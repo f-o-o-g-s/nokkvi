@@ -4,46 +4,185 @@
 //! Receives pure view data and emits actions for root to process.
 
 use iced::{
-    Alignment, Element, Length, Theme,
+    Alignment, Color, Element, Length, Theme,
+    advanced::svg::Handle,
     font::{Font, Weight},
     mouse::ScrollDelta,
-    widget::{column, container, mouse_area, row, text, tooltip},
+    widget::{Svg, button, column, container, mouse_area, row, svg, text, tooltip},
 };
 
-use crate::{
-    theme, widgets,
-    widgets::{
-        hover_overlay::HoverOverlay, three_d_button::three_d_button,
-        three_d_icon_button::three_d_icon_button,
-    },
-};
+use crate::{theme, widgets, widgets::hover_overlay::HoverOverlay};
 
-// Player bar dimensions
-const BASE_PLAYER_BAR_HEIGHT: f32 = 56.0;
-const BUTTON_SIZE: f32 = 44.0;
+// Player bar dimensions (flat redesign). 72 px in both modes — the design
+// CSS specified 64 in flat mode and 72 in rounded, but the 8 px difference
+// makes the 44 px mode buttons feel cramped (10 px gap each side) in flat
+// vs. floating (14 px gap each side) in rounded. Using 72 in both modes
+// gives the transport + mode buttons the same airy breathing room across
+// the two visual languages.
+const BASE_PLAYER_BAR_HEIGHT: f32 = 72.0;
 const CONTROL_ROW_HEIGHT: f32 = 44.0;
+/// Transport button (prev/play/pause/stop/next) — 40×40, borderless flat icon.
+const TRANSPORT_SIZE: f32 = 40.0;
+/// Mode toggle button (repeat/shuffle/consume/EQ/SFX/crossfade/visualizer).
+/// Flat: 38×44; rounded: 40×44.
+const MODE_BUTTON_HEIGHT: f32 = 44.0;
 /// Height of the track info strip below the player bar in PlayerBar display mode.
 /// Re-uses the canonical constant from `track_info_strip.rs` to avoid drift.
-use super::track_info_strip::STRIP_HEIGHT as INFO_STRIP_HEIGHT;
+use super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR as INFO_STRIP_WITH_SEPARATOR;
+
+/// Compact transport-button size used while in `MiniPlayer` display mode.
+/// 28 px (with a 14 px glyph) lets the buttons stack above the progress
+/// scrub inside the existing 72 px bar instead of bumping bar height. The
+/// icon scales 1:2 with the button so the proportions match the standard
+/// 40/20 buttons.
+const MINI_PLAYER_TRANSPORT_SIZE: f32 = 28.0;
+const MINI_PLAYER_TRANSPORT_ICON_SIZE: f32 = 14.0;
+
+/// Compact progress-row height in MiniPlayer stacked mode: matches the
+/// progress widget's intrinsic 24 px so the row introduces no extra
+/// vertical padding around the scrub.
+const MINI_PLAYER_PROGRESS_ROW_HEIGHT: f32 = 24.0;
+
+/// Vertical gap between the centered transports row and the progress row
+/// inside the MiniPlayer stacked column.
+const MINI_PLAYER_STACK_SPACING: f32 = 4.0;
+
+/// Vertical padding applied to the main row in `MiniPlayer` rounded mode.
+/// Slimmer than the default [10, 12] so 28 (transports) + 4 (gap) + 24
+/// (progress) = 56 px of stacked content fits inside the 72 px bar with a
+/// few px of slack. Flat mode already runs at zero vertical padding.
+const MINI_PLAYER_ROUNDED_PADDING: [u16; 2] = [6, 12];
+
+#[inline]
+fn mode_button_width() -> f32 {
+    if theme::is_rounded_mode() { 40.0 } else { 38.0 }
+}
+
+/// Intra-section button gap (between transport buttons, between mode buttons,
+/// between the two vertical volume bars).
+const SECTION_BUTTON_GAP: f32 = 4.0;
+
+/// Inter-section gap inside the player bar's main row (between transport and
+/// progress, progress and modes, modes and volume).
+const MAIN_ROW_INNER_GAP: f32 = 6.0;
+
+/// Width of the transport-controls section for the currently-rendered count
+/// of buttons. 5-button uncollapsed (prev/play/pause/stop/next) or 3-button
+/// collapsed (prev / play-or-pause / next) — the section sizes to fit only
+/// what's on screen, so the progress track can claim the rest of the row.
+#[inline]
+pub(crate) fn transport_section_width(transports_collapsed: bool) -> f32 {
+    let n = if transports_collapsed { 3.0 } else { 5.0 };
+    n * TRANSPORT_SIZE + (n - 1.0) * SECTION_BUTTON_GAP
+}
+
+/// Width of the mode-toggles section for the currently-rendered layout —
+/// `inline_count` mode buttons (7 minus `kebab_mode_count`) plus a kebab
+/// when any modes are culled, plus the hamburger button in `NavLayout::None`.
+/// Returns 0 when no modes are inline and no kebab/hamburger renders.
+#[inline]
+pub(crate) fn mode_section_width(layout: PlayerBarLayout, has_hamburger: bool) -> f32 {
+    let mode_btn_w = mode_button_width();
+    let chrome_btn_w = super::sizes::TOOLBAR_BUTTON_SIZE;
+
+    let inline_count = (CULL_ORDER.len() as u8).saturating_sub(layout.kebab_mode_count);
+    let has_kebab = layout.kebab_mode_count > 0;
+
+    let mut widgets = inline_count as f32 * mode_btn_w;
+    let mut count = inline_count as u32;
+    if has_kebab {
+        widgets += chrome_btn_w;
+        count += 1;
+    }
+    if has_hamburger {
+        widgets += chrome_btn_w;
+        count += 1;
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    widgets + (count - 1) as f32 * SECTION_BUTTON_GAP
+}
+
+/// Width of the volume-control section for the currently-rendered widgets.
+/// Vertical layout sizes for one bar (music only) or two bars (music + SFX
+/// when `show_sfx_slider` is true); horizontal layout always uses the
+/// horizontal track length since stacking SFX above music doesn't widen it.
+#[inline]
+pub(crate) fn volume_section_width(show_sfx_slider: bool) -> f32 {
+    if crate::theme::is_horizontal_volume() {
+        super::volume_slider::HORIZONTAL_LENGTH
+    } else if show_sfx_slider {
+        2.0 * super::volume_slider::BAR_WIDTH + SECTION_BUTTON_GAP
+    } else {
+        super::volume_slider::BAR_WIDTH
+    }
+}
+
+/// Side length of the artwork thumbnail rendered to the left of the
+/// transport controls in `TrackInfoDisplay::MiniPlayer` mode.
+pub(crate) const MINI_PLAYER_ARTWORK_SIZE: f32 = 56.0;
+/// Width of the title/artist/album text column next to that artwork.
+const MINI_PLAYER_TEXT_WIDTH: f32 = 180.0;
+/// Gap between the artwork and the text column inside the section.
+const MINI_PLAYER_INNER_GAP: f32 = 8.0;
+/// Total horizontal extent of the mini-player section. Fed to the
+/// `Length::Fixed` wrapper in `main_row` so the progress bar flexes
+/// into the remainder.
+pub(crate) const MINI_PLAYER_SECTION_WIDTH: f32 =
+    MINI_PLAYER_ARTWORK_SIZE + MINI_PLAYER_INNER_GAP + MINI_PLAYER_TEXT_WIDTH;
+
+/// Window-width threshold below which the mini-player section hides so
+/// the rest of the bar retains breathing room. Set well below the pre-stack
+/// 760 px figure because MiniPlayer mode now lifts the transports out of the
+/// main row and stacks them on top of the progress scrub at the smaller
+/// 28 px scale — that 156 px no longer competes with the mini-player section
+/// for horizontal space. Tuned to leave the progress widget itself ≳100 px
+/// wide at the boundary (244 mini + ~160 stacked column min + ~80 modes/vol
+/// + gaps + padding ≈ 540).
+pub(crate) const MINI_PLAYER_HIDE_BELOW: f32 = 540.0;
+
+/// Whether the mini-player left-of-transport section should render
+/// for the given window width AND the active `TrackInfoDisplay`.
+#[inline]
+pub(crate) fn show_mini_player_section(width: f32) -> bool {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    theme::track_info_display() == TrackInfoDisplay::MiniPlayer && width >= MINI_PLAYER_HIDE_BELOW
+}
 
 /// Volume change per scroll line (e.g. mouse wheel notch)
 const SCROLL_VOLUME_STEP_LINES: f32 = 0.01;
 /// Volume change per scroll pixel (e.g. trackpad smooth scrolling)
 const SCROLL_VOLUME_STEP_PIXELS: f32 = 0.001;
 
-/// Dynamic player bar height: base 56px, plus info strip when track display is PlayerBar
-/// and nav layout is Side (in Top mode the nav bar already shows track/format info).
+/// Base player-bar height: 72 px in both modes (see
+/// `BASE_PLAYER_BAR_HEIGHT` rationale). Kept as a function so future
+/// mode-conditional changes don't need to chase call sites.
+#[inline]
+fn base_player_bar_height() -> f32 {
+    BASE_PLAYER_BAR_HEIGHT
+}
+
+/// Dynamic player bar height: base 72 px, plus the chrome above and below
+/// the main row when `TrackInfoDisplay::PlayerBar` is active. MiniPlayer
+/// mode keeps the base height — the stacked transports + progress column
+/// is sized to fit by shrinking transport buttons and trimming the row's
+/// vertical padding.
+///
+/// When the strip is on, the rendered widget tree is:
+/// `column![top_separator(1), main_row(base), strip(STRIP_HEIGHT_WITH_SEPARATOR)]`.
+/// `STRIP_HEIGHT_WITH_SEPARATOR` already accounts for the strip's own
+/// 1 px separator-above, so the chrome math here must add 1 more px for
+/// the player-bar's own top separator.
 pub(crate) fn player_bar_height() -> f32 {
+    let base = base_player_bar_height();
     if crate::theme::show_player_bar_strip() {
-        BASE_PLAYER_BAR_HEIGHT + INFO_STRIP_HEIGHT
+        base + 1.0 + INFO_STRIP_WITH_SEPARATOR
     } else {
-        BASE_PLAYER_BAR_HEIGHT
+        base
     }
 }
 
-// Format-info container is text-only; hide it as a single threshold without
-// hysteresis since collapsing text doesn't shift button hit targets.
-const BREAKPOINT_HIDE_FORMAT_INFO: f32 = 1000.0;
 // SFX volume slider has its own breakpoint (independent of mode-toggle tier
 // because the slider is wider than a button).
 const BREAKPOINT_HIDE_SFX_SLIDER: f32 = 840.0;
@@ -192,14 +331,19 @@ pub(crate) struct PlayerBarViewData {
     pub window_width: f32,
     pub layout: PlayerBarLayout,
     pub is_light_mode: bool,
-    // Track metadata for progress bar overlay
+    // Track metadata — consumed by the `MiniPlayer` left-of-transport
+    // column. `track_title` / `track_artist` / `track_album` carry the
+    // current queue song; `radio_name` is `Some` when a radio stream is
+    // active (artist/title then carry the ICY values).
     pub track_title: String,
     pub track_artist: String,
     pub track_album: String,
-    pub format_suffix: String,
-    pub sample_rate: u32,
-    pub bitrate: u32,
     pub radio_name: Option<String>,
+    /// Album artwork for the currently playing song. Populated by
+    /// `app_view.rs` from the artwork LRU (large preferred, falls back
+    /// to mini). Rendered as the leading thumbnail in `MiniPlayer`
+    /// mode; ignored in other modes.
+    pub artwork_handle: Option<iced::widget::image::Handle>,
     /// Whether the player-bar hamburger menu is currently open (controlled state).
     pub hamburger_open: bool,
     /// Whether the player-bar kebab "modes" menu is currently open
@@ -231,6 +375,10 @@ pub enum PlayerBarMessage {
     CycleVisualization,
     ToggleCrossfade,
     ScrollVolume(f32),
+    /// Wheel-scroll delta over the SFX slider — handler reads the
+    /// current SFX volume from app state and clamps, avoiding the
+    /// stale-base bug that drove the wheel-scroll fallback deletion.
+    ScrollSfxVolume(f32),
     OpenSettings,
     ToggleLightMode,
     GoToQueue,
@@ -244,54 +392,162 @@ pub enum PlayerBarMessage {
     Quit,
 }
 
-/// Helper function to create a player control button with standard sizing,
-/// wrapped in a `HoverOverlay` for consistent hover/press feedback.
+/// Style for a flat borderless transport button: no border, no background by
+/// default, `bg1()` background on hover, and an optional accent fill when the
+/// button is in its active state (play/pause toggled on).
+fn transport_button_style(
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+    move |_theme, status| {
+        // `ui_radius_pill()` returns `0.0.into()` in flat mode.
+        let radius = theme::ui_radius_pill();
+        let background = if active {
+            Some(theme::accent_bright().into())
+        } else {
+            match status {
+                button::Status::Hovered | button::Status::Pressed => Some(theme::bg1().into()),
+                _ => None,
+            }
+        };
+        button::Style {
+            background,
+            text_color: if active {
+                theme::bg0_hard()
+            } else {
+                theme::fg0()
+            },
+            border: iced::Border {
+                radius,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+/// Style for a 1px-bordered mode toggle (idle = `bg0()` fill with `border()`
+/// outline; active = `accent_bright()` fill + `bg0_hard()` text; hover lightens
+/// to `bg1()`). Rounded mode applies `ui_radius_sm()`.
+fn mode_toggle_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+    move |_theme, status| {
+        // `ui_radius_sm()` returns `0.0.into()` in flat mode.
+        let radius = theme::ui_radius_sm();
+        let (bg, fg, border_color) = if active {
+            (
+                theme::accent_bright(),
+                theme::bg0_hard(),
+                theme::accent_bright(),
+            )
+        } else {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => theme::bg1(),
+                _ => theme::bg0(),
+            };
+            (bg, theme::fg0(), theme::border())
+        };
+        button::Style {
+            background: Some(bg.into()),
+            text_color: fg,
+            border: iced::Border {
+                color: border_color,
+                width: 1.0,
+                radius,
+            },
+            ..Default::default()
+        }
+    }
+}
+
+/// Build a tinted SVG element sized for an inline icon button.
+fn svg_icon(icon_path: &'static str, size: f32, color: Color) -> Svg<'static, Theme> {
+    let svg_content = crate::embedded_svg::get_svg(icon_path);
+    let handle = Handle::from_memory(svg_content.as_bytes());
+    svg(handle)
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(move |_: &Theme, _| svg::Style { color: Some(color) })
+}
+
+/// Centers a child element inside a fixed-size container with no padding/border.
+///
+/// Uses `align_x`/`align_y` rather than `center_x`/`center_y` because the
+/// latter pair set the container's width/height to the passed `Length`,
+/// silently overriding the `Length::Fixed(width)`/`Length::Fixed(height)` set
+/// just above. We want a truly fixed-size container so the wrapping button
+/// reports `Shrink` and doesn't stretch when placed inside a non-Shrink
+/// (e.g. fixed-width section) parent.
+fn fixed_centered<'a, M: 'a>(child: Element<'a, M>, width: f32, height: f32) -> Element<'a, M> {
+    container(child)
+        .width(Length::Fixed(width))
+        .height(Length::Fixed(height))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// Active transport-button side length. Shrinks to
+/// [`MINI_PLAYER_TRANSPORT_SIZE`] while the MiniPlayer track-info display
+/// is selected so the stacked transports + progress column fits the
+/// existing 72 px bar without bumping bar height.
+#[inline]
+pub(crate) fn transport_button_size() -> f32 {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
+        MINI_PLAYER_TRANSPORT_SIZE
+    } else {
+        TRANSPORT_SIZE
+    }
+}
+
+#[inline]
+fn transport_icon_size() -> f32 {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
+        MINI_PLAYER_TRANSPORT_ICON_SIZE
+    } else {
+        20.0
+    }
+}
+
+/// Helper function to create a flat transport icon button (prev / play / pause
+/// / stop / next), wrapped in `HoverOverlay` for the press scale feedback.
 fn player_control_button(
     icon_path: &'static str,
     message: PlayerBarMessage,
-    background: iced::Color,
-    icon_color: iced::Color,
+    icon_color: Color,
     active: bool,
 ) -> Element<'static, PlayerBarMessage> {
-    HoverOverlay::new(
-        three_d_icon_button(icon_path)
-            .on_press(message)
-            .width(BUTTON_SIZE)
-            .height(BUTTON_SIZE)
-            .background(background)
-            .icon_color(icon_color)
-            .active(active),
-    )
-    .into()
+    let size = transport_button_size();
+    let icon = svg_icon(icon_path, transport_icon_size(), icon_color);
+    let inner = fixed_centered(icon.into(), size, size);
+    let btn = button(inner)
+        .padding(0)
+        .style(transport_button_style(active))
+        .on_press(message);
+    HoverOverlay::new(btn)
+        .border_radius(theme::ui_radius_pill())
+        .into()
 }
 
-/// Build a text-label 3D toggle button with tooltip — shared pattern for the
-/// EQ and SFX inline player-bar buttons. Unlike `mode_toggle_button`, these
-/// use `three_d_button` (text label) instead of `three_d_icon_button` (SVG).
-fn three_d_text_toggle(
+/// Build a flat text-labeled mode toggle (used by EQ / SFX inline buttons).
+fn mode_text_toggle(
     label: &'static str,
     on_press: PlayerBarMessage,
     active: bool,
-    bg: iced::Color,
     tooltip_text: &str,
 ) -> Element<'static, PlayerBarMessage> {
-    Element::from(HoverOverlay::new(
+    let label_widget = text(label).size(10.0).font(Font {
+        weight: Weight::Bold,
+        ..theme::ui_font()
+    });
+    let inner = fixed_centered(label_widget.into(), mode_button_width(), MODE_BUTTON_HEIGHT);
+    let btn = button(inner)
+        .padding(0)
+        .style(mode_toggle_style(active))
+        .on_press(on_press);
+    HoverOverlay::new(
         tooltip(
-            three_d_button(
-                container(text(label).size(10.0).font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                }))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill),
-            )
-            .on_press(on_press)
-            .width(Length::Fixed(BUTTON_SIZE))
-            .height(BUTTON_SIZE)
-            .background(bg)
-            .active(active),
+            btn,
             container(
                 text(tooltip_text.to_owned())
                     .size(11.0)
@@ -302,40 +558,164 @@ fn three_d_text_toggle(
         )
         .gap(4)
         .style(theme::container_tooltip),
-    ))
+    )
+    .border_radius(theme::ui_radius_sm())
+    .into()
 }
 
-/// Build a mode toggle button with tooltip — shared pattern for repeat, shuffle,
-/// consume, and visualizer toggles. The inner `player_control_button` already
-/// wraps in `HoverOverlay`, so this function only adds the tooltip layer.
+/// Build a flat icon-based mode toggle (repeat / shuffle / consume / crossfade
+/// / visualizer). 38×44 in flat mode, 40×44 in rounded mode.
 fn mode_toggle_button<'a>(
     icon_path: &'static str,
     message: PlayerBarMessage,
     active: bool,
     label: &'a str,
 ) -> Element<'a, PlayerBarMessage> {
-    tooltip(
-        player_control_button(
-            icon_path,
-            message,
-            if active {
-                theme::accent_bright()
-            } else {
-                theme::bg1()
-            },
-            if active {
-                theme::bg0_hard()
-            } else {
-                theme::fg1()
-            },
-            active,
-        ),
-        container(text(label).size(11.0).font(theme::ui_font())).padding(4),
-        tooltip::Position::Top,
+    let icon_color = if active {
+        theme::bg0_hard()
+    } else {
+        theme::fg0()
+    };
+    let icon = svg_icon(icon_path, 18.0, icon_color);
+    let inner = fixed_centered(icon.into(), mode_button_width(), MODE_BUTTON_HEIGHT);
+    let btn = button(inner)
+        .padding(0)
+        .style(mode_toggle_style(active))
+        .on_press(message);
+    HoverOverlay::new(
+        tooltip(
+            btn,
+            container(text(label).size(11.0).font(theme::ui_font())).padding(4),
+            tooltip::Position::Top,
+        )
+        .gap(4)
+        .style(theme::container_tooltip),
     )
-    .gap(4)
-    .style(theme::container_tooltip)
+    .border_radius(theme::ui_radius_sm())
     .into()
+}
+
+/// Build the left-of-transport artwork + 3-line metadata column rendered
+/// in `TrackInfoDisplay::MiniPlayer` mode.
+///
+/// Layout: [56 px artwork] [8 px gap] [180 px text column with
+/// `title` / `artist` / `album` stacked vertically]. Each text line is a
+/// marquee that scrolls when its content overflows the column width.
+///
+/// In radio mode the three slots carry `station name` / `ICY title` / `ICY artist`
+/// (mapped by `app_view.rs`); the artwork slot falls back to a tinted
+/// `radio-tower` glyph on `theme::bg1()` when no per-station artwork is
+/// available.
+///
+/// The whole section is wrapped in a `mouse_area` that emits
+/// `StripClicked` so the user's configured `strip_click_action` (go to
+/// queue / album / artist / copy info) routes the same as a click on the
+/// regular player-bar strip.
+fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMessage> {
+    let radius = theme::ui_border_radius();
+
+    let artwork: Element<'static, PlayerBarMessage> =
+        if let Some(handle) = data.artwork_handle.clone() {
+            container(
+                iced::widget::image(handle)
+                    .content_fit(iced::ContentFit::Cover)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .width(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .clip(true)
+            .style(move |_| container::Style {
+                background: Some(theme::bg2().into()),
+                border: iced::Border {
+                    radius,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+        } else if data.is_radio {
+            container(svg_icon(
+                super::track_info_strip::RADIO_TOWER_ICON_PATH,
+                MINI_PLAYER_ARTWORK_SIZE * 0.55,
+                theme::fg2(),
+            ))
+            .width(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(move |_| container::Style {
+                background: Some(theme::bg1().into()),
+                border: iced::Border {
+                    radius,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+        } else {
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+                .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+                .style(move |_| container::Style {
+                    background: Some(theme::bg1().into()),
+                    border: iced::Border {
+                        radius,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .into()
+        };
+
+    let make_line =
+        |value: String, color: Color, bold: bool| -> Element<'static, PlayerBarMessage> {
+            let weight = if bold { Weight::Bold } else { Weight::Medium };
+            super::marquee_text::marquee_text(value)
+                .size(12.0)
+                .font(Font {
+                    weight,
+                    ..theme::ui_font()
+                })
+                .color(color)
+                .into()
+        };
+
+    // Slot mapping
+    //   queue:  title / artist / album
+    //   radio:  station / ICY title / ICY artist
+    // app_view already routes ICY values through track_title / track_artist
+    // for radio playback, so the only swap here is the leading station name
+    // taking the title slot.
+    let (line1, line2, line3) = if let Some(station) = data.radio_name.clone() {
+        (station, data.track_title.clone(), data.track_artist.clone())
+    } else {
+        (
+            data.track_title.clone(),
+            data.track_artist.clone(),
+            data.track_album.clone(),
+        )
+    };
+
+    let title_line = make_line(line1, theme::now_playing_color(), true);
+    let artist_line = make_line(line2, theme::selected_color(), false);
+    let album_line = make_line(line3, theme::fg2(), false);
+
+    let text_column = container(
+        column![title_line, artist_line, album_line]
+            .spacing(2)
+            .width(Length::Fixed(MINI_PLAYER_TEXT_WIDTH)),
+    )
+    .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+    .align_y(Alignment::Center);
+
+    let inner = row![artwork, text_column]
+        .spacing(MINI_PLAYER_INNER_GAP)
+        .align_y(Alignment::Center);
+
+    mouse_area(inner)
+        .on_press(PlayerBarMessage::StripClicked)
+        .into()
 }
 
 /// Build the player bar view.
@@ -356,102 +736,87 @@ pub(crate) fn player_bar<'a>(
     let playback_playing = data.playback_playing;
     let playback_paused = data.playback_paused;
 
+    let prev_icon_color = if controls_active {
+        theme::fg0()
+    } else {
+        theme::fg4()
+    };
+    let next_icon_color = prev_icon_color;
     let prev_button = player_control_button(
         "assets/icons/skip-back.svg",
         PlayerBarMessage::PrevTrack,
-        theme::bg1(),
-        if controls_active {
-            theme::fg1()
-        } else {
-            theme::fg4()
-        },
+        prev_icon_color,
         false,
     );
     let next_button = player_control_button(
         "assets/icons/skip-forward.svg",
         PlayerBarMessage::NextTrack,
-        theme::bg1(),
-        if controls_active {
-            theme::fg1()
-        } else {
-            theme::fg4()
-        },
+        next_icon_color,
         false,
     );
 
     let player_controls: Element<'_, PlayerBarMessage> = if data.layout.transports_collapsed {
         // Collapsed transports: prev / play-or-pause toggle / next.
-        // BUTTON_SIZE is fixed (44px) so the middle button's hit target stays
-        // in place when the glyph swaps between play and pause.
+        // The button side length is fixed for the current mode (40 px standard,
+        // 28 px MiniPlayer) so the middle button's hit target stays in place
+        // when the glyph swaps between play and pause.
         let middle_active = playback_playing || playback_paused;
         let (middle_icon, middle_message) = if playback_playing {
             ("assets/icons/pause.svg", PlayerBarMessage::Pause)
         } else {
             ("assets/icons/play.svg", PlayerBarMessage::Play)
         };
+        let middle_icon_color = if middle_active {
+            theme::bg0_hard()
+        } else {
+            theme::fg0()
+        };
         row![
             prev_button,
             player_control_button(
                 middle_icon,
                 middle_message,
-                if middle_active {
-                    theme::accent_bright()
-                } else {
-                    theme::bg1()
-                },
-                if middle_active {
-                    theme::bg0_hard()
-                } else {
-                    theme::fg1()
-                },
-                middle_active,
+                middle_icon_color,
+                middle_active
             ),
             next_button,
         ]
         .spacing(4)
         .into()
     } else {
+        let play_icon_color = if playback_playing {
+            theme::bg0_hard()
+        } else {
+            theme::fg0()
+        };
+        let pause_icon_color = if playback_paused {
+            theme::bg0_hard()
+        } else {
+            theme::fg0()
+        };
+        let stop_icon_color = if controls_active {
+            theme::fg0()
+        } else {
+            theme::fg4()
+        };
         row![
             prev_button,
             player_control_button(
                 "assets/icons/play.svg",
                 PlayerBarMessage::Play,
-                if playback_playing {
-                    theme::accent_bright()
-                } else {
-                    theme::bg1()
-                },
-                if playback_playing {
-                    theme::bg0_hard()
-                } else {
-                    theme::fg1()
-                },
+                play_icon_color,
                 playback_playing,
             ),
             player_control_button(
                 "assets/icons/pause.svg",
                 PlayerBarMessage::Pause,
-                if playback_paused {
-                    theme::accent_bright()
-                } else {
-                    theme::bg1()
-                },
-                if playback_paused {
-                    theme::bg0_hard()
-                } else {
-                    theme::fg1()
-                },
+                pause_icon_color,
                 playback_paused,
             ),
             player_control_button(
                 "assets/icons/stop.svg",
                 PlayerBarMessage::Stop,
-                theme::bg1(),
-                if controls_active {
-                    theme::fg1()
-                } else {
-                    theme::fg4()
-                },
+                stop_icon_color,
                 false,
             ),
             next_button,
@@ -480,133 +845,45 @@ pub(crate) fn player_bar<'a>(
         )
     };
 
-    // Build metadata for scrolling overlay on the progress bar track
-    // Colored segments matching the track info strip: title/artist/album each get their own color
-    use super::progress_bar::OverlaySegment;
-    let mut meta_segments: Vec<OverlaySegment> = Vec::new();
-    let mut format_info_left = String::new();
-    let mut format_info_right = String::new();
-
-    if !data.track_title.is_empty()
-        && crate::theme::track_info_display()
-            == nokkvi_data::types::player_settings::TrackInfoDisplay::ProgressTrack
-    {
-        let separator = crate::theme::strip_separator().as_join_str();
-        let segments = super::track_info_strip::build_now_playing_segments(
-            &data.track_title,
-            &data.track_artist,
-            &data.track_album,
-            crate::theme::strip_show_title(),
-            crate::theme::strip_show_artist(),
-            crate::theme::strip_show_album(),
-            crate::theme::strip_show_labels(),
-            separator,
-        );
-        meta_segments.extend(segments.into_iter().map(|s| OverlaySegment {
-            text: s.text,
-            color: s.color,
-        }));
-
-        if let Some(rname) = &data.radio_name {
-            if !meta_segments.is_empty() {
-                meta_segments.push(OverlaySegment {
-                    text: separator.to_string(),
-                    color: theme::fg4(),
-                });
-            }
-            meta_segments.push(OverlaySegment {
-                text: format!("{rname} (LIVE)"),
-                color: theme::accent_bright(),
-            });
-        }
-
-        if crate::theme::strip_show_format_info()
-            && let Some((left, right)) = super::format_info::format_audio_info_split(
-                &data.format_suffix,
-                data.sample_rate as f32 / 1000.0,
-                data.bitrate,
-            )
-        {
-            format_info_left = left;
-            if let Some(r) = right {
-                format_info_right = r;
-            }
-        }
-    }
-
-    let mut custom_progress_bar =
+    let custom_progress_bar =
         widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
             .is_playing(data.playback_playing && !data.playback_paused)
             .hide_handle(data.is_radio)
             .width(Length::Fill)
             .height(24.0);
-    if !meta_segments.is_empty() {
-        custom_progress_bar = custom_progress_bar.overlay_segments(meta_segments);
-    }
 
-    let mut progress_items: Vec<Element<'_, PlayerBarMessage>> = vec![
+    // MiniPlayer mode stacks the transports above the progress scrub inside a
+    // single Length::Fill column. The progress row trims to a compact 24 px
+    // height there so 28 (transports) + 4 (gap) + 24 (progress) sits inside
+    // the existing 72 px bar with the slimmer rounded-mode padding.
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    let is_mini_player_mode = theme::track_info_display() == TrackInfoDisplay::MiniPlayer;
+    let progress_row_height = if is_mini_player_mode {
+        MINI_PLAYER_PROGRESS_ROW_HEIGHT
+    } else {
+        CONTROL_ROW_HEIGHT
+    };
+
+    let progress_row = row![
         text(pos_str.clone())
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg4())
             .width(Length::Fixed(40.0))
             .align_x(Alignment::End)
-            .align_y(Alignment::Center)
-            .into(),
-        custom_progress_bar.into(),
+            .align_y(Alignment::Center),
+        custom_progress_bar,
         text(dur_str.clone())
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg4())
             .width(Length::Fixed(40.0))
-            .align_y(Alignment::Center)
-            .into(),
-    ];
-    if !format_info_left.is_empty() && data.window_width >= BREAKPOINT_HIDE_FORMAT_INFO {
-        let mut col_items: Vec<Element<'_, PlayerBarMessage>> = vec![
-            text(format_info_left)
-                .size(8.0)
-                .font(theme::ui_font())
-                .color(theme::fg4())
-                .wrapping(text::Wrapping::None)
-                .align_x(Alignment::Center)
-                .into(),
-        ];
-        if !format_info_right.is_empty() {
-            col_items.push(
-                text(format_info_right)
-                    .size(8.0)
-                    .font(theme::ui_font())
-                    .color(theme::fg4())
-                    .wrapping(text::Wrapping::None)
-                    .align_x(Alignment::Center)
-                    .into(),
-            );
-        }
-        let format_col = container(column(col_items).align_x(Alignment::Center).spacing(0))
-            .style(|_: &Theme| {
-                let (inset_tl, _) = theme::border_3d_inset();
-                container::Style {
-                    background: Some(theme::bg1().into()),
-                    border: iced::Border {
-                        color: inset_tl,
-                        width: 1.0,
-                        radius: theme::ui_border_radius(),
-                    },
-                    ..Default::default()
-                }
-            })
-            .padding([0, 6])
-            .center_y(BUTTON_SIZE)
-            .align_x(Alignment::Center);
-        progress_items.push(format_col.into());
-    }
-
-    let progress_row = row(progress_items)
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .height(Length::Fixed(CONTROL_ROW_HEIGHT))
-        .width(Length::Fill);
+            .align_y(Alignment::Center),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .height(Length::Fixed(progress_row_height))
+    .width(Length::Fill);
 
     // Mode toggle buttons with SVG icons
     let is_random_mode = data.is_random_mode;
@@ -754,28 +1031,21 @@ pub(crate) fn player_bar<'a>(
         ));
     }
     if !eq_in_kebab {
-        // EQ inline button — text-styled 3D button (not icon-based).
-        let eq_bg = if eq_enabled {
-            theme::accent_bright()
-        } else {
-            theme::bg1()
-        };
-        mode_toggles_row = mode_toggles_row.push(three_d_text_toggle(
+        // EQ inline button — flat text-labeled toggle.
+        mode_toggles_row = mode_toggles_row.push(mode_text_toggle(
             "EQ",
             PlayerBarMessage::ToggleEq,
             eq_enabled,
-            eq_bg,
             eq_tooltip,
         ));
     }
     if !sfx_in_kebab && sound_effects_enabled {
-        // SFX inline button — text-styled 3D button. Only renders when SFX
-        // is on AND not yet folded into the kebab.
-        mode_toggles_row = mode_toggles_row.push(three_d_text_toggle(
+        // SFX inline button — flat text-labeled toggle. Only renders when
+        // SFX is on AND not yet folded into the kebab.
+        mode_toggles_row = mode_toggles_row.push(mode_text_toggle(
             "SFX",
             PlayerBarMessage::ToggleSoundEffects,
             true,
-            theme::accent_bright(),
             "Sound Effects: UI sounds enabled",
         ));
     }
@@ -864,8 +1134,8 @@ pub(crate) fn player_bar<'a>(
             ));
         }
 
-        mode_toggles_row =
-            mode_toggles_row.push(Element::from(HoverOverlay::new(PlayerModesMenu::new(
+        mode_toggles_row = mode_toggles_row.push(Element::from(
+            HoverOverlay::new(PlayerModesMenu::new(
                 kebab_rows,
                 |open| {
                     PlayerBarMessage::SetOpenMenu(
@@ -873,7 +1143,9 @@ pub(crate) fn player_bar<'a>(
                     )
                 },
                 data.player_modes_open,
-            ))));
+            ))
+            .border_radius(theme::ui_radius_sm()),
+        ));
     }
 
     // Application menu — only visible in NavLayout::None (no nav chrome of
@@ -883,24 +1155,27 @@ pub(crate) fn player_bar<'a>(
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
         let hamburger_open = data.hamburger_open;
-        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
-            HamburgerMenu::new(
-                |action| match action {
-                    MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
-                    MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
-                    MenuAction::About => PlayerBarMessage::About,
-                    MenuAction::Quit => PlayerBarMessage::Quit,
-                },
-                |open| {
-                    PlayerBarMessage::SetOpenMenu(
-                        open.then_some(crate::app_message::OpenMenu::Hamburger),
-                    )
-                },
-                hamburger_open,
-                is_light,
+        mode_toggles_row = mode_toggles_row.push(Element::from(
+            HoverOverlay::new(
+                HamburgerMenu::new(
+                    |action| match action {
+                        MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
+                        MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
+                        MenuAction::About => PlayerBarMessage::About,
+                        MenuAction::Quit => PlayerBarMessage::Quit,
+                    },
+                    |open| {
+                        PlayerBarMessage::SetOpenMenu(
+                            open.then_some(crate::app_message::OpenMenu::Hamburger),
+                        )
+                    },
+                    hamburger_open,
+                    is_light,
+                )
+                .player_bar_style(),
             )
-            .player_bar_style(),
-        )));
+            .border_radius(theme::ui_radius_sm()),
+        ));
     }
 
     let mode_toggles = mode_toggles_row;
@@ -928,6 +1203,7 @@ pub(crate) fn player_bar<'a>(
 
     let mut sfx = widgets::volume_slider(sfx_volume, PlayerBarMessage::SfxVolumeChanged)
         .variant(widgets::SliderVariant::Sfx)
+        .on_scroll(PlayerBarMessage::ScrollSfxVolume)
         .horizontal(is_horizontal);
     if stacked {
         sfx = sfx.thickness(stacked_thickness);
@@ -968,39 +1244,123 @@ pub(crate) fn player_bar<'a>(
     // Layout: choose between normal and track-display mode
     // =========================================================================
 
+    let base_height = base_player_bar_height();
+    let outer_padding = if theme::is_rounded_mode() {
+        if is_mini_player_mode {
+            MINI_PLAYER_ROUNDED_PADDING
+        } else {
+            [10, 12]
+        }
+    } else {
+        [0, 6]
+    };
+
+    // Wrap each non-progress section in a Length::Fixed container sized for
+    // its *currently-visible* widgets, so the progress track flexes into the
+    // rest of the row. Sections still shift at cull / SFX-gate boundaries —
+    // those breakpoints already carry hysteresis, so the shift is a single
+    // user-visible event tied to a window-size change. Transport content
+    // sits flush-left (anchors `prev` to the bar's left edge); modes and
+    // volume content sit flush-right (anchors the kebab/hamburger and music
+    // slider to the bar's right edge).
+    let has_hamburger = crate::theme::is_none_nav();
+    let mode_toggles = container(mode_toggles)
+        .width(Length::Fixed(mode_section_width(
+            data.layout,
+            has_hamburger,
+        )))
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .center_y(Length::Fill);
+    let volume_control = container(volume_control)
+        .width(Length::Fixed(volume_section_width(show_sfx_slider)))
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .center_y(Length::Fill);
+
+    // Progress-track section (artwork + 3-line metadata column) — only
+    // present when the user has picked `TrackInfoDisplay::MiniPlayer`
+    // AND the window is wide enough that adding the section doesn't crush
+    // the progress bar.
+    let mini_player_visible = show_mini_player_section(data.window_width);
+    let mini_player_element = mini_player_visible.then(|| {
+        container(mini_player_section(data))
+            .width(Length::Fixed(MINI_PLAYER_SECTION_WIDTH))
+            .height(Length::Fill)
+            .align_x(Alignment::Start)
+            .center_y(Length::Fill)
+    });
+
+    let mut main_row = iced::widget::Row::new()
+        .spacing(MAIN_ROW_INNER_GAP)
+        .padding(outer_padding)
+        .align_y(Alignment::Center);
+    if let Some(section) = mini_player_element {
+        main_row = main_row.push(section);
+    }
+    if is_mini_player_mode {
+        // MiniPlayer mode: transports sit centered above the scrub inside a
+        // single Length::Fill column, so the transports no longer claim
+        // their own fixed-width section of the main row. Combined with the
+        // smaller 28 px transport buttons that fit the existing bar height,
+        // that lets MINI_PLAYER_HIDE_BELOW drop well under the previous
+        // 760 px threshold.
+        let transports_centered = container(player_controls)
+            .width(Length::Fill)
+            .align_x(Alignment::Center);
+        let stacked = iced::widget::Column::new()
+            .push(transports_centered)
+            .push(progress_row)
+            .spacing(MINI_PLAYER_STACK_SPACING)
+            .width(Length::Fill);
+        main_row = main_row.push(stacked);
+    } else {
+        let transports_section = container(player_controls)
+            .width(Length::Fixed(transport_section_width(
+                data.layout.transports_collapsed,
+            )))
+            .height(Length::Fill)
+            .align_x(Alignment::Start)
+            .center_y(Length::Fill);
+        main_row = main_row.push(transports_section).push(progress_row);
+    }
+    let main_row = main_row.push(mode_toggles).push(volume_control);
+
     let main_content: Element<'_, PlayerBarMessage> = if let Some(strip) = info_strip {
         // --- TRACK DISPLAY MODE ---
-        // Main row: controls + progress bar (same layout as normal mode)
-        // Info strip below: pre-built by the caller
-
-        // Main row: controls + progress + toggles + volume
-        let main_row = row![player_controls, progress_row, mode_toggles, volume_control,]
-            .spacing(4)
-            .padding([4, 8])
-            .align_y(Alignment::Center);
-
+        // Main row on top, info strip below (separator built into the
+        // strip). `player_bar_height()` reserves
+        // `base + 1 + STRIP_HEIGHT_WITH_SEPARATOR`, the outer column
+        // consumes the leading 1 px for `top_separator`, and the strip
+        // accounts for its own separator-above — so this row gets the
+        // bare `base_height`.
         column![
             container(main_row)
                 .width(Length::Fill)
-                .height(Length::Fixed(BASE_PLAYER_BAR_HEIGHT - 2.0))
+                .height(Length::Fixed(base_height))
                 .center_y(Length::Fill),
             strip,
         ]
         .into()
     } else {
-        // --- NORMAL MODE (unchanged) ---
-        row![player_controls, progress_row, mode_toggles, volume_control,]
-            .spacing(4)
-            .padding([4, 8])
-            .into()
+        // --- NORMAL MODE ---
+        main_row.into()
     };
 
-    // Top separator: always visible (2px, bg1), matching nav bar / settings separator style.
-    // Replaces border_light+border_dark which hide in rounded mode.
-    let top_separator: Element<'_, PlayerBarMessage> = theme::horizontal_separator(2.0);
+    // Top separator: flat 1 px `theme::border()` line. Acts as the chrome
+    // divider between the page content above and the player bar.
+    let top_separator: Element<'_, PlayerBarMessage> = container(iced::widget::Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(|_: &Theme| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        })
+        .into();
 
-    // Container with BG1 background, top separator, and dynamic height.
-    // Wrapped in mouse_area so scrolling anywhere on the player bar adjusts volume.
+    // Container with `bg0_hard()` background, top separator, and dynamic height.
+    // Wrapped in mouse_area so scrolling anywhere on the player bar adjusts
+    // volume.
     let bar = container(column![
         top_separator,
         container(main_content)
@@ -1020,6 +1380,129 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ScrollVolume(y)
         })
         .into()
+}
+
+#[cfg(test)]
+mod player_bar_height_tests {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+
+    use super::{
+        super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR, BASE_PLAYER_BAR_HEIGHT,
+        player_bar_height,
+    };
+    use crate::theme::{THEME_MODE_LOCK, set_track_info_display, track_info_display};
+
+    /// Player bar with no strip reports just the base 72 px footprint.
+    #[test]
+    fn player_bar_height_without_strip_is_base() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+        set_track_info_display(TrackInfoDisplay::Off);
+        let got = player_bar_height();
+        set_track_info_display(saved);
+        assert!(
+            (got - BASE_PLAYER_BAR_HEIGHT).abs() < f32::EPSILON,
+            "strip-off height drifted: got {got}, expected {BASE_PLAYER_BAR_HEIGHT}",
+        );
+    }
+
+    /// When the PlayerBar strip is active, the rendered widget is
+    /// `column![top_separator(1), main_row(base), strip(STRIP_HEIGHT_WITH_SEPARATOR)]`.
+    /// `player_bar_height()` must account for all three rows so the
+    /// `chrome_height_with_header()` math (and the iced layout) lines up.
+    #[test]
+    fn player_bar_height_with_strip_includes_top_separator_and_strip_separator() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+        set_track_info_display(TrackInfoDisplay::PlayerBar);
+        let got = player_bar_height();
+        set_track_info_display(saved);
+        let expected = BASE_PLAYER_BAR_HEIGHT + 1.0 + STRIP_HEIGHT_WITH_SEPARATOR;
+        assert!(
+            (got - expected).abs() < f32::EPSILON,
+            "strip-on height drifted: got {got}, expected {expected}",
+        );
+    }
+}
+
+#[cfg(test)]
+mod section_width_tests {
+    use super::{
+        CULL_ORDER, PlayerBarLayout, SECTION_BUTTON_GAP, TRANSPORT_SIZE, mode_button_width,
+        mode_section_width, transport_section_width, volume_section_width,
+    };
+
+    fn layout(kebab: u8, transports_collapsed: bool) -> PlayerBarLayout {
+        PlayerBarLayout {
+            kebab_mode_count: kebab,
+            transports_collapsed,
+        }
+    }
+
+    #[test]
+    fn transport_width_tracks_collapsed_state() {
+        // 5 buttons × 40 + 4 gaps × 4 = 216 (uncollapsed)
+        assert_eq!(
+            transport_section_width(false),
+            5.0 * TRANSPORT_SIZE + 4.0 * SECTION_BUTTON_GAP
+        );
+        assert_eq!(transport_section_width(false), 216.0);
+        // 3 buttons × 40 + 2 gaps × 4 = 128 (collapsed)
+        assert_eq!(
+            transport_section_width(true),
+            3.0 * TRANSPORT_SIZE + 2.0 * SECTION_BUTTON_GAP
+        );
+        assert_eq!(transport_section_width(true), 128.0);
+    }
+
+    #[test]
+    fn mode_width_tracks_inline_count_and_kebab() {
+        let mode_btn_w = mode_button_width();
+        let chrome_w = crate::widgets::sizes::TOOLBAR_BUTTON_SIZE;
+        let total_modes = CULL_ORDER.len() as f32;
+
+        // All inline (kebab_count=0): 7 buttons + 6 gaps, no kebab.
+        let all_inline = mode_section_width(layout(0, false), false);
+        assert_eq!(
+            all_inline,
+            total_modes * mode_btn_w + (total_modes - 1.0) * SECTION_BUTTON_GAP
+        );
+
+        // Some culled (kebab_count=5): 2 inline + kebab + 2 gaps.
+        let some_culled = mode_section_width(layout(5, false), false);
+        assert_eq!(
+            some_culled,
+            2.0 * mode_btn_w + chrome_w + 2.0 * SECTION_BUTTON_GAP
+        );
+
+        // Hamburger adds one more button + gap.
+        let with_hamburger = mode_section_width(layout(5, false), true);
+        assert_eq!(with_hamburger, some_culled + chrome_w + SECTION_BUTTON_GAP);
+    }
+
+    #[test]
+    fn volume_width_tracks_sfx_visibility() {
+        if crate::theme::is_horizontal_volume() {
+            // Horizontal: same width regardless of SFX (SFX stacks vertically).
+            assert_eq!(
+                volume_section_width(false),
+                crate::widgets::volume_slider::HORIZONTAL_LENGTH
+            );
+            assert_eq!(
+                volume_section_width(true),
+                crate::widgets::volume_slider::HORIZONTAL_LENGTH
+            );
+        } else {
+            assert_eq!(
+                volume_section_width(false),
+                crate::widgets::volume_slider::BAR_WIDTH
+            );
+            assert_eq!(
+                volume_section_width(true),
+                2.0 * crate::widgets::volume_slider::BAR_WIDTH + SECTION_BUTTON_GAP
+            );
+        }
+    }
 }
 
 #[cfg(test)]

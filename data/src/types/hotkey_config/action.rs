@@ -473,6 +473,22 @@ define_hotkey_actions! {
             settings_key: "hotkey.edit_down",
             default: KeyCombo::key(KeyCode::ArrowDown),
         },
+        SettingsCategoryNext {
+            display: "Next Settings Category",
+            description: "Move to the next category in the settings sidebar",
+            category: "Navigation",
+            toml_key: "settings_category_next",
+            settings_key: "hotkey.settings_category_next",
+            default: KeyCombo::shift(KeyCode::Tab),
+        },
+        SettingsCategoryPrev {
+            display: "Previous Settings Category",
+            description: "Move to the previous category in the settings sidebar",
+            category: "Navigation",
+            toml_key: "settings_category_prev",
+            settings_key: "hotkey.settings_category_prev",
+            default: KeyCombo::shift(KeyCode::Backspace),
+        },
     ],
     reserved: [
         Escape {

@@ -631,17 +631,10 @@ pub(crate) fn text_input_dialog_overlay<'a>(
 
     content = content.push(button_row);
 
-    // Dialog box with border
+    // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
+    // ui_radius_lg corners. Five overlay modals route through this helper.
     let dialog_box = container(content)
-        .style(|_theme| container::Style {
-            background: Some(theme::bg1().into()),
-            border: iced::Border {
-                color: theme::accent_bright(),
-                width: 1.0,
-                radius: theme::ui_border_radius(),
-            },
-            ..Default::default()
-        })
+        .style(theme::modal_frame_style)
         .width(Length::Shrink);
 
     // ── Backdrop + opaque wrapper (prevents click-through) ───────

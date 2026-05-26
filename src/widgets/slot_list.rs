@@ -6,7 +6,7 @@
 //! Provides reusable slot list rendering with configurable item rendering
 
 use iced::{
-    Color, Element, Length, Padding,
+    Color, Element, Length,
     widget::{button, column, container, mouse_area},
 };
 
@@ -184,11 +184,18 @@ impl SlotListSlotStyle {
                 1 => theme::bg1(),
                 _ => theme::bg2(),
             };
+            // Flat redesign: rows touch (`SLOT_SPACING == 0`) and use the
+            // 1 px `theme::border()` hairline as a shared separator. Iced
+            // draws borders fully inside the rect, so adjacent rows'
+            // borders overlap into one clean line. In rounded mode the
+            // outer list shell owns its `ui_radius_lg()` corners — inside
+            // the shell every row is still flush, so the per-row hairline
+            // continues to read as a single separator.
             Self {
                 bg_color: Color { a: opacity, ..base },
                 border_color: Color {
                     a: opacity,
-                    ..theme::bg3()
+                    ..theme::border()
                 },
                 border_width: 1.0,
                 border_radius: slot_list_border_radius(),
@@ -225,9 +232,15 @@ impl SlotListSlotStyle {
 /// Standard padding for slot list slot content
 pub(crate) const SLOT_LIST_SLOT_PADDING: f32 = 8.0;
 
-/// Border radius for slot list slots — reads the current rounded mode setting.
+/// Border radius for slot list slots — always zero.
+///
+/// Slot rows stay square in both flat and rounded modes. The rounded-mode
+/// list shell (`slot_list_background_container`) keeps its `ui_radius_lg()`
+/// corners and clips the touching row hairlines at its rounded edges via
+/// `clip(true)`, so the outer perimeter still reads as a sealed shell even
+/// though every individual row inside it has 0 px corners.
 pub(crate) fn slot_list_border_radius() -> iced::border::Radius {
-    crate::theme::ui_border_radius()
+    iced::border::Radius::default()
 }
 
 /// Standard vertical spacing between slot list slot elements
@@ -244,6 +257,11 @@ pub(crate) const SLOT_LIST_SELECT_WIDTH: f32 = 40.0;
 /// slot list when the per-view select column is active. Subtracted from the
 /// slot list available height so slot count math stays correct.
 pub(crate) const SELECT_HEADER_HEIGHT: f32 = 24.0;
+
+/// Side length (px) of the per-row multi-select checkbox visual. Tuned for
+/// the flat redesign — 18 px gives the click target a comfortable 9 px
+/// gutter inside the 40 px column without crowding the row text.
+const CHECKBOX_SIZE: f32 = 18.0;
 
 /// Minimum row height before we try to reduce slot count (pixels)
 const MIN_COMFORTABLE_ROW_HEIGHT: f32 = 55.0;
@@ -265,39 +283,62 @@ const MAX_SLOT_COUNT: usize = 29;
 // =========================================================================
 
 /// Spacing between slot list slots in the column layout (pixels).
-pub(crate) const SLOT_SPACING: f32 = 3.0;
+///
+/// Flat redesign target: rows touch (0 px gap) so the bottom-only
+/// `theme::border()` separators line up into a single continuous rule
+/// between rows. The constant is kept at `0.0` in both flat and rounded
+/// modes — rounded mode wraps the whole list in an outer shell instead
+/// of separating individual rows.
+pub(crate) const SLOT_SPACING: f32 = 0.0;
 
-/// Height of the navigation bar at the top of the window (28px content + 4px borders).
-pub(crate) const NAV_BAR_HEIGHT: f32 = 32.0;
-
-/// Height of the view header row (sort controls, search, etc.).
-pub(crate) const VIEW_HEADER_HEIGHT: f32 = 48.0;
+/// Total chrome consumed by the view-header row.
+///
+/// `HEADER_HEIGHT` strip + 1 px `theme::border()` sibling separator below it.
+/// Derives from `view_header::HEADER_HEIGHT` + `HEADER_BOTTOM_SEPARATOR` so
+/// the slot-count math stays welded to the actual rendered widget. The
+/// header keeps its flat treatment in both flat and rounded modes — the
+/// surrounding pill capsule was removed because it looked out of place
+/// stacked above the slot-list shell.
+#[inline]
+pub(crate) fn view_header_chrome() -> f32 {
+    super::view_header::HEADER_HEIGHT + super::view_header::HEADER_BOTTOM_SEPARATOR
+}
 
 /// Height of the browsing panel tab bar.
 pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
-
-/// Bottom padding for slot_list_background_container — also subtracted in row_height()
-/// to keep slot heights in sync with actual available space. Single source of truth.
-const SLOT_LIST_CONTAINER_PADDING: f32 = 10.0;
 
 use super::player_bar::player_bar_height;
 
 /// Total height of chrome elements for views with headers.
 ///
-/// In top nav mode: nav_bar(32) + player_bar(56+) + view_header(48).
-/// In side and none nav modes: player_bar(56+) + view_header(48) (no top bar),
-/// plus the TopBar strip (21+1) when TrackInfoDisplay::TopBar is active.
+/// In top nav mode: nav_bar + player_bar + view_header_chrome(), plus the
+/// `TopBarUnder` strip when that mode is active (sits in its own row beneath
+/// the nav bar — see `show_top_bar_under_strip`).
+/// In side and none nav modes: player_bar + view_header_chrome() (no top bar),
+/// plus the strip when `TopBar` or `TopBarUnder` is active (both render as a
+/// row above the content in those layouts — see `show_top_bar_strip`).
+///
+/// The slot list runs flush to the player bar, so no bottom pad is subtracted
+/// from the slot-count math in `with_dynamic_slots`.
 pub(crate) fn chrome_height_with_header() -> f32 {
     if crate::theme::is_top_nav() {
-        NAV_BAR_HEIGHT + player_bar_height() + VIEW_HEADER_HEIGHT
+        let top_bar_under_strip = if crate::theme::show_top_bar_under_strip() {
+            super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
+        } else {
+            0.0
+        };
+        crate::theme::nav_bar_height()
+            + player_bar_height()
+            + view_header_chrome()
+            + top_bar_under_strip
     } else {
-        // Side or None mode: no top nav bar, but TopBar track info strip may add height
+        // Side or None mode: no top nav bar, but TopBar / TopBarUnder add height
         let top_bar_strip = if crate::theme::show_top_bar_strip() {
             super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
         } else {
             0.0
         };
-        player_bar_height() + VIEW_HEADER_HEIGHT + top_bar_strip
+        player_bar_height() + view_header_chrome() + top_bar_strip
     }
 }
 
@@ -336,8 +377,7 @@ impl SlotListConfig {
     /// short windows get fewer slots (7, 5, 3, 1) as before.
     /// Slot count is always odd so the center slot works correctly.
     pub(crate) fn with_dynamic_slots(window_height: f32, chrome_height: f32) -> Self {
-        let available_height =
-            (window_height - chrome_height - SLOT_LIST_CONTAINER_PADDING).max(0.0);
+        let available_height = (window_height - chrome_height).max(0.0);
 
         // Estimate content height with a mid-range spacing guess for initial calc
         let estimated_spacing = 8.0 * SLOT_SPACING; // ~9 slots worth
@@ -396,8 +436,7 @@ impl SlotListConfig {
     /// Calculate row height based on window size
     /// All slots have uniform height.
     pub(crate) fn row_height(&self) -> f32 {
-        let available_height =
-            (self.window_height - self.chrome_height - SLOT_LIST_CONTAINER_PADDING).max(0.0);
+        let available_height = (self.window_height - self.chrome_height).max(0.0);
         let spacing_height = (self.slot_count.saturating_sub(1)) as f32 * SLOT_SPACING;
         let content_height = (available_height - spacing_height).max(0.0);
 
@@ -439,7 +478,7 @@ pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
     let slots = build_slot_list_slots(sl, items, config, &mut render_item, on_hover);
     let inner: Element<'a, Message> = container(
         column(slots)
-            .spacing(3)
+            .spacing(SLOT_SPACING)
             .width(Length::Fill)
             .height(Length::Fill),
     )
@@ -488,7 +527,7 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
     let slots = build_slot_list_slots(sl, items, config, &mut render_item, on_hover);
 
     let drag_column: Element<'a, Message> = DragColumn::from_vec(slots)
-        .spacing(3)
+        .spacing(SLOT_SPACING)
         .width(Length::Fill)
         .height(Length::Fill)
         .on_drag(on_drag_event)
@@ -821,23 +860,31 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
         widget::{Space, mouse_area, svg},
     };
 
+    // Flat redesign: unchecked sits transparent inside the row with a
+    // hairline `theme::border()` outline; checked fills with
+    // `theme::accent_bright()` and matches the row's selected-state colors.
     let bg_color = if is_checked {
-        theme::accent()
+        theme::accent_bright()
     } else {
-        theme::bg0_soft()
+        iced::Color::TRANSPARENT
     };
     let border_color = if is_checked {
         theme::accent_bright()
     } else {
-        theme::bg3()
+        theme::border()
+    };
+    let glyph_color = if is_checked {
+        theme::bg0_hard()
+    } else {
+        theme::fg0()
     };
 
     let glyph: Element<'a, Message> = if is_checked {
         crate::embedded_svg::svg_widget("assets/icons/check.svg")
-            .width(Length::Fixed(12.0))
-            .height(Length::Fixed(12.0))
-            .style(|_, _| svg::Style {
-                color: Some(theme::fg0()),
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(14.0))
+            .style(move |_, _| svg::Style {
+                color: Some(glyph_color),
             })
             .into()
     } else {
@@ -848,8 +895,8 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
     };
 
     let box_visual = container(glyph)
-        .width(Length::Fixed(16.0))
-        .height(Length::Fixed(16.0))
+        .width(Length::Fixed(CHECKBOX_SIZE))
+        .height(Length::Fixed(CHECKBOX_SIZE))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .style(move |_| container::Style {
@@ -857,7 +904,7 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
             border: iced::Border {
                 color: border_color,
                 width: 1.0,
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
             },
             ..Default::default()
         });
@@ -921,30 +968,37 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
     use crate::widgets::slot_list_page::SelectAllState;
 
     let visually_checked = state.is_checked_visual();
+    // Mirrors `slot_list_select_checkbox` flat treatment so the header
+    // checkbox reads as the same family as the per-row boxes.
     let bg_color = if visually_checked {
-        theme::accent()
+        theme::accent_bright()
     } else {
-        theme::bg0_soft()
+        iced::Color::TRANSPARENT
     };
     let border_color = if visually_checked {
         theme::accent_bright()
     } else {
-        theme::bg3()
+        theme::border()
+    };
+    let glyph_color = if visually_checked {
+        theme::bg0_hard()
+    } else {
+        theme::fg0()
     };
 
     let inner: Element<'a, Message> = match state {
         SelectAllState::All => crate::embedded_svg::svg_widget("assets/icons/check.svg")
-            .width(Length::Fixed(12.0))
-            .height(Length::Fixed(12.0))
-            .style(|_, _| svg::Style {
-                color: Some(theme::fg0()),
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(14.0))
+            .style(move |_, _| svg::Style {
+                color: Some(glyph_color),
             })
             .into(),
         SelectAllState::Some => container(Space::new())
             .width(Length::Fixed(10.0))
             .height(Length::Fixed(2.0))
-            .style(|_| container::Style {
-                background: Some(theme::fg0().into()),
+            .style(move |_| container::Style {
+                background: Some(glyph_color.into()),
                 ..Default::default()
             })
             .into(),
@@ -955,8 +1009,8 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
     };
 
     let box_visual = container(inner)
-        .width(Length::Fixed(16.0))
-        .height(Length::Fixed(16.0))
+        .width(Length::Fixed(CHECKBOX_SIZE))
+        .height(Length::Fixed(CHECKBOX_SIZE))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .style(move |_| container::Style {
@@ -964,7 +1018,7 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
             border: iced::Border {
                 color: border_color,
                 width: 1.0,
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
             },
             ..Default::default()
         });
@@ -1420,20 +1474,38 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
 ///
 /// This prevents lighter background colors from bleeding through transparent slot list slots.
 /// Should be used by all slot-list-based views (albums, queue, etc.) for visual consistency.
+///
+/// Both modes paint a `bg0_hard()` fill behind the slot rows and run
+/// edge-to-edge — no L/R padding (rows align with the view header strip
+/// above) and no bottom padding (the last row meets the player bar with
+/// zero gap). Rounded mode adds an outer `ui_radius_lg()` shell with a
+/// 1 px `theme::border()` outline that clips the touching row hairlines
+/// into a single sealed perimeter.
 pub(crate) fn slot_list_background_container<'a, Message: 'a>(
     slot_list_content: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    container(slot_list_content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(
-            Padding::new(0.0)
-                .right(10.0)
-                .bottom(SLOT_LIST_CONTAINER_PADDING)
-                .left(10.0),
-        )
-        .style(theme::container_bg0_hard)
-        .into()
+    if crate::theme::is_rounded_mode() {
+        container(slot_list_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(theme::bg0_hard().into()),
+                border: iced::Border {
+                    color: theme::border(),
+                    width: 1.0,
+                    radius: theme::ui_radius_lg(),
+                },
+                ..Default::default()
+            })
+            .clip(true)
+            .into()
+    } else {
+        container(slot_list_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::container_bg0_hard)
+            .into()
+    }
 }
 
 /// Resolve the `SlotListPageMessage` a primary slot-row click should
@@ -1587,11 +1659,12 @@ mod tests {
         };
 
         let row_height = config.row_height();
-        // Available = 900 - 234 - 10 (padding) = 656
-        // Spacing = 8 * 3 = 24
-        // Content = 632
-        // Row height = 632 / 9 ≈ 70.22
-        assert!((row_height - 70.222).abs() < 0.01);
+        // Available = 900 - 234 = 666 (slot list now runs flush to the
+        // player bar, no bottom pad).
+        // Spacing = 8 * 0 = 0 (flat-redesign rows touch).
+        // Content = 666
+        // Row height = 666 / 9 = 74.0
+        assert!((row_height - 74.0).abs() < 0.01);
     }
 
     #[test]
@@ -1613,10 +1686,10 @@ mod tests {
     fn test_dynamic_slot_count_large_window() {
         // Large window: should get more than 9 slots to keep row height near TARGET
         let config = SlotListConfig::with_dynamic_slots(900.0, 134.0);
-        // Available = 900 - 134 - 10 = 756
-        // raw ≈ 756 / 70 ≈ 10.5 → try 11 and 13
-        // 11 slots: spacing=30, content=726, row=66
-        // 13 slots: spacing=36, content=720, row=55.4
+        // Available = 900 - 134 - 10 = 756, SLOT_SPACING=0 (flat redesign).
+        // raw ≈ 756 / 70 ≈ 10.8 → try 11 and 13
+        // 11 slots: spacing=0, content=756, row=68.7  (|68.7-70|=1.3)
+        // 13 slots: spacing=0, content=756, row=58.2  (|58.2-70|=11.8)
         // 11 is closer to 70 → 11
         assert_eq!(config.slot_count, 11);
         assert_eq!(config.center_slot, 5);
@@ -1626,10 +1699,10 @@ mod tests {
     fn test_dynamic_slot_count_medium_window() {
         // Medium window should get fewer slots
         let config = SlotListConfig::with_dynamic_slots(450.0, 134.0);
-        // Available = 450 - 134 - 10 = 306
-        // raw ≈ 306 / 70 ≈ 4.1 → try 3 and 5
-        // 3 slots: spacing=6, content=300, row=100 (|100-70|=30)
-        // 5 slots: spacing=12, content=294, row=58.8 (|58.8-70|=11.2)
+        // Available = 450 - 134 - 10 = 306, SLOT_SPACING=0.
+        // raw ≈ 306 / 70 ≈ 4.37 → try 3 and 5
+        // 3 slots: spacing=0, content=306, row=102 (|102-70|=32)
+        // 5 slots: spacing=0, content=306, row=61.2 (|61.2-70|=8.8)
         // 5 is closer → 5
         assert_eq!(config.slot_count, 5);
         assert_eq!(config.center_slot, 2);
@@ -1639,10 +1712,10 @@ mod tests {
     fn test_dynamic_slot_count_small_window() {
         // Very small window should fall back to minimum slots
         let config = SlotListConfig::with_dynamic_slots(250.0, 134.0);
-        // Available = 250 - 134 - 10 = 106
-        // raw ≈ 106 / 70 ≈ 1.3 → lower_odd=1, upper_odd=3
-        // 1 slot: spacing=0, content=106, row=106  (|106-70|=36)
-        // 3 slots: spacing=6, content=100, row=33.3 (< MIN 55)
+        // Available = 250 - 134 - 10 = 106, SLOT_SPACING=0.
+        // raw ≈ 106 / 70 ≈ 1.51 → lower_odd=1, upper_odd=3
+        // 1 slot: content=106, row=106  (|106-70|=36)
+        // 3 slots: content=106, row=35.3 (< MIN 55)
         // upper fails MIN → use lower_odd=1
         assert_eq!(config.slot_count, 1);
         assert_eq!(config.center_slot, 0);
@@ -1712,20 +1785,38 @@ mod tests {
     #[test]
     fn slots_never_exceed_available_space() {
         // The core invariant: rendered slots + spacing must fit in the
-        // available area. If this fails, the last slot clips.
+        // available area. If this fails, the last slot clips. The slot list
+        // now runs flush to the player bar (no bottom pad in either mode),
+        // so `available` is simply `height - chrome`.
         for height in (300..=2160).step_by(50) {
             for chrome in [100.0, 134.0, 170.0, 200.0] {
                 let config = SlotListConfig::with_dynamic_slots(height as f32, chrome);
                 let row_height = config.row_height();
                 let spacing = config.slot_count.saturating_sub(1) as f32 * SLOT_SPACING;
                 let used = config.slot_count as f32 * row_height + spacing;
-                let available = (height as f32 - chrome - SLOT_LIST_CONTAINER_PADDING).max(0.0);
+                let available = (height as f32 - chrome).max(0.0);
                 assert!(
                     used <= available + 0.01, // f32 tolerance
                     "clipped at height={height}, chrome={chrome}: used={used:.1} > available={available:.1}"
                 );
             }
         }
+    }
+
+    #[test]
+    fn view_header_chrome_matches_rendered_widget_height() {
+        // Pins `view_header_chrome()` to the actual widget tree built by
+        // `view_header::view_header()` (a 50 px strip stacked with a 1 px
+        // sibling separator). If `view_header` adds/removes a row, this
+        // assertion fires before the slot-count math silently under-counts.
+        use crate::widgets::view_header::{HEADER_BOTTOM_SEPARATOR, HEADER_HEIGHT};
+        let expected = HEADER_HEIGHT + HEADER_BOTTOM_SEPARATOR;
+        assert!(
+            (view_header_chrome() - expected).abs() < f32::EPSILON,
+            "view_header_chrome() drifted from HEADER_HEIGHT + separator: got {}, expected {}",
+            view_header_chrome(),
+            expected,
+        );
     }
 
     #[test]

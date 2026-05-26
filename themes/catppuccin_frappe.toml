@@ -1,5 +1,8 @@
 name = "Catppuccin Frappé"
 
+[dark]
+border = "#191b25"
+
 [dark.background]
 default = "#303446"
 hard = "#242735"
@@ -18,7 +21,6 @@ level3 = "#e4f0ff"
 level4 = "#e4f0ff"
 
 [dark.accent]
-border_dark = "#688ad8"
 border_light = "#728ac2"
 bright = "#688ad8"
 primary = "#8caaee"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#e5c890", "#e5c890", "#b8a279", "#b8a279", "#c4a871", "#c4a871"]
 
+[light]
+border = "#bbbcbf"
+
 [light.background]
 default = "#eff1f5"
 hard = "#dcdee1"
@@ -65,7 +70,6 @@ level3 = "#303357"
 level4 = "#303357"
 
 [light.accent]
-border_dark = "#0178ff"
 border_light = "#a0b0f5"
 bright = "#0178ff"
 primary = "#1e66f5"

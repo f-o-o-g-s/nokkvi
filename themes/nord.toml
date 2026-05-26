@@ -1,5 +1,8 @@
 name = "Nord"
 
+[dark]
+border = "#181b21"
+
 [dark.background]
 default = "#2e3440"
 hard = "#232730"
@@ -18,7 +21,6 @@ level3 = "#eceff4"
 level4 = "#eceff4"
 
 [dark.accent]
-border_dark = "#5ea09f"
 border_light = "#749899"
 bright = "#5ea09f"
 primary = "#8fbcbb"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#ebcb8b", "#ebcb8b", "#bda474", "#bda474", "#caab6c", "#caab6c"]
 
+[light]
+border = "#1d2128"
+
 [light.background]
 default = "#2e3440"
 hard = "#232730"
@@ -65,7 +70,6 @@ level3 = "#eceff4"
 level4 = "#eceff4"
 
 [light.accent]
-border_dark = "#5ea09f"
 border_light = "#749899"
 bright = "#5ea09f"
 primary = "#8fbcbb"

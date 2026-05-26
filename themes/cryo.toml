@@ -1,5 +1,8 @@
 name = "Cryo"
 
+[dark]
+border = "#070a0e"
+
 [dark.background]
 default = "#0e141b"
 hard = "#0a0f14"
@@ -18,7 +21,6 @@ level3 = "#9bbad9"
 level4 = "#839fb8"
 
 [dark.accent]
-border_dark = "#1b2a3a"
 border_light = "#3b6ea8"
 bright = "#5cc8ff"
 primary = "#3a86c6"
@@ -46,6 +48,9 @@ border_opacity = 1.0
 led_border_opacity = 1
 peak_gradient_colors = ["#ff6b81", "#bfa6ff", "#ffd866", "#ff9f6e"]
 
+[light]
+border = "#c6ccd5"
+
 [light.background]
 default = "#f4f9ff"
 hard = "#e9f1fb"
@@ -64,7 +69,6 @@ level3 = "#2b3d54"
 level4 = "#35506d"
 
 [light.accent]
-border_dark = "#3a86c6"
 border_light = "#5cc8ff"
 bright = "#3a86c6"
 primary = "#245a8d"

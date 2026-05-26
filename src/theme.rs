@@ -260,6 +260,22 @@ pub(crate) fn font_family() -> String {
     FONT_FAMILY.read().clone()
 }
 
+// ----------------------------------------------------------------------------
+// Title font (independent of body font — supports italic/serif title
+// typefaces like IBM Plex Sans without affecting JetBrains-Mono-style body text)
+// ----------------------------------------------------------------------------
+
+// Title-font family was intended to give L1 hero titles + active-breadcrumb
+// segments a typographic distinction from the body font, but the
+// `set_title_font_family` setter never landed (the L5 settings lane it was
+// dead-coded for was descoped). Every `theme::title_font()` call therefore
+// returned the body font, shipping the design's distinction disabled. The
+// machinery (`TITLE_FONT_FAMILY` static + `TITLE_FONT_CACHE` + the public
+// readers) was removed — callers now use `ui_font()` directly. If a future
+// design re-introduces the distinction, the simpler shape is a config-side
+// `theme.title_font_family` field threaded through `ResolvedTheme` rather
+// than a global mutable static.
+
 // ============================================================================
 // Light Mode Control
 // ============================================================================
@@ -282,8 +298,28 @@ pub(crate) fn set_light_mode(enabled: bool) {
 // Rounded Mode Control
 // ============================================================================
 
-/// Radius value applied to container borders when rounded mode is enabled
+/// Legacy single-radius value (kept for `ui_border_radius()` back-compat).
+/// New code prefers the scale helpers (`ui_radius_sm`, `ui_radius_md`, …).
 const ROUNDED_RADIUS: f32 = 6.0;
+
+// ----------------------------------------------------------------------------
+// Radius scale (flat redesign — rounded-mode values per element role)
+// ----------------------------------------------------------------------------
+// Each helper returns the corresponding radius in rounded mode, `0.0` in flat
+// mode, so call sites stay mode-agnostic.
+
+// Scale constants — every helper below consumes one, so they're all live.
+
+/// xs (4 px) — checkboxes, hex swatches, small pips.
+const R_XS: f32 = 4.0;
+/// sm (8 px) — mode buttons, badges, hover pills.
+const R_SM: f32 = 8.0;
+/// md (12 px) — cards, popovers, album art, category tiles.
+const R_MD: f32 = 12.0;
+/// lg (18 px) — list shells, modal frames, hero panels.
+const R_LG: f32 = 18.0;
+/// pill (999 px) — tabs, transport buttons, search, sliders.
+const R_PILL: f32 = 999.0;
 
 /// Returns true if rounded corners mode is enabled
 #[inline]
@@ -298,10 +334,11 @@ pub(crate) fn set_rounded_mode(enabled: bool) {
     debug!(" Rounded mode changed: rounded_mode={}", enabled);
 }
 
-/// Get the UI border radius based on current rounded mode setting.
+/// Get the legacy UI border radius (6 px in rounded mode, 0 in flat).
 ///
-/// Returns uniform `ROUNDED_RADIUS` when enabled, `0.0` when disabled.
-/// Use this instead of hardcoding `radius: 0.0.into()` in container styles.
+/// Kept for back-compat while widgets migrate to the scale helpers
+/// (`ui_radius_xs/sm/md/lg/pill`). New code should call the role-appropriate
+/// helper directly.
 #[inline]
 pub(crate) fn ui_border_radius() -> iced::border::Radius {
     if is_rounded_mode() {
@@ -311,22 +348,93 @@ pub(crate) fn ui_border_radius() -> iced::border::Radius {
     }
 }
 
-// ============================================================================
-// Active Accent Helper
-// ============================================================================
-
-/// Active-tab accent color — uses `accent()` in rounded+light mode for contrast
-/// on light backgrounds, `accent_bright()` everywhere else.
-///
-/// Shared by both the horizontal nav bar and the vertical side nav bar.
+/// Scale step `xs` — 4 px in rounded mode, 0 in flat. Use for checkboxes,
+/// swatches, tiny chips.
 #[inline]
-pub(crate) fn active_accent() -> Color {
-    if is_rounded_mode() && is_light_mode() {
-        accent()
+pub(crate) fn ui_radius_xs() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_XS.into()
     } else {
-        accent_bright()
+        0.0.into()
     }
 }
+
+/// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
+/// badges, format pills.
+#[inline]
+pub(crate) fn ui_radius_sm() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_SM.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Scale step `md` — 12 px in rounded mode, 0 in flat. Use for cards,
+/// popovers, album art, category tiles.
+#[inline]
+pub(crate) fn ui_radius_md() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_MD.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Scale step `lg` — 18 px in rounded mode, 0 in flat. Use for list shells,
+/// modal frames, stats strips.
+#[inline]
+pub(crate) fn ui_radius_lg() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_LG.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
+/// transport buttons, search field, slider handles.
+#[inline]
+pub(crate) fn ui_radius_pill() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_PILL.into()
+    } else {
+        0.0.into()
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Chrome sizing (mode-sensitive)
+// ----------------------------------------------------------------------------
+
+/// Top nav-bar content height — 32 px in flat mode, 44 px in rounded mode
+/// (rounded mode adds 6 px padding above and below the pill capsules).
+#[inline]
+pub(crate) fn nav_bar_height() -> f32 {
+    if is_rounded_mode() { 44.0 } else { 32.0 }
+}
+
+/// Fixed height of the 24 px status strip rendered below the player bar.
+/// Consumed by `widgets::track_info_strip::STRIP_HEIGHT` to keep the strip
+/// widget's height aligned with the theme's source of truth.
+pub(crate) const STATUS_STRIP_HEIGHT: f32 = 24.0;
+
+/// Background color for the 24 px status strip — meaningfully darker
+/// than `bg0_hard()` so the strip reads as its own band below the player
+/// bar. Calibrated to match the design CSS delta (Everforest target:
+/// `bg0_hard=#232A2E` → `status_strip=#1d2326`, a ~17 % darken).
+#[inline]
+pub(crate) fn status_strip_bg() -> Color {
+    darken(bg0_hard(), 0.17)
+}
+
+// `active_accent()` was retained as the canonical accent-resolver for any
+// future surface that wanted the rounded-light contrast bump (returning
+// `accent()` only in `rounded && light` mode, `accent_bright()` otherwise),
+// but every redesign tab/cell already calls `accent_bright()` directly and
+// nothing surfaced a real need for the mode-conditional shape. Removed
+// during the cleanup; a future agent reintroducing the pattern can pull it
+// from `git show`.
 
 use nokkvi_data::types::player_settings::TrackInfoDisplay;
 
@@ -337,7 +445,8 @@ atomic_u8_enum! {
         0 => Off,
         1 => PlayerBar,
         2 => TopBar,
-        3 => ProgressTrack,
+        3 => MiniPlayer,
+        4 => TopBarUnder,
     } default Off
 }
 
@@ -368,12 +477,29 @@ pub(crate) fn show_player_bar_strip() -> bool {
 
 /// Whether the top bar track info strip should be rendered above content.
 ///
-/// True when `TrackInfoDisplay::TopBar` AND side-nav layout are both active.
+/// True when the active strip mode renders a strip above the main content in
+/// side-nav or none-nav layouts. Both `TopBar` and `TopBarUnder` map to the
+/// same above-content position there — they only diverge in top-nav layout
+/// (where `TopBar` lives inline in the nav row and `TopBarUnder` becomes its
+/// own row below the nav — see [`show_top_bar_under_strip`]).
 ///
 /// **Single source of truth** — use this instead of ad-hoc compound checks.
 #[inline]
 pub(crate) fn show_top_bar_strip() -> bool {
-    track_info_display() == TrackInfoDisplay::TopBar && !is_top_nav()
+    matches!(
+        track_info_display(),
+        TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
+    ) && !is_top_nav()
+}
+
+/// Whether the player-bar-styled metadata strip should be rendered directly
+/// beneath the top nav bar.
+///
+/// True when `TrackInfoDisplay::TopBarUnder` AND top-nav layout are both
+/// active. The other layouts route through [`show_top_bar_strip`] instead.
+#[inline]
+pub(crate) fn show_top_bar_under_strip() -> bool {
+    track_info_display() == TrackInfoDisplay::TopBarUnder && is_top_nav()
 }
 
 /// Whether the artwork-elevation feature is *enabled* by the user's theme
@@ -381,12 +507,18 @@ pub(crate) fn show_top_bar_strip() -> bool {
 ///
 /// True when the top-nav layout is active AND the metadata strip lives
 /// somewhere other than the top bar (i.e. `Off`, `PlayerBar`, or
-/// `ProgressTrack`) — in those modes the top nav doesn't carry any
-/// now-playing metadata, so its right portion is free real estate that the
-/// artwork can take over.
+/// `MiniPlayer`) — in those modes the top nav doesn't carry any
+/// now-playing metadata, so its right portion is free real estate that
+/// the artwork can take over. `MiniPlayer` keeps its own artwork inside
+/// the player bar; that doesn't conflict with the top-nav elevation
+/// because they live on different rows.
 ///
 /// `TopBar` keeps the regular column-stacked layout because the metadata
-/// strip still needs the full nav width.
+/// strip still needs the full nav width. `TopBarUnder` likewise opts out:
+/// its strip sits as its own full-width row directly beneath the nav, so
+/// elevating the artwork into that band would either cover the strip or
+/// require the strip to span only the slot-list column. Easier to just
+/// disable elevation whenever a top-area strip is visible.
 ///
 /// This is only the *theme* gate — `Nokkvi::elevated_artwork_extent`
 /// additionally excludes split-view, ineligible views, and the Auto-mode
@@ -395,7 +527,11 @@ pub(crate) fn show_top_bar_strip() -> bool {
 /// finally reads.
 #[inline]
 pub(crate) fn is_artwork_elevated() -> bool {
-    is_top_nav() && track_info_display() != TrackInfoDisplay::TopBar
+    is_top_nav()
+        && !matches!(
+            track_info_display(),
+            TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
+        )
 }
 
 // ============================================================================
@@ -428,6 +564,19 @@ pub(crate) fn is_none_nav() -> bool {
 #[inline]
 pub(crate) fn is_top_nav() -> bool {
     UI_MODE.nav_layout.load(Ordering::Relaxed) == 0
+}
+
+/// Current navigation layout — bytes round-trip through `NavLayout::from_u8`
+/// (unknown bytes fall back to `Top`, the declared default; see the
+/// `atomic_u8_enum!` macro's forward-compat contract).
+///
+/// Test-only: production code uses `is_top_nav()` / `is_side_nav()` /
+/// `is_none_nav()` directly; the enum-shaped reader is here so chrome-math
+/// tests can save/restore the active variant in a single hop.
+#[cfg(test)]
+#[inline]
+pub(crate) fn nav_layout() -> NavLayout {
+    NavLayout::from_u8(UI_MODE.nav_layout.load(Ordering::Relaxed))
 }
 
 /// Set the navigation layout from a NavLayout enum value
@@ -1000,61 +1149,37 @@ pub(crate) fn warning() -> Color {
 pub(crate) fn warning_bright() -> Color {
     read_color(|t| t.warning_bright)
 }
-#[inline]
-#[allow(dead_code)] // Base variant available for future use (bright variant used by star ratings)
-pub(crate) fn star() -> Color {
-    read_color(|t| t.star)
-}
+// Base `star()` accessor was retained alongside `star_bright()` for any
+// future surface that wanted both ends of the star ratings palette, but
+// only `star_bright()` is consumed (slot-list star renders + metadata
+// pills). Removed during the cleanup; `palette.star.base` still lives in
+// the TOML schema so existing themes round-trip without a migration.
 #[inline]
 pub(crate) fn star_bright() -> Color {
     read_color(|t| t.star_bright)
 }
 
 // ============================================================================
-// 3D Border Helpers
+// Chrome Border (1px hairline separators)
 // ============================================================================
-// These functions return (highlight, shadow) color pairs that automatically
-// flip based on light_mode to maintain correct 3D visual effects.
-//
-// For RAISED elements (buttons, handles): highlight goes on top/left, shadow on bottom/right
-// For INSET elements (tracks, grooves): shadow goes on top/left, highlight on bottom/right
 
-/// Returns (top_left_color, bottom_right_color) for 3D raised elements (buttons, handles)
-///
-/// In dark mode: light color on top/left (highlight), dark on bottom/right (shadow)
-/// In light mode: flipped for correct visual effect
+/// Hairline border color used by chrome dividers (between nav bars, list
+/// rows, capsules). Per-theme in TOML, falls back to a darkened
+/// `bg0_hard()` when unset. Replaces hard-coded `#1a2024`-style dividers.
 #[inline]
-pub(crate) fn border_3d_raised() -> (Color, Color) {
-    if is_light_mode() {
-        // Light mode: swap to maintain 3D illusion
-        (bg0(), bg2())
-    } else {
-        // Dark mode: standard (highlight=light, shadow=dark)
-        (bg2(), bg0())
-    }
+pub(crate) fn border() -> Color {
+    read_color(|t| t.border)
 }
 
-/// Returns (top_left_color, bottom_right_color) for 3D inset elements (tracks, grooves)
-///
-/// In dark mode: dark color on top/left (shadow), light on bottom/right (highlight)
-/// In light mode: flipped for correct visual effect
-#[inline]
-pub(crate) fn border_3d_inset() -> (Color, Color) {
-    if is_light_mode() {
-        // Light mode: swap to maintain 3D illusion
-        (bg2(), bg0())
-    } else {
-        // Dark mode: standard (shadow=dark on top/left)
-        (bg0(), bg2())
-    }
-}
+// ============================================================================
+// Color Blending Helpers
+// ============================================================================
+// Used by `darken()` (the border-token fallback in theme_config and the
+// `status_strip_bg` derivation), and by `slot_list`'s depth-darkening of
+// now-playing rows. The flat redesign removed the 3D bevel chrome, taking
+// the old `border_3d_*` / `lighten` helpers with it.
 
-// Color blending for natural 3D effects
-// Instead of pure black/white overlays (which look metallic), we blend the base
-// accent color toward white/black to create tinted highlights/shadows that stay
-// in the same color family.
-
-/// Blend a color toward a target color by the given factor (0.0 = base, 1.0 = target)
+/// Blend a color toward a target color by the given factor (0.0 = base, 1.0 = target).
 #[inline]
 fn blend_toward(base: Color, target: Color, factor: f32) -> Color {
     Color {
@@ -1065,50 +1190,10 @@ fn blend_toward(base: Color, target: Color, factor: f32) -> Color {
     }
 }
 
-/// Lighten a color by blending it toward white
-#[inline]
-fn lighten(color: Color, amount: f32) -> Color {
-    blend_toward(color, Color::WHITE, amount)
-}
-
-/// Darken a color by blending it toward black  
+/// Darken a color by blending it toward black.
 #[inline]
 pub(crate) fn darken(color: Color, amount: f32) -> Color {
     blend_toward(color, Color::BLACK, amount)
-}
-
-/// Returns (highlight_color, shadow_color) for 3D raised elements derived from
-/// an arbitrary accent-family base color.
-///
-/// Lighten/darken ratios are mode-aware: light mode prefers a subtle highlight
-/// and moderate shadow; dark mode prefers a moderate highlight and subtle
-/// shadow. Shared between the bright-accent and darker-accent wrappers below.
-#[inline]
-fn border_3d_accent_from_base(base: Color) -> (Color, Color) {
-    if is_light_mode() {
-        // Light mode: subtle lighten, moderate darken
-        (lighten(base, 0.25), darken(base, 0.35))
-    } else {
-        // Dark mode: moderate lighten, subtle darken
-        (lighten(base, 0.35), darken(base, 0.30))
-    }
-}
-
-/// Returns (highlight_color, shadow_color) for 3D raised accent-colored elements
-///
-/// Derives highlight/shadow from the base accent color by blending toward white/black.
-/// This creates a cohesive color family instead of metallic pure black/white overlays.
-#[inline]
-pub(crate) fn border_3d_accent_raised() -> (Color, Color) {
-    border_3d_accent_from_base(accent_bright())
-}
-
-/// Returns (highlight_color, shadow_color) for 3D raised accent elements using darker accent
-///
-/// Same approach but uses the darker accent as the base color.
-#[inline]
-pub(crate) fn border_3d_accent_darker_raised() -> (Color, Color) {
-    border_3d_accent_from_base(accent())
 }
 
 // ============================================================================
@@ -1130,14 +1215,17 @@ pub(crate) fn container_bg0_hard(_theme: &Theme) -> container::Style {
     }
 }
 
-/// Themed tooltip container style — dark/light aware with 3D border
+/// Themed tooltip container style — `bg0_hard` fill, `theme::border()`
+/// hairline, and the design's smallest corner radius. Migrated onto the
+/// shared chrome tokens so tooltip corners pick up the active theme's
+/// per-palette border color and the global flat-vs-rounded toggle.
 pub(crate) fn container_tooltip(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(bg0_hard().into()),
         border: iced::Border {
-            color: bg3(),
+            color: border(),
             width: 1.0,
-            radius: 2.0.into(),
+            radius: ui_radius_xs(),
         },
         text_color: Some(fg1()),
         ..Default::default()
@@ -1146,9 +1234,12 @@ pub(crate) fn container_tooltip(_theme: &Theme) -> container::Style {
 
 /// Full-width horizontal separator line.
 ///
-/// Renders as a `bg1`-colored container with the given pixel height.
-/// Replaces the inline `container(space()).width(Fill).height(Fixed(h)).style(bg1)` pattern
-/// that was duplicated across `player_bar.rs`, `track_info_strip.rs`, and `app_view.rs`.
+/// Renders as a `border()`-colored container with the given pixel height.
+/// Replaces the inline `container(space()).width(Fill).height(Fixed(h)).style(bg1)`
+/// pattern that was duplicated across `player_bar.rs`, `track_info_strip.rs`,
+/// and `app_view.rs`. The redesign aligned every 1 px chrome rule onto the
+/// shared `theme::border()` token, so this helper now reads the same
+/// hairline color as the modal/menu/nav-bar separator family.
 pub(crate) fn horizontal_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M> {
     use iced::{
         Length,
@@ -1158,15 +1249,17 @@ pub(crate) fn horizontal_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, 
         .width(Length::Fill)
         .height(Length::Fixed(height))
         .style(move |_| container::Style {
-            background: Some(bg1().into()),
+            background: Some(border().into()),
             ..Default::default()
         })
         .into()
 }
 
-/// Fixed-height vertical separator line (1px wide, `bg3` colored).
+/// Fixed-height vertical separator line (1px wide, `border()` colored).
 ///
-/// Used inside info strip rows to delineate fields.
+/// Used inside info strip rows to delineate fields. Shares the same
+/// `theme::border()` hairline color as `horizontal_separator` and the
+/// rest of the chrome separator family.
 pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M> {
     use iced::{
         Length,
@@ -1176,7 +1269,7 @@ pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M>
         .width(Length::Fixed(1.0))
         .height(Length::Fixed(height))
         .style(move |_| container::Style {
-            background: Some(bg3().into()),
+            background: Some(border().into()),
             ..Default::default()
         })
         .into()
@@ -1185,13 +1278,13 @@ pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M>
 // ----------------------------------------------------------------------------
 // Modal separators
 // ----------------------------------------------------------------------------
-// These three helpers consolidate the eight near-identical separator lambdas
-// that previously lived in `about_modal`, `info_modal`, `eq_modal`,
-// `nav_bar` (twice), and `side_nav_bar`. The two alpha levels (0.12 / 0.2)
-// correspond to the row-vs-header visual hierarchy already present in the
-// originating widgets.
+// Both helpers consolidate the eight near-identical separator lambdas that
+// previously lived in `about_modal`, `info_modal`, `eq_modal`, `nav_bar`
+// (twice), and `side_nav_bar`. After the flat redesign they share the same
+// `border()` token — the design CSS uses the same `#1a2024` for modal-head,
+// modal-actions, row separators, popover head, and pop-row borders.
 
-/// 1-px horizontal separator between rows inside a modal (subtle, alpha 0.12).
+/// 1-px horizontal separator between rows inside a modal.
 ///
 /// Replaces the inline `row_separator` lambdas in `about_modal::info_row`
 /// and `info_modal`'s property table.
@@ -1203,18 +1296,14 @@ pub(crate) fn modal_row_separator<'a, M: 'a>() -> iced::Element<'a, M> {
     container(space::horizontal())
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
-        .style(|_| {
-            let mut c = fg4();
-            c.a = 0.12;
-            container::Style {
-                background: Some(c.into()),
-                ..Default::default()
-            }
+        .style(|_| container::Style {
+            background: Some(border().into()),
+            ..Default::default()
         })
         .into()
 }
 
-/// 1-px horizontal separator under a modal's header (slightly stronger, alpha 0.2).
+/// 1-px horizontal separator under a modal's header.
 ///
 /// Replaces the inline `separator_line` lambdas in `about_modal`, `info_modal`,
 /// and `eq_modal`.
@@ -1226,63 +1315,19 @@ pub(crate) fn modal_header_separator<'a, M: 'a>() -> iced::Element<'a, M> {
     container(space::horizontal())
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
-        .style(|_| {
-            let mut c = fg4();
-            c.a = 0.2;
-            container::Style {
-                background: Some(c.into()),
-                ..Default::default()
-            }
-        })
-        .into()
-}
-
-/// Variant flag chosen by `nav_separator` callers — selects between the
-/// horizontal nav bar's tab separator (vertical 2-px rule, can hide in
-/// rounded mode) and the horizontal cross-bar separator drawn inside the
-/// side nav bar (between vertical tabs).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NavSeparatorAxis {
-    /// 2-px wide vertical line, `Length::Fill` tall — used between
-    /// horizontal nav-bar tabs.
-    Vertical,
-    /// `Length::Fill` wide, 2-px tall — used between side-nav vertical tabs.
-    Horizontal,
-}
-
-/// 2-px nav-bar separator (vertical between top-nav tabs, horizontal between
-/// side-nav tabs). When `force_visible` is `false`, the separator is hidden
-/// in rounded mode to match the unbordered Material-style chrome; passing
-/// `true` keeps it visible (used for trailing/leading separators that
-/// bracket the tab strip).
-///
-/// Replaces `tab_separator` / `info_separator` / the inline `separator()`
-/// lambda formerly duplicated across `nav_bar` and `side_nav_bar`.
-pub(crate) fn nav_separator<'a, M: 'a>(
-    axis: NavSeparatorAxis,
-    force_visible: bool,
-) -> iced::Element<'a, M> {
-    use iced::{
-        Length,
-        widget::{Space, container},
-    };
-    let (w, h) = match axis {
-        NavSeparatorAxis::Vertical => (Length::Fixed(2.0), Length::Fill),
-        NavSeparatorAxis::Horizontal => (Length::Fill, Length::Fixed(2.0)),
-    };
-    container(Space::new())
-        .width(w)
-        .height(h)
-        .style(move |_| container::Style {
-            background: if is_rounded_mode() && !force_visible {
-                None
-            } else {
-                Some(bg1().into())
-            },
+        .style(|_| container::Style {
+            background: Some(border().into()),
             ..Default::default()
         })
         .into()
 }
+
+// `NavSeparatorAxis` + `nav_separator` were the canonical "2-px nav-bar
+// separator" recipe — both axes, optional `force_visible` to defeat the
+// rounded-mode hide. L2 (nav-chrome) replaced them with a 1-px
+// `theme::border()`-colored rule local to each nav bar, so the helpers had
+// no callers in the redesign. Removed during the cleanup; recover from
+// `git show` if a future surface wants the old thick visual.
 
 // ----------------------------------------------------------------------------
 // Modal scaffolding
@@ -1331,6 +1376,27 @@ pub(crate) fn modal_scaffold<'a, M: Clone + 'a>(
 /// Conventional backdrop alpha used by every overlay modal.
 pub(crate) const MODAL_BACKDROP_ALPHA: f32 = 0.6;
 
+/// Shared `container::Style` for overlay modal panels — flat `bg0_hard()`
+/// fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners.
+///
+/// Five overlay modals (`about`, `info`, `eq`, `text_input_dialog`,
+/// `default_playlist_picker`) open-coded this exact block. Routing them
+/// through one function means a future per-theme tweak to the modal frame
+/// (e.g. swapping the outline onto `border()` for the chrome-quiet variant)
+/// only touches this body — and the radius / fill / border are all
+/// guaranteed to stay in lockstep across the modal family.
+pub(crate) fn modal_frame_style(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(bg0_hard().into()),
+        border: iced::Border {
+            color: accent_bright(),
+            width: 1.0,
+            radius: ui_radius_lg(),
+        },
+        ..Default::default()
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Transparent button style
 // ----------------------------------------------------------------------------
@@ -1358,26 +1424,12 @@ pub(crate) fn transparent_button_style(
     }
 }
 
-/// Themed search/filter text input style matching the Gruvbox palette.
-/// Used in view headers and settings sub-lists.
-pub(crate) fn search_input_style(_theme: &Theme, status: text_input::Status) -> text_input::Style {
-    text_input::Style {
-        background: (bg0_soft()).into(),
-        border: iced::Border {
-            color: if matches!(status, text_input::Status::Focused { .. }) {
-                accent_bright()
-            } else {
-                iced::Color::TRANSPARENT
-            },
-            width: 2.0,
-            radius: ui_border_radius(),
-        },
-        icon: fg4(),
-        placeholder: fg4(),
-        value: fg0(),
-        selection: selection_color(),
-    }
-}
+// `theme::search_input_style` was the legacy 2 px-bordered Gruvbox view-header
+// style. The L3 flat redesign moved view-header callers to
+// `search_bar::flat_search_input_style` and the L5 settings UI runs through
+// `settings_search_input_style` below; the original helper had no remaining
+// callers and was removed during the cleanup. Recover from `git show` if a
+// future caller wants the old visual.
 
 /// Specialized search style for settings panels so it doesn't blend into bg0_soft.
 pub(crate) fn settings_search_input_style(
@@ -1399,6 +1451,93 @@ pub(crate) fn settings_search_input_style(
         placeholder: fg4(),
         value: fg0(),
         selection: selection_color(),
+    }
+}
+
+/// Themed scrollbar style for the settings detail pane: `bg2` rail, `fg4`
+/// scroller resting, `accent_bright` scroller on hover/drag. Matches the
+/// info-modal scrollable's chrome so all in-settings scrollable surfaces
+/// read consistently against the flat-redesign palette.
+pub(crate) fn settings_scrollable_style(
+    _theme: &Theme,
+    status: iced::widget::scrollable::Status,
+) -> iced::widget::scrollable::Style {
+    use iced::widget::{container, scrollable};
+
+    let rail = scrollable::Rail {
+        background: Some(bg2().into()),
+        border: iced::Border {
+            radius: ui_border_radius(),
+            ..Default::default()
+        },
+        scroller: scrollable::Scroller {
+            background: fg4().into(),
+            border: iced::Border {
+                radius: ui_border_radius(),
+                ..Default::default()
+            },
+        },
+    };
+    let hot_rail = scrollable::Rail {
+        scroller: scrollable::Scroller {
+            background: accent_bright().into(),
+            ..rail.scroller
+        },
+        ..rail
+    };
+    let auto_scroll = scrollable::AutoScroll {
+        background: iced::Color::TRANSPARENT.into(),
+        border: iced::Border::default(),
+        shadow: iced::Shadow::default(),
+        icon: iced::Color::TRANSPARENT,
+    };
+
+    match status {
+        scrollable::Status::Active { .. } => scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: rail,
+            horizontal_rail: rail,
+            gap: None,
+            auto_scroll,
+        },
+        scrollable::Status::Hovered {
+            is_vertical_scrollbar_hovered,
+            is_horizontal_scrollbar_hovered,
+            ..
+        } => scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: if is_vertical_scrollbar_hovered {
+                hot_rail
+            } else {
+                rail
+            },
+            horizontal_rail: if is_horizontal_scrollbar_hovered {
+                hot_rail
+            } else {
+                rail
+            },
+            gap: None,
+            auto_scroll,
+        },
+        scrollable::Status::Dragged {
+            is_vertical_scrollbar_dragged,
+            is_horizontal_scrollbar_dragged,
+            ..
+        } => scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: if is_vertical_scrollbar_dragged {
+                hot_rail
+            } else {
+                rail
+            },
+            horizontal_rail: if is_horizontal_scrollbar_dragged {
+                hot_rail
+            } else {
+                rail
+            },
+            gap: None,
+            auto_scroll,
+        },
     }
 }
 
@@ -1449,6 +1588,14 @@ pub(crate) fn toast_level_color(level: nokkvi_data::types::toast::ToastLevel) ->
     }
 }
 
+/// Sequential guard shared across the workspace's tests that flip globals
+/// like `set_light_mode` or mutate the `UI_MODE` atomics. `parking_lot`
+/// avoids std-lock poisoning if one test panics. Exposed `pub(crate)`
+/// (test-only) so chrome-math regression tests in `widgets::*` can pin
+/// the same atomics under the same lock.
+#[cfg(test)]
+pub(crate) static THEME_MODE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
@@ -1493,79 +1640,8 @@ mod tests {
         );
     }
 
-    // ------------------------------------------------------------------------
-    // border_3d_accent_from_base — helper extracted from the two public
-    // wrappers (`border_3d_accent_raised` / `border_3d_accent_darker_raised`).
-    // These tests pin both the lighten/darken ratios (so a future "tweak the
-    // 3D look" PR can't silently regress them) and the wrapper equivalence
-    // (so a wrapper edit can't accidentally diverge from the helper).
-    // ------------------------------------------------------------------------
-
-    /// Sequential guard for tests that flip `theme::set_light_mode` (a global
-    /// atomic). Mirrors the pattern in `widgets/boat_tests.rs` so the helper
-    /// tests below don't race with each other under multi-threaded
-    /// `cargo test`. `parking_lot::Mutex` avoids std-lock poisoning if one
-    /// test panics.
-    static THEME_MODE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-
-    /// Approximate-equality helper for `Color` channel comparisons. Floating-
-    /// point blend math means `0.5 + (1.0 - 0.5) * 0.35` is unlikely to be
-    /// exactly representable, so we tolerate a tiny epsilon.
-    fn assert_color_eq(actual: Color, expected: Color, what: &str) {
-        let eps = 1e-6_f32;
-        assert!(
-            (actual.r - expected.r).abs() < eps
-                && (actual.g - expected.g).abs() < eps
-                && (actual.b - expected.b).abs() < eps
-                && (actual.a - expected.a).abs() < eps,
-            "{what}: expected {expected:?}, got {actual:?}"
-        );
-    }
-
-    /// Lighten/darken ratios MUST stay at (0.25, 0.35) under light mode and
-    /// (0.35, 0.30) under dark mode. A regression here would shift every 3D
-    /// accent button's highlight/shadow contrast simultaneously, which the
-    /// human owner would not catch without a side-by-side palette diff.
-    #[test]
-    fn border_3d_accent_from_base_pins_lighten_darken_ratios() {
-        let _guard = THEME_MODE_LOCK.lock();
-        let initial_mode = is_light_mode();
-
-        let base = Color::from_rgb(0.5, 0.3, 0.7);
-
-        set_light_mode(false);
-        let (hi_dark, lo_dark) = border_3d_accent_from_base(base);
-        assert_color_eq(hi_dark, lighten(base, 0.35), "dark-mode highlight");
-        assert_color_eq(lo_dark, darken(base, 0.30), "dark-mode shadow");
-
-        set_light_mode(true);
-        let (hi_light, lo_light) = border_3d_accent_from_base(base);
-        assert_color_eq(hi_light, lighten(base, 0.25), "light-mode highlight");
-        assert_color_eq(lo_light, darken(base, 0.35), "light-mode shadow");
-
-        // Restore the global atomic before exit so we don't bleed state into
-        // any other test in this binary that observes `is_light_mode()`.
-        set_light_mode(initial_mode);
-    }
-
-    /// The two public wrappers MUST be one-line delegations to the helper:
-    /// bright-accent base and darker-accent base, respectively. Pinning this
-    /// equivalence prevents a future edit from re-introducing copy-pasted
-    /// math in either wrapper.
-    #[test]
-    fn border_3d_accent_wrappers_delegate_to_helper() {
-        let _guard = THEME_MODE_LOCK.lock();
-
-        let (raised_hi, raised_lo) = border_3d_accent_raised();
-        let (expected_raised_hi, expected_raised_lo) = border_3d_accent_from_base(accent_bright());
-        assert_color_eq(raised_hi, expected_raised_hi, "raised highlight");
-        assert_color_eq(raised_lo, expected_raised_lo, "raised shadow");
-
-        let (darker_hi, darker_lo) = border_3d_accent_darker_raised();
-        let (expected_darker_hi, expected_darker_lo) = border_3d_accent_from_base(accent());
-        assert_color_eq(darker_hi, expected_darker_hi, "darker-raised highlight");
-        assert_color_eq(darker_lo, expected_darker_lo, "darker-raised shadow");
-    }
+    // `THEME_MODE_LOCK` is now defined at module scope so other test modules
+    // in the crate can share the same guard.
 
     // ------------------------------------------------------------------------
     // atomic_u8_enum! macro — verifies that the loader/store impls emitted
@@ -1624,8 +1700,8 @@ mod tests {
         // TrackInfoDisplay default = Off.
         assert_eq!(TrackInfoDisplay::from_u8(255), TrackInfoDisplay::Off);
         assert_eq!(TrackInfoDisplay::from_u8(99), TrackInfoDisplay::Off);
-        // Also verify a byte just past the highest known variant (3) falls back.
-        assert_eq!(TrackInfoDisplay::from_u8(4), TrackInfoDisplay::Off);
+        // Also verify a byte just past the highest known variant (4) falls back.
+        assert_eq!(TrackInfoDisplay::from_u8(5), TrackInfoDisplay::Off);
     }
 
     /// `ArtworkColumnMode`'s integer encoding has `Never` sitting at byte 3,
@@ -1762,17 +1838,6 @@ mod tests {
     fn modal_separators_produce_elements() {
         let _row: iced::Element<'_, ()> = modal_row_separator();
         let _header: iced::Element<'_, ()> = modal_header_separator();
-    }
-
-    /// `nav_separator` must compile for both axis variants and produce real
-    /// `Element`s ready to be pushed onto a row/column. The exact pixel
-    /// dimensions stay verified by the integration-level nav-bar layout
-    /// tests; here we just pin the type-level contract so a future
-    /// refactor cannot silently change the return type.
-    #[test]
-    fn nav_separator_compiles_for_both_axes() {
-        let _v: iced::Element<'_, ()> = nav_separator(NavSeparatorAxis::Vertical, false);
-        let _h: iced::Element<'_, ()> = nav_separator(NavSeparatorAxis::Horizontal, true);
     }
 
     /// `modal_scaffold` must accept any `M: Clone` and return an Element of

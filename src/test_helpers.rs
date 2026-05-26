@@ -355,6 +355,7 @@ pub(crate) fn make_settings_view_data() -> crate::views::SettingsViewData {
         theme_file: nokkvi_data::types::theme_file::ThemeFile::default(),
         active_theme_stem: String::new(),
         window_height: 800.0,
+        window_width: 1200.0,
         hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig::default(),
         is_light_mode: false,
         rounded_mode: false,

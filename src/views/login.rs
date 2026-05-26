@@ -216,14 +216,14 @@ impl LoginPage {
                     .style(|_theme, status| {
                         let border_color = match status {
                             text_input::Status::Focused { .. } => theme::accent(),
-                            _ => theme::bg3(),
+                            _ => theme::border(),
                         };
                         text_input::Style {
                             background: (theme::bg0_hard()).into(),
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
-                                radius: theme::ui_border_radius(),
+                                radius: theme::ui_radius_sm(),
                             },
                             icon: theme::fg1(),
                             placeholder: theme::fg4(),
@@ -243,14 +243,14 @@ impl LoginPage {
                     .style(|_theme, status| {
                         let border_color = match status {
                             text_input::Status::Focused { .. } => theme::accent(),
-                            _ => theme::bg3(),
+                            _ => theme::border(),
                         };
                         text_input::Style {
                             background: (theme::bg0_hard()).into(),
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
-                                radius: theme::ui_border_radius(),
+                                radius: theme::ui_radius_sm(),
                             },
                             icon: theme::fg1(),
                             placeholder: theme::fg4(),
@@ -272,14 +272,14 @@ impl LoginPage {
                     .style(|_theme, status| {
                         let border_color = match status {
                             text_input::Status::Focused { .. } => theme::accent(),
-                            _ => theme::bg3(),
+                            _ => theme::border(),
                         };
                         text_input::Style {
                             background: (theme::bg0_hard()).into(),
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
-                                radius: theme::ui_border_radius(),
+                                radius: theme::ui_radius_sm(),
                             },
                             icon: theme::fg1(),
                             placeholder: theme::fg4(),
@@ -318,13 +318,13 @@ impl LoginPage {
                             border: iced::Border {
                                 color: theme::accent_border_light(),
                                 width: 1.0,
-                                radius: theme::ui_border_radius(),
+                                radius: theme::ui_radius_sm(),
                             },
                             shadow: iced::Shadow::default(),
                             snap: false,
                         })
                     )
-                    .border_radius(theme::ui_border_radius())
+                    .border_radius(theme::ui_radius_sm())
                 )
                 .on_press(LoginMessage::LoginPressed)
                 .interaction(iced::mouse::Interaction::Pointer)
@@ -339,9 +339,9 @@ impl LoginPage {
                 background: Some((theme::bg0()).into()),
                 text_color: Some(theme::fg0()),
                 border: iced::Border {
-                    color: theme::bg1(),
+                    color: theme::border(),
                     width: 1.0,
-                    radius: 12.0.into(),
+                    radius: theme::ui_radius_md(),
                 },
                 shadow: iced::Shadow {
                     color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.8),

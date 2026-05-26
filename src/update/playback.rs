@@ -1335,7 +1335,7 @@ impl Nokkvi {
         // Apply nav display mode from persisted settings
         crate::theme::set_nav_display_mode(settings.nav_display_mode);
 
-        // Apply track info display mode from persisted settings
+        // Apply track info display mode from persisted settings.
         crate::theme::set_track_info_display(settings.track_info_display);
 
         // Apply slot row height from persisted settings

@@ -1,5 +1,8 @@
 name = "Kanagawa"
 
+[dark]
+border = "#101015"
+
 [dark.background]
 default = "#1f1f28"
 hard = "#17171e"
@@ -18,7 +21,6 @@ level3 = "#dcd7ba"
 level4 = "#dcd7ba"
 
 [dark.accent]
-border_dark = "#4e97b3"
 border_light = "#6690a2"
 bright = "#4e97b3"
 primary = "#7fb4ca"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#ff9e3b", "#ff9e3b", "#cc7f34", "#cc7f34", "#dd7e00", "#dd7e00"]
 
+[light]
+border = "#bdb893"
+
 [light.background]
 default = "#f2ecbc"
 hard = "#dfd9ad"
@@ -65,7 +70,6 @@ level3 = "#383852"
 level4 = "#383852"
 
 [light.accent]
-border_dark = "#5d85ce"
 border_light = "#aaada9"
 bright = "#5d85ce"
 primary = "#4d699b"

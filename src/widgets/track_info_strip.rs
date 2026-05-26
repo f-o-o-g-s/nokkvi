@@ -13,8 +13,10 @@ use iced::{
 
 use crate::theme;
 
-/// Height of the track info strip (including 1px separator).
-pub(crate) const STRIP_HEIGHT: f32 = 21.0;
+/// Height of the track info strip — single source of truth lives in
+/// `theme::STATUS_STRIP_HEIGHT` so the flat-redesign 24 px status strip
+/// stays in sync between the theme module and the strip widget.
+pub(crate) const STRIP_HEIGHT: f32 = theme::STATUS_STRIP_HEIGHT;
 
 /// Strip height plus its 1px separator — used by chrome height calculations.
 pub(crate) const STRIP_HEIGHT_WITH_SEPARATOR: f32 = STRIP_HEIGHT + 1.0;
@@ -466,42 +468,25 @@ pub(crate) fn track_info_strip_with_separator<'a, M: Clone + 'static>(
     iced::widget::column![separator, strip].into()
 }
 
-/// Kind of fragment in a [`MetadataSegment`] list — used by renderers that
-/// want different visual treatment for labels vs values vs separators.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum MetadataSegmentKind {
-    Label,
-    Value,
-    Separator,
-}
-
-/// One ordered fragment of the now-playing metadata display: a dimmed label
-/// (e.g. `"title: "`), a colored value (the title text itself), or a separator
-/// joining two visible fields. Single source of truth for the merged-mode
-/// strip marquee and the progress-track overlay — both consume the same list.
-///
-/// `kind` is currently only inspected by tests; production renderers route on
-/// `text` + `color`. It is kept on the struct so a future per-field renderer
-/// (which needs to distinguish labels from values to build labeled rows) can
-/// adopt the same builder without changing the data shape.
-#[derive(Clone, Debug)]
-pub(crate) struct MetadataSegment {
-    #[allow(dead_code)]
-    pub kind: MetadataSegmentKind,
-    pub text: String,
-    pub color: iced::Color,
-}
-
 /// Build the ordered fragment list for now-playing metadata.
 ///
-/// Renderers can either flatten `.text` into a single string (merged-mode
-/// marquee) or map each segment 1:1 to their native visual primitive
-/// (progress-track `OverlaySegment`).
+/// Returns a flat list of text fragments — labels (`"title: "`), values
+/// (`"<title>"`), and separators — in the order the merged-mode marquee
+/// renders them. Renderers concatenate the fragments into a single
+/// scrolling string.
+///
+/// The struct-of-fragments shape (`MetadataSegment { kind, text, color }`)
+/// was kept around for the deleted progress-bar overlay; both its readers
+/// (the old per-segment color renderer and the `kind` test inspection)
+/// were dead since the redesign, so the function now returns `Vec<String>`
+/// directly. If a future renderer needs to distinguish labels from values
+/// it can either revive the typed shape from git history or pattern-match
+/// on the colon suffix the current builder already injects.
 ///
 /// Field order is fixed: title → artist → album. Empty values are skipped
 /// even if their `show_*` toggle is true — this prevents orphan
 /// `"title:    ·  album:"` when a tag is missing. The list never starts or
-/// ends with a [`MetadataSegmentKind::Separator`].
+/// ends with a separator.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_now_playing_segments(
     title: &str,
@@ -512,43 +497,30 @@ pub(crate) fn build_now_playing_segments(
     show_album: bool,
     show_labels: bool,
     separator: &str,
-) -> Vec<MetadataSegment> {
-    let label_color = theme::fg4();
-    let mut segments: Vec<MetadataSegment> = Vec::new();
+) -> Vec<String> {
+    let mut segments: Vec<String> = Vec::new();
 
-    let mut push_field = |label: &'static str, value: &str, color: iced::Color| {
+    let mut push_field = |label: &'static str, value: &str| {
         if value.is_empty() {
             return;
         }
         if !segments.is_empty() {
-            segments.push(MetadataSegment {
-                kind: MetadataSegmentKind::Separator,
-                text: separator.to_string(),
-                color: label_color,
-            });
+            segments.push(separator.to_string());
         }
         if show_labels {
-            segments.push(MetadataSegment {
-                kind: MetadataSegmentKind::Label,
-                text: format!("{label}: "),
-                color: label_color,
-            });
+            segments.push(format!("{label}: "));
         }
-        segments.push(MetadataSegment {
-            kind: MetadataSegmentKind::Value,
-            text: value.to_string(),
-            color,
-        });
+        segments.push(value.to_string());
     };
 
     if show_title {
-        push_field("title", title, theme::now_playing_color());
+        push_field("title", title);
     }
     if show_artist {
-        push_field("artist", artist, theme::selected_color());
+        push_field("artist", artist);
     }
     if show_album {
-        push_field("album", album, theme::fg2());
+        push_field("album", album);
     }
 
     segments
@@ -580,9 +552,7 @@ pub(crate) fn merged_strip_string(
         show_labels,
         join,
     )
-    .into_iter()
-    .map(|s| s.text)
-    .collect()
+    .concat()
 }
 
 /// Build the merged-mode metadata string for radio playback.
@@ -682,10 +652,10 @@ mod tests {
 
     #[test]
     fn build_segments_with_labels_joins_to_merged_strip_string() {
-        // Joining the segment texts in order is byte-for-byte equivalent to
-        // merged_strip_string — keeps overlay and merged-marquee in lockstep.
+        // Joining the segments in order is byte-for-byte equivalent to
+        // merged_strip_string — pins the shape contract.
         let segments = build_now_playing_segments("T", "A", "L", true, true, true, true, DOT);
-        let joined: String = segments.iter().map(|s| s.text.as_str()).collect();
+        let joined: String = segments.concat();
         let merged = merged_strip_string(true, true, true, true, DOT, "T", "A", "L");
         assert_eq!(joined, merged);
         assert_eq!(joined, "title: T  ·  artist: A  ·  album: L");
@@ -696,21 +666,16 @@ mod tests {
         // Even with show_artist=true, an empty artist shouldn't render as
         // "title: T  ·    ·  album: L" with a phantom dot.
         let segments = build_now_playing_segments("T", "", "L", true, true, true, true, DOT);
-        let joined: String = segments.iter().map(|s| s.text.as_str()).collect();
-        assert_eq!(joined, "title: T  ·  album: L");
+        assert_eq!(segments.concat(), "title: T  ·  album: L");
     }
 
     #[test]
     fn build_segments_skips_separator_at_head_and_tail() {
+        // The first and last segment must never be the separator string —
+        // otherwise the merged marquee would render as `"  ·  title: T ..."`.
         let segments = build_now_playing_segments("T", "A", "L", true, true, true, true, DOT);
-        assert_ne!(
-            segments.first().unwrap().kind,
-            MetadataSegmentKind::Separator
-        );
-        assert_ne!(
-            segments.last().unwrap().kind,
-            MetadataSegmentKind::Separator
-        );
+        assert_ne!(segments.first().map(String::as_str), Some(DOT));
+        assert_ne!(segments.last().map(String::as_str), Some(DOT));
     }
 
     #[test]

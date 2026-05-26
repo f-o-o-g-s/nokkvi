@@ -31,7 +31,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Source generation counter**: typed `SourceGeneration` wrapper (over `AtomicU64`) — every user-driven source change goes through `bump_for_user_action()`; renderer snapshots `current()` before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
 - **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `PaginatedFetch::from_common()` handles this in update handlers.
 - **PagedBuffer generation**: `generation()` bumps on every mutation. Use `(query, generation)` keys when memoizing filtered results.
-- **Artwork LRU caches go through `SnapshottedLru<K, V>`**: `album_art`, `large_artwork`, `album_dominant_colors`, and both `CollageArtworkCache.{mini,collage}` are `SnapshottedLru` newtypes that maintain the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — the manual `refresh_*_snapshot()` discipline was deleted (Group U Lane A); a fresh cache must use `SnapshottedLru`.
+- **Artwork LRU caches go through `SnapshottedLru<K, V>`**: `album_art`, `large_artwork`, and both `CollageArtworkCache.{mini,collage}` are `SnapshottedLru` newtypes that maintain the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — the manual `refresh_*_snapshot()` discipline was deleted (Group U Lane A); a fresh cache must use `SnapshottedLru`.
 
 ## Widget Tree & Focus
 
@@ -83,5 +83,5 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Playlist edit guard**: `guard_play_action()` at the top of every play handler.
 - **Chrome height**: must account for every visible header bar. Update constants in `widgets/slot_list.rs` when chrome changes.
 - **Cross-pane drag center index**: snapshotted on drag activation (5 px threshold) — decoupled from subsequent state changes.
-- **Stale progress-track segments**: when a metadata toggle changes, `overlay_segments` must be rebuilt and a `Tick` dispatched to force re-render.
+- **Mode-gated mini-player artwork**: `Nokkvi::mini_player_artwork()` returns `None` when `TrackInfoDisplay != MiniPlayer` — every other strip mode hides the mini-player section, so resolving the cached handle would be wasted work. Tests pin the gate in `update/tests/redesign_chrome.rs`.
 - **Workspace lints are deny-level ship blockers**: `unwrap_used`, `print_stdout`, `print_stderr`, `dbg_macro`, `mem_forget`, `todo`, `unimplemented`, `or_fun_call`, `unused_async`, `match_wildcard_for_single_variants`, `assertions_on_constants` all `deny` in `[workspace.lints.clippy]`. Tests opt out via `#![cfg_attr(test, allow(...))]` at each crate root; intentional CLI prints use targeted `#[allow]`. Don't paper over with broader allows — fix at the call site. `assertions_on_constants` pushes load-bearing constant invariants into `const _: () = assert!(…)` blocks (compile-time) instead of runtime `assert!(<const expr>)` calls the optimizer eats.

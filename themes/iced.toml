@@ -1,5 +1,8 @@
 name = "Iced Built-in"
 
+[dark]
+border = "#161719"
+
 [dark.background]
 default = "#2b2d31"
 hard = "#202225"
@@ -18,7 +21,6 @@ level3 = "#e6e6e6"
 level4 = "#e6e6e6"
 
 [dark.accent]
-border_dark = "#6b75ff"
 border_light = "#4a54c3"
 bright = "#6b75ff"
 primary = "#5865f2"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#ffc14e", "#ffc14e", "#cd9c44", "#cd9c44", "#dda123", "#dda123"]
 
+[light]
+border = "#c7c7c7"
+
 [light.background]
 default = "#ffffff"
 hard = "#ebebeb"
@@ -65,7 +70,6 @@ level3 = "#000000"
 level4 = "#000000"
 
 [light.accent]
-border_dark = "#6b75ff"
 border_light = "#b4b8f7"
 bright = "#6b75ff"
 primary = "#5865f2"

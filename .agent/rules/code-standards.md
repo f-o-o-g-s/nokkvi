@@ -47,7 +47,7 @@ trigger: always_on
 
 Discuss before adding new crates. Existing workspace runtime deps:
 - **UI crate** (`Cargo.toml`): `iced` (forked), `nokkvi-data`, `nokkvi-ipc`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `lru`, `bytemuck`, `libc`
-- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `tracing`, `image`, `color-thief`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `pipewire` (linux-only)
+- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `tracing`, `image`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `pipewire` (linux-only)
 - **IPC crate** (`nokkvi-ipc/Cargo.toml`): `tokio` (net/io-util/macros/rt/sync/fs only), `interprocess`, `serde` (+ `serde_json`), `futures`, `thiserror`, `tracing`. Iced-free invariant — the client path links this before iced exists. Tests: `serial_test`, `tempfile`
 - **Test-only `[dev-dependencies]`**: `proptest`, `tempfile`
 

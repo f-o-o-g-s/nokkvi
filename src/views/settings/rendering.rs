@@ -12,9 +12,15 @@ use iced::{
 
 use super::{
     SettingsMessage,
-    items::{SettingItem, SettingValue, SettingsEntry},
+    items::{SettingItem, SettingValue},
 };
-use crate::{embedded_svg, theme, widgets::slot_list};
+use crate::{
+    embedded_svg, theme,
+    widgets::{
+        pill_segmented_button::{PillOption, PillRowParams, PillVariant, pill_segmented_button},
+        slot_list,
+    },
+};
 
 // ============================================================================
 // Shared Helpers
@@ -52,53 +58,36 @@ pub(crate) fn transparent_button_style(
     }
 }
 
-/// Render a badge-style value container with bg0_hard background.
-/// Used for Hotkey combos, Float/Int/Text values — anything that should
-/// appear in a pill-shaped container.
+/// Flat value badge — mono uppercase label inside a 1 px theme::border()
+/// outlined chip with theme::bg0() fill and theme::ui_radius_sm() corners in
+/// rounded mode. Used for Text rows and the numeric value display inside
+/// `render_numeric_row` (which then layers arrow buttons + mini-slider
+/// around it).
 fn render_badge<'a>(
     display_text: String,
     font_size: f32,
     is_center: bool,
     opacity: f32,
 ) -> Element<'a, SettingsMessage> {
-    let text_color = if is_center {
-        theme::fg0()
-    } else {
-        Color {
-            a: opacity,
-            ..theme::fg0()
-        }
-    };
-    let badge_bg = if is_center {
-        theme::bg0_hard()
-    } else {
-        Color {
-            a: opacity * 0.3,
-            ..theme::bg0_hard()
-        }
-    };
-    let badge_border = if is_center {
-        theme::fg4()
-    } else {
-        Color {
-            a: opacity * 0.4,
-            ..theme::fg4()
-        }
-    };
+    let eff_opacity = if is_center { 1.0 } else { opacity };
+    let text_color = scale_alpha_local(theme::fg0(), eff_opacity);
+    let badge_bg = scale_alpha_local(theme::bg0(), eff_opacity);
+    let badge_border = scale_alpha_local(theme::border(), eff_opacity);
     let badge_size = font_size * 0.95;
 
-    container(slot_list::slot_list_text(
-        display_text,
-        badge_size,
-        text_color,
-    ))
-    .padding(Padding::new(2.0).left(8.0).right(8.0))
+    container(
+        slot_list::slot_list_text(display_text, badge_size, text_color).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        }),
+    )
+    .padding(Padding::new(4.0).left(10.0).right(10.0))
     .style(move |_theme| container::Style {
         background: Some(badge_bg.into()),
         border: Border {
             color: badge_border,
             width: 1.0,
-            radius: theme::ui_border_radius(),
+            radius: theme::ui_radius_sm(),
         },
         ..Default::default()
     })
@@ -161,387 +150,67 @@ pub(crate) struct SlotRenderContext<'a> {
     pub is_capturing: bool,
     /// Conflict warning text to display instead of the combo badge
     pub conflict_text: Option<&'a str>,
-    /// Whether we're rendering at Level 1 (category picker) — centers headers
-    pub is_level1: bool,
     /// Index of the keyboard-cursored badge within a ToggleSet (center row only)
     pub toggle_cursor: Option<usize>,
 }
 
-/// Render a single settings slot list slot (either header or item)
-pub(crate) fn render_settings_slot<'a>(
-    ctx: &SlotRenderContext<'_>,
-    entry: &SettingsEntry,
-    is_editing: bool,
-    is_collapsed: bool,
-    hex_input: &str,
+// ============================================================================
+// Row chrome helpers (cursor stripe + bottom separator)
+// ============================================================================
+
+/// Wrap a row's content in the cursor stripe + bg fill chrome. The cursor
+/// row gets a 3 px [`theme::accent_bright()`] left stripe + [`theme::bg1()`]
+/// fill matching the design's `.nk-set-row.cursor::before` + `.nk-set-row.cursor`
+/// styling. Non-cursor rows render with transparent bg + transparent stripe.
+fn with_cursor_stripe<'a>(
+    content: Element<'a, SettingsMessage>,
+    is_center: bool,
 ) -> Element<'a, SettingsMessage> {
-    match entry {
-        SettingsEntry::Header { label, icon } => render_header_slot(ctx, label, icon, is_collapsed),
-        SettingsEntry::Item(item) => render_item_slot(ctx, item, is_editing, hex_input),
-    }
-}
-
-/// Render a section header slot — flat on the panel, text-color-only highlighting.
-///
-/// - **Center slot**: Bright text (accent_bright) to indicate focus
-/// - **Non-center slots**: Dimmed text (opacity-scaled)
-///
-/// No per-row background or border — the panel provides the visual container.
-fn render_header_slot<'a>(
-    ctx: &SlotRenderContext<'_>,
-    label: &'static str,
-    icon_path: &'static str,
-    is_collapsed: bool,
-) -> Element<'a, SettingsMessage> {
-    let font_size =
-        nokkvi_data::utils::scale::calculate_font_size(16.0, ctx.row_height, ctx.scale_factor)
-            * ctx.scale_factor;
-    let icon_size = (font_size * 1.2).clamp(10.0, 20.0);
-    let chevron_size = (font_size * 1.0).clamp(8.0, 16.0);
-
-    // Text-color-only highlighting: bright for center, dimmed for others
-    let text_color = if ctx.is_center {
-        theme::accent_bright()
-    } else {
-        Color {
-            a: ctx.opacity,
-            ..theme::fg2()
-        }
-    };
-
-    let section_icon = embedded_svg::svg_widget(icon_path)
-        .width(Length::Fixed(icon_size))
-        .height(Length::Fixed(icon_size))
-        .style(move |_theme, _status| svg::Style {
-            color: Some(text_color),
-        });
-
-    // Collapse/expand chevron indicator
-    let chevron_path = if is_collapsed {
-        "assets/icons/chevron-right.svg"
-    } else {
-        "assets/icons/chevron-down.svg"
-    };
-    let chevron = embedded_svg::svg_widget(chevron_path)
-        .width(Length::Fixed(chevron_size))
-        .height(Length::Fixed(chevron_size))
-        .style(move |_theme, _status| svg::Style {
-            color: Some(text_color),
-        });
-
-    // Layout varies by level:
-    // - Level 1: centered text, no chevron (category picker items)
-    // - Level 2: left-aligned with chevron (section separators)
-    let content: Element<'a, SettingsMessage> = if ctx.is_level1 {
-        row![
-            section_icon,
-            text(label)
-                .size(font_size)
-                .font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                })
-                .color(text_color)
-                .wrapping(Wrapping::None),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
-    } else {
-        row![
-            Space::new().width(Length::Fixed(8.0)),
-            chevron,
-            section_icon,
-            text(label)
-                .size(font_size)
-                .font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                })
-                .color(text_color)
-                .wrapping(Wrapping::None),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .into()
-    };
-
-    // Level 2 headers get a darker background + lighter border to stand out from the panel
-    let (header_bg, header_border) = if ctx.is_level1 {
-        (Color::TRANSPARENT, Color::TRANSPARENT)
-    } else if ctx.is_center {
-        (theme::bg0_hard(), theme::bg2())
-    } else {
-        (
-            Color {
-                a: ctx.opacity,
-                ..theme::bg0_hard()
-            },
-            Color {
-                a: ctx.opacity * 0.5,
-                ..theme::bg2()
-            },
-        )
-    };
-    let align_x = if ctx.is_level1 {
-        Alignment::Center
-    } else {
-        Alignment::Start
-    };
-    let styled = container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .clip(true)
-        .align_y(Alignment::Center)
-        .align_x(align_x)
-        .padding(Padding::new(4.0).left(8.0))
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(header_bg.into()),
-            border: Border {
-                color: header_border,
-                width: 1.0,
-                radius: theme::ui_border_radius(),
-            },
-            ..Default::default()
-        });
-
-    // Level 2 headers get a bottom separator line (visual only, not a slot list entry)
-    let with_separator: Element<'a, SettingsMessage> = if !ctx.is_level1 {
-        let sep_color = theme::bg2();
-        column![
-            container(styled).width(Length::Fill).height(Length::Fill),
-            container(Space::new())
-                .width(Length::Fill)
-                .height(Length::Fixed(1.0))
-                .style(move |_: &iced::Theme| container::Style {
-                    background: Some(sep_color.into()),
-                    ..Default::default()
-                }),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    } else {
-        styled.into()
-    };
-
-    // At Level 1, headers are interactive drill-down targets (clickable).
-    // At Level 2, headers are non-interactive section separators (inert).
-    let header_btn = button(with_separator)
-        .style(transparent_button_style)
-        .padding(0)
-        .width(Length::Fill);
-
-    if ctx.is_level1 {
-        header_btn
-            .on_press(if ctx.is_center {
-                SettingsMessage::EditActivate
-            } else {
-                SettingsMessage::SlotListClickItem(ctx.item_index)
-            })
-            .into()
-    } else {
-        // Level 2: no on_press — headers are non-interactive
-        header_btn.into()
-    }
-}
-
-/// Render a setting item slot — flat on the panel, text-color-only highlighting.
-///
-/// - **Center slot**: Bright label (accent_bright), saturated values
-/// - **Non-center slots**: Dimmed label + muted values (opacity-scaled)
-/// - **Edit mode**: Subtle accent underline bar at bottom
-///
-/// No per-row background or border — the panel provides the visual container.
-fn render_item_slot<'a>(
-    ctx: &SlotRenderContext<'_>,
-    item: &SettingItem,
-    is_editing: bool,
-    hex_input: &str,
-) -> Element<'a, SettingsMessage> {
-    let label_size =
-        nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
-            * ctx.scale_factor;
-    let value_size =
-        nokkvi_data::utils::scale::calculate_font_size(13.0, ctx.row_height, ctx.scale_factor)
-            * ctx.scale_factor;
-    let category_size =
-        nokkvi_data::utils::scale::calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
-            * ctx.scale_factor;
-
-    // Mockup-style: accent label on selected row, bold when centered, row gets highlight bg
-    let label_color = if ctx.is_center {
-        theme::accent_bright()
-    } else {
-        Color {
-            a: ctx.opacity,
-            ..theme::fg0()
-        }
-    };
-    let label_weight = if ctx.is_center {
-        Weight::Bold
-    } else {
-        Weight::Normal
-    };
-    let subtext_color = Color {
-        a: ctx.opacity * 0.5,
-        ..theme::fg3()
-    };
-
-    // Build a lightweight style struct for render_value_display compatibility
-    let style = slot_list::SlotListSlotStyle {
-        text_color: label_color,
-        subtext_color,
-        bg_color: Color::TRANSPARENT,
-        border_color: Color::TRANSPARENT,
-        border_width: 0.0,
-        border_radius: 0.0.into(),
-        hover_text_color: crate::theme::accent_bright(),
-    };
-
-    // ── Special layout for preset, restore, and action items ──────────
-    let key_ref = item.key.as_ref();
-    let is_action_item = super::sentinel::SentinelKind::from_key(key_ref).is_some();
-
-    let content: Element<'a, SettingsMessage> = if is_action_item {
-        let description = item.value.display();
-
-        // Manual text column (no slot_list_text_column dependency on SlotListSlotStyle)
-        let title_text = text(item.label.clone())
-            .size(label_size)
-            .font(Font {
-                weight: label_weight,
-                ..theme::ui_font()
-            })
-            .color(label_color)
-            .wrapping(Wrapping::None);
-        let desc_text = text(description)
-            .size(category_size)
-            .font(theme::ui_font())
-            .color(subtext_color)
-            .wrapping(Wrapping::None);
-        let text_col = container(column![title_text, desc_text].spacing(2))
-            .width(Length::FillPortion(35))
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center);
-
-        // Right-side hint
-        let hint_text = if ctx.is_center { "Enter ↵" } else { "" };
-        let hint_col = container(
-            text(hint_text)
-                .size(category_size)
-                .font(theme::ui_font())
-                .color(subtext_color),
-        )
-        .width(Length::FillPortion(65))
-        .height(Length::Fill)
-        .clip(true)
-        .align_y(Alignment::Center)
-        .align_x(Alignment::End)
-        .padding(Padding::new(0.0).right(12.0));
-
-        row![Space::new().width(Length::Fixed(28.0)), text_col, hint_col,]
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .height(Length::Fill)
-            .into()
-    } else {
-        // ── Standard item layout ─────────────────────────────────────
-        let label_text = text(item.label.clone())
-            .size(label_size)
-            .font(Font {
-                weight: label_weight,
-                ..theme::ui_font()
-            })
-            .color(label_color)
-            .wrapping(Wrapping::None);
-
-        // Build label row: text + optional inline icon
-        let label_row: Element<'a, SettingsMessage> = if let Some(icon_path) = item.label_icon {
-            let icon_size = (label_size * 1.0).clamp(10.0, 18.0);
-            let icon_color = label_color;
-            let inline_icon = embedded_svg::svg_widget(icon_path)
-                .width(Length::Fixed(icon_size))
-                .height(Length::Fixed(icon_size))
-                .style(move |_theme, _status| svg::Style {
-                    color: Some(icon_color),
-                });
-            row![label_text, inline_icon]
-                .spacing(5)
-                .align_y(Alignment::Center)
-                .into()
-        } else {
-            label_text.into()
-        };
-
-        let label_col = container(label_row)
-            .width(Length::FillPortion(35))
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center);
-
-        // Determine if this item needs an "Enter ↵" hint. See
-        // [`item_needs_enter_hint`] for the rule.
-        let show_hint =
-            item_needs_enter_hint(item) && ctx.is_center && !is_editing && !ctx.is_capturing;
-
-        // Value column (right 65%)
-        let value_display =
-            render_value_display(&item.value, value_size, &style, ctx, is_editing, hex_input);
-
-        let value_content: Element<'a, SettingsMessage> = if show_hint {
-            let hint = text("Enter ↵")
-                .size(category_size)
-                .font(theme::ui_font())
-                .color(subtext_color);
-            row![value_display, Space::new().width(Length::Fill), hint]
-                .align_y(Alignment::Center)
-                .into()
-        } else {
-            value_display
-        };
-
-        let value_col = container(value_content)
-            .width(Length::FillPortion(65))
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center)
-            .align_x(Alignment::Start)
-            .padding(Padding::new(0.0).right(12.0));
-
-        row![
-            Space::new().width(Length::Fixed(28.0)),
-            label_col,
-            value_col,
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .height(Length::Fill)
-        .into()
-    };
-
-    // Subtle row highlight for center (selected) row
-    let row_bg = if ctx.is_center {
-        Color {
-            a: 0.4,
-            ..theme::bg1()
-        }
+    let row_bg = if is_center {
+        theme::bg1()
     } else {
         Color::TRANSPARENT
     };
-    let styled = container(content)
+    let stripe_color = if is_center {
+        theme::accent_bright()
+    } else {
+        Color::TRANSPARENT
+    };
+
+    let stripe = container(Space::new())
+        .width(Length::Fixed(3.0))
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(stripe_color.into()),
+            ..Default::default()
+        });
+
+    let row_body = row![stripe, container(content).width(Length::Fill)]
+        .height(Length::Fill)
+        .width(Length::Fill);
+
+    container(row_body)
         .width(Length::Fill)
+        .height(Length::Fill)
         .clip(true)
         .style(move |_: &iced::Theme| container::Style {
             background: Some(row_bg.into()),
             ..Default::default()
-        });
+        })
+        .into()
+}
 
-    // Bottom separator line — visual only, not a slot list entry
-    let sep_color = theme::bg2();
-    let with_separator = column![
-        container(styled).width(Length::Fill).height(Length::Fill),
+/// Pin a 1 px [`theme::border()`] separator under a row. `is_center` controls
+/// whether the separator dims slightly to avoid clashing with the cursor
+/// stripe (design keeps it crisp regardless, so this just routes color).
+fn row_with_bottom_separator<'a>(
+    content: Element<'a, SettingsMessage>,
+    _is_center: bool,
+) -> Element<'a, SettingsMessage> {
+    let sep_color = theme::border();
+
+    column![
+        container(content).width(Length::Fill).height(Length::Fill),
         container(Space::new())
             .width(Length::Fill)
             .height(Length::Fixed(1.0))
@@ -551,19 +220,8 @@ fn render_item_slot<'a>(
             }),
     ]
     .width(Length::Fill)
-    .height(Length::Fill);
-
-    // Make clickable — center click enters edit mode, other slots navigate
-    button(with_separator)
-        .on_press(if ctx.is_center {
-            SettingsMessage::EditActivate
-        } else {
-            SettingsMessage::SlotListClickItem(ctx.item_index)
-        })
-        .style(transparent_button_style)
-        .padding(0)
-        .width(Length::Fill)
-        .into()
+    .height(Length::Fill)
+    .into()
 }
 
 /// Render the value display based on SettingValue type
@@ -579,172 +237,38 @@ fn render_value_display<'a>(
     let opacity = ctx.opacity;
 
     let value_widget: Element<'a, SettingsMessage> = match value {
-        SettingValue::Bool(v) => {
-            // SM-style: show all options as plain text, selected gets underline
-            render_sm_options(
-                &["On", "Off"],
-                if *v { "On" } else { "Off" },
-                font_size,
-                is_center,
-                opacity,
-            )
-        }
+        SettingValue::Bool(v) => render_bool_pills(*v, font_size, is_center, opacity),
 
         SettingValue::HexColor(hex) => {
-            let parsed_color = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
-            let eff_opacity = if is_center { 1.0 } else { opacity };
-            let swatch_size = (font_size * 1.2).clamp(12.0, 20.0);
-
             if is_editing {
-                // Inline text input for hex editing in the main slot list
+                // Inline text input for hex editing in the main slot list. The
+                // editor still uses its own (square) preview swatch; design
+                // parity for the editor surface is handled in `render_hex_editor`.
                 let swatch_size = (font_size * 1.2).clamp(12.0, 20.0);
                 render_hex_editor(hex_input, font_size, swatch_size)
             } else {
-                row![
-                    // Color swatch
-                    container(Space::new())
-                        .width(Length::Fixed(swatch_size))
-                        .height(Length::Fixed(swatch_size))
-                        .style(move |_theme| container::Style {
-                            background: Some(
-                                Color {
-                                    a: eff_opacity,
-                                    ..parsed_color
-                                }
-                                .into()
-                            ),
-                            border: Border {
-                                color: Color {
-                                    a: eff_opacity * 0.5,
-                                    ..theme::fg4()
-                                },
-                                width: 1.0,
-                                radius: theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        }),
-                    slot_list::slot_list_text(hex.clone(), font_size * 0.9, style.subtext_color),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .into()
+                render_hex_value_chip(hex, font_size, is_center, opacity, style.subtext_color)
             }
         }
 
         SettingValue::ColorArray(colors) => {
-            let eff_opacity = if is_center { 1.0 } else { opacity };
-            let swatch_size = (font_size * 0.9).clamp(8.0, 14.0);
-
-            // Show mini color swatches for each color in the gradient
-            let mut r = row![].spacing(2).align_y(Alignment::Center);
-            for hex in colors.iter().take(8) {
-                let parsed = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
-                r = r.push(
-                    container(Space::new())
-                        .width(Length::Fixed(swatch_size))
-                        .height(Length::Fixed(swatch_size))
-                        .style(move |_theme| container::Style {
-                            background: Some(
-                                Color {
-                                    a: eff_opacity,
-                                    ..parsed
-                                }
-                                .into(),
-                            ),
-                            border: Border {
-                                color: Color {
-                                    a: eff_opacity * 0.3,
-                                    ..theme::fg4()
-                                },
-                                width: 0.5,
-                                radius: theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        }),
-                );
-            }
-            // Append count label
-            let count = container(slot_list::slot_list_text(
-                format!("{}", colors.len()),
-                font_size * 0.8,
-                style.subtext_color,
-            ));
-            r = r.push(count);
-            r.into()
+            render_color_array_swatches(colors, font_size, is_center, opacity, style.subtext_color)
         }
 
         SettingValue::Enum { val, options } => {
-            // SM-style: show all options as plain text, selected gets underline
-            render_sm_options(options, val, font_size, is_center, opacity)
+            render_enum_pills(options, val, font_size, is_center, opacity)
         }
 
-        SettingValue::ToggleSet(items) => {
-            // Multi-select: each badge independently toggleable
-            render_toggle_set(
-                items,
-                font_size,
-                is_center,
-                opacity,
-                if is_center { ctx.toggle_cursor } else { None },
-            )
-        }
+        SettingValue::ToggleSet(items) => render_toggle_set_pills(
+            items,
+            font_size,
+            is_center,
+            opacity,
+            if is_center { ctx.toggle_cursor } else { None },
+        ),
 
         SettingValue::Hotkey(combo) => {
-            // Capture mode: show "Press a key..." or conflict warning
-            if ctx.is_capturing && ctx.is_center {
-                if let Some(conflict) = ctx.conflict_text {
-                    // Conflict warning: inverted red badge (red bg, dark text)
-                    let text_color = theme::bg0_hard();
-                    let badge_bg = theme::danger_bright();
-                    let badge_border = theme::danger();
-                    let badge_size = font_size * 0.9;
-                    return container(slot_list::slot_list_text(conflict, badge_size, text_color))
-                        .padding(Padding::new(2.0).left(8.0).right(8.0))
-                        .style(move |_theme| container::Style {
-                            background: Some(badge_bg.into()),
-                            border: Border {
-                                color: badge_border,
-                                width: 1.0,
-                                radius: theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        })
-                        .into();
-                }
-                // Capture mode prompt: inverted yellow badge (yellow bg, dark text)
-                let text_color = theme::bg0_hard();
-                let hint_color = Color {
-                    a: 0.7,
-                    ..theme::bg0_hard()
-                };
-                let badge_bg = theme::warning();
-                let badge_border = theme::warning_bright();
-                let badge_size = font_size * 0.9;
-                let hint_size = font_size * 0.7;
-                return container(
-                    row![
-                        slot_list::slot_list_text("Press a key...", badge_size, text_color),
-                        Space::new().width(Length::Fixed(8.0)),
-                        slot_list::slot_list_text("Esc cancel · Del reset", hint_size, hint_color),
-                    ]
-                    .align_y(Alignment::Center),
-                )
-                .padding(Padding::new(2.0).left(8.0).right(8.0))
-                .style(move |_theme| container::Style {
-                    background: Some(badge_bg.into()),
-                    border: Border {
-                        color: badge_border,
-                        width: 1.0,
-                        radius: theme::ui_border_radius(),
-                    },
-                    ..Default::default()
-                })
-                .into();
-            }
-
-            // Normal display: key combo in a badge-style container
-            // Use fg0 for text (always contrasts with bg) and bg0_hard for badge bg (maximum separation)
-            render_badge(combo.clone(), font_size, is_center, opacity)
+            return render_hotkey_badge(combo, font_size, ctx);
         }
 
         _ => {
@@ -753,279 +277,591 @@ fn render_value_display<'a>(
         }
     };
 
-    // Show chevron arrows for numeric values only — Bool/Enum use SM-style clickable options instead
+    // Show chevron arrows + mini-slider for numeric values only.
+    // Bool / Enum / ToggleSet use chip widgets instead.
     if value.is_incrementable() {
-        let arrow_icon_size = (font_size * 0.85).clamp(10.0, 18.0);
-        // Arrow color: bright accent when centered (interactive hint), dimmed otherwise
-        let arrow_color = if is_center {
-            theme::accent_bright()
-        } else {
-            Color {
-                a: opacity * 0.4,
-                ..theme::fg4()
-            }
-        };
-
-        // Pressed background: subtle accent pill behind the chevron
-        let pressed_bg = Color {
-            a: 0.2,
-            ..theme::accent_bright()
-        };
-        let arrow_btn_style = move |_theme: &iced::Theme, status: button::Status| {
-            let bg = if matches!(status, button::Status::Pressed) {
-                Some(pressed_bg.into())
-            } else {
-                None
-            };
-            button::Style {
-                background: bg,
-                border: Border {
-                    radius: 99.0.into(),
-                    ..Border::default()
-                },
-                ..Default::default()
-            }
-        };
-
-        let mut left_arrow = button(
-            embedded_svg::svg_widget("assets/icons/chevron-left.svg")
-                .width(Length::Fixed(arrow_icon_size))
-                .height(Length::Fixed(arrow_icon_size))
-                .style(move |_theme, _status| svg::Style {
-                    color: Some(arrow_color),
-                }),
-        )
-        .style(arrow_btn_style)
-        .padding(0);
-
-        let mut right_arrow = button(
-            embedded_svg::svg_widget("assets/icons/chevron-right.svg")
-                .width(Length::Fixed(arrow_icon_size))
-                .height(Length::Fixed(arrow_icon_size))
-                .style(move |_theme, _status| svg::Style {
-                    color: Some(arrow_color),
-                }),
-        )
-        .style(arrow_btn_style)
-        .padding(0);
-
-        // Only make arrows interactive on the center (selected) row.
-        // EditLeft/EditRight always act on the center item, so firing
-        // them from a non-center row would modify the wrong setting.
-        if is_center {
-            left_arrow = left_arrow.on_press(SettingsMessage::EditLeft);
-            right_arrow = right_arrow.on_press(SettingsMessage::EditRight);
-        }
-
-        row![
-            left_arrow,
-            Space::new().width(Length::Fixed(4.0)),
-            value_widget,
-            Space::new().width(Length::Fixed(4.0)),
-            right_arrow,
-        ]
-        .align_y(Alignment::Center)
-        .into()
+        render_numeric_row(value, value_widget, font_size, is_center, opacity)
     } else {
         value_widget
     }
 }
 
-// ============================================================================
-// StepMania-Style Value Display
-// ============================================================================
+/// Compose the numeric row chrome around a pre-rendered value badge:
+/// `[ ‹ ] [ value ] [ slider track ] [ › ]` matching the design's `.nk-w-num`
+/// layout. Slider is purely visual (non-draggable) so wheel + arrows remain
+/// the sole input paths — a 4 px draggable track inside a slot row would
+/// fight the slot-list scroll listeners.
+fn render_numeric_row<'a>(
+    value: &SettingValue,
+    value_badge: Element<'a, SettingsMessage>,
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    let eff_opacity = if is_center { 1.0 } else { opacity };
 
-/// Render all possible values as plain text with underline cursor on the selected value.
-///
-/// Three visual states:
-/// - **Not selected, any row**: dimmed text, no underline
-/// - **Selected, non-center row**: medium text + subtle underline bar
-/// - **Selected, center row**: bright accent text + accent underline bar
-///
-/// Each option is a clickable button sending `EditSetValue`.
-fn render_sm_options<'a>(
+    let left_arrow = arrow_button(
+        "assets/icons/chevron-left.svg",
+        font_size,
+        is_center,
+        eff_opacity,
+        SettingsMessage::EditLeft,
+    );
+    let right_arrow = arrow_button(
+        "assets/icons/chevron-right.svg",
+        font_size,
+        is_center,
+        eff_opacity,
+        SettingsMessage::EditRight,
+    );
+
+    // Optional mini-slider track between value + right arrow.
+    let track: Option<Element<'a, SettingsMessage>> =
+        numeric_normalized_fraction(value).map(|frac| numeric_mini_track(frac, eff_opacity));
+
+    let mut layout = row![
+        left_arrow,
+        Space::new().width(Length::Fixed(8.0)),
+        value_badge,
+    ]
+    .align_y(Alignment::Center);
+    if let Some(track_el) = track {
+        layout = layout
+            .push(Space::new().width(Length::Fixed(10.0)))
+            .push(track_el);
+    }
+    layout = layout
+        .push(Space::new().width(Length::Fixed(8.0)))
+        .push(right_arrow);
+
+    layout.into()
+}
+
+/// 22×22 flat arrow button — 1 px [`theme::border()`] outline, [`theme::bg0()`]
+/// fill, [`theme::fg2()`] chevron. Clickable only on the center row (same rule
+/// as the legacy chevrons — `EditLeft` / `EditRight` act on the center item).
+fn arrow_button<'a>(
+    icon_path: &'static str,
+    font_size: f32,
+    is_center: bool,
+    eff_opacity: f32,
+    on_press: SettingsMessage,
+) -> Element<'a, SettingsMessage> {
+    let arrow_icon_size = (font_size * 0.85).clamp(10.0, 16.0);
+    let icon_color = scale_alpha_local(theme::fg2(), eff_opacity);
+    let border = scale_alpha_local(theme::border(), eff_opacity);
+    let fill = scale_alpha_local(theme::bg0(), eff_opacity);
+
+    let icon = embedded_svg::svg_widget(icon_path)
+        .width(Length::Fixed(arrow_icon_size))
+        .height(Length::Fixed(arrow_icon_size))
+        .style(move |_, _| svg::Style {
+            color: Some(icon_color),
+        });
+
+    let body = container(icon)
+        .width(Length::Fixed(22.0))
+        .height(Length::Fixed(22.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(fill.into()),
+            border: Border {
+                color: border,
+                width: 1.0,
+                radius: theme::ui_radius_pill(),
+            },
+            ..Default::default()
+        });
+
+    let mut btn = button(body).style(transparent_button_style).padding(0);
+    if is_center {
+        btn = btn.on_press(on_press);
+    }
+    btn.into()
+}
+
+/// 120×4 mini-slider track + 10 px handle showing the value's position within
+/// its `min..max` range. Read-only by design — the surrounding arrow buttons
+/// (and wheel events handled at the slot list level) drive the value.
+fn numeric_mini_track<'a>(fraction: f32, eff_opacity: f32) -> Element<'a, SettingsMessage> {
+    const TRACK_WIDTH: f32 = 120.0;
+    const TRACK_HEIGHT: f32 = 4.0;
+    const HANDLE_SIZE: f32 = 10.0;
+
+    let track_bg = scale_alpha_local(theme::bg0(), eff_opacity);
+    let track_border = scale_alpha_local(theme::border(), eff_opacity);
+    let fill_color = scale_alpha_local(theme::accent_bright(), eff_opacity);
+    let handle_color = fill_color;
+
+    let frac = fraction.clamp(0.0, 1.0);
+    let fill_width = (TRACK_WIDTH * frac).max(0.0);
+    // Center the handle on the fill edge — subtract half its width.
+    let handle_offset = (TRACK_WIDTH * frac - HANDLE_SIZE / 2.0).max(0.0);
+    let right_spacer = (TRACK_WIDTH - handle_offset - HANDLE_SIZE).max(0.0);
+
+    // Track + colored fill (two stacked rectangles in a row sized to the
+    // fraction). The handle sits on top in its own row aligned via Space-padded
+    // anchors so we don't need an absolute-position overlay.
+    let fill = container(Space::new())
+        .width(Length::Fixed(fill_width))
+        .height(Length::Fixed(TRACK_HEIGHT))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(fill_color.into()),
+            border: Border {
+                radius: theme::ui_radius_pill(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    let track_body = container(fill)
+        .width(Length::Fixed(TRACK_WIDTH))
+        .height(Length::Fixed(TRACK_HEIGHT))
+        .align_y(Alignment::Center)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(track_bg.into()),
+            border: Border {
+                color: track_border,
+                width: 1.0,
+                radius: theme::ui_radius_pill(),
+            },
+            ..Default::default()
+        });
+
+    let handle = container(Space::new())
+        .width(Length::Fixed(HANDLE_SIZE))
+        .height(Length::Fixed(HANDLE_SIZE))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(handle_color.into()),
+            border: Border {
+                radius: theme::ui_radius_pill(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+    // Stack track + handle. The handle row uses Space padding instead of an
+    // overlay so positioning happens entirely through layout and respects the
+    // ambient alpha scale.
+    let handle_row = row![
+        Space::new().width(Length::Fixed(handle_offset)),
+        handle,
+        Space::new().width(Length::Fixed(right_spacer)),
+    ]
+    .align_y(Alignment::Center);
+
+    iced::widget::stack![
+        container(track_body)
+            .width(Length::Fixed(TRACK_WIDTH))
+            .height(Length::Fixed(HANDLE_SIZE))
+            .align_y(Alignment::Center),
+        container(handle_row)
+            .width(Length::Fixed(TRACK_WIDTH))
+            .height(Length::Fixed(HANDLE_SIZE))
+            .align_y(Alignment::Center),
+    ]
+    .width(Length::Fixed(TRACK_WIDTH))
+    .height(Length::Fixed(HANDLE_SIZE))
+    .into()
+}
+
+/// Compute the value's normalized 0..1 fraction within its `min..max` range,
+/// or `None` if the range is degenerate (max == min) or the variant isn't
+/// numeric. Used by the mini-slider track to position its handle.
+fn numeric_normalized_fraction(value: &SettingValue) -> Option<f32> {
+    match value {
+        SettingValue::Float { val, min, max, .. } => {
+            if (max - min).abs() < f64::EPSILON {
+                return None;
+            }
+            Some(((val - min) / (max - min)) as f32)
+        }
+        SettingValue::Int { val, min, max, .. } => {
+            if *max == *min {
+                return None;
+            }
+            Some(((val - min) as f32) / ((max - min) as f32))
+        }
+        _ => None,
+    }
+}
+
+// ============================================================================
+// Pill-Segmented Widget Adapters (Bool / Enum / ToggleSet)
+// ============================================================================
+//
+// These thin wrappers translate the legacy `SettingValue` shape into the
+// shared `pill_segmented_button` widget. They produce 1px-bordered chips in
+// flat mode and pill-rounded chips in rounded mode, with selected chips
+// filling in `theme::accent_bright()`. Non-center rows render the chips
+// non-interactively (the parent slot list row handles up/down/click
+// navigation).
+
+/// Render a Bool setting as a two-chip On/Off group.
+fn render_bool_pills<'a>(
+    val: bool,
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    let options = [
+        PillOption {
+            display: "On".to_string(),
+            key: "On".to_string(),
+            on: val,
+        },
+        PillOption {
+            display: "Off".to_string(),
+            key: "Off".to_string(),
+            on: !val,
+        },
+    ];
+    pill_segmented_button(
+        &options,
+        PillVariant::Single,
+        PillRowParams {
+            font_size: chip_label_size(font_size),
+            is_center,
+            opacity,
+        },
+        SettingsMessage::EditSetValue,
+    )
+}
+
+/// Render an Enum setting as a single-select chip group, one chip per option.
+fn render_enum_pills<'a>(
     options: &[&'a str],
     selected: &str,
     font_size: f32,
     is_center: bool,
     opacity: f32,
 ) -> Element<'a, SettingsMessage> {
-    let opt_size = font_size * 0.75;
-    let underline_height = 2.0;
-
-    let mut r = row![].spacing(22).align_y(Alignment::Center);
-
-    for &option in options {
-        let is_selected = option == selected;
-
-        // Mockup style: ALL option text same color, only underlines get accent
-        let text_color = if is_center {
-            Color {
-                a: if is_selected { 1.0 } else { 0.5 },
-                ..theme::fg0()
-            }
-        } else {
-            Color {
-                a: opacity * if is_selected { 0.8 } else { 0.35 },
-                ..theme::fg0()
-            }
-        };
-
-        // Underline color (only for selected)
-        let underline_color = if is_selected {
-            if is_center {
-                theme::accent_bright()
-            } else {
-                Color {
-                    a: opacity * 0.6,
-                    ..theme::accent_bright()
-                }
-            }
-        } else {
-            Color::TRANSPARENT
-        };
-
-        let font_weight = if is_selected {
-            Weight::Bold
-        } else {
-            Weight::Normal
-        };
-
-        let label = text(option)
-            .size(opt_size)
-            .font(Font {
-                weight: font_weight,
-                ..theme::ui_font()
-            })
-            .color(text_color)
-            .wrapping(Wrapping::None);
-
-        // Underline hugs the text width: Shrink-width column makes Fill
-        // expand only to the text's natural width, not the full container.
-        let underline = container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(underline_height))
-            .style(move |_: &iced::Theme| container::Style {
-                background: Some(underline_color.into()),
-                ..Default::default()
-            });
-
-        let option_col = column![label, underline]
-            .spacing(1)
-            .width(Length::Shrink)
-            .align_x(Alignment::Center);
-
-        let option_str = option.to_string();
-        let mut option_btn = button(option_col)
-            .style(transparent_button_style)
-            .padding(Padding::new(2.0).left(4.0).right(4.0));
-
-        // Only make option buttons interactive on the center (selected) row.
-        // EditSetValue always acts on the center item, so firing it from a
-        // non-center row would modify the wrong setting.
-        if is_center {
-            option_btn = option_btn.on_press(SettingsMessage::EditSetValue(option_str));
-        }
-
-        r = r.push(option_btn);
-    }
-
-    container(r).width(Length::Fill).clip(true).into()
+    let chip_options: Vec<PillOption> = options
+        .iter()
+        .map(|&option| PillOption {
+            display: option.to_string(),
+            key: option.to_string(),
+            on: option == selected,
+        })
+        .collect();
+    pill_segmented_button(
+        &chip_options,
+        PillVariant::Single,
+        PillRowParams {
+            font_size: chip_label_size(font_size),
+            is_center,
+            opacity,
+        },
+        SettingsMessage::EditSetValue,
+    )
 }
 
-/// Render a multi-select toggle set as independently clickable badges.
-///
-/// Mirrors `render_sm_options` visually but each badge toggles independently.
-/// - **Enabled**: bold text + accent underline
-/// - **Disabled**: dimmed text, no underline
-fn render_toggle_set<'a>(
+/// Render a ToggleSet as a multi-select chip group. The cursored chip (set by
+/// keyboard arrow navigation within the toggle set) gets the accent outline
+/// even when it isn't on, signaling which chip Enter will toggle.
+fn render_toggle_set_pills<'a>(
     items: &[(String, String, bool)],
     font_size: f32,
     is_center: bool,
     opacity: f32,
     cursor_index: Option<usize>,
 ) -> Element<'a, SettingsMessage> {
-    let opt_size = font_size * 0.75;
-    let underline_height = 2.0;
+    let chip_options: Vec<PillOption> = items
+        .iter()
+        .map(|(label, key, enabled)| PillOption {
+            display: label.clone(),
+            key: key.clone(),
+            on: *enabled,
+        })
+        .collect();
+    pill_segmented_button(
+        &chip_options,
+        PillVariant::Multi { cursor_index },
+        PillRowParams {
+            font_size: chip_label_size(font_size),
+            is_center,
+            opacity,
+        },
+        SettingsMessage::ToggleSetToggle,
+    )
+}
 
-    let mut r = row![].spacing(22).align_y(Alignment::Center);
+/// Chip label is rendered at ~80 % of the row's value font size so chips don't
+/// dominate the row visually. Mirrors the CSS designs' `11 px` chip label vs
+/// `13 px` row label ratio.
+#[inline]
+fn chip_label_size(font_size: f32) -> f32 {
+    font_size * 0.80
+}
 
-    for (i, (label, key, enabled)) in items.iter().enumerate() {
-        let is_on = *enabled;
-        let is_cursored = cursor_index == Some(i);
+// ============================================================================
+// HexColor + ColorArray rendering
+// ============================================================================
+//
+// Per the design (`.nk-w-hex`): mono hex on the left, then a 28×24 swatch on
+// the right with a 1 px `theme::border()` outline in flat mode and
+// `theme::ui_radius_xs()` corners in rounded mode. The CSS layout is `gap:
+// 10px; min-width: 76px; text-align: right` on the hex label; we keep the
+// 76 px min so the swatch column lines up across stacked color rows.
 
-        let text_color = if is_cursored {
-            // Cursored badge: accent color regardless of on/off
-            theme::accent_bright()
-        } else if is_center {
-            Color {
-                a: if is_on { 1.0 } else { 0.5 },
-                ..theme::fg0()
-            }
-        } else {
-            Color {
-                a: opacity * if is_on { 0.8 } else { 0.35 },
-                ..theme::fg0()
-            }
-        };
+const HEX_VALUE_MIN_WIDTH: f32 = 76.0;
+const HEX_SWATCH_WIDTH: f32 = 28.0;
+const HEX_SWATCH_HEIGHT: f32 = 24.0;
 
-        let underline_color = if is_on {
-            if is_center {
-                theme::accent_bright()
-            } else {
-                Color {
-                    a: opacity * 0.6,
-                    ..theme::accent_bright()
-                }
-            }
-        } else {
-            Color::TRANSPARENT
-        };
+/// Static (non-editing) hex value badge — uppercase mono hex + swatch chip.
+fn render_hex_value_chip<'a>(
+    hex: &str,
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+    hex_label_color: Color,
+) -> Element<'a, SettingsMessage> {
+    let parsed_color = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
+    let eff_opacity = if is_center { 1.0 } else { opacity };
+    let fill = scale_alpha_local(parsed_color, eff_opacity);
+    let border = scale_alpha_local(theme::border(), eff_opacity);
 
-        let font_weight = if is_on { Weight::Bold } else { Weight::Normal };
+    let hex_label = container(slot_list::slot_list_text(
+        hex.to_uppercase(),
+        font_size * 0.95,
+        hex_label_color,
+    ))
+    .width(Length::Fixed(HEX_VALUE_MIN_WIDTH))
+    .align_x(Alignment::End);
 
-        let label_widget = text(label.clone())
-            .size(opt_size)
-            .font(Font {
-                weight: font_weight,
-                ..theme::ui_font()
-            })
-            .color(text_color)
-            .wrapping(Wrapping::None);
+    let swatch = container(Space::new())
+        .width(Length::Fixed(HEX_SWATCH_WIDTH))
+        .height(Length::Fixed(HEX_SWATCH_HEIGHT))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(fill.into()),
+            border: Border {
+                color: border,
+                width: 1.0,
+                radius: theme::ui_radius_xs(),
+            },
+            ..Default::default()
+        });
 
-        let underline = container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(underline_height))
-            .style(move |_: &iced::Theme| container::Style {
-                background: Some(underline_color.into()),
-                ..Default::default()
-            });
+    row![hex_label, swatch]
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .into()
+}
 
-        let option_col = column![label_widget, underline]
-            .spacing(1)
-            .width(Length::Shrink)
-            .align_x(Alignment::Center);
+/// Small swatch strip for ColorArray rows — N tiny `theme::border()`-outlined
+/// `theme::ui_radius_xs()` swatches followed by the count label. Capped at 8
+/// previews to keep the row width bounded.
+fn render_color_array_swatches<'a>(
+    colors: &[String],
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+    count_label_color: Color,
+) -> Element<'a, SettingsMessage> {
+    let eff_opacity = if is_center { 1.0 } else { opacity };
+    let swatch_size = (font_size * 0.95).clamp(10.0, 16.0);
+    let border = scale_alpha_local(theme::border(), eff_opacity);
 
-        let key_owned = key.clone();
-        let mut option_btn = button(option_col)
-            .style(transparent_button_style)
-            .padding(Padding::new(2.0).left(4.0).right(4.0));
+    let mut r = row![].spacing(2).align_y(Alignment::Center);
+    for hex in colors.iter().take(8) {
+        let parsed = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
+        let fill = scale_alpha_local(parsed, eff_opacity);
+        r = r.push(
+            container(Space::new())
+                .width(Length::Fixed(swatch_size))
+                .height(Length::Fixed(swatch_size))
+                .style(move |_: &iced::Theme| container::Style {
+                    background: Some(fill.into()),
+                    border: Border {
+                        color: border,
+                        width: 1.0,
+                        radius: theme::ui_radius_xs(),
+                    },
+                    ..Default::default()
+                }),
+        );
+    }
+    r = r.push(Space::new().width(Length::Fixed(8.0)));
+    r = r.push(slot_list::slot_list_text(
+        format!("{}", colors.len()),
+        font_size * 0.85,
+        count_label_color,
+    ));
+    r.into()
+}
 
-        if is_center {
-            option_btn = option_btn.on_press(SettingsMessage::ToggleSetToggle(key_owned));
+// ============================================================================
+// Hotkey Badge States
+// ============================================================================
+//
+// Per the design (nokkvi-settings.css `.nk-w-key`):
+// - Idle:     `accent_bright()` fill + `bg0_hard()` text, 96 px wide key-cap.
+// - Capture:  transparent fill + `warning_bright()` border + `warning_bright()`
+//             text, with the "Esc cancel · Del reset" hint inline. (Pulse
+//             animation noted in the design is omitted — iced has no
+//             keyframes; would require a per-frame Tick subscription that
+//             isn't worth wiring just for visual flourish.)
+// - Conflict: transparent fill + `danger()` border + `danger()` text, showing
+//             the conflict label that the capture handler emitted (which
+//             names the colliding action).
+//
+// The design also lists a "disabled" state (`bg2()` border, `fg3()` text).
+// That state has no data-level producer today — `HotkeyConfig::get_binding()`
+// always returns a `KeyCombo`, never `None` — so it's intentionally not
+// rendered. Add it here when an "unbound" representation lands in the data
+// layer.
+
+/// Render the hotkey value badge in its current state.
+fn render_hotkey_badge<'a>(
+    combo: &str,
+    font_size: f32,
+    ctx: &SlotRenderContext<'_>,
+) -> Element<'a, SettingsMessage> {
+    let opacity = if ctx.is_center { 1.0 } else { ctx.opacity };
+
+    // Capture mode (center-row only by construction in view.rs) — either a
+    // "press a key" prompt or a conflict warning, both rendered as inverted
+    // badges with the design's gold/red palette.
+    if ctx.is_capturing && ctx.is_center {
+        if let Some(conflict) = ctx.conflict_text {
+            return hotkey_capture_badge(
+                conflict,
+                None,
+                font_size,
+                theme::danger(),
+                theme::danger(),
+            );
         }
-
-        r = r.push(option_btn);
+        return hotkey_capture_badge(
+            "Press a key...",
+            Some("Esc cancel · Del reset"),
+            font_size,
+            theme::warning_bright(),
+            theme::warning_bright(),
+        );
     }
 
-    container(r).width(Length::Fill).clip(true).into()
+    // Idle / non-center: green key-cap badge.
+    hotkey_idle_badge(combo, font_size, opacity)
+}
+
+/// Idle key-cap badge — full accent fill, dark text. Sizes to its
+/// content (so long combos like `Ctrl+Alt+Shift+F12` aren't clipped)
+/// with a 96 px floor matching `nk-w-key` in the flat CSS for typical
+/// short combos. The floor is enforced via a `Stack` containing a
+/// fixed-width invisible spacer below the styled badge — iced's stack
+/// takes the max intrinsic width of its children, so the badge widens
+/// past 96 px when the content demands it.
+fn hotkey_idle_badge<'a>(
+    combo: &str,
+    font_size: f32,
+    opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    let badge_size = font_size * 0.92;
+    let bg = scale_alpha_local(theme::accent_bright(), opacity);
+    let border = bg;
+    let text_color = scale_alpha_local(theme::bg0_hard(), opacity);
+
+    const MIN_WIDTH: f32 = 96.0;
+
+    let badge = container(
+        slot_list::slot_list_text(combo.to_string(), badge_size, text_color).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        }),
+    )
+    .width(Length::Shrink)
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center)
+    .padding(Padding::new(5.0).left(14.0).right(14.0))
+    .style(move |_: &iced::Theme| container::Style {
+        background: Some(bg.into()),
+        border: Border {
+            color: border,
+            width: 1.0,
+            radius: theme::ui_radius_pill(),
+        },
+        ..Default::default()
+    });
+
+    iced::widget::stack![
+        Space::new()
+            .width(Length::Fixed(MIN_WIDTH))
+            .height(Length::Fixed(0.0)),
+        badge,
+    ]
+    .into()
+}
+
+/// Capture / conflict badge — transparent fill, colored border + text, with
+/// an optional inline hint suffix. Used for both the "Press a key..." prompt
+/// (gold) and the conflict warning (red).
+fn hotkey_capture_badge<'a>(
+    label: &str,
+    hint: Option<&str>,
+    font_size: f32,
+    border_color: Color,
+    text_color: Color,
+) -> Element<'a, SettingsMessage> {
+    let badge_size = font_size * 0.92;
+    let hint_size = font_size * 0.72;
+    let hint_color = Color {
+        a: 0.7,
+        ..text_color
+    };
+
+    let mut body = row![
+        slot_list::slot_list_text(label.to_string(), badge_size, text_color).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        }),
+    ]
+    .align_y(Alignment::Center);
+
+    if let Some(h) = hint {
+        body = body
+            .push(Space::new().width(Length::Fixed(8.0)))
+            .push(slot_list::slot_list_text(
+                h.to_string(),
+                hint_size,
+                hint_color,
+            ));
+    }
+
+    container(body)
+        .padding(Padding::new(5.0).left(14.0).right(14.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(Color::TRANSPARENT.into()),
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: theme::ui_radius_pill(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Local copy of the pill widget's alpha scaler (kept private to avoid
+/// promoting a trivial helper to a shared API).
+#[inline]
+fn scale_alpha_local(c: Color, factor: f32) -> Color {
+    Color {
+        a: c.a * factor,
+        ..c
+    }
 }
 
 // ============================================================================
 // Color Sub-List Slot Rendering
 // ============================================================================
 
-/// Render a single slot in the color sub-list (gradient editing)
+/// Render a single slot in the color sub-list (gradient editing). Uses the
+/// same flat row chrome as the main settings slot list — theme::bg1() cursor
+/// fill + 3 px theme::accent_bright() left stripe + theme::border() bottom
+/// separator. The swatch picks up theme::border() outline and
+/// theme::ui_radius_xs() corners in rounded mode for parity with the inline
+/// HexColor row.
 pub(crate) fn render_color_slot<'a>(
     ctx: &SlotRenderContext<'_>,
     hex_color: &str,
@@ -1034,8 +870,6 @@ pub(crate) fn render_color_slot<'a>(
     is_editing: bool,
     hex_input: &str,
 ) -> Element<'a, SettingsMessage> {
-    let style =
-        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity, 0);
     let label_size =
         nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
@@ -1046,30 +880,31 @@ pub(crate) fn render_color_slot<'a>(
         nokkvi_data::utils::scale::calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
 
+    let label_color = if ctx.is_center {
+        theme::accent_bright()
+    } else {
+        scale_alpha_local(theme::fg0(), ctx.opacity)
+    };
+    let subtext_color = scale_alpha_local(theme::fg3(), ctx.opacity * 0.7);
+
     let eff_opacity = if ctx.is_center { 1.0 } else { ctx.opacity };
 
-    // Color swatch (larger than the mini swatches in the main slot list)
+    // Color swatch — larger than the inline mini swatches (matches the design
+    // intent of giving the gradient editor a more prominent preview chip).
     let parsed_color = crate::theme_config::parse_hex_color(hex_color).unwrap_or_else(theme::fg4);
     let swatch_size = (label_size * 2.0).clamp(20.0, 36.0);
+    let swatch_fill = scale_alpha_local(parsed_color, eff_opacity);
+    let swatch_border = scale_alpha_local(theme::border(), eff_opacity);
 
     let swatch = container(Space::new())
         .width(Length::Fixed(swatch_size))
         .height(Length::Fixed(swatch_size))
-        .style(move |_theme| container::Style {
-            background: Some(
-                Color {
-                    a: eff_opacity,
-                    ..parsed_color
-                }
-                .into(),
-            ),
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(swatch_fill.into()),
             border: Border {
-                color: Color {
-                    a: eff_opacity * 0.6,
-                    ..theme::fg4()
-                },
+                color: swatch_border,
                 width: 1.0,
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
             },
             ..Default::default()
         });
@@ -1078,11 +913,11 @@ pub(crate) fn render_color_slot<'a>(
     let position_label = format!("Color {} of {}", ctx.item_index + 1, total_colors);
     let label_col = container(
         column![
-            slot_list::slot_list_text(position_label, label_size, style.text_color).font(Font {
+            slot_list::slot_list_text(position_label, label_size, label_color).font(Font {
                 weight: Weight::Bold,
                 ..theme::ui_font()
             }),
-            slot_list::slot_list_text(parent_label.to_string(), position_size, style.subtext_color),
+            slot_list::slot_list_text(parent_label.to_string(), position_size, subtext_color),
         ]
         .spacing(2),
     )
@@ -1090,11 +925,11 @@ pub(crate) fn render_color_slot<'a>(
     .clip(true)
     .align_y(Alignment::Center);
 
-    // Value column — hex text input when editing, otherwise hex text display
+    // Value column — hex text input when editing, otherwise mono hex label.
     let value_display: Element<'a, SettingsMessage> = if is_editing {
         render_hex_editor(hex_input, value_size, 16.0)
     } else {
-        slot_list::slot_list_text(hex_color.to_owned(), value_size, style.subtext_color).into()
+        slot_list::slot_list_text(hex_color.to_uppercase(), value_size, subtext_color).into()
     };
 
     let value_col = container(value_display)
@@ -1116,27 +951,10 @@ pub(crate) fn render_color_slot<'a>(
     .align_y(Alignment::Center)
     .height(Length::Fill);
 
-    // Edit mode: accent border
-    let (border_color, border_width) = if is_editing {
-        (theme::accent_bright(), 2.0)
-    } else {
-        (style.border_color, style.border_width)
-    };
+    let body = with_cursor_stripe(content.into(), ctx.is_center);
+    let with_separator = row_with_bottom_separator(body, ctx.is_center);
 
-    let styled = container(content)
-        .style(move |_theme| container::Style {
-            background: Some(style.bg_color.into()),
-            border: Border {
-                color: border_color,
-                width: border_width,
-                radius: style.border_radius,
-            },
-            ..Default::default()
-        })
-        .width(Length::Fill);
-
-    // Make clickable — center click enters edit mode, other slots navigate
-    button(styled)
+    button(with_separator)
         .on_press(if ctx.is_center {
             SettingsMessage::EditActivate
         } else {
@@ -1174,13 +992,14 @@ fn preview_font(name: &str) -> Font {
     font
 }
 
-/// Render a single slot in the font picker sub-list
+/// Render a single slot in the font picker sub-list. Same flat row chrome as
+/// the main slot list (cursor stripe + bottom border separator) so the font
+/// modal feels like an extension of the settings panel rather than a separate
+/// surface.
 pub(crate) fn render_font_slot<'a>(
     ctx: &SlotRenderContext<'_>,
     font_name: &str,
 ) -> Element<'a, SettingsMessage> {
-    let style =
-        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity, 0);
     let label_size =
         nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
@@ -1188,31 +1007,36 @@ pub(crate) fn render_font_slot<'a>(
         nokkvi_data::utils::scale::calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
 
+    let label_color = if ctx.is_center {
+        theme::accent_bright()
+    } else {
+        scale_alpha_local(theme::fg0(), ctx.opacity)
+    };
+    let subtext_color = scale_alpha_local(theme::fg3(), ctx.opacity * 0.7);
+
     let is_default = font_name.starts_with("Iced Default");
 
-    // Font name rendered in its own typeface for preview
+    // Font name rendered in its own typeface for preview.
     let preview = if is_default {
         Font::DEFAULT
     } else {
         preview_font(font_name)
     };
-    let name_widget =
-        slot_list::slot_list_text(font_name.to_string(), label_size, style.text_color).font(Font {
+    let name_widget = slot_list::slot_list_text(font_name.to_string(), label_size, label_color)
+        .font(Font {
             weight: Weight::Bold,
             ..preview
         });
 
-    // Right-side hint for center item
     let hint_text = if ctx.is_center { "Enter ↵" } else { "" };
-    let hint_widget = slot_list::slot_list_text(hint_text, hint_size, style.subtext_color);
+    let hint_widget = slot_list::slot_list_text(hint_text, hint_size, subtext_color);
 
-    // If it's the default entry, show a small subtitle
     let subtitle = if is_default {
         "No custom font — uses iced::Font::DEFAULT"
     } else {
         ""
     };
-    let subtitle_widget = slot_list::slot_list_text(subtitle, hint_size, style.subtext_color);
+    let subtitle_widget = slot_list::slot_list_text(subtitle, hint_size, subtext_color);
 
     let label_col = container(column![name_widget, subtitle_widget].spacing(2))
         .width(Length::FillPortion(70))
@@ -1233,15 +1057,266 @@ pub(crate) fn render_font_slot<'a>(
         .align_y(Alignment::Center)
         .height(Length::Fill);
 
-    let styled = container(content)
-        .style(move |_theme| style.to_container_style())
-        .width(Length::Fill);
+    let body = with_cursor_stripe(content.into(), ctx.is_center);
+    let with_separator = row_with_bottom_separator(body, ctx.is_center);
 
-    button(styled)
+    button(with_separator)
         .on_press(if ctx.is_center {
             SettingsMessage::EditActivate
         } else {
             SettingsMessage::SlotListClickItem(ctx.item_index)
+        })
+        .style(transparent_button_style)
+        .padding(0)
+        .width(Length::Fill)
+        .into()
+}
+
+// ============================================================================
+// Variable-height detail-pane renderers (persistent-sidebar layout)
+// ============================================================================
+//
+// The detail pane on the right of the persistent sidebar uses
+// variable-height rows so each row can grow to fit inline help text
+// (from `SettingItem.subtitle`) and wrap pill groups without clipping.
+// Headers also grow to their content. These renderers share the value
+// widgets (`render_value_display`) with the legacy slot-list path but
+// drop the `Length::Fill` height requirement.
+
+/// Render a section header for the variable-height detail pane.
+/// Same small-caps mono treatment as `render_l2_section_header` but
+/// shrink-sized vertically so it sits naturally above the rows.
+pub(crate) fn render_detail_header<'a>(
+    label: &str,
+    icon_path: &str,
+) -> Element<'a, SettingsMessage> {
+    let font_size = 11.0;
+    let icon_size = 13.0;
+
+    let label_owned = label.to_string();
+    let icon_owned = icon_path.to_string();
+
+    let section_icon = embedded_svg::svg_widget(&icon_owned)
+        .width(Length::Fixed(icon_size))
+        .height(Length::Fixed(icon_size))
+        .style(move |_, _| svg::Style {
+            color: Some(theme::fg2()),
+        });
+
+    let label_widget = text(label_owned.to_uppercase())
+        .size(font_size)
+        .font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        })
+        .color(theme::fg3())
+        .wrapping(Wrapping::None);
+
+    let content_row = row![
+        Space::new().width(Length::Fixed(4.0)),
+        section_icon,
+        label_widget,
+        Space::new().width(Length::Fill),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let body = container(content_row).width(Length::Fill).padding(
+        Padding::new(0.0)
+            .top(18.0)
+            .bottom(10.0)
+            .left(24.0)
+            .right(28.0),
+    );
+
+    let sep = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        });
+
+    column![body, sep].width(Length::Fill).into()
+}
+
+/// Render a variable-height detail row: `[label + help text below]
+/// [value widget] [Default: X label]`. Pill groups inside the value
+/// widget wrap; rows grow to fit.
+///
+/// `is_focused` corresponds to "the keyboard-cursored row" — drives the
+/// 2 px accent left stripe + `bg1` fill, the bold label, the
+/// "Enter ↵" affordance, and the hotkey-capture / toggle-cursor
+/// indicators. Equivalent to `ctx.is_center` in the legacy slot list.
+pub(crate) fn render_detail_row<'a>(
+    item: &SettingItem,
+    item_index: usize,
+    is_focused: bool,
+    is_editing: bool,
+    is_capturing: bool,
+    hex_input: &str,
+    toggle_cursor: Option<usize>,
+    conflict_text: Option<&str>,
+) -> Element<'a, SettingsMessage> {
+    let label_size = 13.0;
+    let help_size = 11.0;
+    let value_size = 13.0;
+    let hint_size = 10.0;
+
+    let label_color = if is_focused {
+        theme::accent_bright()
+    } else {
+        theme::fg0()
+    };
+    let label_weight = if is_focused {
+        Weight::Bold
+    } else {
+        Weight::Medium
+    };
+
+    // SlotRenderContext built from this row's perspective so the shared
+    // value-widget producers light up the right indicators.
+    let ctx = SlotRenderContext {
+        item_index,
+        is_center: is_focused,
+        opacity: 1.0,
+        row_height: 60.0,
+        scale_factor: 1.0,
+        is_capturing,
+        conflict_text,
+        toggle_cursor: if is_focused { toggle_cursor } else { None },
+    };
+    let style = slot_list::SlotListSlotStyle {
+        text_color: label_color,
+        subtext_color: theme::fg3(),
+        bg_color: Color::TRANSPARENT,
+        border_color: Color::TRANSPARENT,
+        border_width: 0.0,
+        border_radius: 0.0.into(),
+        hover_text_color: theme::accent_bright(),
+    };
+
+    let label_text = text(item.label.clone())
+        .size(label_size)
+        .font(Font {
+            weight: label_weight,
+            ..theme::ui_font()
+        })
+        .color(label_color)
+        .wrapping(Wrapping::None);
+
+    let label_row: Element<'a, SettingsMessage> = if let Some(icon_path) = item.label_icon {
+        let icon_color = label_color;
+        let inline_icon = embedded_svg::svg_widget(icon_path)
+            .width(Length::Fixed(label_size))
+            .height(Length::Fixed(label_size))
+            .style(move |_, _| svg::Style {
+                color: Some(icon_color),
+            });
+        row![label_text, inline_icon]
+            .spacing(5)
+            .align_y(Alignment::Center)
+            .into()
+    } else {
+        label_text.into()
+    };
+
+    let mut label_col = column![label_row].spacing(2);
+    if let Some(help) = item.subtitle.as_ref() {
+        label_col = label_col.push(
+            text(help.to_string())
+                .size(help_size)
+                .color(theme::fg3())
+                .font(theme::ui_font()),
+        );
+    }
+
+    let label_container = container(label_col)
+        .width(Length::Fixed(260.0))
+        .align_y(Alignment::Center);
+
+    let show_hint = item_needs_enter_hint(item) && is_focused && !is_editing && !is_capturing;
+    let value_widget =
+        render_value_display(&item.value, value_size, &style, &ctx, is_editing, hex_input);
+    let value_block: Element<'a, SettingsMessage> = if show_hint {
+        row![
+            value_widget,
+            Space::new().width(Length::Fixed(8.0)),
+            text("Enter ↵")
+                .size(hint_size)
+                .color(theme::fg3())
+                .font(theme::ui_font()),
+        ]
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        value_widget
+    };
+
+    let value_col = container(value_block)
+        .width(Length::Fill)
+        .align_x(Alignment::End)
+        .align_y(Alignment::Center)
+        .padding(Padding::new(0.0).left(12.0).right(12.0));
+
+    let content_row = row![label_container, value_col]
+        .spacing(0)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+    // 2 px accent left stripe + bg1 fill when focused.
+    let stripe_color = if is_focused {
+        theme::accent_bright()
+    } else {
+        Color::TRANSPARENT
+    };
+    let row_bg = if is_focused {
+        theme::bg1()
+    } else {
+        Color::TRANSPARENT
+    };
+    let stripe = container(Space::new())
+        .width(Length::Fixed(2.0))
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(stripe_color.into()),
+            ..Default::default()
+        });
+
+    let stripe_row = row![
+        stripe,
+        container(content_row).width(Length::Fill).padding(
+            Padding::new(0.0)
+                .top(14.0)
+                .bottom(14.0)
+                .left(22.0)
+                .right(28.0)
+        ),
+    ]
+    .align_y(Alignment::Center);
+
+    let body = container(stripe_row)
+        .width(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(row_bg.into()),
+            ..Default::default()
+        });
+
+    let sep = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        });
+
+    let stacked = column![body, sep].width(Length::Fill);
+
+    button(stacked)
+        .on_press(if is_focused {
+            SettingsMessage::EditActivate
+        } else {
+            SettingsMessage::SlotListClickItem(item_index)
         })
         .style(transparent_button_style)
         .padding(0)

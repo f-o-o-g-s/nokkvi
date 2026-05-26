@@ -19,8 +19,24 @@ define_labeled_enum! {
         PlayerBar { label: "Player Bar", wire: "player_bar" },
         /// Track info strip at the top of the window (side nav only)
         TopBar { label: "Top Bar", wire: "top_bar" },
-        /// Scrolling metadata overlay on the progress bar track
-        ProgressTrack { label: "Progress Track", wire: "progress_track" },
+        /// Track info strip rendered in its own row directly beneath the
+        /// nav bar (top-nav layout) — uses the same separator-above
+        /// styling as the player-bar strip instead of being merged into
+        /// the nav row. In side-nav and none-nav layouts (where there
+        /// is no horizontal nav row), behaves the same as `TopBar`:
+        /// the strip sits above the main content.
+        TopBarUnder { label: "Top Bar Under", wire: "top_bar_under" },
+        /// Artwork + title/artist/album stacked to the left of the
+        /// transport controls in the player bar (an inline track-info
+        /// column instead of a separate strip).
+        ///
+        /// `#[serde(alias = "progress_track")]` keeps backwards
+        /// compatibility with older TOML files written before the
+        /// rename (the variant used to be called `ProgressTrack` when
+        /// it rendered as a scrolling overlay on the progress-bar
+        /// track).
+        #[serde(alias = "progress_track")]
+        MiniPlayer { label: "Mini Player", wire: "mini_player" },
     }
 }
 
@@ -81,5 +97,42 @@ impl StripSeparator {
             Self::Slash => "  /  ",
             Self::Bar => "  │  ",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pin the `#[serde(alias = "progress_track")]` migration path.
+    ///
+    /// The variant was renamed from `ProgressTrack` to `MiniPlayer` during
+    /// the redesign (the strip used to render as a scrolling overlay on
+    /// the progress-bar track; the new design pulls the artwork/metadata
+    /// into a dedicated section of the player bar). Pre-redesign TOML
+    /// configs persist the wire string `"progress_track"`. Without the
+    /// alias the deserializer would fail; the test fires loud if a
+    /// future serde update drops alias support or a refactor removes
+    /// the attribute.
+    #[test]
+    fn track_info_display_deserializes_progress_track_as_mini_player() {
+        let mode: TrackInfoDisplay = serde_json::from_str("\"progress_track\"").unwrap();
+        assert_eq!(mode, TrackInfoDisplay::MiniPlayer);
+    }
+
+    /// And the canonical `"mini_player"` wire string still works too — the
+    /// alias must not displace the primary deserialization name.
+    #[test]
+    fn track_info_display_deserializes_mini_player_as_mini_player() {
+        let mode: TrackInfoDisplay = serde_json::from_str("\"mini_player\"").unwrap();
+        assert_eq!(mode, TrackInfoDisplay::MiniPlayer);
+    }
+
+    /// `MiniPlayer` serializes back as `"mini_player"` (not the alias) so
+    /// configs written by the current build round-trip cleanly.
+    #[test]
+    fn track_info_display_serializes_mini_player_as_canonical_wire() {
+        let wire = serde_json::to_string(&TrackInfoDisplay::MiniPlayer).unwrap();
+        assert_eq!(wire, "\"mini_player\"");
     }
 }

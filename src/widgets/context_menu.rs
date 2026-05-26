@@ -27,8 +27,8 @@ use iced::{
 use crate::{
     theme,
     widgets::menu_constants::{
-        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_SHADOW, MENU_TEXT_SIZE,
-        inflate_for_shadow_around_child, visible_menu_layout,
+        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
+        visible_menu_layout,
     },
 };
 
@@ -685,20 +685,12 @@ where
     T: Copy + 'a,
     Message: 'a,
 {
+    // Shared menu-panel chrome — see `widgets::menu_chrome`.
     container(column(
         entries.iter().copied().map(|e| entry_view(e, Length::Fill)),
     ))
     .padding(4)
-    .style(|_theme| container::Style {
-        background: Some(theme::bg1().into()),
-        border: iced::Border {
-            width: 1.0,
-            color: theme::accent_bright(),
-            radius: theme::ui_border_radius(),
-        },
-        shadow: MENU_SHADOW,
-        ..Default::default()
-    })
+    .style(super::menu_chrome::container_style)
     .into()
 }
 
@@ -946,6 +938,9 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
     })
     .width(Length::Fixed(MENU_MIN_WIDTH))
     .style(move |_theme, status| {
+        // Hover/press fill = `bg2()` with `ui_radius_xs()` corners so the
+        // highlight nests neatly inside the `ui_radius_md()` panel
+        // outline in rounded mode (4 px vs 12 px concentric).
         let bg = match status {
             button::Status::Hovered | button::Status::Pressed => Some(theme::bg2().into()),
             _ => None,
@@ -954,7 +949,7 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
             background: bg,
             text_color: theme::fg0(),
             border: iced::Border {
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
                 ..Default::default()
             },
             ..Default::default()
@@ -964,12 +959,16 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
 }
 
 /// Render a separator line for grouping menu items.
+///
+/// Color matches `theme::border()` (the panel outline) so the
+/// inter-section divider reads as a continuation of the chrome line —
+/// matches the `hamburger_menu` separator vocabulary.
 pub(crate) fn menu_separator<'a, Message: 'a>() -> Element<'a, Message> {
     container(iced::widget::Space::new())
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
         .style(|_theme| container::Style {
-            background: Some(theme::bg3().into()),
+            background: Some(theme::border().into()),
             ..Default::default()
         })
         .padding(iced::Padding {

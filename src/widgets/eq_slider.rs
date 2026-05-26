@@ -5,7 +5,7 @@
 //! detent line at 0 dB.
 
 use iced::{
-    Color, Element, Event, Length, Rectangle, Shadow, Size, Theme, Vector,
+    Element, Event, Length, Rectangle, Size, Theme,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -180,56 +180,37 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
             self.gain
         };
 
-        let is_rounded = crate::theme::is_rounded_mode();
-        let radius = crate::theme::ui_border_radius();
-        let bg1 = crate::theme::bg1();
-        let (tl, br) = crate::theme::border_3d_inset();
+        // Flat redesign: 1 px border() track, flat accent fill on the
+        // handle. Handle picks up `pill` shape in rounded mode so the EQ
+        // band visually pairs with the volume / progress sliders.
+        let track_radius = crate::theme::ui_radius_pill();
+        let handle_radius = crate::theme::ui_radius_pill();
 
-        // Use accent for any non-zero gain, muted fg3 for flat — avoids the
-        // green/yellow split that reads as success/warning status indicators.
+        // Use accent for any non-zero gain, muted fg3 at the detent so the
+        // user sees that 0 dB is the neutral position without it suddenly
+        // changing color category.
         let accent = if gain.abs() < 0.1 {
             crate::theme::fg3()
         } else {
             crate::theme::accent_bright()
         };
 
-        let (handle_tl, handle_br) = if gain.abs() < 0.1 {
-            (crate::theme::fg3(), crate::theme::bg0_hard())
-        } else {
-            crate::theme::border_3d_accent_raised()
-        };
-
-        // 1. Draw track background
-        if is_rounded {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds,
-                    border: iced::Border {
-                        color: tl,
-                        width: border_width,
-                        radius,
-                    },
-                    ..Default::default()
+        // 1. Draw track background — single flat fill + 1 px border().
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                border: iced::Border {
+                    color: crate::theme::border(),
+                    width: border_width,
+                    radius: track_radius,
                 },
-                bg1,
-            );
-        } else {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x + border_width,
-                        y: bounds.y + border_width,
-                        width: bounds.width - border_width * 2.0,
-                        height: bounds.height - border_width * 2.0,
-                    },
-                    ..Default::default()
-                },
-                bg1,
-            );
-            self.draw_3d_border(renderer, bounds, border_width, tl, br);
-        }
+                ..Default::default()
+            },
+            crate::theme::bg1(),
+        );
 
-        // Draw 0 dB center line
+        // Draw 0 dB center line (kept — visual detent that helps users
+        // align bands to neutral).
         let center_y = bounds.y + bounds.height / 2.0;
         renderer.fill_quad(
             renderer::Quad {
@@ -244,7 +225,9 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
             crate::theme::fg4(),
         );
 
-        // 2. Draw Handle
+        // 2. Draw Handle — flat accent fill + 1 px border() outline. The
+        // 3D grip lines from the legacy bevel renderer are removed; the
+        // handle reads as a single coloured pill against the track.
         let effective_height = bounds.height - HANDLE_SIZE;
         let pct = ((MAX_DB - gain) / RANGE_DB).clamp(0.0, 1.0);
         let hb = Rectangle {
@@ -254,101 +237,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
             height: HANDLE_SIZE,
         };
 
-        if is_rounded {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: hb,
-                    border: iced::Border {
-                        color: handle_tl,
-                        width: border_width,
-                        radius,
-                    },
-                    shadow: Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                        offset: Vector::new(0.0, 1.0),
-                        blur_radius: 3.0,
-                    },
-                    ..Default::default()
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: hb,
+                border: iced::Border {
+                    color: crate::theme::border(),
+                    width: border_width,
+                    radius: handle_radius,
                 },
-                accent,
-            );
-        } else {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: hb,
-                    shadow: Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                        offset: Vector::new(0.0, 1.0),
-                        blur_radius: 3.0,
-                    },
-                    ..Default::default()
-                },
-                Color::TRANSPARENT,
-            );
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: hb.x + border_width,
-                        y: hb.y + border_width,
-                        width: hb.width - border_width * 2.0,
-                        height: hb.height - border_width * 2.0,
-                    },
-                    ..Default::default()
-                },
-                accent,
-            );
-            self.draw_3d_border(renderer, hb, border_width, handle_tl, handle_br);
-        }
-
-        // Grip lines
-        let gh = 4.0;
-        let gw = if is_rounded { 8.0 } else { bounds.width - 6.0 };
-        let gx = bounds.x + (bounds.width - gw) / 2.0;
-        let gy = hb.y + (HANDLE_SIZE - gh) / 2.0;
-
-        if is_rounded {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: gx,
-                        y: gy,
-                        width: gw,
-                        height: gh,
-                    },
-                    border: iced::Border {
-                        radius,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                handle_tl,
-            );
-        } else {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: gx + 1.0,
-                        y: gy + 1.0,
-                        width: gw - 2.0,
-                        height: gh - 2.0,
-                    },
-                    ..Default::default()
-                },
-                accent,
-            );
-            self.draw_3d_border(
-                renderer,
-                Rectangle {
-                    x: gx,
-                    y: gy,
-                    width: gw,
-                    height: gh,
-                },
-                1.0,
-                handle_tl,
-                handle_br,
-            );
-        }
+                ..Default::default()
+            },
+            accent,
+        );
     }
 
     fn mouse_interaction(
@@ -367,68 +267,6 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
         } else {
             mouse::Interaction::default()
         }
-    }
-}
-
-// Draw 3D border helper
-impl<Message> EqSlider<'_, Message> {
-    fn draw_3d_border(
-        &self,
-        renderer: &mut iced::Renderer,
-        r: Rectangle,
-        bw: f32,
-        tl: Color,
-        br: Color,
-    ) {
-        use iced::advanced::Renderer;
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: r.x,
-                    y: r.y,
-                    width: r.width,
-                    height: bw,
-                },
-                ..Default::default()
-            },
-            tl,
-        );
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: r.x,
-                    y: r.y,
-                    width: bw,
-                    height: r.height,
-                },
-                ..Default::default()
-            },
-            tl,
-        );
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: r.x,
-                    y: r.y + r.height - bw,
-                    width: r.width,
-                    height: bw,
-                },
-                ..Default::default()
-            },
-            br,
-        );
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: r.x + r.width - bw,
-                    y: r.y,
-                    width: bw,
-                    height: r.height,
-                },
-                ..Default::default()
-            },
-            br,
-        );
     }
 }
 

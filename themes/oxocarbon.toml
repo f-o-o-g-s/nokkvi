@@ -1,5 +1,8 @@
 name = "Oxocarbon"
 
+[dark]
+border = "#121212"
+
 [dark.background]
 default = "#232323"
 hard = "#1a1a1a"
@@ -18,7 +21,6 @@ level3 = "#d0d0d0"
 level4 = "#d0d0d0"
 
 [dark.accent]
-border_dark = "#0094dd"
 border_light = "#1390cc"
 bright = "#0094dd"
 primary = "#00b4ff"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#be95ff", "#be95ff", "#9878cc", "#9878cc", "#9f76dd", "#9f76dd"]
 
+[light]
+border = "#161616"
+
 [light.background]
 default = "#232323"
 hard = "#1a1a1a"
@@ -65,7 +70,6 @@ level3 = "#d0d0d0"
 level4 = "#d0d0d0"
 
 [light.accent]
-border_dark = "#0094dd"
 border_light = "#1390cc"
 bright = "#0094dd"
 primary = "#00b4ff"

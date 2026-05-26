@@ -4,18 +4,18 @@
 //! Extracted from mod.rs to reduce file size.
 
 use iced::{
-    Element, Length,
-    widget::{column, container, text},
+    Alignment, Border, Element, Length, Padding,
+    font::{Font, Weight},
+    widget::{Space, button, column, container, row, svg, text},
 };
 
 use super::{
     BREADCRUMB_HEIGHT, SETTINGS_CHROME_HEIGHT, SettingsAction, SettingsMessage, SettingsPage,
-    items::SettingsEntry,
     normalize_hex,
-    rendering::{SlotRenderContext, render_color_slot},
+    rendering::{SlotRenderContext, render_color_slot, transparent_button_style},
 };
 use crate::{
-    theme,
+    embedded_svg, theme,
     widgets::{SlotListView, slot_list},
 };
 
@@ -193,7 +193,6 @@ impl SettingsPage {
                     let parent_offset = sub.parent_offset;
                     self.sub_list = None;
                     self.restore_parent_offset(parent_offset);
-                    self.update_description();
                     SettingsAction::None
                 }
             }
@@ -205,7 +204,11 @@ impl SettingsPage {
             | SettingsMessage::FontSearchChanged(_)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
-            | SettingsMessage::ToggleSetToggle(_) => SettingsAction::None,
+            | SettingsMessage::ToggleSetToggle(_)
+            | SettingsMessage::SidebarUp
+            | SettingsMessage::SidebarDown
+            | SettingsMessage::SidebarSetOffset(_, _)
+            | SettingsMessage::SidebarClickItem(_) => SettingsAction::None,
         }
     }
 
@@ -258,7 +261,6 @@ impl SettingsPage {
                 let parent_offset = fsw.parent_offset;
                 self.font_sub_list = None;
                 self.restore_parent_offset(parent_offset);
-                self.update_description();
                 SettingsAction::None
             }
             // Not applicable in font sub-list:
@@ -271,7 +273,11 @@ impl SettingsPage {
             | SettingsMessage::HotkeyCaptured(_, _)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
-            | SettingsMessage::ToggleSetToggle(_) => SettingsAction::None,
+            | SettingsMessage::ToggleSetToggle(_)
+            | SettingsMessage::SidebarUp
+            | SettingsMessage::SidebarDown
+            | SettingsMessage::SidebarSetOffset(_, _)
+            | SettingsMessage::SidebarClickItem(_) => SettingsAction::None,
         }
     }
 
@@ -300,6 +306,7 @@ impl SettingsPage {
         );
         let colors_owned = sub.colors.clone();
         let label = sub.label.clone();
+        let label_for_title = label.clone();
         let editing_color_index = sub.editing_color_index;
         let hex_input = sub.hex_input.clone();
         let total_colors = colors_owned.len();
@@ -322,7 +329,6 @@ impl SettingsPage {
                     scale_factor: ctx.scale_factor,
                     is_capturing: false,
                     conflict_text: None,
-                    is_level1: false,
                     toggle_cursor: None,
                 };
                 render_color_slot(
@@ -336,18 +342,57 @@ impl SettingsPage {
             },
         );
 
-        // Breadcrumb showing full path: Tab > Section > Sub-item
-        let _center_category = self.cached_entries.iter().rev().find_map(|e| match e {
-            SettingsEntry::Item(item) if item.key.as_ref() == sub.key => Some(item.category),
-            _ => None,
-        });
-        let breadcrumb = self.breadcrumb_header();
+        // Inline sub-list title bar: shows the gradient's display label
+        // plus an X back-button. The sidebar still highlights the parent
+        // category (Theme / Visualizer), so this header just disambiguates
+        // "you're inside a color editor right now". No path-y breadcrumb
+        // needed.
+        let title = text(label_for_title)
+            .size(13.0)
+            .color(theme::fg0())
+            .font(Font {
+                weight: Weight::Bold,
+                ..theme::ui_font()
+            });
+        let back_btn = button(
+            embedded_svg::svg_widget("assets/icons/x.svg")
+                .width(Length::Fixed(13.0))
+                .height(Length::Fixed(13.0))
+                .style(move |_, _| svg::Style {
+                    color: Some(theme::fg3()),
+                }),
+        )
+        .on_press(SettingsMessage::Escape)
+        .style(transparent_button_style)
+        .padding(Padding::new(2.0));
 
-        // Wrap with standard background, adding the breadcrumb above the slot list
-        let content = column![breadcrumb, slot_list_content,]
+        let title_row = row![title, Space::new().width(Length::Fill), back_btn]
+            .align_y(Alignment::Center)
+            .padding(Padding::new(0.0).left(18.0).right(14.0));
+
+        let title_sep = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            });
+
+        let title_bar = column![
+            container(title_row)
+                .width(Length::Fill)
+                .height(Length::Fixed(BREADCRUMB_HEIGHT - 1.0))
+                .align_y(Alignment::Center),
+            title_sep,
+        ]
+        .width(Length::Fill)
+        .height(Length::Fixed(BREADCRUMB_HEIGHT));
+
+        let content = column![title_bar, slot_list_content]
             .width(Length::Fill)
             .height(Length::Fill);
 
+        let _ = Border::default();
         slot_list::slot_list_background_container(content.into())
     }
 }

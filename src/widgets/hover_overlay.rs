@@ -17,21 +17,26 @@ use iced::{
     time, window,
 };
 
-/// Overlay color on hover: subtle semi-transparent black
-const HOVER_COLOR: Color = Color {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 0.08,
-};
+/// Alpha for the hover tint overlay (subtle on top of any background).
+const HOVER_ALPHA: f32 = 0.10;
 
-/// Overlay color on press: stronger semi-transparent black for tactile feedback
-const PRESS_COLOR: Color = Color {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 0.16,
-};
+/// Alpha for the press tint overlay (stronger, tactile).
+const PRESS_ALPHA: f32 = 0.20;
+
+/// Compute the hover/press tint base color from the active theme.
+///
+/// On dark themes we lift toward `fg0`; on light themes we drop toward
+/// `bg0_hard`. Both directions are derived from per-theme palette colors
+/// rather than the pure-black tint that shipped pre-redesign, so the
+/// overlay reads as a deliberate hover affordance on every theme instead
+/// of disappearing on dark palettes and washing out light ones.
+fn tint_base() -> Color {
+    if crate::theme::is_light_mode() {
+        crate::theme::bg0_hard()
+    } else {
+        crate::theme::fg0()
+    }
+}
 
 /// Scale factor on press: 98% gives a subtle "push in" feel.
 const PRESS_SCALE: f32 = 0.98;
@@ -244,9 +249,13 @@ where
             );
         }
 
-        // Draw overlay on top: stronger for press, subtle for hover
+        // Draw overlay on top: stronger for press, subtle for hover.
+        // Tint base is theme-aware (lift on dark, drop on light) so the
+        // overlay reads consistently across the 21 themes.
         if is_hovered || is_pressed {
-            let color = if is_pressed { PRESS_COLOR } else { HOVER_COLOR };
+            let base = tint_base();
+            let alpha = if is_pressed { PRESS_ALPHA } else { HOVER_ALPHA };
+            let color = Color { a: alpha, ..base };
 
             renderer.fill_quad(
                 renderer::Quad {

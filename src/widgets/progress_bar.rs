@@ -1,78 +1,34 @@
-//! Custom Progress Bar Widget with 3D styling and drag-to-seek
+//! Custom Progress Bar Widget with flat styling and drag-to-seek
 //!
-//! This is a custom Iced widget that provides:
-//! - 3D styled track with inset borders
-//! - 3D styled handle with grip lines  
-//! - Handle-only drag-to-seek (user must grab the handle to seek)
+//! Flat-design progress bar:
+//! - 6 px thin track (`theme::bg2()` fill) with `accent_bright()` progress fill
+//! - 14 px square (flat) / pill (rounded) handle with 1 px `bg0_hard()` border
+//! - Click-on-track jumps to position, drag-handle seeks
+//! - Seek tooltip drawn via `overlay()` for proper z-ordering
 //!
 //! Based on Iced's slider widget event handling pattern.
 
 use iced::{
-    Color, Element, Event, Length, Point, Rectangle, Shadow, Size, Theme, Vector,
+    Element, Event, Length, Point, Rectangle, Shadow, Size, Theme, Vector,
     advanced::{
         Shell,
         layout::{self, Layout},
         renderer,
-        text::{Paragraph as _, Renderer as TextRenderer, Shaping, Text, paragraph::Plain},
         widget::{self, Widget},
     },
-    alignment, mouse, touch,
-    widget::text::Wrapping,
+    mouse, touch,
 };
 
-/// A single text segment with its own color for the progress bar overlay.
-#[derive(Clone, Debug)]
-pub struct OverlaySegment {
-    pub text: String,
-    pub color: Color,
-}
-
-/// Per-segment paragraph + measured width, stored in widget state.
-#[derive(Debug, Clone)]
-struct SegmentState {
-    paragraph: Plain<<iced::Renderer as TextRenderer>::Paragraph>,
-    width: f32,
-    color: Color,
-}
-
-impl Default for SegmentState {
-    fn default() -> Self {
-        Self {
-            paragraph: Plain::default(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        }
-    }
-}
-
 /// State for progress bar interaction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct State {
     is_dragging: bool,
     drag_progress: f32,
     last_position: f32,
     last_update: Option<std::time::Instant>,
-    // Overlay segment animation
-    overlay_segments: Vec<SegmentState>,
-    overlay_full_width: f32,
-    overlay_cycle_start: std::time::Instant,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            is_dragging: false,
-            drag_progress: 0.0,
-            last_position: 0.0,
-            last_update: None,
-            overlay_segments: Vec::new(),
-            overlay_full_width: 0.0,
-            overlay_cycle_start: std::time::Instant::now(),
-        }
-    }
-}
-
-/// Custom progress bar with 3D styling
+/// Custom progress bar with flat styling
 pub struct ProgressBar<'a, Message> {
     position: f32,
     duration: f32,
@@ -81,8 +37,14 @@ pub struct ProgressBar<'a, Message> {
     width: Length,
     height: f32,
     hide_handle: bool,
-    overlay_segments: Vec<OverlaySegment>,
 }
+
+/// Visual thickness of the progress track within the widget bounds.
+/// The widget bounds may be taller (to accommodate the handle hit target);
+/// the track itself is centered vertically within those bounds.
+const TRACK_THICKNESS: f32 = 6.0;
+/// Handle size — 14 px square in flat mode, pill in rounded mode.
+const HANDLE_SIZE: f32 = 14.0;
 
 impl<'a, Message> ProgressBar<'a, Message> {
     pub fn new<F>(position: f32, duration: f32, on_seek: F) -> Self
@@ -97,7 +59,6 @@ impl<'a, Message> ProgressBar<'a, Message> {
             width: Length::Fill,
             height: 24.0,
             hide_handle: false,
-            overlay_segments: Vec::new(),
         }
     }
 
@@ -122,22 +83,16 @@ impl<'a, Message> ProgressBar<'a, Message> {
         self
     }
 
-    pub fn overlay_segments(mut self, segments: Vec<OverlaySegment>) -> Self {
-        self.overlay_segments = segments;
-        self
-    }
-
     /// Calculate seek position from cursor X coordinate
     fn locate(&self, cursor_x: f32, bounds: Rectangle) -> f32 {
-        let handle_width = 32.0;
-        let effective_width = bounds.width - handle_width;
+        let effective_width = bounds.width - HANDLE_SIZE;
 
         if effective_width <= 0.0 {
             return 0.0;
         }
 
         // Calculate position relative to track (accounting for handle width)
-        let relative_x = cursor_x - bounds.x - handle_width / 2.0;
+        let relative_x = cursor_x - bounds.x - HANDLE_SIZE / 2.0;
         let percentage = (relative_x / effective_width).clamp(0.0, 1.0);
         percentage * self.duration
     }
@@ -161,75 +116,11 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
     fn layout(
         &mut self,
-        tree: &mut widget::Tree,
-        renderer: &iced::Renderer,
+        _tree: &mut widget::Tree,
+        _renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let node = layout::atomic(limits, self.width, self.height);
-
-        // Build overlay segment paragraphs if configured
-        if !self.overlay_segments.is_empty() {
-            let state = tree.state.downcast_mut::<State>();
-
-            let font = iced::Font {
-                weight: iced::font::Weight::Normal,
-                ..crate::theme::ui_font()
-            };
-            let hint_factor = {
-                use iced::advanced::Renderer as _;
-                renderer.scale_factor()
-            };
-
-            // Resize state vec to match segment count
-            state
-                .overlay_segments
-                .resize_with(self.overlay_segments.len(), SegmentState::default);
-
-            let mut total_width: f32 = 0.0;
-            for (i, seg) in self.overlay_segments.iter().enumerate() {
-                // Measure unconstrained width per segment
-                let unconstrained = Text {
-                    content: seg.text.as_str(),
-                    bounds: Size::new(f32::INFINITY, f32::INFINITY),
-                    size: iced::Pixels(8.0),
-                    line_height: iced::advanced::text::LineHeight::default(),
-                    font,
-                    align_x: alignment::Horizontal::Left.into(),
-                    align_y: alignment::Vertical::Center,
-                    shaping: Shaping::Advanced,
-                    wrapping: Wrapping::None,
-                    ellipsis: iced::advanced::text::Ellipsis::None,
-                    hint_factor,
-                };
-                let para = <iced::Renderer as TextRenderer>::Paragraph::with_text(unconstrained);
-                let seg_width = para.min_bounds().width;
-
-                // Store the constrained paragraph (clipped to track width for rendering)
-                let text_area_width = node.size().width * 0.99;
-                let constrained = Text {
-                    bounds: Size::new(text_area_width, self.height),
-                    ..unconstrained
-                };
-                state.overlay_segments[i].paragraph.update(constrained);
-                state.overlay_segments[i].width = seg_width;
-                state.overlay_segments[i].color = seg.color;
-                total_width += seg_width;
-            }
-
-            // Only reset scroll animation when text width changes significantly
-            if (total_width - state.overlay_full_width).abs() > 5.0 {
-                state.overlay_cycle_start = std::time::Instant::now();
-            }
-            state.overlay_full_width = total_width;
-        } else {
-            // No segments provided — clear any stale state from previous renders
-            // so draw() doesn't render leftover segments after fields are disabled.
-            let state = tree.state.downcast_mut::<State>();
-            state.overlay_segments.clear();
-            state.overlay_full_width = 0.0;
-        }
-
-        node
+        layout::atomic(limits, self.width, self.height)
     }
 
     fn update(
@@ -267,20 +158,19 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 if let Some(cursor_position) = cursor.position_over(bounds) {
                     // Calculate current handle position
-                    let handle_width = 32.0;
                     let current_progress = if self.duration > 0.0 {
                         (self.position / self.duration).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
-                    let effective_width = bounds.width - handle_width;
+                    let effective_width = bounds.width - HANDLE_SIZE;
                     let handle_x = bounds.x + current_progress * effective_width;
 
                     // Check if click is within the handle bounds
                     let handle_bounds = Rectangle {
                         x: handle_x,
                         y: bounds.y,
-                        width: handle_width,
+                        width: HANDLE_SIZE,
                         height: bounds.height,
                     };
 
@@ -351,8 +241,6 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
-        let handle_width = 32.0;
-        let border_width = 1.0;
 
         // Calculate handle position with smooth interpolation during playback
         let progress = if state.is_dragging {
@@ -372,365 +260,87 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         } else {
             0.0
         };
-        let effective_width = bounds.width - handle_width;
+        let effective_width = bounds.width - HANDLE_SIZE;
         let handle_x = bounds.x + progress * effective_width;
 
-        // Colors from theme (supports light/dark mode)
-        let bg1 = crate::theme::bg1();
-        // Track uses inset 3D effect (dark on top/left for "carved in" look)
-        let (track_top_left, track_bottom_right) = crate::theme::border_3d_inset();
-        let accent = crate::theme::accent_bright();
-        // Handle uses raised accent 3D effect
-        let (accent_top_left, accent_bottom_right) = crate::theme::border_3d_accent_raised();
-        let (grip_top_left, grip_bottom_right) = crate::theme::border_3d_accent_raised();
+        // Flat track: 6px thin, centered vertically in widget bounds.
+        // `ui_radius_pill()` returns `0.0.into()` in flat mode and the
+        // pill radius in rounded mode — no separate ladder needed.
+        let track_y = bounds.y + (bounds.height - TRACK_THICKNESS) / 2.0;
+        let track_radius = crate::theme::ui_radius_pill();
 
-        let radius = crate::theme::ui_border_radius();
-        let is_rounded = crate::theme::is_rounded_mode();
+        // Track background — bg2 fill, no border.
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: Rectangle {
+                    x: bounds.x,
+                    y: track_y,
+                    width: bounds.width,
+                    height: TRACK_THICKNESS,
+                },
+                border: iced::Border {
+                    radius: track_radius,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            crate::theme::bg2(),
+        );
 
-        // Track background + borders
-        if is_rounded {
+        // Progress fill — accent_bright, from left edge to handle center.
+        // Per design, the fill stops at the handle's left edge — handle_x is
+        // already the left edge of the handle, so fill width is exactly handle_x
+        // (offset from track origin) plus HANDLE_SIZE/2 to reach the handle's
+        // center.
+        let fill_width = (handle_x - bounds.x + HANDLE_SIZE / 2.0).clamp(0.0, bounds.width);
+        if fill_width > 0.0 {
             renderer.fill_quad(
                 renderer::Quad {
-                    bounds,
+                    bounds: Rectangle {
+                        x: bounds.x,
+                        y: track_y,
+                        width: fill_width,
+                        height: TRACK_THICKNESS,
+                    },
                     border: iced::Border {
-                        color: track_top_left,
-                        width: border_width,
-                        radius,
+                        radius: track_radius,
+                        ..Default::default()
                     },
                     ..Default::default()
                 },
-                bg1,
+                crate::theme::accent_bright(),
             );
-        } else {
-            // Track background (main BG2 area)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x + border_width,
-                        y: bounds.y + border_width,
-                        width: bounds.width - border_width * 2.0,
-                        height: bounds.height - border_width * 2.0,
-                    },
-                    ..Default::default()
-                },
-                bg1,
-            );
-
-            // Track top border (dark - inset effect)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x,
-                        y: bounds.y,
-                        width: bounds.width,
-                        height: border_width,
-                    },
-                    ..Default::default()
-                },
-                track_top_left,
-            );
-
-            // Track left border (dark - inset effect)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x,
-                        y: bounds.y,
-                        width: border_width,
-                        height: bounds.height,
-                    },
-                    ..Default::default()
-                },
-                track_top_left,
-            );
-
-            // Track bottom border (light - inset effect)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x,
-                        y: bounds.y + bounds.height - border_width,
-                        width: bounds.width,
-                        height: border_width,
-                    },
-                    ..Default::default()
-                },
-                track_bottom_right,
-            );
-
-            // Track right border (light - inset effect)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x + bounds.width - border_width,
-                        y: bounds.y,
-                        width: border_width,
-                        height: bounds.height,
-                    },
-                    ..Default::default()
-                },
-                track_bottom_right,
-            );
-        }
-
-        // Overlay segments: scrolling colored metadata centered in the progress bar track
-        if !state.overlay_segments.is_empty() {
-            let text_area_width = bounds.width * 0.99;
-            let text_x = bounds.x + (bounds.width - text_area_width) / 2.0;
-            // Use the first segment's paragraph height for vertical centering
-            let text_height = state.overlay_segments[0].paragraph.min_bounds().height;
-            let vert_y = bounds.y + (bounds.height - text_height) / 2.0;
-            let content_width = state.overlay_full_width;
-            let clip = Rectangle {
-                x: text_x,
-                y: bounds.y,
-                width: text_area_width,
-                height: bounds.height,
-            };
-
-            const SCROLL_PX_PER_SEC: f32 = 30.0;
-            const LOOP_GAP: f32 = 80.0;
-            const INITIAL_PAUSE_SECS: f32 = 2.0;
-
-            let overflow = (content_width - text_area_width).max(0.0);
-
-            // Helper: render all segments at a given base X offset
-            let render_segments = |renderer: &mut iced::Renderer, base_x: f32| {
-                let mut x_cursor = base_x;
-                for seg in &state.overlay_segments {
-                    renderer.fill_paragraph(
-                        seg.paragraph.raw(),
-                        Point::new(x_cursor, vert_y),
-                        seg.color,
-                        clip,
-                    );
-                    x_cursor += seg.width;
-                }
-            };
-
-            if overflow <= 0.0 {
-                // Text fits — center horizontally
-                let cx = text_x + (text_area_width - content_width) / 2.0;
-                render_segments(renderer, cx);
-            } else {
-                // Scrolling ring-buffer animation
-                let elapsed = state.overlay_cycle_start.elapsed().as_secs_f32();
-                let cycle_px = content_width + LOOP_GAP;
-                let offset = if elapsed < INITIAL_PAUSE_SECS {
-                    0.0
-                } else {
-                    ((elapsed - INITIAL_PAUSE_SECS) * SCROLL_PX_PER_SEC) % cycle_px
-                };
-
-                render_segments(renderer, text_x - offset);
-                render_segments(renderer, text_x - offset + cycle_px);
-            }
         }
 
         if !self.hide_handle {
-            // Handle + grip in a separate layer so it renders ON TOP of overlay text.
-            // (Iced's wgpu renderer renders quads before text within the same layer,
-            //  so a new layer is needed to ensure the handle appears above the text.)
-            //
-            // Expand the clip rect downward so the handle's drop shadow
-            // (offset 2.5 + blur 3.0 = 5.5px below bounds) is not clipped.
-            let shadow_overflow = 6.0; // ceil(2.5 + 3.0)
-            let handle_clip = Rectangle {
-                x: bounds.x,
-                y: bounds.y,
-                width: bounds.width,
-                height: bounds.height + shadow_overflow,
-            };
+            // Handle on a separate layer so it draws above any neighboring quads.
+            let handle_clip = bounds;
             renderer.with_layer(handle_clip, |renderer| {
-                // Handle background + borders
+                let handle_y = bounds.y + (bounds.height - HANDLE_SIZE) / 2.0;
                 let handle_bounds = Rectangle {
                     x: handle_x,
-                    y: bounds.y,
-                    width: handle_width,
-                    height: bounds.height,
+                    y: handle_y,
+                    width: HANDLE_SIZE,
+                    height: HANDLE_SIZE,
                 };
-                let shadow_color = Color::from_rgba(0.0, 0.0, 0.0, 0.7);
-
-                if is_rounded {
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: handle_bounds,
-                            border: iced::Border {
-                                color: accent_top_left,
-                                width: border_width,
-                                radius,
-                            },
-                            shadow: Shadow {
-                                color: shadow_color,
-                                offset: Vector::new(0.0, 2.5),
-                                blur_radius: 3.0,
-                            },
-                            ..Default::default()
+                // `ui_radius_pill()` returns `0.0.into()` in flat mode.
+                let handle_radius = crate::theme::ui_radius_pill();
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: handle_bounds,
+                        border: iced::Border {
+                            color: crate::theme::bg0_hard(),
+                            width: 1.0,
+                            radius: handle_radius,
                         },
-                        accent,
-                    );
-                } else {
-                    // Handle background with integrated shadow
-                    // IMPORTANT: Shadow must be on a quad with a real fill color, not TRANSPARENT.
-                    // Iced's WGSL shader blends shadow with quad_color, and using TRANSPARENT
-                    // causes edge artifacts (white pixels) in light mode.
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: handle_x + border_width,
-                                y: bounds.y + border_width,
-                                width: handle_width - border_width * 2.0,
-                                height: bounds.height - border_width * 2.0,
-                            },
-                            shadow: Shadow {
-                                color: shadow_color,
-                                offset: Vector::new(0.0, 2.5),
-                                blur_radius: 3.0,
-                            },
-                            ..Default::default()
-                        },
-                        accent,
-                    );
-
-                    // Handle top border (dark - 3D raised effect)
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: handle_x,
-                                y: bounds.y,
-                                width: handle_width,
-                                height: border_width,
-                            },
-                            ..Default::default()
-                        },
-                        accent_top_left,
-                    );
-
-                    // Handle left border (dark - 3D raised effect)
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: handle_x,
-                                y: bounds.y,
-                                width: border_width,
-                                height: bounds.height,
-                            },
-                            ..Default::default()
-                        },
-                        accent_top_left,
-                    );
-
-                    // Handle bottom border - use base accent (not lightened) to avoid white line
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: handle_x,
-                                y: bounds.y + bounds.height - border_width,
-                                width: handle_width,
-                                height: border_width,
-                            },
-                            ..Default::default()
-                        },
-                        accent,
-                    );
-
-                    // Handle right border (shadow - 3D raised effect)
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: handle_x + handle_width - border_width,
-                                y: bounds.y,
-                                width: border_width,
-                                height: bounds.height,
-                            },
-                            ..Default::default()
-                        },
-                        accent_bottom_right,
-                    );
-                }
-
-                // Grip groove (centered in handle)
-                if is_rounded {
-                    // Rounded mode: Knurled vertical pill ridges
-                    let num_ridges = 4;
-                    let ridge_width = 2.0;
-                    let ridge_spacing = 4.0; // 2px ridge + 2px gap
-                    let total_grip_width = (num_ridges as f32) * ridge_spacing - 2.0;
-                    let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
-
-                    // Taller pill ridges
-                    let grip_padding_y = 6.0;
-                    let grip_height = bounds.height - grip_padding_y * 2.0;
-                    let grip_y = bounds.y + grip_padding_y;
-
-                    for i in 0..num_ridges {
-                        let ridge_x = start_x + (i as f32) * ridge_spacing;
-
-                        renderer.fill_quad(
-                            renderer::Quad {
-                                bounds: Rectangle {
-                                    x: ridge_x,
-                                    y: grip_y,
-                                    width: ridge_width,
-                                    height: grip_height,
-                                },
-                                border: iced::Border {
-                                    radius,
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            },
-                            grip_top_left,
-                        );
-                    }
-                } else {
-                    // Non-rounded mode: Knurled vertical ridges
-                    let num_ridges = 5;
-                    let ridge_spacing = 3.0; // 2px ridge + 1px gap
-                    let total_grip_width = (num_ridges as f32) * ridge_spacing - 1.0;
-                    let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
-
-                    // Make the ridges taller than the old single groove
-                    let grip_padding_y = 6.0;
-                    let grip_height = bounds.height - grip_padding_y * 2.0;
-                    let grip_y = bounds.y + grip_padding_y;
-
-                    for i in 0..num_ridges {
-                        let ridge_x = start_x + (i as f32) * ridge_spacing;
-
-                        // Ridge left edge (light - raised effect)
-                        renderer.fill_quad(
-                            renderer::Quad {
-                                bounds: Rectangle {
-                                    x: ridge_x,
-                                    y: grip_y,
-                                    width: 1.0,
-                                    height: grip_height,
-                                },
-                                ..Default::default()
-                            },
-                            grip_top_left,
-                        );
-
-                        // Ridge right edge (dark - raised effect)
-                        renderer.fill_quad(
-                            renderer::Quad {
-                                bounds: Rectangle {
-                                    x: ridge_x + 1.0,
-                                    y: grip_y,
-                                    width: 1.0,
-                                    height: grip_height,
-                                },
-                                ..Default::default()
-                            },
-                            grip_bottom_right,
-                        );
-                    }
-                }
-            }); // end handle layer
+                        ..Default::default()
+                    },
+                    crate::theme::accent_bright(),
+                );
+            });
         }
 
-        // Tooltip is now drawn via overlay() for proper z-ordering
+        // Tooltip is drawn via overlay() for proper z-ordering
     }
 
     fn mouse_interaction(
@@ -768,14 +378,13 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
         if state.is_dragging {
             let bounds = layout.bounds();
-            let handle_width = 32.0;
-            let effective_width = bounds.width - handle_width;
+            let effective_width = bounds.width - HANDLE_SIZE;
             let handle_x = bounds.x + state.drag_progress * effective_width;
 
             Some(iced::advanced::overlay::Element::new(Box::new(
                 TooltipOverlay {
                     handle_x: handle_x + translation.x,
-                    handle_width,
+                    handle_width: HANDLE_SIZE,
                     bounds_y: bounds.y + translation.y,
                     drag_progress: state.drag_progress,
                     duration: self.duration,
@@ -793,7 +402,10 @@ impl<'a, Message: Clone + 'a> From<ProgressBar<'a, Message>> for Element<'a, Mes
     }
 }
 
-/// Overlay for the seek time tooltip - renders on top of all other widgets
+/// Overlay for the seek time tooltip — renders on top of all other widgets.
+///
+/// Flat design: 1 px `theme::border()` outline on `theme::bg0_hard()` background;
+/// no 3D bevel. A small downward arrow points at the handle.
 struct TooltipOverlay {
     handle_x: f32,
     handle_width: f32,
@@ -839,7 +451,6 @@ impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> f
         };
 
         let bounds = layout.bounds();
-        let border_width = 2.0;
 
         // Tooltip dimensions
         let tooltip_height = 20.0;
@@ -855,14 +466,16 @@ impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> f
         let seek_seconds = (seek_time % 60.0) as u32;
         let time_text = format!("{seek_minutes}:{seek_seconds:02}");
 
-        // Tooltip colors using Gruvbox theme
         use crate::theme;
         let tooltip_bg = theme::bg0_hard();
-        let tooltip_border_dark = theme::bg0();
-        let tooltip_border_light = theme::bg3();
+        let tooltip_border = theme::border();
         let tooltip_text_color = theme::fg1();
+        // `ui_radius_sm()` returns `0.0.into()` in flat mode.
+        let radius = crate::theme::ui_radius_sm();
 
-        // Draw small arrow/pointer below tooltip (pointing down to handle)
+        // Arrow pointing down toward the handle. Drawn as a small filled square
+        // tucked below the tooltip body — keeps the visual link without needing
+        // a triangle primitive.
         let arrow_x = tooltip_x + tooltip_width / 2.0 - tooltip_arrow_size / 2.0;
         let arrow_y = tooltip_y + tooltip_height;
 
@@ -879,98 +492,25 @@ impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> f
             tooltip_bg,
         );
 
-        // Draw tooltip background with 3D borders
-        let radius = crate::theme::ui_border_radius();
-        let is_rounded = crate::theme::is_rounded_mode();
-
-        if is_rounded {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: tooltip_x,
-                        y: tooltip_y,
-                        width: tooltip_width,
-                        height: tooltip_height,
-                    },
-                    border: iced::Border {
-                        color: tooltip_border_dark,
-                        width: border_width,
-                        radius,
-                    },
-                    ..Default::default()
+        // Tooltip body — flat fill with 1 px border.
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: Rectangle {
+                    x: tooltip_x,
+                    y: tooltip_y,
+                    width: tooltip_width,
+                    height: tooltip_height,
                 },
-                tooltip_bg,
-            );
-        } else {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: tooltip_x + border_width,
-                        y: tooltip_y + border_width,
-                        width: tooltip_width - border_width * 2.0,
-                        height: tooltip_height - border_width * 2.0,
-                    },
-                    ..Default::default()
+                border: iced::Border {
+                    color: tooltip_border,
+                    width: 1.0,
+                    radius,
                 },
-                tooltip_bg,
-            );
-
-            // Tooltip top border (dark)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: tooltip_x,
-                        y: tooltip_y,
-                        width: tooltip_width,
-                        height: border_width,
-                    },
-                    ..Default::default()
-                },
-                tooltip_border_dark,
-            );
-
-            // Tooltip left border (dark)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: tooltip_x,
-                        y: tooltip_y,
-                        width: border_width,
-                        height: tooltip_height,
-                    },
-                    ..Default::default()
-                },
-                tooltip_border_dark,
-            );
-
-            // Tooltip bottom border (light)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: tooltip_x,
-                        y: tooltip_y + tooltip_height - border_width,
-                        width: tooltip_width,
-                        height: border_width,
-                    },
-                    ..Default::default()
-                },
-                tooltip_border_light,
-            );
-
-            // Tooltip right border (light)
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: tooltip_x + tooltip_width - border_width,
-                        y: tooltip_y,
-                        width: border_width,
-                        height: tooltip_height,
-                    },
-                    ..Default::default()
-                },
-                tooltip_border_light,
-            );
-        }
+                shadow: Shadow::default(),
+                ..Default::default()
+            },
+            tooltip_bg,
+        );
 
         // Draw the time text centered in tooltip
         let font = crate::theme::ui_font();

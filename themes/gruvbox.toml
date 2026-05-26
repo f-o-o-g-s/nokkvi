@@ -1,5 +1,8 @@
 name = "Gruvbox"
 
+[dark]
+border = "#151515"
+
 [dark.background]
 default = "#282828"
 hard = "#1e1e1e"
@@ -18,7 +21,6 @@ level3 = "#fbf1c7"
 level4 = "#fbf1c7"
 
 [dark.accent]
-border_dark = "#49a8ac"
 border_light = "#3b6c6e"
 bright = "#49a8ac"
 primary = "#458588"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#83a598", "#83a598", "#b8bb26", "#b8bb26", "#fb4934", "#fb4934"]
 
+[light]
+border = "#c4bc9b"
+
 [light.background]
 default = "#fbf1c7"
 hard = "#e7deb7"
@@ -65,7 +70,6 @@ level3 = "#282828"
 level4 = "#282828"
 
 [light.accent]
-border_dark = "#49a8ac"
 border_light = "#aebaa5"
 bright = "#49a8ac"
 primary = "#458588"

@@ -25,8 +25,8 @@ use nokkvi_data::types::info_modal::InfoModalItem;
 use crate::{
     theme,
     widgets::{
-        hover_overlay::HoverOverlay,
-        sizes::{MODAL_ICON_BUTTON_SIZE, MODAL_ICON_SIZE_LARGE, MODAL_ICON_SIZE_SMALL},
+        modal_button::modal_icon_button,
+        sizes::{MODAL_ICON_SIZE_LARGE, MODAL_ICON_SIZE_SMALL},
     },
 };
 
@@ -603,17 +603,10 @@ pub(crate) fn info_modal_overlay<'a>(
         .padding(20)
         .width(Length::Fixed(MODAL_WIDTH));
 
-    // ── Dialog box with themed border ────────────────────────────
+    // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
+    // ui_radius_lg corners. Five overlay modals route through this helper.
     let dialog_box = container(content)
-        .style(|_theme| container::Style {
-            background: Some(theme::bg1().into()),
-            border: iced::Border {
-                color: theme::accent_bright(),
-                width: 1.0,
-                radius: theme::ui_border_radius(),
-            },
-            ..Default::default()
-        })
+        .style(theme::modal_frame_style)
         .max_height(MODAL_MAX_HEIGHT)
         .width(Length::Shrink);
 
@@ -628,43 +621,6 @@ pub(crate) fn info_modal_overlay<'a>(
 // =============================================================================
 // Helpers
 // =============================================================================
-
-/// Borderless icon-only modal-header button using the canonical
-/// `mouse_area(HoverOverlay(container(svg(...))))` chrome.
-///
-/// Replaces the bare `button(svg(...))` chassis that the close, copy, and
-/// folder buttons previously used — they captured `ButtonPressed` early and
-/// bypassed the per-slot hover affordance the rest of the modal headers use.
-fn modal_icon_button<'a>(
-    icon_path: &'static str,
-    icon_size: f32,
-    on_press: InfoModalMessage,
-) -> Element<'a, InfoModalMessage> {
-    mouse_area(
-        HoverOverlay::new(
-            container(
-                crate::embedded_svg::svg_widget(icon_path)
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .style(|_theme, _status| svg::Style {
-                        color: Some(theme::fg3()),
-                    }),
-            )
-            .width(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
-            .height(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .center(Length::Fixed(MODAL_ICON_BUTTON_SIZE)),
-        )
-        .border_radius(theme::ui_border_radius()),
-    )
-    .on_press(on_press)
-    .interaction(iced::mouse::Interaction::Pointer)
-    .into()
-}
 
 #[cfg(test)]
 mod tests {

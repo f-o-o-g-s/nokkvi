@@ -30,11 +30,11 @@ Every custom `overlay::Overlay` impl that draws a `MENU_SHADOW`-bearing quad mus
 
 Adaptive layout via `PlayerBarLayout { kebab_mode_count, transports_collapsed }`. `compute_layout(width, prev)` applies per-mode hysteresis so modes fold into the kebab one at a time as the window narrows. `CULL_ORDER` (right-to-left): Visualizer, Crossfade, SFX, EQ, Consume, Shuffle, Repeat. `CULL_ENTER_WIDTHS` 1070→670 px, `CULL_HYSTERESIS_PX = 40`. Transport row collapses 5→3 buttons (prev / play-pause / next) at narrow widths.
 
-Scroll-to-volume on wheel. Horizontal volume mode stacks sliders. Progress-track metadata mode builds the scrolling overlay + format-info container.
+Scroll-to-volume on wheel (both music + SFX sliders publish a delta via `on_scroll`; the slider widget no longer falls back to `on_change` / `on_release` with stale base). Horizontal volume mode stacks sliders. `MiniPlayer` mode builds an inline artwork + 3-line metadata column to the left of the transports; `Nokkvi::mini_player_artwork()` is the gated resolver that surfaces the cached large-artwork handle only when that mode is active.
 
 ## Progress Bar (`progress_bar.rs`)
 
-Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling colored metadata (2 s pause, 30 px/s, 80 px loop gap). Handle rendered in a separate `with_layer()` with an expanded clip rect. Stale segments persist if not rebuilt after a metadata-toggle change.
+Custom `iced::advanced` seekable widget. Track + handle rendered in separate `with_layer()` passes so the tooltip and handle survive the per-overlay scissor. Drag-release publishes `Seek(progress * duration)` once; in-flight position keeps the handle smooth via `last_position + elapsed` interpolation.
 
 ## Key Widgets
 
@@ -45,9 +45,8 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding, `base_slot_list_empty_state()` |
 | Scroll Indicator | `scroll_indicator.rs` | Transient scrollbar overlay, `wrap_with_scroll_indicator()`, drag-to-seek |
 | Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale + external `flash_at()`. Default radius = `ui_border_radius()` |
-| Track Info Strip | `track_info_strip.rs` | Now-playing metadata (player bar + top bar + progress-track overlay). All three renderers share the `MetadataSegment` builder + `MetadataSegmentKind` enum |
+| Track Info Strip | `track_info_strip.rs` | Now-playing metadata. `build_now_playing_segments` returns `Vec<String>` (title / artist / album fragments + separators) that the merged-mode marquee concats |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
-| Hover Indicator | `hover_indicator.rs` | Canvas hover underline, `HoverExpand` for hot-zone expansion |
 | Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry` |
 | Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown, generic over `Key` (controlled via `OpenMenu::CheckboxDropdown`) |
 | Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum |
@@ -68,18 +67,20 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
 | Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
 | Default Playlist Picker | `default_playlist_picker.rs` | Modal overlay (font-picker pattern) to pick the default playlist; state lives on `Nokkvi.default_playlist_picker` |
-| Library Filter Trigger | `library_filter_trigger.rs` | Nav-bar button anchoring the multi-library selector popover. Renders a count badge via `badge_pip::draw_badge_pip` when a subset is active. Auto-hidden on single-library servers |
+| Library Filter Trigger | `library_filter_trigger.rs` | Nav-bar button anchoring the multi-library selector popover. Renders a count badge via `badge_pip::draw_badge_pip` when a subset is active. Auto-hidden on single-library servers. `FILTERED_CHASSIS_WIDTH` const pins the filtered render's wider chassis |
 | Badge Pip | `badge_pip.rs` | Tiny "active-state" pip drawn in the top-right of an icon button. Shared between the kebab `player_modes_menu` and `library_filter_trigger` |
 | Boat | `boat.rs` (+ `boat_physics.rs` / `boat_tests.rs`) | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes |
+| Menu Chrome | `menu_chrome.rs` | Shared overlay-menu vocabulary: `fill()`, `border()`, `container_style()` accessors consumed by the four overlay menus (hamburger / player_modes / checkbox_dropdown / context_menu) so the `bg1 + border + ui_radius_md + MENU_SHADOW` recipe lives at one site |
+| Modal Button | `modal_button.rs` | `modal_icon_button(icon, size, on_press)` — the shared `mouse_area(HoverOverlay(container(svg)))` chassis used by About / Info modal headers |
 
-## 3D Buttons
+## Modal Frame Style
 
-`three_d_button.rs` / `three_d_icon_button.rs`: single bordered quad in rounded mode, 5-quad bevel in squared mode. `AnimatedPress` (`three_d_helpers.rs`) for press scale animation.
+`theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, and `default_playlist_picker` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
 
 ## Nav Bars
 
-- **Top** (`nav_bar.rs`): tabs + format stats + hamburger. Metadata only when `TrackInfoDisplay::TopBar`. Progressive collapsing (album <900, artist <750, title <600). `HoverIndicator` underlines.
-- **Side** (`side_nav_bar.rs`): vertical sidebar. `NavDisplayMode` { TextOnly, TextAndIcons, IconsOnly }.
+- **Top** (`nav_bar.rs`): tabs + format stats + hamburger. Metadata only when `TrackInfoDisplay::TopBar`. Progressive collapsing (album <900, artist <750, title <600). `flat_tab_container_style` paints the full-cell `accent_bright()` active fill; the right-edge indicator strip from the pre-redesign was removed. `NAV_TABS` is the single source of truth for which tabs render — `NAV_TABS[i] == NavView::ALL[i]` is pinned by a runtime test.
+- **Side** (`side_nav_bar.rs`): vertical sidebar. `NavDisplayMode` { TextOnly, TextAndIcons, IconsOnly }. Same active-fill recipe as the top nav.
 - **None** layout: no nav chrome — only the active page + player bar render (minimalist mode).
 
 ## Layout Constants (`slot_list.rs`)
@@ -96,6 +97,6 @@ Single source of truth: `chrome_height_with_header()`, `NAV_BAR_HEIGHT = 32`, `V
 
 Top-level module. The lookup table is **generated by `build.rs`** from the contents of `assets/icons/` — adding/removing an icon is a one-step change (drop or remove the file, rebuild). Unknown paths return `play.svg` with a warn log. `themed_logo_svg()` rewrites the Nokkvi logo's hex fills to the active theme (fg1, success, accent).
 
-## Critical Pattern
+## HoverOverlay + native buttons
 
-**HoverOverlay wraps containers, not native buttons.** Buttons capture `ButtonPressed` early. Pattern: `mouse_area(HoverOverlay::new(container(...))).on_press(msg)`.
+`HoverOverlay::new(button)` works in some places — e.g. `player_bar.rs:523` actively wraps a `button` and the hover/press visual fires correctly because commit `d2f22a0` added `shell.request_redraw()` to `HoverOverlay::update`. The canonical pattern is still `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells (slot rows, header icons, modal-icon buttons), but the absolute "never wraps a button" framing in older notes is too strict.

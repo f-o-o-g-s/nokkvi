@@ -80,7 +80,7 @@ define_settings! {
                 category: "Layout",
                 subtitle: Some("Where to show the now-playing metadata strip"),
                 default: "Off",
-                options: &["Off", "Player Bar", "Top Bar", "Progress Track"],
+                options: &["Off", "Player Bar", "Top Bar", "Top Bar Under", "Mini Player"],
                 read_field: |d| d.track_info_display.as_ref(),
             },
         },
@@ -268,10 +268,7 @@ define_settings! {
             ui_meta: {
                 label: "Click Action",
                 category: "Metadata Strip",
-                subtitle: Some(
-                    "What happens when you click the track info strip · \
-                     no effect in Progress Track mode",
-                ),
+                subtitle: Some("What happens when you click the track info strip"),
                 default: "Go to Queue",
                 options: &[
                     "Go to Queue",

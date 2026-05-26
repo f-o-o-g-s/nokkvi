@@ -402,6 +402,9 @@ impl Nokkvi {
             HotkeyMessage::FindSimilar => self.handle_find_similar_for_playing_track(),
             HotkeyMessage::FindTopSongs => self.handle_find_top_songs_for_playing_track(),
             HotkeyMessage::EditValue(up) => self.handle_edit_value(up),
+            HotkeyMessage::SettingsCategoryMotion(forward) => {
+                self.handle_settings_category_motion(forward)
+            }
             HotkeyMessage::RefreshView => self
                 .current_view_page()
                 .and_then(|p| p.reload_message())
@@ -434,7 +437,10 @@ impl Nokkvi {
         // key event, suppress hotkey dispatch to avoid triggering actions
         // while the user is typing. Exceptions:
         //   - Escape: always allowed (close overlays, clear search)
+        //   - Tab: always allowed (slot-list navigation)
         //   - Ctrl+key: always allowed (intentional shortcuts like Ctrl+S)
+        //   - Shift+key: always allowed (settings sidebar nav binds
+        //     Shift+Tab / Shift+Backspace; Shift is not a typing modifier)
         if status == iced::event::Status::Captured {
             let is_escape = matches!(
                 key,
@@ -444,7 +450,7 @@ impl Nokkvi {
                 key,
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
             );
-            if !is_escape && !is_tab && !modifiers.control() {
+            if !is_escape && !is_tab && !modifiers.control() && !modifiers.shift() {
                 return Task::none();
             }
         }
@@ -454,6 +460,22 @@ impl Nokkvi {
             Some(msg) => self.update(msg),
             None => Task::none(),
         }
+    }
+
+    /// Settings sidebar category motion: forward = next category, backward =
+    /// previous. Routes to `SettingsMessage::SidebarDown`/`SidebarUp` when the
+    /// settings view is active; no-op everywhere else (the hotkey config can
+    /// bind these globally without bleeding into other views).
+    pub(crate) fn handle_settings_category_motion(&mut self, forward: bool) -> Task<Message> {
+        if self.current_view != View::Settings {
+            return Task::none();
+        }
+        let msg = if forward {
+            crate::views::SettingsMessage::SidebarDown
+        } else {
+            crate::views::SettingsMessage::SidebarUp
+        };
+        self.handle_settings(msg)
     }
 
     /// Track the current keyboard modifier state so views can read it

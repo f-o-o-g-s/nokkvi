@@ -8,7 +8,7 @@
 use iced::{
     Alignment, Background, Border, Element, Length,
     font::{Font, Weight},
-    widget::{Space, button, canvas, column, container, mouse_area, row, text, text::Wrapping},
+    widget::{Space, column, container, mouse_area, row, text, text::Wrapping},
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
@@ -143,7 +143,24 @@ pub enum NavBarMessage {
 // Navigation Bar Component
 // ============================================================================
 
-const NAV_BAR_HEIGHT: f32 = 28.0;
+/// Tray padding (px) inside the rounded-mode top nav bar — the rounded
+/// design tucks the pill tabs into a 6 px vertical / 8 px horizontal
+/// inset so the active pill never kisses the chrome bottom border.
+const NAV_TRAY_PAD_V: f32 = 6.0;
+const NAV_TRAY_PAD_H: f32 = 8.0;
+
+/// Spacing (px) between pill tabs in rounded mode. Flat mode keeps
+/// 0-spacing since the tabs are 1 px `border()`-separated cells.
+const NAV_TRAY_GAP: f32 = 4.0;
+
+/// Height (px) of the rounded-mode pill tab — 32 px matches the design
+/// tray (`6 + 32 + 6 = 44 = nav_bar_height(rounded)`).
+const NAV_PILL_HEIGHT: f32 = 32.0;
+
+/// Vertical divider (px) drawn between the hamburger/library left
+/// cluster and the tab strip in rounded mode (matches design's 22 px
+/// divider centered in the tray).
+const NAV_DIVIDER_HEIGHT: f32 = 22.0;
 
 /// Ordered list of navigation tabs — single source of truth shared with `side_nav_bar`.
 /// Each entry: (label, icon_path, NavView).
@@ -168,7 +185,10 @@ pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
 /// Flat-mode tab button style (filled accent background when active, bg0_hard idle).
 ///
 /// Hover feedback is handled by `HoverOverlay` at the call site — this style
-/// only distinguishes active (accent) vs idle (bg0_hard).
+/// only distinguishes active (accent) vs idle (bg0_hard). Flat tabs are
+/// 1-px-`border()`-separated cells, so no border radius is applied (would
+/// punch holes into the inter-tab rules); see also the top-level
+/// `tab_separator` for the separating rule.
 ///
 /// Shared between the horizontal nav bar and the vertical side nav bar.
 pub(crate) fn flat_tab_container_style(
@@ -181,12 +201,32 @@ pub(crate) fn flat_tab_container_style(
             Some(Background::Color(theme::bg0_hard()))
         },
         text_color: Some(if is_active {
-            theme::bg0()
+            theme::bg0_hard()
+        } else {
+            theme::fg0()
+        }),
+        border: Border::default(),
+        ..Default::default()
+    }
+}
+
+/// Rounded-mode pill-tab button style. Active = filled `accent_bright()`
+/// with `bg0_hard()` text; idle = transparent over the tray background.
+/// The pill radius makes hover regions self-shaping inside the tray.
+fn rounded_pill_tab_style(is_active: bool) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_theme: &iced::Theme| container::Style {
+        background: if is_active {
+            Some(Background::Color(theme::accent_bright()))
+        } else {
+            None
+        },
+        text_color: Some(if is_active {
+            theme::bg0_hard()
         } else {
             theme::fg2()
         }),
         border: Border {
-            radius: theme::ui_border_radius(),
+            radius: theme::ui_radius_pill(),
             ..Default::default()
         },
         ..Default::default()
@@ -203,45 +243,113 @@ pub(crate) fn colored_icon<'a>(path: &str, size: f32, color: iced::Color) -> ice
         .style(move |_, _| iced::widget::svg::Style { color: Some(color) })
 }
 
-/// 2px vertical separator line between tabs.
-///
-/// In rounded mode separators are hidden by default; pass `force_visible = true`
-/// to keep one visible (used for the trailing separator after the last nav tab).
+/// 1 px vertical `theme::border()` separator between flat-mode nav cells.
+/// In rounded mode the tabs are free-floating pills, so the separators
+/// hide by default — pass `force_visible = true` for the in-tray divider
+/// between the left cluster and the tabs (the only sided rule the rounded
+/// design preserves).
 fn tab_separator<'a, M: 'a>(force_visible: bool) -> Element<'a, M> {
-    theme::nav_separator(theme::NavSeparatorAxis::Vertical, force_visible)
+    let visible = force_visible || !theme::is_rounded_mode();
+    let height = if theme::is_rounded_mode() && force_visible {
+        Length::Fixed(NAV_DIVIDER_HEIGHT)
+    } else {
+        Length::Fill
+    };
+    container(Space::new())
+        .width(Length::Fixed(1.0))
+        .height(height)
+        .style(move |_| container::Style {
+            background: if visible {
+                Some(theme::border().into())
+            } else {
+                None
+            },
+            ..Default::default()
+        })
+        .into()
 }
 
-/// 2px vertical separator for the metadata info row — always visible
-/// (callers want a hard visual divide between fields even in rounded mode).
+/// 1 px vertical `theme::border()` separator for the metadata info row
+/// — always visible, both modes (the metadata fields read as distinct
+/// columns regardless of chrome style, mirroring the design's hard
+/// vertical rules between value bands).
 fn info_separator<'a, M: 'a>() -> Element<'a, M> {
-    theme::nav_separator(theme::NavSeparatorAxis::Vertical, true)
+    container(Space::new())
+        .width(Length::Fixed(1.0))
+        .height(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        })
+        .into()
 }
 
-/// Height of the rounded underline indicator beneath active/hovered tabs
-const UNDERLINE_HEIGHT: f32 = 2.0;
+/// Tab label font size — scales down at narrow window widths so adjacent
+/// `FillPortion(1)` tab cells don't overrun each other when the metadata
+/// strip lives elsewhere (`tabs_expand`). Bands are picked so the longest
+/// label (`PLAYLISTS`) stays inside its per-tab share, accounting for the
+/// hamburger + library + divider cluster (~120 px) and 7-tab division.
+/// At very narrow widths (<500 px) some overflow is unavoidable for text
+/// modes — the floor of 9 px keeps the labels legible without dipping
+/// into illegibility.
+fn tab_text_size(window_width: f32) -> f32 {
+    if window_width >= 800.0 {
+        14.0
+    } else if window_width >= 650.0 {
+        12.0
+    } else if window_width >= 500.0 {
+        10.0
+    } else {
+        9.0
+    }
+}
 
 /// Build tab content based on display mode (text, icon+text, icon-only).
 ///
 /// Shared between nav tab rendering and the settings indicator.
+/// `text_size` is the active label size from [`tab_text_size`] — callers
+/// resolve it from `window_width` so labels shrink in lockstep with the
+/// shrinking tab cells.
 fn tab_content<'a>(
     label: &'static str,
     icon_path: &'static str,
     display_mode: NavDisplayMode,
     text_color: iced::Color,
+    text_size: f32,
 ) -> Element<'a, NavBarMessage> {
     let icon_size = 14.0;
     match display_mode {
-        NavDisplayMode::TextOnly => container(text(label).size(14.0).font(Font {
-            weight: Weight::Bold,
-            ..theme::ui_font()
-        }))
-        .width(Length::Shrink)
+        // Both inner wrappers use `Length::Fill` so the inner cell has a
+        // defined width that matches the outer's padded content area. With a
+        // `Length::Shrink` inner the centering broke when the label was wider
+        // than the available space — iced anchored the Shrink child at the
+        // content area's left edge instead of centering its overflow. Fill
+        // gives the inner a real lane, and the text/row inside it stays
+        // visually centered (with symmetric overflow at very narrow widths)
+        // via the inner's `align_x(Center)`.
+        //
+        // The text widget itself also gets `align_x(Horizontal::Center)` and
+        // `wrapping(None)` so iced's text layout draws the glyphs centered
+        // within its bounds rather than left-anchored when the bounds clip
+        // the natural width.
+        NavDisplayMode::TextOnly => container(
+            text(label.to_uppercase())
+                .size(text_size)
+                .font(Font {
+                    weight: Weight::Bold,
+                    ..theme::ui_font()
+                })
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .into(),
         NavDisplayMode::IconsOnly => container(colored_icon(icon_path, icon_size, text_color))
-            .width(Length::Shrink)
+            .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
@@ -249,15 +357,18 @@ fn tab_content<'a>(
         NavDisplayMode::TextAndIcons => container(
             row![
                 colored_icon(icon_path, icon_size, text_color),
-                text(label).size(14.0).font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                }),
+                text(label.to_uppercase())
+                    .size(text_size)
+                    .font(Font {
+                        weight: Weight::Bold,
+                        ..theme::ui_font()
+                    })
+                    .wrapping(iced::widget::text::Wrapping::None),
             ]
             .spacing(4)
             .align_y(Alignment::Center),
         )
-        .width(Length::Shrink)
+        .width(Length::Fill)
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
@@ -273,9 +384,30 @@ fn tab_content<'a>(
 /// - Right: Audio format info
 pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // -------------------------------------------------------------------------
-    // Left Section: Hamburger + Library Filter + Flat Navigation Tabs
+    // Left Section: Hamburger + Library Filter + Navigation Tabs
     // -------------------------------------------------------------------------
     let settings_open = data.settings_open;
+    let window_width = data.window_width;
+
+    // Whenever the metadata strip lives elsewhere (Off / Player Bar / Mini
+    // Player), the tabs grow to consume the otherwise-empty center lane
+    // instead of huddling at the left edge — irrespective of display mode.
+    // `nav_bar` is only called from the top-nav layout (`app_view.rs`
+    // dispatches to `widgets::side_nav_bar` for side mode and emits no
+    // nav widget at all in none mode), so historical `is_side_nav`
+    // branches in here were dead. The merged-mode marquee gate stays:
+    // when `TrackInfoDisplay::TopBar` is active the tabs surrender lane
+    // width so the metadata strip can take it.
+    let show_nav_metadata = {
+        use nokkvi_data::types::player_settings::TrackInfoDisplay;
+        theme::track_info_display() == TrackInfoDisplay::TopBar
+    };
+    let tabs_expand = !show_nav_metadata;
+    // Resolved once per render and forwarded into every tab; pinning a
+    // single size per pass keeps every cell's label in lockstep so they
+    // shrink together (no jagged staircase across the strip).
+    let text_size = tab_text_size(window_width);
+
     // Shared tab builder — used for both regular nav tabs AND the settings indicator.
     // `force_active` overrides the active state (used for settings tab, always active).
     let nav_tab = |label: &'static str,
@@ -290,97 +422,101 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         let tab_padding: [u16; 2] = if matches!(display_mode, NavDisplayMode::IconsOnly) {
             [2, 6]
         } else {
-            [2, 10]
+            [2, 14]
+        };
+        let tab_width = if tabs_expand {
+            Length::FillPortion(1)
+        } else {
+            Length::Shrink
         };
 
         if is_rounded {
-            // Rounded mode: flat button + static underline indicator below
-            let rounded_accent = theme::active_accent();
+            // Rounded mode: 32 px pill that lives inside the tray's
+            // padding. Active = filled `accent_bright()` + `bg0_hard()`
+            // text; idle = transparent over the chrome bg. Hover comes
+            // from `HoverOverlay`, scoped to the pill radius so the
+            // tint follows the chip outline.
+            let tab_style = rounded_pill_tab_style(is_active);
             let text_color = if is_active {
-                rounded_accent
-            } else {
-                theme::fg2()
-            };
-            let tab_style = move |_theme: &iced::Theme, status: button::Status| {
-                let is_hovered =
-                    matches!(status, button::Status::Hovered | button::Status::Pressed);
-                button::Style {
-                    background: Some(Background::Color(theme::bg0_hard())),
-                    text_color: if is_active {
-                        rounded_accent
-                    } else if is_hovered {
-                        theme::fg1()
-                    } else {
-                        theme::fg2()
-                    },
-                    ..button::Style::default()
-                }
-            };
-
-            // Underline: accent colored for active tab, accent on hover for idle
-            let underline_active = if is_active {
-                Some(rounded_accent)
-            } else {
-                None
-            };
-            let underline_hover = if !is_active {
-                Some(rounded_accent)
-            } else {
-                None
-            };
-
-            let elem: Element<'_, NavBarMessage> = column![
-                button(tab_content(label, icon_path, display_mode, text_color))
-                    .on_press(NavBarMessage::SwitchView(view))
-                    .padding(tab_padding)
-                    .height(Length::Fill)
-                    .style(tab_style),
-                canvas(super::hover_indicator::HoverIndicator {
-                    indicator_color: underline_active,
-                    hover_indicator_color: underline_hover,
-                    expand: super::hover_indicator::HoverExpand::up(NAV_BAR_HEIGHT),
-                })
-                .width(Length::Fill)
-                .height(Length::Fixed(UNDERLINE_HEIGHT)),
-            ]
-            .spacing(0)
-            .width(Length::Shrink)
-            .height(Length::Fill)
-            .into();
-            elem
-        } else {
-            // Flat mode: filled background container wrapped in mouse_area so the
-            // HoverOverlay's press-scale fires (native button captures ButtonPressed first).
-            let tab_style = flat_tab_container_style(is_active);
-            let text_color = if is_active {
-                theme::bg0()
+                theme::bg0_hard()
             } else {
                 theme::fg2()
             };
 
-            mouse_area(
+            let elem: Element<'_, NavBarMessage> = mouse_area(
                 super::hover_overlay::HoverOverlay::new(
-                    container(tab_content(label, icon_path, display_mode, text_color))
-                        .padding(tab_padding)
-                        .height(Length::Fill)
-                        .style(tab_style),
+                    container(tab_content(
+                        label,
+                        icon_path,
+                        display_mode,
+                        text_color,
+                        text_size,
+                    ))
+                    .padding(tab_padding)
+                    .height(Length::Fixed(NAV_PILL_HEIGHT))
+                    .center_y(Length::Fixed(NAV_PILL_HEIGHT))
+                    .width(tab_width)
+                    .align_x(Alignment::Center)
+                    .style(tab_style),
                 )
-                .border_radius(theme::ui_border_radius()),
+                .border_radius(theme::ui_radius_pill()),
             )
             .on_press(NavBarMessage::SwitchView(view))
             .interaction(iced::mouse::Interaction::Pointer)
-            .into()
+            .into();
+            elem
+        } else {
+            // Flat mode: full-height accent block when active, `bg0_hard()`
+            // cell otherwise. Sided 1 px `theme::border()` rules between
+            // cells handled by `tab_separator()` at the assembly level.
+            let tab_style = flat_tab_container_style(is_active);
+            let text_color = if is_active {
+                theme::bg0_hard()
+            } else {
+                theme::fg0()
+            };
+
+            let elem: Element<'_, NavBarMessage> = mouse_area(
+                super::hover_overlay::HoverOverlay::new(
+                    container(tab_content(
+                        label,
+                        icon_path,
+                        display_mode,
+                        text_color,
+                        text_size,
+                    ))
+                    .padding(tab_padding)
+                    .height(Length::Fill)
+                    .width(tab_width)
+                    .align_x(Alignment::Center)
+                    .style(tab_style),
+                )
+                .border_radius(0.0.into()),
+            )
+            .on_press(NavBarMessage::SwitchView(view))
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into();
+            elem
         }
     };
 
     let current = data.current_view;
-    let is_side_nav = theme::is_side_nav();
 
     // -------------------------------------------------------------------------
     // Hamburger Menu (head of left_section, beside library filter)
     // -------------------------------------------------------------------------
-    let hamburger: Element<'static, NavBarMessage> =
-        super::hover_overlay::HoverOverlay::new(HamburgerMenu::new(
+    // Pill chassis matches the nav-tab band: rounded mode uses the 32 px
+    // pill (overshoot lands in the tray padding and is invisible against
+    // the matching tray bg), flat mode shrinks to the bar's actual
+    // content height so the open-state accent_bright pill doesn't escape
+    // past the bar's top/bottom edges (flat mode has zero tray padding).
+    let cluster_pill_h = if theme::is_rounded_mode() {
+        NAV_PILL_HEIGHT
+    } else {
+        theme::nav_bar_height() - 1.0
+    };
+    let hamburger: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
+        HamburgerMenu::new(
             |action| match action {
                 MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
                 MenuAction::OpenSettings => NavBarMessage::OpenSettings,
@@ -392,9 +528,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             },
             data.hamburger_open,
             data.is_light_mode,
-        ))
-        .border_radius(theme::ui_border_radius())
-        .into();
+        )
+        .chassis(NAV_PILL_HEIGHT, cluster_pill_h),
+    )
+    .border_radius(theme::ui_radius_pill())
+    .into();
 
     // -------------------------------------------------------------------------
     // Library-filter trigger + popover (icon button + dropdown panel)
@@ -420,27 +558,32 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // widget-tree shape never churns across renders (the iced re-render
     // trap that destroys `text_input` focus — see
     // `.agent/rules/gotchas.md` "Widget Tree & Focus").
-    let library_trigger_slot: Element<'static, NavBarMessage> = if is_side_nav {
-        Space::new().into()
-    } else {
+    let library_trigger_slot: Element<'static, NavBarMessage> = {
         let library_count = data.library_count;
         let active_library_count = data.active_library_count;
         let library_selector_open = data.library_selector_open;
         let library_selector_bounds = data.library_selector_bounds;
+        // Match the adjacent nav-tab pill height; widen the filtered
+        // chassis so the `N/M` count fits beside the icon. Height tracks
+        // `cluster_pill_h` so the open-state accent fill stays inside
+        // the bar in flat mode (see hamburger comment above).
         let trigger = super::hover_overlay::HoverOverlay::new(
             super::library_filter_trigger::library_filter_trigger(
                 library_count,
                 active_library_count,
                 library_selector_open,
-                false, // not compact — top nav has room for the N/M text
-                library_selector_bounds,
+                iced::Size::new(NAV_PILL_HEIGHT, cluster_pill_h),
+                iced::Size::new(
+                    super::library_filter_trigger::FILTERED_CHASSIS_WIDTH,
+                    cluster_pill_h,
+                ),
                 |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                     open,
                     trigger_bounds,
                 },
             ),
         )
-        .border_radius(theme::ui_border_radius());
+        .border_radius(theme::ui_radius_pill());
 
         // Popover rows: format song_count into a comma-grouped string
         // for the dim right column; `None` → empty string (Subsonic
@@ -477,34 +620,48 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             .into()
     };
 
-    // In Side mode, nav tabs move to the vertical sidebar — hide them here
-    let mut left_section: iced::widget::Row<'static, NavBarMessage> = if is_side_nav {
-        row![]
-            .spacing(0)
-            .height(Length::Fill)
-            .align_y(Alignment::Center)
+    // Layout: `[hamburger] [library] [divider] [tab] [tab] ... [tab]`.
+    // Flat mode → separators are 1 px `border()` rules at every joint
+    //   (matches the design's `border-right` on each cell).
+    // Rounded mode → only the cluster/tabs divider is visible (the rest of
+    //   the joints are spacing between floating pills); inter-pill gaps
+    //   come from `row::spacing(NAV_TRAY_GAP)`.
+    let is_rounded = theme::is_rounded_mode();
+    let tab_spacing: f32 = if is_rounded { NAV_TRAY_GAP } else { 0.0 };
+    // When `tabs_expand`, the row claims the entire outer lane so its
+    // `FillPortion(1)` tab children have remaining-width to split. Otherwise
+    // the row stays Shrink and the center_section absorbs the leftover lane
+    // (the original behavior, preserved for every non-expanding combination).
+    let left_row_width = if tabs_expand {
+        Length::Fill
     } else {
-        let mut tabs = row![
-            hamburger,
-            tab_separator(false),
-            library_trigger_slot,
-            tab_separator(false)
-        ]
-        .spacing(0)
-        .height(Length::Fill)
-        .align_y(Alignment::Center);
+        Length::Shrink
+    };
+    let mut left_section: iced::widget::Row<'static, NavBarMessage> = {
+        let mut tabs = row![hamburger, library_trigger_slot, tab_separator(true)]
+            .spacing(tab_spacing)
+            .height(Length::Fill)
+            .width(left_row_width)
+            .align_y(Alignment::Center);
         let tab_count = NAV_TABS.len();
         for (i, &(label, icon_path, view)) in NAV_TABS.iter().enumerate() {
             let is_last = i == tab_count - 1;
-            tabs = tabs
-                .push(nav_tab(label, icon_path, view, current, false))
-                .push(tab_separator(is_last && !settings_open));
+            tabs = tabs.push(nav_tab(label, icon_path, view, current, false));
+            // Inter-tab separator: flat draws one between every pair;
+            // rounded mode skips since pills are gap-spaced. The trailing
+            // separator before the metadata strip is force-visible so the
+            // metadata reads as a distinct band in both modes.
+            if !is_last {
+                tabs = tabs.push(tab_separator(false));
+            } else if !settings_open {
+                tabs = tabs.push(tab_separator(true));
+            }
         }
         tabs
     };
 
     // Settings indicator: reuses the same nav_tab builder with force_active=true
-    if settings_open && !is_side_nav {
+    if settings_open {
         // Use Queue as a dummy NavView — the on_press emits CloseSettings
         // which restores the pre-settings view instead of navigating to Queue.
         left_section = left_section.push(nav_tab(
@@ -517,14 +674,9 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         left_section = left_section.push(tab_separator(true));
     }
 
-    // Only show nav bar metadata when the display mode targets the top/nav bar.
-    // Off, PlayerBar, and ProgressTrack modes shouldn't show metadata here.
-    let show_nav_metadata = {
-        use nokkvi_data::types::player_settings::TrackInfoDisplay;
-        let mode = theme::track_info_display();
-        mode == TrackInfoDisplay::TopBar
-    };
-
+    // `show_nav_metadata` is computed up front (alongside `tabs_expand`) so
+    // both the closure and the layout assembly see the same flag.
+    //
     // In merged mode the marquee scrolls any-length text, so breakpoints are
     // irrelevant — all user-enabled fields stay visible regardless of window
     // width.  In non-merged mode fields are separate labeled elements that each
@@ -561,8 +713,17 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
     let center_section: Element<'static, NavBarMessage> =
         if !show_title && !show_artist && !show_album {
-            // All metadata hidden (narrow window OR all user toggles off)
-            Space::new().width(Length::Fill).into()
+            // All metadata hidden (narrow window OR all user toggles off).
+            // When the tabs have already claimed the lane (`tabs_expand`),
+            // collapse the center to a zero-width spacer so it doesn't
+            // compete with the Fill `left_section` for the row's remaining
+            // space. Otherwise keep the historical Fill spacer that absorbs
+            // the lane.
+            if tabs_expand {
+                Space::new().into()
+            } else {
+                Space::new().width(Length::Fill).into()
+            }
         } else if !is_playing {
             // Stopped state - no track loaded
             container(
@@ -802,6 +963,23 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // -------------------------------------------------------------------------
     // Assemble Layout: Hamburger + LibraryFilter + Tabs | Track Info | Format Info
     // -------------------------------------------------------------------------
+    //
+    // Rounded mode adds 6 px vertical / 8 px horizontal tray padding so
+    // the 32-px pill tabs float inside the 44-px chrome bar with even
+    // breathing space (matches the design's `padding: 6px 8px` rule).
+    // Flat mode keeps zero padding — the cells are wall-to-wall, 1-px
+    // `border()`-divided.
+    let tray_padding = if theme::is_rounded_mode() {
+        iced::Padding {
+            top: NAV_TRAY_PAD_V,
+            bottom: NAV_TRAY_PAD_V,
+            left: NAV_TRAY_PAD_H,
+            right: NAV_TRAY_PAD_H,
+        }
+    } else {
+        iced::Padding::ZERO
+    };
+
     let nav_content = container(
         row![
             // Left: Hamburger + Library filter trigger + navigation tabs
@@ -812,7 +990,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             format_section,
         ]
         .align_y(Alignment::Center)
-        .padding(0)
+        .padding(tray_padding)
         .width(Length::Fill)
         .height(Length::Fill),
     )
@@ -820,25 +998,28 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     .height(Length::Fill)
     .style(theme::container_bg0_hard);
 
-    // Bottom separator: always visible (2px, bg1), matching settings separator style.
-    // Unlike shared border_light/border_dark which hide in rounded mode.
+    // Bottom separator: single 1 px `theme::border()` rule, sided. Flat
+    // and rounded both render it (the design CSS sets
+    // `border-bottom: 1px solid #1a2024` in both modes) so the chrome
+    // divides cleanly from the page background below.
     let bottom_separator: Element<'static, NavBarMessage> = container(Space::new())
         .width(Length::Fill)
-        .height(Length::Fixed(2.0))
+        .height(Length::Fixed(1.0))
         .style(move |_| container::Style {
-            background: Some(theme::bg1().into()),
+            background: Some(theme::border().into()),
             ..Default::default()
         })
         .into();
 
-    container(column![
-        crate::widgets::border_light(),
-        crate::widgets::border_dark(),
-        nav_content,
-        bottom_separator,
-    ])
-    .height(Length::Fixed(NAV_BAR_HEIGHT + 4.0))
-    .into()
+    // Total bar height comes from `theme::nav_bar_height()` (32 px flat /
+    // 44 px rounded) — the 1 px bottom separator counts toward it so the
+    // chrome math in `slot_list::chrome_height_with_header()` stays
+    // honest. Content fills `nav_bar_height() - 1`.
+    let total_height = theme::nav_bar_height();
+
+    container(column![nav_content, bottom_separator])
+        .height(Length::Fixed(total_height))
+        .into()
 }
 
 #[cfg(test)]
@@ -940,6 +1121,32 @@ mod layout_invariants {
             "Fill outer row gives Fill center the visible lane (1000 - 100 - 50 = 850), got {}",
             center.bounds().width
         );
+    }
+
+    #[test]
+    fn nav_tabs_covers_every_nav_view_variant() {
+        // `NAV_TABS` must list every `NavView` variant exactly once, and in
+        // the same order as `NavView::ALL`. The static-assert blocks at the
+        // top of `nav_bar.rs` pin the LENGTH (both 7), but a future agent
+        // could re-order or substitute a variant inside the existing length
+        // without those firing. This test pins the per-position equality
+        // so the side-nav reads its tab strip from the same source of truth
+        // as the top-nav.
+        use super::{NAV_TABS, NavView};
+
+        assert_eq!(
+            NAV_TABS.len(),
+            NavView::ALL.len(),
+            "NAV_TABS must list every NavView variant",
+        );
+        for (i, (_, _, nav_view)) in NAV_TABS.iter().enumerate() {
+            assert_eq!(
+                *nav_view,
+                NavView::ALL[i],
+                "NAV_TABS[{i}] = {nav_view:?}, expected NavView::ALL[{i}] = {:?}",
+                NavView::ALL[i],
+            );
+        }
     }
 
     #[test]

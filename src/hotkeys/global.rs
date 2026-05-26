@@ -167,6 +167,13 @@ fn action_to_message(action: HotkeyAction) -> Message {
         // Settings edit
         HotkeyAction::EditUp => Message::Hotkey(HotkeyMessage::EditValue(true)),
         HotkeyAction::EditDown => Message::Hotkey(HotkeyMessage::EditValue(false)),
+        // Settings sidebar navigation
+        HotkeyAction::SettingsCategoryNext => {
+            Message::Hotkey(HotkeyMessage::SettingsCategoryMotion(true))
+        }
+        HotkeyAction::SettingsCategoryPrev => {
+            Message::Hotkey(HotkeyMessage::SettingsCategoryMotion(false))
+        }
         // Global
         HotkeyAction::Escape => Message::Hotkey(HotkeyMessage::ClearSearch),
         HotkeyAction::ResetToDefault => {

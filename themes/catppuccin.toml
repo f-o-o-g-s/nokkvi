@@ -1,5 +1,8 @@
 name = "Catppuccin"
 
+[dark]
+border = "#101018"
+
 [dark.background]
 default = "#1e1e2e"
 hard = "#171723"
@@ -18,7 +21,6 @@ level3 = "#cdd6f4"
 level4 = "#cdd6f4"
 
 [dark.accent]
-border_dark = "#6394e4"
 border_light = "#6e90c9"
 bright = "#6394e4"
 primary = "#89b4fa"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#f9e2af", "#f9e2af", "#c7b58d", "#c7b58d", "#d8c190", "#d8c190"]
 
+[light]
+border = "#bbbcbf"
+
 [light.background]
 default = "#eff1f5"
 hard = "#dcdee1"
@@ -65,7 +70,6 @@ level3 = "#303357"
 level4 = "#303357"
 
 [light.accent]
-border_dark = "#0178ff"
 border_light = "#a0b0f5"
 bright = "#0178ff"
 primary = "#1e66f5"

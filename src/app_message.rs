@@ -189,6 +189,8 @@ pub enum HotkeyMessage {
     FindTopSongs,
     /// Settings edit value up (enable) or down (disable)
     EditValue(bool),
+    /// Settings sidebar category motion: true = next, false = previous
+    SettingsCategoryMotion(bool),
     /// Refresh data for the current active view (except Queue/Settings)
     RefreshView,
     /// Start a Roulette spin on the current pane's view (Ctrl+R).
@@ -212,9 +214,8 @@ pub enum ArtworkMessage {
     // --- Shared Album Artwork ---
     Loaded(String, Option<image::Handle>),
     LargeLoaded(String, Option<image::Handle>),
-    LargeArtistLoaded(String, Option<image::Handle>, Option<iced::Color>),
+    LargeArtistLoaded(String, Option<image::Handle>),
     LoadLarge(String),
-    DominantColorCalculated(String, iced::Color),
     /// Force-refresh a specific album's artwork (evict all cached sizes, re-fetch).
     /// User-initiated: shows "Refreshing artwork…" / "Artwork refreshed" toasts.
     RefreshAlbumArtwork(String),

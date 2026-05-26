@@ -175,42 +175,6 @@ fn playlist_deleted_does_not_set_active_playlist_info() {
 }
 
 // ============================================================================
-// Dominant Color State (albums view overlay)
-// ============================================================================
-
-#[test]
-fn dominant_color_calculated_updates_global_snapshot() {
-    let mut app = test_app();
-    assert!(
-        app.artwork.album_dominant_colors.snapshot.is_empty(),
-        "dominant_color snapshot should start empty"
-    );
-
-    // Simulate receiving a calculated dominant color
-    let color = iced::Color::from_rgb(0.5, 0.3, 0.2);
-    let _ = app.update(crate::app_message::Message::Artwork(
-        crate::app_message::ArtworkMessage::DominantColorCalculated("dummy".to_string(), color),
-    ));
-
-    assert!(
-        app.artwork
-            .album_dominant_colors
-            .snapshot
-            .contains_key("dummy"),
-        "dominant_color snapshot should be set after DominantColorCalculated"
-    );
-    let stored = *app
-        .artwork
-        .album_dominant_colors
-        .snapshot
-        .get("dummy")
-        .unwrap();
-    assert!((stored.r - 0.5).abs() < 0.01);
-    assert!((stored.g - 0.3).abs() < 0.01);
-    assert!((stored.b - 0.2).abs() < 0.01);
-}
-
-// ============================================================================
 // Navigate and Search Handlers
 // ============================================================================
 
@@ -967,12 +931,9 @@ fn album_focus_and_expand_triggers_large_artwork_load() {
     assert_eq!(
         app.artwork.loading_large_artwork.as_deref(),
         Some("a1"),
-        "LoadLargeArtwork should be dispatched so the new dominant color can be fetched"
+        "LoadLargeArtwork should be dispatched so the artwork column populates"
     );
 }
-
-// Only AlbumsPage uses the dominant_color overlay logic which requires LoadLargeArtwork
-// to be triggered when expanding via click.
 
 #[test]
 fn artist_focus_and_expand_triggers_large_artwork_load() {

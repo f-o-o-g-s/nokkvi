@@ -1,5 +1,8 @@
 name = "Catppuccin Macchiato"
 
+[dark]
+border = "#12141e"
+
 [dark.background]
 default = "#24273a"
 hard = "#1b1d2c"
@@ -18,7 +21,6 @@ level3 = "#cad3f5"
 level4 = "#cad3f5"
 
 [dark.accent]
-border_dark = "#668dde"
 border_light = "#6f8bc5"
 bright = "#668dde"
 primary = "#8aadf4"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#eed49f", "#eed49f", "#bfaa82", "#bfaa82", "#cdb480", "#cdb480"]
 
+[light]
+border = "#bbbcbf"
+
 [light.background]
 default = "#eff1f5"
 hard = "#dcdee1"
@@ -65,7 +70,6 @@ level3 = "#303357"
 level4 = "#303357"
 
 [light.accent]
-border_dark = "#0178ff"
 border_light = "#a0b0f5"
 bright = "#0178ff"
 primary = "#1e66f5"

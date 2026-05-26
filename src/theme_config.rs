@@ -69,9 +69,16 @@ pub(crate) struct ResolvedTheme {
     pub success: Color,
     pub warning: Color,
     pub warning_bright: Color,
-    #[allow(dead_code)] // Base variant available for future use
-    pub star: Color,
+    // Base `star` color was dropped during the redesign cleanup — only
+    // `star_bright` is consumed (slot-list ratings + metadata pill). The
+    // TOML `palette.star.base` field stays so existing themes deserialize
+    // cleanly; it's just not pulled into `ResolvedTheme` anymore.
     pub star_bright: Color,
+
+    /// Chrome separator (1 px hairline border between bars, rows, capsules).
+    /// Read via `theme::border()`; per-theme TOML value or auto-derived
+    /// `darken(bg.hard, 30%)` when empty.
+    pub border: Color,
 }
 
 impl Default for ResolvedTheme {
@@ -138,14 +145,25 @@ impl ResolvedTheme {
                 &palette.warning.bright,
                 parse_hex_color("#fabd2f").expect("valid hardcoded hex"),
             ),
-            star: parse_hex_or_default(
-                &palette.star.base,
-                parse_hex_color("#d79921").expect("valid hardcoded hex"),
-            ),
             star_bright: parse_hex_or_default(
                 &palette.star.bright,
                 parse_hex_color("#fabd2f").expect("valid hardcoded hex"),
             ),
+
+            // Chrome border: explicit hex from TOML, or derive by darkening
+            // `background.hard` by 30 % (matches `theme::darken` algorithm,
+            // duplicated here to avoid a circular `theme -> theme_config` use).
+            border: if palette.border.is_empty() {
+                let bg = parse_hex_or_default(&palette.background.hard, fallback_bg);
+                Color {
+                    r: bg.r * 0.70,
+                    g: bg.g * 0.70,
+                    b: bg.b * 0.70,
+                    a: bg.a,
+                }
+            } else {
+                parse_hex_or_default(&palette.border, fallback_bg)
+            },
         }
     }
 }

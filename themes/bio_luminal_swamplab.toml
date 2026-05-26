@@ -1,5 +1,8 @@
 name = "Bio-Luminal Swamplab"
 
+[dark]
+border = "#020504"
+
 [dark.background]
 default = "#070d0b"
 hard = "#040807"
@@ -18,7 +21,6 @@ level3 = "#84cbb6"
 level4 = "#6bb09c"
 
 [dark.accent]
-border_dark = "#0b1612"
 border_light = "#5aff9d"
 bright = "#5aff9d"
 primary = "#2fdc8b"
@@ -46,6 +48,9 @@ border_opacity = 1.0
 led_border_opacity = 0.6
 peak_gradient_colors = ["#f6ff4d", "#ffb347", "#ff6f61"]
 
+[light]
+border = "#c3d8cf"
+
 [light.background]
 default = "#f2fff9"
 hard = "#e6fff4"
@@ -64,7 +69,6 @@ level3 = "#244a3c"
 level4 = "#2f6250"
 
 [light.accent]
-border_dark = "#2fdc8b"
 border_light = "#5aff9d"
 bright = "#2fdc8b"
 primary = "#1aa36a"

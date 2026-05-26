@@ -12,14 +12,16 @@ pub(crate) mod boat;
 pub(crate) mod drag_column;
 pub(crate) mod eq_slider;
 pub(crate) mod format_info;
-pub(crate) mod hover_indicator;
 pub(crate) mod hover_overlay;
 pub(crate) mod library_filter_trigger;
 pub(crate) mod link_text;
 pub(crate) mod marquee_text;
+pub(crate) mod menu_chrome;
 pub(crate) mod menu_constants;
 pub(crate) mod metadata_pill;
+pub(crate) mod modal_button;
 pub(crate) mod nav_bar;
+pub(crate) mod pill_segmented_button;
 pub(crate) mod player_bar;
 pub(crate) mod player_modes_menu;
 pub(crate) mod scroll_indicator;
@@ -28,7 +30,6 @@ pub(crate) mod side_nav_bar;
 pub(crate) mod sizes;
 pub(crate) mod slot_list;
 pub(crate) mod slot_list_page;
-pub(crate) mod three_d_helpers;
 pub(crate) mod track_info_strip;
 pub(crate) mod visualizer;
 
@@ -44,8 +45,6 @@ pub(crate) mod info_modal;
 pub(crate) mod progress_bar;
 pub(crate) mod slot_list_view;
 pub(crate) mod text_input_dialog;
-pub(crate) mod three_d_button;
-pub(crate) mod three_d_icon_button;
 pub(crate) mod view_header;
 pub(crate) mod volume_slider;
 
@@ -75,46 +74,6 @@ pub(crate) fn format_count_with_commas(n: u32) -> String {
         out.push(*b as char);
     }
     out
-}
-
-/// 1px light line for 3D inset effect (top of player bar/sections)
-pub(crate) fn border_light<'a, M: 'a>() -> iced::Element<'a, M> {
-    use iced::{Length, widget::container};
-
-    use crate::theme;
-
-    container(iced::widget::Space::new())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(move |_| container::Style {
-            background: if theme::is_rounded_mode() {
-                Some((theme::bg0_hard()).into())
-            } else {
-                Some((theme::bg2()).into())
-            },
-            ..Default::default()
-        })
-        .into()
-}
-
-/// 1px dark line for 3D inset effect (below light border)
-pub(crate) fn border_dark<'a, M: 'a>() -> iced::Element<'a, M> {
-    use iced::{Length, widget::container};
-
-    use crate::theme;
-
-    container(iced::widget::Space::new())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(move |_| container::Style {
-            background: if theme::is_rounded_mode() {
-                Some((theme::bg0_hard()).into())
-            } else {
-                Some((theme::bg0()).into())
-            },
-            ..Default::default()
-        })
-        .into()
 }
 
 /// Empty state that routes through base_slot_list_layout to preserve widget tree

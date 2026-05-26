@@ -59,18 +59,18 @@ impl Nokkvi {
             ArtworkMessage::Loaded(id, handle) => self.handle_artwork_loaded(id, handle),
             ArtworkMessage::LoadLarge(album_id) => self.handle_load_large_artwork(album_id),
             ArtworkMessage::LargeLoaded(id, handle) => self.handle_large_artwork_loaded(id, handle),
-            ArtworkMessage::LargeArtistLoaded(id, handle, color) => {
+            ArtworkMessage::LargeArtistLoaded(id, handle) => {
+                // Mirror `handle_large_artwork_loaded`'s id-gated clear:
+                // if the user scrolled from A to B before A's fetch
+                // returned, B is now in flight (marker = Some(B)) and we
+                // must NOT clear it. Caching the late A handle is still
+                // fine — the cache is keyed by id.
                 if let Some(h) = handle {
                     self.artwork.large_artwork.put(id.clone(), h);
                 }
-                if let Some(c) = color {
-                    self.artwork.album_dominant_colors.put(id, c);
+                if self.artwork.loading_large_artwork.as_ref() == Some(&id) {
+                    self.artwork.loading_large_artwork = None;
                 }
-                self.artwork.loading_large_artwork = None;
-                Task::none()
-            }
-            ArtworkMessage::DominantColorCalculated(id, color) => {
-                self.artwork.album_dominant_colors.put(id, color);
                 Task::none()
             }
             ArtworkMessage::RefreshAlbumArtwork(album_id) => {

@@ -44,10 +44,6 @@ fn reset_session_state_clears_artwork_cache() {
         app.artwork.large_artwork.is_empty(),
         "large_artwork LRU must be empty after reset",
     );
-    assert!(
-        app.artwork.album_dominant_colors.is_empty(),
-        "album_dominant_colors LRU must be empty after reset",
-    );
 }
 
 #[test]

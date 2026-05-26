@@ -46,18 +46,16 @@ use iced::{
 
 use crate::{
     theme,
-    widgets::{
-        menu_constants::{
-            MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_SHADOW, MENU_TEXT_SIZE,
-            inflate_for_shadow_around_child, visible_menu_layout,
-        },
-        sizes::ICON_BUTTON_SIZE,
+    widgets::menu_constants::{
+        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
+        visible_menu_layout,
     },
 };
 
-/// 40×40 trigger button chassis — matches the shared `ICON_BUTTON_SIZE`.
-const TRIGGER_SIZE: f32 = ICON_BUTTON_SIZE;
-const TRIGGER_ICON_SIZE: f32 = 20.0;
+/// Trigger-button glyph size (px). Matches the 18 px icon used by
+/// `view_header::header_icon_cell` so the column-dropdown trigger reads at
+/// the same visual weight as the sibling sort/refresh/center icons.
+const TRIGGER_ICON_SIZE: f32 = 18.0;
 
 /// Max width of the name column in two-column rows (px). Sized for the
 /// wider `LIBRARY_SELECTOR_WIDTH` so longer library names ("Longmont
@@ -266,10 +264,12 @@ where
     )
 }
 
-/// Build the trigger element — a 40×40 styled container holding the icon,
-/// wrapped in a tooltip that mirrors `view_header::flat_icon_button` chrome
-/// (without on_press, since the `CheckboxDropdown` Widget intercepts the
-/// left-click itself).
+/// Build the trigger element — a transparent 44×50 icon cell matching the
+/// surrounding `view_header` icon buttons, with a `HoverOverlay` for the
+/// hover/press feedback. Square hover corners regardless of the global
+/// rounded-mode toggle: the view header itself stays flat in both modes,
+/// so its embedded trigger must too. No `on_press` here —
+/// `CheckboxDropdown`'s widget impl intercepts the left-click itself.
 fn trigger_button<'a, Message: 'a>(
     icon_path: &'static str,
     tooltip_text: &'static str,
@@ -281,21 +281,16 @@ fn trigger_button<'a, Message: 'a>(
             color: Some(theme::fg0()),
         });
 
-    let trigger = container(icon)
-        .width(Length::Fixed(TRIGGER_SIZE))
-        .height(Length::Fixed(TRIGGER_SIZE))
-        .style(|_theme| container::Style {
-            background: Some(theme::bg0_soft().into()),
-            border: iced::Border {
-                radius: theme::ui_border_radius(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .center(Length::Fixed(TRIGGER_SIZE));
+    let chassis = container(icon)
+        .width(Length::Fixed(44.0))
+        .height(Length::Fixed(50.0))
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    let with_hover = super::hover_overlay::HoverOverlay::new(chassis).border_radius(0.0.into());
 
     tooltip(
-        trigger,
+        with_hover,
         container(text(tooltip_text).size(11.0).font(theme::ui_font())).padding(4),
         tooltip::Position::Top,
     )
@@ -342,23 +337,30 @@ fn dropdown_item<'a, Message: Clone + 'a>(
     .spacing(8)
     .align_y(iced::Alignment::Center);
 
+    // `HoverOverlay(container)` so the hover tint resolves cleanly
+    // across themes (see `.agent/rules/gotchas.md` "HoverOverlay wraps
+    // containers, not native buttons"). `ui_radius_xs()` matches the
+    // panel's `ui_radius_md()` outline at concentric scale.
     mouse_area(
-        container(row_content)
-            .width(Length::Fill)
-            .padding(iced::Padding {
-                left: 8.0,
-                right: 16.0,
-                top: 4.0,
-                bottom: 4.0,
-            })
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border {
-                    radius: theme::ui_border_radius(),
+        super::hover_overlay::HoverOverlay::new(
+            container(row_content)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: 8.0,
+                    right: 16.0,
+                    top: 4.0,
+                    bottom: 4.0,
+                })
+                .style(|_theme| container::Style {
+                    background: None,
+                    border: iced::Border {
+                        radius: theme::ui_radius_xs(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }),
+                }),
+        )
+        .border_radius(theme::ui_radius_xs()),
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
@@ -405,23 +407,29 @@ fn dropdown_item_two_column<'a, Message: Clone + 'a>(
     .spacing(10)
     .align_y(iced::Alignment::Center);
 
+    // Same hover-overlay pattern as `dropdown_item` — see comment there.
+    // Padding is roomier here (12 / 8 vs 8 / 4) because library names
+    // need more breathing space than column-toggle labels.
     mouse_area(
-        container(row_content)
-            .width(Length::Fill)
-            .padding(iced::Padding {
-                left: 12.0,
-                right: 16.0,
-                top: 8.0,
-                bottom: 8.0,
-            })
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border {
-                    radius: theme::ui_border_radius(),
+        super::hover_overlay::HoverOverlay::new(
+            container(row_content)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: 12.0,
+                    right: 16.0,
+                    top: 8.0,
+                    bottom: 8.0,
+                })
+                .style(|_theme| container::Style {
+                    background: None,
+                    border: iced::Border {
+                        radius: theme::ui_radius_xs(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }),
+                }),
+        )
+        .border_radius(theme::ui_radius_xs()),
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
@@ -444,13 +452,15 @@ where
     let mut rows: Vec<Element<'a, Message>> = Vec::with_capacity(items.len() + 2);
     if let Some(h) = header {
         rows.push(dropdown_header_row(&h.label, &h.counter));
-        // 1 px separator under the header so the title row reads as its own band.
+        // 1 px separator under the header so the title row reads as
+        // its own band. Color matches `theme::border()` (the panel
+        // outline) for visual coherence with the new chrome.
         rows.push(
             container(iced::widget::Space::new())
                 .width(Length::Fill)
                 .height(Length::Fixed(1.0))
                 .style(|_| container::Style {
-                    background: Some(theme::bg0_hard().into()),
+                    background: Some(theme::border().into()),
                     ..Default::default()
                 })
                 .into(),
@@ -473,19 +483,11 @@ where
         rows.push(row);
     }
 
+    // Shared menu-panel chrome — see `widgets::menu_chrome`.
     container(column(rows).spacing(0))
         .width(Length::Fixed(menu_width))
         .padding(4)
-        .style(|_theme| container::Style {
-            background: Some(theme::bg1().into()),
-            border: iced::Border {
-                width: 1.0,
-                color: theme::accent_bright(),
-                radius: theme::ui_border_radius(),
-            },
-            shadow: MENU_SHADOW,
-            ..Default::default()
-        })
+        .style(super::menu_chrome::container_style)
         .into()
 }
 

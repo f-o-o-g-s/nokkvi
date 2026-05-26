@@ -67,7 +67,6 @@ pub struct ArtistsViewData<'a> {
     /// is enabled.
     pub album_art: &'a HashMap<String, image::Handle>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
-    pub dominant_colors: &'a HashMap<String, iced::Color>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -173,13 +172,13 @@ pub enum ArtistsAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     ColumnVisibilityChanged(ArtistsColumn, bool),
     /// Refresh the artists viewport: prefetch mini artwork, fetch the 500px
-    /// artwork + dominant color for the new center artist, and chain a
-    /// page-fetch if the viewport is near the loaded edge.
+    /// artwork for the new center artist, and chain a page-fetch if the
+    /// viewport is near the loaded edge.
     ///
     /// Emitted from settled-scroll and hotkey navigation paths only.
     /// `SlotListScrollSeek` (mid-drag) deliberately does NOT emit this —
     /// rapid scrollbar drag previously hung the app by spawning hundreds
-    /// of in-flight 500px fetches + dominant-color blocking tasks per drag.
+    /// of in-flight 500px fetches per drag.
     LoadLargeArtwork,
     None,
 }

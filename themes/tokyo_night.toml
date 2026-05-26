@@ -1,5 +1,8 @@
 name = "Tokyo Night"
 
+[dark]
+border = "#0e0e14"
+
 [dark.background]
 default = "#1a1b26"
 hard = "#14141d"
@@ -18,7 +21,6 @@ level3 = "#b6c4fa"
 level4 = "#b6c4fa"
 
 [dark.accent]
-border_dark = "#00a3bd"
 border_light = "#249cb2"
 bright = "#00a3bd"
 primary = "#2ac3de"
@@ -47,6 +49,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#e0af68", "#e0af68", "#b38c55", "#b38c55", "#c68d30", "#c68d30"]
 
+[light]
+border = "#a6a7aa"
+
 [light.background]
 default = "#d5d6db"
 hard = "#c4c5c9"
@@ -65,7 +70,6 @@ level3 = "#1e224a"
 level4 = "#1e224a"
 
 [light.accent]
-border_dark = "#00899e"
 border_light = "#8ea0a8"
 bright = "#00899e"
 primary = "#166775"

@@ -1,5 +1,8 @@
 name = "Ember"
 
+[dark]
+border = "#080706"
+
 [dark.background]
 default = "#181412"
 hard = "#0c0a09"
@@ -18,7 +21,6 @@ level3 = "#a8a29e"
 level4 = "#78716c"
 
 [dark.accent]
-border_dark = "#1c1917"
 border_light = "#292524"
 bright = "#f59e0b"
 primary = "#b45309"
@@ -46,6 +48,9 @@ border_opacity = 1.0
 led_border_opacity = 1
 peak_gradient_colors = ["#7c2d12", "#b91c1c", "#ea580c", "#f59e0b", "#fde047", "#22c55e"]
 
+[light]
+border = "#d0d0cf"
+
 [light.background]
 default = "#faf7f2"
 hard = "#f5f5f4"
@@ -64,7 +69,6 @@ level3 = "#57534e"
 level4 = "#78716c"
 
 [light.accent]
-border_dark = "#d6d3d1"
 border_light = "#a8a29e"
 bright = "#b45309"
 primary = "#92400e"

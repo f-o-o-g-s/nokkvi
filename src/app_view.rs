@@ -110,6 +110,20 @@ fn strip_context_state(
     }
 }
 
+/// Library-filter chrome state aggregated for the nav-bar trigger + popover.
+///
+/// Built by `Nokkvi::library_filter_view_data()`; consumed by both the
+/// top-nav `NavBarViewData` builder and the side-nav `SideNavBarData`
+/// builder so the two share the same library list / counter / popover
+/// state without re-deriving it from `AppService`.
+pub(crate) struct LibraryFilterViewData {
+    pub count: usize,
+    pub active_count: usize,
+    pub rows: Vec<(i32, String, Option<u32>, bool)>,
+    pub popover_open: bool,
+    pub trigger_bounds: Option<iced::Rectangle>,
+}
+
 /// Convert a `NavBarMessage` into the root `Message` type.
 ///
 /// Shared between the horizontal nav bar (top mode) and the vertical
@@ -148,14 +162,94 @@ impl Nokkvi {
     // SECTION: View Functions
     // =========================================================================
 
+    /// Aggregate the library-filter chrome state that the nav-bar trigger +
+    /// popover read every frame.
+    ///
+    /// `library_count == 0` (pre-login or before `refresh_libraries` lands)
+    /// suppresses the trigger so the user never sees a chrome flicker
+    /// before the count is known.
+    ///
+    /// `active.is_empty()` is the "all libraries" convention — every row
+    /// renders as checked and the counter reads `{total} / {total}`. Rows
+    /// are sorted by name so the popover order stays stable across reloads.
+    ///
+    /// Shared between the top-nav `navigation_bar()` and the side-nav's
+    /// `SideNavBarData` builder so a future tweak (different sort order,
+    /// added per-library metadata column, etc.) lands at one site.
+    pub(crate) fn library_filter_view_data(&self) -> LibraryFilterViewData {
+        let (count, active_count, rows) = match &self.app_service {
+            Some(svc) => {
+                let active = svc.active_library_ids();
+                let all_checked = active.is_empty();
+                let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
+                    .all_libraries()
+                    .into_iter()
+                    .map(|lib| {
+                        let checked = all_checked || active.contains(&lib.id);
+                        (lib.id, lib.name, lib.song_count, checked)
+                    })
+                    .collect();
+                rows.sort_by(|a, b| a.1.cmp(&b.1));
+                let active_for_display = if all_checked {
+                    rows.len()
+                } else {
+                    active.len()
+                };
+                (svc.library_count(), active_for_display, rows)
+            }
+            None => (0, 0, Vec::new()),
+        };
+        let (open, bounds) = library_selector_state(&self.open_menu);
+        LibraryFilterViewData {
+            count,
+            active_count,
+            rows,
+            popover_open: open,
+            trigger_bounds: bounds,
+        }
+    }
+
+    /// Resolve the artwork handle for the player-bar mini-player section.
+    ///
+    /// Returns `None` whenever any of the following holds, in order:
+    /// - `track_info_display() != TrackInfoDisplay::MiniPlayer` (every other
+    ///   strip mode hides the mini-player section, so resolving artwork is
+    ///   wasted work — short-circuit before walking the queue).
+    /// - Radio playback is active (radio streams don't have album-keyed art).
+    /// - No `scrobble.current_song_id` (no track loaded).
+    /// - The current song isn't in `library.queue_songs`.
+    /// - Neither the large nor the mini LRU has a cached handle for the song's
+    ///   `album_id`.
+    ///
+    /// Otherwise returns the cached handle (large preferred, mini fallback so
+    /// the thumbnail still appears while the full-size art is in flight).
+    pub(crate) fn mini_player_artwork(&self) -> Option<iced::widget::image::Handle> {
+        use nokkvi_data::types::player_settings::TrackInfoDisplay;
+        if crate::theme::track_info_display() != TrackInfoDisplay::MiniPlayer {
+            return None;
+        }
+        if self.active_playback.is_radio() {
+            return None;
+        }
+        let sid = self.scrobble.current_song_id.as_deref()?;
+        let song = self.library.queue_songs.iter().find(|s| s.id == sid)?;
+        self.artwork
+            .large_artwork
+            .snapshot
+            .get(&song.album_id)
+            .or_else(|| self.artwork.album_art.snapshot.get(&song.album_id))
+            .cloned()
+    }
+
     /// Horizontal extent of the content pane — everything inside the outer
     /// chrome that the per-view widgets render into.
     ///
-    /// In `NavLayout::Side` the vertical sidebar consumes
-    /// `SIDE_NAV_TOTAL_WIDTH` px on the left (icons + border) and the views
-    /// must size their artwork-resolver math, drag handles, and slot-list
-    /// rects against the REMAINING width. Top / None nav layouts subtract
-    /// nothing and this returns the raw window width.
+    /// In `NavLayout::Side` the vertical sidebar consumes the live width
+    /// reported by `side_nav_total_width()` (icons + border, mode-sensitive:
+    /// 33 px flat / 41 px rounded). The views must
+    /// size their artwork-resolver math, drag handles, and slot-list rects
+    /// against the REMAINING width. Top / None nav layouts subtract nothing
+    /// and this returns the raw window width.
     ///
     /// Use this in place of `self.window.width` whenever a value flows
     /// into `BaseSlotListLayoutConfig.window_width` or a view-data
@@ -164,7 +258,7 @@ impl Nokkvi {
     /// over-counts the leftover slot-list width by the side-nav footprint.
     pub(crate) fn content_pane_width(&self) -> f32 {
         let nav_chrome = if crate::theme::is_side_nav() {
-            crate::widgets::side_nav_bar::SIDE_NAV_TOTAL_WIDTH
+            crate::widgets::side_nav_bar::side_nav_total_width()
         } else {
             0.0
         };
@@ -176,8 +270,11 @@ impl Nokkvi {
     ///
     /// Returns `Some(extent)` when all of these hold:
     /// - Top-nav layout is active (the only layout this elevation reshapes).
-    /// - `track_info_display` is anything other than `TopBar` — the nav bar's
-    ///   right portion is otherwise reserved for the metadata strip.
+    /// - `track_info_display` is neither `TopBar` nor `TopBarUnder` — the nav
+    ///   bar's right portion is otherwise reserved for the metadata strip
+    ///   (TopBar) or the strip occupies its own row beneath the nav
+    ///   (TopBarUnder), and either case keeps the artwork in its regular
+    ///   column-stacked spot beneath the chrome.
     /// - The browsing panel is not open — split-view has its own dual-pane
     ///   shape and skips elevation.
     /// - The current view's `ViewPage` reports `uses_horizontal_artwork_column()`
@@ -304,6 +401,13 @@ impl Nokkvi {
         };
 
         let has_queue = !self.library.queue_songs.is_empty();
+
+        // Mode-gated mini-player artwork handle — see
+        // `Nokkvi::mini_player_artwork()` for the resolution rules. Gated on
+        // `TrackInfoDisplay::MiniPlayer` inside the method so other strip
+        // modes short-circuit before walking the queue.
+        let mini_player_artwork: Option<iced::widget::image::Handle> = self.mini_player_artwork();
+
         let player_bar_data = widgets::PlayerBarViewData {
             playback_position: self.playback.position,
             playback_duration: self.playback.duration,
@@ -324,17 +428,27 @@ impl Nokkvi {
             window_width: self.window.width,
             layout: self.player_bar_layout,
             is_light_mode: crate::theme::is_light_mode(),
-            track_title: icy_title.unwrap_or(&self.playback.title).to_string(),
-            track_artist: icy_artist.unwrap_or(&self.playback.artist).to_string(),
+            // For radio playback the station name lives on `radio_name` and
+            // ICY values fill the title/artist slots — empty when no ICY has
+            // arrived yet (vs. echoing the station name into slot 2). For
+            // queue playback the fields carry the song metadata directly.
+            track_title: if self.active_playback.is_radio() {
+                icy_title.unwrap_or_default().to_string()
+            } else {
+                self.playback.title.clone()
+            },
+            track_artist: if self.active_playback.is_radio() {
+                icy_artist.unwrap_or_default().to_string()
+            } else {
+                self.playback.artist.clone()
+            },
             track_album: if self.active_playback.is_radio() {
                 String::new()
             } else {
                 self.playback.album.clone()
             },
-            format_suffix: self.playback.format_suffix.clone(),
-            sample_rate: self.playback.sample_rate,
-            bitrate: self.playback.bitrate,
             radio_name: radio_name.map(|s| s.to_string()),
+            artwork_handle: mini_player_artwork,
             hamburger_open: matches!(
                 self.open_menu,
                 Some(crate::app_message::OpenMenu::Hamburger)
@@ -408,56 +522,85 @@ impl Nokkvi {
 
         // Base layout:
         //   Top mode:  nav_bar  + content + player_bar
-        //   Side mode: [strip] + (sidebar + content) + player_bar
-        //   None mode: [strip] +  content            + player_bar  (minimalist — no nav chrome)
+        //   Side mode: row[sidebar, column[strip?, content, player_bar]]
+        //              (sidebar runs the full window height — strip + player
+        //              are pushed RIGHT of the sidebar to match the flat
+        //              redesign mockups)
+        //   None mode: [strip?] + content + player_bar  (no sidebar)
+
+        // Helper: build the optional top-area metadata strip as a single
+        // Element. Returns `None` when the strip is hidden.
+        //
+        // `with_separator_above = false` → `TopBar` styling: bare strip with a
+        // 1 px separator BELOW (visually divides strip from the content under
+        // it). Used by side-nav (inside the right column) and none-nav (top of
+        // the outer column).
+        //
+        // `with_separator_above = true` → `TopBarUnder` styling: 1 px separator
+        // ABOVE the strip (matches the player-bar variant). Used by top-nav,
+        // where the separator divides the nav row from the strip beneath it.
+        let build_top_strip = |with_separator_above: bool| -> Option<Element<'_, Message>> {
+            let visible = if with_separator_above {
+                crate::theme::show_top_bar_under_strip()
+            } else {
+                crate::theme::show_top_bar_strip()
+            };
+            if !visible {
+                return None;
+            }
+            let strip = if with_separator_above {
+                widgets::track_info_strip::track_info_strip_with_separator(
+                    &strip_data,
+                    Some(Message::StripClicked),
+                )
+            } else {
+                widgets::track_info_strip::track_info_strip(
+                    &strip_data,
+                    Some(Message::StripClicked),
+                )
+            };
+            let wrapped: Element<'_, Message> = if radio_name.is_some() {
+                strip
+            } else {
+                let has_local_path = !self.settings.local_music_path.is_empty();
+                let is_starred = self.is_current_track_starred();
+                let (strip_open, strip_position) = strip_context_state(&self.open_menu);
+                widgets::context_menu::context_menu(
+                    strip,
+                    widgets::context_menu::strip_entries(has_local_path),
+                    move |entry, length| {
+                        widgets::context_menu::strip_entry_view(
+                            entry,
+                            length,
+                            is_starred,
+                            Message::StripContextAction,
+                        )
+                    },
+                    strip_open,
+                    strip_position,
+                    |position| match position {
+                        Some(p) => {
+                            Message::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                                id: crate::app_message::ContextMenuId::Strip,
+                                position: p,
+                            }))
+                        }
+                        None => Message::SetOpenMenu(None),
+                    },
+                )
+                .into()
+            };
+            if with_separator_above {
+                Some(wrapped)
+            } else {
+                Some(column![wrapped, crate::theme::horizontal_separator::<Message>(1.0),].into())
+            }
+        };
 
         let base_layer: Element<'_, Message> = if crate::theme::is_side_nav()
             || crate::theme::is_none_nav()
         {
-            // Build the outer column: optionally top bar strip → main row/content → player bar
             let mut outer = iced::widget::Column::new();
-
-            // Top bar info strip (full window width, above sidebar/content)
-            if crate::theme::show_top_bar_strip() {
-                let strip = widgets::track_info_strip::track_info_strip(
-                    &strip_data,
-                    Some(Message::StripClicked),
-                );
-                let wrapped: Element<'_, Message> = if radio_name.is_some() {
-                    strip
-                } else {
-                    let has_local_path = !self.settings.local_music_path.is_empty();
-                    let is_starred = self.is_current_track_starred();
-                    let (strip_open, strip_position) = strip_context_state(&self.open_menu);
-                    widgets::context_menu::context_menu(
-                        strip,
-                        widgets::context_menu::strip_entries(has_local_path),
-                        move |entry, length| {
-                            widgets::context_menu::strip_entry_view(
-                                entry,
-                                length,
-                                is_starred,
-                                Message::StripContextAction,
-                            )
-                        },
-                        strip_open,
-                        strip_position,
-                        |position| match position {
-                            Some(p) => {
-                                Message::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                                    id: crate::app_message::ContextMenuId::Strip,
-                                    position: p,
-                                }))
-                            }
-                            None => Message::SetOpenMenu(None),
-                        },
-                    )
-                    .into()
-                };
-                outer = outer.push(wrapped);
-                // Bottom separator to delineate strip from content below
-                outer = outer.push(crate::theme::horizontal_separator::<Message>(1.0));
-            }
 
             if crate::theme::is_side_nav() {
                 // Settings has no NavView counterpart; the sidebar treats it
@@ -467,58 +610,51 @@ impl Nokkvi {
                         .unwrap_or(widgets::NavView::Queue);
                 // Mirror the top-nav library state into the side-nav so
                 // the footer trigger + popover see the same source of
-                // truth.
-                let (sn_library_count, sn_active_library_count, sn_library_rows) =
-                    match &self.app_service {
-                        Some(svc) => {
-                            let active = svc.active_library_ids();
-                            let all_checked = active.is_empty();
-                            let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
-                                .all_libraries()
-                                .into_iter()
-                                .map(|lib| {
-                                    let checked = all_checked || active.contains(&lib.id);
-                                    (lib.id, lib.name, lib.song_count, checked)
-                                })
-                                .collect();
-                            rows.sort_by(|a, b| a.1.cmp(&b.1));
-                            let active_for_display = if all_checked {
-                                rows.len()
-                            } else {
-                                active.len()
-                            };
-                            (svc.library_count(), active_for_display, rows)
-                        }
-                        None => (0, 0, Vec::new()),
-                    };
-                let (sn_library_selector_open, sn_library_selector_bounds) =
-                    library_selector_state(&self.open_menu);
+                // truth (shared via `library_filter_view_data`).
+                let lib = self.library_filter_view_data();
                 let side_data = widgets::SideNavBarData {
                     current_view: side_nav_view,
                     settings_open: self.current_view == View::Settings,
-                    library_count: sn_library_count,
-                    active_library_count: sn_active_library_count,
-                    library_selector_open: sn_library_selector_open,
-                    library_selector_bounds: sn_library_selector_bounds,
-                    library_rows: sn_library_rows,
+                    library_count: lib.count,
+                    active_library_count: lib.active_count,
+                    library_selector_open: lib.popover_open,
+                    library_selector_bounds: lib.trigger_bounds,
+                    library_rows: lib.rows,
                     hamburger_open: matches!(
                         self.open_menu,
                         Some(crate::app_message::OpenMenu::Hamburger)
                     ),
                     is_light_mode: crate::theme::is_light_mode(),
                 };
+                // Side-nav mode: sidebar runs the FULL window height; the
+                // top-bar strip, content, and player bar all live in the
+                // right column so the sidebar is the visual leftmost band
+                // across every row of chrome (matches the flat-redesign
+                // side-nav mockups).
+                let mut right_col = iced::widget::Column::new();
+                if let Some(strip_el) = build_top_strip(false) {
+                    right_col = right_col.push(strip_el);
+                }
+                right_col = right_col.push(self.main_content(false));
+                right_col = right_col.push(
+                    widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+                );
+
                 outer = outer.push(iced::widget::row![
                     widgets::side_nav_bar(side_data).map(map_nav_bar_message),
-                    self.main_content(false),
+                    right_col,
                 ]);
             } else {
-                // None mode: content fills the full width — no sidebar
+                // None mode: no sidebar — strip (if any), content, player
+                // bar all span the full window width.
+                if let Some(strip_el) = build_top_strip(false) {
+                    outer = outer.push(strip_el);
+                }
                 outer = outer.push(self.main_content(false));
+                outer = outer.push(
+                    widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+                );
             }
-
-            // Player bar
-            outer = outer
-                .push(widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar));
 
             outer.into()
         } else {
@@ -545,17 +681,36 @@ impl Nokkvi {
                 if let Some(artwork_extent) = elevated_extent {
                     (0.0, (self.content_pane_width() - artwork_extent).max(0.0))
                 } else {
-                    (crate::widgets::slot_list::NAV_BAR_HEIGHT, self.window.width)
+                    // Use the live nav-bar height (32 flat / 44 rounded)
+                    // — the legacy `slot_list::NAV_BAR_HEIGHT` const is
+                    // pinned at 32 and lets the rounded-mode nav overlay
+                    // into the view header by 12 px, eating its top
+                    // margin and pushing the header pill flush against
+                    // the bottom of the nav bar.
+                    (crate::theme::nav_bar_height(), self.window.width)
                 };
             let is_elevated = elevated_extent.is_some();
 
-            let base = column![
+            // `TopBarUnder` mode in top-nav: insert the player-bar-styled
+            // strip between the nav-band Space and `main_content` so it
+            // renders directly beneath the nav row and pushes the main
+            // content down by the strip's height. The nav overlay sits
+            // ABOVE the Space; the strip occupies the next column slot,
+            // so nav → strip → content stacks naturally.
+            let top_under_strip = build_top_strip(true);
+
+            let mut base_col = iced::widget::Column::new().push(
                 iced::widget::Space::new()
                     .width(Length::Fill)
                     .height(Length::Fixed(outer_space_height)),
-                self.main_content(is_elevated),
-                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
-            ];
+            );
+            if let Some(strip_el) = top_under_strip {
+                base_col = base_col.push(strip_el);
+            }
+            base_col = base_col.push(self.main_content(is_elevated));
+            base_col = base_col
+                .push(widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar));
+            let base = base_col;
 
             let nav_overlay = column![
                 container(self.navigation_bar(nav_visual_width))
@@ -598,19 +753,35 @@ impl Nokkvi {
             let lines_mirror = cfg.lines.mirror;
             drop(cfg);
 
+            // In side-nav mode the sidebar is the full-height leftmost
+            // band; the visualizer (and boat) overlay must start to its
+            // RIGHT, not at x=0, or the bars/lines bleed under the icons.
+            let side_nav_inset = if crate::theme::is_side_nav() {
+                crate::widgets::side_nav_bar::side_nav_total_width()
+            } else {
+                0.0
+            };
+            let visualizer_width = (self.window.width - side_nav_inset).max(0.0);
+
             let visualizer_height = widgets::visualizer::visualizer_area_height(
-                self.window.width,
+                visualizer_width,
                 self.window.height,
                 height_percent,
             );
             let spacer_height =
                 (self.window.height - widgets::player_bar::player_bar_height() - visualizer_height)
                     .max(0.0);
-            let visualizer_overlay = column![
+            let visualizer_inner = column![
                 container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
                 container(viz_with_mode.view())
                     .width(Length::Fill)
                     .height(Length::Fixed(visualizer_height))
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill);
+            let visualizer_overlay = iced::widget::row![
+                iced::widget::Space::new().width(Length::Fixed(side_nav_inset)),
+                visualizer_inner,
             ]
             .width(Length::Fill)
             .height(Length::Fill);
@@ -621,17 +792,24 @@ impl Nokkvi {
             // shape above so the boat overlay's pixel coordinate space lines
             // up with the visualizer area. `boat_overlay()` returns a
             // fixed-size, self-clipping container, so we don't need an
-            // outer wrapper here.
+            // outer wrapper here. Insets the same `side_nav_inset` so the
+            // boat sails over the visualizer, not the sidebar.
             if self.boat.visible && self.engine.visualization_mode == VisualizationMode::Lines {
-                let boat_overlay_col = column![
+                let boat_inner = column![
                     container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
                     crate::widgets::boat::boat_overlay::<Message>(
                         &self.boat,
-                        self.window.width,
+                        visualizer_width,
                         visualizer_height,
                         viz_opacity,
                         lines_mirror,
                     ),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill);
+                let boat_overlay_col = iced::widget::row![
+                    iced::widget::Space::new().width(Length::Fixed(side_nav_inset)),
+                    boat_inner,
                 ]
                 .width(Length::Fill)
                 .height(Length::Fill);
@@ -842,7 +1020,6 @@ impl Nokkvi {
             albums: &self.library.albums,
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
-            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
             window_width,
             window_height,
             scale_factor: self.window.scale_factor,
@@ -878,7 +1055,6 @@ impl Nokkvi {
             artist_art: &self.artwork.album_art.snapshot,
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
-            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
             window_width,
             window_height,
             scale_factor: self.window.scale_factor,
@@ -912,7 +1088,6 @@ impl Nokkvi {
             songs: &self.library.songs,
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
-            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
             window_width,
             window_height,
             scale_factor: self.window.scale_factor,
@@ -998,41 +1173,15 @@ impl Nokkvi {
             crate::state::ActivePlayback::Queue => (None, None, None, None),
         };
 
-        // Library-filter chrome state — `library_count == 0` (pre-login or
-        // before `refresh_libraries` lands) suppresses the trigger so the user
-        // never sees a chrome flicker before the count is known.
-        let (library_count, active_library_count, library_rows) = match &self.app_service {
-            Some(svc) => {
-                let active = svc.active_library_ids();
-                // Empty active set = "all" semantically; render each row
-                // as checked so the popover reflects the user's mental
-                // model ("everything is on") instead of an unchecked
-                // wall of rows that toggle into a subset on click.
-                let all_checked = active.is_empty();
-                let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
-                    .all_libraries()
-                    .into_iter()
-                    .map(|lib| {
-                        let checked = all_checked || active.contains(&lib.id);
-                        (lib.id, lib.name, lib.song_count, checked)
-                    })
-                    .collect();
-                rows.sort_by(|a, b| a.1.cmp(&b.1));
-                // When the empty-as-all convention is in effect the
-                // popover counter reads "{total} / {total}" so the
-                // header matches the all-checked row state instead of
-                // showing "0 / {total}" while every box looks ticked.
-                let active_for_display = if all_checked {
-                    rows.len()
-                } else {
-                    active.len()
-                };
-                (svc.library_count(), active_for_display, rows)
-            }
-            None => (0, 0, Vec::new()),
-        };
-        let (library_selector_open, library_selector_bounds) =
-            library_selector_state(&self.open_menu);
+        // Library-filter chrome state — shared with the side-nav builder
+        // via `library_filter_view_data`. See that method for the
+        // "all-checked" convention and sort order.
+        let lib = self.library_filter_view_data();
+        let library_count = lib.count;
+        let active_library_count = lib.active_count;
+        let library_rows = lib.rows;
+        let library_selector_open = lib.popover_open;
+        let library_selector_bounds = lib.trigger_bounds;
 
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,

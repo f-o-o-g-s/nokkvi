@@ -1,5 +1,8 @@
 name = "Everforest"
 
+[dark]
+border = "#1a2024"
+
 [dark.background]
 default = "#2D353B"
 hard = "#232A2E"
@@ -18,7 +21,6 @@ level3 = "#859289"
 level4 = "#7A8478"
 
 [dark.accent]
-border_dark = "#8DA101"
 border_light = "#A7C080"
 bright = "#A7C080"
 now_playing = "#A7C080"
@@ -48,6 +50,9 @@ border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#D3C6AA", "#DBBC7F", "#D3C6AA", "#DBBC7F", "#D3C6AA", "#DBBC7F"]
 
+[light]
+border = "#cbc7b4"
+
 [light.background]
 default = "#FDF6E3"
 hard = "#EFEBD4"
@@ -66,7 +71,6 @@ level3 = "#829181"
 level4 = "#939F91"
 
 [light.accent]
-border_dark = "#5C6A72"
 border_light = "#E6E2CC"
 bright = "#93B259"
 now_playing = "#93B259"

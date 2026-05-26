@@ -56,6 +56,9 @@ impl Nokkvi {
             PlayerBarMessage::ScrollVolume(delta) => Task::done(
                 scroll_volume_to_committed_message(self.playback.volume, delta),
             ),
+            PlayerBarMessage::ScrollSfxVolume(delta) => {
+                Task::done(scroll_sfx_volume_to_message(self.sfx.volume, delta))
+            }
             PlayerBarMessage::OpenSettings => Task::done(Message::Navigation(
                 NavigationMessage::SwitchView(crate::View::Settings),
             )),
@@ -88,6 +91,18 @@ pub(crate) fn scroll_volume_to_committed_message(current_volume: f32, delta: f32
     Message::Playback(PlaybackMessage::VolumeCommitted(new_vol))
 }
 
+/// Map an SFX wheel-scroll delta to a `SfxVolumeChanged` message.
+///
+/// `handle_sfx_volume_changed` is unthrottled (no analog of the music
+/// slider's 500 ms `VolumeChanged` throttle), so each notch is itself
+/// the committed event — no separate `SfxVolumeCommitted` variant is
+/// needed. The free-function form mirrors the music routing so unit
+/// tests can pin the clamp arithmetic without driving the iced runtime.
+pub(crate) fn scroll_sfx_volume_to_message(current_volume: f32, delta: f32) -> Message {
+    let new_vol = (current_volume + delta).clamp(0.0, 1.0);
+    Message::Playback(PlaybackMessage::SfxVolumeChanged(new_vol))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +112,35 @@ mod tests {
             Message::Playback(PlaybackMessage::VolumeCommitted(v)) => v,
             other => panic!("expected Message::Playback(VolumeCommitted), got {other:?}"),
         }
+    }
+
+    fn extract_sfx_volume(msg: Message) -> f32 {
+        match msg {
+            Message::Playback(PlaybackMessage::SfxVolumeChanged(v)) => v,
+            other => panic!("expected Message::Playback(SfxVolumeChanged), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scroll_sfx_volume_routes_to_sfx_volume_changed() {
+        // SFX has no throttle, so SfxVolumeChanged IS the commit path —
+        // each wheel notch dispatches straight there. The mapper exists
+        // so the slider widget can publish a delta instead of an absolute
+        // value, avoiding the stale-base bug.
+        let v = extract_sfx_volume(scroll_sfx_volume_to_message(0.30, 0.05));
+        assert!((v - 0.35).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_sfx_volume_clamps_at_upper_bound() {
+        let v = extract_sfx_volume(scroll_sfx_volume_to_message(0.98, 0.05));
+        assert!((v - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_sfx_volume_clamps_at_lower_bound() {
+        let v = extract_sfx_volume(scroll_sfx_volume_to_message(0.02, -0.05));
+        assert!(v.abs() < f32::EPSILON);
     }
 
     #[test]
