@@ -189,6 +189,8 @@ pub enum HotkeyMessage {
     FindTopSongs,
     /// Settings edit value up (enable) or down (disable)
     EditValue(bool),
+    /// Settings sidebar category motion: true = next, false = previous
+    SettingsCategoryMotion(bool),
     /// Refresh data for the current active view (except Queue/Settings)
     RefreshView,
     /// Start a Roulette spin on the current pane's view (Ctrl+R).

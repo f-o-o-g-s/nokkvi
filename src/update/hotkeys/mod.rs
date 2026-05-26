@@ -402,6 +402,9 @@ impl Nokkvi {
             HotkeyMessage::FindSimilar => self.handle_find_similar_for_playing_track(),
             HotkeyMessage::FindTopSongs => self.handle_find_top_songs_for_playing_track(),
             HotkeyMessage::EditValue(up) => self.handle_edit_value(up),
+            HotkeyMessage::SettingsCategoryMotion(forward) => {
+                self.handle_settings_category_motion(forward)
+            }
             HotkeyMessage::RefreshView => self
                 .current_view_page()
                 .and_then(|p| p.reload_message())
@@ -454,6 +457,13 @@ impl Nokkvi {
             Some(msg) => self.update(msg),
             None => Task::none(),
         }
+    }
+
+    /// Settings sidebar category motion. Stubbed in Phase 1 — wired to
+    /// the real `SettingsMessage::SidebarUp`/`SidebarDown` dispatch when
+    /// the sidebar state lands in Phase 2a.
+    pub(crate) fn handle_settings_category_motion(&mut self, _forward: bool) -> Task<Message> {
+        Task::none()
     }
 
     /// Track the current keyboard modifier state so views can read it
