@@ -157,64 +157,23 @@ impl SettingsPage {
         .into()
     }
 
-    /// Sidebar body: slot list of the six categories. Reuses the existing
-    /// L1-hero renderer via `is_level1: true`; the active row is the slot
-    /// list's center, which `apply_sidebar_index` keeps synced to
-    /// `active_category`. Click routes through `SidebarClickItem`.
+    /// Sidebar body: a fixed `Column` of six compact category rows. Slot
+    /// list infrastructure isn't useful here — six rows always fit in any
+    /// realistic window, so we skip the dynamic-slot-count machinery and
+    /// drive the active highlight straight off `sidebar_slot_list
+    /// .viewport_offset`. Keyboard nav still routes through
+    /// `SidebarUp`/`SidebarDown` (handled by the hotkey dispatcher,
+    /// independent of the rendering path).
     fn render_sidebar_body(&self) -> Element<'_, SettingsMessage> {
-        let entries: Vec<SettingsEntry> = SettingsTab::ALL
-            .iter()
-            .map(|tab| SettingsEntry::Header {
-                label: tab.label(),
-                icon: tab.icon_path(),
-            })
-            .collect();
-
-        // Use the dynamic slot config so the sidebar still scrolls if the
-        // window is shorter than 6 rows × row_height.
-        let mut config = slot_list::SlotListConfig::with_dynamic_slots(
-            // Carve out chrome: top-bar/player-bar (96) + sidebar header
-            // (60) + sidebar footer (44).
-            // The slot list runs in the remaining space.
-            f32::MAX,
-            SETTINGS_CHROME_HEIGHT + SIDEBAR_HEADER_HEIGHT + SIDEBAR_FOOTER_HEIGHT,
-        );
-        config.cull_empty = true;
-
-        let entries_owned = entries.clone();
-
-        slot_list::slot_list_view_with_scroll(
-            &self.sidebar_slot_list,
-            &entries_owned,
-            &config,
-            SettingsMessage::SidebarUp,
-            SettingsMessage::SidebarDown,
-            // Scrollbar seek: clamp into the sidebar slot range.
-            {
-                let total = entries_owned.len();
-                move |f: f32| {
-                    SettingsMessage::SidebarSetOffset(
-                        (f * total as f32) as usize,
-                        iced::keyboard::Modifiers::default(),
-                    )
-                }
-            },
-            None,
-            move |entry, ctx| {
-                let ctx = SlotRenderContext {
-                    item_index: ctx.item_index,
-                    is_center: ctx.is_center,
-                    opacity: ctx.opacity,
-                    row_height: ctx.row_height,
-                    scale_factor: ctx.scale_factor,
-                    is_capturing: false,
-                    conflict_text: None,
-                    is_level1: true,
-                    toggle_cursor: None,
-                };
-                render_sidebar_slot(&ctx, entry)
-            },
-        )
+        let active_index = self.sidebar_slot_list.viewport_offset;
+        let mut col = column![].width(Length::Fill);
+        for (idx, tab) in SettingsTab::ALL.iter().enumerate() {
+            col = col.push(render_sidebar_row(*tab, idx, idx == active_index));
+        }
+        container(col)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     /// Sidebar footer: version label on the left, decorative "Esc" pill on
@@ -558,113 +517,75 @@ impl SettingsPage {
     }
 }
 
-/// Render a single sidebar row — visual is the L1 category hero (icon
-/// chip + name + blurb + 2 px accent left stripe on active), but clicks
-/// dispatch sidebar messages rather than the detail-pane drill-down
-/// messages the L1 hero hardcodes. Headers only (sidebar entries are all
-/// `SettingsEntry::Header`); `Item` rows are unreachable here.
-fn render_sidebar_slot<'a>(
-    ctx: &SlotRenderContext<'_>,
-    entry: &SettingsEntry,
+/// Single sidebar row at the design's compact proportions: 38 px icon
+/// chip + 14 px name / 10 px blurb, 14 px / 16 px / 18 px padding,
+/// 1 px hairline bottom separator, 2 px accent left stripe + `bg1` fill
+/// on the active row. Click emits `SidebarClickItem(idx)`.
+fn render_sidebar_row<'a>(
+    tab: SettingsTab,
+    idx: usize,
+    is_active: bool,
 ) -> Element<'a, SettingsMessage> {
-    let (label, icon_path) = match entry {
-        SettingsEntry::Header { label, icon } => (*label, *icon),
-        SettingsEntry::Item(_) => return container(text("")).width(Length::Fill).into(),
-    };
-
-    let title_size =
-        nokkvi_data::utils::scale::calculate_font_size(20.0, ctx.row_height, ctx.scale_factor)
-            * ctx.scale_factor;
-    let desc_size =
-        nokkvi_data::utils::scale::calculate_font_size(11.0, ctx.row_height, ctx.scale_factor)
-            * ctx.scale_factor;
-
-    let title_color = if ctx.is_center {
-        theme::fg0()
+    let chip_bg = if is_active {
+        theme::bg1()
     } else {
-        sidebar_scale_alpha(theme::fg0(), ctx.opacity * 0.85)
+        theme::bg0()
     };
-    let desc_color = sidebar_scale_alpha(theme::fg2(), ctx.opacity * 0.85);
-
-    let chip_size = (title_size * 2.4).clamp(40.0, 56.0);
-    let icon_inner_size = (chip_size * 0.5).clamp(20.0, 28.0);
-    let icon_color = sidebar_scale_alpha(theme::accent_bright(), ctx.opacity);
-    let chip_bg = sidebar_scale_alpha(theme::bg0_hard(), ctx.opacity);
-    let chip_border = sidebar_scale_alpha(theme::border(), ctx.opacity);
+    let chip_icon_color = if is_active {
+        theme::accent_bright()
+    } else {
+        theme::fg2()
+    };
+    let name_color = if is_active {
+        theme::accent_bright()
+    } else {
+        theme::fg0()
+    };
 
     let icon_chip = container(
-        embedded_svg::svg_widget(icon_path)
-            .width(Length::Fixed(icon_inner_size))
-            .height(Length::Fixed(icon_inner_size))
+        embedded_svg::svg_widget(tab.icon_path())
+            .width(Length::Fixed(18.0))
+            .height(Length::Fixed(18.0))
             .style(move |_, _| svg::Style {
-                color: Some(icon_color),
+                color: Some(chip_icon_color),
             }),
     )
-    .width(Length::Fixed(chip_size))
-    .height(Length::Fixed(chip_size))
+    .width(Length::Fixed(38.0))
+    .height(Length::Fixed(38.0))
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
     .style(move |_: &iced::Theme| container::Style {
         background: Some(chip_bg.into()),
         border: Border {
-            color: chip_border,
+            color: theme::border(),
             width: 1.0,
-            radius: theme::ui_radius_md(),
+            radius: theme::ui_radius_sm(),
         },
         ..Default::default()
     });
 
-    let title = text(label)
-        .size(title_size)
-        .font(Font {
-            weight: Weight::Bold,
-            ..theme::ui_font()
-        })
-        .color(title_color);
-    let description = sidebar_category_description(label);
-    let desc_widget = text(description)
-        .size(desc_size)
-        .font(theme::ui_font())
-        .color(desc_color);
+    let name = text(tab.label()).size(14.0).color(name_color).font(Font {
+        weight: if is_active {
+            Weight::Bold
+        } else {
+            Weight::Medium
+        },
+        ..theme::ui_font()
+    });
+    let blurb = text(tab.description())
+        .size(10.0)
+        .color(theme::fg3())
+        .font(theme::ui_font());
 
-    let text_col = column![title, desc_widget].spacing(4).width(Length::Fill);
+    let text_col = column![name, blurb].spacing(2).width(Length::Fill);
 
-    let content = row![
-        Space::new().width(Length::Fixed(14.0)),
-        icon_chip,
-        Space::new().width(Length::Fixed(12.0)),
-        container(text_col)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center),
-    ]
-    .spacing(0)
-    .align_y(Alignment::Center)
-    .height(Length::Fill);
+    let row_content = row![icon_chip, Space::new().width(Length::Fixed(12.0)), text_col]
+        .spacing(0)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
 
-    let body = sidebar_cursor_stripe(content.into(), ctx.is_center);
-
-    button(body)
-        .style(transparent_button_style)
-        .padding(0)
-        .width(Length::Fill)
-        .on_press(SettingsMessage::SidebarClickItem(ctx.item_index))
-        .into()
-}
-
-/// Wrap a sidebar row body in the active-state chrome: bg1 fill + 2 px
-/// accent left stripe when this row matches the active category. Mirrors
-/// the design's `.nk-cat-row.active` block.
-fn sidebar_cursor_stripe<'a>(
-    body: Element<'a, SettingsMessage>,
-    is_active: bool,
-) -> Element<'a, SettingsMessage> {
-    let bg = if is_active {
-        theme::bg1()
-    } else {
-        theme::bg0_hard()
-    };
+    // 2 px accent left stripe when active; transparent otherwise so the
+    // row body keeps its horizontal position across the active toggle.
     let stripe_color = if is_active {
         theme::accent_bright()
     } else {
@@ -677,35 +598,47 @@ fn sidebar_cursor_stripe<'a>(
             background: Some(stripe_color.into()),
             ..Default::default()
         });
-    let row_with_stripe = row![stripe, body]
-        .align_y(Alignment::Center)
-        .height(Length::Fill);
-    container(row_with_stripe)
+
+    let stripe_row = row![
+        stripe,
+        container(row_content).width(Length::Fill).padding(
+            Padding::new(0.0)
+                .top(14.0)
+                .bottom(14.0)
+                .left(16.0)
+                .right(18.0)
+        ),
+    ]
+    .align_y(Alignment::Center);
+
+    let row_bg = if is_active {
+        theme::bg1()
+    } else {
+        Color::TRANSPARENT
+    };
+    let body = container(stripe_row)
         .width(Length::Fill)
-        .height(Length::Fill)
         .style(move |_: &iced::Theme| container::Style {
-            background: Some(bg.into()),
+            background: Some(row_bg.into()),
             ..Default::default()
-        })
+        });
+
+    let row_with_sep = column![
+        body,
+        container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            }),
+    ]
+    .width(Length::Fill);
+
+    button(row_with_sep)
+        .style(transparent_button_style)
+        .padding(0)
+        .width(Length::Fill)
+        .on_press(SettingsMessage::SidebarClickItem(idx))
         .into()
-}
-
-/// Per-category description shown below the sidebar row title. Reads
-/// directly from `SettingsTab::description()` so a single source of
-/// truth feeds both the sidebar blurb and any future ALL-iteration
-/// surface (e.g. Hotkeys page descriptions).
-fn sidebar_category_description(label: &str) -> &'static str {
-    SettingsTab::ALL
-        .iter()
-        .find(|t| t.label() == label)
-        .map_or("Configure this section", |t| t.description())
-}
-
-/// Multiply a color's alpha by `factor`. Local helper to avoid pulling
-/// in the private `scale_alpha_local` from `rendering.rs`.
-fn sidebar_scale_alpha(color: Color, factor: f32) -> Color {
-    Color {
-        a: (color.a * factor).clamp(0.0, 1.0),
-        ..color
-    }
 }
