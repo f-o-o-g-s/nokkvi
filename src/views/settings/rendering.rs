@@ -1161,7 +1161,7 @@ pub(crate) fn render_detail_row<'a>(
     let label_size = 13.0;
     let help_size = 11.0;
     let value_size = 13.0;
-    let default_size = 10.0;
+    let hint_size = 10.0;
 
     let label_color = if is_focused {
         theme::accent_bright()
@@ -1243,7 +1243,7 @@ pub(crate) fn render_detail_row<'a>(
             value_widget,
             Space::new().width(Length::Fixed(8.0)),
             text("Enter ↵")
-                .size(default_size)
+                .size(hint_size)
                 .color(theme::fg3())
                 .font(theme::ui_font()),
         ]
@@ -1259,18 +1259,7 @@ pub(crate) fn render_detail_row<'a>(
         .align_y(Alignment::Center)
         .padding(Padding::new(0.0).left(12.0).right(12.0));
 
-    let default_label_str = format!("Default: {}", item.default.display());
-    let default_col = container(
-        text(default_label_str)
-            .size(default_size)
-            .color(theme::fg3())
-            .font(theme::ui_font())
-            .wrapping(Wrapping::None),
-    )
-    .width(Length::Shrink)
-    .align_y(Alignment::Center);
-
-    let content_row = row![label_container, value_col, default_col]
+    let content_row = row![label_container, value_col]
         .spacing(0)
         .align_y(Alignment::Center)
         .width(Length::Fill);
