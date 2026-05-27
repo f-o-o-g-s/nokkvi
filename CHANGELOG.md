@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Numeric settings sliders are now click-and-drag, with fixed-width value badges so rows line up.
+
 ### Changed
 
 ### Fixed
