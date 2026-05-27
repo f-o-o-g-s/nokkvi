@@ -6,15 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Numeric settings sliders are now click-and-drag, with fixed-width value badges so rows line up.
-
 ### Changed
-
-- First-launch defaults retuned: crossfade enabled (7s), rounded mode, compact slot rows, mini-player track info, merged metadata strip, library-refresh toasts off, SFX off, and a flat LED-bars visualizer.
 
 ### Fixed
 
 ### Removed
+
+## v0.6.2 — 2026-05-27
+
+### Added
+
+- Numeric settings sliders are now click-and-drag, with fixed-width value badges so rows line up.
+
+### Changed
+
+- First-launch defaults retuned: crossfade enabled (7s), rounded mode, compact slot rows, player-bar track-info strip, merged metadata with slash separator, opacity gradient off, library-refresh toasts suppressed, SFX off, and a flat LED-bars visualizer (lines mode drops to 8 points).
+- Narrow-mode Settings category strip scales its chips to fit the window width, with label sizes shrinking at the same breakpoints as the top nav instead of clipping off the right edge.
 
 ## v0.6.1 — 2026-05-26
 
