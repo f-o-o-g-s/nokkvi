@@ -431,10 +431,6 @@ pub(crate) enum SettingsAction {
         /// Vec of (toml_key, default_hex) pairs to reset
         entries: Vec<(String, String)>,
     },
-    /// Play collapse/expand sound effect
-
-    /// Play enter sound effect (items only — headers use ExpandCollapse)
-    PlayEnter,
     /// Focus the hex editor text input
     FocusHexInput,
     /// Focus the settings search input
@@ -883,7 +879,7 @@ impl SettingsPage {
                         _ => {}
                     }
                 }
-                SettingsAction::PlayEnter
+                SettingsAction::None
             }
             SettingsMessage::EditRight => {
                 // ToggleSet: move cursor right instead of increment

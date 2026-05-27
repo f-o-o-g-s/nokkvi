@@ -123,13 +123,17 @@ impl Nokkvi {
     pub(crate) fn handle_settings(&mut self, msg: crate::views::SettingsMessage) -> Task<Message> {
         use crate::views::SettingsMessage;
 
+        // Keyboard nav and scrollbar seek always auto-scroll the focused row
+        // into view; click auto-scrolls only when stable_viewport is off
+        // (legacy scroll-on-click). With stable_viewport on, the clicked row
+        // is already visible by definition, so the view stays put.
         let is_detail_nav = matches!(
             msg,
             SettingsMessage::SlotListUp
                 | SettingsMessage::SlotListDown
                 | SettingsMessage::SlotListSetOffset(..)
-                | SettingsMessage::SlotListClickItem(_)
-        );
+        ) || (matches!(msg, SettingsMessage::SlotListClickItem(_))
+            && !self.settings.stable_viewport);
 
         // Fast path: pure navigation messages don't need SettingsViewData at all
         // when entries are already cached — avoid disk I/O for arrow key nav.
@@ -185,12 +189,7 @@ impl Nokkvi {
             crate::views::SettingsAction::ExitSettings => {
                 self.handle_switch_view(crate::View::Queue)
             }
-            crate::views::SettingsAction::PlayEnter => {
-                self.sfx_engine.play(nokkvi_data::audio::SfxType::Enter);
-                Task::none()
-            }
             crate::views::SettingsAction::FocusHexInput => {
-                self.sfx_engine.play(nokkvi_data::audio::SfxType::Enter);
                 iced::widget::operation::focus(crate::views::settings::HEX_EDITOR_INPUT_ID)
             }
             crate::views::SettingsAction::FocusSearch => {
