@@ -292,7 +292,10 @@ fn info_separator<'a, M: 'a>() -> Element<'a, M> {
 /// At very narrow widths (<500 px) some overflow is unavoidable for text
 /// modes — the floor of 9 px keeps the labels legible without dipping
 /// into illegibility.
-fn tab_text_size(window_width: f32) -> f32 {
+///
+/// Reused by the settings narrow-mode chip strip so its 6 chips scale on
+/// the same curve as the top nav.
+pub(crate) fn tab_text_size(window_width: f32) -> f32 {
     if window_width >= 800.0 {
         14.0
     } else if window_width >= 650.0 {

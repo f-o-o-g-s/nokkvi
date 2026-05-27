@@ -87,7 +87,7 @@ impl SettingsPage {
         // Narrow: horizontal category strip + search header above the
         //         detail pane, both stacked vertically.
         let base: Element<'_, SettingsMessage> = if is_narrow {
-            let strip = self.render_narrow_strip();
+            let strip = self.render_narrow_strip(data.window_width);
             let search_bar = self.render_narrow_search_header();
             column![search_bar, strip, right_pane]
                 .width(Length::Fill)
@@ -315,29 +315,31 @@ impl SettingsPage {
         column![body, sep].width(Length::Fill).into()
     }
 
-    /// Narrow-variant category strip: horizontal scrollable row of pill
-    /// chips, one per category. Active chip gets the accent border +
-    /// `accent_soft` fill + accent text; inactive chips use the
-    /// `bg_border_2` outline. Matches the design's `NarrowTabStrip`.
-    fn render_narrow_strip(&self) -> Element<'_, SettingsMessage> {
+    /// Narrow-variant category strip: horizontal row of pill chips, one
+    /// per category, each taking an equal `FillPortion(1)` share of the
+    /// strip width so the row spans without scrolling. Active chip gets
+    /// the accent border + `accent_soft` fill + accent text; inactive
+    /// chips use the `bg_border_2` outline. Label font scales via
+    /// `tab_text_size` on the same curve as the top nav, so the strip
+    /// stays readable as the window narrows.
+    fn render_narrow_strip(&self, window_width: f32) -> Element<'_, SettingsMessage> {
         let active_index = self.sidebar_slot_list.viewport_offset;
+        let text_size = crate::widgets::nav_bar::tab_text_size(window_width);
         let mut chip_row = row![Space::new().width(Length::Fixed(16.0))]
             .spacing(6)
+            .width(Length::Fill)
             .align_y(Alignment::Center);
         for (idx, tab) in SettingsTab::ALL.iter().enumerate() {
-            chip_row = chip_row.push(render_narrow_chip(*tab, idx, idx == active_index));
+            chip_row = chip_row.push(render_narrow_chip(
+                *tab,
+                idx,
+                idx == active_index,
+                text_size,
+            ));
         }
         chip_row = chip_row.push(Space::new().width(Length::Fixed(16.0)));
 
-        let scrollable_strip = iced::widget::scrollable(chip_row)
-            .direction(iced::widget::scrollable::Direction::Horizontal(
-                iced::widget::scrollable::Scrollbar::new()
-                    .width(0)
-                    .scroller_width(0),
-            ))
-            .width(Length::Fill);
-
-        let body = container(scrollable_strip)
+        let body = container(chip_row)
             .width(Length::Fill)
             .height(Length::Fixed(NARROW_STRIP_HEIGHT - 1.0))
             .align_y(Alignment::Center)
@@ -639,12 +641,17 @@ impl SettingsPage {
 
 /// Narrow-variant category chip: pill-shaped, icon + name only (no
 /// blurb), `accent` border + `accent_soft` fill on the active chip,
-/// `bg2` outline + `bg0` fill on inactive. Click emits
-/// `SidebarClickItem(idx)` — same handler as the wide-sidebar row.
+/// `bg2` outline + `bg0` fill on inactive. Each chip claims a
+/// `FillPortion(1)` slice of the strip so all six chips span the
+/// available width together; the label scales via `text_size` from the
+/// shared `tab_text_size` curve so labels stay inside their share as
+/// the window narrows. Click emits `SidebarClickItem(idx)` — same
+/// handler as the wide-sidebar row.
 fn render_narrow_chip<'a>(
     tab: SettingsTab,
     idx: usize,
     is_active: bool,
+    text_size: f32,
 ) -> Element<'a, SettingsMessage> {
     let border_color = if is_active {
         theme::accent_bright()
@@ -674,19 +681,31 @@ fn render_narrow_chip<'a>(
         .style(move |_, _| svg::Style {
             color: Some(text_color),
         });
-    let label = text(tab.label()).size(12.0).color(text_color).font(Font {
-        weight: if is_active {
-            Weight::Bold
-        } else {
-            Weight::Medium
-        },
-        ..theme::ui_font()
-    });
+    let label = text(tab.label())
+        .size(text_size)
+        .color(text_color)
+        .font(Font {
+            weight: if is_active {
+                Weight::Bold
+            } else {
+                Weight::Medium
+            },
+            ..theme::ui_font()
+        })
+        .wrapping(iced::widget::text::Wrapping::None);
 
-    let content = row![icon, label].spacing(8).align_y(Alignment::Center);
+    // Inner container claims the chip's full content area and centers
+    // the icon+label row inside — without it the row anchors at the
+    // padded left edge of the `FillPortion(1)` button, leaving the
+    // right side of each chip blank.
+    let content = container(row![icon, label].spacing(8).align_y(Alignment::Center))
+        .width(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center);
 
     button(content)
         .on_press(SettingsMessage::SidebarClickItem(idx))
+        .width(Length::FillPortion(1))
         .padding(
             Padding::new(0.0)
                 .top(8.0)
