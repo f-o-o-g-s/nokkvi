@@ -25,7 +25,7 @@ Things that shaped this project:
 - **[mpd](https://github.com/MusicPlayerDaemon/MPD)**: Shaped the queue and consume logic.
 - **[fooyin](https://github.com/fooyin/fooyin)**: Referenced for the native PipeWire implementation.
 - **[cava](https://github.com/karlstav/cava)**: The visualizer DSP (`spectrum.rs`) is a Rust port of cavacore, and the Monstercat smoothing filter is ported from cava.c.
-- **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the drill-down settings navigation.
+- **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the MusicWheel-style slot list (fixed odd-row centered viewport, height-adaptive) and the roulette wheel's discrete-tick decel.
 - **Vim**: Inspired the color schemes and keyboard-first approach.
 
 ## Highlights
