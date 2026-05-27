@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- First-launch defaults retuned: crossfade enabled (7s), rounded mode, compact slot rows, mini-player track info, merged metadata strip, library-refresh toasts off, SFX off, and a flat LED-bars visualizer.
+
 ### Fixed
 
 ### Removed
