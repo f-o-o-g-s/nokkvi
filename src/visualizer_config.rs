@@ -331,7 +331,7 @@ pub struct BarsConfig {
     pub bar_width_max: f32,
 
     /// Spacing between bars in pixels.
-    /// Default: 0.0
+    /// Default: 2.0
     pub bar_spacing: f32,
 
     /// Border width around each bar in pixels.
@@ -341,7 +341,7 @@ pub struct BarsConfig {
 
     /// Enable LED-style segmented bars (like VU meters).
     /// When enabled, bars are rendered as stacked LED segments with gaps.
-    /// Default: false
+    /// Default: true
     pub led_bars: bool,
 
     /// Height of each LED segment in pixels.
@@ -398,7 +398,7 @@ pub struct BarsConfig {
 
     /// Isometric 3D depth in pixels.
     /// When > 0, bars are rendered with a top face and right side face for a 3D look.
-    /// Default: 1.0
+    /// Default: 0.0
     pub bar_depth_3d: f32,
 
     /// Maximum number of bars to display.
@@ -412,9 +412,9 @@ impl Default for BarsConfig {
         Self {
             bar_width_min: 10.0,
             bar_width_max: 20.0,
-            bar_spacing: 0.0,
+            bar_spacing: 2.0,
             border_width: 2.0,
-            led_bars: false,
+            led_bars: true,
             led_segment_height: 5.0,
             gradient_mode: BarsGradientMode::Wave,
             gradient_orientation: BarsGradientOrientation::Vertical,
@@ -424,7 +424,7 @@ impl Default for BarsConfig {
             peak_fade_time: 750,
             peak_height_ratio: 35,
             peak_fall_speed: 5,
-            bar_depth_3d: 1.0,
+            bar_depth_3d: 0.0,
             max_bars: 512,
         }
     }
@@ -462,7 +462,7 @@ impl BarsConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct LinesConfig {
-    /// Number of points to render (default: 24)
+    /// Number of points to render (default: 8)
     pub point_count: usize,
     /// Line thickness as fraction of visualizer height (0.01-0.10, default: 0.01 = 1%)
     pub line_thickness: f32,
@@ -503,7 +503,7 @@ pub struct LinesConfig {
 impl Default for LinesConfig {
     fn default() -> Self {
         Self {
-            point_count: 24,
+            point_count: 8,
             line_thickness: 0.01,
             outline_thickness: 1.0,
             outline_opacity: 1.0,

@@ -58,7 +58,7 @@ pub struct PersistedPlayerSettings {
     /// e.g. "/music/Library" for local Navidrome, or "/mnt/nas/music" for NFS mounts.
     #[serde(default)]
     pub local_music_path: String,
-    /// Rounded corners mode (default: false = square)
+    /// Rounded corners mode (default: true = rounded)
     #[serde(default)]
     pub rounded_mode: bool,
     /// Navigation layout mode (default: Top = horizontal bar)
@@ -73,16 +73,16 @@ pub struct PersistedPlayerSettings {
     /// Slot list row density (default: Default = 70px)
     #[serde(default)]
     pub slot_row_height: SlotRowHeight,
-    /// Whether the opacity gradient on non-center slots is enabled (default: true)
+    /// Whether the opacity gradient on non-center slots is enabled (default: false)
     #[serde(default = "default_opacity_gradient")]
     pub opacity_gradient: bool,
     /// Whether clickable text links in slot list items are enabled (default: true)
     #[serde(default = "default_true")]
     pub slot_text_links: bool,
-    /// Whether crossfade between tracks is enabled (default: false)
+    /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default)]
     pub crossfade_enabled: bool,
-    /// Crossfade duration in seconds (1–12, default 5)
+    /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]
     pub crossfade_duration_secs: u32,
     /// Default playlist ID for quick-add (None = no default)
@@ -136,7 +136,7 @@ pub struct PersistedPlayerSettings {
     #[serde(default = "default_true")]
     pub strip_show_format_info: bool,
     /// Whether the metastrip renders artist/album/title as a single shared
-    /// scrolling unit with one set of bookend separators (default: false).
+    /// scrolling unit with one set of bookend separators (default: true).
     #[serde(default)]
     pub strip_merged_mode: bool,
     /// What happens when clicking the track info strip (default: GoToQueue)
@@ -147,7 +147,7 @@ pub struct PersistedPlayerSettings {
     #[serde(default = "default_true")]
     pub strip_show_labels: bool,
     /// Visual character used to join visible fields in merged-mode rendering
-    /// (default: Dot · — matches the historical hardcoded join).
+    /// (default: Slash /).
     #[serde(default)]
     pub strip_separator: StripSeparator,
     /// Active playlist ID loaded in the queue (None = no playlist context)
@@ -181,7 +181,7 @@ pub struct PersistedPlayerSettings {
     #[serde(default = "default_true")]
     pub show_album_artists_only: bool,
     /// Whether to suppress the toast notification shown when Navidrome
-    /// emits a library-refresh event (default: false = toasts shown).
+    /// emits a library-refresh event (default: true = toasts suppressed).
     #[serde(default)]
     pub suppress_library_refresh_toasts: bool,
     /// Whether the queue's stars rating column is visible (default: true).
@@ -426,7 +426,7 @@ fn default_sfx_volume() -> f64 {
     0.68
 }
 fn default_sound_effects_enabled() -> bool {
-    true
+    false
 }
 fn default_scrobbling_enabled() -> bool {
     true
@@ -444,10 +444,10 @@ fn default_auto_follow_playing() -> bool {
     true
 }
 fn default_opacity_gradient() -> bool {
-    true
+    false
 }
 fn default_crossfade_duration_secs() -> u32 {
-    5
+    7
 }
 fn default_true() -> bool {
     true
@@ -468,14 +468,14 @@ impl Default for PersistedPlayerSettings {
             auto_follow_playing: default_auto_follow_playing(),
             enter_behavior: EnterBehavior::default(),
             local_music_path: String::new(),
-            rounded_mode: false,
+            rounded_mode: true,
             nav_layout: NavLayout::default(),
             nav_display_mode: NavDisplayMode::default(),
-            track_info_display: TrackInfoDisplay::default(),
-            slot_row_height: SlotRowHeight::default(),
+            track_info_display: TrackInfoDisplay::PlayerBar,
+            slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: default_opacity_gradient(),
             slot_text_links: default_true(),
-            crossfade_enabled: false,
+            crossfade_enabled: true,
             crossfade_duration_secs: default_crossfade_duration_secs(),
             default_playlist_id: None,
             default_playlist_name: String::new(),
@@ -493,10 +493,10 @@ impl Default for PersistedPlayerSettings {
             strip_show_artist: true,
             strip_show_album: true,
             strip_show_format_info: true,
-            strip_merged_mode: false,
+            strip_merged_mode: true,
             strip_click_action: StripClickAction::default(),
             strip_show_labels: true,
-            strip_separator: StripSeparator::default(),
+            strip_separator: StripSeparator::Slash,
             active_playlist_id: None,
             active_playlist_name: String::new(),
             active_playlist_comment: String::new(),
@@ -507,7 +507,7 @@ impl Default for PersistedPlayerSettings {
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: default_true(),
-            suppress_library_refresh_toasts: false,
+            suppress_library_refresh_toasts: true,
             queue_show_stars: true,
             queue_show_album: true,
             queue_show_duration: true,
@@ -643,25 +643,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strip_merged_mode_default_is_off() {
+    fn strip_merged_mode_default_is_on() {
         let p = PersistedPlayerSettings::default();
-        assert!(!p.strip_merged_mode);
+        assert!(p.strip_merged_mode);
     }
 
     #[test]
     fn strip_merged_mode_roundtrips_through_serde() {
         let p = PersistedPlayerSettings {
-            strip_merged_mode: true,
+            strip_merged_mode: false,
             ..PersistedPlayerSettings::default()
         };
         let json = serde_json::to_string(&p).expect("serialize");
         let parsed: PersistedPlayerSettings = serde_json::from_str(&json).expect("deserialize");
-        assert!(parsed.strip_merged_mode);
+        assert!(!parsed.strip_merged_mode);
     }
 
     #[test]
-    fn strip_merged_mode_missing_field_defaults_to_false() {
-        // Simulate older redb-stored settings without the field.
+    fn strip_merged_mode_missing_field_defaults_to_serde_false() {
+        // Pre-feature redb rows have no `strip_merged_mode` key, so serde fills
+        // it via the field-level `#[serde(default)]` — which resolves to
+        // `bool::default()` (false), not the struct-level Default (true).
+        // This pin keeps the serde-vs-struct distinction explicit for future
+        // changes to the shipped default.
         let json = r#"{}"#;
         let parsed: PersistedPlayerSettings = serde_json::from_str(json).expect("deserialize");
         assert!(!parsed.strip_merged_mode);

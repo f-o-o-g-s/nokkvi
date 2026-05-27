@@ -280,7 +280,7 @@ impl Default for TomlSettings {
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: true,
-            suppress_library_refresh_toasts: false,
+            suppress_library_refresh_toasts: true,
             queue_show_stars: true,
             queue_show_album: true,
             queue_show_duration: true,
@@ -343,12 +343,12 @@ impl Default for TomlSettings {
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
-            rounded_mode: false,
+            rounded_mode: true,
             nav_layout: NavLayout::default(),
             nav_display_mode: NavDisplayMode::default(),
-            track_info_display: TrackInfoDisplay::default(),
-            slot_row_height: SlotRowHeight::default(),
-            opacity_gradient: true,
+            track_info_display: TrackInfoDisplay::PlayerBar,
+            slot_row_height: SlotRowHeight::Compact,
+            opacity_gradient: false,
             slot_text_links: true,
             horizontal_volume: false,
             font_family: String::new(),
@@ -356,12 +356,12 @@ impl Default for TomlSettings {
             strip_show_artist: true,
             strip_show_album: true,
             strip_show_format_info: true,
-            strip_merged_mode: false,
+            strip_merged_mode: true,
             strip_click_action: StripClickAction::default(),
             strip_show_labels: true,
-            strip_separator: crate::types::player_settings::StripSeparator::default(),
-            crossfade_enabled: false,
-            crossfade_duration_secs: 5,
+            strip_separator: crate::types::player_settings::StripSeparator::Slash,
+            crossfade_enabled: true,
+            crossfade_duration_secs: 7,
             volume_normalization: VolumeNormalizationMode::default(),
             normalization_level: NormalizationLevel::default(),
             replay_gain_preamp_db: 0.0,
@@ -369,7 +369,7 @@ impl Default for TomlSettings {
             replay_gain_fallback_to_agc: false,
             replay_gain_prevent_clipping: true,
             visualization_mode: VisualizationMode::default(),
-            sound_effects_enabled: true,
+            sound_effects_enabled: false,
             sfx_volume: 0.68,
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,
@@ -479,7 +479,7 @@ mod tests {
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
         // Spot-check key fields
         assert_eq!(parsed.start_view, "Queue");
-        assert_eq!(parsed.crossfade_duration_secs, 5);
+        assert_eq!(parsed.crossfade_duration_secs, 7);
         assert!(parsed.scrobbling_enabled);
         assert_eq!(parsed.eq_gains, [0.0; 10]);
     }
@@ -608,20 +608,20 @@ mod tests {
     }
 
     #[test]
-    fn toml_strip_merged_mode_default_is_off() {
+    fn toml_strip_merged_mode_default_is_on() {
         let settings = TomlSettings::default();
-        assert!(!settings.strip_merged_mode);
+        assert!(settings.strip_merged_mode);
     }
 
     #[test]
     fn toml_strip_merged_mode_roundtrip() {
         let settings = TomlSettings {
-            strip_merged_mode: true,
+            strip_merged_mode: false,
             ..TomlSettings::default()
         };
         let toml_str = toml::to_string_pretty(&settings).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
-        assert!(parsed.strip_merged_mode);
+        assert!(!parsed.strip_merged_mode);
     }
 
     #[test]
@@ -633,7 +633,7 @@ mod tests {
         let parsed: TomlSettings = toml::from_str(minimal).expect("deserialize");
         assert_eq!(parsed.start_view, "Albums");
         assert!(parsed.stable_viewport); // default
-        assert_eq!(parsed.crossfade_duration_secs, 5); // default
+        assert_eq!(parsed.crossfade_duration_secs, 7); // default
     }
 
     // ══════════════════════════════════════════════════════════════════

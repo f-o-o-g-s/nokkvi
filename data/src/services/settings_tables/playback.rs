@@ -368,16 +368,16 @@ mod tests {
     }
 
     /// Bool round-trip: `general.crossfade_enabled` is the canonical Bool
-    /// example. Default is `false`; flip via the dispatcher and confirm
+    /// example. Default is `true`; flip via the dispatcher and confirm
     /// `get_player_settings()` reports the new value.
     #[test]
     fn dispatch_playback_bool_round_trip_crossfade_enabled() {
         let (mut mgr, _tmp) = make_test_manager();
-        assert!(!mgr.get_player_settings().crossfade_enabled);
+        assert!(mgr.get_player_settings().crossfade_enabled);
 
         let result = dispatch_playback_tab_setting(
             "general.crossfade_enabled",
-            SettingValue::Bool(true),
+            SettingValue::Bool(false),
             &mut mgr,
         );
 
@@ -387,7 +387,7 @@ mod tests {
                 crate::types::settings_side_effect::SettingsSideEffect::None
             ))
         ));
-        assert!(mgr.get_player_settings().crossfade_enabled);
+        assert!(!mgr.get_player_settings().crossfade_enabled);
     }
 
     /// Number/f32 round-trip: `general.replay_gain_preamp_db` arrives as
