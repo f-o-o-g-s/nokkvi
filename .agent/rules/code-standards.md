@@ -13,7 +13,7 @@ trigger: always_on
 ## Rust Conventions
 
 - **Production error handling**: use `?`, `unwrap_or_default()`, or explicit match — **no `.unwrap()`** in production paths. Enforced by the `unwrap_used = "deny"` workspace lint; tests opt out via `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]` at each crate root.
-- **No `println!` / `dbg!` / `todo!()` / `unimplemented!()` / `mem::forget`**: all `deny` at workspace level. Use `tracing` macros for output; prefer `*_or_else` over `*_or` for non-trivial fallbacks (`or_fun_call = "deny"`); `async fn` without `.await` is rejected (`unused_async = "deny"`); enum matches must enumerate every variant rather than `_ =>` (`match_wildcard_for_single_variants = "deny"`). Don't paper over with broader allows — fix at the call site.
+- **No `println!` / `dbg!` / `todo!()` / `unimplemented!()` / `mem::forget`**: all `deny` at workspace level. Use `tracing` macros for output; prefer `*_or_else` over `*_or` for non-trivial fallbacks (`or_fun_call = "deny"`); `async fn` without `.await` is rejected (`unused_async = "deny"`); enum matches must enumerate every variant rather than `_ =>` (`match_wildcard_for_single_variants = "deny"`); `assert!(<const expr>)` belongs in a `const _: () = assert!(…)` block (`assertions_on_constants = "deny"`). Don't paper over with broader allows — fix at the call site.
 - **Cloning**: prefer references / `Cow<>` over explicit `.clone()`. Search-filter helpers return `Cow::Borrowed` when no query is active.
 - **Logging**: structured `tracing` macros — `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow), `trace!` (per-frame / per-packet / startup enumeration). Stderr is quiet by default; the file log at `~/.local/state/nokkvi/nokkvi.log` stays verbose.
 - **Threading**: prefer `Arc` + atomics over `Mutex<T>` for simple shared state. Theme color reads use `ArcSwap` (lock-free).
@@ -83,7 +83,7 @@ cargo build --release                        # release build
 | Store | What | How |
 |-------|------|-----|
 | `config.toml` | User preferences (general, interface, playback, hotkeys, views, visualizer behavior, font, artwork resolution, library page size, normalization, tray, etc.) | Hot-reloadable via `SettingsManager` + `config_writer.rs`. `verbose_config` writes all defaults |
-| Theme files | Named `.toml` in `~/.config/nokkvi/themes/` | Palette + visualizer colors. **21 built-in**. `config.toml` stores `theme = "name"` |
+| Theme files | Named `.toml` in `~/.config/nokkvi/themes/` | Palette + visualizer colors. **22 built-in**. `config.toml` stores `theme = "name"` |
 | redb | Queue, session tokens (JWT + Subsonic credential) | Via `state_storage.rs`, `services/queue/`, `credentials.rs`. **No password on disk** — JWT auto-refreshes, expired JWT drops to login |
 | Credentials | Server URL, username | In `config.toml`. Password never persists |
 

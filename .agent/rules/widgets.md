@@ -72,6 +72,7 @@ Custom `iced::advanced` seekable widget. Track + handle rendered in separate `wi
 | Boat | `boat.rs` (+ `boat_physics.rs` / `boat_tests.rs`) | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes |
 | Menu Chrome | `menu_chrome.rs` | Shared overlay-menu vocabulary: `fill()`, `border()`, `container_style()` accessors consumed by the four overlay menus (hamburger / player_modes / checkbox_dropdown / context_menu) so the `bg1 + border + ui_radius_md + MENU_SHADOW` recipe lives at one site |
 | Modal Button | `modal_button.rs` | `modal_icon_button(icon, size, on_press)` — the shared `mouse_area(HoverOverlay(container(svg)))` chassis used by About / Info modal headers |
+| Pill Segmented Button | `pill_segmented_button.rs` | Horizontal chip group used by Settings Bool / Enum / ToggleSet widgets. Flat 1 px outline + `theme::bg0()` fill in flat mode; `ui_radius_pill()` corners in rounded mode; selected chip uses `accent_bright()` fill |
 
 ## Modal Frame Style
 

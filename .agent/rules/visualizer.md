@@ -13,7 +13,7 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 ## Module Structure
 
-- `widgets/visualizer/mod.rs` — `ShaderVisualizer` Iced widget glue; `build_shader_params(...)` constructs the 31-field `ShaderParams` from a config snapshot, theme palette, and viewport
+- `widgets/visualizer/mod.rs` — `ShaderVisualizer` Iced widget glue; `build_shader_params(...)` constructs the 32-field `ShaderParams` from a config snapshot, theme palette, and viewport
 - `widgets/visualizer/state.rs` — `VisualizerState` runtime (audio callback, FFT pipeline, peak/effect state, display buffers); `VisualizerTiming` is a unit-conversion newtype (ms → seconds, percent → unit)
 - `widgets/visualizer/pipeline.rs` — `MAX_BARS = 2048`, GPU buffers, `Pipeline::new`
 - `widgets/visualizer/shader.rs` — `ShaderParams` struct, render dispatch, MSAA texture cache, blit shader

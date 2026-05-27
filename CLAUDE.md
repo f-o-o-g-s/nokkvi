@@ -135,10 +135,10 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 
 - **Embedded SVG icons fall back silently to play.svg.** `build.rs` walks `assets/icons/` at compile time and emits the `get_svg()` lookup table + `KNOWN_PATHS` array, so adding an icon is a one-step drop into `assets/icons/` followed by a rebuild — no manual `const` / match arm / KNOWN-list edits. The silent fallback still bites when code references a path that doesn't exist on disk; `cargo test --bin nokkvi -- embedded_svg` runs `all_svg_paths_in_source_are_registered`, which scans every `.rs` file for `assets/icons/*.svg` string literals and asserts each one ships.
 - **Artwork**: use `iced::widget::image::Handle::from_bytes(data)` for refreshable artwork — `Handle::from_path` keys on path and produces stale GPU textures when the file is overwritten. All artwork LRUs are `SnapshottedLru<K, V>` newtypes (`src/state/snapshotted_lru.rs`); never pair a bare `lru::LruCache` with a manual `HashMap` snapshot.
-- **Queue artwork URLs**: queue song mini thumbnails MUST request 80px using `album_id` to hit the prefetch cache; large artwork fallback MUST construct the full-size URL (`size=1000`) — never reuse the 80px URL.
+- **Queue artwork URLs**: queue song mini thumbnails MUST request 80px using `album_id` to hit the prefetch cache; large artwork fallback MUST use the user's `artwork_resolution` setting (`ArtworkResolution::to_size()` → 1000/1500/2000 or `None` for Original) — never reuse the 80px URL.
 - **Filtered queue indices**: when a search is active, slot-list indices are relative to `filtered_songs`. Always map through the filtered view before doing queue mutations.
 - **Queue navigation**: use `peek_next_song()` → `transition_to_queued()` for transitions. Use `reposition_to_index()` ONLY for non-transition updates like play-from-here.
-- **`HoverOverlay` wraps containers, never native buttons** — buttons capture `ButtonPressed` early. Pattern: `mouse_area(HoverOverlay::new(container(...))).on_press(msg)`.
+- **`HoverOverlay`**: canonical pattern is `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells. Wrapping a native `button` works in some places (after `HoverOverlay::update` started issuing `request_redraw`), but reach for the canonical `mouse_area + container` pattern first.
 - **`guard_play_action()` at the top of every play handler** — protects against split-view + playlist-edit conflicts.
 - **Config-watcher feedback loops**: `suppress_config_reload()` blocks the file watcher's reflection, but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
 - **Database lock on re-login**: `StateStorage` is cached on `Nokkvi.cached_storage` and reused via `AppService::new_with_storage()` — redb holds an exclusive lock so a fresh open after logout will fail. Stop the engine + `TaskManager` on logout.
@@ -152,7 +152,7 @@ For the full set of rules and patterns, see `.agent/rules/` (loaded contextually
 - `ui-views.md` — slot list views, expansion, browsing panel, modals
 - `widgets.md` — widget catalog, layout constants, shared menu/modal chrome modules, SVG icons
 - `visualizer.md` — FFT pipeline, shaders, peak/gradient modes
-- `settings-view.md` — settings module structure, drill-down, SettingValue types
+- `settings-view.md` — settings module structure, persistent sidebar layout, SettingValue types
 - `gotchas.md` — full list of the subtle pitfalls
 - `new-feature-checklist.md` — end-to-end checklist for new features
 
