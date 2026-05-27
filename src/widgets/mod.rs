@@ -26,6 +26,7 @@ pub(crate) mod player_bar;
 pub(crate) mod player_modes_menu;
 pub(crate) mod scroll_indicator;
 pub(crate) mod search_bar;
+pub(crate) mod settings_slider;
 pub(crate) mod side_nav_bar;
 pub(crate) mod sizes;
 pub(crate) mod slot_list;

@@ -372,6 +372,10 @@ pub enum SettingsMessage {
     ToggleSearch,
     /// Directly set a value by string (from clickable badges: bool On/Off, enum options)
     EditSetValue(String),
+    /// Drag the centered Float/Int value to a fraction in `[0.0, 1.0]`.
+    /// Emitted by the draggable settings slider; the handler quantizes to
+    /// the item's `step` and clamps to `[min, max]`.
+    EditSetFraction(f32),
     /// Toggle a single badge in a ToggleSet (key = the setting_key of the toggled badge)
     ToggleSetToggle(String),
     /// Move sidebar focus to the next category (Shift+Tab default)
@@ -900,6 +904,10 @@ impl SettingsPage {
             SettingsMessage::EditSetValue(val_str) => {
                 self.auto_enter_edit_if_needed();
                 self.apply_edit(|v| v.parse_from_str(&val_str))
+            }
+            SettingsMessage::EditSetFraction(fraction) => {
+                self.auto_enter_edit_if_needed();
+                self.apply_edit(|v| v.set_fraction(fraction))
             }
             SettingsMessage::ToggleSetToggle(toggle_key) => {
                 // Find the center item and flip the matching toggle badge

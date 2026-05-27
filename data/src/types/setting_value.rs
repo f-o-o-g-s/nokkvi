@@ -247,4 +247,51 @@ impl SettingValue {
             _ => None,
         }
     }
+
+    /// Map a fraction in [0.0, 1.0] to a `Float`/`Int` value within `[min, max]`,
+    /// snapped to `step`. Used by the draggable settings slider.
+    pub fn set_fraction(&self, fraction: f32) -> Option<SettingValue> {
+        let frac = fraction.clamp(0.0, 1.0) as f64;
+        match self {
+            SettingValue::Float {
+                min,
+                max,
+                step,
+                unit,
+                ..
+            } => {
+                let raw = min + frac * (max - min);
+                let snapped = ((raw - min) / step).round() * step + min;
+                let val = snapped.clamp(*min, *max);
+                Some(SettingValue::Float {
+                    val,
+                    min: *min,
+                    max: *max,
+                    step: *step,
+                    unit,
+                })
+            }
+            SettingValue::Int {
+                min,
+                max,
+                step,
+                unit,
+                ..
+            } => {
+                let span = (*max - *min) as f64;
+                let raw = *min as f64 + frac * span;
+                let step_f = *step as f64;
+                let snapped = ((raw - *min as f64) / step_f).round() as i64 * *step + *min;
+                let val = snapped.clamp(*min, *max);
+                Some(SettingValue::Int {
+                    val,
+                    min: *min,
+                    max: *max,
+                    step: *step,
+                    unit,
+                })
+            }
+            _ => None,
+        }
+    }
 }

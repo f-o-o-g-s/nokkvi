@@ -26,6 +26,16 @@ use crate::{
 // Shared Helpers
 // ============================================================================
 
+/// Fixed pixel width for the numeric value badge. Sized to fit the longest
+/// expected value ("22050 Hz") with breathing room so 7 / 0.77 / 22050 Hz
+/// all line up across rows regardless of their content width.
+const NUMERIC_BADGE_WIDTH: f32 = 84.0;
+
+/// Track length next to the value badge inside the numeric row. Matches the
+/// seek-bar pattern: 6 px thick track + 14 px square handle, pinned wide
+/// enough to give the drag a useful range.
+const NUMERIC_TRACK_WIDTH: f32 = 132.0;
+
 /// Whether a `SettingItem` should render the "Enter ↵" affordance when it is
 /// the centered (selected) row.
 ///
@@ -63,11 +73,17 @@ pub(crate) fn transparent_button_style(
 /// rounded mode. Used for Text rows and the numeric value display inside
 /// `render_numeric_row` (which then layers arrow buttons + mini-slider
 /// around it).
+///
+/// `fixed_width` pins the chip to an exact pixel width and centers the text
+/// — used by `render_numeric_row` so values of varying widths (`7`,
+/// `0.77`, `22050 Hz`) line up across rows. `None` keeps the legacy
+/// shrink-to-content behavior used by `Text` rows.
 fn render_badge<'a>(
     display_text: String,
     font_size: f32,
     is_center: bool,
     opacity: f32,
+    fixed_width: Option<f32>,
 ) -> Element<'a, SettingsMessage> {
     let eff_opacity = if is_center { 1.0 } else { opacity };
     let text_color = scale_alpha_local(theme::fg0(), eff_opacity);
@@ -75,7 +91,7 @@ fn render_badge<'a>(
     let badge_border = scale_alpha_local(theme::border(), eff_opacity);
     let badge_size = font_size * 0.95;
 
-    container(
+    let mut chip = container(
         slot_list::slot_list_text(display_text, badge_size, text_color).font(Font {
             weight: Weight::Medium,
             ..theme::ui_font()
@@ -90,8 +106,13 @@ fn render_badge<'a>(
             radius: theme::ui_radius_sm(),
         },
         ..Default::default()
-    })
-    .into()
+    });
+
+    if let Some(width) = fixed_width {
+        chip = chip.width(Length::Fixed(width)).align_x(Alignment::Center);
+    }
+
+    chip.into()
 }
 
 /// Render an inline hex color editor (text input + preview swatch).
@@ -272,8 +293,15 @@ fn render_value_display<'a>(
         }
 
         _ => {
-            // Float, Int, Text — badge with bg0_hard background
-            render_badge(value.display(), font_size, is_center, opacity)
+            // Float, Int, Text — badge with bg0_hard background.
+            // Numeric rows pin the badge to a fixed width so 7 / 0.77 / 22050 Hz
+            // line up across rows; Text rows keep shrink-to-content.
+            let fixed = if value.is_incrementable() {
+                Some(NUMERIC_BADGE_WIDTH)
+            } else {
+                None
+            };
+            render_badge(value.display(), font_size, is_center, opacity, fixed)
         }
     };
 
@@ -288,9 +316,9 @@ fn render_value_display<'a>(
 
 /// Compose the numeric row chrome around a pre-rendered value badge:
 /// `[ ‹ ] [ value ] [ slider track ] [ › ]` matching the design's `.nk-w-num`
-/// layout. Slider is purely visual (non-draggable) so wheel + arrows remain
-/// the sole input paths — a 4 px draggable track inside a slot row would
-/// fight the slot-list scroll listeners.
+/// layout. The track uses the shared
+/// [`SettingsSlider`](crate::widgets::settings_slider) widget — 6 px track +
+/// 14 px square handle, draggable on the focused row, render-only elsewhere.
 fn render_numeric_row<'a>(
     value: &SettingValue,
     value_badge: Element<'a, SettingsMessage>,
@@ -315,9 +343,8 @@ fn render_numeric_row<'a>(
         SettingsMessage::EditRight,
     );
 
-    // Optional mini-slider track between value + right arrow.
-    let track: Option<Element<'a, SettingsMessage>> =
-        numeric_normalized_fraction(value).map(|frac| numeric_mini_track(frac, eff_opacity));
+    let track: Option<Element<'a, SettingsMessage>> = numeric_normalized_fraction(value)
+        .map(|frac| numeric_slider_track(frac, is_center, eff_opacity));
 
     let mut layout = row![
         left_arrow,
@@ -381,88 +408,22 @@ fn arrow_button<'a>(
     btn.into()
 }
 
-/// 120×4 mini-slider track + 10 px handle showing the value's position within
-/// its `min..max` range. Read-only by design — the surrounding arrow buttons
-/// (and wheel events handled at the slot list level) drive the value.
-fn numeric_mini_track<'a>(fraction: f32, eff_opacity: f32) -> Element<'a, SettingsMessage> {
-    const TRACK_WIDTH: f32 = 120.0;
-    const TRACK_HEIGHT: f32 = 4.0;
-    const HANDLE_SIZE: f32 = 10.0;
-
-    let track_bg = scale_alpha_local(theme::bg0(), eff_opacity);
-    let track_border = scale_alpha_local(theme::border(), eff_opacity);
-    let fill_color = scale_alpha_local(theme::accent_bright(), eff_opacity);
-    let handle_color = fill_color;
-
-    let frac = fraction.clamp(0.0, 1.0);
-    let fill_width = (TRACK_WIDTH * frac).max(0.0);
-    // Center the handle on the fill edge — subtract half its width.
-    let handle_offset = (TRACK_WIDTH * frac - HANDLE_SIZE / 2.0).max(0.0);
-    let right_spacer = (TRACK_WIDTH - handle_offset - HANDLE_SIZE).max(0.0);
-
-    // Track + colored fill (two stacked rectangles in a row sized to the
-    // fraction). The handle sits on top in its own row aligned via Space-padded
-    // anchors so we don't need an absolute-position overlay.
-    let fill = container(Space::new())
-        .width(Length::Fixed(fill_width))
-        .height(Length::Fixed(TRACK_HEIGHT))
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(fill_color.into()),
-            border: Border {
-                radius: theme::ui_radius_pill(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let track_body = container(fill)
-        .width(Length::Fixed(TRACK_WIDTH))
-        .height(Length::Fixed(TRACK_HEIGHT))
-        .align_y(Alignment::Center)
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(track_bg.into()),
-            border: Border {
-                color: track_border,
-                width: 1.0,
-                radius: theme::ui_radius_pill(),
-            },
-            ..Default::default()
-        });
-
-    let handle = container(Space::new())
-        .width(Length::Fixed(HANDLE_SIZE))
-        .height(Length::Fixed(HANDLE_SIZE))
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(handle_color.into()),
-            border: Border {
-                radius: theme::ui_radius_pill(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-
-    // Stack track + handle. The handle row uses Space padding instead of an
-    // overlay so positioning happens entirely through layout and respects the
-    // ambient alpha scale.
-    let handle_row = row![
-        Space::new().width(Length::Fixed(handle_offset)),
-        handle,
-        Space::new().width(Length::Fixed(right_spacer)),
-    ]
-    .align_y(Alignment::Center);
-
-    iced::widget::stack![
-        container(track_body)
-            .width(Length::Fixed(TRACK_WIDTH))
-            .height(Length::Fixed(HANDLE_SIZE))
-            .align_y(Alignment::Center),
-        container(handle_row)
-            .width(Length::Fixed(TRACK_WIDTH))
-            .height(Length::Fixed(HANDLE_SIZE))
-            .align_y(Alignment::Center),
-    ]
-    .width(Length::Fixed(TRACK_WIDTH))
-    .height(Length::Fixed(HANDLE_SIZE))
-    .into()
+/// Slider track sitting between the value badge and the right stepper.
+/// Wraps the shared [`SettingsSlider`](crate::widgets::settings_slider)
+/// widget at a fixed `NUMERIC_TRACK_WIDTH` so the row layout stays stable
+/// across values. Draggable only when the row is focused; non-focused rows
+/// dim by `eff_opacity` and ignore pointer input so the row-button still
+/// receives the click and focuses the row.
+fn numeric_slider_track<'a>(
+    fraction: f32,
+    is_center: bool,
+    eff_opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    crate::widgets::settings_slider::SettingsSlider::new(fraction, SettingsMessage::EditSetFraction)
+        .width(Length::Fixed(NUMERIC_TRACK_WIDTH))
+        .enabled(is_center)
+        .opacity(eff_opacity)
+        .into()
 }
 
 /// Compute the value's normalized 0..1 fraction within its `min..max` range,

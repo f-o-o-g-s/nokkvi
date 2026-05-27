@@ -582,6 +582,80 @@ mod tests {
     }
 
     #[test]
+    fn set_fraction_snaps_to_step_and_clamps_for_float() {
+        let base = SettingValue::Float {
+            val: 0.0,
+            min: 0.0,
+            max: 1.0,
+            step: 0.05,
+            unit: "",
+        };
+
+        // 0.0 / 0.5 / 1.0 hit min, midpoint, max exactly.
+        for (frac, want) in [(0.0_f32, 0.0_f64), (0.5, 0.5), (1.0, 1.0)] {
+            let SettingValue::Float { val, .. } = base.set_fraction(frac).unwrap() else {
+                panic!("set_fraction returned non-Float variant");
+            };
+            assert!(
+                (val - want).abs() < 1e-9,
+                "frac {frac} -> {val} (want {want})"
+            );
+        }
+
+        // A fraction that lands between steps snaps to the nearest 0.05 multiple.
+        let SettingValue::Float { val, .. } = base.set_fraction(0.43).unwrap() else {
+            panic!();
+        };
+        assert!(
+            (val - 0.45).abs() < 1e-9,
+            "expected snap to 0.45, got {val}"
+        );
+
+        // Out-of-range fractions clamp.
+        let SettingValue::Float { val, .. } = base.set_fraction(-0.5).unwrap() else {
+            panic!();
+        };
+        assert!((val - 0.0).abs() < 1e-9);
+        let SettingValue::Float { val, .. } = base.set_fraction(1.5).unwrap() else {
+            panic!();
+        };
+        assert!((val - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn set_fraction_snaps_to_step_and_clamps_for_int() {
+        let base = SettingValue::Int {
+            val: 0,
+            min: 1000,
+            max: 22050,
+            step: 100,
+            unit: " Hz",
+        };
+
+        // Endpoints map to min / max exactly.
+        let SettingValue::Int { val, .. } = base.set_fraction(0.0).unwrap() else {
+            panic!();
+        };
+        assert_eq!(val, 1000);
+        let SettingValue::Int { val, .. } = base.set_fraction(1.0).unwrap() else {
+            panic!();
+        };
+        assert_eq!(val, 22050);
+
+        // Midpoint snaps to nearest step boundary above min.
+        let SettingValue::Int { val, .. } = base.set_fraction(0.5).unwrap() else {
+            panic!();
+        };
+        assert_eq!(val % 100, 0, "expected snap to 100 Hz step, got {val}");
+
+        // Non-incrementable variants reject the call.
+        assert!(
+            SettingValue::Bool(true).set_fraction(0.5).is_none(),
+            "Bool should not accept set_fraction"
+        );
+    }
+
+    #[test]
     fn settings_descriptions_fit_in_footer() {
         let general = crate::views::settings::items_general::GeneralSettingsData::default();
         let interface = crate::views::settings::items_interface::InterfaceSettingsData::default();

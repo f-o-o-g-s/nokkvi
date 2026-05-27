@@ -199,6 +199,7 @@ impl SettingsPage {
             SettingsMessage::EditLeft
             | SettingsMessage::EditRight
             | SettingsMessage::EditSetValue(_)
+            | SettingsMessage::EditSetFraction(_)
             | SettingsMessage::ResetToDefault
             | SettingsMessage::HotkeyCaptured(_, _)
             | SettingsMessage::FontSearchChanged(_)
@@ -267,6 +268,7 @@ impl SettingsPage {
             SettingsMessage::EditLeft
             | SettingsMessage::EditRight
             | SettingsMessage::EditSetValue(_)
+            | SettingsMessage::EditSetFraction(_)
             | SettingsMessage::ResetToDefault
             | SettingsMessage::HexInputChanged(_)
             | SettingsMessage::HexInputSubmit
