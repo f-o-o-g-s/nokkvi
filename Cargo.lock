@@ -3079,7 +3079,6 @@ dependencies = [
  "font-kit",
  "futures",
  "icy-metadata",
- "image",
  "num-complex",
  "parking_lot",
  "pipewire",
