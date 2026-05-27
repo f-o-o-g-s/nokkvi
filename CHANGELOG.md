@@ -8,6 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## v0.6.1 — 2026-05-26
+
+### Changed
+
 - Clicking a setting row no longer plays the activation sound effect (value-change feedback is unchanged).
 
 ### Fixed
@@ -15,8 +23,6 @@ All notable changes to this project will be documented in this file.
 - Metadata-strip text (title, artist, codec, bitrate) is now legible on light themes.
 - Toggling light mode in Settings no longer reverts to dark when any other setting is changed.
 - Left-clicking a settings row no longer scrolls the detail pane when stable viewport is enabled (Tab and Backspace still scroll).
-
-### Removed
 
 ## v0.6.0 — 2026-05-25
 
