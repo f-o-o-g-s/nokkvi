@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- New "Player Only" rounded-corners option keeps the playback bar soft while the rest of the UI stays flat.
+
 ### Changed
 
 - Appearance toggles (Theme Mode, Rounded Corners, Opacity Gradient) now sit at the top of the Theme settings tab instead of below the theme picker.
