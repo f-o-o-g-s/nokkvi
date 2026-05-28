@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Appearance toggles (Theme Mode, Rounded Corners, Opacity Gradient) now sit at the top of the Theme settings tab instead of below the theme picker.
+- Settings sidebar and detail pane now show a 1 px hairline between them in the wide layout.
 
 ### Fixed
 
