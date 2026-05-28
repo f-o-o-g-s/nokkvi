@@ -110,6 +110,7 @@ pub(crate) fn build_visualizer_items(
     let d = VisualizerConfig::default();
     let dt =
         nokkvi_data::services::theme_loader::load_builtin_theme(active_stem).unwrap_or_default();
+    const F: &str = "assets/icons/layout-grid.svg";
     const S: &str = "assets/icons/sliders-horizontal.svg";
     const B: &str = "assets/icons/audio-lines.svg";
     const P: &str = "assets/icons/palette.svg";
@@ -117,16 +118,16 @@ pub(crate) fn build_visualizer_items(
 
     let mut e = Vec::with_capacity(40);
 
-    // --- General section ---
+    // --- Frame section (how the visualizer occupies the window) ---
     e.push(SettingsEntry::Header {
-        label: "General",
-        icon: S,
+        label: "Frame",
+        icon: F,
     });
     e.push(SettingItem::text(
         SettingMeta::new(
             SentinelKind::RestoreVisualizer.to_key(),
             "⟲ Restore Defaults",
-            "General",
+            "Frame",
         )
         .with_subtitle(
             "Restore all visualizer settings to defaults. Preserves your color palette.",
@@ -135,69 +136,7 @@ pub(crate) fn build_visualizer_items(
         "Press Enter",
     ));
     e.push(SettingItem::float(
-        SettingMeta::new(keys::NOISE_REDUCTION, "Noise Reduction", "General")
-            .with_subtitle("0.0 = raw FFT, 1.0 = fully smoothed"),
-        config.noise_reduction,
-        d.noise_reduction,
-        0.0,
-        1.0,
-        0.01,
-        "",
-    ));
-    e.push(SettingItem::bool_val(
-        SettingMeta::new(keys::WAVES, "Waves Smoothing", "General")
-            .with_subtitle(
-                "Bars mode only — Catmull-Rom spline smoothing creates smooth rolling hills. Mutually exclusive with Monstercat",
-            ),
-        config.waves,
-        d.waves,
-    ));
-    e.push(SettingItem::int(
-        SettingMeta::new(keys::WAVES_SMOOTHING, "Waves Intensity", "General")
-            .with_subtitle(
-                "Bars mode only — control point spacing for waves spline. Higher = smoother (fewer control points)",
-            ),
-        config.waves_smoothing as i64,
-        d.waves_smoothing as i64,
-        2,
-        16,
-        1,
-        "",
-    ));
-    e.push(SettingItem::float(
-        SettingMeta::new(keys::MONSTERCAT, "Monstercat Smoothing", "General")
-            .with_subtitle(
-                "Bars mode only — sharp triangular peaks with exponential falloff. Higher = wider spread. Mutually exclusive with Waves",
-            ),
-        config.monstercat,
-        d.monstercat,
-        0.0,
-        10.0,
-        0.1,
-        "",
-    ));
-    e.push(SettingItem::int(
-        SettingMeta::new(keys::LOWER_CUTOFF_FREQ, "Lower Cutoff Freq", "General")
-            .with_subtitle("Frequencies below this are hidden"),
-        config.lower_cutoff_freq as i64,
-        d.lower_cutoff_freq as i64,
-        20,
-        1000,
-        10,
-        " Hz",
-    ));
-    e.push(SettingItem::int(
-        SettingMeta::new(keys::HIGHER_CUTOFF_FREQ, "Upper Cutoff Freq", "General")
-            .with_subtitle("Frequencies above this are hidden"),
-        config.higher_cutoff_freq as i64,
-        d.higher_cutoff_freq as i64,
-        1000,
-        22050,
-        100,
-        " Hz",
-    ));
-    e.push(SettingItem::float(
-        SettingMeta::new(keys::HEIGHT_PERCENT, "Visualizer Height", "General")
+        SettingMeta::new(keys::HEIGHT_PERCENT, "Visualizer Height", "Frame")
             .with_subtitle("% of window height, 10–60%"),
         config.height_percent as f64,
         d.height_percent as f64,
@@ -207,7 +146,7 @@ pub(crate) fn build_visualizer_items(
         "%",
     ));
     e.push(SettingItem::float(
-        SettingMeta::new(keys::OPACITY, "Visualizer Opacity", "General")
+        SettingMeta::new(keys::OPACITY, "Visualizer Opacity", "Frame")
             .with_subtitle("0.0 = invisible, 1.0 = fully opaque"),
         config.opacity as f64,
         d.opacity as f64,
@@ -216,8 +155,44 @@ pub(crate) fn build_visualizer_items(
         0.05,
         "",
     ));
+
+    // --- Signal section (FFT/DSP, affects both Bars and Lines modes) ---
+    e.push(SettingsEntry::Header {
+        label: "Signal",
+        icon: S,
+    });
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::NOISE_REDUCTION, "Noise Reduction", "Signal")
+            .with_subtitle("0.0 = raw FFT, 1.0 = fully smoothed"),
+        config.noise_reduction,
+        d.noise_reduction,
+        0.0,
+        1.0,
+        0.01,
+        "",
+    ));
+    e.push(SettingItem::int(
+        SettingMeta::new(keys::LOWER_CUTOFF_FREQ, "Lower Cutoff Freq", "Signal")
+            .with_subtitle("Frequencies below this are hidden"),
+        config.lower_cutoff_freq as i64,
+        d.lower_cutoff_freq as i64,
+        20,
+        1000,
+        10,
+        " Hz",
+    ));
+    e.push(SettingItem::int(
+        SettingMeta::new(keys::HIGHER_CUTOFF_FREQ, "Upper Cutoff Freq", "Signal")
+            .with_subtitle("Frequencies above this are hidden"),
+        config.higher_cutoff_freq as i64,
+        d.higher_cutoff_freq as i64,
+        1000,
+        22050,
+        100,
+        " Hz",
+    ));
     e.push(SettingItem::bool_val(
-        SettingMeta::new(keys::AUTO_SENSITIVITY, "Auto Sensitivity", "General")
+        SettingMeta::new(keys::AUTO_SENSITIVITY, "Auto Sensitivity", "Signal")
             .with_subtitle("Scales output to always fill full height"),
         config.auto_sensitivity,
         d.auto_sensitivity,
@@ -228,6 +203,37 @@ pub(crate) fn build_visualizer_items(
         label: "Bars",
         icon: B,
     });
+    e.push(SettingItem::bool_val(
+        SettingMeta::new(keys::WAVES, "Waves Smoothing", "Bars")
+            .with_subtitle(
+                "Catmull-Rom spline smoothing creates smooth rolling hills. Mutually exclusive with Monstercat",
+            ),
+        config.waves,
+        d.waves,
+    ));
+    e.push(SettingItem::int(
+        SettingMeta::new(keys::WAVES_SMOOTHING, "Waves Intensity", "Bars").with_subtitle(
+            "Control point spacing for waves spline. Higher = smoother (fewer control points)",
+        ),
+        config.waves_smoothing as i64,
+        d.waves_smoothing as i64,
+        2,
+        16,
+        1,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::MONSTERCAT, "Monstercat Smoothing", "Bars")
+            .with_subtitle(
+                "Sharp triangular peaks with exponential falloff. Higher = wider spread. Mutually exclusive with Waves",
+            ),
+        config.monstercat,
+        d.monstercat,
+        0.0,
+        10.0,
+        0.1,
+        "",
+    ));
     e.push(SettingItem::int(
         SettingMeta::new(keys::BARS_MAX_BARS, "Max Bar Count", "Bars")
             .with_subtitle("Maximum number of bars to fit in the window"),
