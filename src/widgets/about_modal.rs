@@ -206,7 +206,7 @@ pub(crate) fn about_modal_overlay<'a>(
                         .width(Length::Fixed(14.0))
                         .height(Length::Fixed(14.0))
                         .style(|_theme, _status| svg::Style {
-                            color: Some(theme::accent_bright()),
+                            color: Some(theme::danger_bright()),
                         }),
                     text("Buy foogs a coffee on Ko-fi")
                         .size(13.0)
