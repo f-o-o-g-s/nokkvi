@@ -158,8 +158,8 @@ mod tests {
         // Verify section headers
         assert_eq!(
             count_headers(&entries),
-            5,
-            "Expected 5 sections: General, Bars, Bar Colors (Dark), Bar Colors (Light), Lines"
+            6,
+            "Expected 6 sections: Frame, Signal, Bars, Bar Colors (Dark), Bar Colors (Light), Lines"
         );
 
         // Verify total item count (catches drift when settings are added/removed)
@@ -329,8 +329,8 @@ mod tests {
         // color group).
         assert_eq!(
             count_headers(&entries),
-            7,
-            "Expected 7 theme sections: Appearance, Select Theme, Background Colors, Foreground Colors, Accent Colors, Semantic Colors, Chrome Border",
+            8,
+            "Expected 8 theme sections: Mode, Display, Select Theme, Background Colors, Foreground Colors, Accent Colors, Semantic Colors, Chrome Border",
         );
 
         // Verify we have a reasonable number of items
@@ -352,8 +352,8 @@ mod tests {
 
         assert_eq!(
             count_headers(&entries),
-            4,
-            "Expected 4 sections: Application, Mouse Behavior, System Tray, Account"
+            6,
+            "Expected 6 sections: Library, Display, Behavior, Window & Tray, Advanced, Account"
         );
         assert_eq!(count_items(&entries), 15, "Expected 15 items");
     }
@@ -369,8 +369,8 @@ mod tests {
 
         assert_eq!(
             count_headers(&entries),
-            5,
-            "Expected 5 sections: Layout, Views, Font, Metadata Strip, Artwork Column"
+            7,
+            "Expected 7 sections: Navigation, Slot List, Player Bar, Font, Metadata Strip, Artwork Overlays, Artwork Column"
         );
         assert_eq!(
             count_items(&entries),
@@ -401,8 +401,8 @@ mod tests {
 
         assert_eq!(
             count_headers(&entries),
-            3,
-            "Expected 3 sections: Playback, Scrobbling, Playlists"
+            4,
+            "Expected 4 sections: Transitions, Volume Normalization, Scrobbling, Playlists"
         );
         // Off mode hides AGC level + RG knobs.
         assert_eq!(
