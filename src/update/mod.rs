@@ -241,11 +241,22 @@ impl Nokkvi {
                 match &mutation {
                     crate::app_message::PlaylistMutation::Created(name, Some(id))
                     | crate::app_message::PlaylistMutation::Overwritten(name, Some(id)) => {
-                        self.active_playlist_info = Some(crate::state::ActivePlaylistContext {
-                            id: id.clone(),
-                            name: name.clone(),
-                            comment: String::new(),
-                        });
+                        self.active_playlist_info = Some(
+                            self.library
+                                .playlists
+                                .iter()
+                                .find(|p| p.id == *id)
+                                .map_or_else(
+                                    || {
+                                        crate::state::ActivePlaylistContext::minimal(
+                                            id.clone(),
+                                            name.clone(),
+                                            String::new(),
+                                        )
+                                    },
+                                    crate::state::ActivePlaylistContext::from_playlist,
+                                ),
+                        );
                         self.persist_active_playlist_info();
                     }
                     _ => {}

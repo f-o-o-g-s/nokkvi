@@ -242,11 +242,11 @@ fn roulette_start_on_queue_preserves_active_playlist_info() {
         make_queue_song("s3", "Three", "Artist", "Album"),
         make_queue_song("s4", "Four", "Artist", "Album"),
     ];
-    app.active_playlist_info = Some(ActivePlaylistContext {
-        id: "pl_42".to_string(),
-        name: "Sunday Set".to_string(),
-        comment: String::new(),
-    });
+    app.active_playlist_info = Some(ActivePlaylistContext::minimal(
+        "pl_42".to_string(),
+        "Sunday Set".to_string(),
+        String::new(),
+    ));
 
     let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Queue));
 
@@ -271,11 +271,11 @@ fn roulette_start_on_albums_clears_via_settle_path() {
         make_album("a3", "Third", "Artist"),
         make_album("a4", "Fourth", "Artist"),
     ]);
-    app.active_playlist_info = Some(ActivePlaylistContext {
-        id: "pl_42".to_string(),
-        name: "Sunday Set".to_string(),
-        comment: String::new(),
-    });
+    app.active_playlist_info = Some(ActivePlaylistContext::minimal(
+        "pl_42".to_string(),
+        "Sunday Set".to_string(),
+        String::new(),
+    ));
 
     let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
 

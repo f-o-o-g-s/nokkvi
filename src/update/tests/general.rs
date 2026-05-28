@@ -404,11 +404,11 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
         .artists
         .set_from_vec(vec![make_artist("ar1", "Artist")]);
     app.similar_songs_generation = 7;
-    app.active_playlist_info = Some(crate::state::ActivePlaylistContext {
-        id: "pl1".into(),
-        name: "Mix".into(),
-        comment: String::new(),
-    });
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "pl1".into(),
+        "Mix".into(),
+        String::new(),
+    ));
     app.server_version = Some("0.61.1".into());
     app.last_queue_current_index = Some(3);
     app.pending_expand = Some(pending_album("a1"));

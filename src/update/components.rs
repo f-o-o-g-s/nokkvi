@@ -306,6 +306,9 @@ impl Nokkvi {
     /// that was duplicated across 12+ call sites.
     pub(crate) fn clear_active_playlist(&mut self) {
         self.active_playlist_info = None;
+        // Drop any stale strip expansion so it never carries into the next
+        // playlist (or shows over an empty context).
+        self.queue_page.playlist_strip_expanded = false;
         self.persist_active_playlist_info();
     }
 
@@ -1487,6 +1490,7 @@ impl Nokkvi {
         self.similar_songs = None;
         self.similar_songs_generation = 0;
         self.active_playlist_info = None;
+        self.queue_page.playlist_strip_expanded = false;
         self.playlist_edit = None;
         self.server_version = None;
         self.last_queue_current_index = None;

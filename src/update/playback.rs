@@ -1275,16 +1275,17 @@ impl Nokkvi {
         self.similar_page.column_visibility.love = settings.similar_show_love;
         self.similar_page.column_visibility.select = settings.similar_show_select;
 
-        // Restore active playlist context from persisted settings
-        self.active_playlist_info =
-            settings
-                .active_playlist_id
-                .clone()
-                .map(|id| crate::state::ActivePlaylistContext {
-                    id,
-                    name: settings.active_playlist_name.clone(),
-                    comment: settings.active_playlist_comment.clone(),
-                });
+        // Restore active playlist context from persisted settings. Only
+        // id/name/comment are persisted, so this is a minimal context: the
+        // strip shows the queue length for the count and hides duration /
+        // updated-date until the playlist is played afresh.
+        self.active_playlist_info = settings.active_playlist_id.clone().map(|id| {
+            crate::state::ActivePlaylistContext::minimal(
+                id,
+                settings.active_playlist_name.clone(),
+                settings.active_playlist_comment.clone(),
+            )
+        });
 
         // Apply start_view on first load (one-shot: only before first application)
         let mut start_view_task = Task::none();

@@ -7,6 +7,10 @@ fn make_playlist_ctx() -> ActivePlaylistContext {
         id: "pl_42".to_string(),
         name: "Sunday Set".to_string(),
         comment: "weekend rotation".to_string(),
+        song_count: 12,
+        duration_secs: 2730.0,
+        public: true,
+        updated: "2026-05-28T10:00:00Z".to_string(),
     }
 }
 
@@ -103,6 +107,27 @@ fn enter_new_playback_context_clears_active_playlist_info() {
     assert!(
         app.library.queue_loading_target.is_none(),
         "new-context entry must cancel the in-progress queue load target"
+    );
+}
+
+#[test]
+fn clear_active_playlist_resets_strip_expansion() {
+    // The read-only playlist strip's hover-expansion flag is transient: when
+    // the active playlist clears, a stale expansion must not carry into the
+    // next playlist (or render over an empty context).
+    let mut app = test_app();
+    app.active_playlist_info = Some(make_playlist_ctx());
+    app.queue_page.playlist_strip_expanded = true;
+
+    app.clear_active_playlist();
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "clear drops the playlist context"
+    );
+    assert!(
+        !app.queue_page.playlist_strip_expanded,
+        "clear must collapse the playlist strip"
     );
 }
 
