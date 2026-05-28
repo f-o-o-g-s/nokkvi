@@ -1,28 +1,27 @@
 //! Queue view — `impl QueuePage { fn view }`.
 //!
-//! Rendering for the queue page, plus the per-mode column-visibility helpers
-//! and the `BREAKPOINT_HIDE_QUEUE_STARS` constant. Update/state logic lives
-//! in `update.rs`; types live in `mod.rs`.
+//! Rendering for the queue page. The per-row song-list composition (columns,
+//! drag, context menu) is delegated to the shared `views::song_list_pane`
+//! renderer; the per-mode column-visibility helpers and the
+//! `BREAKPOINT_HIDE_QUEUE_STARS` constant live there too. Update/state logic
+//! lives in `update.rs`; types live in `mod.rs`.
 
 use iced::{
     Alignment, Element, Length,
     widget::{Row, Space, column, container, mouse_area, row},
 };
-use nokkvi_data::backend::queue::QueueSongUIViewData;
 
 use super::{
     QueueColumn, QueueContextEntry, QueueMessage, QueuePage, QueueSortMode, QueueViewData,
 };
-use crate::widgets::{
-    self,
-    hover_overlay::HoverOverlay,
-    view_header::{HeaderButton, ViewHeaderConfig},
+use crate::{
+    views::song_list_pane::{SongListPaneParams, SongListRowEvent, song_list_pane},
+    widgets::{
+        self,
+        hover_overlay::HoverOverlay,
+        view_header::{HeaderButton, ViewHeaderConfig},
+    },
 };
-
-/// Hide the queue stars column when the queue panel is narrower than this.
-/// Queue panel is measured (via `iced::widget::responsive`), so this fires
-/// correctly in split-view where the queue is roughly half the window.
-pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
 
 /// Compact height of the read-only playlist "Playing From" banner.
 pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
@@ -73,53 +72,10 @@ fn blend_toward(base: iced::Color, toward: iced::Color, t: f32) -> iced::Color {
     }
 }
 
-/// Pure decision: should the queue's stars rating column be rendered?
-///
-/// Two independent gates: the user toggle (always wins when off) and the
-/// responsive width gate (always wins when below the breakpoint).
-pub(crate) fn rating_column_visible(
-    _sort: QueueSortMode,
-    panel_width: f32,
-    user_visible: bool,
-) -> bool {
-    user_visible && panel_width >= BREAKPOINT_HIDE_QUEUE_STARS
-}
-
-/// Pure decision: should the album column be rendered? User toggle only —
-/// no responsive gate yet (the album column carries inline genre when
-/// sort = Genre, so hiding it on narrow widths is a separate question).
-pub(crate) fn album_column_visible(user_visible: bool) -> bool {
-    user_visible
-}
-
-/// Pure decision: should the duration column be rendered? User toggle only.
-pub(crate) fn duration_column_visible(user_visible: bool) -> bool {
-    user_visible
-}
-
-/// Pure decision: should the love (heart) column be rendered? User toggle only.
-pub(crate) fn love_column_visible(user_visible: bool) -> bool {
-    user_visible
-}
-
-/// Pure decision: should the plays column be rendered? Either the user toggle
-/// is on, OR the queue is sorted by Most Played (auto-show so the user always
-/// sees the data they're sorting by).
-pub(crate) fn plays_column_visible(sort: QueueSortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, QueueSortMode::MostPlayed)
-}
-
-/// Pure decision: should the genre be rendered (stacked under album, or in
-/// place of the album when album is hidden)? Toggle on, OR queue is sorted by
-/// Genre — mirrors the plays-on-MostPlayed auto-show.
-pub(crate) fn genre_column_visible(sort: QueueSortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, QueueSortMode::Genre)
-}
-
 impl QueuePage {
     /// Build the view
     pub fn view<'a>(&'a self, data: QueueViewData<'a>) -> Element<'a, QueueMessage> {
-        use crate::widgets::slot_list::{SlotListConfig, SlotListRowContext};
+        use crate::widgets::slot_list::SlotListConfig;
 
         // Build ViewHeader using generic component
         const QUEUE_VIEW_OPTIONS: &[QueueSortMode] = &[
@@ -753,281 +709,42 @@ impl QueuePage {
         let album_art = data.album_art; // Move artwork maps
         let large_artwork = data.large_artwork;
         let queue_songs = data.queue_songs; // Move ownership to extend lifetime
-        // User-toggle gates from the columns dropdown; combined with responsive
-        // gates inside the per-row `responsive(...)` closure below.
         let column_visibility = self.column_visibility;
-        let show_album_column = album_column_visible(column_visibility.album);
-        let show_genre_column = genre_column_visible(current_sort_mode, column_visibility.genre);
-        let show_duration_column = duration_column_visible(column_visibility.duration);
-        let show_love_column = love_column_visible(column_visibility.love);
-        let show_plays_column = plays_column_visible(current_sort_mode, column_visibility.plays);
 
-        // Build the render_item closure (shared between drag and non-drag paths)
-        let render_item = |song: &QueueSongUIViewData,
-                           ctx: SlotListRowContext|
-         -> Element<'a, QueueMessage> {
-            // Clone all data from song at the start to avoid lifetime issues
-            let title = song.title.clone();
-            let artist = song.artist.clone();
-            let album = song.album.clone();
-            let album_id = song.album_id.clone();
-            let duration = song.duration.clone();
-            let genre = song.genre.clone();
-            let starred = song.starred;
-            let rating = song.rating.unwrap_or(0).min(5) as usize;
-            let play_count = song.play_count.unwrap_or(0);
-            let song_id = song.id.clone();
-            let artist_id = song.artist_id.clone();
-            let stable_viewport = data.stable_viewport;
-
-            // Match on per-row entry_id — drift-immune and duplicate-aware
-            // by construction. The song_id check is kept as a defense-in-
-            // depth filter while the projection settles after a queue swap
-            // (e.g. PlayAlbum re-stamps fresh entry_ids on rows that briefly
-            // collide with the previous queue's ids).
-            //
-            // Suppressed while ctrl/shift is held (active multi-selection)
-            // so users can clearly see which items are selected.
-            let entry_id = song.entry_id;
-            let is_current = !(ctx.modifiers.shift() || ctx.modifiers.control())
-                && current_playing_entry_id.is_some_and(|eid| eid == entry_id)
-                && current_playing_song_id.as_ref() == Some(&song_id);
-
-            // Wrap the row in `responsive(...)` so the queue-stars column hide
-            // is gated by the queue panel's measured width rather than the full
-            // window width. This is correct in split-view (Ctrl+E), where the
-            // queue panel is roughly half the window.
-            let responsive_row = iced::widget::responsive(move |size| {
-                let panel_width = size.width;
-
-                // Re-clone owned values each layout pass: the responsive
-                // closure is `Fn`, so it borrows captured strings; the row
-                // builders below take owned values.
-                let title = title.clone();
-                let artist = artist.clone();
-                let album = album.clone();
-                let album_id = album_id.clone();
-                let duration = duration.clone();
-                let genre = genre.clone();
-                let artist_id = artist_id.clone();
-
-                // Get centralized slot list slot styling
-                use crate::widgets::slot_list::{
-                    SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
-                    slot_list_text,
-                };
-                let style = SlotListSlotStyle::for_slot(
-                    ctx.is_center,
-                    is_current,
-                    ctx.is_selected,
-                    ctx.has_multi_selection,
-                    ctx.opacity,
-                    0,
-                );
-
-                let m = ctx.metrics;
-                let artwork_size = m.artwork_size;
-                let title_size = m.title_size_lg;
-                let subtitle_size = m.subtitle_size;
-                let index_size = m.metadata_size;
-                let duration_size = m.metadata_size;
-                let icon_size = m.star_size;
-
-                // Dynamic column proportions: title gets more space when album/rating columns are hidden
-                let show_rating_column =
-                    rating_column_visible(current_sort_mode, panel_width, column_visibility.stars);
-                let title_portion: u16 = if show_rating_column { 35 } else { 40 };
-
-                // Layout: [Index?] [Thumbnail?] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
-                let mut content_row = Row::new().spacing(6.0).align_y(Alignment::Center);
-                if column_visibility.index {
-                    content_row = content_row.push(slot_list_index_column(
-                        ctx.item_index,
-                        index_size,
-                        style,
-                        ctx.opacity,
-                    ));
+        // Render the queue's song rows through the shared `song_list_pane`.
+        // The queue maps the neutral row-event vocabulary back to the exact
+        // `QueueMessage` each interaction emitted before extraction, and
+        // supplies the queue-specific 11-entry context menu via the
+        // `build_context_menu` closure — so behavior is byte-identical.
+        let overlay_open_menu = data.overlay.open_menu;
+        let slot_list_content = song_list_pane(
+            SongListPaneParams {
+                slot_list: &self.common.slot_list,
+                songs: queue_songs.as_ref(),
+                list_config: &config,
+                drop_indicator_slot: data.drop_indicator_slot,
+                columns: column_visibility,
+                sort_mode: current_sort_mode,
+                album_art,
+                current_playing_song_id: current_playing_song_id.clone(),
+                current_playing_entry_id,
+                stable_viewport: data.stable_viewport,
+            },
+            |e| match e {
+                SongListRowEvent::Slot(m) => QueueMessage::SlotList(m),
+                SongListRowEvent::Drag(d) => QueueMessage::DragReorder(d),
+                SongListRowEvent::TitleClick(i) => {
+                    QueueMessage::ContextMenuAction(i, QueueContextEntry::GetInfo)
                 }
-                if column_visibility.thumbnail {
-                    use crate::widgets::slot_list::slot_list_artwork_column;
-                    content_row = content_row.push(slot_list_artwork_column(
-                        album_art.get(&album_id),
-                        artwork_size,
-                        ctx.is_center,
-                        is_current,
-                        ctx.opacity,
-                    ));
-                }
-                content_row = content_row.push({
-                    use crate::widgets::slot_list::slot_list_text_column;
-                    let title_click = Some(QueueMessage::ContextMenuAction(
-                        ctx.item_index,
-                        QueueContextEntry::GetInfo,
-                    ));
-                    slot_list_text_column(
-                        title,
-                        title_click,
-                        artist.clone(),
-                        Some(QueueMessage::NavigateAndExpandArtist(artist_id.clone())),
-                        title_size,
-                        subtitle_size,
-                        style,
-                        ctx.is_center || is_current,
-                        title_portion,
-                    )
-                });
-
-                // 3. Album / genre column — slot renders when either is visible.
-                //    Both → column![album, small_genre]. Album only → album.
-                //    Genre only → genre at album-size font, vertically centered.
-                if show_album_column || show_genre_column {
-                    content_row = content_row.push(
-                        container({
-                            let links_enabled = crate::theme::is_slot_text_links();
-                            let click_album =
-                                QueueMessage::NavigateAndExpandAlbum(album_id.clone());
-                            let click_genre = QueueMessage::NavigateAndExpandGenre(genre.clone());
-                            let genre_label = if genre.is_empty() {
-                                "Unknown".to_string()
-                            } else {
-                                genre.clone()
-                            };
-                            let stacked_genre_size = nokkvi_data::utils::scale::calculate_font_size(
-                                10.0,
-                                ctx.row_height,
-                                ctx.scale_factor,
-                            ) * ctx.scale_factor;
-                            let make_link =
-                                |label: String,
-                                 font_size: f32,
-                                 click: QueueMessage|
-                                 -> Element<'_, QueueMessage> {
-                                    crate::widgets::link_text::LinkText::new(label)
-                                        .size(font_size)
-                                        .color(style.subtext_color)
-                                        .hover_color(style.hover_text_color)
-                                        .font(crate::theme::ui_font())
-                                        .on_press(if links_enabled { Some(click) } else { None })
-                                        .into()
-                                };
-                            let content: Element<'_, QueueMessage> =
-                                match (show_album_column, show_genre_column) {
-                                    (true, true) => {
-                                        let album_widget =
-                                            make_link(album, subtitle_size, click_album);
-                                        let genre_widget =
-                                            make_link(genre_label, stacked_genre_size, click_genre);
-                                        column![album_widget, genre_widget].spacing(2.0).into()
-                                    }
-                                    (true, false) => make_link(album, subtitle_size, click_album),
-                                    (false, true) => {
-                                        make_link(genre_label, subtitle_size, click_genre)
-                                    }
-                                    (false, false) => unreachable!(),
-                                };
-                            content
-                        })
-                        .width(Length::FillPortion(30))
-                        .height(Length::Fill)
-                        .clip(true)
-                        .align_y(Alignment::Center),
-                    );
-                }
-
-                // 4. Rating column — only shown for Rating sort mode (dedicated column, not inline with title)
-                if show_rating_column {
-                    let star_icon_size = m.title_size;
-                    let idx = ctx.item_index;
-                    use crate::widgets::slot_list::slot_list_star_rating;
-                    content_row = content_row.push(slot_list_star_rating(
-                        rating,
-                        star_icon_size,
-                        style,
-                        Some(15),
-                        Some(move |star: usize| QueueMessage::ClickSetRating(idx, star)),
-                    ));
-                }
-
-                // 5. Duration - right aligned (user-toggleable)
-                if show_duration_column {
-                    content_row = content_row.push(
-                        container(slot_list_text(duration, duration_size, style.subtext_color))
-                            .width(Length::FillPortion(10))
-                            .align_x(Alignment::End)
-                            .align_y(Alignment::Center),
-                    );
-                }
-
-                // 6. Plays - right aligned. User-toggleable, also auto-shown
-                // when sort = MostPlayed.
-                if show_plays_column {
-                    content_row = content_row.push(
-                        container(slot_list_text(
-                            format!("{play_count} plays"),
-                            duration_size,
-                            style.subtext_color,
-                        ))
-                        .width(Length::FillPortion(10))
-                        .align_x(Alignment::End)
-                        .align_y(Alignment::Center),
-                    );
-                }
-
-                // 7. Heart Icon - use reusable component, with symmetric padding
-                // for centering (user-toggleable via columns dropdown).
-                if show_love_column {
-                    content_row = content_row.push(
-                        container({
-                            use crate::widgets::slot_list::slot_list_favorite_icon;
-                            slot_list_favorite_icon(
-                                starred,
-                                style,
-                                icon_size,
-                                "heart",
-                                Some(QueueMessage::ClickToggleStar(ctx.item_index)),
-                            )
-                        })
-                        .width(Length::FillPortion(5))
-                        .padding(iced::Padding {
-                            left: 4.0,
-                            right: 4.0,
-                            ..Default::default()
-                        })
-                        .align_x(Alignment::Center)
-                        .align_y(Alignment::Center),
-                    );
-                }
-
-                // When the love column is hidden, the rightmost trailing
-                // column (duration or plays) sits flush against the slot
-                // edge — bump the row's right padding to restore the
-                // breathing room the love column would have provided.
-                let row_right_padding = if show_love_column { 4.0 } else { 12.0 };
-                let content = content_row
-                    .padding(iced::Padding {
-                        left: SLOT_LIST_SLOT_PADDING,
-                        right: row_right_padding,
-                        top: 4.0,
-                        bottom: 4.0,
-                    })
-                    .height(Length::Fill);
-
-                // Wrap in clickable container
-                let clickable = container(content)
-                    .style(move |_theme| style.to_container_style())
-                    .width(Length::Fill);
-
-                // Make it interactive
-                let slot_button = crate::widgets::slot_list::primary_slot_button(
-                    clickable,
-                    &ctx,
-                    stable_viewport,
-                    QueueMessage::SlotList,
-                );
-
-                // Wrap in context menu
+                SongListRowEvent::NavArtist(a) => QueueMessage::NavigateAndExpandArtist(a),
+                SongListRowEvent::NavAlbum(a) => QueueMessage::NavigateAndExpandAlbum(a),
+                SongListRowEvent::NavGenre(g) => QueueMessage::NavigateAndExpandGenre(g),
+                SongListRowEvent::SetRating(i, s) => QueueMessage::ClickSetRating(i, s),
+                SongListRowEvent::ToggleLove(i) => QueueMessage::ClickToggleStar(i),
+            },
+            move |slot_button, item_idx| {
+                // Wrap in context menu — queue-specific 11-entry menu.
                 use crate::widgets::context_menu::{context_menu, menu_button, menu_separator};
-                let item_idx = ctx.item_index;
                 let entries = vec![
                     QueueContextEntry::Play,
                     QueueContextEntry::PlayNext,
@@ -1047,7 +764,7 @@ impl QueuePage {
 
                 let cm_id = crate::app_message::ContextMenuId::QueueRow(item_idx);
                 let (cm_open, cm_position) =
-                    crate::widgets::context_menu::open_state_for(data.overlay.open_menu, &cm_id);
+                    crate::widgets::context_menu::open_state_for(overlay_open_menu, &cm_id);
                 let cm_id_for_msg = cm_id.clone();
                 context_menu(
                     slot_button,
@@ -1136,45 +853,8 @@ impl QueuePage {
                     },
                 )
                 .into()
-            });
-            crate::widgets::slot_list::wrap_with_select_column(
-                column_visibility.select,
-                ctx.is_selected,
-                ctx.item_index,
-                |idx| {
-                    QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SelectionToggle(
-                        idx,
-                    ))
-                },
-                responsive_row.into(),
-            )
-        };
-
-        // Build slot list content: always use DragColumn so we detect drag attempts
-        // (toast shown if drag is disabled for current sort/search state)
-        let slot_list_content = {
-            use crate::widgets::slot_list::slot_list_view_with_drag;
-            slot_list_view_with_drag(
-                &self.common.slot_list,
-                &queue_songs,
-                &config,
-                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
-                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
-                crate::views::scroll_seek_msg(queue_songs.len(), QueueMessage::SlotList),
-                QueueMessage::DragReorder,
-                Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
-                    QueueMessage::SlotList,
-                )),
-                data.drop_indicator_slot,
-                render_item,
-            )
-        };
-
-        // Wrap slot list content with standard background (prevents color bleed-through)
-        use crate::widgets::slot_list::slot_list_background_container;
-        let slot_list_content = slot_list_background_container(slot_list_content);
-
-        let slot_list_content: Element<'a, QueueMessage> = slot_list_content;
+            },
+        );
 
         // Get large artwork: prioritize currently playing song, fall back
         // to centered song's large, then to either song's mini. Mini is
@@ -1247,117 +927,5 @@ impl QueuePage {
             Some(QueueMessage::ArtworkColumnDrag),
             Some(QueueMessage::ArtworkColumnVerticalDrag),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const WIDE_PANEL: f32 = 1200.0;
-
-    #[test]
-    fn rating_column_visible_for_all_sort_modes() {
-        for sort in QueueSortMode::all() {
-            assert!(
-                rating_column_visible(sort, WIDE_PANEL, true),
-                "stars column should render for sort mode {sort:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn rating_column_hidden_below_breakpoint() {
-        for sort in QueueSortMode::all() {
-            assert!(
-                !rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS - 1.0, true),
-                "stars column should hide below breakpoint for {sort:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn rating_column_visible_at_breakpoint() {
-        // Boundary is `>=`: the exact breakpoint width keeps stars visible.
-        for sort in QueueSortMode::all() {
-            assert!(
-                rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS, true),
-                "stars column should remain visible at exact breakpoint for {sort:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn rating_column_responsive_overrides_sort_mode() {
-        // Width wins over sort mode: even Rating sort hides when too narrow.
-        assert!(!rating_column_visible(
-            QueueSortMode::Rating,
-            BREAKPOINT_HIDE_QUEUE_STARS - 1.0,
-            true,
-        ));
-    }
-
-    #[test]
-    fn rating_column_user_toggle_off_overrides_wide_panel() {
-        // User toggle wins over width: a wide panel still hides stars when
-        // the user has toggled them off.
-        for sort in QueueSortMode::all() {
-            assert!(
-                !rating_column_visible(sort, WIDE_PANEL, false),
-                "user toggle off should hide stars even at wide panel ({sort:?})"
-            );
-        }
-    }
-
-    #[test]
-    fn rating_column_responsive_still_hides_when_user_visible_true() {
-        // The two gates AND together: user wants stars visible, but the
-        // panel is too narrow → still hidden.
-        assert!(!rating_column_visible(
-            QueueSortMode::Album,
-            BREAKPOINT_HIDE_QUEUE_STARS - 1.0,
-            true,
-        ));
-    }
-
-    #[test]
-    fn album_column_visible_follows_user_toggle() {
-        assert!(album_column_visible(true));
-        assert!(!album_column_visible(false));
-    }
-
-    #[test]
-    fn duration_column_visible_follows_user_toggle() {
-        assert!(duration_column_visible(true));
-        assert!(!duration_column_visible(false));
-    }
-
-    #[test]
-    fn plays_column_visible_auto_shows_on_most_played() {
-        // Sort overrides the user toggle: MostPlayed always shows, regardless of toggle.
-        assert!(plays_column_visible(QueueSortMode::MostPlayed, false));
-        assert!(plays_column_visible(QueueSortMode::MostPlayed, true));
-    }
-
-    #[test]
-    fn plays_column_visible_follows_user_toggle_for_other_sorts() {
-        assert!(!plays_column_visible(QueueSortMode::Title, false));
-        assert!(plays_column_visible(QueueSortMode::Title, true));
-        assert!(!plays_column_visible(QueueSortMode::Rating, false));
-        assert!(plays_column_visible(QueueSortMode::Rating, true));
-    }
-
-    #[test]
-    fn genre_column_visible_auto_shows_on_genre_sort() {
-        assert!(genre_column_visible(QueueSortMode::Genre, false));
-        assert!(genre_column_visible(QueueSortMode::Genre, true));
-    }
-
-    #[test]
-    fn genre_column_visible_follows_user_toggle_for_other_sorts() {
-        assert!(!genre_column_visible(QueueSortMode::Title, false));
-        assert!(genre_column_visible(QueueSortMode::Title, true));
-        assert!(!genre_column_visible(QueueSortMode::MostPlayed, false));
-        assert!(genre_column_visible(QueueSortMode::MostPlayed, true));
     }
 }

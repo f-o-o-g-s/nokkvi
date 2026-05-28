@@ -16,6 +16,7 @@ pub(crate) mod queue;
 pub(crate) mod radios;
 pub(crate) mod settings;
 pub(crate) mod similar;
+pub(crate) mod song_list_pane;
 pub(crate) mod songs;
 pub(crate) mod sort_api;
 
