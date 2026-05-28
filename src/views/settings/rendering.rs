@@ -1075,32 +1075,43 @@ pub(crate) fn render_detail_header<'a>(
         .color(theme::fg1())
         .wrapping(Wrapping::None);
 
+    // 1 px horizontal rule that starts as `accent_bright` at the label
+    // seam and dissipates linearly into the pane background by ~80% of
+    // its width. Reads as a "label flag" trailing off into negative
+    // space, not as a divider in its own right.
+    let accent_rule = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(|_: &iced::Theme| {
+            let gradient = iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2))
+                .add_stop(0.0, theme::accent_bright())
+                .add_stop(0.8, theme::bg0())
+                .add_stop(1.0, theme::bg0());
+            container::Style {
+                background: Some(gradient.into()),
+                ..Default::default()
+            }
+        });
+
     let content_row = row![
         Space::new().width(Length::Fixed(4.0)),
         section_icon,
         label_widget,
-        Space::new().width(Length::Fill),
+        accent_rule,
     ]
     .spacing(8)
     .align_y(Alignment::Center);
 
-    let body = container(content_row).width(Length::Fill).padding(
-        Padding::new(0.0)
-            .top(18.0)
-            .bottom(10.0)
-            .left(24.0)
-            .right(28.0),
-    );
-
-    let sep = container(Space::new())
+    container(content_row)
         .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(theme::border().into()),
-            ..Default::default()
-        });
-
-    column![body, sep].width(Length::Fill).into()
+        .padding(
+            Padding::new(0.0)
+                .top(18.0)
+                .bottom(10.0)
+                .left(24.0)
+                .right(28.0),
+        )
+        .into()
 }
 
 /// Render a variable-height detail row: `[label + help text below]
