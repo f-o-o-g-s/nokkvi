@@ -504,7 +504,7 @@ mod tests {
         ts.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
         ts.normalization_level = NormalizationLevel::Loud;
         ts.opacity_gradient = false;
-        ts.rounded_mode = true;
+        ts.rounded_mode = RoundedMode::On;
         ts.queue_show_stars = false;
 
         let mut p = PersistedPlayerSettings::default();
@@ -519,7 +519,7 @@ mod tests {
         );
         assert_eq!(p.normalization_level, NormalizationLevel::Loud);
         assert!(!p.opacity_gradient);
-        assert!(p.rounded_mode);
+        assert_eq!(p.rounded_mode, RoundedMode::On);
         assert!(!p.queue_show_stars);
     }
 
@@ -538,7 +538,7 @@ mod tests {
         src.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
         src.normalization_level = NormalizationLevel::Loud;
         src.opacity_gradient = false;
-        src.rounded_mode = true;
+        src.rounded_mode = RoundedMode::On;
         src.queue_show_stars = false;
         src.scrobble_threshold = 0.75;
 
@@ -553,7 +553,7 @@ mod tests {
         );
         assert_eq!(ui.normalization_level, NormalizationLevel::Loud);
         assert!(!ui.opacity_gradient);
-        assert!(ui.rounded_mode);
+        assert_eq!(ui.rounded_mode, RoundedMode::On);
         assert!(!ui.queue_show_stars);
         assert!((ui.scrobble_threshold - 0.75_f32).abs() < f32::EPSILON);
     }
@@ -576,7 +576,7 @@ mod tests {
         ps.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
         ps.normalization_level = NormalizationLevel::Loud;
         ps.opacity_gradient = false;
-        ps.rounded_mode = true;
+        ps.rounded_mode = RoundedMode::On;
         ps.queue_show_stars = false;
         ps.queue_show_album = false;
         ps.queue_show_duration = false;
@@ -601,7 +601,7 @@ mod tests {
         );
         assert_eq!(ts.normalization_level, NormalizationLevel::Loud);
         assert!(!ts.opacity_gradient);
-        assert!(ts.rounded_mode);
+        assert_eq!(ts.rounded_mode, RoundedMode::On);
         assert!(!ts.queue_show_stars);
         assert!(!ts.queue_show_album);
         assert!(!ts.queue_show_duration);
