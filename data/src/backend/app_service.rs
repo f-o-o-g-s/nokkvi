@@ -403,6 +403,40 @@ impl AppService {
         self.queue_orchestrator().play(songs, start).await
     }
 
+    /// Resolve a playlist's tracks into UI view-data WITHOUT touching the play
+    /// queue, the audio engine, or persisted state.
+    ///
+    /// This is the playlist editor's load path: the editor owns an independent
+    /// in-memory buffer, so editing a playlist never disturbs what the user is
+    /// hearing. Rows use the shared projection
+    /// ([`crate::backend::queue::build_queue_song_ui_view_data`]) so they match
+    /// live-queue rows exactly; `entry_id`s are assigned by buffer position
+    /// (the editor has no `QueueManager` to hand them out).
+    pub async fn resolve_playlist_for_editor(
+        &self,
+        playlist_id: &str,
+    ) -> Result<Vec<crate::backend::queue::QueueSongUIViewData>> {
+        let songs = self
+            .library_orchestrator()
+            .resolve_playlist(playlist_id)
+            .await?;
+        let (server_url, subsonic_credential) = self.auth_gateway.server_config().await;
+        let rows = songs
+            .iter()
+            .enumerate()
+            .map(|(index, song)| {
+                crate::backend::queue::build_queue_song_ui_view_data(
+                    song,
+                    index,
+                    index as u64,
+                    &server_url,
+                    &subsonic_credential,
+                )
+            })
+            .collect();
+        Ok(rows)
+    }
+
     /// Load a playlist's songs into the queue WITHOUT starting playback.
     ///
     /// Used for playlist editing mode where we want to populate the queue

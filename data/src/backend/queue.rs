@@ -92,6 +92,47 @@ impl crate::utils::search::Searchable for QueueSongUIViewData {
     }
 }
 
+/// Build a single [`QueueSongUIViewData`] row from a [`Song`].
+///
+/// Shared by the live-queue projection ([`QueueService::transform_songs_from_pool`])
+/// and the playlist editor's buffer load
+/// ([`crate::backend::AppService::resolve_playlist_for_editor`]) so both produce
+/// identical rows. The caller supplies `entry_id`: the queue uses
+/// manager-assigned ids; the editor uses the row's buffer index.
+pub fn build_queue_song_ui_view_data(
+    song: &Song,
+    index: usize,
+    entry_id: u64,
+    server_url: &str,
+    subsonic_credential: &str,
+) -> QueueSongUIViewData {
+    let genre = song.genre.clone().unwrap_or_default();
+    let searchable_lower = crate::utils::search::build_searchable_lower(&[
+        &song.title,
+        &song.artist,
+        &song.album,
+        &genre,
+    ]);
+    QueueSongUIViewData {
+        id: song.id.clone(),
+        entry_id,
+        track_number: (index + 1) as i32,
+        title: song.title.clone(),
+        artist: song.artist.clone(),
+        artist_id: song.artist_id.clone().unwrap_or_default(),
+        album: song.album.clone(),
+        album_id: song.album_id.clone().unwrap_or_default(),
+        artwork_url: artwork_url::build_song_artwork_url(song, server_url, subsonic_credential),
+        duration: crate::utils::formatters::format_duration(song.duration),
+        duration_seconds: song.duration,
+        genre,
+        starred: song.starred,
+        rating: song.rating,
+        play_count: song.play_count,
+        searchable_lower,
+    }
+}
+
 #[derive(Clone)]
 pub struct QueueService {
     // Queue manager for playback queue state
@@ -185,37 +226,13 @@ impl QueueService {
                 // is defense-in-depth for an out-of-sync caller, not an
                 // expected path.
                 let entry_id = entry_ids.get(index).copied()?;
-                let track_number = (index + 1) as i32;
-                let album_id = song.album_id.clone().unwrap_or_default();
-                let url =
-                    artwork_url::build_song_artwork_url(song, server_url, subsonic_credential);
-                let duration_str = crate::utils::formatters::format_duration(song.duration);
-                let genre = song.genre.clone().unwrap_or_default();
-                let searchable_lower = crate::utils::search::build_searchable_lower(&[
-                    &song.title,
-                    &song.artist,
-                    &song.album,
-                    &genre,
-                ]);
-
-                Some(QueueSongUIViewData {
-                    id: song.id.clone(),
+                Some(build_queue_song_ui_view_data(
+                    song,
+                    index,
                     entry_id,
-                    track_number,
-                    title: song.title.clone(),
-                    artist: song.artist.clone(),
-                    artist_id: song.artist_id.clone().unwrap_or_default(),
-                    album: song.album.clone(),
-                    album_id,
-                    artwork_url: url,
-                    duration: duration_str,
-                    duration_seconds: song.duration,
-                    genre,
-                    starred: song.starred,
-                    rating: song.rating,
-                    play_count: song.play_count,
-                    searchable_lower,
-                })
+                    server_url,
+                    subsonic_credential,
+                ))
             })
             .collect()
     }
@@ -365,6 +382,22 @@ mod tests {
         ids.iter()
             .map(|id| Song::test_default(id, &format!("Song {id}")))
             .collect()
+    }
+
+    #[test]
+    fn build_row_maps_song_fields_and_supplied_entry_id() {
+        let song = Song::test_default("s7", "Hello World");
+        let row = build_queue_song_ui_view_data(&song, 4, 99, "http://server", "cred");
+
+        assert_eq!(row.id, "s7");
+        // entry_id is caller-supplied (editor uses buffer index), not derived.
+        assert_eq!(row.entry_id, 99);
+        // track_number is 1-based on the row's position.
+        assert_eq!(row.track_number, 5);
+        assert_eq!(row.title, "Hello World");
+        assert_eq!(row.duration_seconds, song.duration);
+        // searchable index is pre-lowercased.
+        assert!(row.searchable_lower.contains("hello world"));
     }
 
     /// `add_songs` must update `total_count` to match the new queue length,
