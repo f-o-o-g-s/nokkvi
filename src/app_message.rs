@@ -406,6 +406,13 @@ pub enum EditorMessage {
     PublicToggled(bool),
     /// Persist the editor buffer back to the playlist.
     Save,
+    /// Edit-bar discard / exit control — forwards to the shared
+    /// `SplitViewMessage::ExitEditMode` handler.
+    ExitEditMode,
+    /// Open/close a per-row context menu (editor rows live in the split-view
+    /// left pane). Forwards to the root `SetOpenMenu` so the single overlay
+    /// stack is preserved.
+    SetOpenMenu(Option<OpenMenu>),
 }
 
 /// Actions the editor bubbles to root for global state mutation.
@@ -630,6 +637,8 @@ pub enum ContextMenuId {
     LibraryRow { view: View, item_index: usize },
     /// A row in the queue view.
     QueueRow(usize),
+    /// A row in the playlist-editor view (split-view left pane while editing).
+    EditorRow(usize),
     /// A row in the radios view.
     RadioRow(usize),
     /// A row in the Similar/Top Songs results (Similar lives only in the

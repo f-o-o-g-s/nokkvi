@@ -13,8 +13,6 @@ use std::borrow::Cow;
 
 use nokkvi_data::backend::queue::QueueSongUIViewData;
 
-use crate::views::queue::QueueColumnVisibility;
-
 /// Read-only view data passed from root to the playlist editor.
 ///
 /// A trimmed [`crate::views::QueueViewData`] that **borrows** the editor's
@@ -22,10 +20,7 @@ use crate::views::queue::QueueColumnVisibility;
 /// `current_playing_entry_id`, `is_playing`, playlist context/cover) — the
 /// editor never reflects a "now playing" row.
 //
-// Phase 3 wires this struct into the editor's `view()` (which will widen
-// visibility to `pub`, matching `QueueViewData`); until then every field is
-// dormant.
-#[allow(dead_code)]
+// Phase 3 wires this struct into the editor's `view()`.
 pub(crate) struct EditorViewData<'a> {
     /// The editor's track buffer, borrowed (filtered when a search is active).
     pub songs: Cow<'a, [QueueSongUIViewData]>,
@@ -35,12 +30,9 @@ pub(crate) struct EditorViewData<'a> {
     pub large_artwork: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
-    pub scale_factor: f32,
     pub modifiers: iced::keyboard::Modifiers,
     /// Total buffer count before filtering (for empty-state detection).
     pub total_count: usize,
-    /// Per-column visibility flags (mirrors the queue page).
-    pub columns: QueueColumnVisibility,
     /// Edit-bar: the playlist's current (editable) name.
     pub name: String,
     /// Edit-bar: the playlist's current (editable) comment.
@@ -52,4 +44,10 @@ pub(crate) struct EditorViewData<'a> {
     /// Visual slot index where the cross-pane-drag drop indicator should draw —
     /// `Some` only when a drag is active and the cursor is over an editor slot.
     pub drop_indicator_slot: Option<usize>,
+    /// Borrowed root open-menu state, used to resolve per-row context-menu
+    /// open/close (mirrors `QueueViewData.overlay.open_menu`). The editor has
+    /// no column-dropdown, so the rest of the overlay plumbing is not needed.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
+
+pub(crate) mod view;

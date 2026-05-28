@@ -23,16 +23,61 @@ impl Nokkvi {
     pub(crate) fn handle_editor_message(&mut self, msg: EditorMessage) -> Task<Message> {
         match msg {
             EditorMessage::SongsLoaded(rows) => self.handle_editor_songs_loaded(rows),
-            // Buffer mutations, metadata edits, and Save land in later phases.
-            EditorMessage::SlotList(_)
-            | EditorMessage::DragReorder(_)
+            EditorMessage::SlotList(m) => self.handle_editor_slot_list(m),
+            EditorMessage::NameChanged(name) => {
+                if let Some(editor) = self.playlist_editor.as_mut() {
+                    editor.edit.set_name(name);
+                }
+                Task::none()
+            }
+            EditorMessage::CommentChanged(comment) => {
+                if let Some(editor) = self.playlist_editor.as_mut() {
+                    editor.edit.set_comment(comment);
+                }
+                Task::none()
+            }
+            EditorMessage::PublicToggled(value) => {
+                if let Some(editor) = self.playlist_editor.as_mut() {
+                    editor.edit.set_public(value);
+                }
+                Task::none()
+            }
+            // Discard/exit reuses the shared split-view exit handler — the
+            // editor view emits this so the discard button can route through
+            // the editor's own message space (Phase 6 owns the exit handler).
+            EditorMessage::ExitEditMode => Task::done(Message::SplitView(
+                crate::app_message::SplitViewMessage::ExitEditMode,
+            )),
+            // Per-row context-menu open/close — forward to the single overlay
+            // stack so editor menus share the same close-on-outside-click path.
+            EditorMessage::SetOpenMenu(menu) => self.handle_set_open_menu(menu),
+            // Buffer mutations and Save land in later phases.
+            EditorMessage::DragReorder(_)
             | EditorMessage::RemoveAt(_)
             | EditorMessage::ContextMenuAction(..)
-            | EditorMessage::NameChanged(_)
-            | EditorMessage::CommentChanged(_)
-            | EditorMessage::PublicToggled(_)
             | EditorMessage::Save => Task::none(),
         }
+    }
+
+    /// Apply a shared slot-list message to the editor's OWN slot-list state.
+    ///
+    /// Mirrors how the queue page routes `SlotListPageMessage` through
+    /// `SlotListPageState::handle`, but against `playlist_editor.common` — the
+    /// editor keeps an independent cursor/selection from the live queue. The
+    /// total item count is the editor buffer's current length so navigation and
+    /// selection clamp correctly.
+    fn handle_editor_slot_list(
+        &mut self,
+        msg: crate::widgets::SlotListPageMessage,
+    ) -> Task<Message> {
+        if let Some(editor) = self.playlist_editor.as_mut() {
+            let total = editor.songs.len();
+            // The editor has no sort/play side effects to act on — the returned
+            // action is intentionally discarded (search/sort/activate variants
+            // are not surfaced by the editor's row vocabulary).
+            let _ = editor.common.handle(msg, total);
+        }
+        Task::none()
     }
 
     /// Fill the editor buffer with the async-resolved playlist rows.

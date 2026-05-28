@@ -142,3 +142,102 @@ fn create_new_playlist_edit_does_not_clear_queue() {
         "creating a new (empty) playlist for edit must not clear the queue"
     );
 }
+
+/// Seed a clean editor session with a small loaded buffer.
+fn seeded_editor(app: &mut crate::Nokkvi) {
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        "Original comment".into(),
+        true,
+        Vec::new(),
+    )));
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(vec![
+        make_queue_song("a", "Song A", "Artist", "Album"),
+        make_queue_song("b", "Song B", "Artist", "Album"),
+        make_queue_song("c", "Song C", "Artist", "Album"),
+    ])));
+}
+
+#[test]
+fn editor_name_changed_marks_name_dirty() {
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::NameChanged(
+        "Renamed Playlist".into(),
+    )));
+
+    let edit = &app
+        .playlist_editor
+        .as_ref()
+        .expect("editor session present")
+        .edit;
+    assert_eq!(edit.playlist_name, "Renamed Playlist");
+    assert!(
+        edit.is_name_dirty(),
+        "changing the name must flip the name-dirty flag"
+    );
+}
+
+#[test]
+fn editor_comment_changed_marks_comment_dirty() {
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::CommentChanged(
+        "Updated comment".into(),
+    )));
+
+    let edit = &app
+        .playlist_editor
+        .as_ref()
+        .expect("editor session present")
+        .edit;
+    assert_eq!(edit.playlist_comment, "Updated comment");
+    assert!(
+        edit.is_comment_dirty(),
+        "changing the comment must flip the comment-dirty flag"
+    );
+}
+
+#[test]
+fn editor_public_toggled_marks_public_dirty() {
+    let mut app = test_app();
+    seeded_editor(&mut app);
+    // Seeded session starts public = true.
+
+    let _ = app.update(Message::Editor(EditorMessage::PublicToggled(false)));
+
+    let edit = &app
+        .playlist_editor
+        .as_ref()
+        .expect("editor session present")
+        .edit;
+    assert!(!edit.playlist_public);
+    assert!(
+        edit.is_public_dirty(),
+        "toggling public must flip the public-dirty flag"
+    );
+}
+
+#[test]
+fn editor_slot_selection_toggle_updates_selection() {
+    use crate::widgets::SlotListPageMessage;
+
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::SlotList(
+        SlotListPageMessage::SelectionToggle(1),
+    )));
+
+    let editor = app
+        .playlist_editor
+        .as_ref()
+        .expect("editor session present");
+    assert!(
+        editor.common.slot_list.selected_indices.contains(&1),
+        "selection toggle must add the index to the editor's own slot-list selection"
+    );
+}

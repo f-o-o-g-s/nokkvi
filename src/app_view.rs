@@ -1317,7 +1317,31 @@ impl Nokkvi {
                 drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
             };
 
-            let queue_pane = self.queue_page.view(queue_view_data).map(Message::Queue);
+            // LEFT pane source: the playlist editor while editing (its own
+            // buffer, now-playing OFF), otherwise the live queue. Both render at
+            // the same width portion and pane chrome below.
+            let queue_pane: Element<'_, Message> = if let Some(ref editor) = self.playlist_editor {
+                let dirty = editor.edit.is_dirty(&self.editor_song_ids())
+                    || editor.edit.has_metadata_changes();
+                let editor_data = views::EditorViewData {
+                    songs: std::borrow::Cow::Borrowed(&editor.songs),
+                    album_art: &self.artwork.album_art.snapshot,
+                    large_artwork,
+                    window_width: self.content_pane_width() * 0.55,
+                    window_height: self.window.height,
+                    modifiers: self.window.keyboard_modifiers,
+                    total_count: editor.songs.len(),
+                    name: editor.edit.playlist_name.clone(),
+                    comment: editor.edit.playlist_comment.clone(),
+                    public: editor.edit.playlist_public,
+                    dirty,
+                    drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
+                    open_menu: self.open_menu.as_ref(),
+                };
+                editor.view(editor_data).map(Message::Editor)
+            } else {
+                self.queue_page.view(queue_view_data).map(Message::Queue)
+            };
             let queue_focused = self.pane_focus == crate::state::PaneFocus::Queue;
 
             // Shared pane border style: accent + thick when focused, bg3 + thin otherwise
