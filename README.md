@@ -2,6 +2,12 @@
 
 # Nokkvi
 
+<p align="center">
+  <a href="https://github.com/f-o-o-g-s/nokkvi/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/f-o-o-g-s/nokkvi/ci.yml?branch=main&label=CI" alt="CI status" /></a>
+  <a href="https://github.com/f-o-o-g-s/nokkvi/releases"><img src="https://img.shields.io/github/v/release/f-o-o-g-s/nokkvi" alt="Latest release" /></a>
+  <a href="https://aur.archlinux.org/packages/nokkvi-bin"><img src="https://img.shields.io/aur/version/nokkvi-bin?label=AUR" alt="AUR version" /></a>
+</p>
+
 A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music server. Named after Old Norse *nökkvi*, a small, humble boat.
 
 *Demo showcasing Nokkvi's GPU-accelerated audio visualizers and how the layout adapts to different window sizes.*
