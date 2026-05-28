@@ -239,7 +239,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
                 border: iced::Border {
                     color: outline,
                     width: TRIGGER_BORDER_WIDTH,
-                    radius: theme::ui_radius_sm(),
+                    radius: theme::ui_radius_sm_player(),
                 },
                 ..Default::default()
             },
@@ -526,7 +526,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                             renderer::Quad {
                                 bounds: item_bounds,
                                 border: iced::Border {
-                                    radius: theme::ui_radius_sm(),
+                                    radius: theme::ui_radius_sm_player(),
                                     ..Default::default()
                                 },
                                 ..Default::default()

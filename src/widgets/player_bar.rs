@@ -55,7 +55,11 @@ const MINI_PLAYER_ROUNDED_PADDING: [u16; 2] = [6, 12];
 
 #[inline]
 fn mode_button_width() -> f32 {
-    if theme::is_rounded_mode() { 40.0 } else { 38.0 }
+    if theme::is_rounded_for_player() {
+        40.0
+    } else {
+        38.0
+    }
 }
 
 /// Intra-section button gap (between transport buttons, between mode buttons,
@@ -400,7 +404,7 @@ fn transport_button_style(
 ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
     move |_theme, status| {
         // `ui_radius_pill()` returns `0.0.into()` in flat mode.
-        let radius = theme::ui_radius_pill();
+        let radius = theme::ui_radius_pill_player();
         let background = if active {
             Some(theme::accent_bright().into())
         } else {
@@ -431,7 +435,7 @@ fn transport_button_style(
 fn mode_toggle_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
     move |_theme, status| {
         // `ui_radius_sm()` returns `0.0.into()` in flat mode.
-        let radius = theme::ui_radius_sm();
+        let radius = theme::ui_radius_sm_player();
         let (bg, fg, border_color) = if active {
             (
                 theme::accent_bright(),
@@ -525,7 +529,7 @@ fn player_control_button(
         .style(transport_button_style(active))
         .on_press(message);
     HoverOverlay::new(btn)
-        .border_radius(theme::ui_radius_pill())
+        .border_radius(theme::ui_radius_pill_player())
         .into()
 }
 
@@ -559,7 +563,7 @@ fn mode_text_toggle(
         .gap(4)
         .style(theme::container_tooltip),
     )
-    .border_radius(theme::ui_radius_sm())
+    .border_radius(theme::ui_radius_sm_player())
     .into()
 }
 
@@ -591,7 +595,7 @@ fn mode_toggle_button<'a>(
         .gap(4)
         .style(theme::container_tooltip),
     )
-    .border_radius(theme::ui_radius_sm())
+    .border_radius(theme::ui_radius_sm_player())
     .into()
 }
 
@@ -612,7 +616,7 @@ fn mode_toggle_button<'a>(
 /// queue / album / artist / copy info) routes the same as a click on the
 /// regular player-bar strip.
 fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMessage> {
-    let radius = theme::ui_border_radius();
+    let radius = theme::ui_border_radius_player();
 
     let artwork: Element<'static, PlayerBarMessage> =
         if let Some(handle) = data.artwork_handle.clone() {
@@ -1152,7 +1156,7 @@ pub(crate) fn player_bar<'a>(
                 },
                 data.player_modes_open,
             ))
-            .border_radius(theme::ui_radius_sm()),
+            .border_radius(theme::ui_radius_sm_player()),
         ));
     }
 
@@ -1182,7 +1186,7 @@ pub(crate) fn player_bar<'a>(
                 )
                 .player_bar_style(),
             )
-            .border_radius(theme::ui_radius_sm()),
+            .border_radius(theme::ui_radius_sm_player()),
         ));
     }
 
@@ -1253,7 +1257,7 @@ pub(crate) fn player_bar<'a>(
     // =========================================================================
 
     let base_height = base_player_bar_height();
-    let outer_padding = if theme::is_rounded_mode() {
+    let outer_padding = if theme::is_rounded_for_player() {
         if is_mini_player_mode {
             MINI_PLAYER_ROUNDED_PADDING
         } else {

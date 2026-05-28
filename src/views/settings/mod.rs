@@ -500,7 +500,7 @@ pub(crate) struct SettingsViewData {
     pub window_width: f32,
     pub hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig,
     pub is_light_mode: bool,
-    pub rounded_mode: bool,
+    pub rounded_mode: nokkvi_data::types::player_settings::RoundedMode,
     pub opacity_gradient: bool,
 }
 

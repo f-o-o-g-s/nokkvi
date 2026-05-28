@@ -66,8 +66,9 @@ pub(crate) fn theme_generation() -> u64 {
 struct UiModeFlags {
     /// Light/dark theme toggle
     light_mode: AtomicBool,
-    /// Rounded corner borders
-    rounded_mode: AtomicBool,
+    /// Rounded corner borders — tri-state (Off / On / PlayerOnly). Backed
+    /// by `AtomicU8` via the `atomic_u8_enum!` impl on `RoundedMode`.
+    rounded_mode: AtomicU8,
     /// Track info display mode: 0 = Off, 1 = PlayerBar, 2 = TopBar
     track_info_display: AtomicU8,
     /// Navigation layout: 0 = Top, 1 = Side, 2 = None
@@ -128,7 +129,9 @@ struct UiModeFlags {
 
 static UI_MODE: UiModeFlags = UiModeFlags {
     light_mode: AtomicBool::new(false),
-    rounded_mode: AtomicBool::new(false),
+    // RoundedMode::Off discriminant (0). PlayerSettings load corrects this
+    // to the user's preference on first dump.
+    rounded_mode: AtomicU8::new(0),
     track_info_display: AtomicU8::new(0),
     nav_layout: AtomicU8::new(0),
     nav_display_mode: AtomicU8::new(0),
@@ -321,27 +324,61 @@ const R_LG: f32 = 18.0;
 /// pill (999 px) — tabs, transport buttons, search, sliders.
 const R_PILL: f32 = 999.0;
 
-/// Returns true if rounded corners mode is enabled
+/// Returns the current rounded-corners mode enum (Off / On / PlayerOnly).
+#[inline]
+pub(crate) fn rounded_mode() -> RoundedMode {
+    RoundedMode::from_u8(UI_MODE.rounded_mode.load(Ordering::Relaxed))
+}
+
+/// Returns true when **every** UI surface should render with rounded corners.
+///
+/// True only when the active mode is [`RoundedMode::On`]. `PlayerOnly` returns
+/// `false` from here — only the player chrome rounds in that mode (see
+/// [`is_rounded_for_player`]).
 #[inline]
 pub(crate) fn is_rounded_mode() -> bool {
-    UI_MODE.rounded_mode.load(Ordering::Relaxed)
+    rounded_mode() == RoundedMode::On
+}
+
+/// Returns true when the **bottom playback chrome** should render with rounded
+/// corners. True for [`RoundedMode::On`] and [`RoundedMode::PlayerOnly`].
+///
+/// Player widgets (player bar, progress bar, volume slider, mode menu) and the
+/// bottom track-info strip route their radius helpers through this predicate
+/// instead of [`is_rounded_mode`] so the `PlayerOnly` mode keeps the player
+/// soft while the rest of the UI stays flat.
+#[inline]
+pub(crate) fn is_rounded_for_player() -> bool {
+    matches!(rounded_mode(), RoundedMode::On | RoundedMode::PlayerOnly)
 }
 
 /// Set rounded corners mode (call when user toggles the setting)
 #[inline]
-pub(crate) fn set_rounded_mode(enabled: bool) {
-    UI_MODE.rounded_mode.store(enabled, Ordering::Relaxed);
-    debug!(" Rounded mode changed: rounded_mode={}", enabled);
+pub(crate) fn set_rounded_mode(mode: RoundedMode) {
+    UI_MODE.rounded_mode.store(mode.to_u8(), Ordering::Relaxed);
+    debug!(" Rounded mode changed: rounded_mode={}", mode);
 }
 
 /// Get the legacy UI border radius (6 px in rounded mode, 0 in flat).
 ///
 /// Kept for back-compat while widgets migrate to the scale helpers
 /// (`ui_radius_xs/sm/md/lg/pill`). New code should call the role-appropriate
-/// helper directly.
+/// helper directly. Player widgets must call [`ui_border_radius_player`].
 #[inline]
 pub(crate) fn ui_border_radius() -> iced::border::Radius {
     if is_rounded_mode() {
+        ROUNDED_RADIUS.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Player-chrome variant of [`ui_border_radius`] — rounds for `On` AND
+/// `PlayerOnly`. Use from player_bar / progress_bar / volume_slider /
+/// player_modes_menu and the `PlayerBar`-scoped track info strip.
+#[inline]
+pub(crate) fn ui_border_radius_player() -> iced::border::Radius {
+    if is_rounded_for_player() {
         ROUNDED_RADIUS.into()
     } else {
         0.0.into()
@@ -404,6 +441,39 @@ pub(crate) fn ui_radius_pill() -> iced::border::Radius {
 }
 
 // ----------------------------------------------------------------------------
+// Player-chrome radius helpers — round in `On` AND `PlayerOnly`.
+// ----------------------------------------------------------------------------
+//
+// The parallel `_player` family gates on [`is_rounded_for_player`] instead of
+// [`is_rounded_mode`], so the bottom playback chrome stays soft when the user
+// picks `RoundedMode::PlayerOnly` even though the rest of the UI is flat.
+// Used by player_bar, progress_bar, volume_slider, and player_modes_menu.
+// Add the corresponding `_player` variant when a player widget needs the
+// `xs`, `md`, or `lg` step; the goal is for every radius decision inside the
+// bottom playback chrome to route through a `_player` helper, never the
+// global `is_rounded_mode()`-gated set.
+
+/// Player-chrome variant of [`ui_radius_sm`].
+#[inline]
+pub(crate) fn ui_radius_sm_player() -> iced::border::Radius {
+    if is_rounded_for_player() {
+        R_SM.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Player-chrome variant of [`ui_radius_pill`].
+#[inline]
+pub(crate) fn ui_radius_pill_player() -> iced::border::Radius {
+    if is_rounded_for_player() {
+        R_PILL.into()
+    } else {
+        0.0.into()
+    }
+}
+
+// ----------------------------------------------------------------------------
 // Chrome sizing (mode-sensitive)
 // ----------------------------------------------------------------------------
 
@@ -436,7 +506,7 @@ pub(crate) fn status_strip_bg() -> Color {
 // during the cleanup; a future agent reintroducing the pattern can pull it
 // from `git show`.
 
-use nokkvi_data::types::player_settings::TrackInfoDisplay;
+use nokkvi_data::types::player_settings::{RoundedMode, TrackInfoDisplay};
 
 use crate::atomic_u8_enum::{AtomicU8Enum, atomic_u8_enum};
 
@@ -447,6 +517,14 @@ atomic_u8_enum! {
         2 => TopBar,
         3 => MiniPlayer,
         4 => TopBarUnder,
+    } default Off
+}
+
+atomic_u8_enum! {
+    RoundedMode {
+        0 => Off,
+        1 => On,
+        2 => PlayerOnly,
     } default Off
 }
 

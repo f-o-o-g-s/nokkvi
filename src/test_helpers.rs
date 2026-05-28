@@ -358,7 +358,7 @@ pub(crate) fn make_settings_view_data() -> crate::views::SettingsViewData {
         window_width: 1200.0,
         hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig::default(),
         is_light_mode: false,
-        rounded_mode: false,
+        rounded_mode: nokkvi_data::types::player_settings::RoundedMode::Off,
         opacity_gradient: true,
     }
 }

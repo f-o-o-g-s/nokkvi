@@ -12,8 +12,8 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, NavDisplayMode,
-            NavLayout, NormalizationLevel, SlotRowHeight, StripClickAction, TrackInfoDisplay,
-            VolumeNormalizationMode,
+            NavLayout, NormalizationLevel, RoundedMode, SlotRowHeight, StripClickAction,
+            TrackInfoDisplay, VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -283,8 +283,8 @@ impl SettingsManager {
         self.save()
     }
 
-    pub fn set_rounded_mode(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.rounded_mode = enabled;
+    pub fn set_rounded_mode(&mut self, mode: RoundedMode) -> Result<()> {
+        self.settings.player.rounded_mode = mode;
         self.save()
     }
 
@@ -1080,9 +1080,9 @@ mod sentinel_roundtrip_tests {
         types::{
             player_settings::{
                 ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior,
-                LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight,
-                StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
-                VolumeNormalizationMode,
+                LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, RoundedMode,
+                SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
+                VisualizationMode, VolumeNormalizationMode,
             },
             settings::PersistedPlayerSettings,
             toml_settings::TomlSettings,
@@ -1129,13 +1129,13 @@ mod sentinel_roundtrip_tests {
             auto_follow_playing: false,       // default true
             enter_behavior: EnterBehavior::AppendAndPlay, // default PlayAll
             local_music_path: "/tmp/sentinel/music".to_string(),
-            rounded_mode: true,                           // default false
-            nav_layout: NavLayout::Side,                  // default Top
-            nav_display_mode: NavDisplayMode::IconsOnly,  // default TextOnly
+            rounded_mode: RoundedMode::PlayerOnly, // default On
+            nav_layout: NavLayout::Side,           // default Top
+            nav_display_mode: NavDisplayMode::IconsOnly, // default TextOnly
             track_info_display: TrackInfoDisplay::TopBar, // default Off
-            slot_row_height: SlotRowHeight::Spacious,     // default Default
-            opacity_gradient: false,                      // default true
-            slot_text_links: false,                       // default true
+            slot_row_height: SlotRowHeight::Spacious, // default Default
+            opacity_gradient: false,               // default true
+            slot_text_links: false,                // default true
 
             // Playback / crossfade
             crossfade_enabled: true,    // default false

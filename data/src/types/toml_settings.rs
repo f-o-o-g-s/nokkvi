@@ -10,8 +10,9 @@ use crate::{
     audio::eq::CustomEqPreset,
     types::player_settings::{
         ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
-        NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight, StripClickAction,
-        TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+        NavDisplayMode, NavLayout, NormalizationLevel, RoundedMode, SlotRowHeight,
+        StripClickAction, TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+        deserialize_rounded_mode_with_bool_compat,
     },
 };
 
@@ -160,7 +161,8 @@ pub struct TomlSettings {
 
     // -- Interface --
     pub light_mode: bool,
-    pub rounded_mode: bool,
+    #[serde(deserialize_with = "deserialize_rounded_mode_with_bool_compat")]
+    pub rounded_mode: RoundedMode,
     pub nav_layout: NavLayout,
     pub nav_display_mode: NavDisplayMode,
     pub track_info_display: TrackInfoDisplay,
@@ -343,7 +345,7 @@ impl Default for TomlSettings {
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
-            rounded_mode: true,
+            rounded_mode: RoundedMode::On,
             nav_layout: NavLayout::default(),
             nav_display_mode: NavDisplayMode::default(),
             track_info_display: TrackInfoDisplay::PlayerBar,

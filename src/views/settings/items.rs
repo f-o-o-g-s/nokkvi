@@ -316,7 +316,13 @@ mod tests {
     #[test]
     fn theme_items_structure() {
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
-        let entries = build_theme_items(&theme, "everforest", false, true, false);
+        let entries = build_theme_items(
+            &theme,
+            "everforest",
+            nokkvi_data::types::player_settings::RoundedMode::Off,
+            true,
+            false,
+        );
 
         // Verify section headers (Chrome Border is its own section so the
         // 1 px hairline gets a Restore Defaults sentinel like every other
@@ -677,7 +683,7 @@ mod tests {
         all_entries.extend(crate::views::settings::items_theme::build_theme_items(
             &theme,
             "everforest",
-            false,
+            nokkvi_data::types::player_settings::RoundedMode::Off,
             true,
             false,
         ));

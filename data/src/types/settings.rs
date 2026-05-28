@@ -4,8 +4,9 @@ use crate::types::{
     hotkey_config::HotkeyConfig,
     player_settings::{
         ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
-        NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight, StripClickAction,
-        StripSeparator, TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+        NavDisplayMode, NavLayout, NormalizationLevel, RoundedMode, SlotRowHeight,
+        StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
+        VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
     },
     queue::{QueueSortPreferences, SortPreferences},
     queue_sort_mode::QueueSortMode,
@@ -58,9 +59,15 @@ pub struct PersistedPlayerSettings {
     /// e.g. "/music/Library" for local Navidrome, or "/mnt/nas/music" for NFS mounts.
     #[serde(default)]
     pub local_music_path: String,
-    /// Rounded corners mode (default: true = rounded)
-    #[serde(default)]
-    pub rounded_mode: bool,
+    /// Rounded corners mode (default: `On`).
+    ///
+    /// Field-level shim accepts legacy bool values (`true` → `On`,
+    /// `false` → `Off`) for configs written before the tri-state migration.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_rounded_mode_with_bool_compat"
+    )]
+    pub rounded_mode: RoundedMode,
     /// Navigation layout mode (default: Top = horizontal bar)
     #[serde(default)]
     pub nav_layout: NavLayout,
@@ -468,7 +475,7 @@ impl Default for PersistedPlayerSettings {
             auto_follow_playing: default_auto_follow_playing(),
             enter_behavior: EnterBehavior::default(),
             local_music_path: String::new(),
-            rounded_mode: true,
+            rounded_mode: RoundedMode::On,
             nav_layout: NavLayout::default(),
             nav_display_mode: NavDisplayMode::default(),
             track_info_display: TrackInfoDisplay::PlayerBar,

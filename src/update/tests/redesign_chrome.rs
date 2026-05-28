@@ -18,13 +18,13 @@
 //! `TrackInfoDisplay` mode it short-circuits to `None` (so other strip
 //! modes don't pay the per-frame queue walk).
 
-use nokkvi_data::types::player_settings::{NavLayout, TrackInfoDisplay};
+use nokkvi_data::types::player_settings::{NavLayout, RoundedMode, TrackInfoDisplay};
 
 use crate::{
     test_helpers::{make_queue_song, test_app},
     theme::{
-        THEME_MODE_LOCK, is_rounded_mode, nav_layout, set_nav_layout, set_rounded_mode,
-        set_track_info_display, track_info_display,
+        THEME_MODE_LOCK, is_rounded_for_player, is_rounded_mode, nav_layout, rounded_mode,
+        set_nav_layout, set_rounded_mode, set_track_info_display, track_info_display,
     },
     widgets::{
         player_bar::player_bar_height,
@@ -39,7 +39,7 @@ use crate::{
 struct UiModeGuard {
     saved_tid: TrackInfoDisplay,
     saved_nav: NavLayout,
-    saved_rounded: bool,
+    saved_rounded: RoundedMode,
 }
 
 impl UiModeGuard {
@@ -47,7 +47,7 @@ impl UiModeGuard {
         Self {
             saved_tid: track_info_display(),
             saved_nav: nav_layout(),
-            saved_rounded: is_rounded_mode(),
+            saved_rounded: rounded_mode(),
         }
     }
 }
@@ -86,7 +86,7 @@ fn expected_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
 fn chrome_matrix_flat_mode_pins_every_combination() {
     let _guard = THEME_MODE_LOCK.lock();
     let _restore = UiModeGuard::snapshot();
-    set_rounded_mode(false);
+    set_rounded_mode(RoundedMode::Off);
 
     let layouts = [NavLayout::Top, NavLayout::Side, NavLayout::None];
     let modes = [
@@ -123,15 +123,53 @@ fn chrome_matrix_rounded_mode_swaps_nav_height_only() {
     set_nav_layout(NavLayout::Top);
     set_track_info_display(TrackInfoDisplay::Off);
 
-    set_rounded_mode(true);
+    set_rounded_mode(RoundedMode::On);
     let rounded = chrome_height_with_header();
 
-    set_rounded_mode(false);
+    set_rounded_mode(RoundedMode::Off);
     let flat = chrome_height_with_header();
 
     assert!(
         (rounded - flat - 12.0).abs() < f32::EPSILON,
         "rounded-vs-flat chrome delta drifted: rounded={rounded}, flat={flat}",
+    );
+
+    // PlayerOnly mode rounds the bottom playback chrome but leaves the
+    // nav bar (and the rest of the UI) flat. Chrome height must match
+    // the fully-flat baseline, not the fully-rounded one.
+    set_rounded_mode(RoundedMode::PlayerOnly);
+    let player_only = chrome_height_with_header();
+    assert!(
+        (player_only - flat).abs() < f32::EPSILON,
+        "PlayerOnly must leave nav-bar height flat: got {player_only}, expected {flat}",
+    );
+}
+
+#[test]
+fn rounded_predicates_split_global_from_player_scope() {
+    // Pin the contract that distinguishes the three rounded modes: `On`
+    // rounds everything, `PlayerOnly` rounds only the bottom playback
+    // chrome, `Off` rounds nothing. Future agents adding a new mode here
+    // fail loudly instead of silently rewiring one predicate.
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+
+    set_rounded_mode(RoundedMode::Off);
+    assert!(!is_rounded_mode());
+    assert!(!is_rounded_for_player());
+
+    set_rounded_mode(RoundedMode::On);
+    assert!(is_rounded_mode());
+    assert!(is_rounded_for_player());
+
+    set_rounded_mode(RoundedMode::PlayerOnly);
+    assert!(
+        !is_rounded_mode(),
+        "global rounded must be false in PlayerOnly"
+    );
+    assert!(
+        is_rounded_for_player(),
+        "player-scope rounded must be true in PlayerOnly",
     );
 }
 
@@ -143,7 +181,7 @@ fn top_bar_under_strip_only_adds_height_in_top_nav() {
     // its own row beneath the nav bar.
     let _guard = THEME_MODE_LOCK.lock();
     let _restore = UiModeGuard::snapshot();
-    set_rounded_mode(false);
+    set_rounded_mode(RoundedMode::Off);
 
     set_nav_layout(NavLayout::Top);
     set_track_info_display(TrackInfoDisplay::Off);

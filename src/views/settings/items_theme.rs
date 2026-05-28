@@ -4,7 +4,7 @@
 //! Color keys use theme-file-relative paths (e.g. `dark.background.hard`)
 //! and are written to the active theme file via `config_writer::update_theme_value`.
 
-use nokkvi_data::types::theme_file::ThemeFile;
+use nokkvi_data::types::{player_settings::RoundedMode, theme_file::ThemeFile};
 
 use super::{
     items::{SettingItem, SettingMeta, SettingsEntry},
@@ -158,7 +158,7 @@ macro_rules! push_semantic_color_section {
 pub(crate) fn build_theme_items(
     theme: &ThemeFile,
     active_stem: &str,
-    rounded_mode: bool,
+    rounded_mode: RoundedMode,
     opacity_gradient: bool,
     is_light_mode: bool,
 ) -> Vec<SettingsEntry> {
@@ -196,11 +196,16 @@ pub(crate) fn build_theme_items(
         "Dark",
         vec!["Dark", "Light"],
     ));
-    e.push(SettingItem::bool_val(
+    e.push(SettingItem::enum_val(
         SettingMeta::new("general.rounded_mode", "Rounded Corners", "Appearance")
             .with_subtitle("Apply rounded borders to UI elements"),
-        rounded_mode,
-        false,
+        rounded_mode.as_label(),
+        RoundedMode::default().as_label(),
+        vec![
+            RoundedMode::Off.as_label(),
+            RoundedMode::On.as_label(),
+            RoundedMode::PlayerOnly.as_label(),
+        ],
     ));
     e.push(SettingItem::bool_val(
         SettingMeta::new("general.opacity_gradient", "Opacity Gradient", "Appearance")
@@ -411,7 +416,7 @@ mod tests {
     #[test]
     fn push_color_section_emits_header_restore_and_field_rows() {
         let theme = ThemeFile::default();
-        let entries = build_theme_items(&theme, "everforest", false, true, false);
+        let entries = build_theme_items(&theme, "everforest", RoundedMode::Off, true, false);
         let prefix = palette_prefix_from(&entries);
         let section = section_slice(&entries, "Background Colors");
 
@@ -450,7 +455,7 @@ mod tests {
     #[test]
     fn push_color_section_foreground_and_accent_rows() {
         let theme = ThemeFile::default();
-        let entries = build_theme_items(&theme, "everforest", false, true, false);
+        let entries = build_theme_items(&theme, "everforest", RoundedMode::Off, true, false);
         let prefix = palette_prefix_from(&entries);
 
         let fg = section_slice(&entries, "Foreground Colors");
@@ -486,7 +491,7 @@ mod tests {
     #[test]
     fn push_semantic_color_section_expands_each_emotion_to_two_rows() {
         let theme = ThemeFile::default();
-        let entries = build_theme_items(&theme, "everforest", false, true, false);
+        let entries = build_theme_items(&theme, "everforest", RoundedMode::Off, true, false);
         let prefix = palette_prefix_from(&entries);
         let section = section_slice(&entries, "Semantic Colors");
 

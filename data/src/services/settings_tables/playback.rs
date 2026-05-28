@@ -21,7 +21,7 @@
 use crate::{
     define_settings,
     types::{
-        player_settings::{NormalizationLevel, VolumeNormalizationMode},
+        player_settings::{NormalizationLevel, RoundedMode, VolumeNormalizationMode},
         settings_data::PlaybackSettingsData,
     },
 };
@@ -256,10 +256,10 @@ define_settings! {
             read: |src, out| out.opacity_gradient = src.opacity_gradient,
             write: |ps, ts| ts.opacity_gradient = ps.opacity_gradient,
         },
-        RoundedMode {
+        RoundedModeSetting {
             key: "general.rounded_mode",
-            value_type: Bool,
-            setter: |mgr, v: bool| mgr.set_rounded_mode(v),
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_rounded_mode(RoundedMode::from_label(&v)),
             toml_apply: |ts, p| p.rounded_mode = ts.rounded_mode,
             read: |src, out| out.rounded_mode = src.rounded_mode,
             write: |ps, ts| ts.rounded_mode = ps.rounded_mode,

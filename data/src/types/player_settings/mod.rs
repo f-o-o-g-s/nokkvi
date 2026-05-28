@@ -4,6 +4,7 @@
 //! callers continue to use `crate::types::player_settings::Foo` paths
 //! regardless of which file the type lives in.
 
+mod appearance;
 mod artwork;
 mod library;
 mod navigation;
@@ -12,6 +13,7 @@ mod slot_list;
 mod strip;
 mod visualizer;
 
+pub use appearance::*;
 pub use artwork::*;
 pub use library::*;
 pub use navigation::*;
@@ -52,7 +54,7 @@ pub struct LivePlayerSettings {
     /// Local filesystem prefix to prepend to song paths for file manager (empty = not configured)
     pub local_music_path: String,
     /// Whether rounded corners mode is enabled
-    pub rounded_mode: bool,
+    pub rounded_mode: RoundedMode,
     /// Navigation layout mode (top bar vs side bar)
     pub nav_layout: NavLayout,
     /// Navigation display mode (text, icons, or both)

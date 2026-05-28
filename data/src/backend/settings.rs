@@ -22,8 +22,8 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior,
             LibraryPageSize, LivePlayerSettings, NavDisplayMode, NavLayout, NormalizationLevel,
-            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
-            VolumeNormalizationMode,
+            RoundedMode, SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
+            VisualizationMode, VolumeNormalizationMode,
         },
         queue_sort_mode::QueueSortMode,
         sort_mode::SortMode,
@@ -186,7 +186,7 @@ impl SettingsService {
     delegate_setter!(set_suppress_library_refresh_toasts, bool);
     delegate_setter!(set_show_tray_icon, bool);
     delegate_setter!(set_close_to_tray, bool);
-    delegate_setter!(set_rounded_mode, bool);
+    delegate_setter!(set_rounded_mode, RoundedMode);
     delegate_setter!(set_nav_layout, NavLayout);
     delegate_setter!(set_nav_display_mode, NavDisplayMode);
     delegate_setter!(set_track_info_display, TrackInfoDisplay);

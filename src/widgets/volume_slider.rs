@@ -373,7 +373,7 @@ impl<Message> VolumeSlider<'_, Message> {
 
         // `ui_radius_pill()` already returns `0.0.into()` in flat mode;
         // the helper handles the mode-switch internally.
-        let radius = crate::theme::ui_radius_pill();
+        let radius = crate::theme::ui_radius_pill_player();
 
         // Center the single bar inside the widget bounds so external
         // `thickness()` overrides don't shift it off-center.
@@ -438,7 +438,7 @@ impl<Message> VolumeSlider<'_, Message> {
 
         // `ui_radius_pill()` already returns `0.0.into()` in flat mode;
         // the helper handles the mode-switch internally.
-        let radius = crate::theme::ui_radius_pill();
+        let radius = crate::theme::ui_radius_pill_player();
 
         // Track centered vertically within widget bounds.
         let track_y = bounds.y + (bounds.height - HORIZONTAL_TRACK_THICKNESS) / 2.0;
