@@ -24,6 +24,49 @@ impl Nokkvi {
         }
     }
 
+    /// Prefetch the active playlist's "Playing From" strip cover (mini) when it
+    /// isn't cached yet.
+    ///
+    /// On a fresh launch the playlist context is restored from settings but the
+    /// collage cache is empty, so the strip has no cover until the user visits
+    /// the Playlists view. This fetches a single mini keyed by the active
+    /// playlist id; album ids resolve server-side (empty vec → the playlist
+    /// fetcher), matching the cover the Playlists view shows. No-op when no
+    /// playlist is active, its cover is already cached / in flight, or there's
+    /// no live session.
+    pub(crate) fn prefetch_active_playlist_cover(&mut self) -> Task<Message> {
+        let Some(id) = self.active_playlist_info.as_ref().map(|ctx| ctx.id.clone()) else {
+            return Task::none();
+        };
+        if self.artwork.playlist.mini.snapshot.contains_key(&id)
+            || self.artwork.playlist.collage.snapshot.contains_key(&id)
+            || self.artwork.playlist.pending.contains(&id)
+        {
+            return Task::none();
+        }
+        if self.app_service.is_none() {
+            return Task::none();
+        }
+        // Mark in flight so a later viewport-driven load (or a second restore)
+        // doesn't duplicate the fetch; cleared by `handle_collage_mini_loaded`.
+        self.artwork.playlist.pending.insert(id.clone());
+        self.shell_task(
+            move |shell| async move {
+                let (server_url, cred) = shell.auth().server_config().await;
+                (id, server_url, cred)
+            },
+            |(id, server_url, cred)| {
+                Message::Artwork(ArtworkMessage::LoadCollageMini(
+                    CollageTarget::Playlist,
+                    id,
+                    server_url,
+                    cred,
+                    Vec::new(),
+                ))
+            },
+        )
+    }
+
     /// Unified collage artwork loader for both genres and playlists.
     ///
     /// # Parameters

@@ -1286,6 +1286,10 @@ impl Nokkvi {
                 settings.active_playlist_comment.clone(),
             )
         });
+        // The collage cache is empty on a fresh launch, so fetch the restored
+        // playlist's strip cover up front instead of leaving it blank until the
+        // Playlists view is visited.
+        let active_playlist_cover_task = self.prefetch_active_playlist_cover();
 
         // Apply start_view on first load (one-shot: only before first application)
         let mut start_view_task = Task::none();
@@ -1396,7 +1400,7 @@ impl Nokkvi {
             shell.set_volume(vol).await
         });
 
-        Task::batch([start_view_task, crossfade_task])
+        Task::batch([start_view_task, crossfade_task, active_playlist_cover_task])
     }
 
     pub(crate) fn handle_initialize_scrobble_state(
