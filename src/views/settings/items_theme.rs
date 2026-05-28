@@ -180,6 +180,35 @@ pub(crate) fn build_theme_items(
         &defaults.dark
     };
 
+    // ── Appearance ───────────────────────────────────────────────────
+    // Placed above the theme picker so the small set of high-traffic
+    // toggles isn't buried under the (potentially long) theme list.
+    const A: &str = "assets/icons/monitor.svg";
+    e.push(SettingsEntry::Header {
+        label: "Appearance",
+        icon: A,
+    });
+    let theme_val = if is_light_mode { "Light" } else { "Dark" };
+    e.push(SettingItem::enum_val(
+        SettingMeta::new("general.light_mode", "Theme Mode", "Appearance")
+            .with_subtitle("Switch between dark and light"),
+        theme_val,
+        "Dark",
+        vec!["Dark", "Light"],
+    ));
+    e.push(SettingItem::bool_val(
+        SettingMeta::new("general.rounded_mode", "Rounded Corners", "Appearance")
+            .with_subtitle("Apply rounded borders to UI elements"),
+        rounded_mode,
+        false,
+    ));
+    e.push(SettingItem::bool_val(
+        SettingMeta::new("general.opacity_gradient", "Opacity Gradient", "Appearance")
+            .with_subtitle("Fade non-center slots in list views"),
+        opacity_gradient,
+        true,
+    ));
+
     // ── Theme Picker ─────────────────────────────────────────────────
     e.push(SettingsEntry::Header {
         label: "Select Theme",
@@ -221,33 +250,6 @@ pub(crate) fn build_theme_items(
                 .with_theme_key(),
         );
     }
-
-    // ── Appearance ───────────────────────────────────────────────────
-    const A: &str = "assets/icons/monitor.svg";
-    e.push(SettingsEntry::Header {
-        label: "Appearance",
-        icon: A,
-    });
-    let theme_val = if is_light_mode { "Light" } else { "Dark" };
-    e.push(SettingItem::enum_val(
-        SettingMeta::new("general.light_mode", "Theme Mode", "Appearance")
-            .with_subtitle("Switch between dark and light"),
-        theme_val,
-        "Dark",
-        vec!["Dark", "Light"],
-    ));
-    e.push(SettingItem::bool_val(
-        SettingMeta::new("general.rounded_mode", "Rounded Corners", "Appearance")
-            .with_subtitle("Apply rounded borders to UI elements"),
-        rounded_mode,
-        false,
-    ));
-    e.push(SettingItem::bool_val(
-        SettingMeta::new("general.opacity_gradient", "Opacity Gradient", "Appearance")
-            .with_subtitle("Fade non-center slots in list views"),
-        opacity_gradient,
-        true,
-    ));
 
     // ── Background Colors ────────────────────────────────────────────
     push_color_section!(

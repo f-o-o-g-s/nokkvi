@@ -324,7 +324,7 @@ mod tests {
         assert_eq!(
             count_headers(&entries),
             7,
-            "Expected 7 theme sections: Select Theme, Appearance, Background Colors, Foreground Colors, Accent Colors, Semantic Colors, Chrome Border",
+            "Expected 7 theme sections: Appearance, Select Theme, Background Colors, Foreground Colors, Accent Colors, Semantic Colors, Chrome Border",
         );
 
         // Verify we have a reasonable number of items
