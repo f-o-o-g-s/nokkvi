@@ -7,11 +7,13 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - New "Player Only" rounded-corners option keeps the playback bar soft while the rest of the UI stays flat.
+- A sticky pill mini-index above the settings detail pane lets you jump to each sub-section; hidden on tabs with only one section.
 
 ### Changed
 
 - Appearance toggles (Theme Mode, Rounded Corners, Opacity Gradient) now sit at the top of the Theme settings tab instead of below the theme picker.
 - Settings sidebar and detail pane now show a 1 px hairline between them in the wide layout.
+- Settings sub-section headers are larger, bolder, and show an item count (e.g. APPLICATION (8)) so sections read as architecture instead of metadata.
 
 ### Fixed
 
