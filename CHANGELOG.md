@@ -15,6 +15,9 @@ All notable changes to this project will be documented in this file.
 - Settings sidebar and detail pane now show a 1 px hairline between them in the wide layout.
 - Settings sub-section headers are larger, bolder, and show an item count (e.g. APPLICATION (8)) so sections read as architecture instead of metadata.
 - A fading accent rule now flags each settings sub-section header, extending from the label and dissipating into the pane background.
+- Each settings tab's first section now uses concrete domain headings (Library, Navigation, Transitions, Frame, Mode) instead of generic Application/Layout/Appearance/General.
+- Track Info Display moved into the Metadata Strip section next to the other strip controls.
+- Visualizer's Waves, Waves Intensity, and Monstercat smoothing knobs moved from General into the Bars section.
 
 ### Fixed
 
