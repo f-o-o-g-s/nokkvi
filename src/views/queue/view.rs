@@ -509,7 +509,7 @@ impl QueuePage {
                 .push(save_btn)
                 .push(edit_btn);
             let compact = container(compact)
-                .height(Length::Fixed(PLAYLIST_STRIP_COMPACT_H))
+                .center_y(Length::Fixed(PLAYLIST_STRIP_COMPACT_H))
                 .width(Length::Fill);
 
             let total_h = if expanded {
