@@ -29,10 +29,27 @@ pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
 /// Height of the playlist edit-mode header. Taller than the read-only band
 /// because it stacks an eyebrow over the name + comment inputs.
 pub(crate) const PLAYLIST_EDIT_BAR_H: f32 = 60.0;
-/// Extra height revealed by the hover-expanded detail block. Fixed so the
-/// slot-list chrome math stays exact; a long comment clips within this area
-/// rather than growing the band unboundedly.
-pub(crate) const PLAYLIST_STRIP_DETAIL_H: f32 = 84.0;
+/// Height of the hover-expanded detail block, sized to fit the comment plus
+/// the meta row. `ui_font()` renders monospace, so the wrapped line count is
+/// predictable from the character count and available width — letting the band
+/// fit its content instead of reserving a fixed slab of dead space under short
+/// comments. Capped at `MAX_LINES` (longer comments clip via the container's
+/// `clip(true)`) so a wall-of-text comment can't swallow the queue. The same
+/// value drives the band height and the slot-list chrome math, keeping them in
+/// lockstep.
+fn playlist_strip_detail_height(comment: &str, content_width: f32) -> f32 {
+    const LINE_H: f32 = 16.0;
+    const CHAR_W: f32 = 7.3;
+    const META_ROW_H: f32 = 20.0;
+    const ROW_GAP: f32 = 8.0;
+    const BOTTOM_PAD: f32 = 9.0;
+    const MAX_LINES: f32 = 5.0;
+    let cols = (content_width / CHAR_W).floor().max(1.0);
+    let lines = (comment.chars().count() as f32 / cols)
+        .ceil()
+        .clamp(1.0, MAX_LINES);
+    lines * LINE_H + ROW_GAP + META_ROW_H + BOTTOM_PAD
+}
 
 /// Format a playlist's total duration for the strip, e.g. `4h 53m` / `47m`.
 fn format_strip_duration(secs: f32) -> String {
@@ -190,6 +207,13 @@ impl QueuePage {
 
         // Build final header: regular header + optional edit mode bar.
         //
+        // Expanded read-only-strip detail height, sized to the comment so the
+        // band reserves no dead space below short comments (monospace estimate).
+        // Shared by the band and the chrome math below so they stay in sync.
+        let playlist_detail_h = data.playlist_context_info.as_ref().map_or(0.0, |ctx| {
+            playlist_strip_detail_height(&ctx.comment, (data.window_width - 73.0).max(120.0))
+        });
+
         // Every branch produces the same `column![extra, sep, header]` shape so
         // iced's positional reconciler keeps the search `text_input::Id` stable
         // across edit / playlist-context / read-only mode toggles. In read-only
@@ -507,7 +531,7 @@ impl QueuePage {
                 .width(Length::Fill);
 
             let total_h = if expanded {
-                PLAYLIST_STRIP_COMPACT_H + PLAYLIST_STRIP_DETAIL_H
+                PLAYLIST_STRIP_COMPACT_H + playlist_detail_h
             } else {
                 PLAYLIST_STRIP_COMPACT_H
             };
@@ -601,7 +625,7 @@ impl QueuePage {
 
                 let detail = container(column![comment_text, meta_row].spacing(8))
                     .width(Length::Fill)
-                    .height(Length::Fixed(PLAYLIST_STRIP_DETAIL_H))
+                    .height(Length::Fixed(playlist_detail_h))
                     .padding(iced::Padding {
                         top: 0.0,
                         right: 13.0,
@@ -676,7 +700,7 @@ impl QueuePage {
             // Compact "Playing From" banner + 1px separator, plus the detail
             // block height when the strip is hover-expanded (grow-in-flow).
             let strip = if data.playlist_strip_expanded {
-                PLAYLIST_STRIP_COMPACT_H + PLAYLIST_STRIP_DETAIL_H
+                PLAYLIST_STRIP_COMPACT_H + playlist_detail_h
             } else {
                 PLAYLIST_STRIP_COMPACT_H
             };
