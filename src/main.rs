@@ -183,7 +183,9 @@ pub struct Nokkvi {
     // -------------------------------------------------------------------------
     // Playlist Edit Mode (split-view)
     // -------------------------------------------------------------------------
-    pub playlist_edit: Option<nokkvi_data::types::playlist_edit::PlaylistEditState>,
+    /// Active playlist editing session, owning its own track buffer decoupled
+    /// from the live play queue. `Some(..)` is the "in edit mode" signal.
+    pub playlist_editor: Option<crate::state::PlaylistEditorState>,
     /// Identity of the playlist currently loaded in the queue.
     /// Set on PlayPlaylist, cleared on non-playlist play.
     pub active_playlist_info: Option<crate::state::ActivePlaylistContext>,
@@ -375,7 +377,7 @@ impl Default for Nokkvi {
             // Misc state
             last_queue_current_index: None,
             last_queue_current_entry_id: None,
-            playlist_edit: None,
+            playlist_editor: None,
             active_playlist_info: None,
             browsing_panel: None,
             pane_focus: crate::state::PaneFocus::Queue,
@@ -724,6 +726,22 @@ impl Nokkvi {
             .iter()
             .map(|s| s.id.clone())
             .collect()
+    }
+
+    /// Collect song IDs from the playlist editor's buffer, in order.
+    ///
+    /// Mirrors [`Self::queue_song_ids`] but reads the editor's OWN buffer
+    /// (`playlist_editor.songs`) instead of the live queue. Returns an empty
+    /// vec when no edit session is active. Always serializes the full ordered
+    /// buffer (never the filtered subset) — the save/dirty path relies on this.
+    //
+    // Phase 6 wires this into save/dirty detection; Phase 1 only lands it.
+    #[allow(dead_code)]
+    pub fn editor_song_ids(&self) -> Vec<String> {
+        self.playlist_editor
+            .as_ref()
+            .map(|editor| editor.songs.iter().map(|s| s.id.clone()).collect())
+            .unwrap_or_default()
     }
 
     /// Sort queue songs based on current sort mode and sort order (client-side).

@@ -69,7 +69,7 @@ impl Nokkvi {
             let not_expanded = page.is_none_or(|p| !p.is_expanded());
             let not_focused = page.is_none_or(|p| !p.common().search_input_focused);
             if search_empty && not_expanded && not_focused {
-                if self.playlist_edit.is_some() {
+                if self.playlist_editor.is_some() {
                     return Task::done(Message::SplitView(SplitViewMessage::ExitEditMode));
                 }
                 return Task::done(Message::SplitView(SplitViewMessage::ToggleBrowsingPanel));

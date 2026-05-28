@@ -311,7 +311,7 @@ fn create_playlist_dialog_refused_when_already_editing() {
         playlist_comment: String::new(),
         playlist_public: true,
     }));
-    assert!(app.playlist_edit.is_some());
+    assert!(app.playlist_editor.is_some());
 
     // User clicks the view-header `+` — message bubbles to root, guard fires.
     let _ = app.update(Message::Playlists(
@@ -323,7 +323,7 @@ fn create_playlist_dialog_refused_when_already_editing() {
         "guard must keep the dialog closed when already editing"
     );
     assert!(
-        app.playlist_edit.is_some(),
+        app.playlist_editor.is_some(),
         "guard must not disturb the in-progress edit"
     );
 }
@@ -336,7 +336,7 @@ fn create_playlist_dialog_opens_when_not_editing() {
     };
 
     let mut app = test_app();
-    assert!(app.playlist_edit.is_none());
+    assert!(app.playlist_editor.is_none());
 
     let _ = app.update(Message::Playlists(
         PlaylistsMessage::OpenCreatePlaylistDialog,
@@ -412,8 +412,8 @@ fn exit_edit_mode_preserves_aligned_context() {
     );
     assert_eq!(active.id, "new");
     assert!(
-        app.playlist_edit.is_none(),
-        "exit clears playlist_edit but not active_playlist_info"
+        app.playlist_editor.is_none(),
+        "exit clears playlist_editor but not active_playlist_info"
     );
 }
 
@@ -430,9 +430,10 @@ fn enter_playlist_edit_mode_seeds_initial_public() {
     }));
 
     let edit = app
-        .playlist_edit
+        .playlist_editor
         .as_ref()
-        .expect("entering edit mode must populate playlist_edit");
+        .map(|e| &e.edit)
+        .expect("entering edit mode must populate playlist_editor");
     assert!(
         !edit.playlist_public,
         "EnterPlaylistEditMode with public=false must seed playlist_public=false"
@@ -462,7 +463,11 @@ fn playlist_edit_public_toggle_flips_state() {
         false,
     )));
 
-    let edit = app.playlist_edit.as_ref().expect("playlist_edit set");
+    let edit = app
+        .playlist_editor
+        .as_ref()
+        .map(|e| &e.edit)
+        .expect("playlist_editor set");
     assert!(
         !edit.playlist_public,
         "PlaylistEditPublicToggled(false) must flip the edit-state flag"
@@ -495,7 +500,11 @@ fn playlist_edit_public_revert_clears_dirty() {
         true,
     )));
 
-    let edit = app.playlist_edit.as_ref().expect("playlist_edit set");
+    let edit = app
+        .playlist_editor
+        .as_ref()
+        .map(|e| &e.edit)
+        .expect("playlist_editor set");
     assert!(
         !edit.is_public_dirty(),
         "toggling back to the original value must clear public-dirty"
@@ -521,7 +530,11 @@ fn playlist_edit_public_only_change_is_metadata_dirty() {
         false,
     )));
 
-    let edit = app.playlist_edit.as_ref().expect("playlist_edit set");
+    let edit = app
+        .playlist_editor
+        .as_ref()
+        .map(|e| &e.edit)
+        .expect("playlist_editor set");
     assert!(
         edit.has_metadata_changes(),
         "a pure-visibility flip must satisfy the predicate the save handler \

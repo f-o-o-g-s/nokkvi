@@ -10,6 +10,7 @@ pub(crate) mod browsing_panel;
 pub(crate) mod expansion;
 pub(crate) mod genres;
 pub(crate) mod login;
+pub(crate) mod playlist_editor;
 pub(crate) mod playlists;
 pub(crate) mod queue;
 pub(crate) mod radios;
@@ -24,6 +25,9 @@ pub(crate) use artists::{ArtistsAction, ArtistsMessage, ArtistsPage, ArtistsView
 pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingView};
 pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData};
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
+// Phase 3 wires the editor view through this re-export; dormant in Phase 1.
+#[allow(unused_imports)]
+pub(crate) use playlist_editor::EditorViewData;
 pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
 pub(crate) use queue::{QueueAction, QueueMessage, QueuePage, QueueSortMode, QueueViewData};
 pub(crate) use radios::{RadiosAction, RadiosMessage, RadiosPage, RadiosViewData};

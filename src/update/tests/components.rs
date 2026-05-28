@@ -135,12 +135,14 @@ fn clear_active_playlist_resets_strip_expansion() {
 fn guard_play_action_blocks_during_playlist_edit() {
     let mut app = test_app();
     app.active_playlist_info = Some(make_playlist_ctx());
-    app.playlist_edit = Some(nokkvi_data::types::playlist_edit::PlaylistEditState::new(
-        "pl_42".into(),
-        "Sunday Set".into(),
-        String::new(),
-        false,
-        Vec::new(),
+    app.playlist_editor = Some(crate::state::PlaylistEditorState::new(
+        nokkvi_data::types::playlist_edit::PlaylistEditState::new(
+            "pl_42".into(),
+            "Sunday Set".into(),
+            String::new(),
+            false,
+            Vec::new(),
+        ),
     ));
 
     let blocked = app.guard_play_action();

@@ -271,7 +271,7 @@ impl Nokkvi {
     /// the playback pointer within the existing queue (`PlaySong` inside the
     /// queue view) must NOT — doing so clears the loaded-playlist header.
     pub(crate) fn guard_play_action(&mut self) -> Option<Task<Message>> {
-        if self.playlist_edit.is_some() {
+        if self.playlist_editor.is_some() {
             self.toast_warn("Cannot play — would replace the playlist being edited");
             return Some(Task::none());
         }
@@ -1410,7 +1410,7 @@ impl Nokkvi {
     /// - **Core session identity**: app_service, stored_session,
     ///   should_auto_login, screen.
     /// - **Server-specific data pointing at gone IDs**: library, artwork,
-    ///   similar_songs(+generation), active_playlist_info, playlist_edit,
+    ///   similar_songs(+generation), active_playlist_info, playlist_editor,
     ///   server_version, last_queue_current_index, active_progress,
     ///   pending_expand(+center_only +top_pin), roulette.
     /// - **Transient UI work tied to the prior session**: open_menu,
@@ -1491,7 +1491,7 @@ impl Nokkvi {
         self.similar_songs_generation = 0;
         self.active_playlist_info = None;
         self.queue_page.playlist_strip_expanded = false;
-        self.playlist_edit = None;
+        self.playlist_editor = None;
         self.server_version = None;
         self.last_queue_current_index = None;
         self.active_progress = Vec::new();

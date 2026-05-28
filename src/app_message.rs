@@ -374,6 +374,55 @@ pub enum SplitViewMessage {
     PlaylistEditsSaved,
 }
 
+/// Playlist-editor messages, namespaced under `Message::Editor(..)`.
+///
+/// The editor operates on its OWN in-memory track buffer
+/// (`Nokkvi.playlist_editor`), decoupled from the live play queue. These
+/// mirror the *edit-mode* subset of [`views::QueueMessage`] (reorder, remove,
+/// metadata edits, save) and deliberately omit the playback subset — the
+/// editor has no "now playing" concept.
+///
+/// Phase 1 only defines the enum + a no-op routing stub. Real handling lands
+/// in Phase 3+, when the split-view edit variants currently living on
+/// `QueueMessage` / `SplitViewMessage` migrate here.
+#[derive(Debug, Clone)]
+pub enum EditorMessage {
+    /// Async resolve result — the playlist's tracks, ready to fill the editor
+    /// buffer. The TESTABLE entry point (dispatch with a fabricated payload).
+    SongsLoaded(Vec<nokkvi_data::backend::queue::QueueSongUIViewData>),
+    /// Shared slot-list navigation/activation/selection/search carrier.
+    SlotList(widgets::SlotListPageMessage),
+    /// Drag-and-drop reorder within the editor buffer.
+    DragReorder(widgets::drag_column::DragEvent),
+    /// Remove a single row at the given buffer index.
+    RemoveAt(usize),
+    /// Context-menu action against the row at the given index.
+    ContextMenuAction(usize, views::queue::QueueContextEntry),
+    /// Edit-bar: playlist name changed (per keystroke).
+    NameChanged(String),
+    /// Edit-bar: playlist comment changed (per keystroke).
+    CommentChanged(String),
+    /// Edit-bar: public/private toggled.
+    PublicToggled(bool),
+    /// Persist the editor buffer back to the playlist.
+    Save,
+}
+
+/// Actions the editor bubbles to root for global state mutation.
+///
+/// Most editor mutations (reorder/remove/add) are plain local `Vec` ops with
+/// no backend round-trip, handled inline; only `Save` needs to bubble up to a
+/// backend call.
+//
+// Phase 3 wires the variants; Phase 1 only lands the type.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) enum EditorAction {
+    None,
+    /// Persist the editor buffer back to the playlist (triggers the save task).
+    Save,
+}
+
 /// Cross-pane drag state machine messages — drag from browsing panel into
 /// queue. Handled by `update/cross_pane_drag.rs`.
 #[derive(Debug, Clone)]
@@ -802,6 +851,9 @@ pub enum Message {
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),
     SplitView(SplitViewMessage),
+    /// Playlist editor (owns its own buffer; decoupled from the live queue).
+    /// Phase 1 routes to a no-op stub; real handling lands in Phase 3+.
+    Editor(EditorMessage),
 
     // --- Cross-Pane Drag (browsing panel → queue) ---
     CrossPaneDrag(CrossPaneDragMessage),

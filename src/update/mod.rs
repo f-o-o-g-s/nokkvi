@@ -48,6 +48,7 @@ mod components;
 mod config;
 mod cross_pane_drag;
 mod default_playlist_picker;
+mod editor;
 mod eq_modal;
 mod genres;
 mod hotkeys;
@@ -473,6 +474,8 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::BrowsingPanel(msg) => self.handle_browsing_panel_message(msg),
             Message::SplitView(msg) => self.handle_split_view_message(msg),
+            // Phase 1: no-op stub; real handling lands in Phase 3+.
+            Message::Editor(msg) => self.handle_editor_message(msg),
 
             // -----------------------------------------------------------------
             // Info Modal

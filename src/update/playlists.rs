@@ -394,7 +394,7 @@ impl Nokkvi {
                 // Refuse if already in split-view edit mode — creating a new
                 // playlist drops the user into edit mode for it, which would
                 // collide with the in-progress edit.
-                if self.playlist_edit.is_some() {
+                if self.playlist_editor.is_some() {
                     self.toast_warn("Finish or discard the current playlist edit first");
                     return Task::none();
                 }

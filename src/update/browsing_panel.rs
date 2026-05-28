@@ -83,7 +83,7 @@ impl Nokkvi {
         }
 
         // In edit mode, don't allow closing the panel
-        if self.playlist_edit.is_some() {
+        if self.playlist_editor.is_some() {
             debug!(" [BROWSE] Toggle ignored — in playlist edit mode");
             return Task::none();
         }
@@ -123,13 +123,18 @@ impl Nokkvi {
             playlist_name, playlist_id, playlist_public
         );
 
-        // Set up edit state — snapshot gets populated after QueueLoaded arrives
-        self.playlist_edit = Some(nokkvi_data::types::playlist_edit::PlaylistEditState::new(
-            playlist_id.clone(),
-            playlist_name.clone(),
-            playlist_comment.clone(),
-            playlist_public,
-            Vec::new(),
+        // Set up edit state — snapshot gets populated after QueueLoaded arrives.
+        // Phase 1: the editor owns the `PlaylistEditState`, but the existing
+        // flow still loads the queue and reads `queue_song_ids()` for
+        // save/dirty (behavior unchanged until Phase 3+).
+        self.playlist_editor = Some(crate::state::PlaylistEditorState::new(
+            nokkvi_data::types::playlist_edit::PlaylistEditState::new(
+                playlist_id.clone(),
+                playlist_name.clone(),
+                playlist_comment.clone(),
+                playlist_public,
+                Vec::new(),
+            ),
         ));
         // Re-anchor `active_playlist_info` to the playlist being edited.
         // The queue is about to be replaced with this playlist's tracks
@@ -179,7 +184,7 @@ impl Nokkvi {
 
     /// Exit split-view playlist editing mode.
     pub(crate) fn handle_exit_playlist_edit_mode(&mut self) -> Task<Message> {
-        if let Some(edit_state) = &self.playlist_edit {
+        if let Some(edit_state) = self.playlist_editor.as_ref().map(|e| &e.edit) {
             let current_ids = self.queue_song_ids();
             let is_dirty = edit_state.is_dirty(&current_ids);
             let name = edit_state.playlist_name.clone();
@@ -189,7 +194,7 @@ impl Nokkvi {
             info!(" Exiting playlist edit mode: \"{}\"", name);
         }
 
-        self.playlist_edit = None;
+        self.playlist_editor = None;
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;
 
@@ -211,7 +216,7 @@ impl Nokkvi {
     /// Save the current queue as the edited playlist's tracks.
     /// Also renames the playlist if the name was changed.
     pub(crate) fn handle_save_playlist_edits(&mut self) -> Task<Message> {
-        let Some(edit_state) = &self.playlist_edit else {
+        let Some(edit_state) = self.playlist_editor.as_ref().map(|e| &e.edit) else {
             return Task::none();
         };
 
@@ -269,7 +274,7 @@ impl Nokkvi {
     pub(crate) fn handle_playlist_edits_saved(&mut self) -> Task<Message> {
         let current_ids = self.queue_song_ids();
 
-        if let Some(edit_state) = &mut self.playlist_edit {
+        if let Some(edit_state) = self.playlist_editor.as_mut().map(|e| &mut e.edit) {
             let name = edit_state.playlist_name.clone();
             let comment = edit_state.playlist_comment.clone();
             let id = edit_state.playlist_id.clone();

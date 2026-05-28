@@ -1257,23 +1257,29 @@ impl Nokkvi {
             let current_playing_song_id = self.scrobble.current_song_id.clone();
 
             // Build edit_mode_info only when actually editing a playlist
-            let edit_mode_info = self.playlist_edit.as_ref().map(|edit_state| {
-                let current_ids = self.queue_song_ids();
-                let is_dirty = edit_state.is_dirty(&current_ids)
-                    || edit_state.is_name_dirty()
-                    || edit_state.is_comment_dirty()
-                    || edit_state.is_public_dirty();
-                (edit_state.playlist_name.clone(), is_dirty)
-            });
+            let edit_mode_info = self
+                .playlist_editor
+                .as_ref()
+                .map(|e| &e.edit)
+                .map(|edit_state| {
+                    let current_ids = self.queue_song_ids();
+                    let is_dirty = edit_state.is_dirty(&current_ids)
+                        || edit_state.is_name_dirty()
+                        || edit_state.is_comment_dirty()
+                        || edit_state.is_public_dirty();
+                    (edit_state.playlist_name.clone(), is_dirty)
+                });
 
             let edit_mode_comment = self
-                .playlist_edit
+                .playlist_editor
                 .as_ref()
+                .map(|e| &e.edit)
                 .map(|edit_state| edit_state.playlist_comment.clone());
 
             let edit_mode_public = self
-                .playlist_edit
+                .playlist_editor
                 .as_ref()
+                .map(|e| &e.edit)
                 .map(|edit_state| edit_state.playlist_public);
 
             let (column_dropdown_open, column_dropdown_trigger_bounds) =
@@ -1358,7 +1364,7 @@ impl Nokkvi {
             let browser_content: Element<'_, Message> = if let Some(ref panel) = self.browsing_panel
             {
                 let similar_label = self.similar_songs.as_ref().map(|s| s.label.as_str());
-                let is_editing = self.playlist_edit.is_some();
+                let is_editing = self.playlist_editor.is_some();
                 let tab_bar = panel
                     .tab_bar(similar_label, is_editing)
                     .map(Message::BrowsingPanel);
