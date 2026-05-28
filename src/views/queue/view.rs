@@ -439,41 +439,6 @@ impl QueuePage {
                 .width(Length::Fill)
                 .clip(true);
 
-            // Inline meta — "{count} songs · {duration}". Count falls back to the
-            // live queue length when the playlist's own count is unknown.
-            let count = if ctx.song_count > 0 {
-                ctx.song_count as usize
-            } else {
-                data.total_queue_count
-            };
-            let count_label = if count == 1 {
-                "1 song".to_string()
-            } else {
-                format!("{count} songs")
-            };
-            let meta_label = if ctx.duration_secs > 0.0 {
-                format!(
-                    "{count_label} · {}",
-                    format_strip_duration(ctx.duration_secs)
-                )
-            } else {
-                count_label.clone()
-            };
-            let inline_meta = iced::widget::text(meta_label)
-                .font(crate::theme::ui_font())
-                .size(11)
-                .color(crate::theme::fg3())
-                .wrapping(iced::widget::text::Wrapping::None);
-
-            // 1px vertical divider before the action cluster.
-            let divider = container(Space::new())
-                .width(Length::Fixed(1.0))
-                .height(Length::Fixed(20.0))
-                .style(|_theme| container::Style {
-                    background: Some(crate::theme::border().into()),
-                    ..Default::default()
-                });
-
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::QuickSavePlaylist);
             let edit_btn = icon_btn("assets/icons/pencil-line.svg", QueueMessage::EditPlaylist);
 
@@ -502,12 +467,14 @@ impl QueuePage {
                     .clip(true),
                 );
             }
-            let compact = compact
-                .push(name_stack)
-                .push(inline_meta)
-                .push(divider)
-                .push(save_btn)
-                .push(edit_btn);
+            // Identity on the left (cover + eyebrow/name); actions grouped on the
+            // right. All metadata (count / duration / updated / visibility) lives
+            // in the hover-expanded detail block — keeping the compact band from
+            // duplicating the song count the view-header already shows beneath it.
+            let actions = row![save_btn, edit_btn]
+                .spacing(2)
+                .align_y(Alignment::Center);
+            let compact = compact.push(name_stack).push(actions);
             let compact = container(compact)
                 .center_y(Length::Fixed(PLAYLIST_STRIP_COMPACT_H))
                 .width(Length::Fill);
@@ -539,8 +506,19 @@ impl QueuePage {
                         .into()
                     };
 
+                let count = if ctx.song_count > 0 {
+                    ctx.song_count as usize
+                } else {
+                    data.total_queue_count
+                };
+                let count_label = if count == 1 {
+                    "1 song".to_string()
+                } else {
+                    format!("{count} songs")
+                };
+
                 let mut meta_row = Row::new().spacing(14).align_y(Alignment::Center);
-                meta_row = meta_row.push(meta_item("assets/icons/music.svg", count_label.clone()));
+                meta_row = meta_row.push(meta_item("assets/icons/music.svg", count_label));
                 if ctx.duration_secs > 0.0 {
                     meta_row = meta_row.push(meta_item(
                         "assets/icons/clock.svg",
