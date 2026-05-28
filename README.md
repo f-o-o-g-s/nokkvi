@@ -4,7 +4,6 @@
 
 <p align="center">
   <a href="https://github.com/f-o-o-g-s/nokkvi/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/f-o-o-g-s/nokkvi/ci.yml?branch=main&label=CI" alt="CI status" /></a>
-  <a href="https://github.com/f-o-o-g-s/nokkvi/releases"><img src="https://img.shields.io/github/v/release/f-o-o-g-s/nokkvi" alt="Latest release" /></a>
   <a href="https://aur.archlinux.org/packages/nokkvi-bin"><img src="https://img.shields.io/aur/version/nokkvi-bin?label=AUR" alt="AUR version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/f-o-o-g-s/nokkvi" alt="License" /></a>
 </p>
