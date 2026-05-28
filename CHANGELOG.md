@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- About modal's Ko-fi heart now uses the theme's love color (usually red) instead of the accent color, matching hearts elsewhere in the app.
+
 ### Removed
 
 ## v0.6.2 — 2026-05-27
