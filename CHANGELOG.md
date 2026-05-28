@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Appearance toggles (Theme Mode, Rounded Corners, Opacity Gradient) now sit at the top of the Theme settings tab instead of below the theme picker.
 - Settings sidebar and detail pane now show a 1 px hairline between them in the wide layout.
 - Settings sub-section headers are larger, bolder, and show an item count (e.g. APPLICATION (8)) so sections read as architecture instead of metadata.
+- A fading accent rule now flags each settings sub-section header, extending from the label and dissipating into the pane background.
 
 ### Fixed
 
