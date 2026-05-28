@@ -180,24 +180,32 @@ pub(crate) fn build_theme_items(
         &defaults.dark
     };
 
-    // ── Appearance ───────────────────────────────────────────────────
+    // ── Mode + Display ───────────────────────────────────────────────
     // Placed above the theme picker so the small set of high-traffic
     // toggles isn't buried under the (potentially long) theme list.
-    const A: &str = "assets/icons/monitor.svg";
+    // Mode hosts the palette-mode switch; Display groups the chrome-shape
+    // and slot-list fade knobs that don't belong with palette selection.
+    const MODE_ICON: &str = "assets/icons/monitor.svg";
+    const DISPLAY_ICON: &str = "assets/icons/layout-grid.svg";
     e.push(SettingsEntry::Header {
-        label: "Appearance",
-        icon: A,
+        label: "Mode",
+        icon: MODE_ICON,
     });
     let theme_val = if is_light_mode { "Light" } else { "Dark" };
     e.push(SettingItem::enum_val(
-        SettingMeta::new("general.light_mode", "Theme Mode", "Appearance")
+        SettingMeta::new("general.light_mode", "Theme Mode", "Mode")
             .with_subtitle("Switch between dark and light"),
         theme_val,
         "Dark",
         vec!["Dark", "Light"],
     ));
+
+    e.push(SettingsEntry::Header {
+        label: "Display",
+        icon: DISPLAY_ICON,
+    });
     e.push(SettingItem::enum_val(
-        SettingMeta::new("general.rounded_mode", "Rounded Corners", "Appearance")
+        SettingMeta::new("general.rounded_mode", "Rounded Corners", "Display")
             .with_subtitle("Apply rounded borders to UI elements"),
         rounded_mode.as_label(),
         RoundedMode::default().as_label(),
@@ -208,7 +216,7 @@ pub(crate) fn build_theme_items(
         ],
     ));
     e.push(SettingItem::bool_val(
-        SettingMeta::new("general.opacity_gradient", "Opacity Gradient", "Appearance")
+        SettingMeta::new("general.opacity_gradient", "Opacity Gradient", "Display")
             .with_subtitle("Fade non-center slots in list views"),
         opacity_gradient,
         true,

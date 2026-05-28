@@ -1,12 +1,13 @@
-//! Interface tab setting entries — layout, display, and metadata strip.
+//! Interface tab setting entries — navigation, lists, player bar, font, and
+//! metadata strip.
 //!
 //! 13 flat rows come from `define_settings!` via
-//! `build_interface_tab_settings_items` (5 Layout + 1 Views + 4 Metadata
-//! Strip + 3 Artwork Column: mode dropdown, `artwork_auto_max_pct` slider,
-//! `artwork_vertical_height_pct` slider). Section headers, the two ToggleSet
-//! rows (`__toggle_artwork_overlays`, `__toggle_strip_fields`), the
-//! theme-routed `font_family` text row, and the conditional
-//! `general.artwork_column_stretch_fit` knob (shown when
+//! `build_interface_tab_settings_items` (2 Navigation + 2 Slot List + 1
+//! Player Bar + 5 Metadata Strip + 3 Artwork Column: mode dropdown,
+//! `artwork_auto_max_pct` slider, `artwork_vertical_height_pct` slider).
+//! Section headers, the two ToggleSet rows (`__toggle_artwork_overlays`,
+//! `__toggle_strip_fields`), the theme-routed `font_family` text row, and
+//! the conditional `general.artwork_column_stretch_fit` knob (shown when
 //! `ArtworkColumnMode::is_stretched()` — i.e. either horizontal or vertical
 //! stretched mode) stay hand-written.
 
@@ -21,10 +22,12 @@ use super::items::{MacroRows, SettingItem, SettingMeta, SettingsEntry};
 
 /// Build settings entries for the Interface tab.
 pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<SettingsEntry> {
-    const LAYOUT: &str = "assets/icons/panels-top-left.svg";
-    const VIEWS: &str = "assets/icons/layout-grid.svg";
+    const NAVIGATION: &str = "assets/icons/compass.svg";
+    const SLOT_LIST: &str = "assets/icons/list-filter.svg";
+    const PLAYER_BAR: &str = "assets/icons/audio-waveform.svg";
     const FONT: &str = "assets/icons/type.svg";
     const STRIP: &str = "assets/icons/radio-tower.svg";
+    const ARTWORK_OVERLAYS: &str = "assets/icons/layout-grid.svg";
     const ARTWORK_COL: &str = "assets/icons/panel-right-open.svg";
 
     let font_display = if data.font_family.is_empty() {
@@ -36,51 +39,26 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
     let mut macro_rows = MacroRows::new(build_interface_tab_settings_items(data));
 
     let mut items: Vec<SettingsEntry> = vec![
-        // --- Layout ---
+        // --- Navigation ---
         SettingsEntry::Header {
-            label: "Layout",
-            icon: LAYOUT,
+            label: "Navigation",
+            icon: NAVIGATION,
         },
         macro_rows.take("general.nav_layout"),
         macro_rows.take("general.nav_display_mode"),
-        macro_rows.take("general.track_info_display"),
-        macro_rows.take("general.slot_row_height"),
-        macro_rows.take("general.horizontal_volume"),
-        // --- Views ---
+        // --- Slot List ---
         SettingsEntry::Header {
-            label: "Views",
-            icon: VIEWS,
+            label: "Slot List",
+            icon: SLOT_LIST,
         },
-        SettingItem::toggle_set(
-            SettingMeta::new(
-                "__toggle_artwork_overlays",
-                "Text Overlay On Artwork",
-                "Show the metadata text overlay on the large artwork in each view",
-            ),
-            vec![
-                (
-                    "Albums".to_string(),
-                    "general.albums_artwork_overlay".to_string(),
-                    data.albums_artwork_overlay,
-                ),
-                (
-                    "Artists".to_string(),
-                    "general.artists_artwork_overlay".to_string(),
-                    data.artists_artwork_overlay,
-                ),
-                (
-                    "Songs".to_string(),
-                    "general.songs_artwork_overlay".to_string(),
-                    data.songs_artwork_overlay,
-                ),
-                (
-                    "Playlists".to_string(),
-                    "general.playlists_artwork_overlay".to_string(),
-                    data.playlists_artwork_overlay,
-                ),
-            ],
-        ),
+        macro_rows.take("general.slot_row_height"),
         macro_rows.take("general.slot_text_links"),
+        // --- Player Bar ---
+        SettingsEntry::Header {
+            label: "Player Bar",
+            icon: PLAYER_BAR,
+        },
+        macro_rows.take("general.horizontal_volume"),
         // --- Font (theme-routed; hand-written) ---
         SettingsEntry::Header {
             label: "Font",
@@ -98,6 +76,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             label: "Metadata Strip",
             icon: STRIP,
         },
+        macro_rows.take("general.track_info_display"),
         SettingItem::toggle_set(
             SettingMeta::new(
                 "__toggle_strip_fields",
@@ -131,6 +110,40 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         macro_rows.take("general.strip_show_labels"),
         macro_rows.take("general.strip_separator"),
         macro_rows.take("general.strip_click_action"),
+        // --- Artwork Overlays ---
+        SettingsEntry::Header {
+            label: "Artwork Overlays",
+            icon: ARTWORK_OVERLAYS,
+        },
+        SettingItem::toggle_set(
+            SettingMeta::new(
+                "__toggle_artwork_overlays",
+                "Text Overlay On Artwork",
+                "Show the metadata text overlay on the large artwork in each view",
+            ),
+            vec![
+                (
+                    "Albums".to_string(),
+                    "general.albums_artwork_overlay".to_string(),
+                    data.albums_artwork_overlay,
+                ),
+                (
+                    "Artists".to_string(),
+                    "general.artists_artwork_overlay".to_string(),
+                    data.artists_artwork_overlay,
+                ),
+                (
+                    "Songs".to_string(),
+                    "general.songs_artwork_overlay".to_string(),
+                    data.songs_artwork_overlay,
+                ),
+                (
+                    "Playlists".to_string(),
+                    "general.playlists_artwork_overlay".to_string(),
+                    data.playlists_artwork_overlay,
+                ),
+            ],
+        ),
         // --- Artwork Column ---
         SettingsEntry::Header {
             label: "Artwork Column",
