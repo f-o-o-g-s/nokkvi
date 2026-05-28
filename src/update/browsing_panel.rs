@@ -4,11 +4,11 @@
 //! pane focus switching, and save flow.
 
 use iced::Task;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, SplitViewMessage},
+    app_message::{EditorMessage, Message, SplitViewMessage},
     state::PaneFocus,
     views::{BrowsingPanel, BrowsingPanelMessage, BrowsingView},
 };
@@ -109,8 +109,11 @@ impl Nokkvi {
 
     /// Enter split-view playlist editing mode.
     ///
-    /// Loads the playlist's songs into the queue, creates a snapshot for
-    /// dirty detection, sets up the browsing panel, and switches to Queue view.
+    /// Resolves the playlist's songs into the editor's OWN buffer (via
+    /// `resolve_playlist_for_editor` → `EditorMessage::SongsLoaded`), sets up
+    /// the browsing panel, and switches to Queue view. The live play queue,
+    /// audio engine, and persisted state are left entirely untouched — music
+    /// keeps playing while the user edits.
     pub(crate) fn handle_enter_playlist_edit_mode(
         &mut self,
         playlist_id: String,
@@ -123,10 +126,11 @@ impl Nokkvi {
             playlist_name, playlist_id, playlist_public
         );
 
-        // Set up edit state — snapshot gets populated after QueueLoaded arrives.
-        // Phase 1: the editor owns the `PlaylistEditState`, but the existing
-        // flow still loads the queue and reads `queue_song_ids()` for
-        // save/dirty (behavior unchanged until Phase 3+).
+        // Set up edit state — the dirty snapshot gets seeded from the loaded
+        // rows once `EditorMessage::SongsLoaded` arrives (see
+        // `handle_editor_songs_loaded`). The editor owns its `PlaylistEditState`
+        // and its own track buffer; the live queue is never read or written
+        // during the edit session.
         self.playlist_editor = Some(crate::state::PlaylistEditorState::new(
             nokkvi_data::types::playlist_edit::PlaylistEditState::new(
                 playlist_id.clone(),
@@ -136,10 +140,8 @@ impl Nokkvi {
                 Vec::new(),
             ),
         ));
-        // Re-anchor `active_playlist_info` to the playlist being edited.
-        // The queue is about to be replaced with this playlist's tracks
-        // (possibly zero, for a freshly-created playlist), so the read-only
-        // header that reappears after exiting edit mode must reflect the
+        // Re-anchor `active_playlist_info` to the playlist being edited, so the
+        // read-only header that reappears after exiting edit mode reflects the
         // *edited* playlist — not whatever was playing before. The edit bar
         // takes priority while editing (`edit_mode_info` checked first in the
         // view), so this assignment isn't visible until the user saves or
@@ -172,14 +174,27 @@ impl Nokkvi {
             Task::none()
         };
 
-        // Load playlist songs into the queue without starting playback
-        let queue_load = self.shell_action_task(
-            move |shell| async move { shell.load_playlist_into_queue(&playlist_id).await },
-            Message::LoadQueue,
-            "load playlist for editing",
+        // Resolve the playlist's tracks into the editor's OWN buffer WITHOUT
+        // touching the queue/engine/redb. The result is dispatched as
+        // `EditorMessage::SongsLoaded`, which fills the buffer and seeds the
+        // dirty snapshot. The live play queue is left entirely untouched.
+        let editor_load = self.shell_task(
+            move |shell| async move { shell.resolve_playlist_for_editor(&playlist_id).await },
+            |result| match result {
+                Ok(rows) => Message::Editor(EditorMessage::SongsLoaded(rows)),
+                Err(e) => {
+                    error!(" Failed to resolve playlist for editing: {}", e);
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to load playlist for editing: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
         );
 
-        Task::batch([queue_load, songs_load])
+        Task::batch([editor_load, songs_load])
     }
 
     /// Exit split-view playlist editing mode.

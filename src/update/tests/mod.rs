@@ -11,6 +11,7 @@ mod boat;
 mod components;
 mod cross_pane_drag;
 mod default_playlist_picker;
+mod editor;
 mod general;
 mod hotkeys;
 mod ipc;
