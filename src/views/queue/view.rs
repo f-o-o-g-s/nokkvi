@@ -26,6 +26,9 @@ pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
 
 /// Compact height of the read-only playlist "Playing From" banner.
 pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
+/// Height of the playlist edit-mode header. Taller than the read-only band
+/// because it stacks an eyebrow over the name + comment inputs.
+pub(crate) const PLAYLIST_EDIT_BAR_H: f32 = 60.0;
 /// Extra height revealed by the hover-expanded detail block. Fixed so the
 /// slot-list chrome math stays exact; a long comment clips within this area
 /// rather than growing the band unboundedly.
@@ -194,22 +197,26 @@ impl QueuePage {
         let extra: Element<'a, QueueMessage> = if let Some((ref name, _)) = data.edit_mode_info {
             use iced::widget::svg;
 
-            // Pencil-line icon to indicate editing
-            let edit_icon = crate::embedded_svg::svg_widget("assets/icons/pencil-line.svg")
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(14.0))
-                .style(|_theme, _status| svg::Style {
-                    color: Some(crate::theme::accent()),
-                });
+            let accent = crate::theme::accent();
+
+            // Eyebrow mirrors the read-only banner's "PLAYING FROM PLAYLIST".
+            let eyebrow = iced::widget::text("EDITING PLAYLIST")
+                .font(iced::font::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..crate::theme::ui_font()
+                })
+                .size(9.5)
+                .color(accent)
+                .wrapping(iced::widget::text::Wrapping::None);
 
             let name_input = iced::widget::text_input("Playlist name", name)
                 .on_input(QueueMessage::PlaylistNameChanged)
                 .font(iced::font::Font {
-                    weight: iced::font::Weight::Medium,
+                    weight: iced::font::Weight::Bold,
                     ..crate::theme::ui_font()
                 })
-                .size(12)
-                .width(Length::FillPortion(3))
+                .size(14)
+                .width(Length::Fill)
                 .padding([2, 4])
                 .style(|_theme, _status| iced::widget::text_input::Style {
                     background: iced::Background::Color(iced::Color::TRANSPARENT),
@@ -230,7 +237,7 @@ impl QueuePage {
                 .on_input(QueueMessage::PlaylistCommentChanged)
                 .font(crate::theme::ui_font())
                 .size(11)
-                .width(Length::FillPortion(2))
+                .width(Length::Fill)
                 .padding([2, 4])
                 .style(|_theme, _status| iced::widget::text_input::Style {
                     background: iced::Background::Color(iced::Color::TRANSPARENT),
@@ -338,33 +345,53 @@ impl QueuePage {
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
             let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
 
-            let name_comment_col: Element<'a, QueueMessage> =
-                iced::widget::column![name_input, comment_input]
-                    .spacing(1)
-                    .width(Length::Fill)
-                    .into();
+            // Accent stripe + faint wash mirror the read-only banner chrome.
+            let stripe = container(Space::new())
+                .width(Length::Fixed(3.0))
+                .height(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(accent.into()),
+                    ..Default::default()
+                });
 
-            let edit_bar = container(
-                row![
-                    edit_icon,
-                    name_comment_col,
-                    public_toggle,
-                    save_btn,
-                    discard_btn,
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .padding([0, 8])
-                .width(Length::Fill),
+            // Left: eyebrow over the name + comment inputs (mirrors the banner's
+            // eyebrow/name stack). Right: the action icons grouped as a tidy set.
+            let left = column![eyebrow, name_input, comment_input]
+                .spacing(2)
+                .width(Length::Fill);
+            let actions = row![public_toggle, save_btn, discard_btn]
+                .spacing(2)
+                .align_y(Alignment::Center);
+
+            let content = container(
+                row![left, actions]
+                    .spacing(10)
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill)
+                    .padding(iced::Padding {
+                        top: 0.0,
+                        right: 13.0,
+                        bottom: 0.0,
+                        left: 11.0,
+                    }),
             )
-            .height(Length::Fixed(44.0))
-            .style(|_theme| container::Style {
-                background: Some(crate::theme::bg0_soft().into()),
-                ..Default::default()
-            })
+            .center_y(Length::Fixed(PLAYLIST_EDIT_BAR_H))
             .width(Length::Fill);
 
-            edit_bar.into()
+            let wash = blend_toward(crate::theme::bg0_soft(), accent, 0.07);
+
+            container(
+                row![stripe, content]
+                    .width(Length::Fill)
+                    .height(Length::Fixed(PLAYLIST_EDIT_BAR_H)),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(PLAYLIST_EDIT_BAR_H))
+            .style(move |_theme| container::Style {
+                background: Some(wash.into()),
+                ..Default::default()
+            })
+            .into()
         } else if let Some(ref ctx) = data.playlist_context_info {
             // Read-only "Playing From" banner (Direction 2). Renders only while a
             // playlist is loaded for playback and not editing (the edit arm above
@@ -643,8 +670,8 @@ impl QueuePage {
         };
         let select_header_visible = self.column_visibility.select;
         let chrome_height = if data.edit_mode_info.is_some() {
-            // 44px edit bar + 1px separator
-            chrome_height_with_header() + 45.0
+            // Edit-mode header + 1px separator.
+            chrome_height_with_header() + PLAYLIST_EDIT_BAR_H + 1.0
         } else if data.playlist_context_info.is_some() {
             // Compact "Playing From" banner + 1px separator, plus the detail
             // block height when the strip is hover-expanded (grow-in-flow).
