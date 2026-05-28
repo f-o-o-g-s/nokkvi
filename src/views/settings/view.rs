@@ -94,7 +94,14 @@ impl SettingsPage {
                 .height(Length::Fill)
                 .into()
         } else {
-            row![self.render_sidebar(), right_pane]
+            let pane_separator = container(Space::new())
+                .width(Length::Fixed(1.0))
+                .height(Length::Fill)
+                .style(|_: &iced::Theme| container::Style {
+                    background: Some(theme::border().into()),
+                    ..Default::default()
+                });
+            row![self.render_sidebar(), pane_separator, right_pane]
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()
