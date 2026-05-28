@@ -209,7 +209,8 @@ impl SettingsPage {
             | SettingsMessage::SidebarUp
             | SettingsMessage::SidebarDown
             | SettingsMessage::SidebarSetOffset(_, _)
-            | SettingsMessage::SidebarClickItem(_) => SettingsAction::None,
+            | SettingsMessage::SidebarClickItem(_)
+            | SettingsMessage::JumpToSection(_) => SettingsAction::None,
         }
     }
 
@@ -279,7 +280,8 @@ impl SettingsPage {
             | SettingsMessage::SidebarUp
             | SettingsMessage::SidebarDown
             | SettingsMessage::SidebarSetOffset(_, _)
-            | SettingsMessage::SidebarClickItem(_) => SettingsAction::None,
+            | SettingsMessage::SidebarClickItem(_)
+            | SettingsMessage::JumpToSection(_) => SettingsAction::None,
         }
     }
 

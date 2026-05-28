@@ -1045,32 +1045,34 @@ pub(crate) fn render_font_slot<'a>(
 // drop the `Length::Fill` height requirement.
 
 /// Render a section header for the variable-height detail pane.
-/// Same small-caps mono treatment as `render_l2_section_header` but
-/// shrink-sized vertically so it sits naturally above the rows.
+///
+/// `count` appends ` (N)` after the label so the eye gets a size cue
+/// for the section without having to scroll through it.
 pub(crate) fn render_detail_header<'a>(
     label: &str,
     icon_path: &str,
+    count: usize,
 ) -> Element<'a, SettingsMessage> {
-    let font_size = 11.0;
-    let icon_size = 13.0;
+    let font_size = 13.0;
+    let icon_size = 14.0;
 
-    let label_owned = label.to_string();
+    let label_text = format!("{} ({})", label.to_uppercase(), count);
     let icon_owned = icon_path.to_string();
 
     let section_icon = embedded_svg::svg_widget(&icon_owned)
         .width(Length::Fixed(icon_size))
         .height(Length::Fixed(icon_size))
         .style(move |_, _| svg::Style {
-            color: Some(theme::fg2()),
+            color: Some(theme::fg1()),
         });
 
-    let label_widget = text(label_owned.to_uppercase())
+    let label_widget = text(label_text)
         .size(font_size)
         .font(Font {
-            weight: Weight::Medium,
+            weight: Weight::Bold,
             ..theme::ui_font()
         })
-        .color(theme::fg3())
+        .color(theme::fg1())
         .wrapping(Wrapping::None);
 
     let content_row = row![

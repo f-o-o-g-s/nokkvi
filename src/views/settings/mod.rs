@@ -386,6 +386,9 @@ pub enum SettingsMessage {
     SidebarSetOffset(usize, iced::keyboard::Modifiers),
     /// Sidebar row clicked — focus + activate (loads the category into the detail pane)
     SidebarClickItem(usize),
+    /// Mini-index pill clicked — scroll the detail pane so the header at
+    /// the given entry index lands at the top of the viewport.
+    JumpToSection(usize),
 }
 
 /// Build the scrollbar-seek closure shared by every settings slot list.
@@ -537,6 +540,12 @@ pub(crate) const DETAIL_SCROLLABLE_ID: &str = "settings_detail_scrollable";
 /// pane. Variable-height rows preclude an exact figure; 64 averages an
 /// item with subtitle (≈78) and one without (≈60).
 pub(crate) const DETAIL_AVERAGE_ROW_HEIGHT: f32 = 64.0;
+
+/// Height (px) of a sub-section header row in the detail pane. Headers
+/// are shorter than rows; the mini-index jump math sums real header
+/// heights + average row heights so the target lands on the header
+/// instead of overshooting into the section body.
+pub(crate) const DETAIL_HEADER_HEIGHT: f32 = 44.0;
 
 /// Settings page state
 pub struct SettingsPage {
@@ -1081,6 +1090,10 @@ impl SettingsPage {
                 self.sidebar_set_index(offset, data);
                 SettingsAction::None
             }
+            // Intercepted at the Nokkvi level in `handle_settings` so the
+            // scroll task can read `cached_entries` directly; this arm
+            // exists only for exhaustiveness.
+            SettingsMessage::JumpToSection(_) => SettingsAction::None,
         }
     }
 

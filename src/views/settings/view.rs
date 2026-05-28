@@ -418,10 +418,17 @@ impl SettingsPage {
         let hex_input_owned = self.hex_input.clone();
         let toggle_cursor = self.toggle_cursor;
 
+        let sections = compute_section_index(entries);
+        let mut section_cursor = 0;
+
         let mut col = column![].width(Length::Fill);
         for (idx, entry) in entries.iter().enumerate() {
             let row_element: Element<'a, SettingsMessage> = match entry {
-                SettingsEntry::Header { label, icon } => render_detail_header(label, icon),
+                SettingsEntry::Header { label, icon } => {
+                    let count = sections.get(section_cursor).map_or(0, |s| s.count);
+                    section_cursor += 1;
+                    render_detail_header(label, icon, count)
+                }
                 SettingsEntry::Item(item) => {
                     let is_focused = idx == focused_index;
                     let is_editing = editing_index == Some(idx);
@@ -455,7 +462,18 @@ impl SettingsPage {
             .height(Length::Fill)
             .style(theme::settings_scrollable_style);
 
-        container(scrollable_body)
+        // Stack the sticky mini-index above the scrollable. Single-section
+        // tabs (Hotkeys) drop the strip — a one-pill index reads as noise.
+        let pane_body: Element<'a, SettingsMessage> = if sections.len() > 1 {
+            column![render_section_pill_strip(&sections), scrollable_body]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            scrollable_body.into()
+        };
+
+        container(pane_body)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_: &iced::Theme| container::Style {
@@ -866,5 +884,153 @@ fn render_sidebar_row<'a>(
         .padding(0)
         .width(Length::Fill)
         .on_press(SettingsMessage::SidebarClickItem(idx))
+        .into()
+}
+
+// ============================================================================
+// Mini-index pill strip (sticky above detail-pane scrollable)
+// ============================================================================
+
+/// Height (px) of the sticky mini-index strip above the detail pane.
+/// Matches the narrow-strip footprint so the two share visual rhythm.
+const MINI_INDEX_HEIGHT: f32 = 44.0;
+
+/// A single sub-section descriptor used by the mini-index pill strip and
+/// by the in-flow header count.
+struct SectionInfo {
+    label: &'static str,
+    icon: &'static str,
+    count: usize,
+    header_idx: usize,
+}
+
+/// Walk the flat entry list once, emit one `SectionInfo` per `Header`
+/// entry with the item count of the slice between this header and the
+/// next (or end). Iteration order matches the render order, so the
+/// caller can advance a parallel cursor through it during the row loop.
+fn compute_section_index(entries: &[SettingsEntry]) -> Vec<SectionInfo> {
+    let mut sections = Vec::new();
+    let mut i = 0;
+    while i < entries.len() {
+        if let SettingsEntry::Header { label, icon } = entries[i] {
+            let mut count = 0;
+            let mut j = i + 1;
+            while j < entries.len() && !matches!(entries[j], SettingsEntry::Header { .. }) {
+                count += 1;
+                j += 1;
+            }
+            sections.push(SectionInfo {
+                label,
+                icon,
+                count,
+                header_idx: i,
+            });
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    sections
+}
+
+/// Render the horizontal pill mini-index that sits above the detail
+/// scrollable. Each pill is a clickable label that emits
+/// `JumpToSection(header_idx)`; the handler scrolls the pane so the
+/// matching header lands at the top. Pills are wrapped in a horizontal
+/// scrollable so tabs with many sections (Theme has 12) stay reachable
+/// at narrower widths.
+fn render_section_pill_strip<'a>(sections: &[SectionInfo]) -> Element<'a, SettingsMessage> {
+    let mut chip_row = row![Space::new().width(Length::Fixed(16.0))]
+        .spacing(6)
+        .align_y(Alignment::Center);
+    for section in sections {
+        chip_row = chip_row.push(render_section_pill(
+            section.label,
+            section.icon,
+            section.header_idx,
+        ));
+    }
+    chip_row = chip_row.push(Space::new().width(Length::Fixed(16.0)));
+
+    let scrollable_row = iced::widget::scrollable(chip_row)
+        .direction(iced::widget::scrollable::Direction::Horizontal(
+            iced::widget::scrollable::Scrollbar::new()
+                .width(0)
+                .scroller_width(0),
+        ))
+        .width(Length::Fill);
+
+    let body = container(scrollable_row)
+        .width(Length::Fill)
+        .height(Length::Fixed(MINI_INDEX_HEIGHT - 1.0))
+        .align_y(Alignment::Center)
+        .style(|_: &iced::Theme| container::Style {
+            background: Some(theme::bg0_hard().into()),
+            ..Default::default()
+        });
+
+    let sep = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(|_: &iced::Theme| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        });
+
+    column![body, sep]
+        .width(Length::Fill)
+        .height(Length::Fixed(MINI_INDEX_HEIGHT))
+        .into()
+}
+
+/// A single mini-index pill: icon + uppercase label, click dispatches
+/// `JumpToSection(header_idx)`.
+fn render_section_pill<'a>(
+    label: &'static str,
+    icon_path: &'static str,
+    header_idx: usize,
+) -> Element<'a, SettingsMessage> {
+    let icon = embedded_svg::svg_widget(icon_path)
+        .width(Length::Fixed(12.0))
+        .height(Length::Fixed(12.0))
+        .style(|_, _| svg::Style {
+            color: Some(theme::fg2()),
+        });
+    let label_widget = text(label.to_uppercase())
+        .size(11.0)
+        .color(theme::fg1())
+        .font(Font {
+            weight: Weight::Bold,
+            ..theme::ui_font()
+        })
+        .wrapping(iced::widget::text::Wrapping::None);
+
+    let content = row![icon, label_widget]
+        .spacing(6)
+        .align_y(Alignment::Center);
+
+    button(content)
+        .on_press(SettingsMessage::JumpToSection(header_idx))
+        .padding(
+            Padding::new(0.0)
+                .top(6.0)
+                .bottom(6.0)
+                .left(12.0)
+                .right(12.0),
+        )
+        .style(|_theme: &iced::Theme, status: button::Status| {
+            let hovered = matches!(status, button::Status::Hovered);
+            let bg = if hovered { theme::bg1() } else { theme::bg0() };
+            button::Style {
+                background: Some(bg.into()),
+                border: Border {
+                    color: theme::bg2(),
+                    width: 1.0,
+                    radius: theme::ui_radius_pill(),
+                },
+                text_color: theme::fg1(),
+                ..Default::default()
+            }
+        })
         .into()
 }
