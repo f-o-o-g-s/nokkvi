@@ -139,11 +139,22 @@ impl Nokkvi {
         // takes priority while editing (`edit_mode_info` checked first in the
         // view), so this assignment isn't visible until the user saves or
         // discards.
-        self.active_playlist_info = Some(crate::state::ActivePlaylistContext {
-            id: playlist_id.clone(),
-            name: playlist_name,
-            comment: playlist_comment,
-        });
+        self.active_playlist_info = Some(
+            self.library
+                .playlists
+                .iter()
+                .find(|p| p.id == playlist_id)
+                .map_or_else(
+                    || {
+                        crate::state::ActivePlaylistContext::minimal(
+                            playlist_id.clone(),
+                            playlist_name,
+                            playlist_comment,
+                        )
+                    },
+                    crate::state::ActivePlaylistContext::from_playlist,
+                ),
+        );
         self.persist_active_playlist_info();
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
@@ -267,8 +278,16 @@ impl Nokkvi {
 
             // Sync edited name/comment back to active_playlist_info so the
             // read-only context bar shows updated values after exiting edit mode.
-            self.active_playlist_info =
-                Some(crate::state::ActivePlaylistContext { id, name, comment });
+            self.active_playlist_info = Some(
+                self.library
+                    .playlists
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map_or_else(
+                        || crate::state::ActivePlaylistContext::minimal(id, name, comment),
+                        crate::state::ActivePlaylistContext::from_playlist,
+                    ),
+            );
             self.persist_active_playlist_info();
         }
 

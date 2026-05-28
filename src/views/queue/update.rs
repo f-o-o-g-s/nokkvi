@@ -262,6 +262,14 @@ impl QueuePage {
             QueueMessage::RefreshArtwork(album_id) => {
                 (Task::none(), QueueAction::RefreshArtwork(album_id))
             }
+            QueueMessage::PlaylistStripHoverEnter => {
+                self.playlist_strip_expanded = true;
+                (Task::none(), QueueAction::None)
+            }
+            QueueMessage::PlaylistStripHoverExit => {
+                self.playlist_strip_expanded = false;
+                (Task::none(), QueueAction::None)
+            }
         }
     }
 }
@@ -396,5 +404,20 @@ mod tests {
         let mut page = QueuePage::default();
         let (_t, action) = page.update(QueueMessage::ClickSetRating(42, 4), &songs);
         assert!(matches!(action, QueueAction::None));
+    }
+
+    #[test]
+    fn playlist_strip_hover_toggles_expanded() {
+        let mut page = QueuePage::default();
+        let songs: Vec<QueueSongUIViewData> = Vec::new();
+        assert!(!page.playlist_strip_expanded, "default is collapsed");
+
+        let (_t, action) = page.update(QueueMessage::PlaylistStripHoverEnter, &songs);
+        assert!(page.playlist_strip_expanded, "hover-enter expands");
+        assert!(matches!(action, QueueAction::None), "no root action");
+
+        let (_t, action) = page.update(QueueMessage::PlaylistStripHoverExit, &songs);
+        assert!(!page.playlist_strip_expanded, "hover-exit collapses");
+        assert!(matches!(action, QueueAction::None), "no root action");
     }
 }

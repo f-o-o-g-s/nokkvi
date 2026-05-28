@@ -989,6 +989,22 @@ impl Nokkvi {
             .map(|h| h.slot_index())
     }
 
+    /// Resolve the active playlist's strip cover handle: the collage's first
+    /// tile, falling back to the mini cover. `None` when no playlist is active
+    /// or its artwork hasn't been cached yet — the strip omits the cover then.
+    /// Reuses the Playlists view's `CollageArtworkCache`, so a playlist the
+    /// user has browsed already has its cover warm.
+    fn active_playlist_strip_cover(&self) -> Option<&iced::widget::image::Handle> {
+        let ctx = self.active_playlist_info.as_ref()?;
+        self.artwork
+            .playlist
+            .collage
+            .snapshot
+            .get(&ctx.id)
+            .and_then(|tiles| tiles.first())
+            .or_else(|| self.artwork.playlist.mini.snapshot.get(&ctx.id))
+    }
+
     // -------------------------------------------------------------------------
     // Per-view ViewData builders
     //
@@ -1283,6 +1299,8 @@ impl Nokkvi {
                 edit_mode_comment,
                 edit_mode_public,
                 playlist_context_info: self.active_playlist_info.clone(),
+                playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
+                playlist_cover: self.active_playlist_strip_cover(),
                 overlay: views::OverlayMenuViewData {
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
@@ -1481,6 +1499,8 @@ impl Nokkvi {
                     edit_mode_comment: None,
                     edit_mode_public: None,
                     playlist_context_info: self.active_playlist_info.clone(),
+                    playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
+                    playlist_cover: self.active_playlist_strip_cover(),
                     overlay: views::OverlayMenuViewData {
                         column_dropdown_open,
                         column_dropdown_trigger_bounds,

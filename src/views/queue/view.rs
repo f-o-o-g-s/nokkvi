@@ -24,6 +24,38 @@ use crate::widgets::{
 /// correctly in split-view where the queue is roughly half the window.
 pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
 
+/// Compact height of the read-only playlist "Playing From" banner.
+pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
+/// Height of the playlist edit-mode header. Taller than the read-only band
+/// because it stacks an eyebrow over the name + comment inputs.
+pub(crate) const PLAYLIST_EDIT_BAR_H: f32 = 60.0;
+/// Extra height revealed by the hover-expanded detail block. Fixed so the
+/// slot-list chrome math stays exact; a long comment clips within this area
+/// rather than growing the band unboundedly.
+pub(crate) const PLAYLIST_STRIP_DETAIL_H: f32 = 84.0;
+
+/// Format a playlist's total duration for the strip, e.g. `4h 53m` / `47m`.
+fn format_strip_duration(secs: f32) -> String {
+    let total_mins = (secs / 60.0).round() as u32;
+    let (h, m) = (total_mins / 60, total_mins % 60);
+    if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{m}m")
+    }
+}
+
+/// Linear blend of `base` toward `toward` by `t` (0..1), preserving `base`'s
+/// alpha. Used for the strip's faint accent wash over `bg0_soft()`.
+fn blend_toward(base: iced::Color, toward: iced::Color, t: f32) -> iced::Color {
+    iced::Color {
+        r: base.r + (toward.r - base.r) * t,
+        g: base.g + (toward.g - base.g) * t,
+        b: base.b + (toward.b - base.b) * t,
+        a: base.a,
+    }
+}
+
 /// Pure decision: should the queue's stars rating column be rendered?
 ///
 /// Two independent gates: the user toggle (always wins when off) and the
@@ -165,22 +197,26 @@ impl QueuePage {
         let extra: Element<'a, QueueMessage> = if let Some((ref name, _)) = data.edit_mode_info {
             use iced::widget::svg;
 
-            // Pencil-line icon to indicate editing
-            let edit_icon = crate::embedded_svg::svg_widget("assets/icons/pencil-line.svg")
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(14.0))
-                .style(|_theme, _status| svg::Style {
-                    color: Some(crate::theme::accent()),
-                });
+            let accent = crate::theme::accent();
+
+            // Eyebrow mirrors the read-only banner's "PLAYING FROM PLAYLIST".
+            let eyebrow = iced::widget::text("EDITING PLAYLIST")
+                .font(iced::font::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..crate::theme::ui_font()
+                })
+                .size(9.5)
+                .color(accent)
+                .wrapping(iced::widget::text::Wrapping::None);
 
             let name_input = iced::widget::text_input("Playlist name", name)
                 .on_input(QueueMessage::PlaylistNameChanged)
                 .font(iced::font::Font {
-                    weight: iced::font::Weight::Medium,
+                    weight: iced::font::Weight::Bold,
                     ..crate::theme::ui_font()
                 })
-                .size(12)
-                .width(Length::FillPortion(3))
+                .size(14)
+                .width(Length::Fill)
                 .padding([2, 4])
                 .style(|_theme, _status| iced::widget::text_input::Style {
                     background: iced::Background::Color(iced::Color::TRANSPARENT),
@@ -201,7 +237,7 @@ impl QueuePage {
                 .on_input(QueueMessage::PlaylistCommentChanged)
                 .font(crate::theme::ui_font())
                 .size(11)
-                .width(Length::FillPortion(2))
+                .width(Length::Fill)
                 .padding([2, 4])
                 .style(|_theme, _status| iced::widget::text_input::Style {
                     background: iced::Background::Color(iced::Color::TRANSPARENT),
@@ -309,135 +345,296 @@ impl QueuePage {
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
             let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
 
-            let name_comment_col: Element<'a, QueueMessage> =
-                iced::widget::column![name_input, comment_input]
-                    .spacing(1)
-                    .width(Length::Fill)
-                    .into();
+            // Accent stripe + faint wash mirror the read-only banner chrome.
+            let stripe = container(Space::new())
+                .width(Length::Fixed(3.0))
+                .height(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(accent.into()),
+                    ..Default::default()
+                });
 
-            let edit_bar = container(
-                row![
-                    edit_icon,
-                    name_comment_col,
-                    public_toggle,
-                    save_btn,
-                    discard_btn,
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .padding([0, 8])
-                .width(Length::Fill),
+            // Left: eyebrow over the name + comment inputs (mirrors the banner's
+            // eyebrow/name stack). Right: the action icons grouped as a tidy set.
+            let left = column![eyebrow, name_input, comment_input]
+                .spacing(2)
+                .width(Length::Fill);
+            let actions = row![public_toggle, save_btn, discard_btn]
+                .spacing(2)
+                .align_y(Alignment::Center);
+
+            let content = container(
+                row![left, actions]
+                    .spacing(10)
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill)
+                    .padding(iced::Padding {
+                        top: 0.0,
+                        right: 13.0,
+                        bottom: 0.0,
+                        left: 11.0,
+                    }),
             )
-            .height(Length::Fixed(44.0))
-            .style(|_theme| container::Style {
-                background: Some(crate::theme::bg0_soft().into()),
-                ..Default::default()
-            })
+            .center_y(Length::Fixed(PLAYLIST_EDIT_BAR_H))
             .width(Length::Fill);
 
-            edit_bar.into()
+            let wash = blend_toward(crate::theme::bg0_soft(), accent, 0.07);
+
+            container(
+                row![stripe, content]
+                    .width(Length::Fill)
+                    .height(Length::Fixed(PLAYLIST_EDIT_BAR_H)),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(PLAYLIST_EDIT_BAR_H))
+            .style(move |_theme| container::Style {
+                background: Some(wash.into()),
+                ..Default::default()
+            })
+            .into()
         } else if let Some(ref ctx) = data.playlist_context_info {
-            // Read-only playlist context bar (playing a playlist, not editing)
+            // Read-only "Playing From" banner (Direction 2). Renders only while a
+            // playlist is loaded for playback and not editing (the edit arm above
+            // takes precedence). Hovering the band reveals a detail block; the
+            // banner grows in flow and the slot-list chrome height tracks it.
             use iced::widget::svg;
 
-            let name_label = iced::widget::text(ctx.name.clone())
+            let accent = crate::theme::accent();
+            let expanded = data.playlist_strip_expanded;
+
+            // Icon action button — mouse_area + HoverOverlay(container) so the
+            // press scale fires; the inner press is independent of the band's
+            // hover-enter/exit so save/edit clicks don't toggle the panel.
+            let icon_btn =
+                |icon_path: &'static str, msg: QueueMessage| -> Element<'a, QueueMessage> {
+                    let icon = crate::embedded_svg::svg_widget(icon_path)
+                        .width(Length::Fixed(14.0))
+                        .height(Length::Fixed(14.0))
+                        .style(|_theme, _status| svg::Style {
+                            color: Some(crate::theme::fg2()),
+                        });
+                    mouse_area(
+                        HoverOverlay::new(
+                            container(icon)
+                                .padding([4, 6])
+                                .style(|_theme| container::Style {
+                                    background: None,
+                                    border: iced::Border {
+                                        color: iced::Color::TRANSPARENT,
+                                        width: 2.0,
+                                        radius: crate::theme::ui_border_radius(),
+                                    },
+                                    ..Default::default()
+                                })
+                                .center_y(Length::Shrink),
+                        )
+                        .border_radius(crate::theme::ui_border_radius()),
+                    )
+                    .on_press(msg)
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .into()
+                };
+
+            // Accent stripe — 3px, full banner height.
+            let stripe = container(Space::new())
+                .width(Length::Fixed(3.0))
+                .height(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(accent.into()),
+                    ..Default::default()
+                });
+
+            // Eyebrow + name stack; clip so a long name can't shove the right
+            // cluster off-screen (same overflow guard the old bar relied on).
+            let eyebrow = iced::widget::text("PLAYING FROM PLAYLIST")
                 .font(iced::font::Font {
-                    weight: iced::font::Weight::Medium,
+                    weight: iced::font::Weight::Semibold,
                     ..crate::theme::ui_font()
                 })
-                .size(12)
-                .color(crate::theme::fg0());
+                .size(9.5)
+                .color(accent)
+                .wrapping(iced::widget::text::Wrapping::None);
+            let name = iced::widget::text(ctx.name.clone())
+                .font(iced::font::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..crate::theme::ui_font()
+                })
+                .size(14)
+                .color(crate::theme::fg0())
+                .wrapping(iced::widget::text::Wrapping::None);
+            let name_stack = container(column![eyebrow, name].spacing(1))
+                .width(Length::Fill)
+                .clip(true);
 
-            // Build name + optional comment as a column, constrained to prevent overflow.
-            // Without a width constraint, long comments expand to intrinsic text width
-            // and push save/edit icons off-screen, cascading layout breakage.
-            let name_area: Element<'a, QueueMessage> = if ctx.comment.is_empty() {
-                container(name_label).width(Length::Fill).clip(true).into()
+            let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::QuickSavePlaylist);
+            let edit_btn = icon_btn("assets/icons/pencil-line.svg", QueueMessage::EditPlaylist);
+
+            // Compact row. The cover is pushed only when its handle is cached so
+            // an absent cover leaves no phantom leading gap.
+            let mut compact = Row::new()
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 13.0,
+                    bottom: 0.0,
+                    left: 11.0,
+                });
+            if let Some(handle) = data.playlist_cover {
+                compact = compact.push(
+                    container(
+                        iced::widget::image(handle.clone())
+                            .width(Length::Fixed(34.0))
+                            .height(Length::Fixed(34.0))
+                            .content_fit(iced::ContentFit::Cover),
+                    )
+                    .width(Length::Fixed(34.0))
+                    .height(Length::Fixed(34.0))
+                    .clip(true),
+                );
+            }
+            // Identity on the left (cover + eyebrow/name); actions grouped on the
+            // right. All metadata (count / duration / updated / visibility) lives
+            // in the hover-expanded detail block — keeping the compact band from
+            // duplicating the song count the view-header already shows beneath it.
+            let actions = row![save_btn, edit_btn]
+                .spacing(2)
+                .align_y(Alignment::Center);
+            let compact = compact.push(name_stack).push(actions);
+            let compact = container(compact)
+                .center_y(Length::Fixed(PLAYLIST_STRIP_COMPACT_H))
+                .width(Length::Fill);
+
+            let total_h = if expanded {
+                PLAYLIST_STRIP_COMPACT_H + PLAYLIST_STRIP_DETAIL_H
             } else {
-                let comment_label = iced::widget::text(ctx.comment.clone())
-                    .font(crate::theme::ui_font())
-                    .size(10)
-                    .color(crate::theme::fg2())
-                    .wrapping(iced::widget::text::Wrapping::None);
-                container(column![name_label, comment_label].spacing(1))
-                    .width(Length::Fill)
-                    .clip(true)
-                    .into()
+                PLAYLIST_STRIP_COMPACT_H
             };
 
-            // Save button — quick-saves the current queue back to this playlist
-            let save_icon = crate::embedded_svg::svg_widget("assets/icons/save.svg")
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(14.0))
-                .style(|_theme, _status| svg::Style {
-                    color: Some(crate::theme::fg2()),
-                });
+            // Body: compact row alone, or compact + fixed-height detail block.
+            let body: Element<'a, QueueMessage> = if expanded {
+                let meta_item =
+                    |icon_path: &'static str, label: String| -> Element<'a, QueueMessage> {
+                        row![
+                            crate::embedded_svg::svg_widget(icon_path)
+                                .width(Length::Fixed(12.0))
+                                .height(Length::Fixed(12.0))
+                                .style(|_theme, _status| svg::Style {
+                                    color: Some(crate::theme::fg3()),
+                                }),
+                            iced::widget::text(label)
+                                .font(crate::theme::ui_font())
+                                .size(11)
+                                .color(crate::theme::fg3()),
+                        ]
+                        .spacing(5)
+                        .align_y(Alignment::Center)
+                        .into()
+                    };
 
-            let save_btn: Element<'a, QueueMessage> = mouse_area(
-                HoverOverlay::new(
-                    container(save_icon)
-                        .padding([4, 6])
-                        .style(|_theme| container::Style {
-                            background: None,
-                            border: iced::Border {
-                                color: iced::Color::TRANSPARENT,
-                                width: 2.0,
-                                radius: crate::theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        })
-                        .center_y(Length::Shrink),
+                let count = if ctx.song_count > 0 {
+                    ctx.song_count as usize
+                } else {
+                    data.total_queue_count
+                };
+                let count_label = if count == 1 {
+                    "1 song".to_string()
+                } else {
+                    format!("{count} songs")
+                };
+
+                let mut meta_row = Row::new().spacing(14).align_y(Alignment::Center);
+                meta_row = meta_row.push(meta_item("assets/icons/music.svg", count_label));
+                if ctx.duration_secs > 0.0 {
+                    meta_row = meta_row.push(meta_item(
+                        "assets/icons/clock.svg",
+                        format_strip_duration(ctx.duration_secs),
+                    ));
+                }
+                if !ctx.updated.is_empty() {
+                    let date = nokkvi_data::utils::formatters::format_date_concise(&ctx.updated);
+                    meta_row = meta_row.push(meta_item(
+                        "assets/icons/calendar.svg",
+                        format!("Updated {date}"),
+                    ));
+                }
+
+                // Public/private chip — pill outline at 30% accent alpha.
+                let (chip_icon, chip_text) = if ctx.public {
+                    ("assets/icons/lock-open.svg", "Public")
+                } else {
+                    ("assets/icons/lock.svg", "Private")
+                };
+                let chip_border = iced::Color { a: 0.30, ..accent };
+                let chip = container(
+                    row![
+                        crate::embedded_svg::svg_widget(chip_icon)
+                            .width(Length::Fixed(11.0))
+                            .height(Length::Fixed(11.0))
+                            .style(|_theme, _status| svg::Style {
+                                color: Some(crate::theme::fg2()),
+                            }),
+                        iced::widget::text(chip_text)
+                            .font(crate::theme::ui_font())
+                            .size(10.5)
+                            .color(crate::theme::fg2()),
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
                 )
-                .border_radius(crate::theme::ui_border_radius()),
-            )
-            .on_press(QueueMessage::QuickSavePlaylist)
-            .interaction(iced::mouse::Interaction::Pointer)
-            .into();
-
-            // Edit button — enters split-view playlist edit mode
-            let edit_icon = crate::embedded_svg::svg_widget("assets/icons/pencil-line.svg")
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(14.0))
-                .style(|_theme, _status| svg::Style {
-                    color: Some(crate::theme::fg2()),
+                .padding([2, 8])
+                .style(move |_theme| container::Style {
+                    border: iced::Border {
+                        color: chip_border,
+                        width: 1.0,
+                        radius: crate::theme::ui_radius_pill(),
+                    },
+                    ..Default::default()
                 });
+                meta_row = meta_row.push(chip);
 
-            let edit_btn: Element<'a, QueueMessage> = mouse_area(
-                HoverOverlay::new(
-                    container(edit_icon)
-                        .padding([4, 6])
-                        .style(|_theme| container::Style {
-                            background: None,
-                            border: iced::Border {
-                                color: iced::Color::TRANSPARENT,
-                                width: 2.0,
-                                radius: crate::theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        })
-                        .center_y(Length::Shrink),
-                )
-                .border_radius(crate::theme::ui_border_radius()),
-            )
-            .on_press(QueueMessage::EditPlaylist)
-            .interaction(iced::mouse::Interaction::Pointer)
-            .into();
+                let comment_text = iced::widget::text(ctx.comment.clone())
+                    .font(crate::theme::ui_font())
+                    .size(12)
+                    .color(crate::theme::fg2());
 
-            let playlist_bar = container(
-                row![name_area, save_btn, edit_btn]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                    .padding([0, 8])
-                    .width(Length::Fill),
+                let detail = container(column![comment_text, meta_row].spacing(8))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(PLAYLIST_STRIP_DETAIL_H))
+                    .padding(iced::Padding {
+                        top: 0.0,
+                        right: 13.0,
+                        bottom: 9.0,
+                        left: 57.0,
+                    })
+                    .clip(true);
+
+                column![compact, detail].width(Length::Fill).into()
+            } else {
+                compact.into()
+            };
+
+            // Faint accent wash over bg0_soft (flat blend — reads correctly on
+            // every theme without gradient-API risk).
+            let wash = blend_toward(crate::theme::bg0_soft(), accent, 0.07);
+
+            let banner = container(
+                row![stripe, body]
+                    .width(Length::Fill)
+                    .height(Length::Fixed(total_h)),
             )
-            .height(Length::Fixed(32.0))
-            .style(|_theme| container::Style {
-                background: Some(crate::theme::bg0_soft().into()),
+            .width(Length::Fill)
+            .height(Length::Fixed(total_h))
+            .style(move |_theme| container::Style {
+                background: Some(wash.into()),
                 ..Default::default()
-            })
-            .width(Length::Fill);
+            });
 
-            playlist_bar.into()
+            mouse_area(banner)
+                .on_enter(QueueMessage::PlaylistStripHoverEnter)
+                .on_exit(QueueMessage::PlaylistStripHoverExit)
+                .into()
         } else {
             Space::new()
                 .width(Length::Shrink)
@@ -473,11 +670,17 @@ impl QueuePage {
         };
         let select_header_visible = self.column_visibility.select;
         let chrome_height = if data.edit_mode_info.is_some() {
-            // 44px edit bar + 1px separator
-            chrome_height_with_header() + 45.0
+            // Edit-mode header + 1px separator.
+            chrome_height_with_header() + PLAYLIST_EDIT_BAR_H + 1.0
         } else if data.playlist_context_info.is_some() {
-            // 32px context bar + 1px separator
-            chrome_height_with_header() + 33.0
+            // Compact "Playing From" banner + 1px separator, plus the detail
+            // block height when the strip is hover-expanded (grow-in-flow).
+            let strip = if data.playlist_strip_expanded {
+                PLAYLIST_STRIP_COMPACT_H + PLAYLIST_STRIP_DETAIL_H
+            } else {
+                PLAYLIST_STRIP_COMPACT_H
+            };
+            chrome_height_with_header() + strip + 1.0
         } else {
             chrome_height_with_select_header(select_header_visible)
         };

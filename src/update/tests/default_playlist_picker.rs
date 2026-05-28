@@ -363,11 +363,11 @@ fn enter_edit_mode_aligns_active_playlist_info() {
 
     let mut app = test_app();
     // Pre-condition: a different playlist is currently "active" in the header.
-    app.active_playlist_info = Some(ActivePlaylistContext {
-        id: "playing".into(),
-        name: "Currently Playing".into(),
-        comment: String::new(),
-    });
+    app.active_playlist_info = Some(ActivePlaylistContext::minimal(
+        "playing".into(),
+        "Currently Playing".into(),
+        String::new(),
+    ));
 
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "edited".into(),

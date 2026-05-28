@@ -139,11 +139,7 @@ impl Nokkvi {
                     .playlists
                     .iter()
                     .find(|p| p.id == playlist_id)
-                    .map(|p| crate::state::ActivePlaylistContext {
-                        id: p.id.clone(),
-                        name: p.name.clone(),
-                        comment: p.comment.clone(),
-                    });
+                    .map(crate::state::ActivePlaylistContext::from_playlist);
                 self.persist_active_playlist_info();
                 return self.shell_action_task(
                     move |shell| async move { shell.play_playlist(&playlist_id).await },
@@ -200,11 +196,7 @@ impl Nokkvi {
                     .playlists
                     .iter()
                     .find(|p| p.id == playlist_id)
-                    .map(|p| crate::state::ActivePlaylistContext {
-                        id: p.id.clone(),
-                        name: p.name.clone(),
-                        comment: p.comment.clone(),
-                    });
+                    .map(crate::state::ActivePlaylistContext::from_playlist);
                 self.persist_active_playlist_info();
                 return self.shell_action_task(
                     move |shell| async move {

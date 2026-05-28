@@ -44,6 +44,11 @@ pub struct QueuePage {
     /// unchanged since last sort" cases. Same-length-different-content
     /// requires the caller to manually re-trigger or invalidate.
     pub last_sort_signature: Option<(QueueSortMode, bool, usize)>,
+    /// Transient: whether the read-only playlist context strip is expanded to
+    /// reveal its detail block. Driven by hover
+    /// (`PlaylistStripHoverEnter`/`Exit`); reset whenever the active playlist
+    /// changes or clears so a stale expansion never carries over.
+    pub playlist_strip_expanded: bool,
 }
 
 // Toggleable queue columns. `Stars`, `Album`, `Duration`, `Love`, and `Plays`
@@ -92,6 +97,13 @@ pub struct QueueViewData<'a> {
     pub edit_mode_public: Option<bool>,
     /// When a playlist is loaded for playback (not editing)
     pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,
+    /// Whether the read-only playlist context strip should render its expanded
+    /// detail block this frame (mirrors `QueuePage.playlist_strip_expanded`).
+    pub playlist_strip_expanded: bool,
+    /// Resolved cover handle for the active playlist's strip thumbnail (collage
+    /// first tile, falling back to the mini cover). `None` when no playlist is
+    /// active or its artwork isn't cached yet — the strip omits the cover.
+    pub playlist_cover: Option<&'a iced::widget::image::Handle>,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
     /// `open_menu` reference). See `super::OverlayMenuViewData`.
     pub overlay: super::OverlayMenuViewData<'a>,
@@ -177,6 +189,11 @@ pub enum QueueMessage {
     ArtworkColumnVerticalDrag(crate::widgets::artwork_split_handle::DragEvent),
     /// Header chip clicked — bubble to root, opens the default-playlist picker.
     OpenDefaultPlaylistPicker,
+    /// Pointer entered the read-only playlist context strip — expand its detail
+    /// block (hover mode). Handled locally; no root action.
+    PlaylistStripHoverEnter,
+    /// Pointer left the playlist context strip — collapse the detail block.
+    PlaylistStripHoverExit,
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -238,6 +255,7 @@ impl Default for QueuePage {
             queue_sort_mode: QueueSortMode::Album,
             column_visibility: QueueColumnVisibility::default(),
             last_sort_signature: None,
+            playlist_strip_expanded: false,
         }
     }
 }
