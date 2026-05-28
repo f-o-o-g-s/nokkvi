@@ -1,7 +1,8 @@
 //! Playback tab setting entries.
 //!
-//! Contains: Playback (crossfade + volume normalization), Scrobbling, and
-//! Playlists sections. 7 flat rows come from `define_settings!` via
+//! Contains four sections: Transitions (crossfade), Volume Normalization
+//! (mode dropdown + AGC target knob + ReplayGain knobs), Scrobbling, and
+//! Playlists. 7 flat rows come from `define_settings!` via
 //! `build_playback_tab_settings_items`. The conditional AGC target-level
 //! knob, the four ReplayGain knobs (only shown in RG modes), and the
 //! `default_playlist_name` dialog sentinel row stay hand-written so the
@@ -16,20 +17,26 @@ use super::items::{MacroRows, SettingItem, SettingMeta, SettingsEntry};
 
 /// Build settings entries for the Playback tab.
 pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsEntry> {
-    const PLAY: &str = "assets/icons/circle-play.svg";
+    const TRANSITIONS: &str = "assets/icons/audio-waveform.svg";
+    const NORMALIZATION: &str = "assets/icons/sliders-vertical.svg";
     const SCR: &str = "assets/icons/radio-tower.svg";
     const LIST: &str = "assets/icons/list-music.svg";
 
     let mut macro_rows = MacroRows::new(build_playback_tab_settings_items(data));
 
     let mut items: Vec<SettingsEntry> = vec![
-        // --- Playback ---
+        // --- Transitions ---
         SettingsEntry::Header {
-            label: "Playback",
-            icon: PLAY,
+            label: "Transitions",
+            icon: TRANSITIONS,
         },
         macro_rows.take("general.crossfade_enabled"),
         macro_rows.take("general.crossfade_duration"),
+        // --- Volume Normalization ---
+        SettingsEntry::Header {
+            label: "Volume Normalization",
+            icon: NORMALIZATION,
+        },
         macro_rows.take("general.volume_normalization"),
     ];
 
