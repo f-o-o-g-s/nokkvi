@@ -1275,15 +1275,20 @@ impl Nokkvi {
         self.similar_page.column_visibility.love = settings.similar_show_love;
         self.similar_page.column_visibility.select = settings.similar_show_select;
 
-        // Restore active playlist context from persisted settings. Only
-        // id/name/comment are persisted, so this is a minimal context: the
-        // strip shows the queue length for the count and hides duration /
-        // updated-date until the playlist is played afresh.
+        // Restore active playlist context from persisted settings. The full
+        // metadata (count/duration/public/updated) is persisted, so the
+        // restored banner is complete and shows the correct visibility right
+        // away; `handle_playlists_loaded` later re-syncs it against fresh
+        // server metadata.
         self.active_playlist_info = settings.active_playlist_id.clone().map(|id| {
-            crate::state::ActivePlaylistContext::minimal(
+            crate::state::ActivePlaylistContext::from_persisted(
                 id,
                 settings.active_playlist_name.clone(),
                 settings.active_playlist_comment.clone(),
+                settings.active_playlist_duration,
+                settings.active_playlist_updated.clone(),
+                settings.active_playlist_public,
+                settings.active_playlist_song_count,
             )
         });
         // The collage cache is empty on a fresh launch, so fetch the restored

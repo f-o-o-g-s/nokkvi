@@ -634,4 +634,89 @@ fn playlist_edit_public_only_change_is_metadata_dirty() {
     );
 }
 
+// Active-playlist banner re-sync on playlists load (resync_active_playlist_context)
+// ============================================================================
+
+fn full_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
+    nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: id.to_string(),
+        name: name.to_string(),
+        comment: "synced comment".to_string(),
+        duration: 6241.0,
+        song_count: 29,
+        owner_name: "owner".to_string(),
+        public: true,
+        updated_at: "2026-05-27T20:19:59-06:00".to_string(),
+        artwork_album_ids: vec![],
+        searchable_lower: name.to_lowercase(),
+    }
+}
+
+#[test]
+fn resync_upgrades_minimal_active_playlist_context() {
+    let mut app = test_app();
+    // A restored/minimal context: correct id, but missing metadata.
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "p1".into(),
+        "Stale Name".into(),
+        String::new(),
+    ));
+    app.library
+        .playlists
+        .append_page(vec![full_playlist("p1", "Synced Name")], 1);
+
+    app.resync_active_playlist_context();
+
+    let ctx = app.active_playlist_info.as_ref().expect("context retained");
+    assert_eq!(
+        ctx.name, "Synced Name",
+        "name refreshed from loaded metadata"
+    );
+    assert_eq!(ctx.song_count, 29, "song count upgraded");
+    assert!(
+        (ctx.duration_secs - 6241.0).abs() < f32::EPSILON,
+        "duration upgraded"
+    );
+    assert!(ctx.public, "visibility upgraded to public");
+    assert_eq!(ctx.updated, "2026-05-27T20:19:59-06:00", "updated upgraded");
+}
+
+#[test]
+fn resync_noops_when_active_playlist_absent_from_loaded_list() {
+    let mut app = test_app();
+    let original = crate::state::ActivePlaylistContext::minimal(
+        "missing".into(),
+        "Kept".into(),
+        String::new(),
+    );
+    app.active_playlist_info = Some(original.clone());
+    app.library
+        .playlists
+        .append_page(vec![full_playlist("other", "Other")], 1);
+
+    app.resync_active_playlist_context();
+
+    assert_eq!(
+        app.active_playlist_info.as_ref(),
+        Some(&original),
+        "a playlist not in the loaded page must leave the context untouched"
+    );
+}
+
+#[test]
+fn resync_noops_with_no_active_playlist() {
+    let mut app = test_app();
+    app.active_playlist_info = None;
+    app.library
+        .playlists
+        .append_page(vec![full_playlist("p1", "Synced")], 1);
+
+    app.resync_active_playlist_context();
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "no active playlist stays none"
+    );
+}
+
 // ============================================================================

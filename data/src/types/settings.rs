@@ -166,6 +166,18 @@ pub struct PersistedPlayerSettings {
     /// Active playlist comment/description
     #[serde(default)]
     pub active_playlist_comment: String,
+    /// Active playlist total duration in seconds (0.0 when unknown).
+    #[serde(default)]
+    pub active_playlist_duration: f32,
+    /// Active playlist last-updated timestamp (raw ISO-8601; empty when unknown).
+    #[serde(default)]
+    pub active_playlist_updated: String,
+    /// Active playlist public/private visibility (drives the strip lock chip).
+    #[serde(default)]
+    pub active_playlist_public: bool,
+    /// Active playlist song count (0 when unknown; strip falls back to queue length).
+    #[serde(default)]
+    pub active_playlist_song_count: u32,
     /// Whether the 10-band graphic EQ is enabled (master bypass).
     #[serde(default)]
     pub eq_enabled: bool,
@@ -507,6 +519,10 @@ impl Default for PersistedPlayerSettings {
             active_playlist_id: None,
             active_playlist_name: String::new(),
             active_playlist_comment: String::new(),
+            active_playlist_duration: 0.0,
+            active_playlist_updated: String::new(),
+            active_playlist_public: false,
+            active_playlist_song_count: 0,
             eq_enabled: false,
             eq_gains: default_eq_gains(),
             custom_eq_presets: Vec::new(),

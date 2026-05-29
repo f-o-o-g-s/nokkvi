@@ -124,6 +124,14 @@ pub struct LivePlayerSettings {
     pub active_playlist_name: String,
     /// Active playlist comment/description
     pub active_playlist_comment: String,
+    /// Active playlist total duration in seconds (0.0 when unknown).
+    pub active_playlist_duration: f32,
+    /// Active playlist last-updated timestamp (raw ISO-8601; empty when unknown).
+    pub active_playlist_updated: String,
+    /// Active playlist public/private visibility (drives the strip lock chip).
+    pub active_playlist_public: bool,
+    /// Active playlist song count (0 when unknown; strip falls back to queue length).
+    pub active_playlist_song_count: u32,
     /// Whether the 10-band graphic EQ is enabled (master bypass).
     pub eq_enabled: bool,
     /// Per-band EQ gain values in dB (-12.0 to +12.0). Indexed by band.

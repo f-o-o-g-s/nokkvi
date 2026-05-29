@@ -317,14 +317,31 @@ impl Nokkvi {
     /// Call after every mutation of `self.active_playlist_info` so the
     /// playlist context bar survives application restarts.
     pub(crate) fn persist_active_playlist_info(&self) {
-        let (id, name, comment) = match &self.active_playlist_info {
-            Some(ctx) => (Some(ctx.id.clone()), ctx.name.clone(), ctx.comment.clone()),
-            None => (None, String::new(), String::new()),
-        };
+        let (id, name, comment, duration, updated, public, song_count) =
+            match &self.active_playlist_info {
+                Some(ctx) => (
+                    Some(ctx.id.clone()),
+                    ctx.name.clone(),
+                    ctx.comment.clone(),
+                    ctx.duration_secs,
+                    ctx.updated.clone(),
+                    ctx.public,
+                    ctx.song_count,
+                ),
+                None => (
+                    None,
+                    String::new(),
+                    String::new(),
+                    0.0,
+                    String::new(),
+                    false,
+                    0,
+                ),
+            };
         self.shell_spawn("persist_active_playlist", move |shell| async move {
             shell
                 .settings()
-                .set_active_playlist(id, name, comment)
+                .set_active_playlist(id, name, comment, duration, updated, public, song_count)
                 .await
         });
     }

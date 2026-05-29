@@ -23,7 +23,7 @@ pub struct StoredSession {
 /// creation, session restore) build a [`Self::minimal`] context; the playlist
 /// strip then falls back to the live queue length for the count and hides the
 /// duration / updated-date when these stay unset.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ActivePlaylistContext {
     pub id: String,
     pub name: String,
@@ -52,6 +52,32 @@ impl ActivePlaylistContext {
             duration_secs: p.duration,
             public: p.public,
             updated: p.updated_at.clone(),
+        }
+    }
+
+    /// Rebuild from persisted settings on session restore. Carries the full
+    /// metadata captured when the playlist was last played or re-synced, so
+    /// the restored banner is complete and correct (visibility included) before
+    /// the playlists list reloads. `handle_playlists_loaded` later re-syncs it
+    /// against fresh server metadata.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_persisted(
+        id: String,
+        name: String,
+        comment: String,
+        duration_secs: f32,
+        updated: String,
+        public: bool,
+        song_count: u32,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            comment,
+            song_count,
+            duration_secs,
+            public,
+            updated,
         }
     }
 

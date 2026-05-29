@@ -426,3 +426,56 @@ fn handle_restore_defaults_bg_with_cached_entries_returns_non_empty_group() {
         other => panic!("expected RestoreColorGroup, got {other:?}"),
     }
 }
+
+#[test]
+fn player_settings_loaded_restores_full_active_playlist_context() {
+    // Session restore must rebuild a COMPLETE banner context from persisted
+    // settings — not a degraded `minimal` one. Regression guard: a restored
+    // public playlist previously showed as "Private" with no duration/updated.
+    let mut app = test_app();
+
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
+        active_playlist_id: Some("pl_restore".to_string()),
+        active_playlist_name: "Restored Mix".to_string(),
+        active_playlist_comment: "comment".to_string(),
+        active_playlist_duration: 4321.0,
+        active_playlist_updated: "2026-05-27T20:19:59-06:00".to_string(),
+        active_playlist_public: true,
+        active_playlist_song_count: 42,
+        ..Default::default()
+    });
+
+    let ctx = app
+        .active_playlist_info
+        .as_ref()
+        .expect("restore must seed the active playlist context");
+    assert_eq!(ctx.id, "pl_restore");
+    assert_eq!(ctx.name, "Restored Mix");
+    assert!(
+        (ctx.duration_secs - 4321.0).abs() < f32::EPSILON,
+        "duration restored"
+    );
+    assert_eq!(ctx.updated, "2026-05-27T20:19:59-06:00", "updated restored");
+    assert!(ctx.public, "a public playlist must not restore as private");
+    assert_eq!(ctx.song_count, 42, "song count restored");
+}
+
+#[test]
+fn player_settings_loaded_without_active_playlist_clears_context() {
+    let mut app = test_app();
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "stale".into(),
+        "Stale".into(),
+        String::new(),
+    ));
+
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
+        active_playlist_id: None,
+        ..Default::default()
+    });
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "no persisted active playlist must clear the banner context"
+    );
+}

@@ -69,7 +69,31 @@ impl Nokkvi {
         result: Result<Vec<PlaylistUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        self.handle_loaded_with::<PlaylistsTarget>(result, total_count, false, None)
+        let task = self.handle_loaded_with::<PlaylistsTarget>(result, total_count, false, None);
+        // The restored banner context can be stale (persisted at last play);
+        // re-sync it against the freshly loaded metadata so count / duration /
+        // updated-date / visibility always reflect the server.
+        self.resync_active_playlist_context();
+        task
+    }
+
+    /// Refresh `active_playlist_info` from the freshly loaded playlists list.
+    ///
+    /// Restore seeds the banner context from persisted settings; once the
+    /// authoritative playlists metadata loads, upgrade the context to it (and
+    /// re-persist) so a server-side edit between sessions is reflected. No-ops
+    /// when no playlist is active or the active one isn't in the loaded page.
+    pub(crate) fn resync_active_playlist_context(&mut self) {
+        let Some(active_id) = self.active_playlist_info.as_ref().map(|ctx| ctx.id.clone()) else {
+            return;
+        };
+        if let Some(playlist) = self.library.playlists.iter().find(|p| p.id == active_id) {
+            let fresh = crate::state::ActivePlaylistContext::from_playlist(playlist);
+            if self.active_playlist_info.as_ref() != Some(&fresh) {
+                self.active_playlist_info = Some(fresh);
+                self.persist_active_playlist_info();
+            }
+        }
     }
 
     pub(crate) fn handle_playlists(&mut self, msg: views::PlaylistsMessage) -> Task<Message> {

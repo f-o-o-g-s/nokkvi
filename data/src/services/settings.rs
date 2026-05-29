@@ -749,15 +749,24 @@ impl SettingsManager {
         self.save()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_active_playlist(
         &mut self,
         id: Option<String>,
         name: String,
         comment: String,
+        duration: f32,
+        updated: String,
+        public: bool,
+        song_count: u32,
     ) -> Result<()> {
         self.settings.player.active_playlist_id = id;
         self.settings.player.active_playlist_name = name;
         self.settings.player.active_playlist_comment = comment;
+        self.settings.player.active_playlist_duration = duration;
+        self.settings.player.active_playlist_updated = updated;
+        self.settings.player.active_playlist_public = public;
+        self.settings.player.active_playlist_song_count = song_count;
         self.save_redb_only()
     }
 
@@ -925,6 +934,10 @@ impl SettingsManager {
             active_playlist_id: p.active_playlist_id.clone(),
             active_playlist_name: p.active_playlist_name.clone(),
             active_playlist_comment: p.active_playlist_comment.clone(),
+            active_playlist_duration: p.active_playlist_duration,
+            active_playlist_updated: p.active_playlist_updated.clone(),
+            active_playlist_public: p.active_playlist_public,
+            active_playlist_song_count: p.active_playlist_song_count,
 
             // Scalar residuals — fields not (yet) owned by any per-tab or
             // per-view-column macro (paralleling the same residuals in
@@ -1114,6 +1127,10 @@ mod sentinel_roundtrip_tests {
             active_playlist_id: Some("playlist-99".to_string()),
             active_playlist_name: "Active Playlist".to_string(),
             active_playlist_comment: "comment text".to_string(),
+            active_playlist_duration: 1234.5,
+            active_playlist_updated: "2026-05-27T20:19:59-06:00".to_string(),
+            active_playlist_public: true,
+            active_playlist_song_count: 29,
 
             // Audio knobs
             sfx_volume: 0.3142,

@@ -350,14 +350,19 @@ impl SettingsService {
     }
 
     /// Set active playlist context (for queue header bar) and persist
+    #[allow(clippy::too_many_arguments)]
     pub async fn set_active_playlist(
         &self,
         id: Option<String>,
         name: String,
         comment: String,
+        duration: f32,
+        updated: String,
+        public: bool,
+        song_count: u32,
     ) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
-        sm.set_active_playlist(id, name, comment)
+        sm.set_active_playlist(id, name, comment, duration, updated, public, song_count)
     }
 
     // =========================================================================
