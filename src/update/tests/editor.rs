@@ -745,3 +745,146 @@ fn exit_when_clean_no_warn() {
         "a clean editor must not push a discard warning on exit"
     );
 }
+
+// --- Phase 7: regression lock on root-cause-Y isolation ------------------
+//
+// These tests prove the editor buffer (`Nokkvi.playlist_editor.songs`) is
+// STRUCTURALLY ISOLATED from the live play queue (`library.queue_songs`).
+// Each sets up BOTH a populated queue AND an editor session loaded with a
+// DIFFERENT set of rows, then drives a queue/playback mutation and asserts the
+// editor buffer is byte-for-byte unchanged. The point is to lock in the
+// decoupling so a future change cannot silently re-couple them (which is what
+// caused the original root-cause-Y bugs 5/6/8/9).
+//
+// Bugs 8 (MPRIS / media keys) and 9 (scrobble during edit) are DISSOLVED BY
+// CONSTRUCTION and asserted indirectly: the editor buffer is a separate `Vec`
+// that is never the playback queue, and the scrobble/MPRIS handlers carry NO
+// reference to `playlist_editor` at all (`src/update/scrobbling.rs`,
+// `src/update/mpris.rs`, `src/update/playback.rs` — verified: zero matches for
+// `playlist_editor`). They drive the engine/queue exclusively. There is no
+// state-level `test_app` assertion for them because both require a live
+// `app_service`/engine (scrobble issues an HTTP request; MPRIS reads engine
+// transport), so they are listed as MANUAL smoke checks rather than faked. The
+// queue-isolation tests below cover the buffer-mutation half of the same
+// guarantee; the transport half is the manual check.
+
+/// Snapshot the editor buffer's `(id, entry_id)` pairs for an exact
+/// before/after equality assertion (catches reorder, removal, or insertion).
+fn editor_buffer_snapshot(app: &crate::Nokkvi) -> Vec<(String, u64)> {
+    app.playlist_editor
+        .as_ref()
+        .expect("editor session present")
+        .songs
+        .iter()
+        .map(|s| (s.id.clone(), s.entry_id))
+        .collect()
+}
+
+#[test]
+fn consume_style_queue_mutation_does_not_alter_editor_buffer() {
+    // Bug 5 regression: consume mode removes the just-played track from the
+    // queue. With the old coupling, that removal hit the playlist-being-edited
+    // and silently shrank the saved playlist. The remove-from-queue handler is
+    // the same code path consume drives (`QueueAction::RemoveFromQueue` →
+    // optimistic `library.queue_songs` mutation). Drive it with an editor
+    // session present and assert the editor buffer is untouched.
+    use crate::views::{QueueMessage, queue::QueueContextEntry};
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("q1", "Queue One", "Artist A", "Album A"),
+        make_queue_song("q2", "Queue Two", "Artist B", "Album B"),
+        make_queue_song("q3", "Queue Three", "Artist C", "Album C"),
+    ];
+    seeded_editor(&mut app); // editor buffer is [a,b,c] — a DIFFERENT set
+    let editor_before = editor_buffer_snapshot(&app);
+
+    // Remove the head of the queue — exactly what a consume tick does after a
+    // track finishes.
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(
+        0,
+        QueueContextEntry::RemoveFromQueue,
+    ));
+
+    // The queue lost its head row...
+    assert_eq!(
+        app.queue_song_ids(),
+        vec!["q2", "q3"],
+        "the queue mutation must apply to the live queue"
+    );
+    // ...but the editor buffer is byte-for-byte unchanged.
+    assert_eq!(
+        editor_buffer_snapshot(&app),
+        editor_before,
+        "a consume-style queue removal must never touch the editor buffer (bug 5)"
+    );
+}
+
+#[test]
+fn queue_navigation_during_edit_leaves_editor_buffer_untouched() {
+    // Bug 6 regression: auto-advance / reposition walks the queue cursor and
+    // (via reorder) mutates queue order. The reachable, app_service-free queue
+    // navigation/reorder path in test_app is the drag-reorder → MoveItem
+    // optimistic local reorder of `library.queue_songs`. Drive a queue reorder
+    // with an editor session present and assert the editor buffer is untouched.
+    use crate::{views::QueueMessage, widgets::drag_column::DragEvent};
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("q1", "Queue One", "Artist A", "Album A"),
+        make_queue_song("q2", "Queue Two", "Artist B", "Album B"),
+        make_queue_song("q3", "Queue Three", "Artist C", "Album C"),
+    ];
+    seeded_editor(&mut app); // editor buffer is [a,b,c]
+    let editor_before = editor_buffer_snapshot(&app);
+
+    // Reorder the queue (move row 0 down) — exercises the queue-navigation /
+    // reorder mutation path on `library.queue_songs`.
+    let _ = app.handle_queue(QueueMessage::DragReorder(DragEvent::Dropped {
+        index: 0,
+        target_index: 2,
+    }));
+
+    // The queue order changed...
+    assert_eq!(
+        app.queue_song_ids(),
+        vec!["q2", "q1", "q3"],
+        "the queue reorder must apply to the live queue"
+    );
+    // ...the editor buffer did not.
+    assert_eq!(
+        editor_buffer_snapshot(&app),
+        editor_before,
+        "queue navigation/reorder during edit must never touch the editor buffer (bug 6)"
+    );
+}
+
+#[test]
+fn scrobble_and_mpris_handlers_are_independent_of_editor_by_construction() {
+    // Bugs 8 (MPRIS / media keys) and 9 (scrobble during edit) are dissolved by
+    // construction: the editor buffer is a separate Vec, and the scrobble/MPRIS
+    // handlers never read `playlist_editor`. This test documents that guarantee
+    // at the level test_app CAN assert — that an editor session present does not
+    // change the editor buffer when an unrelated playback-adjacent message flows
+    // through update(). Full transport/scrobble behaviour requires a live engine
+    // and is covered by the MANUAL smoke checks in the handoff.
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("q1", "Queue One", "Artist A", "Album A"),
+        make_queue_song("q2", "Queue Two", "Artist B", "Album B"),
+    ];
+    seeded_editor(&mut app);
+    let editor_before = editor_buffer_snapshot(&app);
+
+    // A scrobble-submission result (the path that increments play counts) flows
+    // through update(); it reads queue/engine state, never the editor buffer.
+    let _ = app.update(Message::Scrobble(
+        crate::app_message::ScrobbleMessage::SubmissionResult(Ok("q1".to_string())),
+    ));
+
+    assert_eq!(
+        editor_buffer_snapshot(&app),
+        editor_before,
+        "scrobble/MPRIS-adjacent messages must never touch the editor buffer (bugs 8/9)"
+    );
+}
