@@ -57,6 +57,13 @@ const _: [(); NavView::ALL.len() - 7] = [];
 #[derive(Debug, Clone)]
 pub(crate) struct NavBarViewData {
     pub current_view: NavView,
+    /// A playlist-edit session is active — render the contextual "Editing"
+    /// pill so the editor view is reachable without disturbing the Queue tab.
+    pub editor_session_active: bool,
+    /// The editor view is the current destination — highlight the pill (and
+    /// suppress the regular tabs' active state, since `current_view` falls back
+    /// to `Queue` for the tab-less editor view).
+    pub editor_active: bool,
     pub track_title: String,
     pub track_artist: String,
     pub track_album: String,
@@ -117,6 +124,9 @@ pub(crate) struct NavBarViewData {
 #[derive(Debug, Clone)]
 pub enum NavBarMessage {
     SwitchView(NavView),
+    /// Navigate to the contextual playlist-editor view (the "Editing" pill).
+    /// Carries no `NavView` — the editor has no permanent tab.
+    SwitchToEditor,
     ToggleLightMode,
     OpenSettings,
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
@@ -390,6 +400,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Left Section: Hamburger + Library Filter + Navigation Tabs
     // -------------------------------------------------------------------------
     let settings_open = data.settings_open;
+    let editor_active = data.editor_active;
     let window_width = data.window_width;
 
     // Whenever the metadata strip lives elsewhere (Off / Player Bar / Mini
@@ -411,97 +422,95 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // shrink together (no jagged staircase across the strip).
     let text_size = tab_text_size(window_width);
 
-    // Shared tab builder — used for both regular nav tabs AND the settings indicator.
-    // `force_active` overrides the active state (used for settings tab, always active).
-    let nav_tab = |label: &'static str,
-                   icon_path: &'static str,
-                   view: NavView,
-                   current: NavView,
-                   force_active: bool| {
-        let is_active = force_active || (!settings_open && current == view);
-        let is_rounded = theme::is_rounded_mode();
-        let display_mode = theme::nav_display_mode();
+    // Shared tab builder — used for regular nav tabs, the settings indicator,
+    // AND the contextual editor pill. `is_active` and `on_press` are supplied
+    // by the caller so the builder stays message-agnostic (the editor pill
+    // emits `SwitchToEditor`, not `SwitchView`).
+    let nav_tab =
+        |label: &'static str, icon_path: &'static str, is_active: bool, on_press: NavBarMessage| {
+            let is_rounded = theme::is_rounded_mode();
+            let display_mode = theme::nav_display_mode();
 
-        let tab_padding: [u16; 2] = if matches!(display_mode, NavDisplayMode::IconsOnly) {
-            [2, 6]
-        } else {
-            [2, 14]
-        };
-        let tab_width = if tabs_expand {
-            Length::FillPortion(1)
-        } else {
-            Length::Shrink
-        };
-
-        if is_rounded {
-            // Rounded mode: 32 px pill that lives inside the tray's
-            // padding. Active = filled `accent_bright()` + `bg0_hard()`
-            // text; idle = transparent over the chrome bg. Hover comes
-            // from `HoverOverlay`, scoped to the pill radius so the
-            // tint follows the chip outline.
-            let tab_style = rounded_pill_tab_style(is_active);
-            let text_color = if is_active {
-                theme::bg0_hard()
+            let tab_padding: [u16; 2] = if matches!(display_mode, NavDisplayMode::IconsOnly) {
+                [2, 6]
             } else {
-                theme::fg2()
+                [2, 14]
+            };
+            let tab_width = if tabs_expand {
+                Length::FillPortion(1)
+            } else {
+                Length::Shrink
             };
 
-            let elem: Element<'_, NavBarMessage> = mouse_area(
-                super::hover_overlay::HoverOverlay::new(
-                    container(tab_content(
-                        label,
-                        icon_path,
-                        display_mode,
-                        text_color,
-                        text_size,
-                    ))
-                    .padding(tab_padding)
-                    .height(Length::Fixed(NAV_PILL_HEIGHT))
-                    .center_y(Length::Fixed(NAV_PILL_HEIGHT))
-                    .width(tab_width)
-                    .align_x(Alignment::Center)
-                    .style(tab_style),
-                )
-                .border_radius(theme::ui_radius_pill()),
-            )
-            .on_press(NavBarMessage::SwitchView(view))
-            .interaction(iced::mouse::Interaction::Pointer)
-            .into();
-            elem
-        } else {
-            // Flat mode: full-height accent block when active, `bg0_hard()`
-            // cell otherwise. Sided 1 px `theme::border()` rules between
-            // cells handled by `tab_separator()` at the assembly level.
-            let tab_style = flat_tab_container_style(is_active);
-            let text_color = if is_active {
-                theme::bg0_hard()
-            } else {
-                theme::fg0()
-            };
+            if is_rounded {
+                // Rounded mode: 32 px pill that lives inside the tray's
+                // padding. Active = filled `accent_bright()` + `bg0_hard()`
+                // text; idle = transparent over the chrome bg. Hover comes
+                // from `HoverOverlay`, scoped to the pill radius so the
+                // tint follows the chip outline.
+                let tab_style = rounded_pill_tab_style(is_active);
+                let text_color = if is_active {
+                    theme::bg0_hard()
+                } else {
+                    theme::fg2()
+                };
 
-            let elem: Element<'_, NavBarMessage> = mouse_area(
-                super::hover_overlay::HoverOverlay::new(
-                    container(tab_content(
-                        label,
-                        icon_path,
-                        display_mode,
-                        text_color,
-                        text_size,
-                    ))
-                    .padding(tab_padding)
-                    .height(Length::Fill)
-                    .width(tab_width)
-                    .align_x(Alignment::Center)
-                    .style(tab_style),
+                let elem: Element<'_, NavBarMessage> = mouse_area(
+                    super::hover_overlay::HoverOverlay::new(
+                        container(tab_content(
+                            label,
+                            icon_path,
+                            display_mode,
+                            text_color,
+                            text_size,
+                        ))
+                        .padding(tab_padding)
+                        .height(Length::Fixed(NAV_PILL_HEIGHT))
+                        .center_y(Length::Fixed(NAV_PILL_HEIGHT))
+                        .width(tab_width)
+                        .align_x(Alignment::Center)
+                        .style(tab_style),
+                    )
+                    .border_radius(theme::ui_radius_pill()),
                 )
-                .border_radius(0.0.into()),
-            )
-            .on_press(NavBarMessage::SwitchView(view))
-            .interaction(iced::mouse::Interaction::Pointer)
-            .into();
-            elem
-        }
-    };
+                .on_press(on_press.clone())
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into();
+                elem
+            } else {
+                // Flat mode: full-height accent block when active, `bg0_hard()`
+                // cell otherwise. Sided 1 px `theme::border()` rules between
+                // cells handled by `tab_separator()` at the assembly level.
+                let tab_style = flat_tab_container_style(is_active);
+                let text_color = if is_active {
+                    theme::bg0_hard()
+                } else {
+                    theme::fg0()
+                };
+
+                let elem: Element<'_, NavBarMessage> = mouse_area(
+                    super::hover_overlay::HoverOverlay::new(
+                        container(tab_content(
+                            label,
+                            icon_path,
+                            display_mode,
+                            text_color,
+                            text_size,
+                        ))
+                        .padding(tab_padding)
+                        .height(Length::Fill)
+                        .width(tab_width)
+                        .align_x(Alignment::Center)
+                        .style(tab_style),
+                    )
+                    .border_radius(0.0.into()),
+                )
+                .on_press(on_press.clone())
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into();
+                elem
+            }
+        };
 
     let current = data.current_view;
 
@@ -649,7 +658,16 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         let tab_count = NAV_TABS.len();
         for (i, &(label, icon_path, view)) in NAV_TABS.iter().enumerate() {
             let is_last = i == tab_count - 1;
-            tabs = tabs.push(nav_tab(label, icon_path, view, current, false));
+            // No regular tab is active while editing (current_view falls back
+            // to Queue for the tab-less editor view) — the editor pill carries
+            // the active state instead.
+            let is_active = !settings_open && !editor_active && current == view;
+            tabs = tabs.push(nav_tab(
+                label,
+                icon_path,
+                is_active,
+                NavBarMessage::SwitchView(view),
+            ));
             // Inter-tab separator: flat draws one between every pair;
             // rounded mode skips since pills are gap-spaced. The trailing
             // separator before the metadata strip is force-visible so the
@@ -663,16 +681,29 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         tabs
     };
 
-    // Settings indicator: reuses the same nav_tab builder with force_active=true
+    // Settings indicator: reuses the same nav_tab builder, always active.
     if settings_open {
-        // Use Queue as a dummy NavView — the on_press emits CloseSettings
-        // which restores the pre-settings view instead of navigating to Queue.
+        // Use Queue as a dummy target — switching away from Settings restores
+        // the pre-settings view rather than navigating to Queue.
         left_section = left_section.push(nav_tab(
             "Settings",
             "assets/icons/settings.svg",
-            NavView::Queue,
-            current,
             true,
+            NavBarMessage::SwitchView(NavView::Queue),
+        ));
+        left_section = left_section.push(tab_separator(true));
+    }
+
+    // Contextual editor pill: present only while an edit session is active.
+    // Clicking it returns to the editor view; it highlights when the editor is
+    // the current destination. The Queue tab is never replaced, so the user can
+    // always switch back to their live queue.
+    if data.editor_session_active {
+        left_section = left_section.push(nav_tab(
+            "Editing",
+            "assets/icons/pencil.svg",
+            editor_active,
+            NavBarMessage::SwitchToEditor,
         ));
         left_section = left_section.push(tab_separator(true));
     }

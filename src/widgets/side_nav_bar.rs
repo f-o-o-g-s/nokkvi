@@ -94,6 +94,10 @@ fn side_nav_tab_width() -> f32 {
 pub(crate) struct SideNavBarData {
     pub current_view: NavView,
     pub settings_open: bool,
+    /// A playlist-edit session is active — render the contextual editor cell.
+    pub editor_session_active: bool,
+    /// The editor view is the current destination — highlight that cell.
+    pub editor_active: bool,
     /// Total libraries known to the client. `<= 1` hides the footer
     /// library trigger entirely (same suppression rule as the top-nav
     /// variant — see `libraries_imp_plan.md` §2).
@@ -226,14 +230,15 @@ fn side_nav_tab_content(
 /// Build the vertical side navigation bar
 pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessage> {
     let settings_open = data.settings_open;
+    let editor_active = data.editor_active;
     let current = data.current_view;
     let is_rounded = theme::is_rounded_mode();
 
     let nav_tab = |label: &'static str,
                    icon_path: &'static str,
-                   view: NavView|
+                   is_active: bool,
+                   on_press: NavBarMessage|
      -> Element<'_, NavBarMessage> {
-        let is_active = !settings_open && current == view;
         let display_mode = theme::nav_display_mode();
 
         // Active = filled `accent_bright()` + dark text, idle = `bg0_hard()`
@@ -285,7 +290,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             )
             .border_radius(card_radius),
         )
-        .on_press(NavBarMessage::SwitchView(view))
+        .on_press(on_press)
         .interaction(iced::mouse::Interaction::Pointer)
         .into()
     };
@@ -508,9 +513,12 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         .width(Length::Fixed(nav_width))
         .height(Length::Fill);
     for &(label, icon_path, view) in NAV_TABS {
+        // No regular tab is active while editing — the editor cell carries the
+        // active state (current_view falls back to Queue for the editor view).
+        let is_active = !settings_open && !editor_active && current == view;
         tabs = tabs
             .push(wrap_in_gutter(
-                nav_tab(label, icon_path, view),
+                nav_tab(label, icon_path, is_active, NavBarMessage::SwitchView(view)),
                 is_rounded,
                 nav_width,
             ))
@@ -520,6 +528,22 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     if let Some(indicator) = settings_indicator {
         tabs = tabs
             .push(wrap_in_gutter(indicator, is_rounded, nav_width))
+            .push(separator());
+    }
+
+    // Contextual editor cell — present only while an edit session is active.
+    if data.editor_session_active {
+        tabs = tabs
+            .push(wrap_in_gutter(
+                nav_tab(
+                    "Editing",
+                    "assets/icons/pencil.svg",
+                    editor_active,
+                    NavBarMessage::SwitchToEditor,
+                ),
+                is_rounded,
+                nav_width,
+            ))
             .push(separator());
     }
 

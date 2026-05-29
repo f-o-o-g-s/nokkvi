@@ -135,6 +135,9 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         widgets::NavBarMessage::SwitchView(nav_view) => {
             Message::Navigation(NavigationMessage::SwitchView(nav_view.into()))
         }
+        widgets::NavBarMessage::SwitchToEditor => {
+            Message::Navigation(NavigationMessage::SwitchView(View::PlaylistEditor))
+        }
         widgets::NavBarMessage::ToggleLightMode => Message::ToggleLightMode,
         widgets::NavBarMessage::OpenSettings => {
             Message::Navigation(NavigationMessage::SwitchView(View::Settings))
@@ -617,6 +620,8 @@ impl Nokkvi {
                 let side_data = widgets::SideNavBarData {
                     current_view: side_nav_view,
                     settings_open: self.current_view == View::Settings,
+                    editor_session_active: self.playlist_editor.is_some(),
+                    editor_active: matches!(self.current_view, View::PlaylistEditor),
                     library_count: lib.count,
                     active_library_count: lib.active_count,
                     library_selector_open: lib.popover_open,
@@ -1206,6 +1211,8 @@ impl Nokkvi {
 
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,
+            editor_session_active: self.playlist_editor.is_some(),
+            editor_active: matches!(self.current_view, View::PlaylistEditor),
             track_title,
             track_artist,
             track_album,
@@ -1635,7 +1642,7 @@ mod tests {
             let nav: Option<widgets::NavView> = v.into();
             match v {
                 View::Settings | View::PlaylistEditor => {
-                    assert!(nav.is_none(), "{v:?} is contextual — no NavView")
+                    assert!(nav.is_none(), "{v:?} is contextual — no NavView");
                 }
                 _ => assert!(nav.is_some(), "{v:?} must map to a NavView"),
             }
