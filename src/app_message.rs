@@ -390,6 +390,15 @@ pub enum EditorMessage {
     /// Async resolve result — the playlist's tracks, ready to fill the editor
     /// buffer. The TESTABLE entry point (dispatch with a fabricated payload).
     SongsLoaded(Vec<nokkvi_data::backend::queue::QueueSongUIViewData>),
+    /// Async result of a cross-pane drag drop into the editor: the resolved
+    /// rows for the dragged browser item(s), to splice into the buffer at the
+    /// `at` slot index (relative to the editor's current — possibly filtered —
+    /// view). Fresh sequential `entry_id`s are assigned on insert so they
+    /// never collide with existing buffer rows.
+    SongsInserted {
+        rows: Vec<nokkvi_data::backend::queue::QueueSongUIViewData>,
+        at: usize,
+    },
     /// Shared slot-list navigation/activation/selection/search carrier.
     SlotList(widgets::SlotListPageMessage),
     /// Drag-and-drop reorder within the editor buffer.

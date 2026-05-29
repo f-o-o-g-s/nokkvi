@@ -189,21 +189,33 @@ impl Nokkvi {
             None => return Task::none(), // No active drag
         };
 
-        // Drop is over the queue pane iff a queue slot is currently hovered.
-        // No cursor-X check needed — the per-slot `mouse_area` only fires
-        // `on_enter` when the cursor is inside a slot's rendered bounds.
-        let queue_insert_index = match self.compute_queue_drop_slot() {
+        // Drop is over the left pane iff one of its slots is currently
+        // hovered. No cursor-X check needed — the per-slot `mouse_area` only
+        // fires `on_enter` when the cursor is inside a slot's rendered bounds.
+        //
+        // While editing, the LEFT pane is the playlist editor, so the drop
+        // target comes from the editor's own hovered slot and the staleness
+        // gate compares against the editor buffer (plan §5.6). The resolved
+        // batch is then routed into the editor buffer by
+        // `add_or_insert_batch_to_queue_task` (which reads `playlist_editor`)
+        // — the live queue/engine/redb are never touched.
+        let drop_index = if self.playlist_editor.is_some() {
+            self.compute_editor_drop_slot()
+        } else {
+            self.compute_queue_drop_slot()
+        };
+        let insert_index = match drop_index {
             Some(idx) => idx,
             None => {
-                debug!(" [DRAG] Cross-pane drag cancelled: released outside queue slots");
+                debug!(" [DRAG] Cross-pane drag cancelled: released outside drop-target slots");
                 return Task::none();
             }
         };
 
         // Store the target position for the update handler to consume
-        self.pending_queue_insert_position = Some(queue_insert_index);
+        self.pending_queue_insert_position = Some(insert_index);
 
-        debug!(" [DRAG] Drop target queue index: {queue_insert_index}");
+        debug!(" [DRAG] Drop target index: {insert_index}");
 
         // For single-item drags: set selected_offset so AddCenterToQueue picks up
         // the correct item. This is necessary because the button's SlotListSetOffset
@@ -523,6 +535,31 @@ impl Nokkvi {
     pub(crate) fn compute_queue_drop_slot(&self) -> Option<usize> {
         let hovered = self.queue_page.common.slot_list.hovered_slot?;
         let current_len = self.library.queue_songs.len();
+        let baked_len = match hovered {
+            HoveredSlot::Item { items_len, .. } | HoveredSlot::Empty { items_len, .. } => items_len,
+        };
+        if baked_len != current_len {
+            return None;
+        }
+        match hovered {
+            HoveredSlot::Item { item_index, .. } => Some(item_index),
+            HoveredSlot::Empty { .. } => Some(current_len),
+        }
+    }
+
+    /// Editor-mode sibling of [`Self::compute_queue_drop_slot`].
+    ///
+    /// While a playlist edit session is active, the LEFT split-view pane is the
+    /// editor (not the live queue), so the drop target is read from the
+    /// editor's own `hovered_slot` and the staleness length-gate compares
+    /// against the editor buffer length (plan §5.6) — never the queue length.
+    /// Returns `None` (cancel the drop) when no edit session is active, no
+    /// editor slot is hovered, or the hover payload is stale relative to the
+    /// editor buffer.
+    pub(crate) fn compute_editor_drop_slot(&self) -> Option<usize> {
+        let editor = self.playlist_editor.as_ref()?;
+        let hovered = editor.common.slot_list.hovered_slot?;
+        let current_len = editor.songs.len();
         let baked_len = match hovered {
             HoveredSlot::Item { items_len, .. } | HoveredSlot::Empty { items_len, .. } => items_len,
         };

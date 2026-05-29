@@ -445,3 +445,166 @@ fn editor_remove_under_active_search_maps_filtered_index() {
         "RemoveAt under active search must map the filtered index to the right full-buffer row"
     );
 }
+
+// --- Phase 5: cross-pane drop targets the editor buffer ------------------
+
+#[test]
+fn drop_browser_song_inserts_into_editor_at_index() {
+    // A completed browser→editor drop resolves to `SongsInserted { rows, at }`.
+    // Buffer [a,b,c]; dropping a new row at slot 1 yields [a,NEW,b,c].
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsInserted {
+        rows: vec![make_queue_song("x", "Song X", "Artist", "Album")],
+        at: 1,
+    }));
+
+    assert_eq!(
+        editor_ids(&app),
+        vec!["a", "x", "b", "c"],
+        "a browser drop must splice the resolved row into the editor buffer at the drop slot"
+    );
+
+    // Fresh, unique entry_id: must not collide with any existing buffer row.
+    let editor = app.playlist_editor.as_ref().expect("editor present");
+    let inserted = editor
+        .songs
+        .iter()
+        .find(|s| s.id == "x")
+        .expect("inserted row present");
+    let others: Vec<u64> = editor
+        .songs
+        .iter()
+        .filter(|s| s.id != "x")
+        .map(|s| s.entry_id)
+        .collect();
+    assert!(
+        !others.contains(&inserted.entry_id),
+        "inserted row must get a fresh entry_id that does not collide with existing rows"
+    );
+}
+
+#[test]
+fn drop_into_editor_does_not_modify_queue() {
+    // Editing must keep the live queue byte-for-byte unchanged: a browser drop
+    // splices into the editor buffer, never the queue.
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("q1", "Queue One", "Artist A", "Album A"),
+        make_queue_song("q2", "Queue Two", "Artist B", "Album B"),
+    ];
+    let before = app.queue_song_ids();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsInserted {
+        rows: vec![make_queue_song("x", "Song X", "Artist", "Album")],
+        at: 0,
+    }));
+
+    assert_eq!(
+        app.queue_song_ids(),
+        before,
+        "a drop into the editor buffer must not mutate the live queue"
+    );
+}
+
+#[test]
+fn drop_appends_when_index_beyond_buffer() {
+    // A drop slot past the buffer length clamps to the end (append) — the
+    // editor-aware staleness gate / insert never panics on an out-of-range
+    // index. Buffer [a,b,c]; dropping at slot 99 → appended at the tail.
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsInserted {
+        rows: vec![make_queue_song("x", "Song X", "Artist", "Album")],
+        at: 99,
+    }));
+
+    assert_eq!(
+        editor_ids(&app),
+        vec!["a", "b", "c", "x"],
+        "an out-of-range drop index must clamp to the buffer end (append)"
+    );
+}
+
+#[test]
+fn drop_staleness_gate_uses_editor_len() {
+    // `compute_editor_drop_slot` is the editor-mode sibling of
+    // `compute_queue_drop_slot`: it reads the EDITOR pane's hovered slot and
+    // rejects payloads whose baked `items_len` no longer matches the EDITOR
+    // buffer length — NOT the queue length. Construct queue_len != editor_len
+    // so the test distinguishes which length the gate uses.
+    use crate::widgets::HoveredSlot;
+
+    let mut app = test_app();
+    // Queue length 5 (deliberately different from the editor buffer).
+    app.library.queue_songs = vec![
+        make_queue_song("q1", "Q1", "ar", "Al"),
+        make_queue_song("q2", "Q2", "ar", "Al"),
+        make_queue_song("q3", "Q3", "ar", "Al"),
+        make_queue_song("q4", "Q4", "ar", "Al"),
+        make_queue_song("q5", "Q5", "ar", "Al"),
+    ];
+    seeded_editor(&mut app); // editor buffer len == 3
+
+    // Hover payload baked against the editor's length (3) at item 1 → valid.
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
+            slot_index: 1,
+            item_index: 1,
+            items_len: 3,
+        });
+    }
+    assert_eq!(
+        app.compute_editor_drop_slot(),
+        Some(1),
+        "a hover baked against the editor buffer length must resolve to its item index"
+    );
+
+    // Now bake against the QUEUE length (5). The editor gate must REJECT it as
+    // stale, even though 5 matches the live queue length.
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
+            slot_index: 1,
+            item_index: 1,
+            items_len: 5,
+        });
+    }
+    assert_eq!(
+        app.compute_editor_drop_slot(),
+        None,
+        "the editor staleness gate must compare against the editor buffer length, not the queue"
+    );
+}
+
+#[test]
+fn drop_into_editor_makes_session_dirty() {
+    // An insert changes membership, so the session dirties automatically
+    // (dirty is computed from the buffer ids at render time).
+    let mut app = test_app();
+    seeded_editor(&mut app);
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "freshly-loaded editor must be clean before the drop"
+    );
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsInserted {
+        rows: vec![make_queue_song("x", "Song X", "Artist", "Album")],
+        at: 1,
+    }));
+
+    assert!(
+        app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "inserting a row changes membership and must dirty the session"
+    );
+}

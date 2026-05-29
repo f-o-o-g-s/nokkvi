@@ -437,6 +437,37 @@ impl AppService {
         Ok(rows)
     }
 
+    /// Resolve a `BatchPayload` (e.g. a cross-pane drag from the browsing
+    /// panel) into editor view-data rows WITHOUT touching the queue, audio
+    /// engine, or redb. Mirrors [`Self::resolve_playlist_for_editor`]'s
+    /// projection so dragged rows match buffer rows exactly.
+    ///
+    /// The caller assigns final `entry_id`s when splicing the rows into the
+    /// editor buffer (they must not collide with existing buffer ids); the
+    /// `entry_id`/`track_number` baked in here are placeholders derived from
+    /// the batch's own ordering.
+    pub async fn resolve_batch_for_editor(
+        &self,
+        batch: crate::types::batch::BatchPayload,
+    ) -> Result<Vec<crate::backend::queue::QueueSongUIViewData>> {
+        let songs = self.library_orchestrator().resolve_batch(batch).await?;
+        let (server_url, subsonic_credential) = self.auth_gateway.server_config().await;
+        let rows = songs
+            .iter()
+            .enumerate()
+            .map(|(index, song)| {
+                crate::backend::queue::build_queue_song_ui_view_data(
+                    song,
+                    index,
+                    index as u64,
+                    &server_url,
+                    &subsonic_credential,
+                )
+            })
+            .collect();
+        Ok(rows)
+    }
+
     /// Load a playlist's songs into the queue WITHOUT starting playback.
     ///
     /// Used for playlist editing mode where we want to populate the queue

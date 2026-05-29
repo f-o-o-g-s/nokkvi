@@ -1045,6 +1045,30 @@ impl Nokkvi {
     ) -> Task<Message> {
         let len = payload.items.len();
         if let Some(pos) = self.pending_queue_insert_position.take() {
+            // While a playlist edit session is active the drop target is the
+            // editor's LEFT pane, so resolve the dragged item(s) into editor
+            // view-data rows and splice them into the editor buffer at the drop
+            // slot — the live queue / engine / redb are never touched (plan
+            // §5.6). Resolving is async because building rows needs the
+            // server_url/credential for artwork URLs, mirroring the queue
+            // insert path's data flow.
+            if self.playlist_editor.is_some() {
+                return self.shell_task(
+                    move |shell| async move { shell.resolve_batch_for_editor(payload).await },
+                    move |result| match result {
+                        Ok(rows) => {
+                            Message::Editor(crate::app_message::EditorMessage::SongsInserted {
+                                rows,
+                                at: pos,
+                            })
+                        }
+                        Err(e) => {
+                            error!(" Failed to resolve dragged batch for editor: {}", e);
+                            Message::NoOp
+                        }
+                    },
+                );
+            }
             return self.shell_fire_and_forget_task(
                 move |shell| async move { shell.insert_batch_at_position(payload, pos).await },
                 format!("Inserted {len} items at position {}", pos + 1),

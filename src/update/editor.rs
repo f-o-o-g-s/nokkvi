@@ -25,6 +25,9 @@ impl Nokkvi {
     pub(crate) fn handle_editor_message(&mut self, msg: EditorMessage) -> Task<Message> {
         match msg {
             EditorMessage::SongsLoaded(rows) => self.handle_editor_songs_loaded(rows),
+            EditorMessage::SongsInserted { rows, at } => {
+                self.handle_editor_songs_inserted(rows, at)
+            }
             EditorMessage::SlotList(m) => self.handle_editor_slot_list(m),
             EditorMessage::NameChanged(name) => {
                 if let Some(editor) = self.playlist_editor.as_mut() {
@@ -297,6 +300,81 @@ impl Nokkvi {
             editor.common.slot_list.selected_indices.clear();
             editor.common.slot_list.anchor_index = None;
         }
+        Task::none()
+    }
+
+    /// Splice cross-pane-dragged rows into the editor buffer at a drop slot.
+    ///
+    /// The async resolve result of a browser→editor drop
+    /// (`EditorMessage::SongsInserted`). The rows arrive with placeholder
+    /// `entry_id`s from the resolve projection, so this assigns FRESH
+    /// sequential ids (`max(existing) + 1 ..`) that cannot collide with any
+    /// existing buffer row — the editor addresses rows by `entry_id` for
+    /// duplicate-aware removal (Phase 4), so collisions would let one remove
+    /// take out an unrelated row.
+    ///
+    /// `at` is the drop slot relative to the editor's current (possibly
+    /// filtered) view, so it is mapped through `filter_editor_songs()` to a
+    /// full-buffer insert position before splicing (invariant #1). With no
+    /// search active this is the identity case. The position is clamped to the
+    /// buffer length so a stale / out-of-range slot appends rather than
+    /// panicking.
+    fn handle_editor_songs_inserted(
+        &mut self,
+        rows: Vec<QueueSongUIViewData>,
+        at: usize,
+    ) -> Task<Message> {
+        if rows.is_empty() {
+            return Task::none();
+        }
+
+        // Map the (possibly filtered) drop slot to a full-buffer index BEFORE
+        // taking the mutable borrow. Under an active search the slot is
+        // relative to the filtered view: insert AFTER the row at the matching
+        // full-buffer position (or at the end when dropping past the filtered
+        // tail), so the dragged rows land where the indicator showed them.
+        let insert_at = {
+            let filtered = self.filter_editor_songs();
+            let Some(editor) = self.playlist_editor.as_ref() else {
+                return Task::none();
+            };
+            if editor.common.search_query.is_empty() {
+                at.min(editor.songs.len())
+            } else {
+                match filtered.get(at) {
+                    // Insert before the matching full-buffer row.
+                    Some(target) => editor
+                        .songs
+                        .iter()
+                        .position(|s| s.entry_id == target.entry_id)
+                        .unwrap_or(editor.songs.len()),
+                    // Dropped past the filtered tail → append.
+                    None => editor.songs.len(),
+                }
+            }
+        };
+
+        let Some(editor) = self.playlist_editor.as_mut() else {
+            return Task::none();
+        };
+
+        // Fresh sequential entry_ids starting past the current max so the new
+        // rows never collide with existing buffer ids.
+        let base_id = editor
+            .songs
+            .iter()
+            .map(|s| s.entry_id)
+            .max()
+            .map_or(0, |m| m + 1);
+        let insert_at = insert_at.min(editor.songs.len());
+        for (offset, mut row) in rows.into_iter().enumerate() {
+            row.entry_id = base_id + offset as u64;
+            editor.songs.insert(insert_at + offset, row);
+        }
+
+        // Drop any stale selection so it does not point at shifted rows.
+        editor.common.clear_multi_selection();
+        editor.common.slot_list.selected_offset = None;
         Task::none()
     }
 }

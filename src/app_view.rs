@@ -982,11 +982,14 @@ impl Nokkvi {
     /// slot. Read by [`crate::views::QueueViewData::drop_indicator_slot`].
     fn cross_pane_drop_indicator_slot(&self) -> Option<usize> {
         self.cross_pane_drag.as_ref()?;
-        self.queue_page
-            .common
-            .slot_list
-            .hovered_slot
-            .map(|h| h.slot_index())
+        // While editing, the LEFT pane is the playlist editor, so the drop
+        // indicator tracks the editor's own hovered slot (its slot-list state
+        // is independent of the live queue's). Otherwise read the queue pane.
+        let slot_list = match self.playlist_editor.as_ref() {
+            Some(editor) => &editor.common.slot_list,
+            None => &self.queue_page.common.slot_list,
+        };
+        slot_list.hovered_slot.map(|h| h.slot_index())
     }
 
     /// Resolve the active playlist's strip cover handle: the collage's first
