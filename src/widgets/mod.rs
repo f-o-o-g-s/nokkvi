@@ -25,6 +25,7 @@ pub(crate) mod pill_segmented_button;
 pub(crate) mod player_bar;
 pub(crate) mod player_modes_menu;
 pub(crate) mod scroll_indicator;
+pub(crate) mod scroll_into_view;
 pub(crate) mod search_bar;
 pub(crate) mod settings_slider;
 pub(crate) mod side_nav_bar;

@@ -1270,12 +1270,19 @@ pub(crate) fn render_detail_row<'a>(
     ]
     .align_y(Alignment::Center);
 
-    let body = container(stripe_row)
+    let mut body = container(stripe_row)
         .width(Length::Fill)
         .style(move |_: &iced::Theme| container::Style {
             background: Some(row_bg.into()),
             ..Default::default()
         });
+    // Tag the focused row so the measured auto-scroll can read its real
+    // laid-out bounds and center it (replaces estimated pixel heights). Only
+    // the focused row carries the Id, so the scroll operation matches exactly
+    // one container.
+    if is_focused {
+        body = body.id(iced::widget::Id::new(super::DETAIL_FOCUSED_ROW_ID));
+    }
 
     let sep = container(Space::new())
         .width(Length::Fill)

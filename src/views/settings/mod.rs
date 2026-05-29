@@ -531,21 +531,16 @@ pub(crate) const SETTINGS_SEARCH_INPUT_ID: &str = "settings_search";
 /// Unique text_input ID for the hex color editor
 pub(crate) const HEX_EDITOR_INPUT_ID: &str = "hex_editor_input";
 
-/// Unique scrollable ID for the detail pane. The `SlotListUp`/`SlotListDown`
-/// fast-path uses this with `iced::widget::operation::scroll_to` to keep
-/// the focused row in view as Tab/Backspace cycles.
+/// Unique scrollable ID for the detail pane. Auto-scroll (Tab/Backspace nav
+/// and mini-index jumps) targets this scrollable to keep the focused row in
+/// view via measured geometry — see [`crate::widgets::scroll_into_view`].
 pub(crate) const DETAIL_SCROLLABLE_ID: &str = "settings_detail_scrollable";
 
-/// Estimated row height (px) used by the auto-scroll math in the detail
-/// pane. Variable-height rows preclude an exact figure; 64 averages an
-/// item with subtitle (≈78) and one without (≈60).
-pub(crate) const DETAIL_AVERAGE_ROW_HEIGHT: f32 = 64.0;
-
-/// Height (px) of a sub-section header row in the detail pane. Headers
-/// are shorter than rows; the mini-index jump math sums real header
-/// heights + average row heights so the target lands on the header
-/// instead of overshooting into the section body.
-pub(crate) const DETAIL_HEADER_HEIGHT: f32 = 44.0;
+/// Widget ID attached to the currently-focused detail-pane row. The measured
+/// auto-scroll reads this row's real laid-out bounds (rather than an estimated
+/// pixel height, which drifts on variable-height rows) to center it within
+/// `DETAIL_SCROLLABLE_ID`.
+pub(crate) const DETAIL_FOCUSED_ROW_ID: &str = "settings_detail_focused_row";
 
 /// Settings page state
 pub struct SettingsPage {

@@ -343,39 +343,28 @@ impl Nokkvi {
         }
     }
 
-    /// Dispatch a `scroll_to` task that brings the currently-focused
-    /// detail-pane row roughly into the middle of the visible viewport.
+    /// Center the currently-focused detail-pane row in the visible viewport.
     ///
-    /// The detail pane is variable-height, so the target y is approximate
-    /// — `DETAIL_AVERAGE_ROW_HEIGHT` averages a row with subtitle (≈ 78)
-    /// and one without (≈ 60). Centering the focused row makes drift
-    /// tolerable: even if the estimate is off by a row or two, the row
-    /// stays inside the viewport.
+    /// The detail pane has variable-height rows (wrapped subtitles, value
+    /// badges, color swatches), so this dispatches a measured widget operation
+    /// that reads the focused row's REAL laid-out bounds and the scrollable's
+    /// real frame, then scrolls to center it. Any fixed per-row pixel estimate
+    /// drifts cumulatively — undershooting on tall rows (Hotkeys) and
+    /// overshooting on short ones (Theme) — and walks the focused row out of
+    /// view. See [`crate::widgets::scroll_into_view`]. No-op when no row is
+    /// focused (e.g. an empty list).
     fn detail_pane_scroll_task(&self) -> Task<Message> {
-        use iced::widget::scrollable::AbsoluteOffset;
-
-        let focused = self.settings_page.slot_list.viewport_offset as f32;
-        let row_height = crate::views::settings::DETAIL_AVERAGE_ROW_HEIGHT;
-        let viewport = (self.window.height - 96.0).max(120.0); // 96 = chrome
-        let target_y = (focused * row_height + row_height / 2.0 - viewport / 2.0).max(0.0);
-
-        iced::widget::operation::scroll_to(
+        crate::widgets::scroll_into_view::center_in_scrollable(
             iced::widget::Id::new(crate::views::settings::DETAIL_SCROLLABLE_ID),
-            AbsoluteOffset {
-                x: 0.0,
-                y: target_y,
-            },
+            iced::widget::Id::new(crate::views::settings::DETAIL_FOCUSED_ROW_ID),
         )
     }
 
-    /// Sum real heights (headers ≠ rows) up to `header_idx` and scroll
-    /// the detail pane so the matching header lands at the top of the
-    /// viewport with a small breathing pad. Also advances the keyboard
-    /// focus to the first item under the section so subsequent
-    /// Tab/Backspace navigation continues from where the user landed.
+    /// Advance the keyboard focus to the first item under the clicked section
+    /// header, then center it in the detail pane (which leaves the section
+    /// header visible just above). Subsequent Tab/Backspace navigation
+    /// continues from where the user landed.
     fn handle_jump_to_section(&mut self, header_idx: usize) -> Task<Message> {
-        use iced::widget::scrollable::AbsoluteOffset;
-
         let entries = &self.settings_page.cached_entries;
         if header_idx >= entries.len() {
             return Task::none();
@@ -386,28 +375,7 @@ impl Nokkvi {
         self.settings_page.editing_index = None;
         self.settings_page.toggle_cursor = None;
 
-        let header_height = crate::views::settings::DETAIL_HEADER_HEIGHT;
-        let mut y = 0.0_f32;
-        for (idx, entry) in entries.iter().enumerate() {
-            if idx == header_idx {
-                break;
-            }
-            y += match entry {
-                crate::views::settings::items::SettingsEntry::Header { .. } => header_height,
-                crate::views::settings::items::SettingsEntry::Item(item) => {
-                    if item.subtitle.is_some() { 78.0 } else { 60.0 }
-                }
-            };
-        }
-        let target_y = (y - 8.0).max(0.0);
-
-        iced::widget::operation::scroll_to(
-            iced::widget::Id::new(crate::views::settings::DETAIL_SCROLLABLE_ID),
-            AbsoluteOffset {
-                x: 0.0,
-                y: target_y,
-            },
-        )
+        self.detail_pane_scroll_task()
     }
 
     /// Rebuild the settings page's cached entries when `config_dirty` is set.
