@@ -1254,98 +1254,81 @@ impl Nokkvi {
         // =====================================================================
         // Split-view layout for playlist edit mode or browsing panel toggle
         // =====================================================================
-        if self.browsing_panel.is_some() && self.current_view == View::Queue {
+        // The editor renders its own split (its own buffer + an add-songs
+        // browser); the non-edit queue split powers similar-songs / the
+        // browse-toggle. They are mutually exclusive on `current_view`, and the
+        // queue split is suppressed while a session is active so the editor's
+        // browser never leaks into the Queue tab when the user peeks at it.
+        let in_editor = self.current_view == View::PlaylistEditor;
+        if self.browsing_panel.is_some()
+            && (in_editor || (self.current_view == View::Queue && self.playlist_editor.is_none()))
+        {
             use iced::widget::{column as col, row as r};
 
-            // --- LEFT PANE: Queue (editing surface) ---
-            let filtered_queue_songs = self.filter_queue_songs();
-            let current_playing_song_id = self.scrobble.current_song_id.clone();
-
-            // Build edit_mode_info only when actually editing a playlist
-            let edit_mode_info = self
-                .playlist_editor
-                .as_ref()
-                .map(|e| &e.edit)
-                .map(|edit_state| {
-                    let current_ids = self.queue_song_ids();
-                    let is_dirty = edit_state.is_dirty(&current_ids)
-                        || edit_state.is_name_dirty()
-                        || edit_state.is_comment_dirty()
-                        || edit_state.is_public_dirty();
-                    (edit_state.playlist_name.clone(), is_dirty)
-                });
-
-            let edit_mode_comment = self
-                .playlist_editor
-                .as_ref()
-                .map(|e| &e.edit)
-                .map(|edit_state| edit_state.playlist_comment.clone());
-
-            let edit_mode_public = self
-                .playlist_editor
-                .as_ref()
-                .map(|e| &e.edit)
-                .map(|edit_state| edit_state.playlist_public);
-
-            let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                column_dropdown_state(&self.open_menu, View::Queue);
-            let queue_view_data = views::QueueViewData {
-                queue_songs: filtered_queue_songs,
-                album_art: &self.artwork.album_art.snapshot,
-                large_artwork,
-                window_width: self.content_pane_width() * 0.55,
-                window_height: self.window.height,
-                scale_factor: self.window.scale_factor,
-                modifiers: self.window.keyboard_modifiers,
-                current_playing_song_id,
-                current_playing_entry_id: self.last_queue_current_entry_id,
-                is_playing: self.playback.playing && !self.playback.paused,
-                total_queue_count: self
-                    .library
-                    .queue_loading_target
-                    .unwrap_or(self.library.queue_songs.len()),
-                stable_viewport: self.settings.stable_viewport,
-                elevated: false,
-                edit_mode_info,
-                edit_mode_comment,
-                edit_mode_public,
-                playlist_context_info: self.active_playlist_info.clone(),
-                playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
-                playlist_cover: self.active_playlist_strip_cover(),
-                overlay: views::OverlayMenuViewData {
-                    column_dropdown_open,
-                    column_dropdown_trigger_bounds,
-                    open_menu: self.open_menu.as_ref(),
-                },
-                show_default_playlist_chip: self.settings.queue_show_default_playlist,
-                default_playlist_name: &self.settings.default_playlist_name,
-                drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
-            };
-
-            // LEFT pane source: the playlist editor while editing (its own
-            // buffer, now-playing OFF), otherwise the live queue. Both render at
-            // the same width portion and pane chrome below.
-            let queue_pane: Element<'_, Message> = if let Some(ref editor) = self.playlist_editor {
-                let dirty = editor.edit.is_dirty(&self.editor_song_ids())
-                    || editor.edit.has_metadata_changes();
-                let editor_data = views::EditorViewData {
-                    songs: std::borrow::Cow::Borrowed(&editor.songs),
-                    album_art: &self.artwork.album_art.snapshot,
-                    large_artwork,
-                    window_width: self.content_pane_width() * 0.55,
-                    window_height: self.window.height,
-                    modifiers: self.window.keyboard_modifiers,
-                    total_count: editor.songs.len(),
-                    name: editor.edit.playlist_name.clone(),
-                    comment: editor.edit.playlist_comment.clone(),
-                    public: editor.edit.playlist_public,
-                    dirty,
-                    drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
-                    open_menu: self.open_menu.as_ref(),
-                };
-                editor.view(editor_data).map(Message::Editor)
-            } else {
-                self.queue_page.view(queue_view_data).map(Message::Queue)
+            // LEFT pane: the editor's own buffer on the editor view, else the
+            // live queue. Each branch builds only its own view data.
+            let queue_pane: Element<'_, Message> = match self.playlist_editor.as_ref() {
+                Some(editor) if in_editor => {
+                    let dirty = editor.edit.is_dirty(&self.editor_song_ids())
+                        || editor.edit.has_metadata_changes();
+                    let editor_data = views::EditorViewData {
+                        songs: std::borrow::Cow::Borrowed(&editor.songs),
+                        album_art: &self.artwork.album_art.snapshot,
+                        large_artwork,
+                        window_width: self.content_pane_width() * 0.55,
+                        window_height: self.window.height,
+                        modifiers: self.window.keyboard_modifiers,
+                        total_count: editor.songs.len(),
+                        name: editor.edit.playlist_name.clone(),
+                        comment: editor.edit.playlist_comment.clone(),
+                        public: editor.edit.playlist_public,
+                        dirty,
+                        drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
+                        open_menu: self.open_menu.as_ref(),
+                    };
+                    editor.view(editor_data).map(Message::Editor)
+                }
+                _ => {
+                    let filtered_queue_songs = self.filter_queue_songs();
+                    let current_playing_song_id = self.scrobble.current_song_id.clone();
+                    let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                        column_dropdown_state(&self.open_menu, View::Queue);
+                    let queue_view_data = views::QueueViewData {
+                        queue_songs: filtered_queue_songs,
+                        album_art: &self.artwork.album_art.snapshot,
+                        large_artwork,
+                        window_width: self.content_pane_width() * 0.55,
+                        window_height: self.window.height,
+                        scale_factor: self.window.scale_factor,
+                        modifiers: self.window.keyboard_modifiers,
+                        current_playing_song_id,
+                        current_playing_entry_id: self.last_queue_current_entry_id,
+                        is_playing: self.playback.playing && !self.playback.paused,
+                        total_queue_count: self
+                            .library
+                            .queue_loading_target
+                            .unwrap_or(self.library.queue_songs.len()),
+                        stable_viewport: self.settings.stable_viewport,
+                        elevated: false,
+                        // The editor is its own view now — the queue is never in
+                        // edit mode.
+                        edit_mode_info: None,
+                        edit_mode_comment: None,
+                        edit_mode_public: None,
+                        playlist_context_info: self.active_playlist_info.clone(),
+                        playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
+                        playlist_cover: self.active_playlist_strip_cover(),
+                        overlay: views::OverlayMenuViewData {
+                            column_dropdown_open,
+                            column_dropdown_trigger_bounds,
+                            open_menu: self.open_menu.as_ref(),
+                        },
+                        show_default_playlist_chip: self.settings.queue_show_default_playlist,
+                        default_playlist_name: &self.settings.default_playlist_name,
+                        drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
+                    };
+                    self.queue_page.view(queue_view_data).map(Message::Queue)
+                }
             };
             let queue_focused = self.pane_focus == crate::state::PaneFocus::Queue;
 
