@@ -146,7 +146,17 @@ impl Nokkvi {
         // banner pointing at the edited playlist after the user discards.
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
-        self.current_view = View::Queue;
+        // Remember where the edit was launched from so discard/exit returns
+        // there (mirrors `pre_settings_view`). Guard against re-entry from the
+        // editor itself, which would trap the return view on the editor.
+        self.editor_return_view = if self.current_view == View::PlaylistEditor {
+            View::Playlists
+        } else {
+            self.current_view
+        };
+        // Navigate to the dedicated editor view. The live Queue tab is left
+        // alone, so the user can always switch back to their real queue.
+        self.current_view = View::PlaylistEditor;
 
         // Default browsing tab is Songs — trigger load if data hasn't arrived yet
         let songs_load = if self.library.songs.is_empty() {
@@ -194,7 +204,11 @@ impl Nokkvi {
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;
 
-        Task::none()
+        // Return to wherever the edit was launched from (mirrors closing
+        // Settings). Cleared the session above first, so the switch-view guard
+        // sees no active editor.
+        let target = self.editor_return_view;
+        self.handle_switch_view(target)
     }
 
     /// Toggle keyboard focus between queue and browser panes.

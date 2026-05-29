@@ -469,6 +469,64 @@ fn save_edits_only_refreshes_banner_when_playing_the_edited_playlist() {
 }
 
 #[test]
+fn enter_edit_mode_navigates_to_editor_and_records_origin() {
+    use crate::{
+        View,
+        app_message::{Message, SplitViewMessage},
+    };
+
+    let mut app = test_app();
+    app.current_view = View::Playlists;
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
+        playlist_id: "p1".into(),
+        playlist_name: "Mix".into(),
+        playlist_comment: String::new(),
+        playlist_public: false,
+    }));
+
+    assert_eq!(
+        app.current_view,
+        View::PlaylistEditor,
+        "entering edit mode must navigate to the dedicated editor view"
+    );
+    assert_eq!(
+        app.editor_return_view,
+        View::Playlists,
+        "entry must record the originating view for the return-on-exit"
+    );
+    assert!(app.playlist_editor.is_some());
+}
+
+#[test]
+fn exit_edit_mode_returns_to_origin_view() {
+    use crate::{
+        View,
+        app_message::{Message, SplitViewMessage},
+    };
+
+    let mut app = test_app();
+    app.current_view = View::Playlists;
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
+        playlist_id: "p1".into(),
+        playlist_name: "Mix".into(),
+        playlist_comment: String::new(),
+        playlist_public: false,
+    }));
+    assert_eq!(app.current_view, View::PlaylistEditor);
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
+
+    assert_eq!(
+        app.current_view,
+        View::Playlists,
+        "discarding must return the user to where they launched the edit"
+    );
+    assert!(app.playlist_editor.is_none(), "exit clears the session");
+    assert!(app.browsing_panel.is_none(), "exit tears down the split");
+}
+
+#[test]
 fn enter_playlist_edit_mode_seeds_initial_public() {
     use crate::app_message::{Message, SplitViewMessage};
 
