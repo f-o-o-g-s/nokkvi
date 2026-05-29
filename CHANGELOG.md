@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.6.3 — 2026-05-28
+
+### Added
+
 - New "Player Only" rounded-corners option keeps the playback bar soft while the rest of the UI stays flat.
 - A sticky pill mini-index above the settings detail pane lets you jump to each sub-section; hidden on tabs with only one section.
 
@@ -18,15 +28,13 @@ All notable changes to this project will be documented in this file.
 - Each settings tab's first section now uses concrete domain headings (Library, Navigation, Transitions, Frame, Mode) instead of generic Application/Layout/Appearance/General.
 - Track Info Display moved into the Metadata Strip section next to the other strip controls.
 - Visualizer's Waves, Waves Intensity, and Monstercat smoothing knobs moved from General into the Bars section.
-- The queue's "Playing From" bar is now a richer banner — cover art plus a hover-expand block with the playlist's comment, song count, duration, and visibility.
-- Editing a playlist now opens a dedicated editor view with an "Editing" nav pill instead of taking over the queue tab, so you can leave and return mid-edit.
+- The queue's "Playing From" bar is now a banner with cover art and a hover-expand block showing the playlist's comment, song count, duration, and visibility.
+- Editing a playlist now opens a dedicated editor view with an "Editing" nav pill, so you can leave and return mid-edit.
 
 ### Fixed
 
 - About modal's Ko-fi heart now uses the theme's love color (usually red) instead of the accent color, matching hearts elsewhere in the app.
-- Editing a playlist no longer wipes or replaces your play queue; your music keeps playing and the queue stays intact while you reorder, remove, or add songs.
-
-### Removed
+- Editing a playlist no longer replaces your play queue; your music keeps playing while you reorder, remove, or add songs.
 
 ## v0.6.2 — 2026-05-27
 
