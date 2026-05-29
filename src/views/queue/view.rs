@@ -25,15 +25,44 @@ use crate::{
 
 /// Compact height of the read-only playlist "Playing From" banner.
 pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
-/// Height of the hover-expanded detail block, sized to fit the comment plus
-/// the meta row. `ui_font()` renders monospace, so the wrapped line count is
-/// predictable from the character count and available width — letting the band
-/// fit its content instead of reserving a fixed slab of dead space under short
-/// comments. Capped at `MAX_LINES` (longer comments clip via the container's
-/// `clip(true)`) so a wall-of-text comment can't swallow the queue. The same
-/// value drives the band height and the slot-list chrome math, keeping them in
-/// lockstep.
-fn playlist_strip_detail_height(comment: &str, content_width: f32) -> f32 {
+/// Width available to the expanded playlist strip's content — the song-list
+/// column, i.e. the content pane minus the horizontal artwork column when one
+/// is shown. Vertical / hidden artwork leave the strip full-width. The comment
+/// wraps within this width, so sizing the detail block to it (rather than to
+/// the full pane) is what keeps the meta row from being clipped.
+fn playlist_strip_band_width(window_width: f32, window_height: f32) -> f32 {
+    use crate::widgets::base_slot_list_layout::{
+        ArtworkOrientation, BaseSlotListLayoutConfig, resolve_artwork_layout,
+    };
+    // `resolve_artwork_layout` only reads the window dimensions, the
+    // show-artwork flag, and the display-mode atomics — `slot_list_chrome` /
+    // `elevated` are irrelevant here, so neutral values are fine.
+    let cfg = BaseSlotListLayoutConfig {
+        window_width,
+        window_height,
+        show_artwork_column: true,
+        slot_list_chrome: 0.0,
+        elevated: false,
+    };
+    match resolve_artwork_layout(&cfg) {
+        Some(layout) if matches!(layout.orientation, ArtworkOrientation::Horizontal) => {
+            (window_width - layout.extent).max(120.0)
+        }
+        _ => window_width,
+    }
+}
+
+/// Lay out the hover-expanded detail block: clamp the comment to at most
+/// `MAX_LINES` rendered lines (appending an ellipsis when it would overflow)
+/// and return the display string together with the block height, sized to the
+/// (clamped) comment plus the meta row.
+///
+/// `content_width` is the comment's real rendered width (band width minus the
+/// strip padding). Sizing the block to it — and truncating the comment to fit
+/// — keeps a long description from pushing the meta row past the container's
+/// `clip(true)` and vanishing. Short comments still reserve no dead space.
+/// `ui_font()` is monospace, so the char-count/width estimate is reliable.
+fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
     const LINE_H: f32 = 16.0;
     const CHAR_W: f32 = 7.3;
     const META_ROW_H: f32 = 20.0;
@@ -41,10 +70,18 @@ fn playlist_strip_detail_height(comment: &str, content_width: f32) -> f32 {
     const BOTTOM_PAD: f32 = 9.0;
     const MAX_LINES: f32 = 5.0;
     let cols = (content_width / CHAR_W).floor().max(1.0);
-    let lines = (comment.chars().count() as f32 / cols)
-        .ceil()
-        .clamp(1.0, MAX_LINES);
-    lines * LINE_H + ROW_GAP + META_ROW_H + BOTTOM_PAD
+    let char_count = comment.chars().count();
+    let raw_lines = (char_count as f32 / cols).ceil().max(1.0);
+    let (display, lines) = if raw_lines <= MAX_LINES {
+        (comment.to_string(), raw_lines)
+    } else {
+        // Keep MAX_LINES worth of characters (less one for the ellipsis glyph)
+        // so the rendered comment occupies at most MAX_LINES lines.
+        let keep = ((MAX_LINES * cols) as usize).saturating_sub(1);
+        let truncated: String = comment.chars().take(keep).collect();
+        (format!("{}…", truncated.trim_end()), MAX_LINES)
+    };
+    (display, lines * LINE_H + ROW_GAP + META_ROW_H + BOTTOM_PAD)
 }
 
 /// Format a playlist's total duration for the strip, e.g. `4h 53m` / `47m`.
@@ -160,12 +197,22 @@ impl QueuePage {
 
         // Build final header: regular header + optional "Playing From" banner.
         //
-        // Expanded read-only-strip detail height, sized to the comment so the
-        // band reserves no dead space below short comments (monospace estimate).
-        // Shared by the band and the chrome math below so they stay in sync.
-        let playlist_detail_h = data.playlist_context_info.as_ref().map_or(0.0, |ctx| {
-            playlist_strip_detail_height(&ctx.comment, (data.window_width - 73.0).max(120.0))
-        });
+        // Expanded read-only-strip detail: clamp the comment to the real band
+        // width (the song-list column, excluding the horizontal artwork column)
+        // so it can't overflow the clipped block and push the meta row out of
+        // view. Returns the (possibly ellipsized) display string plus the block
+        // height; both feed the band render and the chrome math below so they
+        // stay in lockstep.
+        let (playlist_comment_display, playlist_detail_h) =
+            data.playlist_context_info.as_ref().map_or_else(
+                || (String::new(), 0.0),
+                |ctx| {
+                    let content_width =
+                        (playlist_strip_band_width(data.window_width, data.window_height) - 73.0)
+                            .max(120.0);
+                    playlist_strip_detail(&ctx.comment, content_width)
+                },
+            );
 
         // Both branches produce the same `column![extra, sep, header]` shape so
         // iced's positional reconciler keeps the search `text_input::Id` stable
@@ -373,7 +420,7 @@ impl QueuePage {
                 });
                 meta_row = meta_row.push(chip);
 
-                let comment_text = iced::widget::text(ctx.comment.clone())
+                let comment_text = iced::widget::text(playlist_comment_display)
                     .font(crate::theme::ui_font())
                     .size(12)
                     .color(crate::theme::fg2());
@@ -720,5 +767,63 @@ impl QueuePage {
             Some(QueueMessage::ArtworkColumnDrag),
             Some(QueueMessage::ArtworkColumnVerticalDrag),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::playlist_strip_detail;
+
+    // 1 line: 1*16 + 8 (gap) + 20 (meta) + 9 (bottom) = 53.
+    const ONE_LINE_H: f32 = 53.0;
+    // 5 lines (MAX_LINES): 5*16 + 8 + 20 + 9 = 117.
+    const MAX_LINES_H: f32 = 117.0;
+
+    #[test]
+    fn short_comment_renders_verbatim_at_one_line() {
+        let (display, height) = playlist_strip_detail("Short note", 555.0);
+        assert_eq!(display, "Short note", "a one-line comment is not altered");
+        assert!(
+            (height - ONE_LINE_H).abs() < f32::EPSILON,
+            "short comment reserves exactly one line + meta row, got {height}"
+        );
+    }
+
+    #[test]
+    fn empty_comment_still_reserves_one_line() {
+        let (display, height) = playlist_strip_detail("", 555.0);
+        assert_eq!(display, "");
+        assert!((height - ONE_LINE_H).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn overflowing_comment_is_ellipsized_and_height_caps() {
+        // ~600 chars at a narrow width vastly exceeds the 5-line cap.
+        let comment = "word ".repeat(120);
+        let (display, height) = playlist_strip_detail(&comment, 200.0);
+        assert!(
+            display.ends_with('…'),
+            "an overflowing comment must end with an ellipsis"
+        );
+        assert!(
+            display.chars().count() < comment.chars().count(),
+            "the display string must be shorter than the source"
+        );
+        assert!(
+            (height - MAX_LINES_H).abs() < f32::EPSILON,
+            "height must cap at MAX_LINES so the meta row stays in view, got {height}"
+        );
+    }
+
+    #[test]
+    fn comment_at_the_cap_is_not_truncated() {
+        // cols = floor(555/7.3) = 76; 5 lines worth ≈ 380 chars. 300 fits.
+        let comment = "x".repeat(300);
+        let (display, _height) = playlist_strip_detail(&comment, 555.0);
+        assert!(
+            !display.ends_with('…'),
+            "a comment within the 5-line budget keeps its full text"
+        );
+        assert_eq!(display.chars().count(), 300);
     }
 }
