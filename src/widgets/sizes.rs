@@ -61,14 +61,16 @@ const _: () = assert!(
 mod tests {
     use super::*;
 
-    /// `ICON_BUTTON_SIZE` MUST match the literal 40 px used by `view_header`'s
-    /// `flat_icon_button` chrome (the most visible call site). If a future
-    /// refactor wants to change either, this test surfaces the drift.
+    /// Pins `ICON_BUTTON_SIZE` to its historic 40 px so a refactor that nudges
+    /// the shared icon-button glyph size fails loudly. This is the inner glyph
+    /// button only — it does NOT feed the slot-count chrome math, and it is not
+    /// the view-header cell size (those cells are `ICON_CELL_WIDTH` 44 ×
+    /// `HEADER_HEIGHT` 50; see `view_header::header_icon_cell`).
     #[test]
-    fn icon_button_size_matches_view_header_chrome() {
+    fn icon_button_size_pinned_to_historic_40px() {
         assert_eq!(
             ICON_BUTTON_SIZE, 40.0,
-            "ICON_BUTTON_SIZE pinned to the historic 40px header chrome",
+            "ICON_BUTTON_SIZE pinned to the historic 40px glyph button",
         );
     }
 
