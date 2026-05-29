@@ -841,6 +841,24 @@ impl PlaybackController {
             .await
     }
 
+    /// Snapshot whether the engine is *genuinely producing audio* right now
+    /// (`PlaybackState::Playing`) — as opposed to merely having a navigator
+    /// `current_song_id`, which is populated from the persisted queue at
+    /// startup even when nothing has ever played.
+    ///
+    /// Callers snapshot this before a queue mutation so
+    /// [`crate::services::playback::decide_removal_aftermath`] can tell a real
+    /// "remove the playing track" from "remove the persisted current row of a
+    /// stopped/paused app". Reads one `Copy` field under a single,
+    /// independently-acquired engine lock that is dropped immediately — never
+    /// nested under the navigator or queue lock.
+    pub async fn engine_is_playing(&self) -> bool {
+        matches!(
+            self.audio_engine.lock().await.state(),
+            crate::audio::engine::PlaybackState::Playing
+        )
+    }
+
     /// Apply a [`RemovalAftermath`] plan to the engine + navigator.
     ///
     /// Called from [`super::app_service::AppService::remove_queue_entries`]
@@ -870,6 +888,7 @@ impl PlaybackController {
             RemovalAftermath::LoadNewCurrent {
                 new_song_id,
                 new_index: _,
+                resume,
             } => {
                 let replay_gain = {
                     let qm_arc = self.queue_service.queue_manager();
@@ -892,9 +911,19 @@ impl PlaybackController {
                 }
 
                 {
+                    // Always swap the engine source to the new current so the
+                    // engine never keeps streaming (or stays cued on) the
+                    // deleted track. `load_track_with_rg` on a stopped/paused
+                    // engine does no network I/O and starts no renderer — the
+                    // decoder only initialises inside `play()`. Resume playback
+                    // ONLY when the engine was genuinely playing: a stopped or
+                    // paused app must not start playing just because its
+                    // current row was removed.
                     let mut engine = self.audio_engine.lock().await;
                     engine.load_track_with_rg(&stream_url, replay_gain).await;
-                    engine.play().await?;
+                    if resume {
+                        engine.play().await?;
+                    }
                 }
 
                 self.queue_navigator
@@ -902,7 +931,14 @@ impl PlaybackController {
                     .await
                     .set_current_song_id(Some(new_song_id.clone()))
                     .await;
-                debug!("▶️ Removal advanced engine to new current: {}", new_song_id);
+                if resume {
+                    debug!("▶️ Removal advanced engine to new current: {}", new_song_id);
+                } else {
+                    debug!(
+                        "⏸️ Removal re-cued stopped/paused engine to new current (no autoplay): {}",
+                        new_song_id
+                    );
+                }
                 Ok(())
             }
         }

@@ -44,13 +44,24 @@ pub enum RemovalAftermath {
     /// Either nothing was playing or the playing song survived the removal.
     /// The engine and the navigator stay as they are.
     NoCurrentChange,
-    /// The playing song was removed and the queue still has songs. The engine
+    /// The current row was removed and the queue still has songs. The engine
     /// must load `new_song_id` (which the queue model has already promoted to
-    /// `queue.current_index = new_index`) and the navigator's `current_song_id`
-    /// must follow.
+    /// `queue.current_index = new_index`) so its source follows the queue
+    /// instead of streaming the deleted track, and the navigator's
+    /// `current_song_id` must follow.
+    ///
+    /// `resume` carries the engine's *real* transport state at removal time:
+    /// `true` only when the engine was genuinely [`PlaybackState::Playing`].
+    /// When `false` (stopped or paused — including a just-reopened app whose
+    /// navigator merely names a persisted `current_index`), the executor loads
+    /// the new source but must NOT call `play()`, so removing the centered row
+    /// of a stopped queue can't spuriously start playback.
+    ///
+    /// [`PlaybackState::Playing`]: crate::audio::engine::PlaybackState::Playing
     LoadNewCurrent {
         new_song_id: String,
         new_index: usize,
+        resume: bool,
     },
     /// The playing song was removed and the queue is now empty. The engine
     /// must stop and the navigator's `current_song_id` must clear.
@@ -68,10 +79,21 @@ pub enum RemovalAftermath {
 /// `was_playing_id` is the song the navigator named *before* the removal;
 /// the caller must snapshot it because the navigator's stored
 /// `current_song_id` is stale by the time this decision runs.
+///
+/// `engine_playing` is the engine's *real* transport state, snapshotted by
+/// the caller (`true` only when `engine.state() == PlaybackState::Playing`).
+/// It is distinct from "the navigator names a current song": the navigator's
+/// `current_song_id` is populated from the persisted `current_index` at
+/// startup, so it is `Some` even on a freshly-reopened, never-played queue.
+/// `engine_playing` flows through to [`RemovalAftermath::LoadNewCurrent::resume`]
+/// so the executor swaps the engine source to the new current either way, but
+/// only resumes playback when the engine was actually playing — a stopped or
+/// paused app must not start playing just because its current row was removed.
 pub fn decide_removal_aftermath(
     qm: &QueueManager,
     was_playing_id: Option<&str>,
     removed_ids: &[String],
+    engine_playing: bool,
 ) -> RemovalAftermath {
     let was_playing = match was_playing_id {
         Some(id) => id,
@@ -86,16 +108,17 @@ pub fn decide_removal_aftermath(
         .and_then(|idx| queue.song_ids.get(idx).map(|id| (id.clone(), idx)))
     {
         Some((new_id, idx)) => {
-            // Duplicate-row case: the playing song was removed from one row,
+            // Duplicate-row case: the current song was removed from one row,
             // but another row with the same song_id still occupies the
-            // current slot. The engine is already producing that song —
-            // leave it alone instead of reloading the same URL.
+            // current slot. If the engine is producing that song it is already
+            // correct — leave it alone instead of reloading the same URL.
             if new_id == was_playing {
                 RemovalAftermath::NoCurrentChange
             } else {
                 RemovalAftermath::LoadNewCurrent {
                     new_song_id: new_id,
                     new_index: idx,
+                    resume: engine_playing,
                 }
             }
         }
@@ -806,13 +829,14 @@ mod tests {
     // engine must keep going as-is, swap to a new source, or stop.
     //
     // Engine is never constructed here; the function under test is a pure
-    // free function over `QueueManager` + `Option<&str>` + `&[String]`.
+    // free function over `QueueManager` + `Option<&str>` + `&[String]` + the
+    // `engine_playing` snapshot (`bool`).
 
     /// Nothing was playing → removal can't have unhooked anything.
     #[test]
     fn removal_aftermath_no_playing_song_returns_no_change() {
         let qm = manager_with_songs(vec![make_song("a"), make_song("b")], None);
-        let plan = decide_removal_aftermath(&qm, None, &["a".to_string()]);
+        let plan = decide_removal_aftermath(&qm, None, &["a".to_string()], false);
         assert_eq!(plan, RemovalAftermath::NoCurrentChange);
     }
 
@@ -826,7 +850,7 @@ mod tests {
         );
         let _ = qm.remove_song_by_id("b").expect("remove b");
 
-        let plan = decide_removal_aftermath(&qm, Some("a"), &["b".to_string()]);
+        let plan = decide_removal_aftermath(&qm, Some("a"), &["b".to_string()], true);
 
         assert_eq!(
             plan,
@@ -835,8 +859,9 @@ mod tests {
         );
     }
 
-    /// Playing song was removed and the queue still has songs → the engine
-    /// must load the song that the queue now exposes at `current_index`.
+    /// Playing song was removed *while genuinely playing* and the queue still
+    /// has songs → the engine must load the song the queue now exposes at
+    /// `current_index` and resume (`resume: true`).
     #[test]
     fn removal_aftermath_playing_song_removed_loads_new_current() {
         // Queue: [a, b, c], current = b (idx 1). Remove b.
@@ -848,13 +873,14 @@ mod tests {
         );
         let _ = qm.remove_song_by_id("b").expect("remove b");
 
-        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()]);
+        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], true);
 
         assert_eq!(
             plan,
             RemovalAftermath::LoadNewCurrent {
                 new_song_id: "c".to_string(),
                 new_index: 1,
+                resume: true,
             },
             "engine must follow the queue's clamped current_index to the next song",
         );
@@ -879,13 +905,15 @@ mod tests {
             .remove_songs_by_ids(&["b".to_string(), "d".to_string()])
             .expect("remove batch");
 
-        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string(), "d".to_string()]);
+        let plan =
+            decide_removal_aftermath(&qm, Some("b"), &["b".to_string(), "d".to_string()], true);
 
         assert_eq!(
             plan,
             RemovalAftermath::LoadNewCurrent {
                 new_song_id: "c".to_string(),
                 new_index: 1,
+                resume: true,
             },
         );
     }
@@ -898,7 +926,7 @@ mod tests {
         let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
         let _ = qm.remove_song_by_id("only").expect("remove only");
 
-        let plan = decide_removal_aftermath(&qm, Some("only"), &["only".to_string()]);
+        let plan = decide_removal_aftermath(&qm, Some("only"), &["only".to_string()], true);
 
         assert_eq!(
             plan,
@@ -960,12 +988,13 @@ mod tests {
 
         // And the aftermath plan, fed the pre-mutation resolution, correctly
         // routes the engine to "c" (queue's clamp landed there).
-        let plan = decide_removal_aftermath(&qm, Some("b"), &removed_song_ids);
+        let plan = decide_removal_aftermath(&qm, Some("b"), &removed_song_ids, true);
         assert_eq!(
             plan,
             RemovalAftermath::LoadNewCurrent {
                 new_song_id: "c".to_string(),
                 new_index: 1,
+                resume: true,
             },
         );
     }
@@ -989,7 +1018,7 @@ mod tests {
         assert_eq!(qm.get_queue().song_ids, vec!["dup", "b"]);
         assert_eq!(qm.get_queue().current_index, Some(0));
 
-        let plan = decide_removal_aftermath(&qm, Some("dup"), &["dup".to_string()]);
+        let plan = decide_removal_aftermath(&qm, Some("dup"), &["dup".to_string()], true);
 
         assert_eq!(
             plan,
@@ -1008,8 +1037,107 @@ mod tests {
             .remove_songs_by_ids(&["a".to_string(), "b".to_string()])
             .expect("remove all");
 
-        let plan = decide_removal_aftermath(&qm, Some("a"), &["a".to_string(), "b".to_string()]);
+        let plan =
+            decide_removal_aftermath(&qm, Some("a"), &["a".to_string(), "b".to_string()], true);
 
         assert_eq!(plan, RemovalAftermath::StopEmpty);
+    }
+
+    // ── Regression: removal must not start playback from a non-playing app ──
+    //
+    // Root cause: `was_playing_id` is the navigator's `current_song_id`, which
+    // `QueueNavigator::new` seeds from the persisted `current_index` at startup
+    // — so it is `Some` on a freshly-reopened, never-played queue. The engine's
+    // real transport state (`engine_playing`) is the discriminator: a stopped
+    // or paused app re-cues its source to the new current (`LoadNewCurrent`)
+    // but must NOT resume (`resume: false`).
+
+    /// THE REPORTED BUG. Stopped engine (e.g. app reopened, or user pressed
+    /// Stop), the navigator still names the persisted current row, and that row
+    /// is removed. The engine source must follow the queue to the next song so
+    /// a later manual Play is correct — but playback must NOT auto-start.
+    #[test]
+    fn removal_aftermath_stopped_engine_removed_current_recues_without_resume() {
+        // Queue: [a, b, c], current = b (idx 1). Remove b. After: [a, c],
+        // current_index clamps to 1 (c). engine_playing = false (Stopped).
+        let mut qm = manager_with_songs(
+            vec![make_song("a"), make_song("b"), make_song("c")],
+            Some(1),
+        );
+        let _ = qm.remove_song_by_id("b").expect("remove b");
+
+        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], false);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::LoadNewCurrent {
+                new_song_id: "c".to_string(),
+                new_index: 1,
+                resume: false,
+            },
+            "a stopped app must re-cue to the new current WITHOUT starting playback",
+        );
+    }
+
+    /// Paused engine snapshots to `engine_playing = false` exactly like a
+    /// stopped one — removing the paused current row re-cues the source but
+    /// must not resume into playback.
+    #[test]
+    fn removal_aftermath_paused_engine_removed_current_recues_without_resume() {
+        let mut qm = manager_with_songs(
+            vec![make_song("a"), make_song("b"), make_song("c")],
+            Some(1),
+        );
+        let _ = qm.remove_song_by_id("b").expect("remove b");
+
+        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], false);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::LoadNewCurrent {
+                new_song_id: "c".to_string(),
+                new_index: 1,
+                resume: false,
+            },
+            "a paused app must re-cue to the new current WITHOUT resuming playback",
+        );
+    }
+
+    /// The play-state gate is scoped strictly to the `LoadNewCurrent` arm:
+    /// emptying the queue from a stopped app still routes to `StopEmpty`
+    /// (engine.stop() + navigator clear), never a re-cue.
+    #[test]
+    fn removal_aftermath_stopped_engine_emptied_still_stops() {
+        let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
+        let _ = qm.remove_song_by_id("only").expect("remove only");
+
+        let plan = decide_removal_aftermath(&qm, Some("only"), &["only".to_string()], false);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::StopEmpty,
+            "emptying the queue must stop the engine regardless of play-state",
+        );
+    }
+
+    /// The duplicate-row guard precedes the play-state gate: a surviving
+    /// duplicate of the same song still occupies `current_index`, so the
+    /// engine is left alone — `NoCurrentChange`, not a re-cue — whether or not
+    /// the engine was playing.
+    #[test]
+    fn removal_aftermath_duplicate_survives_no_change_when_stopped() {
+        let mut qm = manager_with_songs(
+            vec![make_song("dup"), make_song("dup"), make_song("b")],
+            Some(0),
+        );
+        let _ = qm.remove_song(0).expect("remove duplicate row");
+
+        let plan = decide_removal_aftermath(&qm, Some("dup"), &["dup".to_string()], false);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::NoCurrentChange,
+            "a surviving duplicate keeps the engine untouched regardless of play-state",
+        );
     }
 }

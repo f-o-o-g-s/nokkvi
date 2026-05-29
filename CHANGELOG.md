@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 - Tabbing through long settings tabs (Hotkeys, Theme, Visualizer) now keeps the selected row centered in view instead of letting it scroll out of sight.
 - The queue's "Playing From" banner no longer stays stuck expanded after you enter or leave the playlist editor; it collapses again when not hovered.
+- Removing the current song from a stopped queue (after a restart or pressing Stop) no longer kicks playback into starting on its own; the queue stays stopped until you press play.
 
 ### Removed
 

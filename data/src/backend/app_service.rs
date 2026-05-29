@@ -897,6 +897,12 @@ impl AppService {
         }
 
         let was_playing_id = self.playback.current_song_id().await;
+        // The engine's *real* transport state — distinct from "the navigator
+        // names a current song" (which is true on a freshly-reopened, stopped
+        // queue). Snapshotted here, before the mutation, as an independent
+        // one-shot engine lock so removing the current row of a stopped/paused
+        // app re-cues the engine without starting playback.
+        let engine_playing = self.playback.engine_is_playing().await;
 
         // Resolve each entry_id → its song_id *before* the removal. The
         // post-removal queue no longer holds those entries, and
@@ -923,6 +929,7 @@ impl AppService {
                 &qm,
                 was_playing_id.as_deref(),
                 &removed_song_ids,
+                engine_playing,
             )
         };
 
