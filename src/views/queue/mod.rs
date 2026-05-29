@@ -47,7 +47,9 @@ pub struct QueuePage {
     /// Transient: whether the read-only playlist context strip is expanded to
     /// reveal its detail block. Driven by hover
     /// (`PlaylistStripHoverEnter`/`Exit`); reset whenever the active playlist
-    /// changes or clears so a stale expansion never carries over.
+    /// changes or clears so a stale expansion never carries over. Also reset on
+    /// entering and exiting playlist edit mode, because that transition unmounts
+    /// the banner's hover `mouse_area` and the `on_exit` collapse can never fire.
     pub playlist_strip_expanded: bool,
 }
 

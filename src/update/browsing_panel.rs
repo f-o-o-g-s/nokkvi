@@ -146,6 +146,12 @@ impl Nokkvi {
         // banner pointing at the edited playlist after the user discards.
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
+        // Collapse the "Playing From" banner: the view swap below unmounts its
+        // hover `mouse_area`, so the `on_exit` that would normally collapse a
+        // hover-expanded strip can never fire. Reset the flag here (a reset hook
+        // alongside `clear_active_playlist`) so the banner re-mounts collapsed
+        // rather than carrying a stale expansion onto the Queue tab.
+        self.queue_page.playlist_strip_expanded = false;
         // Remember where the edit was launched from so discard/exit returns
         // there (mirrors `pre_settings_view`). Guard against re-entry from the
         // editor itself, which would trap the return view on the editor.
@@ -203,6 +209,10 @@ impl Nokkvi {
         self.playlist_editor = None;
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;
+        // Symmetric to the enter edge: the queue banner re-mounts here with no
+        // cursor over it, so clear any expansion stranded during the session
+        // (its hover `on_exit` could not fire while the banner was unmounted).
+        self.queue_page.playlist_strip_expanded = false;
 
         // Return to wherever the edit was launched from (mirrors closing
         // Settings). Cleared the session above first, so the switch-view guard

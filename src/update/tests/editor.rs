@@ -53,6 +53,43 @@ fn entering_edit_mode_does_not_touch_queue() {
 }
 
 #[test]
+fn entering_edit_mode_collapses_playlist_strip() {
+    // The "Playing From" banner's hover `mouse_area` is unmounted the moment
+    // edit mode swaps the queue pane out for the editor, so its `on_exit` can
+    // never fire to collapse a hover-expanded strip. Edit-mode entry must reset
+    // the expansion flag explicitly (a reset hook alongside
+    // `clear_active_playlist`), or the banner re-mounts stale-expanded with no
+    // cursor over it (e.g. on the Queue tab mid-edit).
+    let mut app = test_app();
+    app.queue_page.playlist_strip_expanded = true;
+
+    enter_edit(&mut app, "pl_1");
+
+    assert!(
+        !app.queue_page.playlist_strip_expanded,
+        "entering edit mode must collapse the playlist strip (its hover on_exit \
+         can never fire once the banner is unmounted)"
+    );
+}
+
+#[test]
+fn exiting_edit_mode_collapses_playlist_strip() {
+    // Symmetric to the enter edge: leaving edit mode re-mounts the queue banner.
+    // A strip expansion stranded true during the session must not survive the
+    // return, or the banner appears fully expanded with no cursor over it.
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+    app.queue_page.playlist_strip_expanded = true;
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
+
+    assert!(
+        !app.queue_page.playlist_strip_expanded,
+        "exiting edit mode must re-mount the queue banner collapsed"
+    );
+}
+
+#[test]
 fn editor_songs_loaded_populates_buffer() {
     let mut app = test_app();
     app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
