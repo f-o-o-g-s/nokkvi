@@ -34,6 +34,8 @@ impl From<View> for Option<widgets::NavView> {
             View::Playlists => Some(widgets::NavView::Playlists),
             View::Radios => Some(widgets::NavView::Radios),
             View::Settings => None,
+            // Contextual destinations with no permanent nav tab.
+            View::PlaylistEditor => None,
         }
     }
 }
@@ -1496,6 +1498,16 @@ impl Nokkvi {
         // Normal single-view layout
         // =====================================================================
         match self.current_view {
+            // The editor renders through its own split block above this match
+            // (see the `current_view == View::PlaylistEditor` branch). This arm
+            // is a defensive fallback for the unreachable case where a session
+            // was cleared mid-render.
+            View::PlaylistEditor => container(
+                iced::widget::Space::new()
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .into(),
             View::Albums => {
                 let view_data = self.build_albums_view_data(
                     self.content_pane_width(),
@@ -1631,15 +1643,17 @@ mod tests {
     use super::*;
 
     /// Every `View` variant must convert to either `Some(NavView)` or `None`
-    /// (Settings) — the table doubles as a length-anchor: adding a `View`
-    /// variant without updating the conversion fails this test, not just at
-    /// compile time.
+    /// (the contextual, no-permanent-tab views: Settings and PlaylistEditor)
+    /// — the table doubles as a length-anchor: adding a `View` variant without
+    /// updating the conversion fails this test, not just at compile time.
     #[test]
     fn view_to_nav_view_covers_every_variant() {
         for &v in View::ALL {
             let nav: Option<widgets::NavView> = v.into();
             match v {
-                View::Settings => assert!(nav.is_none(), "Settings has no NavView"),
+                View::Settings | View::PlaylistEditor => {
+                    assert!(nav.is_none(), "{v:?} is contextual — no NavView")
+                }
                 _ => assert!(nav.is_some(), "{v:?} must map to a NavView"),
             }
         }

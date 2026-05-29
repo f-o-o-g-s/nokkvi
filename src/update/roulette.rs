@@ -108,7 +108,7 @@ impl Nokkvi {
             View::Artists => self.artists_page.expansion.clear(),
             View::Genres => self.genres_page.expansion.clear(),
             View::Playlists => self.playlists_page.expansion.clear(),
-            View::Queue | View::Songs | View::Radios | View::Settings => {}
+            View::Queue | View::Songs | View::Radios | View::Settings | View::PlaylistEditor => {}
         }
 
         // Clear any prior click-driven selection so the centered row gets
@@ -343,7 +343,7 @@ impl Nokkvi {
             View::Genres => self.library.genres.len(),
             View::Playlists => self.library.playlists.len(),
             View::Radios => self.library.radio_stations.len(),
-            View::Settings => 0,
+            View::Settings | View::PlaylistEditor => 0,
         }
     }
 

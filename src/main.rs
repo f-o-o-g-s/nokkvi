@@ -60,6 +60,11 @@ pub enum View {
     Playlists,
     Radios,
     Settings,
+    /// Playlist editor — a contextual destination with no permanent nav tab
+    /// (like `Settings`). Reached only while an edit session is active, via
+    /// the contextual "Editing" pill; entering/leaving never disturbs the
+    /// live play queue, which keeps its own `Queue` tab.
+    PlaylistEditor,
 }
 
 impl View {
@@ -73,14 +78,15 @@ impl View {
         View::Playlists,
         View::Radios,
         View::Settings,
+        View::PlaylistEditor,
     ];
 }
 
 // Length anchor: adding a `View` variant without extending `ALL` fails to
 // compile. Both directions are needed — a single subtraction passes if
 // either side is too small.
-const _: [(); 8 - View::ALL.len()] = [];
-const _: [(); View::ALL.len() - 8] = [];
+const _: [(); 9 - View::ALL.len()] = [];
+const _: [(); View::ALL.len() - 9] = [];
 
 // ============================================================================
 // SECTION: Application State (KEEP IN main.rs)
@@ -120,6 +126,10 @@ pub struct Nokkvi {
     pub current_view: View,
     /// View to restore when closing Settings (captured on Settings open)
     pub pre_settings_view: View,
+    /// View to restore when leaving the playlist editor (captured on enter).
+    /// Mirrors `pre_settings_view` — the editor is a transient destination, so
+    /// save/discard returns the user to wherever they launched the edit from.
+    pub editor_return_view: View,
 
     // -------------------------------------------------------------------------
     // Auto-login flag (credentials stored in LoginPage)
@@ -339,6 +349,7 @@ impl Default for Nokkvi {
             screen: Screen::Login,
             current_view: View::Queue,
             pre_settings_view: View::Queue,
+            editor_return_view: View::Queue,
             should_auto_login,
             stored_session,
             library: crate::state::LibraryData::default(),

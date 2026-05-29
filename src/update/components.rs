@@ -703,7 +703,8 @@ impl Nokkvi {
                         crate::View::Queue
                         | crate::View::Playlists
                         | crate::View::Radios
-                        | crate::View::Settings => None,
+                        | crate::View::Settings
+                        | crate::View::PlaylistEditor => None,
                     };
                     if browse_view.is_some() {
                         return Some(Task::done(Message::Navigation(

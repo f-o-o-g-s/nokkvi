@@ -78,7 +78,9 @@ impl Nokkvi {
             View::Playlists => Some(&self.playlists_page),
             View::Queue => Some(&self.queue_page),
             View::Radios => Some(&self.radios_page),
-            View::Settings => None,
+            // No `ViewPage` impl — the editor routes its slot events through
+            // `EditorMessage::SlotList`, not the generic page dispatch.
+            View::Settings | View::PlaylistEditor => None,
         }
     }
 
@@ -92,7 +94,7 @@ impl Nokkvi {
             View::Playlists => Some(&mut self.playlists_page),
             View::Queue => Some(&mut self.queue_page),
             View::Radios => Some(&mut self.radios_page),
-            View::Settings => None,
+            View::Settings | View::PlaylistEditor => None,
         }
     }
 

@@ -138,7 +138,7 @@ impl Nokkvi {
             View::Songs => self.handle_load_songs(false, None),
             View::Genres => self.handle_load_genres(),
             View::Playlists => self.handle_load_playlists(),
-            View::Queue | View::Radios | View::Settings => Task::none(),
+            View::Queue | View::Radios | View::Settings | View::PlaylistEditor => Task::none(),
         }
     }
 

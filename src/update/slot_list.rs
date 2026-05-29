@@ -247,6 +247,10 @@ impl Nokkvi {
                 .is_empty(),
                 View::Radios => self.filter_radio_stations().is_empty(),
                 View::Settings => false,
+                View::PlaylistEditor => self
+                    .playlist_editor
+                    .as_ref()
+                    .is_none_or(|e| e.songs.is_empty()),
             };
 
             if is_empty {

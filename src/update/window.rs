@@ -168,7 +168,11 @@ impl Nokkvi {
                     ),
                 ))
             }
-            View::Genres | View::Playlists | View::Radios | View::Settings => Task::none(),
+            View::Genres
+            | View::Playlists
+            | View::Radios
+            | View::Settings
+            | View::PlaylistEditor => Task::none(),
         }
     }
 
@@ -257,7 +261,11 @@ impl Nokkvi {
                 }
                 Some(self.handle_load_artist_large_artwork(artist_id))
             }
-            View::Genres | View::Playlists | View::Radios | View::Settings => None,
+            View::Genres
+            | View::Playlists
+            | View::Radios
+            | View::Settings
+            | View::PlaylistEditor => None,
         }
     }
 
