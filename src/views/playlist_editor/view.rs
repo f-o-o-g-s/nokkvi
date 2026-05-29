@@ -8,10 +8,10 @@
 //! no "now playing" concept) and an editor-specific 2-entry context menu
 //! (Get Info / Remove from playlist) instead of the queue's 11-entry menu.
 //!
-//! The edit-bar header reproduces the queue view's edit bar (eyebrow + name
-//! input + comment input + public toggle + save/discard) so the two surfaces
-//! look identical. The metadata-edit messages route to [`EditorMessage`]
-//! variants; the discard control reuses the existing
+//! The edit-bar header (eyebrow + name input + comment input + public toggle +
+//! save/discard) mirrors the queue's read-only "Playing From" banner chrome so
+//! the two surfaces look cohesive. The metadata-edit messages route to
+//! [`EditorMessage`] variants; the discard control reuses the existing
 //! [`SplitViewMessage::ExitEditMode`] path mapped to the root [`Message`].
 //!
 //! Root-widget stability: every branch returns a `Column` (via
@@ -33,8 +33,9 @@ use crate::{
     widgets::{self, hover_overlay::HoverOverlay},
 };
 
-/// Height of the editor's edit-bar header. Matches the queue edit bar
-/// (`views::queue::view::PLAYLIST_EDIT_BAR_H`) so the chrome lines up.
+/// Height of the editor's edit-bar header (eyebrow over the name + comment
+/// inputs, with the public/save/discard actions). Sized to sit comfortably
+/// above the shared `song_list_pane` rows.
 const EDIT_BAR_H: f32 = 60.0;
 
 /// Linear blend of `base` toward `toward` by `t`, preserving `base`'s alpha —

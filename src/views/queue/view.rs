@@ -25,9 +25,6 @@ use crate::{
 
 /// Compact height of the read-only playlist "Playing From" banner.
 pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
-/// Height of the playlist edit-mode header. Taller than the read-only band
-/// because it stacks an eyebrow over the name + comment inputs.
-pub(crate) const PLAYLIST_EDIT_BAR_H: f32 = 60.0;
 /// Height of the hover-expanded detail block, sized to fit the comment plus
 /// the meta row. `ui_font()` renders monospace, so the wrapped line count is
 /// predictable from the character count and available width — letting the band
@@ -161,7 +158,7 @@ impl QueuePage {
             on_roulette: Some(QueueMessage::Roulette),
         });
 
-        // Build final header: regular header + optional edit mode bar.
+        // Build final header: regular header + optional "Playing From" banner.
         //
         // Expanded read-only-strip detail height, sized to the comment so the
         // band reserves no dead space below short comments (monospace estimate).
@@ -170,213 +167,15 @@ impl QueuePage {
             playlist_strip_detail_height(&ctx.comment, (data.window_width - 73.0).max(120.0))
         });
 
-        // Every branch produces the same `column![extra, sep, header]` shape so
+        // Both branches produce the same `column![extra, sep, header]` shape so
         // iced's positional reconciler keeps the search `text_input::Id` stable
-        // across edit / playlist-context / read-only mode toggles. In read-only
-        // mode `extra` and `sep` are zero-sized `Space` placeholders.
-        let extra: Element<'a, QueueMessage> = if let Some((ref name, _)) = data.edit_mode_info {
-            use iced::widget::svg;
-
-            let accent = crate::theme::accent();
-
-            // Eyebrow mirrors the read-only banner's "PLAYING FROM PLAYLIST".
-            let eyebrow = iced::widget::text("EDITING PLAYLIST")
-                .font(iced::font::Font {
-                    weight: iced::font::Weight::Semibold,
-                    ..crate::theme::ui_font()
-                })
-                .size(9.5)
-                .color(accent)
-                .wrapping(iced::widget::text::Wrapping::None);
-
-            let name_input = iced::widget::text_input("Playlist name", name)
-                .on_input(QueueMessage::PlaylistNameChanged)
-                .font(iced::font::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..crate::theme::ui_font()
-                })
-                .size(14)
-                .width(Length::Fill)
-                .padding([2, 4])
-                .style(|_theme, _status| iced::widget::text_input::Style {
-                    background: iced::Background::Color(iced::Color::TRANSPARENT),
-                    border: iced::Border {
-                        color: crate::theme::bg3(),
-                        width: 0.0,
-                        radius: crate::theme::ui_border_radius(),
-                    },
-                    icon: crate::theme::fg0(),
-                    placeholder: crate::theme::fg2(),
-                    value: crate::theme::fg0(),
-                    selection: crate::theme::selection_color(),
-                });
-
-            // Comment text input — lighter, smaller, visually secondary
-            let comment_value = data.edit_mode_comment.as_deref().unwrap_or_default();
-            let comment_input = iced::widget::text_input("Comment", comment_value)
-                .on_input(QueueMessage::PlaylistCommentChanged)
-                .font(crate::theme::ui_font())
-                .size(11)
-                .width(Length::Fill)
-                .padding([2, 4])
-                .style(|_theme, _status| iced::widget::text_input::Style {
-                    background: iced::Background::Color(iced::Color::TRANSPARENT),
-                    border: iced::Border {
-                        color: crate::theme::bg3(),
-                        width: 0.0,
-                        radius: crate::theme::ui_border_radius(),
-                    },
-                    icon: crate::theme::fg2(),
-                    placeholder: crate::theme::fg2(),
-                    value: crate::theme::fg2(),
-                    selection: crate::theme::selection_color(),
-                });
-
-            // Icon-only action button — mouse_area + HoverOverlay(container) so the
-            // press scale effect fires (native button captures ButtonPressed first).
-            let icon_btn =
-                |icon_path: &'static str, msg: QueueMessage| -> Element<'a, QueueMessage> {
-                    let icon = crate::embedded_svg::svg_widget(icon_path)
-                        .width(Length::Fixed(14.0))
-                        .height(Length::Fixed(14.0))
-                        .style(|_theme, _status| svg::Style {
-                            color: Some(crate::theme::fg2()),
-                        });
-                    mouse_area(
-                        HoverOverlay::new(
-                            container(icon)
-                                .padding([4, 6])
-                                .style(|_theme| container::Style {
-                                    background: None,
-                                    border: iced::Border {
-                                        color: iced::Color::TRANSPARENT,
-                                        width: 2.0,
-                                        radius: crate::theme::ui_border_radius(),
-                                    },
-                                    ..Default::default()
-                                })
-                                .center_y(Length::Shrink),
-                        )
-                        .border_radius(crate::theme::ui_border_radius()),
-                    )
-                    .on_press(msg)
-                    .interaction(iced::mouse::Interaction::Pointer)
-                    .into()
-                };
-
-            // Public/Private toggle — accent when public (default), muted when
-            // private. Built inline (not via `icon_btn`) so the icon path and
-            // tint can vary with the current state.
-            let is_public = data.edit_mode_public.unwrap_or(true);
-            let public_toggle: Element<'a, QueueMessage> = {
-                let icon_path = if is_public {
-                    "assets/icons/lock-open.svg"
-                } else {
-                    "assets/icons/lock.svg"
-                };
-                let tint = if is_public {
-                    crate::theme::accent()
-                } else {
-                    crate::theme::fg2()
-                };
-                let tooltip_label = if is_public {
-                    "Public — click to make private"
-                } else {
-                    "Private — click to make public"
-                };
-                let icon = crate::embedded_svg::svg_widget(icon_path)
-                    .width(Length::Fixed(14.0))
-                    .height(Length::Fixed(14.0))
-                    .style(move |_theme, _status| svg::Style { color: Some(tint) });
-                let trigger = mouse_area(
-                    HoverOverlay::new(
-                        container(icon)
-                            .padding([4, 6])
-                            .style(|_theme| container::Style {
-                                background: None,
-                                border: iced::Border {
-                                    color: iced::Color::TRANSPARENT,
-                                    width: 2.0,
-                                    radius: crate::theme::ui_border_radius(),
-                                },
-                                ..Default::default()
-                            })
-                            .center_y(Length::Shrink),
-                    )
-                    .border_radius(crate::theme::ui_border_radius()),
-                )
-                .on_press(QueueMessage::PlaylistEditPublicToggled(!is_public))
-                .interaction(iced::mouse::Interaction::Pointer);
-                iced::widget::tooltip(
-                    trigger,
-                    container(
-                        iced::widget::text(tooltip_label)
-                            .size(11.0)
-                            .font(crate::theme::ui_font()),
-                    )
-                    .padding(4),
-                    iced::widget::tooltip::Position::Bottom,
-                )
-                .gap(4)
-                .style(crate::theme::container_tooltip)
-                .into()
-            };
-
-            let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
-            let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
-
-            // Accent stripe + faint wash mirror the read-only banner chrome.
-            let stripe = container(Space::new())
-                .width(Length::Fixed(3.0))
-                .height(Length::Fill)
-                .style(move |_theme| container::Style {
-                    background: Some(accent.into()),
-                    ..Default::default()
-                });
-
-            // Left: eyebrow over the name + comment inputs (mirrors the banner's
-            // eyebrow/name stack). Right: the action icons grouped as a tidy set.
-            let left = column![eyebrow, name_input, comment_input]
-                .spacing(2)
-                .width(Length::Fill);
-            let actions = row![public_toggle, save_btn, discard_btn]
-                .spacing(2)
-                .align_y(Alignment::Center);
-
-            let content = container(
-                row![left, actions]
-                    .spacing(10)
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill)
-                    .padding(iced::Padding {
-                        top: 0.0,
-                        right: 13.0,
-                        bottom: 0.0,
-                        left: 11.0,
-                    }),
-            )
-            .center_y(Length::Fixed(PLAYLIST_EDIT_BAR_H))
-            .width(Length::Fill);
-
-            let wash = blend_toward(crate::theme::bg0_soft(), accent, 0.07);
-
-            container(
-                row![stripe, content]
-                    .width(Length::Fill)
-                    .height(Length::Fixed(PLAYLIST_EDIT_BAR_H)),
-            )
-            .width(Length::Fill)
-            .height(Length::Fixed(PLAYLIST_EDIT_BAR_H))
-            .style(move |_theme| container::Style {
-                background: Some(wash.into()),
-                ..Default::default()
-            })
-            .into()
-        } else if let Some(ref ctx) = data.playlist_context_info {
+        // across the playlist-context / read-only toggle. With no playlist loaded
+        // `extra` and `sep` are zero-sized `Space` placeholders.
+        let extra: Element<'a, QueueMessage> = if let Some(ref ctx) = data.playlist_context_info {
             // Read-only "Playing From" banner (Direction 2). Renders only while a
-            // playlist is loaded for playback and not editing (the edit arm above
-            // takes precedence). Hovering the band reveals a detail block; the
-            // banner grows in flow and the slot-list chrome height tracks it.
+            // playlist is loaded for playback. Hovering the band reveals a detail
+            // block; the banner grows in flow and the slot-list chrome height
+            // tracks it. Editing happens in the decoupled `PlaylistEditor` view.
             use iced::widget::svg;
 
             let accent = crate::theme::accent();
@@ -621,15 +420,14 @@ impl QueuePage {
                 .height(Length::Fixed(0.0))
                 .into()
         };
-        let sep: Element<'a, QueueMessage> =
-            if data.edit_mode_info.is_some() || data.playlist_context_info.is_some() {
-                crate::theme::horizontal_separator(1.0)
-            } else {
-                Space::new()
-                    .width(Length::Shrink)
-                    .height(Length::Fixed(0.0))
-                    .into()
-            };
+        let sep: Element<'a, QueueMessage> = if data.playlist_context_info.is_some() {
+            crate::theme::horizontal_separator(1.0)
+        } else {
+            Space::new()
+                .width(Length::Shrink)
+                .height(Length::Fixed(0.0))
+                .into()
+        };
         let header: Element<'a, QueueMessage> = column![extra, sep, header].into();
 
         // Compose with the tri-state "select all" header bar when the
@@ -642,17 +440,14 @@ impl QueuePage {
             header,
         );
 
-        // Configure slot list with queue-specific chrome height (with view header now)
-        // Edit mode adds a 44px bar + context bar adds 32px bar; account for the tallest so
-        // the last slot isn't shorter than the rest.
+        // Configure slot list with queue-specific chrome height (with view header now).
+        // The "Playing From" banner adds its own height; account for it so the last
+        // slot isn't shorter than the rest.
         use crate::widgets::slot_list::{
             chrome_height_with_header, chrome_height_with_select_header,
         };
         let select_header_visible = self.column_visibility.select;
-        let chrome_height = if data.edit_mode_info.is_some() {
-            // Edit-mode header + 1px separator.
-            chrome_height_with_header() + PLAYLIST_EDIT_BAR_H + 1.0
-        } else if data.playlist_context_info.is_some() {
+        let chrome_height = if data.playlist_context_info.is_some() {
             // Compact "Playing From" banner + 1px separator, plus the detail
             // block height when the strip is hover-expanded (grow-in-flow).
             let strip = if data.playlist_strip_expanded {
@@ -664,9 +459,7 @@ impl QueuePage {
         } else {
             chrome_height_with_select_header(select_header_visible)
         };
-        let chrome_height = if select_header_visible
-            && (data.edit_mode_info.is_some() || data.playlist_context_info.is_some())
-        {
+        let chrome_height = if select_header_visible && data.playlist_context_info.is_some() {
             chrome_height + crate::widgets::slot_list::SELECT_HEADER_HEIGHT
         } else {
             chrome_height

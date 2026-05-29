@@ -246,17 +246,6 @@ impl QueuePage {
                 }
                 QueueContextEntry::TopSongs => (Task::none(), QueueAction::TopSongs(clicked_idx)),
             },
-            QueueMessage::SavePlaylist => (Task::none(), QueueAction::SavePlaylist),
-            QueueMessage::DiscardEdits => (Task::none(), QueueAction::DiscardEdits),
-            QueueMessage::PlaylistNameChanged(name) => {
-                (Task::none(), QueueAction::PlaylistNameChanged(name))
-            }
-            QueueMessage::PlaylistCommentChanged(comment) => {
-                (Task::none(), QueueAction::PlaylistCommentChanged(comment))
-            }
-            QueueMessage::PlaylistEditPublicToggled(value) => {
-                (Task::none(), QueueAction::PlaylistEditPublicToggled(value))
-            }
             QueueMessage::EditPlaylist => (Task::none(), QueueAction::EditPlaylist),
             QueueMessage::QuickSavePlaylist => (Task::none(), QueueAction::SaveAsPlaylist),
             QueueMessage::RefreshArtwork(album_id) => {

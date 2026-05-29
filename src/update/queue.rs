@@ -475,27 +475,6 @@ impl Nokkvi {
                     );
                 }
             }
-            QueueAction::SavePlaylist => {
-                return Task::done(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
-            }
-            QueueAction::DiscardEdits => {
-                return Task::done(Message::SplitView(SplitViewMessage::ExitEditMode));
-            }
-            QueueAction::PlaylistNameChanged(name) => {
-                if let Some(edit_state) = self.playlist_editor.as_mut().map(|e| &mut e.edit) {
-                    edit_state.set_name(name);
-                }
-            }
-            QueueAction::PlaylistCommentChanged(comment) => {
-                if let Some(edit_state) = self.playlist_editor.as_mut().map(|e| &mut e.edit) {
-                    edit_state.set_comment(comment);
-                }
-            }
-            QueueAction::PlaylistEditPublicToggled(value) => {
-                if let Some(edit_state) = self.playlist_editor.as_mut().map(|e| &mut e.edit) {
-                    edit_state.set_public(value);
-                }
-            }
             QueueAction::EditPlaylist => {
                 // Enter edit mode for the currently-playing playlist. Look up
                 // the cached visibility from the playlists library; fall back

@@ -89,13 +89,8 @@ pub struct QueueViewData<'a> {
     /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
     /// side-nav / none-nav.
     pub elevated: bool,
-    /// When in edit mode: (playlist_name, is_dirty)
-    pub edit_mode_info: Option<(String, bool)>,
-    /// Playlist comment when in edit mode
-    pub edit_mode_comment: Option<String>,
-    /// Playlist public flag when in edit mode (drives the lock toggle button)
-    pub edit_mode_public: Option<bool>,
-    /// When a playlist is loaded for playback (not editing)
+    /// When a playlist is loaded for playback (editing happens in the
+    /// decoupled `PlaylistEditor` view, never in the queue).
     pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,
     /// Whether the read-only playlist context strip should render its expanded
     /// detail block this frame (mirrors `QueuePage.playlist_strip_expanded`).
@@ -160,12 +155,8 @@ pub enum QueueMessage {
     /// root handler before the page's `update` runs.
     Roulette,
 
-    // Playlist edit mode
-    SavePlaylist,
-    DiscardEdits,
-    PlaylistNameChanged(String),
-    PlaylistCommentChanged(String),
-    PlaylistEditPublicToggled(bool),
+    // Playlist editing entry points. The editor itself is the decoupled
+    // `PlaylistEditor` view; the queue only launches it / quick-saves.
     EditPlaylist,      // Enter edit mode for the currently-playing playlist
     QuickSavePlaylist, // Save current queue back to the active playlist without entering edit mode
 
@@ -222,21 +213,16 @@ pub enum QueueAction {
     /// referenced by per-row `entry_id` so a single duplicate row can be
     /// promoted without dragging the other duplicate with it.
     PlayNext(Vec<u64>),
-    ShowToast(String),           // informational toast (e.g. drag disabled reason)
-    SaveAsPlaylist,              // open dialog to save queue as new playlist
-    OpenBrowsingPanel,           // toggle the library browser panel
-    AddToPlaylist(Vec<String>),  // song_ids - add to playlist dialog
-    SavePlaylist,                // save playlist edits (edit mode)
-    DiscardEdits,                // discard edits and exit edit mode
-    PlaylistNameChanged(String), // playlist name edited inline
-    PlaylistCommentChanged(String), // playlist comment edited inline
-    PlaylistEditPublicToggled(bool), // public/private toggled in the edit bar
-    EditPlaylist,                // enter edit mode from playlist context bar
-    ShowInfo(usize),             // Open info modal (queue index for full Song lookup)
-    ShowInFolder(usize),         // Open containing folder (queue index, path fetched via API)
-    RefreshArtwork(String),      // album_id - refresh artwork from server
-    FindSimilar(usize),          // Open Find Similar panel for queue index
-    TopSongs(usize),             // Open Top Songs panel for queue index
+    ShowToast(String),          // informational toast (e.g. drag disabled reason)
+    SaveAsPlaylist,             // open dialog to save queue as new playlist
+    OpenBrowsingPanel,          // toggle the library browser panel
+    AddToPlaylist(Vec<String>), // song_ids - add to playlist dialog
+    EditPlaylist,               // enter edit mode from playlist context bar
+    ShowInfo(usize),            // Open info modal (queue index for full Song lookup)
+    ShowInFolder(usize),        // Open containing folder (queue index, path fetched via API)
+    RefreshArtwork(String),     // album_id - refresh artwork from server
+    FindSimilar(usize),         // Open Find Similar panel for queue index
+    TopSongs(usize),            // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand

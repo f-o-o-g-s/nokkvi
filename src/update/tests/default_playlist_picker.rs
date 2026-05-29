@@ -555,10 +555,7 @@ fn enter_playlist_edit_mode_seeds_initial_public() {
 
 #[test]
 fn playlist_edit_public_toggle_flips_state() {
-    use crate::{
-        app_message::{Message, SplitViewMessage},
-        views::QueueMessage,
-    };
+    use crate::app_message::{EditorMessage, Message, SplitViewMessage};
 
     let mut app = test_app();
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
@@ -568,9 +565,7 @@ fn playlist_edit_public_toggle_flips_state() {
         playlist_public: true,
     }));
 
-    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
-        false,
-    )));
+    let _ = app.update(Message::Editor(EditorMessage::PublicToggled(false)));
 
     let edit = app
         .playlist_editor
@@ -579,7 +574,7 @@ fn playlist_edit_public_toggle_flips_state() {
         .expect("playlist_editor set");
     assert!(
         !edit.playlist_public,
-        "PlaylistEditPublicToggled(false) must flip the edit-state flag"
+        "PublicToggled(false) must flip the edit-state flag"
     );
     assert!(
         edit.is_public_dirty(),
@@ -589,10 +584,7 @@ fn playlist_edit_public_toggle_flips_state() {
 
 #[test]
 fn playlist_edit_public_revert_clears_dirty() {
-    use crate::{
-        app_message::{Message, SplitViewMessage},
-        views::QueueMessage,
-    };
+    use crate::app_message::{EditorMessage, Message, SplitViewMessage};
 
     let mut app = test_app();
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
@@ -602,12 +594,8 @@ fn playlist_edit_public_revert_clears_dirty() {
         playlist_public: true,
     }));
 
-    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
-        false,
-    )));
-    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
-        true,
-    )));
+    let _ = app.update(Message::Editor(EditorMessage::PublicToggled(false)));
+    let _ = app.update(Message::Editor(EditorMessage::PublicToggled(true)));
 
     let edit = app
         .playlist_editor
@@ -622,10 +610,7 @@ fn playlist_edit_public_revert_clears_dirty() {
 
 #[test]
 fn playlist_edit_public_only_change_is_metadata_dirty() {
-    use crate::{
-        app_message::{Message, SplitViewMessage},
-        views::QueueMessage,
-    };
+    use crate::app_message::{EditorMessage, Message, SplitViewMessage};
 
     let mut app = test_app();
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
@@ -635,9 +620,7 @@ fn playlist_edit_public_only_change_is_metadata_dirty() {
         playlist_public: true,
     }));
 
-    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
-        false,
-    )));
+    let _ = app.update(Message::Editor(EditorMessage::PublicToggled(false)));
 
     let edit = app
         .playlist_editor

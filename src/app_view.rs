@@ -1317,11 +1317,6 @@ impl Nokkvi {
                             .unwrap_or(self.library.queue_songs.len()),
                         stable_viewport: self.settings.stable_viewport,
                         elevated: false,
-                        // The editor is its own view now — the queue is never in
-                        // edit mode.
-                        edit_mode_info: None,
-                        edit_mode_comment: None,
-                        edit_mode_public: None,
                         playlist_context_info: self.active_playlist_info.clone(),
                         playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
                         playlist_cover: self.active_playlist_strip_cover(),
@@ -1530,9 +1525,6 @@ impl Nokkvi {
                         .unwrap_or(self.library.queue_songs.len()),
                     stable_viewport: self.settings.stable_viewport,
                     elevated,
-                    edit_mode_info: None,
-                    edit_mode_comment: None,
-                    edit_mode_public: None,
                     playlist_context_info: self.active_playlist_info.clone(),
                     playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
                     playlist_cover: self.active_playlist_strip_cover(),
