@@ -4,10 +4,9 @@
 //! decoupled from the live play queue. The presence of `Some(..)` on
 //! `Nokkvi.playlist_editor` is the "in edit mode" signal.
 //!
-//! Phase 1 only lands the type; the existing edit flow still drives the
-//! live queue. Phase 3 wires entering edit mode to populate `songs`, and
-//! later phases route mutations and Save through this buffer instead of
-//! the queue.
+//! Entering edit mode populates `songs` via an async resolve, navigates to
+//! `View::PlaylistEditor`, and routes all mutations and Save through this
+//! buffer — the live play queue is never read or written during a session.
 
 use nokkvi_data::{backend::queue::QueueSongUIViewData, types::playlist_edit::PlaylistEditState};
 
@@ -36,9 +35,9 @@ pub struct PlaylistEditorState {
 impl PlaylistEditorState {
     /// Create an editor session from its dirty-detection metadata.
     ///
-    /// `songs` starts empty (Phase 3 fills it after the async resolve
-    /// returns), `common` uses the queue's sort-less slot-list shape, and
-    /// `columns` defaults to the same visibility as a fresh queue page.
+    /// `songs` starts empty (filled when the async resolve returns via
+    /// `EditorMessage::SongsLoaded`), `common` uses the queue's sort-less
+    /// slot-list shape, and `columns` defaults to a fresh queue page's.
     pub fn new(edit: PlaylistEditState) -> Self {
         Self {
             songs: Vec::new(),

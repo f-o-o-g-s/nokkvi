@@ -2,11 +2,10 @@
 //!
 //! The editor operates on its OWN in-memory track buffer
 //! (`Nokkvi.playlist_editor`), fully decoupled from the live play queue.
-//!
-//! Phase 3a wires the async resolve result (`EditorMessage::SongsLoaded`) into
-//! the buffer and seeds the dirty snapshot so a freshly-loaded session is
-//! clean. Remaining variants (reorder/remove/add, metadata edits, Save) stay
-//! no-ops until later phases.
+//! `EditorMessage::SongsLoaded` fills the buffer from the async resolve and
+//! seeds the dirty snapshot; reorder/remove/add mutate the buffer in place;
+//! metadata edits update the edit state; Save persists the buffer and exit
+//! tears the session down — none of which touch the live queue.
 
 use iced::Task;
 use nokkvi_data::backend::queue::QueueSongUIViewData;
@@ -20,8 +19,6 @@ use crate::{
 
 impl Nokkvi {
     /// Dispatch a [`EditorMessage`].
-    //
-    // Phase 4+ fills in the buffer-mutation / metadata / save variants.
     pub(crate) fn handle_editor_message(&mut self, msg: EditorMessage) -> Task<Message> {
         match msg {
             EditorMessage::SongsLoaded(rows) => self.handle_editor_songs_loaded(rows),
