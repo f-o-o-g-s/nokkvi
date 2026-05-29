@@ -18,10 +18,13 @@ All notable changes to this project will be documented in this file.
 - Each settings tab's first section now uses concrete domain headings (Library, Navigation, Transitions, Frame, Mode) instead of generic Application/Layout/Appearance/General.
 - Track Info Display moved into the Metadata Strip section next to the other strip controls.
 - Visualizer's Waves, Waves Intensity, and Monstercat smoothing knobs moved from General into the Bars section.
+- The queue's "Playing From" bar is now a richer banner — cover art plus a hover-expand block with the playlist's comment, song count, duration, and visibility.
+- Editing a playlist now opens a dedicated editor view with an "Editing" nav pill instead of taking over the queue tab, so you can leave and return mid-edit.
 
 ### Fixed
 
 - About modal's Ko-fi heart now uses the theme's love color (usually red) instead of the accent color, matching hearts elsewhere in the app.
+- Editing a playlist no longer wipes or replaces your play queue; your music keeps playing and the queue stays intact while you reorder, remove, or add songs.
 
 ### Removed
 
