@@ -355,14 +355,14 @@ fn create_playlist_dialog_opens_when_not_editing() {
 // ============================================================================
 
 #[test]
-fn enter_edit_mode_aligns_active_playlist_info() {
+fn enter_edit_mode_preserves_playing_context() {
     use crate::{
         app_message::{Message, SplitViewMessage},
         state::ActivePlaylistContext,
     };
 
     let mut app = test_app();
-    // Pre-condition: a different playlist is currently "active" in the header.
+    // Pre-condition: the queue is playing from a different playlist.
     app.active_playlist_info = Some(ActivePlaylistContext::minimal(
         "playing".into(),
         "Currently Playing".into(),
@@ -376,24 +376,25 @@ fn enter_edit_mode_aligns_active_playlist_info() {
         playlist_public: false,
     }));
 
+    // Editing is decoupled from playback: entering edit mode must NOT touch
+    // the "Playing From" banner — the queue keeps playing from "playing".
     let active = app
         .active_playlist_info
         .as_ref()
-        .expect("active_playlist_info must remain Some — re-anchored, not cleared");
+        .expect("active_playlist_info must stay pointed at the playing playlist");
     assert_eq!(
-        active.id, "edited",
-        "entering edit mode must re-anchor active_playlist_info to the edited playlist"
+        active.id, "playing",
+        "entering edit mode must leave the playing context untouched"
     );
-    assert_eq!(active.name, "Being Edited");
-    assert_eq!(active.comment, "Edit me");
+    assert_eq!(active.name, "Currently Playing");
 }
 
 #[test]
-fn exit_edit_mode_preserves_aligned_context() {
+fn exit_edit_mode_leaves_playing_context_untouched() {
     use crate::app_message::{Message, SplitViewMessage};
 
     let mut app = test_app();
-    // No active playlist initially (e.g., create-and-edit flow).
+    // Nothing playing (e.g., create-and-edit flow).
     assert!(app.active_playlist_info.is_none());
 
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
@@ -406,14 +407,64 @@ fn exit_edit_mode_preserves_aligned_context() {
     // Discard.
     let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
 
-    let active = app.active_playlist_info.as_ref().expect(
-        "exit must leave active_playlist_info pointing at the edited playlist, \
-             not clear it or revert to a stale prior context",
+    // Editing never set the banner, so exiting must leave it cleared — the
+    // banner reflects what is playing, and nothing is playing.
+    assert!(
+        app.active_playlist_info.is_none(),
+        "exit must not leave a stale banner from the edited playlist"
     );
-    assert_eq!(active.id, "new");
     assert!(
         app.playlist_editor.is_none(),
-        "exit clears playlist_editor but not active_playlist_info"
+        "exit clears the editor session"
+    );
+}
+
+#[test]
+fn save_edits_only_refreshes_banner_when_playing_the_edited_playlist() {
+    use crate::{
+        app_message::{Message, SplitViewMessage},
+        state::ActivePlaylistContext,
+    };
+
+    // Editing a DIFFERENT playlist than the one playing: save must NOT
+    // hijack the "Playing From" banner.
+    let mut app = test_app();
+    app.active_playlist_info = Some(ActivePlaylistContext::minimal(
+        "playing".into(),
+        "Currently Playing".into(),
+        String::new(),
+    ));
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
+        playlist_id: "edited".into(),
+        playlist_name: "Being Edited".into(),
+        playlist_comment: String::new(),
+        playlist_public: false,
+    }));
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved));
+    assert_eq!(
+        app.active_playlist_info.as_ref().map(|c| c.id.as_str()),
+        Some("playing"),
+        "saving an unrelated playlist must not steal the banner"
+    );
+
+    // Editing the SAME playlist the queue is playing from: save refreshes it.
+    let mut app = test_app();
+    app.active_playlist_info = Some(ActivePlaylistContext::minimal(
+        "edited".into(),
+        "Old Name".into(),
+        String::new(),
+    ));
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
+        playlist_id: "edited".into(),
+        playlist_name: "Being Edited".into(),
+        playlist_comment: String::new(),
+        playlist_public: false,
+    }));
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved));
+    assert_eq!(
+        app.active_playlist_info.as_ref().map(|c| c.id.as_str()),
+        Some("edited"),
+        "saving the currently-playing playlist keeps the banner on it"
     );
 }
 

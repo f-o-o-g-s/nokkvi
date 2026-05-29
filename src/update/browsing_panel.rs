@@ -140,29 +140,10 @@ impl Nokkvi {
                 Vec::new(),
             ),
         ));
-        // Re-anchor `active_playlist_info` to the playlist being edited, so the
-        // read-only header that reappears after exiting edit mode reflects the
-        // *edited* playlist — not whatever was playing before. The edit bar
-        // takes priority while editing (`edit_mode_info` checked first in the
-        // view), so this assignment isn't visible until the user saves or
-        // discards.
-        self.active_playlist_info = Some(
-            self.library
-                .playlists
-                .iter()
-                .find(|p| p.id == playlist_id)
-                .map_or_else(
-                    || {
-                        crate::state::ActivePlaylistContext::minimal(
-                            playlist_id.clone(),
-                            playlist_name,
-                            playlist_comment,
-                        )
-                    },
-                    crate::state::ActivePlaylistContext::from_playlist,
-                ),
-        );
-        self.persist_active_playlist_info();
+        // Leave `active_playlist_info` (the "Playing From" banner) untouched:
+        // editing is decoupled from playback, so the queue keeps playing from
+        // whatever it was playing from. Re-anchoring here would leave a stale
+        // banner pointing at the edited playlist after the user discards.
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
         self.current_view = View::Queue;
@@ -299,19 +280,27 @@ impl Nokkvi {
             edit_state.update_snapshot(current_ids);
             self.toast_success(format!("Playlist \"{name}\" saved"));
 
-            // Sync edited name/comment back to active_playlist_info so the
-            // read-only context bar shows updated values after exiting edit mode.
-            self.active_playlist_info = Some(
-                self.library
-                    .playlists
-                    .iter()
-                    .find(|p| p.id == id)
-                    .map_or_else(
-                        || crate::state::ActivePlaylistContext::minimal(id, name, comment),
-                        crate::state::ActivePlaylistContext::from_playlist,
-                    ),
-            );
-            self.persist_active_playlist_info();
+            // Only refresh the "Playing From" banner when the live queue is
+            // actually playing from the playlist just saved — then a rename
+            // shows immediately. Saving any other playlist leaves the banner
+            // pointed at whatever is really playing.
+            if self
+                .active_playlist_info
+                .as_ref()
+                .is_some_and(|ctx| ctx.id == id)
+            {
+                self.active_playlist_info = Some(
+                    self.library
+                        .playlists
+                        .iter()
+                        .find(|p| p.id == id)
+                        .map_or_else(
+                            || crate::state::ActivePlaylistContext::minimal(id, name, comment),
+                            crate::state::ActivePlaylistContext::from_playlist,
+                        ),
+                );
+                self.persist_active_playlist_info();
+            }
         }
 
         // Reload playlists so the Playlists view reflects any rename immediately
