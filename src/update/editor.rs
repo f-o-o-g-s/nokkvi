@@ -14,6 +14,8 @@ use nokkvi_data::backend::queue::QueueSongUIViewData;
 use crate::{
     Nokkvi,
     app_message::{EditorMessage, Message},
+    views::queue::QueueContextEntry,
+    widgets::drag_column::DragEvent,
 };
 
 impl Nokkvi {
@@ -51,11 +53,205 @@ impl Nokkvi {
             // Per-row context-menu open/close — forward to the single overlay
             // stack so editor menus share the same close-on-outside-click path.
             EditorMessage::SetOpenMenu(menu) => self.handle_set_open_menu(menu),
-            // Buffer mutations and Save land in later phases.
-            EditorMessage::DragReorder(_)
-            | EditorMessage::RemoveAt(_)
-            | EditorMessage::ContextMenuAction(..)
-            | EditorMessage::Save => Task::none(),
+            // Buffer mutations: plain in-memory `Vec` ops on the editor buffer,
+            // no queue/engine/redb round-trip. Dirty detection is computed at
+            // render time from the buffer, so these need no explicit dirty flag.
+            EditorMessage::DragReorder(event) => self.handle_editor_drag_reorder(event),
+            EditorMessage::RemoveAt(idx) => self.handle_editor_remove_at(idx),
+            EditorMessage::ContextMenuAction(idx, entry) => {
+                self.handle_editor_context_menu_action(idx, entry)
+            }
+            // Save lands in Phase 6.
+            EditorMessage::Save => Task::none(),
+        }
+    }
+
+    /// Reorder the editor buffer in response to a drag-and-drop.
+    ///
+    /// Mirrors the queue's `DragReorder` handler (`views/queue/update.rs:117`):
+    /// single-row drag is **guarded while a search query is active** (mirror of
+    /// the queue's `:119` guard) because filtered slot indices would otherwise
+    /// move the wrong row (invariant #1). With no search, slot indices map to
+    /// buffer indices through the editor's own slot-list, then a plain
+    /// `remove`+`insert` reorders the buffer. Unlike the queue, there is no
+    /// backend `MoveItem`/`MoveBatch` round-trip — the buffer is the source of
+    /// truth until Save (Phase 6).
+    fn handle_editor_drag_reorder(&mut self, event: DragEvent) -> Task<Message> {
+        let Some(editor) = self.playlist_editor.as_mut() else {
+            return Task::none();
+        };
+        // Guard while a search query is active — same as the queue. A filtered
+        // view changes the slot→item mapping, so a raw reorder is unsafe.
+        if !editor.common.search_query.is_empty() {
+            return Task::none();
+        }
+
+        let total = editor.songs.len();
+        match event {
+            DragEvent::Picked { index } => {
+                // Match the queue: highlight the picked row unless it's part of
+                // an existing multi-selection (batch drag preserves it).
+                if let Some(item_index) = editor.common.slot_list.slot_to_item_index(index, total)
+                    && !editor
+                        .common
+                        .slot_list
+                        .selected_indices
+                        .contains(&item_index)
+                {
+                    editor.common.slot_list.set_selected(item_index, total);
+                }
+                Task::none()
+            }
+            DragEvent::Dropped {
+                index,
+                target_index,
+            } => {
+                let from = editor.common.slot_list.slot_to_item_index(index, total);
+                let to = editor
+                    .common
+                    .slot_list
+                    .slot_to_item_index_for_drop(target_index, total);
+
+                // Multi-selection batch drag: if several rows are selected and
+                // the dragged row is one of them, move the whole batch — same
+                // condition the queue uses before dispatching `MoveBatch`.
+                let selected = &editor.common.slot_list.selected_indices;
+                if selected.len() > 1
+                    && from.is_some_and(|f| selected.contains(&f))
+                    && let Some(t) = to
+                {
+                    let mut indices: Vec<usize> = selected.iter().copied().collect();
+                    editor.common.clear_multi_selection();
+                    Self::reorder_buffer_batch(&mut editor.songs, &mut indices, t);
+                } else if let (Some(f), Some(t)) = (from, to)
+                    && f != t
+                {
+                    let item = editor.songs.remove(f);
+                    let insert_at = if f < t { t - 1 } else { t };
+                    editor.songs.insert(insert_at, item);
+                    // Keep the highlight on the moved row at its new position
+                    // (mirrors the queue's `set_selected(insert_at, ..)`).
+                    let new_total = editor.songs.len();
+                    editor.common.slot_list.set_selected(insert_at, new_total);
+                }
+                Task::none()
+            }
+            // A cancelled drag leaves the buffer untouched (matches the queue's
+            // catch-all no-op for non-drop events).
+            DragEvent::Canceled { .. } => Task::none(),
+        }
+    }
+
+    /// In-memory batch reorder mirroring the queue's `MoveBatch` optimistic
+    /// local reorder (`update/queue.rs:296`): remove the selected rows
+    /// (descending so earlier removals don't shift later indices), then insert
+    /// them as a contiguous block before `target`, adjusting the insert point
+    /// for rows removed from before the target.
+    fn reorder_buffer_batch(
+        songs: &mut Vec<QueueSongUIViewData>,
+        indices: &mut [usize],
+        target: usize,
+    ) {
+        indices.sort_unstable_by(|a, b| b.cmp(a)); // descending
+        let len = songs.len();
+        let mut moved = Vec::new();
+        for &i in indices.iter() {
+            if i < songs.len() {
+                moved.push(songs.remove(i));
+            }
+        }
+        moved.reverse(); // restore ascending order for insertion
+
+        let removed_before_target = indices.iter().filter(|&&i| i < target).count();
+        let adjusted_target = target.min(len).saturating_sub(removed_before_target);
+        let insert_pos = adjusted_target.min(songs.len());
+        for (offset, song) in moved.into_iter().enumerate() {
+            songs.insert(insert_pos + offset, song);
+        }
+    }
+
+    /// Remove from the editor buffer at a slot index (multi-selection aware).
+    ///
+    /// Mirrors the queue's context-menu remove (`views/queue/update.rs:198` +
+    /// `update/queue.rs:377`): `evaluate_context_menu` expands the clicked row
+    /// to the full multi-selection when the clicked row is selected, otherwise
+    /// targets just that row. Targets are resolved to per-row `entry_id`s at the
+    /// boundary so removal is duplicate-aware (two rows of the same song_id only
+    /// lose the targeted one) and drift-immune. Filtered indices are mapped
+    /// through the filtered view first (invariant #1).
+    fn handle_editor_remove_at(&mut self, idx: usize) -> Task<Message> {
+        // Resolve the (possibly filtered) slot index to per-row entry_id(s)
+        // BEFORE the mutable borrow — under an active search the index is
+        // relative to the filtered view, so map through it (invariant #1).
+        // `entry_id` lookup makes removal duplicate-aware and drift-immune.
+        let target_entry_ids: Vec<u64> = {
+            let filtered = self.filter_editor_songs();
+            let Some(editor) = self.playlist_editor.as_ref() else {
+                return Task::none();
+            };
+            // Expand the clicked index to the multi-selection when the clicked
+            // row is selected, else just that row — same as the queue's
+            // `evaluate_context_menu`. Read-only resolution here; the selection
+            // mutation happens below under the mutable borrow.
+            let target_indices: Vec<usize> =
+                if editor.common.slot_list.selected_indices.contains(&idx) {
+                    editor
+                        .common
+                        .slot_list
+                        .selected_indices
+                        .iter()
+                        .copied()
+                        .collect()
+                } else {
+                    vec![idx]
+                };
+            target_indices
+                .iter()
+                .filter_map(|&i| filtered.get(i).map(|s| s.entry_id))
+                .collect()
+        };
+
+        let Some(editor) = self.playlist_editor.as_mut() else {
+            return Task::none();
+        };
+        editor.common.clear_multi_selection();
+        if target_entry_ids.is_empty() {
+            return Task::none();
+        }
+
+        let id_set: std::collections::HashSet<u64> = target_entry_ids.into_iter().collect();
+        editor.songs.retain(|s| !id_set.contains(&s.entry_id));
+
+        // Clean up the slot-list cursor/selection so nothing dangles past the
+        // shrunk buffer (mirrors `handle_queue_loaded`'s cleanup at
+        // `update/queue.rs:46`/`:85`): drop the click-to-focus marker and clamp
+        // the viewport offset into range. `evaluate_context_menu` +
+        // `clear_multi_selection` above already cleared the multi-selection.
+        let new_total = editor.songs.len();
+        editor.common.slot_list.selected_offset = None;
+        if new_total > 0 && editor.common.slot_list.viewport_offset >= new_total {
+            editor.common.slot_list.viewport_offset = new_total.saturating_sub(1);
+        } else if new_total == 0 {
+            editor.common.slot_list.viewport_offset = 0;
+        }
+        Task::none()
+    }
+
+    /// Handle an editor row's context-menu entry.
+    ///
+    /// "Remove from Playlist" routes through the buffer remove path;
+    /// "Get Info" stays a no-op for now (the editor surfaces removal + metadata
+    /// edits, not the queue's full navigation menu). The remaining queue menu
+    /// entries are not offered by the editor view and fall through to no-op.
+    fn handle_editor_context_menu_action(
+        &mut self,
+        idx: usize,
+        entry: QueueContextEntry,
+    ) -> Task<Message> {
+        match entry {
+            QueueContextEntry::RemoveFromQueue => self.handle_editor_remove_at(idx),
+            // Get Info / everything else: no-op in the editor for now.
+            _ => Task::none(),
         }
     }
 

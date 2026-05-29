@@ -728,6 +728,24 @@ impl Nokkvi {
             .collect()
     }
 
+    /// Filter the editor buffer's songs by the editor's own search query.
+    ///
+    /// Mirrors [`Self::filter_queue_songs`] but reads the editor buffer and the
+    /// editor's independent search state. Returns `Cow::Borrowed` (zero-cost)
+    /// when no search is active, and an empty borrowed slice when no edit
+    /// session exists. Used to map filtered slot indices back to full-buffer
+    /// rows during buffer mutations (invariant #1).
+    pub fn filter_editor_songs(
+        &self,
+    ) -> std::borrow::Cow<'_, [nokkvi_data::backend::queue::QueueSongUIViewData]> {
+        match self.playlist_editor.as_ref() {
+            Some(editor) => {
+                nokkvi_data::utils::search::filter_items(&editor.songs, &editor.common.search_query)
+            }
+            None => std::borrow::Cow::Borrowed(&[]),
+        }
+    }
+
     /// Collect song IDs from the playlist editor's buffer, in order.
     ///
     /// Mirrors [`Self::queue_song_ids`] but reads the editor's OWN buffer
