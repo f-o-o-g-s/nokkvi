@@ -200,7 +200,7 @@ impl Nokkvi {
     /// Exit split-view playlist editing mode.
     pub(crate) fn handle_exit_playlist_edit_mode(&mut self) -> Task<Message> {
         if let Some(edit_state) = self.playlist_editor.as_ref().map(|e| &e.edit) {
-            let current_ids = self.queue_song_ids();
+            let current_ids = self.editor_song_ids();
             let is_dirty = edit_state.is_dirty(&current_ids);
             let name = edit_state.playlist_name.clone();
             if is_dirty {
@@ -239,7 +239,10 @@ impl Nokkvi {
         let playlist_name = edit_state.playlist_name.clone();
         let playlist_comment = edit_state.playlist_comment.clone();
         let playlist_public = edit_state.playlist_public;
-        let song_ids = self.queue_song_ids();
+        // Serialize the editor's OWN full ordered buffer (never the filtered
+        // subset, never the live queue) — the editor buffer is the source of
+        // truth for what gets persisted.
+        let song_ids = self.editor_song_ids();
         let name_changed = edit_state.is_name_dirty();
         let comment_changed = edit_state.is_comment_dirty();
         let public_changed = edit_state.is_public_dirty();
@@ -287,7 +290,7 @@ impl Nokkvi {
 
     /// Handle successful playlist save — update snapshot and show toast.
     pub(crate) fn handle_playlist_edits_saved(&mut self) -> Task<Message> {
-        let current_ids = self.queue_song_ids();
+        let current_ids = self.editor_song_ids();
 
         if let Some(edit_state) = self.playlist_editor.as_mut().map(|e| &mut e.edit) {
             let name = edit_state.playlist_name.clone();

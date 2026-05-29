@@ -608,3 +608,140 @@ fn drop_into_editor_makes_session_dirty() {
         "inserting a row changes membership and must dirty the session"
     );
 }
+
+// --- Phase 6: save reads the editor buffer; exit needs no restore --------
+
+#[test]
+fn save_success_seeds_snapshot_from_editor_buffer() {
+    // Dirty the editor (reorder), then dispatch the save-success message. The
+    // snapshot must be re-seeded from the EDITOR buffer ids, so the session is
+    // clean afterward. If save read the queue instead, the snapshot would
+    // mismatch the editor buffer and the session would stay dirty — so a clean
+    // session here is observable proof the save path uses the editor buffer.
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Dropped {
+            index: 0,
+            target_index: 2,
+        },
+    )));
+    assert!(
+        app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "the reorder must leave the session dirty before save"
+    );
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved));
+
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "after save the snapshot must be re-seeded from the editor buffer, leaving it clean"
+    );
+}
+
+#[test]
+fn save_serializes_full_buffer_even_with_search() {
+    // Preserve the verified-SAFE property: save serializes the FULL ordered
+    // buffer, never the filtered subset. With a search active that filters the
+    // buffer down, `editor_song_ids()` (what save serializes) must still return
+    // ALL buffer ids in order.
+    let mut app = test_app();
+    seeded_editor(&mut app); // buffer [a,b,c]
+
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        // A query matching only one row, so the filtered view is a strict subset.
+        editor.common.search_query = "Song B".to_string();
+    }
+
+    // Sanity: the filtered view is indeed a subset.
+    assert_eq!(
+        app.filter_editor_songs().len(),
+        1,
+        "the search must filter the buffer down for this test to be meaningful"
+    );
+
+    assert_eq!(
+        app.editor_song_ids(),
+        vec!["a", "b", "c"],
+        "save must serialize the full ordered buffer, not the filtered subset"
+    );
+}
+
+#[test]
+fn exit_leaves_queue_untouched() {
+    // Seed a non-empty live queue, enter edit, load a DIFFERENT set into the
+    // editor buffer, mutate it, then exit. The queue must be byte-for-byte
+    // unchanged and the editor session cleared (no restore needed — the queue
+    // was never touched: fixes bugs 3/11).
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("q1", "Queue One", "Artist A", "Album A"),
+        make_queue_song("q2", "Queue Two", "Artist B", "Album B"),
+    ];
+    let before = app.queue_song_ids();
+
+    seeded_editor(&mut app); // editor buffer is [a,b,c] — a different set
+    let _ = app.update(Message::Editor(EditorMessage::RemoveAt(1)));
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
+
+    assert_eq!(
+        app.queue_song_ids(),
+        before,
+        "exiting edit mode must leave the live queue untouched"
+    );
+    assert!(
+        app.playlist_editor.is_none(),
+        "exiting edit mode must clear the editor session"
+    );
+}
+
+#[test]
+fn exit_when_editor_dirty_warns() {
+    // The discard warning must be driven by the editor's (correct) dirty state:
+    // a mutated buffer at exit pushes the "Discarded unsaved playlist changes"
+    // warn toast.
+    let mut app = test_app();
+    seeded_editor(&mut app);
+    let _ = app.update(Message::Editor(EditorMessage::RemoveAt(1)));
+    assert!(app.toast.toasts.is_empty(), "no toast before exit");
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
+
+    assert_eq!(
+        app.toast.toasts.len(),
+        1,
+        "a dirty editor must push exactly one discard-warning toast on exit"
+    );
+    let toast = &app.toast.toasts[0];
+    assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Warning);
+    assert!(
+        toast.message.to_lowercase().contains("discard"),
+        "the toast must be the discard warning, got: {}",
+        toast.message
+    );
+}
+
+#[test]
+fn exit_when_clean_no_warn() {
+    // A clean editor at exit must NOT push the discard warning.
+    let mut app = test_app();
+    seeded_editor(&mut app); // freshly loaded == clean
+    assert!(app.toast.toasts.is_empty(), "no toast before exit");
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "a clean editor must not push a discard warning on exit"
+    );
+}

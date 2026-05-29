@@ -752,9 +752,6 @@ impl Nokkvi {
     /// (`playlist_editor.songs`) instead of the live queue. Returns an empty
     /// vec when no edit session is active. Always serializes the full ordered
     /// buffer (never the filtered subset) — the save/dirty path relies on this.
-    //
-    // Phase 6 wires this into save/dirty detection; Phase 1 only lands it.
-    #[allow(dead_code)]
     pub fn editor_song_ids(&self) -> Vec<String> {
         self.playlist_editor
             .as_ref()

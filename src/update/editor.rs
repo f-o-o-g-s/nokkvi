@@ -64,8 +64,12 @@ impl Nokkvi {
             EditorMessage::ContextMenuAction(idx, entry) => {
                 self.handle_editor_context_menu_action(idx, entry)
             }
-            // Save lands in Phase 6.
-            EditorMessage::Save => Task::none(),
+            // Forward to the shared save handler (same pattern as ExitEditMode)
+            // so the editor reuses the single `handle_save_playlist_edits` path
+            // rather than duplicating the playlists-API logic.
+            EditorMessage::Save => Task::done(Message::SplitView(
+                crate::app_message::SplitViewMessage::SavePlaylistEdits,
+            )),
         }
     }
 
