@@ -342,6 +342,19 @@ pub(crate) fn chrome_height_with_header() -> f32 {
     }
 }
 
+/// Chrome height for a view whose own bar fully **replaces** the view header
+/// (the playlist editor's edit bar stands in for the `view_header` strip, which
+/// that view never renders). Equals [`chrome_height_with_header`] minus
+/// [`view_header_chrome`], leaving the caller to add its replacement bar's
+/// height instead. Derived by subtraction so it stays welded to
+/// `chrome_height_with_header` — a new chrome term added there tracks here
+/// automatically. Counting `view_header_chrome()` in such a view over-reserves
+/// 51 px and leaves a blank, placeholder-less band at the bottom of the list.
+#[inline]
+pub(crate) fn chrome_height_without_view_header() -> f32 {
+    chrome_height_with_header() - view_header_chrome()
+}
+
 /// Configuration for slot list rendering
 #[derive(Debug, Clone)]
 pub(crate) struct SlotListConfig {

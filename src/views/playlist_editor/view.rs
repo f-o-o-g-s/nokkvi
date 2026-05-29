@@ -38,6 +38,30 @@ use crate::{
 /// above the shared `song_list_pane` rows.
 const EDIT_BAR_H: f32 = 60.0;
 
+/// Total slot-list chrome for the editor view.
+///
+/// The editor renders its [edit bar](PlaylistEditorState::edit_bar) **in place
+/// of** the usual `view_header`, so the chrome is built from
+/// [`chrome_height_without_view_header`] (nav bar + player bar + any top-bar
+/// strip, but *not* the view header) plus the edit bar (`EDIT_BAR_H`) and its
+/// 1 px separator, plus the select-all band when the multi-select column is on.
+///
+/// Using `chrome_height_with_header()` here would count the 51 px
+/// `view_header_chrome()` for a header the editor never draws, under-budgeting
+/// the `Length::Fill` slot rect and leaving a blank, placeholder-less band at
+/// the bottom of the list.
+///
+/// [`chrome_height_without_view_header`]: crate::widgets::slot_list::chrome_height_without_view_header
+pub(crate) fn editor_chrome_height(select_header_visible: bool) -> f32 {
+    use crate::widgets::slot_list::{SELECT_HEADER_HEIGHT, chrome_height_without_view_header};
+
+    let mut chrome = chrome_height_without_view_header() + EDIT_BAR_H + 1.0;
+    if select_header_visible {
+        chrome += SELECT_HEADER_HEIGHT;
+    }
+    chrome
+}
+
 /// Linear blend of `base` toward `toward` by `t`, preserving `base`'s alpha —
 /// the faint accent wash, mirroring the queue edit bar's `blend_toward`.
 fn blend_toward(base: iced::Color, toward: iced::Color, t: f32) -> iced::Color {
@@ -56,8 +80,7 @@ impl PlaylistEditorState {
         use crate::widgets::{
             base_slot_list_layout::{BaseSlotListLayoutConfig, single_artwork_panel_with_menu},
             slot_list::{
-                SlotListConfig, chrome_height_with_header, compose_header_with_select,
-                slot_list_background_container,
+                SlotListConfig, compose_header_with_select, slot_list_background_container,
             },
         };
 
@@ -75,12 +98,11 @@ impl PlaylistEditorState {
             header,
         );
 
-        // Chrome height: view-header chrome + edit bar + 1px separator, plus the
-        // select-all header band when the multi-select column is on.
-        let mut chrome_height = chrome_height_with_header() + EDIT_BAR_H + 1.0;
-        if self.columns.select {
-            chrome_height += crate::widgets::slot_list::SELECT_HEADER_HEIGHT;
-        }
+        // Chrome height for the slot-count math. The edit bar stands in for the
+        // view header (the editor renders no `view_header`), so this excludes
+        // `view_header_chrome()`; including it over-reserved 51 px and left a
+        // blank, placeholder-less band at the bottom of the list.
+        let chrome_height = editor_chrome_height(self.columns.select);
 
         let layout_config = BaseSlotListLayoutConfig {
             window_width: data.window_width,
@@ -444,5 +466,46 @@ impl PlaylistEditorState {
             ..Default::default()
         })
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: the editor's edit bar renders *in place of* the view header,
+    /// so its slot-list chrome must NOT include `view_header_chrome()`. When it
+    /// did (via `chrome_height_with_header()`), the `Length::Fill` slot rect was
+    /// over-reserved by 51 px and the bottom of the list rendered a blank,
+    /// placeholder-less band. Pins the editor chrome to exactly
+    /// `view_header_chrome()` below the old (buggy) formula.
+    #[test]
+    fn editor_chrome_excludes_view_header() {
+        use crate::{
+            theme::THEME_MODE_LOCK,
+            widgets::slot_list::{
+                SELECT_HEADER_HEIGHT, chrome_height_with_header, view_header_chrome,
+            },
+        };
+
+        // Serialize against theme-mutating tests so both chrome reads observe
+        // the same global nav/strip state (mirrors the player_bar tests).
+        let _guard = THEME_MODE_LOCK.lock();
+
+        let with_phantom_header = chrome_height_with_header() + EDIT_BAR_H + 1.0;
+        let editor = editor_chrome_height(false);
+        assert!(
+            (with_phantom_header - editor - view_header_chrome()).abs() < 0.01,
+            "editor chrome must exclude view_header_chrome(): with_header={with_phantom_header}, \
+             editor={editor}, view_header_chrome={}",
+            view_header_chrome(),
+        );
+
+        // The multi-select column adds exactly SELECT_HEADER_HEIGHT.
+        let delta = editor_chrome_height(true) - editor_chrome_height(false);
+        assert!(
+            (delta - SELECT_HEADER_HEIGHT).abs() < 0.01,
+            "multi-select column should add SELECT_HEADER_HEIGHT to editor chrome, got {delta}",
+        );
     }
 }
