@@ -155,6 +155,11 @@ fn samples_to_buffer_units(samples: usize) -> usize {
 const PLAY_PREBUFFER_COUNT: usize = 15;
 const SEEK_PREBUFFER_COUNT: usize = 10;
 
+// Load-bearing invariant: `play` must prime more buffers than `seek` (see the
+// rationale above). Enforced at compile time per the `assertions_on_constants`
+// convention so a future tuning can't silently invert the relationship.
+const _: () = assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
+
 /// Compute backpressure watermarks scaled by crossfade duration.
 ///
 /// Returns `(high_watermark, low_watermark)` — the thresholds at which the
@@ -2390,13 +2395,11 @@ mod tests {
         let elapsed = start.elapsed();
         assert!(
             elapsed >= tokio::time::Duration::from_millis(490),
-            "timeout should have elapsed ~500 ms, got {:?}",
-            elapsed
+            "timeout should have elapsed ~500 ms, got {elapsed:?}"
         );
         assert!(
             elapsed < tokio::time::Duration::from_millis(600),
-            "timeout should not overshoot by more than 100 ms, got {:?}",
-            elapsed
+            "timeout should not overshoot by more than 100 ms, got {elapsed:?}"
         );
     }
     // =========================================================================
@@ -2508,14 +2511,5 @@ mod tests {
             *guard = Some("from_callback".to_string());
         }
         assert_eq!(slot.get(), Some("from_callback".to_string()));
-    }
-
-    /// Pin the doc-comment invariant: `play` cold-starts the decoder +
-    /// renderer together so it needs more buffers than `seek` (which runs
-    /// against an already-initialized renderer). A future tuning must not
-    /// accidentally invert this relationship.
-    #[test]
-    fn prebuffer_counts_play_exceeds_seek() {
-        assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
     }
 }

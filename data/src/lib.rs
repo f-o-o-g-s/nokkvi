@@ -1,4 +1,11 @@
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::print_stderr,
+        clippy::field_reassign_with_default
+    )
+)]
 //! Nokkvi Data Crate
 //!
 //! Iced-free business logic: types, backend services, audio engine, utilities,

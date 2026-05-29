@@ -309,9 +309,9 @@ mod tests {
         }
     }
 
-    /// 7 entries get ui_meta — 3 unconditional Playback rows + 2 Scrobbling
-    /// + 2 Playlists. The 5 conditional AGC/RG knobs and the
-    /// `default_playlist_name` dialog row stay hand-written, plus the 6
+    /// 7 entries get ui_meta: 3 unconditional Playback rows, 2 Scrobbling,
+    /// and 2 Playlists. The 5 conditional AGC/RG knobs and the
+    /// `default_playlist_name` dialog row stay hand-written; the 6
     /// lifecycle-only entries (queue column visibility, opacity_gradient,
     /// rounded_mode) emit nothing here.
     #[test]

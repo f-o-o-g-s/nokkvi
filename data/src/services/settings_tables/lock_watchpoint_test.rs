@@ -30,8 +30,7 @@ mod tests {
              dispatcher in `src/update/settings.rs` calls these under `blocking_lock()` \
              on the iced UI thread; an async setter would jank the UI for the duration \
              of its `.await`. Either keep the setter sync or revisit the dispatcher \
-             before adding `.await`. Offending lines:\n{:#?}",
-            offending
+             before adding `.await`. Offending lines:\n{offending:#?}"
         );
     }
 }

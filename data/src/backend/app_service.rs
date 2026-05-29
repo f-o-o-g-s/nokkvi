@@ -1129,6 +1129,60 @@ impl AppService {
     }
 }
 
+// =============================================================================
+// === Shutdown ===
+// =============================================================================
+impl AppService {
+    /// Signal everything to stop before the process exits.
+    ///
+    /// Fans out to:
+    /// 1. `CustomAudioEngine::request_shutdown` — supersedes the decode-loop
+    ///    generation counter, joins the render thread, and stops the renderer.
+    ///    The engine mutex is held only for the duration of this synchronous
+    ///    call; no network I/O occurs here.
+    /// 2. `TaskManager::shutdown_all` — fires the shared `CancellationToken` and
+    ///    awaits tracked `JoinHandle`s up to a 500 ms internal budget, aborting
+    ///    stragglers. The 500 ms sits inside the caller's 750 ms outer budget.
+    ///
+    /// The caller is responsible for wrapping this in a `tokio::time::timeout`
+    /// (recommended ≤ 750 ms) so a slow engine mutex acquisition or a stuck
+    /// blocking worker cannot defer window close beyond user patience.
+    ///
+    /// Idempotent: generation supersede is monotonic; `CancellationToken::cancel`
+    /// is a no-op when already cancelled; `shutdown_all` on a drained `JoinSet`
+    /// returns 0 without panicking.
+    pub async fn request_shutdown(&self) {
+        debug!(" [APP SERVICE] request_shutdown: locking audio engine");
+        let engine_arc = self.audio_engine();
+        let mut engine = engine_arc.lock().await;
+        engine.request_shutdown();
+        drop(engine);
+
+        debug!(" [APP SERVICE] request_shutdown: awaiting task manager drain");
+        let clean = self
+            .task_manager
+            .shutdown_all(std::time::Duration::from_millis(500))
+            .await;
+        debug!(" [APP SERVICE] request_shutdown: {clean} tasks finished cleanly");
+    }
+}
+
+// =============================================================================
+// === Library orchestrator accessor ===
+// =============================================================================
+impl AppService {
+    /// Borrow-handle for entity-to-songs resolution. Holds no state; the
+    /// returned orchestrator borrows the underlying services for the
+    /// duration of the call chain.
+    pub(crate) fn library_orchestrator(&self) -> crate::backend::LibraryOrchestrator<'_> {
+        crate::backend::LibraryOrchestrator::new(
+            &self.auth_gateway,
+            &self.albums_service,
+            &self.artists_service,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1150,8 +1204,7 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_nanos())
         );
         let db_path = std::env::temp_dir().join(suffix);
         let _ = std::fs::remove_file(&db_path);
@@ -1211,8 +1264,7 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_nanos())
         );
         let db_path = std::env::temp_dir().join(suffix);
         let _ = std::fs::remove_file(&db_path);
@@ -1258,8 +1310,7 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_nanos())
         );
         let db_path = std::env::temp_dir().join(suffix);
         let _ = std::fs::remove_file(&db_path);
@@ -1420,8 +1471,7 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_nanos())
         );
         let db_path = std::env::temp_dir().join(suffix);
         let _ = std::fs::remove_file(&db_path);
@@ -1457,59 +1507,5 @@ mod tests {
         }
 
         let _ = std::fs::remove_file(&db_path);
-    }
-}
-
-// =============================================================================
-// === Shutdown ===
-// =============================================================================
-impl AppService {
-    /// Signal everything to stop before the process exits.
-    ///
-    /// Fans out to:
-    /// 1. `CustomAudioEngine::request_shutdown` — supersedes the decode-loop
-    ///    generation counter, joins the render thread, and stops the renderer.
-    ///    The engine mutex is held only for the duration of this synchronous
-    ///    call; no network I/O occurs here.
-    /// 2. `TaskManager::shutdown_all` — fires the shared `CancellationToken` and
-    ///    awaits tracked `JoinHandle`s up to a 500 ms internal budget, aborting
-    ///    stragglers. The 500 ms sits inside the caller's 750 ms outer budget.
-    ///
-    /// The caller is responsible for wrapping this in a `tokio::time::timeout`
-    /// (recommended ≤ 750 ms) so a slow engine mutex acquisition or a stuck
-    /// blocking worker cannot defer window close beyond user patience.
-    ///
-    /// Idempotent: generation supersede is monotonic; `CancellationToken::cancel`
-    /// is a no-op when already cancelled; `shutdown_all` on a drained `JoinSet`
-    /// returns 0 without panicking.
-    pub async fn request_shutdown(&self) {
-        debug!(" [APP SERVICE] request_shutdown: locking audio engine");
-        let engine_arc = self.audio_engine();
-        let mut engine = engine_arc.lock().await;
-        engine.request_shutdown();
-        drop(engine);
-
-        debug!(" [APP SERVICE] request_shutdown: awaiting task manager drain");
-        let clean = self
-            .task_manager
-            .shutdown_all(std::time::Duration::from_millis(500))
-            .await;
-        debug!(" [APP SERVICE] request_shutdown: {clean} tasks finished cleanly");
-    }
-}
-
-// =============================================================================
-// === Library orchestrator accessor ===
-// =============================================================================
-impl AppService {
-    /// Borrow-handle for entity-to-songs resolution. Holds no state; the
-    /// returned orchestrator borrows the underlying services for the
-    /// duration of the call chain.
-    pub(crate) fn library_orchestrator(&self) -> crate::backend::LibraryOrchestrator<'_> {
-        crate::backend::LibraryOrchestrator::new(
-            &self.auth_gateway,
-            &self.albums_service,
-            &self.artists_service,
-        )
     }
 }
