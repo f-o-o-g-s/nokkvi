@@ -7,12 +7,15 @@
 //! metadata edits update the edit state; Save persists the buffer and exit
 //! tears the session down — none of which touch the live queue.
 
+use std::collections::HashSet;
+
 use iced::Task;
 use nokkvi_data::backend::queue::QueueSongUIViewData;
 
+use super::components::prefetch_album_artwork_tasks;
 use crate::{
     Nokkvi,
-    app_message::{EditorMessage, Message},
+    app_message::{ArtworkMessage, EditorMessage, Message},
     views::queue::QueueContextEntry,
     widgets::drag_column::DragEvent,
 };
@@ -277,7 +280,51 @@ impl Nokkvi {
             // are not surfaced by the editor's row vocabulary).
             let _ = editor.common.handle(msg, total);
         }
-        Task::none()
+        // Prefetch mini artwork for rows scrolled into view (mirrors the
+        // queue's slot-list-change prefetch).
+        self.editor_artwork_prefetch_tasks()
+    }
+
+    /// Dispatch mini-artwork prefetch for the editor buffer's visible rows.
+    ///
+    /// The editor reads thumbnails from the shared `artwork.album_art` cache
+    /// (the same snapshot the queue and library panes pass), so without this
+    /// the rows render blank gray placeholders for any album not already
+    /// fetched by another view. Mirrors `handle_queue_loaded`: the canonical
+    /// 80 px album-id prefetch plus a large-artwork load for the centered row.
+    /// A no-op when there is no backend or the buffer is empty.
+    fn editor_artwork_prefetch_tasks(&self) -> Task<Message> {
+        let (Some(editor), Some(shell)) =
+            (self.playlist_editor.as_ref(), self.app_service.as_ref())
+        else {
+            return Task::none();
+        };
+        if editor.songs.is_empty() {
+            return Task::none();
+        }
+
+        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        let mut tasks = prefetch_album_artwork_tasks(
+            &editor.common.slot_list,
+            &editor.songs,
+            &cached,
+            shell.albums().clone(),
+            |song| (song.album_id.clone(), song.artwork_url.clone()),
+        );
+
+        // Large artwork for the centered row, so the artwork panel fills too.
+        if let Some(center_idx) = editor
+            .common
+            .slot_list
+            .get_center_item_index(editor.songs.len())
+            && let Some(song) = editor.songs.get(center_idx)
+        {
+            tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
+                song.album_id.clone(),
+            ))));
+        }
+
+        Task::batch(tasks)
     }
 
     /// Fill the editor buffer with the async-resolved playlist rows.
@@ -301,7 +348,11 @@ impl Nokkvi {
             editor.common.slot_list.selected_indices.clear();
             editor.common.slot_list.anchor_index = None;
         }
-        Task::none()
+        // Prefetch mini artwork for the freshly-loaded buffer so the rows show
+        // their covers instead of blank gray placeholders. The editor never
+        // otherwise populates the shared `artwork.album_art` cache for its own
+        // songs (mirrors `handle_queue_loaded`).
+        self.editor_artwork_prefetch_tasks()
     }
 
     /// Splice cross-pane-dragged rows into the editor buffer at a drop slot.
@@ -376,6 +427,7 @@ impl Nokkvi {
         // Drop any stale selection so it does not point at shifted rows.
         editor.common.clear_multi_selection();
         editor.common.slot_list.selected_offset = None;
-        Task::none()
+        // Fetch art for the newly dropped rows.
+        self.editor_artwork_prefetch_tasks()
     }
 }
