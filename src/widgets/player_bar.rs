@@ -704,17 +704,24 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
         )
     };
 
+    // Mini-player text sits on the player bar's `bg0_hard()` chrome (the bar's
+    // `main_content` uses `container_bg0_hard`), so each line is made legible
+    // against it. Title is the brighter fg tier, artist/album the secondary.
     let title_line = make_line(
         line1,
-        theme::legible_strip_text(theme::now_playing_color()),
+        theme::legible_strip_text(theme::fg2(), theme::bg0_hard()),
         true,
     );
     let artist_line = make_line(
         line2,
-        theme::legible_strip_text(theme::selected_color()),
+        theme::legible_strip_text(theme::fg3(), theme::bg0_hard()),
         false,
     );
-    let album_line = make_line(line3, theme::fg2(), false);
+    let album_line = make_line(
+        line3,
+        theme::legible_strip_text(theme::fg2(), theme::bg0_hard()),
+        false,
+    );
 
     let text_column = container(
         column![title_line, artist_line, album_line]

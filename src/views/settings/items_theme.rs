@@ -306,7 +306,11 @@ pub(crate) fn build_theme_items(
         "Accent Colors",
         SentinelKind::RestoreAccent,
         "Accent",
-        [primary, bright, border_light, now_playing, selected]
+        // `now_playing` / `selected` are intentionally absent: the slot
+        // highlights are now derived from these accent tokens with contrast
+        // guards (see `theme::playing_fill` / `selected_fill_resolved`), so
+        // hand-tuning them did nothing. The TOML fields still round-trip.
+        [primary, bright, border_light]
     );
 
     // ── Semantic Colors ──────────────────────────────────────────────
@@ -482,16 +486,11 @@ mod tests {
         assert_eq!(extract_keys(&fg[2..]), expected_fg_refs);
 
         let accent = section_slice(&entries, "Accent Colors");
-        let expected_accent: Vec<String> = [
-            "accent.primary",
-            "accent.bright",
-            "accent.border_light",
-            "accent.now_playing",
-            "accent.selected",
-        ]
-        .iter()
-        .map(|s| format!("{prefix}.{s}"))
-        .collect();
+        let expected_accent: Vec<String> =
+            ["accent.primary", "accent.bright", "accent.border_light"]
+                .iter()
+                .map(|s| format!("{prefix}.{s}"))
+                .collect();
         let expected_accent_refs: Vec<&str> = expected_accent.iter().map(String::as_str).collect();
         assert_eq!(extract_keys(&accent[2..]), expected_accent_refs);
     }

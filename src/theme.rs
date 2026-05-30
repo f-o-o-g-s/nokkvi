@@ -489,13 +489,45 @@ pub(crate) fn nav_bar_height() -> f32 {
 /// widget's height aligned with the theme's source of truth.
 pub(crate) const STATUS_STRIP_HEIGHT: f32 = 24.0;
 
-/// Background color for the 24 px status strip — meaningfully darker
-/// than `bg0_hard()` so the strip reads as its own band below the player
-/// bar. Calibrated to match the design CSS delta (Everforest target:
-/// `bg0_hard=#232A2E` → `status_strip=#1d2326`, a ~17 % darken).
+/// Minimum relative-luminance separation between the light-mode status-strip
+/// band and `bg0_hard()`, so the strip reads as its own band instead of
+/// vanishing into warm cream chrome. Dark mode keeps the calibrated darken.
+const STRIP_BAND_DELTA: f32 = 0.035;
+
+/// Background color for the 24 px status strip — a band distinct from
+/// `bg0_hard()` below the player bar.
+///
+/// Dark mode keeps the original calibrated darken (Everforest target:
+/// `bg0_hard=#232A2E` → `status_strip=#1d2326`, a ~17 % darken) — the look the
+/// design was tuned around and which already reads well on every dark theme.
+/// Light mode cannot darken toward black without muddying warm cream chrome
+/// into a dingy grey, so it instead blends `bg0_hard()` toward the theme's own
+/// foreground ink (`fg0()`) just until the band clears [`STRIP_BAND_DELTA`],
+/// keeping the band on-palette in the theme's own hue.
 #[inline]
 pub(crate) fn status_strip_bg() -> Color {
-    darken(bg0_hard(), 0.17)
+    if is_light_mode() {
+        strip_band_toward_ink(bg0_hard(), fg0(), STRIP_BAND_DELTA)
+    } else {
+        darken(bg0_hard(), 0.17)
+    }
+}
+
+/// Blend `base` toward `ink` just far enough that their relative luminance
+/// differs by at least `delta` (capped at a 0.6 blend so the band stays a
+/// subtle tint, never a full ink fill). Backs the light-mode status strip.
+fn strip_band_toward_ink(base: Color, ink: Color, delta: f32) -> Color {
+    let l_base = relative_luminance(base);
+    let mut amount = 0.0_f32;
+    let mut band = base;
+    while amount < 0.60 {
+        amount += 0.02;
+        band = blend_toward(base, ink, amount);
+        if (relative_luminance(band) - l_base).abs() >= delta {
+            break;
+        }
+    }
+    band
 }
 
 // `active_accent()` was retained as the canonical accent-resolver for any
@@ -1158,25 +1190,12 @@ pub(crate) fn accent_border_light() -> Color {
     read_color(|t| t.accent_border_light)
 }
 
-/// Dedicated now-playing slot highlight color.
-///
-/// Defaults to `accent()` when not explicitly configured, allowing themes
-/// to decouple the playing-track highlight from the general accent without
-/// affecting nav bars, borders, or other accent-colored UI.
-#[inline]
-pub(crate) fn now_playing_color() -> Color {
-    read_color(|t| t.now_playing)
-}
-
-/// Dedicated selected/center slot highlight color.
-///
-/// Defaults to `accent_bright()` when not explicitly configured, allowing
-/// themes to decouple the selected-slot highlight from the general accent
-/// without affecting nav bars, borders, or other accent-colored UI.
-#[inline]
-pub(crate) fn selected_color() -> Color {
-    read_color(|t| t.selected)
-}
+// The now-playing and selected slot highlights are no longer per-theme stored
+// colors. They are derived from the live accent tokens with built-in contrast
+// guards — see the "Highlight-fill family" section below
+// (`playing_fill` / `selected_fill_resolved` / `legible_text_on`). The
+// `accent.now_playing` / `accent.selected` TOML fields are still parsed for
+// round-trip compatibility (the `star.base` precedent) but no longer consumed.
 
 /// Semi-transparent accent color for text input selection highlights.
 ///
@@ -1353,19 +1372,26 @@ fn contrast_ratio(a: Color, b: Color) -> f32 {
 /// for normal text.
 const LEGIBLE_TEXT_CONTRAST: f32 = 4.5;
 
-/// Darken `color` toward black until its contrast against `bg` meets
-/// [`LEGIBLE_TEXT_CONTRAST`]. Returns the input unchanged when it already
-/// meets the threshold, or the maximally-darkened form when the search
-/// budget is exhausted.
-fn darken_until_legible(color: Color, bg: Color) -> Color {
-    if contrast_ratio(color, bg) >= LEGIBLE_TEXT_CONTRAST {
+/// Push `color` toward whichever pure extreme (black or white) maximizes its
+/// WCAG contrast against `reference`, stopping as soon as the contrast clears
+/// `floor` (or at a near-full blend, which is guaranteed to clear ~4.58:1).
+///
+/// Bidirectional and surface-aware: the target extreme is the one farthest in
+/// luminance from `reference` (= [`legible_text_on`] of the reference), so a
+/// too-light color over a light surface darkens, and a too-dark color over a
+/// dark surface lightens. This single primitive backs legible strip / chrome
+/// text in BOTH modes — it replaces the old light-only `darken_until_legible`,
+/// which could not lift a too-dark color on a dark theme.
+fn legible_against(color: Color, reference: Color, floor: f32) -> Color {
+    if contrast_ratio(color, reference) >= floor {
         return color;
     }
+    let target = legible_text_on(reference);
     let mut adjusted = color;
     let mut amount: f32 = 0.05;
-    while amount < 0.95 {
-        adjusted = darken(color, amount);
-        if contrast_ratio(adjusted, bg) >= LEGIBLE_TEXT_CONTRAST {
+    while amount < 0.99 {
+        adjusted = blend_toward(color, target, amount);
+        if contrast_ratio(adjusted, reference) >= floor {
             return adjusted;
         }
         amount += 0.05;
@@ -1373,17 +1399,127 @@ fn darken_until_legible(color: Color, bg: Color) -> Color {
     adjusted
 }
 
-/// In light mode, darkens `color` until it meets WCAG AA contrast against
-/// the chrome surface ([`bg0_hard`]), so muted theme accents stay legible
-/// when rendered as small text inside the metadata / mini-player strip. In
-/// dark mode the function is a no-op — vibrant accents on dark surfaces
-/// already exceed the threshold.
+/// Make `color` legible as small strip / chrome text over the surface it is
+/// ACTUALLY painted on (`status_strip_bg()` for the status strip, `bg0_hard()`
+/// for the nav bar / mini-player). Surface-aware and bidirectional — fixes
+/// both the old dark-mode no-op and the wrong-surface measurement.
 #[inline]
-pub(crate) fn legible_strip_text(color: Color) -> Color {
-    if !is_light_mode() {
-        return color;
+pub(crate) fn legible_strip_text(color: Color, surface: Color) -> Color {
+    legible_against(color, surface, LEGIBLE_TEXT_CONTRAST)
+}
+
+// ============================================================================
+// Highlight-fill family (single source of truth)
+// ============================================================================
+//
+// Selected/center and now-playing/expanded slots render as OPAQUE accent fills
+// with the row text forced to a guaranteed-legible color. Unlike the
+// translucent hover wash (which leaves the row's own text untouched), the
+// readability of a fill is governed by its FORCED TEXT, so this family pairs a
+// derived fill with `legible_text_on`. Both fills are derived from the live
+// accent tokens — the per-theme `now_playing` / `selected` TOML values are no
+// longer consumed — so a new theme inherits readable, mutually-distinct
+// highlights for free instead of hand-tuning two colors that could (and did,
+// e.g. Everforest light / Kanagawa Dragon dark) land unreadable.
+
+/// Minimum WCAG contrast kept between the now-playing fill and the selected
+/// fill, so the playing row stays distinguishable from the keyboard-cursor row
+/// when both are visible at once.
+const FILL_DISTINCT_CONTRAST: f32 = 1.5;
+
+/// Pick pure black or white as the forced text/ink for an opaque highlight
+/// `fill`, choosing whichever yields more WCAG contrast. Provably ≥ 4.58:1
+/// against ANY fill (the black/white contrast curves cross at luminance
+/// ≈ 0.179, where both equal 4.58), so the forced text always clears AA — even
+/// for a future low-contrast accent.
+#[inline]
+pub(crate) fn legible_text_on(fill: Color) -> Color {
+    if contrast_ratio(fill, Color::BLACK) >= contrast_ratio(fill, Color::WHITE) {
+        Color::BLACK
+    } else {
+        Color::WHITE
     }
-    darken_until_legible(color, bg0_hard())
+}
+
+/// A visible ring for an opaque highlight chip: blends `fill` toward its own
+/// forced text color (the guaranteed-contrasting extreme), so the border is
+/// always perceptible against the fill regardless of theme. `strength` 1.0 =
+/// max-contrast ring (center / playing); ~0.55 = subtler ring (plain selected).
+#[inline]
+pub(crate) fn highlight_border(fill: Color, strength: f32) -> Color {
+    blend_toward(fill, legible_text_on(fill), strength)
+}
+
+/// Resolve the `(now_playing, selected)` fill pair from the accent tokens,
+/// applying the distinctness separator once so the pair is always mutually
+/// consistent. `selected` anchors on the louder `accent_bright`; `playing` is
+/// the calmer `accent`, receded toward `bg` if needed to clear
+/// [`FILL_DISTINCT_CONTRAST`] WITHOUT crossing selected's luminance (crossing
+/// would invert the "cursor is loud, playing is ambient" hierarchy). If
+/// receding stalls (accent and accent_bright sit at near-equal luminance),
+/// `selected` is pushed toward the extreme farthest from `playing`
+/// ([`legible_text_on`] of playing) instead — which always reaches the floor.
+fn resolve_highlight_fills(accent: Color, accent_bright: Color, bg: Color) -> (Color, Color) {
+    let sel = accent_bright;
+    let mut play = accent;
+    if contrast_ratio(play, sel) >= FILL_DISTINCT_CONTRAST {
+        return (play, sel);
+    }
+    let l_sel = relative_luminance(sel);
+    let started_below = relative_luminance(play) < l_sel;
+    // Step A: recede playing toward the chrome bg, never crossing selected.
+    let mut amount: f32 = 0.05;
+    let mut best = play;
+    while amount < 0.90 {
+        let candidate = blend_toward(play, bg, amount);
+        let l_c = relative_luminance(candidate);
+        let crossed = if started_below {
+            l_c >= l_sel
+        } else {
+            l_c <= l_sel
+        };
+        if crossed {
+            break;
+        }
+        best = candidate;
+        if contrast_ratio(best, sel) >= FILL_DISTINCT_CONTRAST {
+            return (best, sel);
+        }
+        amount += 0.05;
+    }
+    play = best;
+    // Step B: receding stalled — push selected farther from playing in the
+    // direction that PRESERVES the hierarchy (lighter stays lighter, darker
+    // stays darker), so the separator never inverts "cursor loud / playing
+    // ambient". Saturated accent pairs have ample headroom toward their nearer
+    // extreme; the distinctness guard test catches any palette that doesn't.
+    let target = if relative_luminance(sel) >= relative_luminance(play) {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    };
+    let mut s = sel;
+    let mut sa: f32 = 0.05;
+    while sa < 0.99 {
+        s = blend_toward(sel, target, sa);
+        if contrast_ratio(s, play) >= FILL_DISTINCT_CONTRAST {
+            break;
+        }
+        sa += 0.05;
+    }
+    (play, s)
+}
+
+/// Now-playing / expanded-parent slot fill — derived, distinctness-resolved.
+#[inline]
+pub(crate) fn playing_fill() -> Color {
+    resolve_highlight_fills(accent(), accent_bright(), bg0_hard()).0
+}
+
+/// Selected / center slot fill — derived, distinctness-resolved.
+#[inline]
+pub(crate) fn selected_fill_resolved() -> Color {
+    resolve_highlight_fills(accent(), accent_bright(), bg0_hard()).1
 }
 
 // ============================================================================
@@ -1851,67 +1987,192 @@ mod tests {
         assert!((contrast_ratio(Color::WHITE, Color::WHITE) - 1.0).abs() < 0.001);
     }
 
-    #[test]
-    fn darken_until_legible_returns_input_when_already_legible() {
-        // Black on white is 21:1 — well past 4.5:1, no adjustment expected.
-        let result = darken_until_legible(Color::BLACK, Color::WHITE);
-        assert_eq!(result.r, Color::BLACK.r);
-        assert_eq!(result.g, Color::BLACK.g);
-        assert_eq!(result.b, Color::BLACK.b);
+    fn rgb(r: u8, g: u8, b: u8) -> Color {
+        Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
 
+    /// Every shipped palette as `(name, mode, ResolvedTheme)` — for theme-wide
+    /// contrast guards. Reads embedded built-in TOML; no disk, no global theme
+    /// state, so these sweeps are deterministic and lock-free.
+    fn all_builtin_palettes() -> Vec<(String, &'static str, ResolvedTheme)> {
+        let mut out = Vec::new();
+        for stem in nokkvi_data::services::theme_loader::builtin_theme_stems() {
+            let tf = nokkvi_data::services::theme_loader::load_builtin_theme(stem)
+                .unwrap_or_else(|| panic!("built-in theme {stem} must parse"));
+            let dual = ResolvedDualTheme::from_theme_file(&tf);
+            out.push((stem.to_string(), "dark", dual.dark));
+            out.push((stem.to_string(), "light", dual.light));
+        }
+        out
+    }
+
+    /// `legible_text_on` is provably ≥ 4.58:1 against any fill (the black/white
+    /// contrast curves cross at luminance ≈ 0.179). Spot-check the hardest fills
+    /// near the crossover plus the real problem colors.
     #[test]
-    fn darken_until_legible_lifts_muted_accent_past_threshold() {
-        // Everforest light: selected = #A6B0A0 (a desaturated grey-green that
-        // sits at almost the same luminance as the chrome surface). The raw
-        // contrast against bg0_hard #EFEBD4 is ~1.8:1 — far below WCAG AA.
-        let muted = Color::from_rgb(
-            0xA6 as f32 / 255.0,
-            0xB0 as f32 / 255.0,
-            0xA0 as f32 / 255.0,
+    fn legible_text_on_is_always_legible() {
+        let samples = [
+            Color::BLACK,
+            Color::WHITE,
+            Color::from_rgb(0.5, 0.5, 0.5),
+            Color::from_rgb(0.45, 0.45, 0.45),
+            Color::from_rgb(0.40, 0.40, 0.40),
+            rgb(0x22, 0x32, 0x49), // Kanagawa Dragon primary (dark navy)
+            rgb(0x93, 0xB2, 0x59), // Everforest light accent_bright
+            rgb(0xA6, 0xB0, 0xA0), // Everforest light old `selected` grey
+        ];
+        for fill in samples {
+            let cr = contrast_ratio(fill, legible_text_on(fill));
+            assert!(
+                cr >= LEGIBLE_TEXT_CONTRAST,
+                "forced text on {fill:?} only reached {cr:.2}:1"
+            );
+        }
+    }
+
+    /// The forced row text reads against BOTH derived highlight fills on every
+    /// shipped theme/mode — the systemic fix for the unreadable Everforest-light
+    /// selection and Kanagawa-Dragon-dark now-playing rows.
+    #[test]
+    fn forced_text_reads_on_every_highlight_fill() {
+        for (name, mode, t) in all_builtin_palettes() {
+            let (play, sel) = resolve_highlight_fills(t.accent, t.accent_bright, t.bg0_hard);
+            for (which, fill) in [("playing", play), ("selected", sel)] {
+                let cr = contrast_ratio(fill, legible_text_on(fill));
+                assert!(
+                    cr >= LEGIBLE_TEXT_CONTRAST,
+                    "{name}/{mode} {which} fill forced-text contrast {cr:.2}:1 below AA"
+                );
+            }
+        }
+    }
+
+    /// Now-playing and selected fills stay perceptibly distinct on every shipped
+    /// theme/mode, so a playing row and a cursor row are tellable apart at once.
+    #[test]
+    fn playing_and_selected_fills_stay_distinct() {
+        for (name, mode, t) in all_builtin_palettes() {
+            let (play, sel) = resolve_highlight_fills(t.accent, t.accent_bright, t.bg0_hard);
+            let cr = contrast_ratio(play, sel);
+            assert!(
+                cr >= FILL_DISTINCT_CONTRAST,
+                "{name}/{mode} playing-vs-selected contrast {cr:.2}:1 < {FILL_DISTINCT_CONTRAST}"
+            );
+        }
+    }
+
+    /// The distinctness separator never inverts the hierarchy: when playing
+    /// starts darker than selected, the resolved playing fill stays no lighter
+    /// than the resolved selected fill (cursor = loud/bright, playing = ambient).
+    #[test]
+    fn playing_fill_does_not_invert_hierarchy() {
+        for (name, mode, t) in all_builtin_palettes() {
+            if relative_luminance(t.accent) < relative_luminance(t.accent_bright) {
+                let (play, sel) = resolve_highlight_fills(t.accent, t.accent_bright, t.bg0_hard);
+                assert!(
+                    relative_luminance(play) <= relative_luminance(sel) + 1e-4,
+                    "{name}/{mode} playing fill became lighter than selected (hierarchy inverted)"
+                );
+            }
+        }
+    }
+
+    /// The highlight border is perceptible against its fill at both strengths
+    /// (regression for the old center-slot border that matched the fill 1:1 on
+    /// the 17 themes that didn't customize `selected`).
+    #[test]
+    fn highlight_border_contrasts_its_fill() {
+        for (name, mode, t) in all_builtin_palettes() {
+            let (play, sel) = resolve_highlight_fills(t.accent, t.accent_bright, t.bg0_hard);
+            for (which, fill) in [("playing", play), ("selected", sel)] {
+                assert!(
+                    contrast_ratio(highlight_border(fill, 1.0), fill) > 1.3,
+                    "{name}/{mode} {which} max-strength border indistinct from fill"
+                );
+                assert!(
+                    contrast_ratio(highlight_border(fill, 0.55), fill) > 1.05,
+                    "{name}/{mode} {which} subtle border indistinct from fill"
+                );
+            }
+        }
+    }
+
+    /// `legible_against` is bidirectional: too-dark text on a dark surface is
+    /// LIFTED (the old `darken_until_legible` could not), and too-light text on
+    /// a light surface is darkened — both reaching WCAG AA.
+    #[test]
+    fn legible_against_is_bidirectional() {
+        // Kanagawa Dragon dark: navy "Hemp Dub" text over the near-black strip.
+        let navy = rgb(0x22, 0x32, 0x49);
+        let dark_surface = rgb(0x0f, 0x0e, 0x0e);
+        let lifted = legible_against(navy, dark_surface, LEGIBLE_TEXT_CONTRAST);
+        assert!(
+            contrast_ratio(lifted, dark_surface) >= LEGIBLE_TEXT_CONTRAST,
+            "dark text on dark surface should reach AA"
         );
-        let bg = Color::from_rgb(
-            0xEF as f32 / 255.0,
-            0xEB as f32 / 255.0,
-            0xD4 as f32 / 255.0,
+        assert!(
+            relative_luminance(lifted) > relative_luminance(navy),
+            "dark-on-dark fix must LIGHTEN (the old light-only path could not)"
         );
 
-        let before = contrast_ratio(muted, bg);
+        // Everforest light: muted green text over cream chrome.
+        let green = rgb(0x93, 0xB2, 0x59);
+        let light_surface = rgb(0xEF, 0xEB, 0xD4);
+        let darkened = legible_against(green, light_surface, LEGIBLE_TEXT_CONTRAST);
         assert!(
-            before < LEGIBLE_TEXT_CONTRAST,
-            "fixture should start below threshold; got {before:.2}"
-        );
-
-        let adjusted = darken_until_legible(muted, bg);
-        let after = contrast_ratio(adjusted, bg);
-        assert!(
-            after >= LEGIBLE_TEXT_CONTRAST,
-            "darkening should reach WCAG AA; before={before:.2}, after={after:.2}"
+            contrast_ratio(darkened, light_surface) >= LEGIBLE_TEXT_CONTRAST,
+            "light-ish text on a light surface should reach AA"
         );
         assert!(
-            relative_luminance(adjusted) < relative_luminance(muted),
-            "adjusted color should be darker than input"
+            relative_luminance(darkened) < relative_luminance(green),
+            "a fix on a light surface must DARKEN"
         );
     }
 
+    /// `legible_against` is a no-op when the input already clears the floor.
     #[test]
-    fn legible_strip_text_is_identity_in_dark_mode() {
-        let _guard = THEME_MODE_LOCK.lock();
-        let saved = UI_MODE.light_mode.load(Ordering::Relaxed);
-        set_light_mode(false);
+    fn legible_against_returns_input_when_already_legible() {
+        let r = legible_against(Color::BLACK, Color::WHITE, LEGIBLE_TEXT_CONTRAST);
+        assert_eq!((r.r, r.g, r.b), (0.0, 0.0, 0.0));
+    }
 
-        // Pick a color that would otherwise be darkened in light mode.
-        let muted = Color::from_rgb(
-            0xA6 as f32 / 255.0,
-            0xB0 as f32 / 255.0,
-            0xA0 as f32 / 255.0,
-        );
-        let result = legible_strip_text(muted);
-        assert_eq!(result.r, muted.r);
-        assert_eq!(result.g, muted.g);
-        assert_eq!(result.b, muted.b);
+    /// The light-mode status strip is a perceptible band on every light palette
+    /// (the old fixed darken-toward-black muddied warm cream into dingy grey).
+    #[test]
+    fn light_status_strip_band_separates_from_chrome() {
+        for (name, mode, t) in all_builtin_palettes() {
+            if mode != "light" {
+                continue;
+            }
+            let band = strip_band_toward_ink(t.bg0_hard, t.fg0, STRIP_BAND_DELTA);
+            let delta = (relative_luminance(band) - relative_luminance(t.bg0_hard)).abs();
+            assert!(
+                delta >= STRIP_BAND_DELTA - 1e-3,
+                "{name}/{mode} status strip band only Δ{delta:.4} from chrome"
+            );
+        }
+    }
 
-        UI_MODE.light_mode.store(saved, Ordering::Relaxed);
+    /// Strip text tiers (`fg2`/`fg3`) made legible over the painted strip
+    /// surface clear WCAG AA on every theme/mode — including Kanagawa Dragon
+    /// dark, where the old now_playing/selected-as-text path was unreadable.
+    #[test]
+    fn strip_text_tiers_read_on_their_surface() {
+        for (name, mode, t) in all_builtin_palettes() {
+            let surface = if mode == "light" {
+                strip_band_toward_ink(t.bg0_hard, t.fg0, STRIP_BAND_DELTA)
+            } else {
+                darken(t.bg0_hard, 0.17)
+            };
+            for (tier, color) in [("fg2", t.fg2), ("fg3", t.fg3)] {
+                let txt = legible_against(color, surface, LEGIBLE_TEXT_CONTRAST);
+                let cr = contrast_ratio(txt, surface);
+                assert!(
+                    cr >= LEGIBLE_TEXT_CONTRAST,
+                    "{name}/{mode} strip {tier} text only {cr:.2}:1 over its surface"
+                );
+            }
+        }
     }
 
     /// `hover_tint()` must read against the neutral chrome surface it sits over

@@ -127,6 +127,12 @@ pub(crate) struct SlotListSlotStyle {
     pub text_color: Color,
     pub subtext_color: Color,
     pub hover_text_color: Color,
+    /// `true` on the opaque-fill highlight rows (now-playing / expanded and
+    /// selected / center), where every glyph — index, empty star/heart
+    /// outlines, lock — must use the row's forced-legible `text_color` instead
+    /// of a muted theme color that would wash out against the accent fill.
+    /// Read by [`slot_list_static_icon_color`].
+    pub forces_legible_text: bool,
 }
 
 impl SlotListSlotStyle {
@@ -143,42 +149,49 @@ impl SlotListSlotStyle {
         depth: u8,
     ) -> Self {
         if is_highlighted {
-            // Currently playing/selected state (e.g., current song in queue)
+            // Now-playing / expanded-parent fill. Derived from the accent
+            // tokens with guaranteed-legible forced text — recomputed on the
+            // depth-darkened bg so nested rows never push text into the fill.
+            let fill = theme::playing_fill();
             let bg = if depth > 0 {
-                theme::darken(theme::now_playing_color(), depth as f32 * 0.15)
+                theme::darken(fill, depth as f32 * 0.15)
             } else {
-                theme::now_playing_color()
+                fill
             };
+            let txt = theme::legible_text_on(bg);
             Self {
                 bg_color: bg,
-                border_color: theme::accent_bright(),
+                border_color: theme::highlight_border(bg, 1.0),
                 border_width: 2.0,
                 border_radius: slot_list_border_radius(),
-                text_color: theme::bg0_hard(),
-                subtext_color: theme::bg0_hard(),
-                hover_text_color: theme::bg0_hard(),
+                text_color: txt,
+                subtext_color: txt,
+                hover_text_color: txt,
+                forces_legible_text: true,
             }
         } else if is_selected || (is_center && !has_multi_selection) {
-            // Selected item, or center slot when there is NO explicit multi-selection.
+            // Selected item, or center slot when there is NO explicit
+            // multi-selection. Derived fill + guaranteed-legible forced text;
+            // the center slot gets a max-contrast ring, plain selection a
+            // subtler one (both perceptible against the fill on every theme).
+            let fill = theme::selected_fill_resolved();
+            let txt = theme::legible_text_on(fill);
             Self {
-                bg_color: theme::selected_color(),
-                border_color: if is_center {
-                    theme::accent_bright()
-                } else {
-                    theme::selected_color()
-                },
+                bg_color: fill,
+                border_color: theme::highlight_border(fill, if is_center { 1.0 } else { 0.55 }),
                 border_width: 2.0,
                 border_radius: slot_list_border_radius(),
-                text_color: theme::bg0_hard(),
-                subtext_color: theme::bg0_hard(),
-                hover_text_color: theme::bg0_hard(),
+                text_color: txt,
+                subtext_color: txt,
+                hover_text_color: txt,
+                forces_legible_text: true,
             }
         // Removed redundant else if is_center branch as it matches the default fallback exactly
         } else {
             // Regular slot with opacity fade (both background and text).
             // Per-depth background steps along the theme's elevation ramp so
             // nested expansion rows stay distinguishable from each other and
-            // from the focused row's `selected_color()` fill.
+            // from the focused row's `selected_fill_resolved()` fill.
             let base = match depth {
                 0 => theme::bg0(),
                 1 => theme::bg1(),
@@ -208,6 +221,7 @@ impl SlotListSlotStyle {
                     ..theme::fg4()
                 },
                 hover_text_color: theme::accent_bright(),
+                forces_legible_text: false,
             }
         }
     }
@@ -810,19 +824,19 @@ pub(crate) fn slot_list_index_column<'a, Message: 'a>(
     slot_list_labeled_index_column(format!("{}", index + 1), font_size, style, opacity)
 }
 
-/// Resolve the color for a static tinted icon (lock, sub-index label,
-/// empty heart/star outline) inside a slot-list row. Returns `bg0_hard()`
-/// on dark-text rows (selected / highlighted / centered) so the icon stays
-/// readable against the light selected-row fill; otherwise `fallback` with
-/// the given alpha. Always prefer this over hardcoding a `theme::fg*()`
-/// color in a row renderer.
+/// Resolve the color for a static tinted glyph (lock, index / sub-index label,
+/// empty heart/star outline) inside a slot-list row. On the opaque-fill
+/// highlight rows (`style.forces_legible_text`) it returns the row's
+/// forced-legible `text_color` so the glyph matches the song name and stays
+/// readable against the accent fill; otherwise `fallback` with the given alpha.
+/// Always prefer this over hardcoding a `theme::fg*()` color in a row renderer.
 pub(crate) fn slot_list_static_icon_color(
     style: SlotListSlotStyle,
     fallback: Color,
     opacity: f32,
 ) -> Color {
-    if style.text_color == theme::bg0_hard() {
-        theme::bg0_hard()
+    if style.forces_legible_text {
+        style.text_color
     } else {
         Color {
             a: opacity,
@@ -1330,9 +1344,10 @@ fn outlined_svg_icon<'a, M: 'a>(
 /// Render a star rating display (1-5 stars) for slot list slots.
 ///
 /// Filled stars use the brand `star_bright` color; empty stars use
-/// `slot_list_static_icon_color(style, fg4, 1.0)` so the outline darkens in
-/// lockstep with row text on selected / highlighted / centered rows. Per-star
-/// opacity tracks `style.text_color.a` to fade with the row.
+/// `slot_list_static_icon_color(style, fg4, 1.0)` so the outline matches the
+/// row's forced-legible text on selected / highlighted / centered rows (and
+/// stays a muted `fg4` elsewhere). Per-star opacity tracks `style.text_color.a`
+/// to fade with the row.
 ///
 /// # Arguments
 /// * `rating` - Star count (0-5), clamped internally
@@ -1401,10 +1416,11 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
 /// Render a favorite icon (heart or star) for a slot-list row.
 ///
 /// Both color and opacity are derived from `style` so the icon stays in
-/// lockstep with the row's text — empty outlines darken on selected /
-/// highlighted / centered rows via `slot_list_static_icon_color`, filled
-/// icons keep their brand colors (`danger_bright` / `star_bright`) and
-/// fade with `style.text_color.a` to match the surrounding text.
+/// lockstep with the row's text — empty outlines take the row's forced-legible
+/// text color on selected / highlighted / centered rows via
+/// `slot_list_static_icon_color`, filled icons keep their brand colors
+/// (`danger_bright` / `star_bright`) and fade with `style.text_color.a` to
+/// match the surrounding text.
 ///
 /// # Arguments
 /// * `is_starred` - Whether the item is starred/favorited
@@ -1833,18 +1849,42 @@ mod tests {
     }
 
     #[test]
-    fn hover_text_color_adjusts_for_background_contrast() {
-        // Normal slot (dark bg) -> hover is bright accent
+    fn highlight_slots_force_legible_ink() {
+        // Normal (unhighlighted) slot -> hover text is the bright accent.
         let style = SlotListSlotStyle::for_slot(false, false, false, false, 1.0, 0);
         assert_eq!(style.hover_text_color, crate::theme::accent_bright());
 
-        // Highlighted slot (light playing bg) -> hover is dark text (e.g. bg0_hard)
-        let hl_style = SlotListSlotStyle::for_slot(false, true, false, false, 1.0, 0);
-        assert_eq!(hl_style.hover_text_color, crate::theme::bg0_hard());
+        // Highlighted (playing) slot -> all three text fields are forced to the
+        // legible ink for the derived fill, and stay consistent.
+        let hl = SlotListSlotStyle::for_slot(false, true, false, false, 1.0, 0);
+        assert_eq!(hl.text_color, crate::theme::legible_text_on(hl.bg_color));
+        assert_eq!(hl.hover_text_color, hl.text_color);
+        assert_eq!(hl.subtext_color, hl.text_color);
 
-        // Selected slot (light selected bg) -> hover is dark text
-        let sel_style = SlotListSlotStyle::for_slot(false, false, true, false, 1.0, 0);
-        assert_eq!(sel_style.hover_text_color, crate::theme::bg0_hard());
+        // Selected slot -> same forced-legible-ink rule against its own fill.
+        let sel = SlotListSlotStyle::for_slot(false, false, true, false, 1.0, 0);
+        assert_eq!(sel.text_color, crate::theme::legible_text_on(sel.bg_color));
+        assert_eq!(sel.hover_text_color, sel.text_color);
+
+        // Static glyphs (index, empty star/heart outlines, lock) must follow
+        // the forced text on highlight rows — not a muted theme fallback that
+        // would wash out against the fill.
+        assert!(hl.forces_legible_text);
+        assert!(sel.forces_legible_text);
+        assert_eq!(
+            slot_list_static_icon_color(hl, crate::theme::fg4(), 1.0),
+            hl.text_color
+        );
+        assert_eq!(
+            slot_list_static_icon_color(sel, crate::theme::fg4(), 1.0),
+            sel.text_color
+        );
+        // A normal row keeps the muted fallback rather than the row text color.
+        assert!(!style.forces_legible_text);
+        assert_ne!(
+            slot_list_static_icon_color(style, crate::theme::fg4(), 1.0),
+            style.text_color
+        );
     }
 
     fn unfocused_bg(depth: u8) -> iced::Color {

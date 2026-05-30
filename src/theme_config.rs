@@ -60,8 +60,11 @@ pub(crate) struct ResolvedTheme {
     pub accent: Color,
     pub accent_bright: Color,
     pub accent_border_light: Color,
-    pub now_playing: Color,
-    pub selected: Color,
+    // `accent.now_playing` / `accent.selected` are no longer resolved into the
+    // theme: the now-playing and selected slot highlights are derived from the
+    // accent tokens with contrast guards (see `theme::playing_fill` /
+    // `selected_fill_resolved`). The TOML fields are still parsed for
+    // round-trip compatibility (the `star.base` precedent) but unused here.
 
     // Semantic colors
     pub danger: Color,
@@ -114,17 +117,6 @@ impl ResolvedTheme {
                 &palette.accent.border_light,
                 fallback_accent,
             ),
-            now_playing: if palette.accent.now_playing.is_empty() {
-                parse_hex_or_default(&palette.accent.primary, fallback_accent)
-            } else {
-                parse_hex_or_default(&palette.accent.now_playing, fallback_accent)
-            },
-            selected: if palette.accent.selected.is_empty() {
-                parse_hex_or_default(&palette.accent.bright, fallback_accent)
-            } else {
-                parse_hex_or_default(&palette.accent.selected, fallback_accent)
-            },
-
             danger: parse_hex_or_default(
                 &palette.danger.base,
                 parse_hex_color("#cc241d").expect("valid hardcoded hex"),

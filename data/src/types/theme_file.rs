@@ -253,10 +253,16 @@ pub struct AccentConfig {
     pub bright: String,
     /// Light border accent
     pub border_light: String,
-    /// Now-playing slot highlight (defaults to primary if empty)
+    /// Now-playing slot highlight. DERIVED, not consumed: the now-playing /
+    /// expanded slot fill is computed from `primary` + `bright` with a
+    /// contrast guard (`theme::playing_fill`). Retained so existing theme
+    /// files round-trip without migration (the `star.base` precedent).
     #[serde(default)]
     pub now_playing: String,
-    /// Selected/center slot highlight (defaults to bright if empty)
+    /// Selected/center slot highlight. DERIVED, not consumed: the selected
+    /// slot fill is computed from `bright` with a contrast guard
+    /// (`theme::selected_fill_resolved`). Retained for round-trip
+    /// compatibility (the `star.base` precedent).
     #[serde(default)]
     pub selected: String,
 }

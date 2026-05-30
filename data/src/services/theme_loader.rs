@@ -267,6 +267,14 @@ pub fn load_builtin_theme(name: &str) -> Option<ThemeFile> {
         .and_then(|content| ThemeFile::load(content).ok())
 }
 
+/// Stems of every built-in theme, in declaration order (first is the default).
+/// Reads the embedded table, so callers (e.g. theme-wide contrast guard tests)
+/// can sweep all shipped palettes without touching disk or drifting out of
+/// sync with the `themes/` directory.
+pub fn builtin_theme_stems() -> Vec<&'static str> {
+    BUILTIN_THEMES.iter().map(|t| t.stem).collect()
+}
+
 /// Save a theme to `~/.config/nokkvi/themes/{name}.toml`.
 pub fn save_theme(name: &str, theme: &ThemeFile) -> Result<()> {
     let themes_dir = get_themes_dir()?;

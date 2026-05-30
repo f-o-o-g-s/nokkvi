@@ -21,6 +21,15 @@ pub(crate) const STRIP_HEIGHT: f32 = theme::STATUS_STRIP_HEIGHT;
 /// Strip height plus its 1px separator — used by chrome height calculations.
 pub(crate) const STRIP_HEIGHT_WITH_SEPARATOR: f32 = STRIP_HEIGHT + 1.0;
 
+/// Make `color` legible over the status-strip band — the surface every field
+/// in this widget is painted on. Thin wrapper so the call sites that thread the
+/// strip's own background stay readable (single source of "this strip's
+/// surface" for the whole module).
+#[inline]
+fn strip_text(color: iced::Color) -> iced::Color {
+    theme::legible_strip_text(color, theme::status_strip_bg())
+}
+
 /// Embedded-SVG path for the radio-tower glyph. Shared between the nav-tab row,
 /// both metadata-strip widgets, and the radios view so a future rename touches
 /// one site instead of five (the embedded-svg lookup falls back to play.svg on
@@ -81,7 +90,7 @@ where
                 weight: Weight::Bold,
                 ..theme::ui_font()
             })
-            .color(theme::legible_strip_text(theme::now_playing_color())),
+            .color(strip_text(theme::fg2())),
     );
 
     if !icy_title.is_empty() {
@@ -89,7 +98,7 @@ where
         row_in = row_in.push(info_field_widget(
             "playing:",
             icy_title.to_string(),
-            theme::legible_strip_text(theme::accent_bright()),
+            strip_text(theme::fg2()),
         ));
     }
 
@@ -98,7 +107,7 @@ where
         row_in = row_in.push(info_field_widget(
             "artist:",
             icy_artist.to_string(),
-            theme::legible_strip_text(theme::selected_color()),
+            strip_text(theme::fg3()),
         ));
     }
 
@@ -107,7 +116,11 @@ where
         && let Some(url) = radio_url
     {
         row_in = row_in.push(info_sep());
-        row_in = row_in.push(info_field_widget("url:", url.to_string(), theme::fg2()));
+        row_in = row_in.push(info_field_widget(
+            "url:",
+            url.to_string(),
+            strip_text(theme::fg2()),
+        ));
     }
     row_in = row_in.push(info_sep());
 
@@ -257,7 +270,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                     weight: Weight::Medium,
                     ..theme::ui_font()
                 })
-                .color(theme::legible_strip_text(theme::fg3()))
+                .color(strip_text(theme::fg3()))
                 .wrapping(text::Wrapping::None),
         );
         info_row = info_row.push(info_sep());
@@ -292,7 +305,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                     super::marquee_text::marquee_text(merged)
                         .size(10.0)
                         .font(theme::ui_font())
-                        .color(theme::legible_strip_text(theme::selected_color())),
+                        .color(strip_text(theme::fg2())),
                 ]
                 .align_y(Alignment::Center)
                 .width(Length::FillPortion(9)),
@@ -308,29 +321,22 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         }
 
         if show_title {
-            center_row = center_row.push(info_field(
-                title_label,
-                title,
-                theme::legible_strip_text(theme::now_playing_color()),
-            ));
+            center_row = center_row.push(info_field(title_label, title, strip_text(theme::fg2())));
             has_prev_field = true;
         }
         if show_artist {
             if has_prev_field {
                 center_row = center_row.push(info_sep());
             }
-            center_row = center_row.push(info_field(
-                artist_label,
-                artist,
-                theme::legible_strip_text(theme::selected_color()),
-            ));
+            center_row =
+                center_row.push(info_field(artist_label, artist, strip_text(theme::fg3())));
             has_prev_field = true;
         }
         if show_album {
             if has_prev_field {
                 center_row = center_row.push(info_sep());
             }
-            center_row = center_row.push(info_field(album_label, album, theme::fg2()));
+            center_row = center_row.push(info_field(album_label, album, strip_text(theme::fg2())));
             has_prev_field = true;
         }
 
@@ -376,7 +382,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                     weight: Weight::Medium,
                     ..theme::ui_font()
                 })
-                .color(theme::legible_strip_text(theme::fg3()))
+                .color(strip_text(theme::fg3()))
                 .wrapping(text::Wrapping::None),
         );
     }
@@ -417,7 +423,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
                 weight: Weight::Medium,
                 ..theme::ui_font()
             })
-            .color(theme::legible_strip_text(theme::fg3()))
+            .color(strip_text(theme::fg3()))
             .wrapping(text::Wrapping::None)
     };
 
@@ -425,7 +431,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
         super::marquee_text::marquee_text(merged)
             .size(10.0)
             .font(theme::ui_font())
-            .color(theme::legible_strip_text(theme::selected_color()))
+            .color(strip_text(theme::fg2()))
             .align_x(iced::alignment::Horizontal::Center),
     ]
     .align_y(Alignment::Center)

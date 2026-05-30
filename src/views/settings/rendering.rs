@@ -1169,6 +1169,7 @@ pub(crate) fn render_detail_row<'a>(
         border_width: 0.0,
         border_radius: 0.0.into(),
         hover_text_color: theme::accent_bright(),
+        forces_legible_text: false,
     };
 
     let label_text = text(item.label.clone())

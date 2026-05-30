@@ -741,6 +741,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         super::track_info_strip::info_field_widget(label, value, value_color)
     };
 
+    // Nav-bar strip text is painted over the `bg0_hard()` chrome surface
+    // (`nav_content` below uses `container_bg0_hard`), so legibility is
+    // measured against it — the single source of "this strip's surface".
+    let nav_strip_text = |color: iced::Color| theme::legible_strip_text(color, theme::bg0_hard());
+
     // -------------------------------------------------------------------------
     // Center Section: Track Info (hidden below breakpoint)
     // -------------------------------------------------------------------------
@@ -836,7 +841,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                                 super::marquee_text::marquee_text(merged)
                                     .size(10.0)
                                     .font(theme::ui_font())
-                                    .color(theme::legible_strip_text(theme::selected_color()))
+                                    .color(nav_strip_text(theme::fg2()))
                                     .align_x(iced::alignment::Horizontal::Center),
                             ]
                             .align_y(Alignment::Center)
@@ -874,7 +879,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                             super::marquee_text::marquee_text(merged)
                                 .size(10.0)
                                 .font(theme::ui_font())
-                                .color(theme::legible_strip_text(theme::selected_color()))
+                                .color(nav_strip_text(theme::fg2()))
                                 .align_x(iced::alignment::Horizontal::Center),
                         ]
                         .align_y(Alignment::Center)
@@ -884,11 +889,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             } else {
                 if show_title {
                     info_row = info_row.push(info_sep());
-                    info_row = info_row.push(info_field(
-                        title_label,
-                        title,
-                        theme::legible_strip_text(theme::now_playing_color()),
-                    ));
+                    info_row =
+                        info_row.push(info_field(title_label, title, nav_strip_text(theme::fg2())));
                     has_prev_field = true;
                 }
 
@@ -897,14 +899,15 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     info_row = info_row.push(info_field(
                         artist_label,
                         artist,
-                        theme::legible_strip_text(theme::selected_color()),
+                        nav_strip_text(theme::fg3()),
                     ));
                     has_prev_field = true;
                 }
 
                 if show_album {
                     info_row = info_row.push(info_sep());
-                    info_row = info_row.push(info_field(album_label, album, theme::fg2()));
+                    info_row =
+                        info_row.push(info_field(album_label, album, nav_strip_text(theme::fg2())));
                     has_prev_field = true;
                 }
 
@@ -982,7 +985,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                             weight: Weight::Medium,
                             ..theme::ui_font()
                         })
-                        .color(theme::legible_strip_text(theme::fg3()))
+                        .color(nav_strip_text(theme::fg3()))
                         .wrapping(Wrapping::None),
                 ]
                 .spacing(6)
