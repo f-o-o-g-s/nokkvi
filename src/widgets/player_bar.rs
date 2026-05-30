@@ -396,22 +396,21 @@ pub enum PlayerBarMessage {
     Quit,
 }
 
-/// Style for a flat borderless transport button: no border, no background by
-/// default, `bg1()` background on hover, and an optional accent fill when the
-/// button is in its active state (play/pause toggled on).
+/// Style for a flat borderless transport button: no border, an optional accent
+/// fill when the button is in its active state (play/pause toggled on), and no
+/// background otherwise. Hover/press feedback is owned by the wrapping
+/// `HoverOverlay` (the accent-wash helpers), matching the nav-bar convention —
+/// this style encodes only active-vs-idle.
 fn transport_button_style(
     active: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
-    move |_theme, status| {
+    move |_theme, _status| {
         // `ui_radius_pill()` returns `0.0.into()` in flat mode.
         let radius = theme::ui_radius_pill_player();
         let background = if active {
             Some(theme::accent_bright().into())
         } else {
-            match status {
-                button::Status::Hovered | button::Status::Pressed => Some(theme::bg1().into()),
-                _ => None,
-            }
+            None
         };
         button::Style {
             background,
@@ -430,10 +429,12 @@ fn transport_button_style(
 }
 
 /// Style for a 1px-bordered mode toggle (idle = `bg0()` fill with `border()`
-/// outline; active = `accent_bright()` fill + `bg0_hard()` text; hover lightens
-/// to `bg1()`). Rounded mode applies `ui_radius_sm()`.
+/// outline; active = `accent_bright()` fill + `bg0_hard()` text). Hover/press
+/// feedback is owned by the wrapping `HoverOverlay` (the accent-wash helpers),
+/// matching the nav-bar convention — this style encodes only active-vs-idle.
+/// Rounded mode applies `ui_radius_sm()`.
 fn mode_toggle_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
-    move |_theme, status| {
+    move |_theme, _status| {
         // `ui_radius_sm()` returns `0.0.into()` in flat mode.
         let radius = theme::ui_radius_sm_player();
         let (bg, fg, border_color) = if active {
@@ -443,11 +444,8 @@ fn mode_toggle_style(active: bool) -> impl Fn(&Theme, button::Status) -> button:
                 theme::accent_bright(),
             )
         } else {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => theme::bg1(),
-                _ => theme::bg0(),
-            };
-            (bg, theme::fg0(), theme::border())
+            // Idle `bg0()` fill in every state; hover is the overlay's job.
+            (theme::bg0(), theme::fg0(), theme::border())
         };
         button::Style {
             background: Some(bg.into()),
@@ -1443,6 +1441,62 @@ mod player_bar_height_tests {
         assert!(
             (got - expected).abs() < f32::EPSILON,
             "strip-on height drifted: got {got}, expected {expected}",
+        );
+    }
+}
+
+#[cfg(test)]
+mod transport_hover_convention_tests {
+    use iced::widget::button;
+
+    use super::{mode_toggle_style, transport_button_style};
+    use crate::theme::THEME_MODE_LOCK;
+
+    /// Hover/press feedback on the transport buttons is owned entirely by the
+    /// wrapping `HoverOverlay` (the accent-wash helpers), matching the nav-bar
+    /// convention spelled out at `nav_bar::flat_tab_container_style`: the
+    /// `button::Style` closure encodes only active-vs-idle, so an INACTIVE
+    /// button keeps the same background across `Active` (idle), `Hovered`, and
+    /// `Pressed`. Guards against re-introducing the pre-redesign neutral
+    /// `bg1()` hover fill underneath the overlay.
+    #[test]
+    fn inactive_transport_button_background_is_hover_invariant() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let style = transport_button_style(false);
+        let idle = style(&iced::Theme::Dark, button::Status::Active).background;
+        let hovered = style(&iced::Theme::Dark, button::Status::Hovered).background;
+        let pressed = style(&iced::Theme::Dark, button::Status::Pressed).background;
+        assert_eq!(
+            idle, hovered,
+            "inactive transport button changed background on hover; hover must \
+             be delegated to HoverOverlay, not painted by the button style",
+        );
+        assert_eq!(
+            idle, pressed,
+            "inactive transport button changed background on press; press must \
+             be delegated to HoverOverlay, not painted by the button style",
+        );
+    }
+
+    /// Same convention for the bordered mode toggles (repeat / shuffle /
+    /// consume / EQ / SFX): the inactive background is hover-invariant and the
+    /// overlay owns the hover affordance.
+    #[test]
+    fn inactive_mode_toggle_background_is_hover_invariant() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let style = mode_toggle_style(false);
+        let idle = style(&iced::Theme::Dark, button::Status::Active).background;
+        let hovered = style(&iced::Theme::Dark, button::Status::Hovered).background;
+        let pressed = style(&iced::Theme::Dark, button::Status::Pressed).background;
+        assert_eq!(
+            idle, hovered,
+            "inactive mode toggle changed background on hover; hover must be \
+             delegated to HoverOverlay, not painted by the button style",
+        );
+        assert_eq!(
+            idle, pressed,
+            "inactive mode toggle changed background on press; press must be \
+             delegated to HoverOverlay, not painted by the button style",
         );
     }
 }
