@@ -8,9 +8,18 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## v0.6.4 — 2026-05-29
+
+### Changed
+
 - Hover and press highlights now follow the theme's accent color, making them clearly visible in light mode instead of nearly invisible.
-- Selected and now-playing row highlights are now derived from each theme's accent colors with a built-in readability guarantee, so every element on the highlighted row (song name, artist, album, duration, the index number, and the star and heart outlines) stays legible. This fixes the muddy grey selection block on Everforest light and the unreadable now-playing row on Kanagawa Dragon dark, and the playing row now stays visibly distinct from the keyboard selection on every theme.
-- The status strip background in light mode now tints toward the theme's own text color instead of darkening toward black, so it stays on-palette instead of looking dingy. Dark mode keeps its existing look.
+- Selected and now-playing row highlights are now derived from each theme's accent colors, keeping every element on the highlighted row legible on every theme.
+- The now-playing row now stays visibly distinct from the keyboard-selected row, fixing the muddy grey selection on Everforest light and the unreadable now-playing row on Kanagawa Dragon dark.
+- The status strip background in light mode now tints toward the theme's text color instead of darkening toward black, so it stays on-palette instead of dingy; dark mode is unchanged.
 
 ### Fixed
 
@@ -21,7 +30,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
-- The per-theme `now_playing` and `selected` accent swatches were removed from the theme editor, since those highlights are now derived automatically. Existing theme files still load unchanged (the fields are kept for compatibility).
+- The per-theme `now_playing` and `selected` accent swatches were removed from the theme editor, since those highlights are now derived automatically; existing theme files still load unchanged (the fields are kept for compatibility).
 
 ## v0.6.3 — 2026-05-28
 
