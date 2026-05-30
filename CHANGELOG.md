@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The player bar's playback and mode-toggle buttons now show the theme accent highlight on hover instead of a flat grey one.
+
 ### Removed
 
 ## v0.6.4 — 2026-05-29
