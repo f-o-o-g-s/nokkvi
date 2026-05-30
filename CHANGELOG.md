@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Hover and press highlights now follow the theme's accent color, making them clearly visible in light mode instead of nearly invisible.
+
 ### Fixed
 
 - Tabbing through long settings tabs (Hotkeys, Theme, Visualizer) now keeps the selected row centered in view instead of letting it scroll out of sight.
