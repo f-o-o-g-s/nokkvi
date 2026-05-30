@@ -62,17 +62,6 @@ pub(crate) fn editor_chrome_height(select_header_visible: bool) -> f32 {
     chrome
 }
 
-/// Linear blend of `base` toward `toward` by `t`, preserving `base`'s alpha —
-/// the faint accent wash, mirroring the queue edit bar's `blend_toward`.
-fn blend_toward(base: iced::Color, toward: iced::Color, t: f32) -> iced::Color {
-    iced::Color {
-        r: base.r + (toward.r - base.r) * t,
-        g: base.g + (toward.g - base.g) * t,
-        b: base.b + (toward.b - base.b) * t,
-        a: base.a,
-    }
-}
-
 impl PlaylistEditorState {
     /// Build the editor view: edit-bar header + the editor buffer rendered
     /// through the shared `song_list_pane`.
@@ -452,7 +441,7 @@ impl PlaylistEditorState {
         .center_y(Length::Fixed(EDIT_BAR_H))
         .width(Length::Fill);
 
-        let wash = blend_toward(crate::theme::bg0_soft(), accent, 0.07);
+        let wash = crate::theme::accent_wash(crate::theme::bg0_soft(), crate::theme::HEADER_WASH);
 
         container(
             row![stripe, content]

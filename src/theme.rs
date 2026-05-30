@@ -1265,6 +1265,57 @@ pub(crate) fn darken(color: Color, amount: f32) -> Color {
 }
 
 // ============================================================================
+// Accent-wash family (single source of truth)
+// ============================================================================
+//
+// The playlist / queue "Playing From" header banner and the `HoverOverlay`
+// hover/press feedback are the same recipe — a faint pull of the live theme
+// `accent()` over a surface. Both route through `accent_wash` / `hover_tint`
+// so a 22nd theme or a new wash site inherits the look for free and cannot
+// silently re-fork the recipe (the duplication this consolidated removed).
+
+/// Faint accent-wash factor for the playlist / queue "Playing From" header
+/// banner — `bg0_soft()` lerped this far toward `accent()`.
+pub(crate) const HEADER_WASH: f32 = 0.07;
+
+/// Blend `base` toward the active theme `accent()` by `factor` (0.0 = base,
+/// 1.0 = pure accent). Preserves `base`'s alpha (opaque base → opaque wash).
+/// The single home for the accent-wash family.
+#[inline]
+pub(crate) fn accent_wash(base: Color, factor: f32) -> Color {
+    blend_toward(base, accent(), factor)
+}
+
+/// Opaque pigment the hover/press overlay deposits over a NEUTRAL surface.
+///
+/// `HoverOverlay` applies its own hover/press alpha on top, so the live
+/// src-over composite equals `lerp(surface, this, alpha)` — the same
+/// accent wash as the header, viewed at the overlay's alpha. Light mode
+/// pulls toward `accent()`; dark toward the brighter `accent_bright()` so it
+/// still reads over dark chrome. Fixes the pre-redesign light-mode no-op
+/// (a near-black tint at 10% over a near-`bg0_hard()` surface was invisible).
+#[inline]
+pub(crate) fn hover_tint() -> Color {
+    if is_light_mode() {
+        accent()
+    } else {
+        accent_bright()
+    }
+}
+
+/// Hover/press pigment for a surface that is ALREADY filled with
+/// `accent_bright()` — active nav tabs and active player mode toggles.
+///
+/// Depositing the accent wash there is a near-no-op (accent over accent), so
+/// these surfaces get a CONTRASTING neutral pull instead: `bg0_hard()` in
+/// light mode, `fg0()` in dark. Call sites opt in via
+/// [`HoverOverlay::on_accent_surface`] with their own active flag.
+#[inline]
+pub(crate) fn hover_tint_on_accent() -> Color {
+    if is_light_mode() { bg0_hard() } else { fg0() }
+}
+
+// ============================================================================
 // Contrast helpers
 // ============================================================================
 //
@@ -1859,6 +1910,53 @@ mod tests {
         assert_eq!(result.r, muted.r);
         assert_eq!(result.g, muted.g);
         assert_eq!(result.b, muted.b);
+
+        UI_MODE.light_mode.store(saved, Ordering::Relaxed);
+    }
+
+    /// `hover_tint()` must read against the neutral chrome surface it sits over
+    /// (`bg0_hard()`) in both modes — the fix for the pre-redesign light-mode
+    /// no-op where a near-black tint at 10% over a near-`bg0_hard()` surface
+    /// was effectively invisible.
+    #[test]
+    fn hover_tint_reads_over_neutral_chrome() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = UI_MODE.light_mode.load(Ordering::Relaxed);
+
+        for light in [true, false] {
+            set_light_mode(light);
+            let delta = (relative_luminance(hover_tint()) - relative_luminance(bg0_hard())).abs();
+            assert!(
+                delta > 0.02,
+                "hover_tint() must differ perceptibly from neutral chrome (light={light}); \
+                 luminance delta={delta:.4}"
+            );
+        }
+
+        UI_MODE.light_mode.store(saved, Ordering::Relaxed);
+    }
+
+    /// Regression guard for the active-tab no-op. An accent-derived hover over
+    /// a surface already filled with `accent_bright()` (active nav tab / mode
+    /// toggle) is a near-no-op — in dark mode `accent_bright()` over
+    /// `accent_bright()` is exactly zero. `hover_tint_on_accent()` must instead
+    /// contrast against the accent fill so hovering an active tab still reads.
+    #[test]
+    fn hover_tint_on_accent_contrasts_with_accent_fill() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = UI_MODE.light_mode.load(Ordering::Relaxed);
+
+        for light in [true, false] {
+            set_light_mode(light);
+            let delta = (relative_luminance(hover_tint_on_accent())
+                - relative_luminance(accent_bright()))
+            .abs();
+            assert!(
+                delta > 0.02,
+                "hover_tint_on_accent() must contrast with the accent_bright() fill \
+                 (light={light}); luminance delta={delta:.4}"
+            );
+        }
 
         UI_MODE.light_mode.store(saved, Ordering::Relaxed);
     }

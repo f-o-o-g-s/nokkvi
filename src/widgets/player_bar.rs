@@ -530,6 +530,7 @@ fn player_control_button(
         .on_press(message);
     HoverOverlay::new(btn)
         .border_radius(theme::ui_radius_pill_player())
+        .on_accent_surface(active)
         .into()
 }
 
@@ -564,6 +565,7 @@ fn mode_text_toggle(
         .style(theme::container_tooltip),
     )
     .border_radius(theme::ui_radius_sm_player())
+    .on_accent_surface(active)
     .into()
 }
 
@@ -596,6 +598,7 @@ fn mode_toggle_button<'a>(
         .style(theme::container_tooltip),
     )
     .border_radius(theme::ui_radius_sm_player())
+    .on_accent_surface(active)
     .into()
 }
 

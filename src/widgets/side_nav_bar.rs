@@ -288,7 +288,8 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                         ..Default::default()
                     }),
             )
-            .border_radius(card_radius),
+            .border_radius(card_radius)
+            .on_accent_surface(is_active),
         )
         .on_press(on_press)
         .interaction(iced::mouse::Interaction::Pointer)

@@ -471,7 +471,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                         .align_x(Alignment::Center)
                         .style(tab_style),
                     )
-                    .border_radius(theme::ui_radius_pill()),
+                    .border_radius(theme::ui_radius_pill())
+                    .on_accent_surface(is_active),
                 )
                 .on_press(on_press.clone())
                 .interaction(iced::mouse::Interaction::Pointer)
@@ -503,7 +504,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                         .align_x(Alignment::Center)
                         .style(tab_style),
                     )
-                    .border_radius(0.0.into()),
+                    .border_radius(0.0.into())
+                    .on_accent_surface(is_active),
                 )
                 .on_press(on_press.clone())
                 .interaction(iced::mouse::Interaction::Pointer)

@@ -95,17 +95,6 @@ fn format_strip_duration(secs: f32) -> String {
     }
 }
 
-/// Linear blend of `base` toward `toward` by `t` (0..1), preserving `base`'s
-/// alpha. Used for the strip's faint accent wash over `bg0_soft()`.
-fn blend_toward(base: iced::Color, toward: iced::Color, t: f32) -> iced::Color {
-    iced::Color {
-        r: base.r + (toward.r - base.r) * t,
-        g: base.g + (toward.g - base.g) * t,
-        b: base.b + (toward.b - base.b) * t,
-        a: base.a,
-    }
-}
-
 impl QueuePage {
     /// Build the view
     pub fn view<'a>(&'a self, data: QueueViewData<'a>) -> Element<'a, QueueMessage> {
@@ -442,8 +431,10 @@ impl QueuePage {
             };
 
             // Faint accent wash over bg0_soft (flat blend — reads correctly on
-            // every theme without gradient-API risk).
-            let wash = blend_toward(crate::theme::bg0_soft(), accent, 0.07);
+            // every theme without gradient-API risk). Shares the single
+            // accent-wash recipe with the hover overlay via `theme::accent_wash`.
+            let wash =
+                crate::theme::accent_wash(crate::theme::bg0_soft(), crate::theme::HEADER_WASH);
 
             let banner = container(
                 row![stripe, body]

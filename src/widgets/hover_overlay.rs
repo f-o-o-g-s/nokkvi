@@ -23,21 +23,6 @@ const HOVER_ALPHA: f32 = 0.10;
 /// Alpha for the press tint overlay (stronger, tactile).
 const PRESS_ALPHA: f32 = 0.20;
 
-/// Compute the hover/press tint base color from the active theme.
-///
-/// On dark themes we lift toward `fg0`; on light themes we drop toward
-/// `bg0_hard`. Both directions are derived from per-theme palette colors
-/// rather than the pure-black tint that shipped pre-redesign, so the
-/// overlay reads as a deliberate hover affordance on every theme instead
-/// of disappearing on dark palettes and washing out light ones.
-fn tint_base() -> Color {
-    if crate::theme::is_light_mode() {
-        crate::theme::bg0_hard()
-    } else {
-        crate::theme::fg0()
-    }
-}
-
 /// Scale factor on press: 98% gives a subtle "push in" feel.
 const PRESS_SCALE: f32 = 0.98;
 
@@ -65,6 +50,11 @@ pub(crate) struct HoverOverlay<'a, Message, Theme = iced::Theme, Renderer = iced
     /// External flash timestamp from `SlotListView::flash_center_at`.
     /// When within `FLASH_DURATION`, the widget shows the press animation.
     flash_at: Option<time::Instant>,
+    /// `true` when the wrapped surface is already filled with `accent_bright()`
+    /// (active nav tab, active player mode toggle). Such surfaces use a
+    /// contrasting neutral hover pigment instead of the accent wash, which
+    /// over an accent fill would be a near-no-op.
+    on_accent_surface: bool,
 }
 
 impl<'a, Message, Theme, Renderer> HoverOverlay<'a, Message, Theme, Renderer>
@@ -77,12 +67,22 @@ where
             content: content.into(),
             border_radius: crate::theme::ui_border_radius(),
             flash_at: None,
+            on_accent_surface: false,
         }
     }
 
     /// Set the border radius of the hover overlay quad.
     pub(crate) fn border_radius(mut self, radius: iced::border::Radius) -> Self {
         self.border_radius = radius;
+        self
+    }
+
+    /// Mark the wrapped surface as already `accent_bright()`-filled when `yes`
+    /// is `true` (pass the surface's own active flag). Such surfaces deposit a
+    /// contrasting neutral pigment (`theme::hover_tint_on_accent()`) instead of
+    /// the accent wash, which over an accent fill would barely register.
+    pub(crate) fn on_accent_surface(mut self, yes: bool) -> Self {
+        self.on_accent_surface = yes;
         self
     }
 
@@ -250,10 +250,18 @@ where
         }
 
         // Draw overlay on top: stronger for press, subtle for hover.
-        // Tint base is theme-aware (lift on dark, drop on light) so the
-        // overlay reads consistently across the 21 themes.
+        // The pigment is the theme accent wash (`hover_tint`) so hover reads
+        // as the same family as the playlist-header wash across all themes —
+        // except over an already-`accent_bright()`-filled surface, where a
+        // contrasting neutral pigment (`hover_tint_on_accent`) is used so
+        // accent-over-accent doesn't vanish. The overlay's own alpha makes the
+        // live composite equal `lerp(surface, pigment, alpha)`.
         if is_hovered || is_pressed {
-            let base = tint_base();
+            let base = if self.on_accent_surface {
+                crate::theme::hover_tint_on_accent()
+            } else {
+                crate::theme::hover_tint()
+            };
             let alpha = if is_pressed { PRESS_ALPHA } else { HOVER_ALPHA };
             let color = Color { a: alpha, ..base };
 
