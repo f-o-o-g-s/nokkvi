@@ -960,11 +960,8 @@ impl AudioRenderer {
                 // somehow runs mid-pause still reports pause-corrected progress.
                 let live_paused = paused_at.map_or(*paused_accum, |t| *paused_accum + t.elapsed());
                 let elapsed_ms = started_at.elapsed().as_millis() as u64;
-                let progress = crossfade_progress(
-                    elapsed_ms,
-                    live_paused.as_millis() as u64,
-                    *duration_ms,
-                );
+                let progress =
+                    crossfade_progress(elapsed_ms, live_paused.as_millis() as u64, *duration_ms);
                 // Equal-power crossfade using cos²/sin² curves.
                 let fade_out = (progress * std::f64::consts::FRAC_PI_2).cos().powi(2);
                 let fade_in = (progress * std::f64::consts::FRAC_PI_2).sin().powi(2);
@@ -1042,10 +1039,7 @@ impl AudioRenderer {
         // Subtract paused time so the position offset reflects only the audio
         // the incoming track actually produced during the fade.
         let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
-        let elapsed_ms = started_at
-            .elapsed()
-            .saturating_sub(live_paused)
-            .as_millis() as u64;
+        let elapsed_ms = started_at.elapsed().saturating_sub(live_paused).as_millis() as u64;
 
         debug!(
             "🔀 [RENDERER] Crossfade FINALIZED: elapsed={}ms/{}ms",
@@ -1465,7 +1459,11 @@ mod tests {
         renderer.playing = true;
         renderer.crossfade_state = completed_active_state(stream);
 
-        assert_eq!(renderer.crossfade_buffer_count(), 0, "incoming ring is empty");
+        assert_eq!(
+            renderer.crossfade_buffer_count(),
+            0,
+            "incoming ring is empty"
+        );
         assert_eq!(
             renderer.tick_crossfade(),
             CrossfadeTick::IncomingStalled,
@@ -1483,7 +1481,10 @@ mod tests {
         renderer.playing = true;
         renderer.crossfade_state = completed_active_state(stream);
 
-        assert!(renderer.crossfade_buffer_count() > 0, "incoming ring is filled");
+        assert!(
+            renderer.crossfade_buffer_count() > 0,
+            "incoming ring is filled"
+        );
         assert_eq!(
             renderer.tick_crossfade(),
             CrossfadeTick::Finalize,
