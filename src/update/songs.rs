@@ -117,9 +117,15 @@ impl Nokkvi {
     pub(crate) fn handle_song_artwork_loaded(
         &mut self,
         album_id: String,
+        updated_at: Option<String>,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
         if let Some(h) = handle {
+            // Record the version in lockstep with the handle (N17) — see
+            // `handle_artwork_loaded`.
+            self.artwork
+                .album_art_versions
+                .insert(album_id.clone(), updated_at);
             self.artwork.album_art.put(album_id, h);
         }
         Task::none()

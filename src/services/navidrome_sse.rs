@@ -13,7 +13,6 @@ use nokkvi_data::{
     services::navidrome_events::{NavidromeEvent, parse_sse_event},
 };
 use parking_lot::Mutex as ParkingMutex;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace, warn};
 
 /// Connection parameters for the SSE stream
@@ -23,7 +22,12 @@ pub(crate) struct SseConnectionInfo {
     pub auth_gateway: AuthGateway,
 }
 
-static SSE_CONNECTION_INFO: OnceLock<Mutex<Option<SseConnectionInfo>>> = OnceLock::new();
+/// Connection slot for the SSE event loop. A synchronous `parking_lot::Mutex`
+/// (mirroring `subscription_slot.rs`) so `register` / `clear` always succeed —
+/// the previous `OnceLock<tokio::Mutex>` + `try_lock` shape could silently drop
+/// a mutation under contention with `run()`'s blocking lock, leaving stale
+/// `auth_gateway` + `server_url` in the slot after a logout (audit Finding 13).
+static SSE_CONNECTION_INFO: ParkingMutex<Option<SseConnectionInfo>> = ParkingMutex::new(None);
 
 /// Tracks SSE event names already logged at debug for this session. Navidrome emits
 /// recurring unknown events (e.g. `nowPlayingCount`); gating prevents log spam while
@@ -32,11 +36,8 @@ static SEEN_UNKNOWN_SSE_EVENTS: OnceLock<ParkingMutex<HashSet<String>>> = OnceLo
 
 /// Register connection details. Called once from handle_login_result.
 pub(crate) fn register(info: SseConnectionInfo) {
-    let slot = SSE_CONNECTION_INFO.get_or_init(|| Mutex::new(None));
-    if let Ok(mut guard) = slot.try_lock() {
-        *guard = Some(info);
-        debug!(" [SSE] Connection info registered");
-    }
+    *SSE_CONNECTION_INFO.lock() = Some(info);
+    debug!(" [SSE] Connection info registered");
 }
 
 /// Drop registered connection info. Called from `reset_session_state` on
@@ -46,11 +47,28 @@ pub(crate) fn register(info: SseConnectionInfo) {
 /// an unreachable one) until the next successful `register()` overwrites
 /// the slot.
 pub(crate) fn clear() {
-    let slot = SSE_CONNECTION_INFO.get_or_init(|| Mutex::new(None));
-    if let Ok(mut guard) = slot.try_lock() {
-        *guard = None;
-        debug!(" [SSE] Connection info cleared");
-    }
+    *SSE_CONNECTION_INFO.lock() = None;
+    debug!(" [SSE] Connection info cleared");
+}
+
+/// Test-only helper: reports whether the SSE connection slot currently holds
+/// connection info. Mirrors `subscription_slot.rs::slot_is_set`; used by the
+/// regression tests that pin the logout-clears-the-slot contract.
+#[cfg(test)]
+pub(crate) fn slot_is_set() -> bool {
+    SSE_CONNECTION_INFO.lock().is_some()
+}
+
+/// Test-only helper: grab the connection-slot lock and hold it for `dur`,
+/// then release. The static is module-private, so the contention regression
+/// test in `update::tests::session` drives the lock through this rather than
+/// reaching into the static directly. Under the old `try_lock` shape a
+/// `register` racing this hold would have silently dropped; the blocking
+/// `parking_lot::Mutex` makes the register wait and complete.
+#[cfg(test)]
+pub(crate) fn hold_slot_lock_blocking(dur: Duration) {
+    let _guard = SSE_CONNECTION_INFO.lock();
+    std::thread::sleep(dur);
 }
 
 /// Structured payload carrying the resource kinds Navidrome reports as changed.
@@ -140,6 +158,35 @@ fn append_chunk_decoded(
     drain_end
 }
 
+/// Reconnect backoff floor: a fresh attempt waits at least this long.
+const SSE_BACKOFF_FLOOR: Duration = Duration::from_secs(2);
+/// Reconnect backoff ceiling: escalation saturates here.
+const SSE_BACKOFF_CAP: Duration = Duration::from_secs(30);
+/// A connection that stayed up at least this long is considered healthy, so
+/// its disconnect resets the backoff floor (and incurs no reconnect sleep).
+const SSE_HEALTHY_UPTIME: Duration = Duration::from_secs(60);
+
+/// Decide the reconnect backoff after a stream-died disconnect.
+///
+/// Pure and clock-free (the caller reads `Instant::now()` / `elapsed()` and
+/// passes the uptime in), so the escalate / cap / reset policy is unit-testable
+/// without I/O.
+///
+/// - A connection that stayed up `>= SSE_HEALTHY_UPTIME` is healthy: returns
+///   `(None, SSE_BACKOFF_FLOOR)` — no sleep, floor reset. This preserves the
+///   original "reset backoff on a good connection" intent while defeating the
+///   flap-resets-backoff defect (a 200 → EOF → 200 flap never stayed up long
+///   enough to count as healthy, so it now escalates).
+/// - A short-lived connection (flap) returns `(Some(prev), min(prev*2, CAP))`:
+///   sleep `prev`, then escalate `2 → 4 → 8 → 16 → 30`, saturating at 30s.
+fn next_backoff(prev: Duration, connection_uptime: Duration) -> (Option<Duration>, Duration) {
+    if connection_uptime >= SSE_HEALTHY_UPTIME {
+        (None, SSE_BACKOFF_FLOOR)
+    } else {
+        (Some(prev), std::cmp::min(prev * 2, SSE_BACKOFF_CAP))
+    }
+}
+
 /// Start the SSE subscription loop
 pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
     sipper(async |mut output| {
@@ -151,18 +198,15 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
         let mut backoff = Duration::from_secs(2);
 
         loop {
-            // 1. Get connection info
-            let info = {
-                let slot = SSE_CONNECTION_INFO.get_or_init(|| Mutex::new(None));
-                let guard = slot.lock().await;
-                match guard.as_ref() {
-                    Some(info) => info.clone(),
-                    None => {
-                        drop(guard);
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        continue;
-                    }
-                }
+            // 1. Get connection info. The synchronous parking_lot guard is
+            //    dropped at the end of this statement — never held across an
+            //    `.await`. `.cloned()` (not `.take()`): the loop re-reads the
+            //    slot every iteration to pick up JWT refreshes across
+            //    reconnects, so the slot must retain the info.
+            let info = SSE_CONNECTION_INFO.lock().as_ref().cloned();
+            let Some(info) = info else {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
             };
 
             // 2. Read latest JWT (can update across reconnects if redb session is resumed)
@@ -197,7 +241,12 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                     }
 
                     info!(" [SSE] Connected to Navidrome event stream");
-                    backoff = Duration::from_secs(2); // Reset backoff on success
+                    // Record connection start so the post-disconnect backoff
+                    // (`next_backoff`) can tell a healthy connection (reset the
+                    // floor, no sleep) from a flap (escalate). The backoff is
+                    // NOT reset here unconditionally — a 200 → EOF → 200 flap
+                    // would otherwise reset the floor on every short-lived 200.
+                    let connected_at = std::time::Instant::now();
 
                     let mut stream = response.bytes_stream();
                     let mut buffer = String::new();
@@ -316,6 +365,17 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                 break;
                             }
                         }
+                    }
+
+                    // The inner read loop only `break`s on a stream-died path
+                    // (read error / server-ended / read timeout). Throttle the
+                    // reconnect: a healthy connection resets the floor and
+                    // reconnects immediately; a flap escalates 2 → 4 → … → 30s
+                    // so a proxy idle-timeout / restart loop can't spin.
+                    let (sleep, new_backoff) = next_backoff(backoff, connected_at.elapsed());
+                    backoff = new_backoff;
+                    if let Some(d) = sleep {
+                        tokio::time::sleep(d).await;
                     }
                 }
                 Err(e) => {
@@ -489,5 +549,45 @@ mod tests {
             "event: refreshResource\ndata: {\"artist\":\"Sigur Rós\"}\n\n"
         );
         assert!(byte_buffer.is_empty());
+    }
+
+    // ── next_backoff (I17) ──────────────────────────────────────────────
+    //
+    // A connection that drops immediately (uptime ~0) is a flap: backoff must
+    // escalate so a proxy idle-timeout / server-restart loop does not produce a
+    // tight reconnect spin. A connection that stayed up past the healthy
+    // threshold resets the floor and incurs no reconnect sleep.
+
+    /// An immediate flap (zero uptime) escalates: sleep the previous backoff,
+    /// double it for next time.
+    #[test]
+    fn next_backoff_escalates_on_immediate_flap() {
+        assert_eq!(
+            next_backoff(Duration::from_secs(2), Duration::from_secs(0)),
+            (Some(Duration::from_secs(2)), Duration::from_secs(4)),
+        );
+    }
+
+    /// Escalation saturates at the 30s cap and stays there.
+    #[test]
+    fn next_backoff_caps_at_30s() {
+        assert_eq!(
+            next_backoff(Duration::from_secs(16), Duration::from_secs(0)).1,
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(30), Duration::from_secs(0)).1,
+            Duration::from_secs(30),
+        );
+    }
+
+    /// A healthy connection (uptime past the threshold) resets the floor and
+    /// does NOT sleep before reconnecting.
+    #[test]
+    fn next_backoff_resets_on_healthy_uptime() {
+        assert_eq!(
+            next_backoff(Duration::from_secs(16), Duration::from_secs(120)),
+            (None, Duration::from_secs(2)),
+        );
     }
 }

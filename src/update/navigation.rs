@@ -449,6 +449,13 @@ impl Nokkvi {
                 // Returns None if no audio device is available — music will also be disabled.
                 let shared_mixer = self.sfx_engine.mixer();
                 let pw_volume = self.sfx_engine.has_native_volume();
+                // Push the canonical shared EqState alongside the mixer so the
+                // renderer holds the live UI-owned atomics BEFORE the first
+                // stream is created — otherwise a track that starts before the
+                // async apply_player_settings task lands would track the
+                // renderer's seeded default (always-disabled) atomics and
+                // ignore a later EQ enable for that stream's lifetime.
+                let eq_state = self.playback.eq_state.clone();
                 shell
                     .task_manager()
                     .spawn("setup_audio", move || async move {
@@ -458,6 +465,7 @@ impl Nokkvi {
                             engine.set_shared_mixer(mixer);
                         }
                         engine.set_pw_volume_active(pw_volume);
+                        engine.set_eq_state(eq_state);
                     });
 
                 self.app_service = Some(shell.clone());

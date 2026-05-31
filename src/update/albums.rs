@@ -121,9 +121,17 @@ impl Nokkvi {
     pub(crate) fn handle_artwork_loaded(
         &mut self,
         id: String,
+        updated_at: Option<String>,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
         if let Some(h) = handle {
+            // Record the cache-buster the URL carried, in lockstep with the
+            // handle, so a later server cover change is a version-aware miss
+            // (N17). album_art evicts at capacity; `should_refetch` guards the
+            // skew by also checking album_art membership.
+            self.artwork
+                .album_art_versions
+                .insert(id.clone(), updated_at);
             self.artwork.album_art.put(id, h);
         } else {
             warn!(" Mini artwork failed to load for album: {}", id);
@@ -266,6 +274,19 @@ impl Nokkvi {
             return Task::none();
         }
         if let Some(h) = thumb {
+            // Re-sync the recorded version to the album's current updated_at so
+            // a passive prefetch tick right after a manual refresh doesn't see
+            // a phantom mismatch and re-fetch (N17). Falls back to None when the
+            // album isn't in the current library window.
+            let updated_at = self
+                .library
+                .albums
+                .iter()
+                .find(|a| a.id == album_id)
+                .and_then(|a| a.updated_at.clone());
+            self.artwork
+                .album_art_versions
+                .insert(album_id.clone(), updated_at);
             self.artwork.album_art.put(album_id.clone(), h);
         }
         if let Some(h) = large {

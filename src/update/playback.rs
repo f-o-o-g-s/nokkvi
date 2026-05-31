@@ -1,7 +1,5 @@
 //! Playback control handlers
 
-use std::time::Duration;
-
 use iced::Task;
 use tracing::{debug, trace};
 
@@ -10,6 +8,42 @@ use crate::{
     app_message::{Message, PlaybackMessage, ScrobbleMessage},
     views,
 };
+
+/// Resolve the next radio-station index when cycling.
+///
+/// `current_pos` is the position of the currently-playing station in the list,
+/// or `None` if it has vanished (deleted mid-playback, or dropped/re-IDed by a
+/// refresh). When present, cycle with wraparound. When absent, fall back to a
+/// deliberate edge: the head on `forward`, the tail otherwise — keeping
+/// Next/Previous functional after a delete instead of fabricating index 0.
+///
+/// Returns `None` only for an empty list (`stations_len == 0`); callers guard
+/// against that, so the modulo/`len - 1` math can never underflow.
+fn resolve_cycle_index(
+    stations_len: usize,
+    current_pos: Option<usize>,
+    forward: bool,
+) -> Option<usize> {
+    if stations_len == 0 {
+        return None;
+    }
+    Some(match current_pos {
+        Some(i) => {
+            if forward {
+                (i + 1) % stations_len
+            } else {
+                (i + stations_len - 1) % stations_len
+            }
+        }
+        None => {
+            if forward {
+                0
+            } else {
+                stations_len - 1
+            }
+        }
+    })
+}
 
 /// Bundled MPRIS state pushed to D-Bus on each playback tick.
 struct MprisUpdate<'a> {
@@ -282,10 +316,17 @@ impl Nokkvi {
         self.playback.sample_rate = sample_rate;
         self.playback.bitrate = bitrate;
         self.playback.bpm = bpm;
-        self.modes.random = random;
-        self.modes.repeat = repeat;
-        self.modes.repeat_queue = repeat_queue;
-        self.modes.consume = consume;
+        // Reconcile mode flags from the backend snapshot — but ONLY when no
+        // toggle commit is outstanding. A tick can carry a snapshot taken
+        // BEFORE an in-flight toggle's commit ran, which would briefly revert
+        // the optimistic flip; the gate suppresses that until the authoritative
+        // *Toggled result lands and decrements the counter.
+        if self.pending_mode_commits == 0 {
+            self.modes.random = random;
+            self.modes.repeat = repeat;
+            self.modes.repeat_queue = repeat_queue;
+            self.modes.consume = consume;
+        }
 
         // Reset visualizer when playback stops (clears bars instead of freezing)
         if playback_stopped && let Some(ref viz) = self.visualizer {
@@ -384,11 +425,16 @@ impl Nokkvi {
         pos: u32,
         tasks: &mut Vec<Task<Message>>,
     ) {
-        // Scrobble previous song if conditions were met but not yet scrobbled
+        // Scrobble previous song if conditions were met but not yet scrobbled.
+        // Judge the FINISHED song against ITS OWN duration
+        // (`current_song_duration`, captured at the last reset_for_new_song),
+        // never `self.playback.duration` — that field was already overwritten
+        // with the successor's duration earlier in handle_playback_state_updated.
         if let Some(prev_song_id) = &self.scrobble.current_song_id
-            && self
-                .scrobble
-                .should_scrobble(self.playback.duration, self.settings.scrobble_threshold)
+            && self.scrobble.should_scrobble(
+                self.scrobble.current_song_duration,
+                self.settings.scrobble_threshold,
+            )
         {
             debug!(
                 "📊 [SCROBBLE] Submitting previous song on change: {} (listened {:.0}s)",
@@ -399,28 +445,16 @@ impl Nokkvi {
             ))));
         }
 
-        // Reset scrobble state for new song
+        // Reset scrobble state for new song. `self.playback.duration` was
+        // overwritten with the incoming song's duration earlier in
+        // handle_playback_state_updated, so it is the correct duration for the
+        // NEW song we are now tracking.
         self.scrobble
-            .reset_for_new_song(song_id.clone(), pos as f32);
+            .reset_for_new_song(song_id.clone(), pos as f32, self.playback.duration);
 
-        // Start 2-second debounce timer for "now playing"
+        // Start the debounce timer for "now playing" via the shared helper.
         if let Some(sid) = song_id {
-            self.scrobble.now_playing_timer_id += 1;
-            let timer_id = self.scrobble.now_playing_timer_id;
-            let sid_clone = sid.clone();
-            debug!(
-                "📊 [SCROBBLE] Song changed, starting now-playing timer (id={}) for: {}",
-                timer_id, sid
-            );
-            tasks.push(Task::perform(
-                async move {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    (timer_id, sid_clone)
-                },
-                |(timer_id, song_id)| {
-                    Message::Scrobble(ScrobbleMessage::NowPlaying(timer_id, song_id))
-                },
-            ));
+            tasks.push(self.arm_now_playing(sid.clone()));
         }
 
         // CONSUME MODE: Queue UI refresh is handled by the queue_changed_subscription
@@ -452,8 +486,12 @@ impl Nokkvi {
         let current_pos = pos as f32;
         let delta = current_pos - self.scrobble.last_position;
 
-        // Only count forward progress in reasonable range (0-10 seconds)
-        // This excludes seeks (large jumps) and going backwards
+        // Only count forward progress in a reasonable range (0-10 seconds);
+        // this excludes backward seeks (delta < 0) and large discontinuities
+        // from late MPRIS sync. handle_seek now writes the seek target to
+        // last_position so the post-seek tick computes ~0 delta — both small
+        // and large seeks credit nothing — making this magnitude clamp only a
+        // defensive backstop rather than the primary anti-seek-fraud guard.
         if delta > 0.0 && delta < 10.0 {
             self.scrobble.listening_time += delta;
         }
@@ -469,7 +507,10 @@ impl Nokkvi {
                 "📊 [SCROBBLE] Conditions met! Submitting: {} (listened {:.0}s / {} total)",
                 sid, self.scrobble.listening_time, dur
             );
-            self.scrobble.submitted = true;
+            // Latch the in-flight guard (NOT `submitted`) so ticks stop
+            // re-dispatching while the GET is pending; `submitted` is set only
+            // when the server confirms in handle_scrobble_submission_result.
+            self.scrobble.submission_in_flight = true;
             tasks.push(Task::done(Message::Scrobble(ScrobbleMessage::Submit(
                 sid.clone(),
             ))));
@@ -610,19 +651,56 @@ impl Nokkvi {
             return Task::none();
         }
 
-        // Optimistic UI update: toggle play/pause immediately so buttons
-        // don't flicker while waiting for the async engine call + tick roundtrip.
+        // Currently playing → pause. Optimistic flip is safe: a loaded source
+        // is guaranteed, so the engine cannot no-op.
         if self.playback.playing && !self.playback.paused {
             self.playback.paused = true;
-        } else {
+            return self.shell_task(
+                |shell| async move {
+                    let _ = shell.play_pause().await;
+                },
+                |_| Message::Playback(PlaybackMessage::Tick),
+            );
+        }
+
+        // Paused → resume. A loaded source is guaranteed here too, so keep the
+        // instant optimistic feedback. Also re-arm the now-playing heartbeat so
+        // the server's ephemeral entry refreshes after the resume.
+        if self.playback.paused {
             self.playback.playing = true;
             self.playback.paused = false;
+            let resume_task = self.shell_task(
+                |shell| async move {
+                    let _ = shell.play_pause().await;
+                },
+                |_| Message::Playback(PlaybackMessage::Tick),
+            );
+            let rearm_task = self
+                .scrobble
+                .current_song_id
+                .clone()
+                .map_or_else(Task::none, |sid| self.arm_now_playing(sid));
+            return Task::batch([resume_task, rearm_task]);
         }
+
+        // Cold start (nothing loaded, queue non-empty). The engine may no-op
+        // (empty server_url, current id absent from the pool) and still return
+        // Ok(()), so do NOT assert Playing up front — reconcile from the
+        // Result and surface a toast on failure, mirroring handle_play.
         self.shell_task(
-            |shell| async move {
-                let _ = shell.play_pause().await;
+            |shell| async move { shell.play_pause().await },
+            |result| match result {
+                Ok(()) => Message::Playback(PlaybackMessage::Tick),
+                Err(e) => {
+                    tracing::error!(" Play toggle cold-start failed: {}", e);
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to start playback: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
             },
-            |_| Message::Playback(PlaybackMessage::Tick),
         )
     }
 
@@ -775,21 +853,17 @@ impl Nokkvi {
             }
 
             let current_id = &state.station.id;
-            let current_idx = self
+            let len = self.library.radio_stations.len();
+            let current_pos = self
                 .library
                 .radio_stations
                 .iter()
-                .position(|s| s.id == *current_id)
-                .unwrap_or(0);
+                .position(|s| s.id == *current_id);
 
-            let new_idx = if forward {
-                (current_idx + 1) % self.library.radio_stations.len()
-            } else {
-                if current_idx == 0 {
-                    self.library.radio_stations.len() - 1
-                } else {
-                    current_idx - 1
-                }
+            // `len >= 1` is guaranteed by the is_empty early-return above, so
+            // resolve_cycle_index always returns Some on a non-empty list.
+            let Some(new_idx) = resolve_cycle_index(len, current_pos, forward) else {
+                return Task::none();
             };
 
             let next_station = self.library.radio_stations[new_idx].clone();
@@ -837,6 +911,16 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_toggle_random(&mut self) -> Task<Message> {
+        // Radio playback has no queue to shuffle — the toggle would silently
+        // reorder the dormant library queue with no audible effect. No-op
+        // BEFORE the pending_mode_commits bump so a radio press never leaks a
+        // phantom in-flight count that would wedge tick reconciliation.
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
+        // Gate the tick from clobbering this optimistic flip until the commit
+        // lands (decremented in handle_random_toggled).
+        self.pending_mode_commits += 1;
         // Optimistic UI update: toggle immediately so the button doesn't flicker
         // while waiting for the async API response. The tick handler reconciles
         // with server groundtruth every cycle.
@@ -855,12 +939,20 @@ impl Nokkvi {
 
     pub(crate) fn handle_random_toggled(&mut self, random: bool) -> Task<Message> {
         self.modes.random = random;
+        // Commit landed — release the tick-reconcile gate.
+        self.pending_mode_commits = self.pending_mode_commits.saturating_sub(1);
         // Allow gapless prep to re-trigger with the new shuffled/unshuffled order
         self.engine.gapless_preparing = false;
         Task::none()
     }
 
     pub(crate) fn handle_toggle_repeat(&mut self) -> Task<Message> {
+        // Radio playback ignores repeat — no-op BEFORE the pending_mode_commits
+        // bump so a radio press cannot wedge tick reconciliation.
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
+        self.pending_mode_commits += 1;
         // Optimistic UI update: cycle through repeat modes immediately so the
         // button doesn't flicker while waiting for the async API response.
         // Cycle: off -> repeat_one -> repeat_queue -> off
@@ -896,6 +988,12 @@ impl Nokkvi {
     ) -> Task<Message> {
         use nokkvi_data::types::queue::RepeatMode;
 
+        // Radio playback ignores repeat — no-op BEFORE the pending_mode_commits
+        // bump so a radio SetLoopStatus cannot wedge tick reconciliation.
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
+        self.pending_mode_commits += 1;
         let new_repeat = mode == RepeatMode::Track;
         let new_repeat_queue = mode == RepeatMode::Playlist;
         self.modes.repeat = new_repeat;
@@ -930,12 +1028,21 @@ impl Nokkvi {
     ) -> Task<Message> {
         self.modes.repeat = repeat;
         self.modes.repeat_queue = repeat_queue;
+        // Commit landed (from handle_toggle_repeat OR handle_set_repeat_mode) —
+        // release the tick-reconcile gate.
+        self.pending_mode_commits = self.pending_mode_commits.saturating_sub(1);
         // Allow gapless prep to re-trigger with the new repeat mode
         self.engine.gapless_preparing = false;
         Task::none()
     }
 
     pub(crate) fn handle_toggle_consume(&mut self) -> Task<Message> {
+        // Radio playback has no queue to consume — no-op BEFORE the
+        // pending_mode_commits bump so a radio press cannot wedge reconciliation.
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
+        self.pending_mode_commits += 1;
         // Optimistic UI update: toggle immediately so the button doesn't flicker
         // while waiting for the async API response. The tick handler reconciles
         // with server groundtruth every cycle.
@@ -954,6 +1061,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_consume_toggled(&mut self, consume: bool) -> Task<Message> {
         self.modes.consume = consume;
+        // Commit landed — release the tick-reconcile gate.
+        self.pending_mode_commits = self.pending_mode_commits.saturating_sub(1);
         // Allow gapless prep to re-trigger with the new consume setting
         self.engine.gapless_preparing = false;
         Task::none()
@@ -1027,6 +1136,12 @@ impl Nokkvi {
         if self.active_playback.is_radio() {
             return Task::none();
         }
+        // Mark the seek explicitly: advance last_position to the seek target so
+        // the next position tick computes a ~0 delta and credits NO listening
+        // time for the jump (forward OR backward, any magnitude). This is the
+        // real anti-seek-fraud guard; the 10s clamp in track_listening_time is
+        // only a backstop now. (Queue-only: this handler is radio-gated above.)
+        self.scrobble.last_position = val;
         // Slider sends position in seconds, shell.seek expects seconds
         let pos_secs = f64::from(val);
         self.shell_task(
@@ -1639,5 +1754,41 @@ impl Nokkvi {
                 self.handle_radio_metadata_update(artist, title, None)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod cycle_index_tests {
+    use super::resolve_cycle_index;
+
+    #[test]
+    fn resolve_cycle_index_handles_missing_station() {
+        // Vanished station: forward lands on the head, backward on the tail.
+        assert_eq!(resolve_cycle_index(3, None, true), Some(0));
+        assert_eq!(resolve_cycle_index(3, None, false), Some(2));
+    }
+
+    #[test]
+    fn resolve_cycle_index_wraps_present_station() {
+        // Forward from the middle.
+        assert_eq!(resolve_cycle_index(3, Some(1), true), Some(2));
+        // Forward wraps off the end to the head.
+        assert_eq!(resolve_cycle_index(3, Some(2), true), Some(0));
+        // Backward from the head wraps to the tail.
+        assert_eq!(resolve_cycle_index(3, Some(0), false), Some(2));
+        // Backward from the middle.
+        assert_eq!(resolve_cycle_index(3, Some(2), false), Some(1));
+    }
+
+    #[test]
+    fn resolve_cycle_index_single_station_stays_put() {
+        assert_eq!(resolve_cycle_index(1, Some(0), true), Some(0));
+        assert_eq!(resolve_cycle_index(1, Some(0), false), Some(0));
+    }
+
+    #[test]
+    fn resolve_cycle_index_empty_is_none() {
+        assert_eq!(resolve_cycle_index(0, None, true), None);
+        assert_eq!(resolve_cycle_index(0, Some(0), false), None);
     }
 }

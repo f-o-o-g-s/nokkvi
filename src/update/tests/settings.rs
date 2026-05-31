@@ -173,8 +173,17 @@ fn side_effect_write_verbose_config_disable_emits_success_toast() {
 // Artwork overlay theme-atomic tests (B5)
 // ============================================================================
 
+/// Serializes the two tests that read-modify-restore the process-global
+/// `albums_artwork_overlay` atomic. Both flip the same shared static, so under
+/// parallel execution they race (one test's restore clobbers the other's
+/// assertion). Holding this lock for the full duration of each test forces them
+/// to run one at a time. `unwrap_or_else(|e| e.into_inner())` recovers a
+/// poisoned lock so a panic in one test does not cascade into the other.
+static OVERLAY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn player_settings_loaded_albums_artwork_overlay_false_clears_atomic() {
+    let _guard = OVERLAY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut app = test_app();
     let prior = crate::theme::albums_artwork_overlay();
 
@@ -194,6 +203,7 @@ fn player_settings_loaded_albums_artwork_overlay_false_clears_atomic() {
 
 #[test]
 fn player_settings_loaded_albums_artwork_overlay_true_sets_atomic() {
+    let _guard = OVERLAY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Force the atomic to false first so the test is self-contained regardless
     // of the initial global state (avoids false-pass when it's already true).
     crate::theme::set_albums_artwork_overlay(false);

@@ -140,6 +140,12 @@ pub enum ScrobbleMessage {
     /// song_id — the same track looped in repeat-one mode.
     /// Triggers scrobble submission for the completed loop and resets state.
     TrackLooped(String),
+    /// timer_id, song_id — periodic now-playing heartbeat. Fired ~30s after a
+    /// successful now-playing send so the server's ephemeral now-playing entry
+    /// does not age out during a long single track. Re-emits a `NowPlaying`
+    /// only when still live (matching timer_id, playing, not paused, queue
+    /// playback); otherwise it is a no-op.
+    NowPlayingRefresh(u64, String),
 }
 
 /// Hotkey action messages, namespaced under `Message::Hotkey(..)`
@@ -212,7 +218,11 @@ pub enum CollageTarget {
 #[derive(Debug, Clone)]
 pub enum ArtworkMessage {
     // --- Shared Album Artwork ---
-    Loaded(String, Option<image::Handle>),
+    /// `(album_id, updated_at, handle)`. `updated_at` is the cache-buster the
+    /// fetch URL carried; recorded into `album_art_versions` in lockstep with
+    /// the handle so a later server cover change is a version-aware prefetch
+    /// miss (N17).
+    Loaded(String, Option<String>, Option<image::Handle>),
     LargeLoaded(String, Option<image::Handle>),
     LargeArtistLoaded(String, Option<image::Handle>),
     LoadLarge(String),
@@ -245,7 +255,9 @@ pub enum ArtworkMessage {
     CollageBatchReady(CollageTarget, Vec<String>, String, String),
 
     // --- Song Artwork ---
-    SongMiniLoaded(String, Option<image::Handle>),
+    /// `(album_id, updated_at, handle)`. See [`ArtworkMessage::Loaded`] — the
+    /// `updated_at` is recorded into `album_art_versions` alongside the handle.
+    SongMiniLoaded(String, Option<String>, Option<image::Handle>),
 
     // --- Artwork Pane Drag ---
     /// Resize the artwork column via the split handle. `Change` is per-frame
@@ -390,6 +402,10 @@ pub enum EditorMessage {
     /// Async resolve result — the playlist's tracks, ready to fill the editor
     /// buffer. The TESTABLE entry point (dispatch with a fabricated payload).
     SongsLoaded(Vec<nokkvi_data::backend::queue::QueueSongUIViewData>),
+    /// Async resolve FAILED — marks the editor session `Failed` so save and
+    /// track mutations are gated off (the empty buffer is not the real
+    /// playlist). The editor stays mounted; the user can reload or discard.
+    SongsLoadFailed,
     /// Async result of a cross-pane drag drop into the editor: the resolved
     /// rows for the dragged browser item(s), to splice into the buffer at the
     /// `at` slot index (relative to the editor's current — possibly filtered —

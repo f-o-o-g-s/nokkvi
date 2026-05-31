@@ -9,7 +9,7 @@ use nokkvi_data::{
 };
 use tracing::{debug, error, trace};
 
-use super::components::prefetch_album_artwork_tasks;
+use super::components::{passive_artwork_version, prefetch_album_artwork_tasks};
 use crate::{
     Nokkvi, View,
     app_message::{
@@ -59,8 +59,15 @@ impl Nokkvi {
                             &self.queue_page.common.slot_list,
                             &self.library.queue_songs,
                             &cached,
+                            &self.artwork.album_art_versions,
                             shell.albums().clone(),
-                            |song| (song.album_id.clone(), song.artwork_url.clone()),
+                            |song| {
+                                (
+                                    song.album_id.clone(),
+                                    passive_artwork_version(&song.updated_at),
+                                    song.artwork_url.clone(),
+                                )
+                            },
                         ));
 
                         // Load large artwork for center song
@@ -151,6 +158,33 @@ impl Nokkvi {
         // vertical-aware resync so the queue's stored slot_count matches the
         // actual rendered count even when artwork is stacked above the list.
         self.resync_slot_counts();
+
+        // ── Fast path for slot hover ──
+        // The slot list republishes `HoverEnterSlot` on EVERY `CursorMoved`
+        // while the cursor sits inside a row (`slot_list.rs` `on_move`). Hover
+        // never moves `viewport_offset`, and `prefetch_indices` is centered
+        // solely on the offset, so the prefetch window on a hover frame is
+        // identical to the previous non-hover frame's — re-running the tail
+        // below would (a) pay an O(n) `filter_queue_songs().into_owned()` clone
+        // plus a fresh batch of `Task::perform`s per cursor pixel and (b) thrash
+        // the version-aware mini-thumbnail dedup for a single-album queue
+        // (album_id-keyed cache fed per-song `updated_at`), re-`put`ting the
+        // `album_art` handle with a new `Id::unique()` texture for identical
+        // bytes → visible flicker. Mirror the shared `hovered_slot` bookkeeping
+        // (`views/mod.rs`) so cross-pane drag still tracks the row, then return.
+        match &msg {
+            QueueMessage::SlotList(SlotListPageMessage::HoverEnterSlot(h)) => {
+                self.queue_page.common.slot_list.hovered_slot = Some(*h);
+                return Task::none();
+            }
+            QueueMessage::SlotList(SlotListPageMessage::HoverExitSlot(h)) => {
+                if self.queue_page.common.slot_list.hovered_slot == Some(*h) {
+                    self.queue_page.common.slot_list.hovered_slot = None;
+                }
+                return Task::none();
+            }
+            _ => {}
+        }
 
         // IMPORTANT: Use filtered queue for all operations since slot list indices are relative to filtered list.
         // `.into_owned()` is required here because this mutable handler needs to mutate `self` later.
@@ -617,8 +651,15 @@ impl Nokkvi {
                 &self.queue_page.common.slot_list,
                 &filtered_queue,
                 &cached,
+                &self.artwork.album_art_versions,
                 shell.albums().clone(),
-                |song| (song.album_id.clone(), song.artwork_url.clone()),
+                |song| {
+                    (
+                        song.album_id.clone(),
+                        passive_artwork_version(&song.updated_at),
+                        song.artwork_url.clone(),
+                    )
+                },
             );
             tasks.extend(prefetch_tasks);
 
@@ -668,8 +709,15 @@ impl Nokkvi {
                 &self.queue_page.common.slot_list,
                 items,
                 &cached,
+                &self.artwork.album_art_versions,
                 shell.albums().clone(),
-                |song: &QueueSongUIViewData| (song.album_id.clone(), song.artwork_url.clone()),
+                |song: &QueueSongUIViewData| {
+                    (
+                        song.album_id.clone(),
+                        passive_artwork_version(&song.updated_at),
+                        song.artwork_url.clone(),
+                    )
+                },
             ));
 
             if let Some(center_idx) = self
@@ -707,8 +755,15 @@ impl Nokkvi {
                 &self.queue_page.common.slot_list,
                 &filtered,
                 &cached,
+                &self.artwork.album_art_versions,
                 shell.albums().clone(),
-                |song| (song.album_id.clone(), song.artwork_url.clone()),
+                |song| {
+                    (
+                        song.album_id.clone(),
+                        passive_artwork_version(&song.updated_at),
+                        song.artwork_url.clone(),
+                    )
+                },
             ));
 
             if let Some(center_idx) = self

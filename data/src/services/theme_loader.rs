@@ -144,9 +144,9 @@ pub struct ThemeInfo {
 ///
 /// Only writes files that don't already exist — never overwrites user edits.
 /// Called once at startup. Routes through `write_atomic` so the startup-time
-/// seed writes also bump `LAST_INTERNAL_WRITE`, suppressing any spurious
-/// `ThemeConfigReloaded` events the file watcher would have fired for the
-/// new theme files.
+/// seed writes are recorded in the internal-write registry, suppressing any
+/// spurious `ThemeConfigReloaded` events the file watcher would have fired for
+/// the new theme files.
 pub fn seed_builtin_themes() -> Result<()> {
     let themes_dir = get_themes_dir()?;
 
@@ -541,15 +541,15 @@ mod tests {
     /// not test-overridable, but the load-bearing behavior is the
     /// `write_atomic` call against the registered built-in content. Exercising
     /// the same payload through the same helper against a temp path proves the
-    /// LAST_INTERNAL_WRITE bump fires for theme restores. If the helper is
-    /// silently swapped for a non-suppressing `std::fs::write`, this assertion
-    /// catches it — and the UI's `RestoreColorGroup` handler at
+    /// internal-write registry records the (path, content-hash) for theme
+    /// restores. If the helper is silently swapped for a non-suppressing
+    /// `std::fs::write`, this assertion catches it — and the UI's
+    /// `RestoreColorGroup` handler at
     /// `src/update/settings.rs:244` would then race a spurious watcher event
     /// against its own `reload_theme()` call.
     #[test]
-    fn restore_builtin_payload_bumps_internal_write() {
+    fn restore_builtin_payload_records_internal_write() {
         let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();
-        use std::sync::atomic::Ordering;
 
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("everforest.toml");
@@ -558,17 +558,16 @@ mod tests {
         let registry = builtin_registry();
         let content = registry.get("everforest").expect("everforest is built-in");
 
-        let before = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-
         crate::utils::paths::write_atomic(&path, content).unwrap();
 
-        let after = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
         assert!(
-            after > before,
+            crate::utils::paths::was_internal_write(
+                &path,
+                crate::utils::paths::hash_config_bytes(content.as_bytes())
+            ),
             "restore_builtin must route through write_atomic so the watcher \
-             suppress fires and the UI's reload_theme() call doesn't race a \
-             spurious ThemeConfigReloaded event; before={before} after={after}"
+             can identity-match its own write and the UI's reload_theme() call \
+             doesn't race a spurious ThemeConfigReloaded event"
         );
 
         // Sanity: the registered content round-trips as a valid ThemeFile.

@@ -1,5 +1,6 @@
 //! Tests for general handlers (server version, light mode, task manager, radios, auth) update handlers.
 
+use super::SSE_SLOT_TEST_LOCK;
 use crate::{View, test_helpers::*};
 
 // Server Version (mod.rs)
@@ -239,6 +240,276 @@ fn ctrl_combo_not_suppressed_when_captured() {
 }
 
 // ============================================================================
+// Shift+char hotkeys suppressed during text input (N1)
+// ============================================================================
+//
+// The captured-suppression had a blanket `!modifiers.shift()` exception
+// (justified only for Shift+Tab / Shift+Backspace settings nav). But Shift
+// also produces capital letters while typing, so every plain Shift+key
+// binding fired in a captured text input (e.g. capital D → ClearQueue).
+// The exception is now scoped to ONLY Tab / Backspace.
+
+#[test]
+fn shift_char_suppressed_when_captured() {
+    // Shift+'c' is CenterOnPlaying, which synchronously toasts
+    // "No song is currently playing" when nothing is playing. Captured =
+    // the user is typing a capital C — it must NOT fire (no toast).
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::SHIFT,
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "Shift+char (CenterOnPlaying) must be suppressed when Status::Captured"
+    );
+}
+
+#[test]
+fn shift_char_fires_when_not_captured() {
+    // Same Shift+'c' with Status::Ignored fires normally (toast appears).
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::SHIFT,
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.toast.toasts.is_empty(),
+        "Shift+char (CenterOnPlaying) must fire when no widget is capturing"
+    );
+}
+
+#[test]
+fn shift_tab_not_suppressed_when_captured() {
+    // The scoped exception must PRESERVE Shift+Tab settings-sidebar nav even
+    // when a text input is captured. Shift+Tab → SettingsCategoryNext →
+    // sidebar moves down (observable on the sidebar slot list offset).
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+    let before = app.settings_page.sidebar_slot_list.viewport_offset;
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::SHIFT,
+        iced::event::Status::Captured,
+    );
+
+    assert_ne!(
+        app.settings_page.sidebar_slot_list.viewport_offset, before,
+        "Shift+Tab must still reach the settings sidebar nav when captured"
+    );
+}
+
+// ============================================================================
+// Modal-open suppression on the Ignored path (N8 + N9)
+// ============================================================================
+//
+// EQ / Info / About modals (and the default-playlist picker) are mouse-opaque
+// but not keyboard-capturing and host no focused text_input, so bare-key
+// hotkeys arrive Status::Ignored and leaked through to the obscured view.
+// One modal-open guard now suppresses non-Escape keys when any blocking modal
+// is open. The picker additionally lets its own slot-nav keys through.
+
+#[test]
+fn bare_key_suppressed_when_eq_modal_open() {
+    // 'x' = ToggleRandom (mutates modes.random synchronously). With the EQ
+    // modal open it must be swallowed.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.eq_modal.open = true;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the EQ modal is open"
+    );
+}
+
+#[test]
+fn bare_key_suppressed_when_info_modal_open() {
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.info_modal.visible = true;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the Info modal is open"
+    );
+}
+
+#[test]
+fn bare_key_suppressed_when_about_modal_open() {
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.about_modal.visible = true;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the About modal is open"
+    );
+}
+
+#[test]
+fn escape_closes_eq_modal_on_ignored_path() {
+    // Escape must still flow through the guard to close the modal.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.eq_modal.open = true;
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.eq_modal.open,
+        "Escape must still close the EQ modal on the Ignored path"
+    );
+}
+
+#[test]
+fn bare_key_fires_when_no_modal_open() {
+    // Regression guard: single-pane behavior is byte-identical when no modal
+    // is open — ToggleRandom fires.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        app.modes.random,
+        "ToggleRandom must fire normally when no modal is open"
+    );
+}
+
+#[test]
+fn bare_key_suppressed_when_picker_open() {
+    // The default-playlist picker is modal — 'x' (ToggleRandom) must not leak
+    // to the underlying view while it is open.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.default_playlist_picker =
+        Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[]));
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the default-playlist picker is open"
+    );
+}
+
+#[test]
+fn picker_nav_key_passes_through_when_picker_open() {
+    // Tab (default SlotListDown) must reach the picker route, not be globally
+    // suppressed. The picker's slot_list.rs routing moves its selection; the
+    // observable here is that the key was NOT suppressed — modes/view stay
+    // unchanged (it did not fall through to the underlying view either).
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    // Seed the picker with a playlist so its filtered list has a "Clear" entry
+    // plus a row — enough for SlotListDown to advance the offset.
+    let playlist = nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: "p1".to_string(),
+        name: "One".to_string(),
+        comment: String::new(),
+        duration: 0.0,
+        song_count: 0,
+        owner_name: String::new(),
+        public: false,
+        updated_at: String::new(),
+        artwork_album_ids: Vec::new(),
+        searchable_lower: String::new(),
+    };
+    app.default_playlist_picker =
+        Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[playlist]));
+    let before = app
+        .default_playlist_picker
+        .as_ref()
+        .map(|p| p.slot_list.viewport_offset);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    let after = app
+        .default_playlist_picker
+        .as_ref()
+        .map(|p| p.slot_list.viewport_offset);
+    assert_ne!(
+        before, after,
+        "Tab (SlotListDown) must reach the picker's nav route, not be suppressed"
+    );
+    assert!(
+        !app.modes.random,
+        "Tab must not fall through to the underlying view"
+    );
+}
+
+// ============================================================================
 // Light Mode Persistence (mod.rs)
 // ============================================================================
 
@@ -423,6 +694,10 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
 
 #[test]
 fn reset_session_state_clears_all_session_bound_fields() {
+    // `reset_session_state()` calls `navidrome_sse::clear()` on the global SSE
+    // slot; serialize against the other SSE-slot tests so the shared static
+    // cannot race under parallel execution.
+    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut app = test_app();
     seed_session_bound_state(&mut app);
 
@@ -469,6 +744,10 @@ fn reset_session_state_clears_all_session_bound_fields() {
 
 #[test]
 fn reset_session_state_preserves_non_session_fields() {
+    // `reset_session_state()` calls `navidrome_sse::clear()` on the global SSE
+    // slot; serialize against the other SSE-slot tests so the shared static
+    // cannot race under parallel execution.
+    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut app = test_app();
 
     // Mutate retained fields to non-default values.
@@ -717,16 +996,21 @@ fn tick_does_not_hijack_for_resume_session() {
 #[test]
 fn should_auto_login_reflects_stored_session_at_construction() {
     // The auto-login signal is computed once at construction from
-    // `stored_session.is_some()`. Default `Nokkvi` has no stored session,
-    // so it should be false. boot() consults this field to decide whether
-    // to fire ResumeSession alongside the window-open task.
+    // `stored_session.is_some()`. boot() consults this field to decide
+    // whether to fire ResumeSession alongside the window-open task.
+    //
+    // `Nokkvi::default()` reads the real on-disk redb session, so whether a
+    // stored session exists is environment-dependent (a developer/CI machine
+    // that has logged in carries a populated session). Pin the invariant that
+    // actually matters — the two fields stay in lockstep — rather than a
+    // disk-state precondition that is not isolated from real user state.
     let app = test_app();
 
-    assert!(
-        !app.should_auto_login,
-        "fresh app with no stored session must have should_auto_login = false"
+    assert_eq!(
+        app.should_auto_login,
+        app.stored_session.is_some(),
+        "should_auto_login must mirror stored_session.is_some() at construction"
     );
-    assert!(app.stored_session.is_none());
 }
 
 // ============================================================================

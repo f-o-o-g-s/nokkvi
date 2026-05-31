@@ -100,8 +100,10 @@ impl QueueManager {
             return None;
         }
 
-        // Mode Priority 1: Repeat Track
-        if self.queue.repeat == RepeatMode::Track {
+        // Mode Priority 1: Repeat Track. mpd consume-wins — a consuming queue
+        // suppresses the replay so the gapless-prepared next track is the real
+        // next song, letting the queue drain.
+        if self.queue.repeat == RepeatMode::Track && !self.queue.consume {
             if let Some(idx) = self.queue.current_index
                 && let Some(id) = self.queue.song_ids.get(idx)
                 && let Some(song) = self.pool.get(id)
@@ -275,6 +277,11 @@ impl QueueManager {
 
         if was_repeat_track {
             self.queue.repeat = RepeatMode::Track;
+            // The transition's save_order ran while repeat was the transient
+            // None, so redb now holds repeat=None. Re-persist the restored
+            // value so a manual skip can't silently drop the repeat-one
+            // preference across a relaunch. Best-effort + idempotent.
+            let _ = self.save_order();
         }
 
         let transition = transition?;
@@ -336,6 +343,32 @@ impl QueueManager {
             self.clear_queued();
             self.save_order().ok();
             return PreviousSongResult::InQueue(song, idx - 1);
+        }
+
+        // Repeat-Playlist backward wrap: Previous at the head with empty
+        // history wraps to the last song, mirroring the forward Next wrap
+        // (order.rs `next_order_index`). Suppressed under consume to match
+        // nokkvi's own forward `!consume` guard — wrapping would replay a
+        // song the queue is draining. Walks song_ids (not the shuffle order
+        // array): the bug only triggers with shuffle OFF, where the two
+        // coincide, matching the idx-1 fallback above.
+        if current_index == Some(0)
+            && self.queue.repeat == RepeatMode::Playlist
+            && !self.queue.consume
+            && !self.queue.song_ids.is_empty()
+            && let Some(last) = self.queue.song_ids.len().checked_sub(1)
+            && let Some(song) = self
+                .queue
+                .song_ids
+                .get(last)
+                .and_then(|id| self.pool.get(id))
+                .cloned()
+        {
+            self.queue.current_index = Some(last);
+            self.sync_current_order_to_index();
+            self.clear_queued();
+            let _ = self.save_order();
+            return PreviousSongResult::InQueue(song, last);
         }
 
         PreviousSongResult::None
@@ -511,6 +544,36 @@ mod tests {
     }
 
     #[test]
+    fn get_next_repeat_track_persists_repeat_across_reload() {
+        use crate::services::{queue::QueueManager, state_storage::StateStorage};
+
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        // The cloned StateStorage shares the underlying redb so a fresh
+        // QueueManager::new reads back exactly what this manager persisted.
+        let storage: StateStorage = qm.storage.clone();
+
+        // Persist repeat=Track via the write guard.
+        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+
+        // Manual skip once — the bypass transiently sets repeat=None and
+        // save_order fires while it is None.
+        let _ = qm.get_next_song();
+
+        // Reconstruct on the SAME storage: the reloaded repeat must be Track.
+        let qm2 = QueueManager::new(storage).expect("reload");
+        assert_eq!(
+            qm2.get_queue().repeat,
+            RepeatMode::Track,
+            "repeat-one preference must survive a manual skip + relaunch",
+        );
+    }
+
+    #[test]
     fn get_next_empty_queue_returns_none() {
         let (mut qm, _temp) = make_test_manager(vec![], None);
         assert!(qm.get_next_song().is_none());
@@ -585,6 +648,44 @@ mod tests {
 
         let result = qm.get_previous_song(Some(0));
         assert!(matches!(result, PreviousSongResult::None));
+    }
+
+    #[test]
+    fn previous_at_head_repeat_playlist_wraps_to_last() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        // No shuffle / consume / history.
+
+        let result = qm.get_previous_song(Some(0));
+        match result {
+            PreviousSongResult::InQueue(song, idx) => {
+                assert_eq!(song.id, "c");
+                assert_eq!(idx, 2);
+            }
+            other => panic!("Expected InQueue wrap to last, got {other:?}"),
+        }
+        assert_eq!(qm.queue.current_index, Some(2));
+    }
+
+    #[test]
+    fn previous_at_head_repeat_playlist_consume_returns_none() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        qm.queue.consume = true;
+
+        let result = qm.get_previous_song(Some(0));
+        assert!(matches!(result, PreviousSongResult::None));
+        assert_eq!(qm.queue.current_index, Some(0));
     }
 
     // ── History tests ──
@@ -994,6 +1095,28 @@ mod tests {
             peeked.is_none(),
             "shuffle + consume + repeat-playlist with 1 song should NOT wrap (got {:?})",
             peeked.map(|r| r.song().id.clone())
+        );
+    }
+
+    #[test]
+    fn consume_repeat_track_peek_advances_not_replays() {
+        // mpd consume-wins: consume + repeat-Track must drain the queue
+        // (advance), not replay the current song forever.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.queue.consume = true;
+        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+
+        let peeked = qm.peek_next_song().unwrap();
+        assert_eq!(peeked.index(), 1, "should advance to next song, not replay");
+        assert_ne!(
+            peeked.reason(),
+            "repeat",
+            "consume must suppress the repeat-track replay",
         );
     }
 

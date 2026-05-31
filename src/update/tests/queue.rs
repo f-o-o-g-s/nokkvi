@@ -640,3 +640,64 @@ fn genres_selection_toggle_on_album_child_lands_in_selected_indices() {
 }
 
 // ============================================================================
+// Hover must not re-run artwork prefetch (b58bee3 flicker regression)
+// ============================================================================
+
+/// Regression guard for the queue mini-thumbnail hover flicker introduced by
+/// b58bee3. The slot list republishes `HoverEnterSlot` on every `CursorMoved`
+/// (`slot_list.rs` `on_move`), so a hover that merely tracks the cursor used to
+/// fall through to the `prefetch_album_artwork_tasks` tail. Because the
+/// version-aware dedup is keyed by `album_id` but fed the per-song `updated_at`,
+/// a same-album queue re-fetched and re-`put` the `album_art` handle every
+/// frame, and iced's `Handle::from_bytes` mints a fresh `Id::unique()` texture
+/// for identical bytes → continuous flicker while the cursor moved. The hover
+/// fast path must short-circuit before the prefetch dispatch while still
+/// keeping `hovered_slot` current for cross-pane drag.
+///
+/// Discriminator: with a real shell and an uncached queue the pre-fix
+/// fall-through batches prefetch + `LoadLarge` tasks (`Task::units() >= 1`); the
+/// fast path returns `Task::none()` (`units() == 0`). `units()` cannot
+/// discriminate without a shell because the prefetch tail short-circuits when
+/// `app_service` is `None`.
+#[tokio::test]
+async fn queue_slot_hover_does_not_dispatch_artwork_prefetch() {
+    use super::library::test_app_with_shell;
+    use crate::{
+        app_message::Message,
+        views::QueueMessage,
+        widgets::{HoveredSlot, SlotListPageMessage},
+    };
+
+    let (mut app, db_path) = test_app_with_shell().await;
+
+    // Seed a non-empty queue + viewport so the (pre-fix) prefetch tail has
+    // uncached slots to dispatch fetches for.
+    app.library.queue_songs = vec![
+        make_queue_song("s1", "Track 1", "Artist", "Album"),
+        make_queue_song("s2", "Track 2", "Artist", "Album"),
+    ];
+    app.queue_page.common.slot_list.slot_count = 8;
+    app.queue_page.common.slot_list.viewport_offset = 0;
+
+    let hovered = HoveredSlot::Item {
+        slot_index: 0,
+        item_index: 0,
+        items_len: 2,
+    };
+    let task = app.update(Message::Queue(QueueMessage::SlotList(
+        SlotListPageMessage::HoverEnterSlot(hovered),
+    )));
+
+    assert_eq!(
+        task.units(),
+        0,
+        "hovering a queue slot must not spawn artwork prefetch / large-artwork tasks",
+    );
+    assert_eq!(
+        app.queue_page.common.slot_list.hovered_slot,
+        Some(hovered),
+        "the hover fast path must still record hovered_slot for cross-pane drag",
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}

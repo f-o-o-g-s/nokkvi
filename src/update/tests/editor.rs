@@ -241,6 +241,37 @@ fn editor_comment_changed_marks_comment_dirty() {
 }
 
 #[test]
+fn comment_only_edit_leaves_name_and_public_clean() {
+    // N21: a comment-only edit must NOT mark name or public dirty — proving the
+    // save path will omit them from the wire (so it cannot re-write the name or
+    // silently revert a concurrent visibility change). Observable PlaylistEditState.
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::CommentChanged(
+        "Updated comment".into(),
+    )));
+
+    let edit = &app
+        .playlist_editor
+        .as_ref()
+        .expect("editor session present")
+        .edit;
+    assert!(
+        edit.is_comment_dirty(),
+        "the comment edit must dirty the comment"
+    );
+    assert!(
+        !edit.is_name_dirty(),
+        "a comment-only edit must leave the name clean (save omits it)"
+    );
+    assert!(
+        !edit.is_public_dirty(),
+        "a comment-only edit must leave public clean (save omits it — no silent revert)"
+    );
+}
+
+#[test]
 fn editor_public_toggled_marks_public_dirty() {
     let mut app = test_app();
     seeded_editor(&mut app);
@@ -278,6 +309,161 @@ fn editor_slot_selection_toggle_updates_selection() {
     assert!(
         editor.common.slot_list.selected_indices.contains(&1),
         "selection toggle must add the index to the editor's own slot-list selection"
+    );
+}
+
+// --- N22: editor load-state lifecycle gate -------------------------------
+
+#[test]
+fn fresh_editor_session_starts_loading() {
+    // Entering edit mode constructs the editor BEFORE the async resolve
+    // returns. In test_app the resolve never runs, so the session must stay
+    // Loading — distinguishing an in-flight resolve from a genuinely-empty
+    // playlist.
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .load_state,
+        EditorLoadState::Loading,
+        "a freshly-entered editor must start in the Loading state"
+    );
+}
+
+#[test]
+fn editor_songs_loaded_marks_loaded() {
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(vec![
+        make_queue_song("a", "Song A", "Artist", "Album"),
+    ])));
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .load_state,
+        EditorLoadState::Loaded,
+        "a successful resolve must mark the session Loaded"
+    );
+}
+
+#[test]
+fn editor_songs_load_failed_marks_failed() {
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoadFailed));
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .load_state,
+        EditorLoadState::Failed,
+        "a failed resolve must mark the session Failed (editor stays mounted)"
+    );
+    // The session is NOT auto-aborted — the editor remains for reload/discard.
+    assert!(
+        app.playlist_editor.is_some(),
+        "a failed resolve must keep the editor mounted (no auto-abort)"
+    );
+}
+
+#[test]
+fn save_blocked_until_loaded() {
+    // A save dispatched while the session is still Loading must early-return:
+    // the empty buffer is NOT the real playlist, so persisting it would
+    // full-overwrite the server. Observable: the editor session is preserved
+    // and untouched (no replace task is built).
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+    app.active_playlist_info = None;
+
+    // Session is Loading (the resolve never ran in test_app).
+    let _ = app.update(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
+
+    assert!(
+        app.playlist_editor.is_some(),
+        "a save blocked on a not-yet-loaded session must preserve the editor"
+    );
+    // A warn toast tells the user to wait.
+    assert_eq!(
+        app.toast.toasts.len(),
+        1,
+        "a blocked save must surface exactly one warn toast"
+    );
+    assert_eq!(
+        app.toast.toasts[0].level,
+        nokkvi_data::types::toast::ToastLevel::Warning,
+        "the blocked-save toast must be a warning"
+    );
+}
+
+#[test]
+fn failed_session_blocks_track_mutations() {
+    // A Failed session must not accumulate edits: a remove on a failed-load
+    // session is a no-op (the buffer is unreliable).
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    seeded_editor(&mut app); // Loaded with [a,b,c]
+    // Force the session Failed after loading to model a mid-session failure.
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.load_state = EditorLoadState::Failed;
+    }
+    let before = editor_ids(&app);
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveAt(1)));
+
+    assert_eq!(
+        editor_ids(&app),
+        before,
+        "a Failed session must block track mutations (buffer is unreliable)"
+    );
+}
+
+#[test]
+fn save_with_no_track_changes_preserves_clean_session() {
+    // N10 Layer 1: a save on a clean (loaded, non-dirty) editor must skip the
+    // destructive track overwrite. In test_app the replace task never runs
+    // (no app_service), so the observable guarantee is that the editor session
+    // is preserved and reports not-dirty — the gate decision did not corrupt
+    // the session.
+    let mut app = test_app();
+    seeded_editor(&mut app); // Loaded, clean [a,b,c]
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "freshly-loaded editor must be clean before the save"
+    );
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
+
+    assert!(
+        app.playlist_editor.is_some(),
+        "a clean save must preserve the editor session"
+    );
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "a no-track-change save must leave the session clean (no spurious dirty)"
     );
 }
 

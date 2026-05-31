@@ -922,3 +922,98 @@ fn large_artist_loaded_with_handle_clears_matching_marker_and_caches() {
 }
 
 // ============================================================================
+// Interaction guard: skip SSE reload during an active playlist edit / drag (I19)
+//
+// A server-pushed refreshResource arriving mid-gesture would otherwise reload
+// the backing slot list and reset scroll / selection / viewport under an
+// in-progress playlist edit or cross-pane drag. handle_library_changed now
+// returns Task::none() while either gesture is active (skip-and-rely-on-
+// manual-refresh), short-circuiting the reload and the misleading
+// "Library refreshed automatically" toast. The decoupled edit / drag state
+// survives, so the next post-gesture SSE event (or the manual Refresh button)
+// reconciles the library.
+//
+// Observable signal: the per-kind reload calls `set_loading(true)`, so
+// `is_loading()` distinguishes "reload fired" from "reload skipped".
+// ============================================================================
+
+#[test]
+fn library_changed_skips_reload_during_playlist_edit() {
+    use nokkvi_data::types::playlist_edit::PlaylistEditState;
+
+    use crate::state::PlaylistEditorState;
+
+    let mut app = test_app();
+    seed_songs(&mut app, songs_indexed(3));
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "p1".into(),
+        "P".into(),
+        String::new(),
+        false,
+        vec![],
+    )));
+
+    let _ = app.handle_library_changed(wildcard_change());
+
+    assert!(
+        !app.library.songs.is_loading(),
+        "reload must be skipped while a playlist edit is in progress"
+    );
+    assert!(
+        app.playlist_editor.is_some(),
+        "the guard must not disturb the active editor"
+    );
+    assert!(
+        app.toast.toasts.is_empty(),
+        "no 'Library refreshed' toast should fire during a skipped reload"
+    );
+}
+
+#[test]
+fn library_changed_skips_reload_during_cross_pane_drag() {
+    use crate::state::CrossPaneDragState;
+
+    let mut app = test_app();
+    seed_songs(&mut app, songs_indexed(3));
+    app.cross_pane_drag = Some(CrossPaneDragState {
+        origin: iced::Point::ORIGIN,
+        cursor: iced::Point::ORIGIN,
+        center_index: None,
+        selection_count: 1,
+    });
+
+    let _ = app.handle_library_changed(wildcard_change());
+
+    assert!(
+        !app.library.songs.is_loading(),
+        "reload must be skipped while a cross-pane drag is in progress"
+    );
+    assert!(
+        app.cross_pane_drag.is_some(),
+        "the guard must not disturb the active drag"
+    );
+    assert!(
+        app.toast.toasts.is_empty(),
+        "no 'Library refreshed' toast should fire during a skipped reload"
+    );
+}
+
+#[test]
+fn library_changed_reloads_when_idle() {
+    // Positive control: with no gesture active, a non-empty, non-Random songs
+    // buffer must still reload on a wildcard change (the guard is not
+    // over-broad).
+    let mut app = test_app();
+    seed_songs(&mut app, songs_indexed(3));
+    assert!(app.playlist_editor.is_none());
+    assert!(app.cross_pane_drag.is_none());
+
+    let _ = app.handle_library_changed(wildcard_change());
+
+    assert!(
+        app.library.songs.is_loading(),
+        "an idle wildcard change must still drive the songs reload"
+    );
+}
+
+// ============================================================================

@@ -64,6 +64,44 @@ impl QueueManager {
         );
     }
 
+    /// Capture the current play-order as a sequence of per-row `entry_id`s.
+    ///
+    /// `order[i]` is a `song_ids` index; this maps each through `entry_ids`
+    /// to the stable row identity, yielding the upcoming play sequence in
+    /// terms that survive a physical reorder. Pair with
+    /// [`Self::rebuild_order_from_play_sequence`] to relocate moved rows
+    /// inside a shuffled order WITHOUT re-randomizing the tail.
+    pub(crate) fn capture_play_order_entry_ids(&self) -> Vec<u64> {
+        self.queue
+            .order
+            .iter()
+            .filter_map(|&song_idx| self.entry_ids.get(song_idx).copied())
+            .collect()
+    }
+
+    /// Rebuild the `order` array so it reproduces a previously-captured
+    /// play-order sequence of `entry_id`s over the (possibly reordered)
+    /// physical layout. Each entry_id maps to its NEW `song_ids` index, so
+    /// the random tail keeps its relative order and only the moved rows
+    /// follow their new physical slot — a queue move under shuffle stops
+    /// re-randomizing next-up.
+    ///
+    /// Falls back to the canonical identity order if the reconstruction
+    /// can't reproduce a full permutation (e.g. a row vanished), keeping
+    /// the navigation invariants intact.
+    pub(crate) fn rebuild_order_from_play_sequence(&mut self, play_order_eids: &[u64]) {
+        let new_order: Vec<usize> = play_order_eids
+            .iter()
+            .filter_map(|&eid| self.entry_ids.iter().position(|&id| id == eid))
+            .collect();
+        if new_order.len() == self.queue.song_ids.len() {
+            self.queue.order = new_order;
+        } else {
+            self.rebuild_order();
+        }
+        self.sync_current_order_to_index();
+    }
+
     /// Restore order array to identity `[0, 1, 2, …]` and sync current_order.
     pub(crate) fn unshuffle_order(&mut self) {
         self.rebuild_order();

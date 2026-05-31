@@ -199,7 +199,8 @@ impl Nokkvi {
         // batch is then routed into the editor buffer by
         // `add_or_insert_batch_to_queue_task` (which reads `playlist_editor`)
         // — the live queue/engine/redb are never touched.
-        let drop_index = if self.playlist_editor.is_some() {
+        let is_editor_drop = self.playlist_editor.is_some();
+        let drop_index = if is_editor_drop {
             self.compute_editor_drop_slot()
         } else {
             self.compute_queue_drop_slot()
@@ -207,6 +208,17 @@ impl Nokkvi {
         let insert_index = match drop_index {
             Some(idx) => idx,
             None => {
+                // On the queue path, `compute_queue_drop_slot` only returns
+                // `None` when the cursor is over no queue slot OR the hovered
+                // row no longer resolves to a live `entry_id` (e.g. it was
+                // removed mid-drag). Both are genuinely-unplaceable drops, so
+                // surface feedback instead of silently cancelling — matching
+                // the intra-pane reorder / keyboard-move paths that toast
+                // when an action can't be applied. The editor path keeps its
+                // silent cancel (no filtered-vs-full split exercised there).
+                if !is_editor_drop && self.queue_page.common.slot_list.hovered_slot.is_some() {
+                    self.toast_warn("Could not place item in the filtered queue");
+                }
                 debug!(" [DRAG] Cross-pane drag cancelled: released outside drop-target slots");
                 return Task::none();
             }
@@ -513,6 +525,35 @@ impl Nokkvi {
         .into()
     }
 
+    /// Translate a *filtered* queue row index (slot-list space when a queue
+    /// search is active) into the corresponding *full* `queue_songs` index.
+    ///
+    /// When a search filters the queue to a strict subset, slot-list indices
+    /// (and the `item_index` baked into a `HoveredSlot`) are relative to the
+    /// filtered view, not the live `queue_songs` buffer. Downstream insert
+    /// paths (`insert_batch_at_position`) operate on the FULL queue, so the
+    /// filtered index must be mapped back through the canonical per-row
+    /// identifier rather than used verbatim.
+    ///
+    /// Queue rows are addressed by `entry_id` (gotchas.md), which is
+    /// duplicate-safe — `track_number` and bare positions drift the moment an
+    /// optimistic mutation lands. Resolve the filtered row's `entry_id`, then
+    /// find its live position in `queue_songs`. Returns `None` when the
+    /// filtered index is out of range or the row no longer exists in the live
+    /// queue (e.g. it was removed mid-drag), which is inherently
+    /// staleness-safe: a vanished row yields `None` instead of a stale index.
+    ///
+    /// When no search is active `filter_queue_songs()` returns
+    /// `Cow::Borrowed` (zero-cost) and the lookup resolves to the identical
+    /// position, so this is safe to call unconditionally.
+    fn filtered_queue_index_to_full(&self, filtered_index: usize) -> Option<usize> {
+        let entry_id = self.filter_queue_songs().get(filtered_index)?.entry_id;
+        self.library
+            .queue_songs
+            .iter()
+            .position(|s| s.entry_id == entry_id)
+    }
+
     /// Resolve the queue insertion index for the current cross-pane drag.
     ///
     /// Reads `queue_page.common.slot_list.hovered_slot`, which the per-slot
@@ -524,26 +565,20 @@ impl Nokkvi {
     /// at all — either it is on chrome, a different pane, or completely
     /// outside the slot list.
     ///
-    /// Staleness gate: if `queue_songs.len()` has changed since the hover
-    /// was baked (consume auto-advance, SSE library refresh, optimistic
-    /// reorder), reject the payload and return `None`. The released drag
-    /// then cancels rather than mis-dropping at a position that no longer
-    /// matches what the user sees. The iced `mouse_area` diff condition
-    /// (`reference-iced/widget/src/mouse_area.rs:320`) only re-fires
-    /// `on_enter` on cursor or bounds change, so a queue mutation beneath
-    /// a stationary cursor never refreshes the payload organically.
+    /// The hovered `item_index` is in filtered slot-list space, so it is
+    /// translated to a full-queue index via [`Self::filtered_queue_index_to_full`]
+    /// (resolving through the row's `entry_id`). This keeps cross-pane drops
+    /// working while a queue search filters the queue to a strict subset, and
+    /// is inherently staleness-safe: a row that no longer exists yields `None`
+    /// (the released drag then surfaces feedback rather than mis-dropping at a
+    /// position that no longer matches what the user sees). The `Empty`
+    /// (append) case uses the FULL `queue_songs.len()` so the drop still lands
+    /// at the true queue end regardless of the active filter.
     pub(crate) fn compute_queue_drop_slot(&self) -> Option<usize> {
         let hovered = self.queue_page.common.slot_list.hovered_slot?;
-        let current_len = self.library.queue_songs.len();
-        let baked_len = match hovered {
-            HoveredSlot::Item { items_len, .. } | HoveredSlot::Empty { items_len, .. } => items_len,
-        };
-        if baked_len != current_len {
-            return None;
-        }
         match hovered {
-            HoveredSlot::Item { item_index, .. } => Some(item_index),
-            HoveredSlot::Empty { .. } => Some(current_len),
+            HoveredSlot::Item { item_index, .. } => self.filtered_queue_index_to_full(item_index),
+            HoveredSlot::Empty { .. } => Some(self.library.queue_songs.len()),
         }
     }
 

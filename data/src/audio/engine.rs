@@ -1480,6 +1480,31 @@ impl CustomAudioEngine {
         renderer.disarm_crossfade();
     }
 
+    /// Recover from a crossfade whose incoming stream stalled at completion.
+    ///
+    /// Driven by the renderer's `on_renderer_crossfade_stalled` path (the fade
+    /// reached 100% wall-clock progress but the incoming ring is empty, so the
+    /// incoming decoder never produced audio). Rather than promoting the silent
+    /// decoder — which would fade the audible outgoing track into silence — this
+    /// cancels the crossfade (restoring the outgoing stream as primary at full
+    /// volume and clearing the incoming decoder), bumps the source generation so
+    /// any late callbacks from the abandoned incoming source are discarded by
+    /// the renderer's staleness gate, then runs the normal end-of-track
+    /// transition so the bad track is skipped via the standard prepared/next
+    /// path. No decoder is created while a lock is held (cancel only clears).
+    pub async fn recover_stalled_crossfade(&mut self) {
+        if self.crossfade_phase.is_idle() {
+            return;
+        }
+        warn!("🔀 [CROSSFADE] Incoming stalled at completion — restoring outgoing and skipping");
+        self.cancel_crossfade().await;
+        // The abandoned incoming source is being thrown away; invalidate any of
+        // its in-flight completion callbacks.
+        self.source_generation.bump_for_user_action();
+        // Skip the stalled track via the standard end-of-track machinery.
+        self.on_decoder_finished().await;
+    }
+
     /// Finalize crossfade: promote the incoming track to become the current track.
     /// Called when the renderer finishes mixing (crossfade progress reaches 1.0)
     /// or when the outgoing decoder's buffers are fully consumed.
@@ -1768,9 +1793,22 @@ impl CustomAudioEngine {
     /// Call this whenever the play order changes (shuffle/repeat/consume toggle)
     /// to prevent a stale gapless transition to the wrong song.
     pub async fn reset_next_track(&mut self) {
+        // Cancel an in-flight crossfade FIRST. A mode toggle (shuffle / repeat /
+        // consume) during an active fade must abandon the prepared/in-flight
+        // next track so the engine re-derives it under the new mode — otherwise
+        // finalize_crossfade_engine would still promote the now-wrong incoming
+        // track. cancel_crossfade resets crossfade_phase → Idle, clears the
+        // incoming decoder, and restores the outgoing as primary. Run it before
+        // taking the parking_lot renderer lock below (it acquires that lock and
+        // awaits the decoder lock itself).
+        if !self.crossfade_phase.is_idle() {
+            self.cancel_crossfade().await;
+        }
         self.gapless.lock().await.clear();
         self.next_source.clear();
         self.next_format = AudioFormat::invalid();
+        // Still needed for the Armed-but-not-Active case (cancel_crossfade only
+        // touches Active); harmless when cancel_crossfade already disarmed.
         self.renderer.lock().disarm_crossfade();
     }
 
@@ -2181,6 +2219,54 @@ mod tests {
 
     fn fresh_decoder() -> AudioDecoder {
         AudioDecoder::new(Arc::new(std::sync::RwLock::new(None)))
+    }
+
+    /// N20: seek must NOT bump the source generation — the source URL is
+    /// unchanged, so renderer.seek recreates the primary stream under the same
+    /// generation (gated by the `seeking` flag + decode_loop.supersede). This
+    /// pins the invariant the corrected `bump_for_user_action` doc now
+    /// documents, so a future maintainer can't quietly add a spurious bump into
+    /// seek and invalidate the render/visualizer staleness gating mid-seek.
+    #[tokio::test]
+    async fn seek_preserves_source_generation() {
+        let mut engine = CustomAudioEngine::new();
+        let before = engine.source_generation();
+        // Fresh engine has duration 0, so seek returns at its early guard
+        // without spawning a decode loop — but crucially without bumping the
+        // generation either (the abort path and the real seek path both leave
+        // it untouched by design).
+        engine.seek(5_000).await;
+        assert_eq!(
+            engine.source_generation(),
+            before,
+            "seek must not bump the source generation",
+        );
+    }
+
+    /// N4: toggling shuffle / repeat / consume mid-crossfade must cancel the
+    /// in-flight fade, not just clear the gapless slot. Previously
+    /// reset_next_track only cleared the gapless slot + disarmed the Armed
+    /// flag, leaving an Active crossfade running so finalize_crossfade_engine
+    /// would still promote the (now wrong-under-new-mode) incoming track.
+    #[tokio::test]
+    async fn reset_next_track_cancels_active_crossfade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        assert!(
+            !engine.crossfade_is_idle(),
+            "precondition: engine must start mid-crossfade",
+        );
+
+        engine.reset_next_track().await;
+
+        assert!(
+            engine.crossfade_is_idle(),
+            "reset_next_track must cancel the active crossfade (phase → Idle)",
+        );
     }
 
     #[test]

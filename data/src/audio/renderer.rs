@@ -49,7 +49,46 @@ enum CrossfadeState {
         started_at: std::time::Instant,
         duration_ms: u64,
         incoming_format: AudioFormat,
+        /// Total time spent paused since the crossfade started. Subtracted
+        /// from wall-clock elapsed so progress only advances while audio is
+        /// actually produced (the streams are paused while `paused_at` is set).
+        paused_accum: std::time::Duration,
+        /// When `Some`, the crossfade is currently paused; the span since this
+        /// instant is folded into `paused_accum` on resume.
+        paused_at: Option<std::time::Instant>,
     },
+}
+
+/// Outcome of a single [`AudioRenderer::tick_crossfade`] call.
+///
+/// Replaces the historical bare `bool` so the render loop can distinguish a
+/// healthy completion (`Finalize`) from a fade that reached 100% wall-clock
+/// progress while the incoming stream never produced audio (`IncomingStalled`).
+/// Without the stall case a stalled/failed incoming decoder still completed the
+/// fade — dropping the audible outgoing track and promoting a silent decoder to
+/// primary (music faded into silence with no recovery).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrossfadeTick {
+    /// Fade still in progress — keep ticking.
+    Continue,
+    /// Fade complete and the incoming stream produced audio — promote it.
+    Finalize,
+    /// Fade reached completion but the incoming stream is empty (stalled /
+    /// failed decode) — recover by restoring the outgoing and skipping the
+    /// bad track via the normal end-of-track path.
+    IncomingStalled,
+}
+
+/// Pure crossfade-progress accessor — single source of truth shared by
+/// `tick_crossfade`, `finalize_crossfade`, and the `cancel_crossfade` log so
+/// the three readers can never drift. Subtracts paused time from wall-clock
+/// elapsed and clamps to `[0.0, 1.0]`. A zero duration is treated as complete.
+fn crossfade_progress(elapsed_ms: u64, paused_accum_ms: u64, duration_ms: u64) -> f64 {
+    if duration_ms > 0 {
+        (elapsed_ms.saturating_sub(paused_accum_ms) as f64 / duration_ms as f64).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
 }
 
 /// Audio renderer that manages streaming sources on the rodio mixer.
@@ -120,8 +159,13 @@ pub struct AudioRenderer {
     /// Used by the gapless-reuse guard to detect when a track-mode
     /// transition would leave the wrong gain applied to the new track.
     current_replay_gain: Option<ReplayGain>,
-    /// Shared EQ state — passed to each new StreamingSource.
-    eq_state: Option<super::eq::EqState>,
+    /// Shared EQ state — cloned into every new `StreamingSource` so each stream
+    /// always carries an `EqProcessor` bound to the canonical shared atomics.
+    /// Seeded with a default (disabled) instance so a stream created before
+    /// `set_eq_state` lands still has a processor (a disabled processor is a
+    /// true no-op); the engine pushes the canonical UI-owned instance at login
+    /// via `set_eq_state` before the first stream is created.
+    eq_state: super::eq::EqState,
     /// When `true`, PipeWire handles the user's volume via `channelVolumes`.
     /// Software volume is kept at 1.0 during normal playback; crossfade
     /// ramps use only the fade factor (PipeWire applies user volume on top).
@@ -208,9 +252,12 @@ impl AudioRenderer {
         })
     }
 
-    /// Update shared EQ state. Replaces existing eq state, taking effect on new streams.
+    /// Update shared EQ state. Replaces the stored instance, taking effect on
+    /// new streams. The engine pushes the canonical UI-owned `EqState` here at
+    /// login (before first play) so streams track the live `enabled`/gain
+    /// atomics rather than the seeded default's always-disabled atomics.
     pub fn set_eq_state(&mut self, state: super::eq::EqState) {
-        self.eq_state = Some(state);
+        self.eq_state = state;
     }
 }
 
@@ -244,7 +291,7 @@ impl AudioRenderer {
             pending_replay_gain: None,
             pending_crossfade_replay_gain: None,
             current_replay_gain: None,
-            eq_state: None,
+            eq_state: super::eq::EqState::default(),
             pw_volume_active: false,
             consumed_notify: Arc::new(Notify::new()),
         }
@@ -359,7 +406,7 @@ impl AudioRenderer {
             format.channel_count() as u16,
             self.stream_volume(),
             norm,
-            self.eq_state.clone(),
+            Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             true,
         );
@@ -468,10 +515,34 @@ impl AudioRenderer {
         // must be cleared — otherwise the source returns silence).
         if let Some(ref stream) = self.primary_stream {
             stream.resume();
-            stream.set_volume(self.stream_volume());
         }
-        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+        if let CrossfadeState::Active {
+            stream,
+            paused_accum,
+            paused_at,
+            ..
+        } = &mut self.crossfade_state
+        {
             stream.resume();
+            // start() — NOT the (unused) resume() — is the engine's unpause
+            // path (engine.play() → renderer.start()). Fold the in-progress
+            // pause span into paused_accum and clear paused_at so
+            // tick_crossfade excludes the silent interval. Without this,
+            // paused_at stays Some and `live_paused` tracks wall clock in
+            // lockstep with `elapsed_ms`, freezing crossfade progress below
+            // 1.0 forever: the fade never finalizes, the UI position pins at
+            // the outgoing track's end, and the queue never advances.
+            if let Some(t) = paused_at.take() {
+                *paused_accum += t.elapsed();
+            }
+        }
+        // Restore primary volume (it may have been changed via set_volume while
+        // paused) only when NOT crossfading — during an active crossfade the
+        // stream volumes are owned by the crossfade tick.
+        if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
+            && let Some(ref stream) = self.primary_stream
+        {
+            stream.set_volume(self.stream_volume());
         }
 
         trace!("▶ Renderer::start() completed — stream active");
@@ -505,31 +576,18 @@ impl AudioRenderer {
         if let Some(ref stream) = self.primary_stream {
             stream.pause();
         }
-        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
-            stream.pause();
-        }
-    }
-
-    /// Resume from pause.
-    pub fn resume(&mut self) {
-        if !self.paused {
-            return;
-        }
-        self.paused = false;
-        // Resume the streaming source — it will start pulling and counting again.
-        if let Some(ref stream) = self.primary_stream {
-            stream.resume();
-        }
-        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
-            stream.resume();
-        }
-        // Restore volume (may have been changed during pause via set_volume)
-        if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
-            && let Some(ref stream) = self.primary_stream
+        if let CrossfadeState::Active {
+            stream, paused_at, ..
+        } = &mut self.crossfade_state
         {
-            stream.set_volume(self.stream_volume());
+            stream.pause();
+            // Stamp the pause start so start() (the unpause path) can fold the
+            // paused span into paused_accum — without this the wall-clock
+            // progress keeps advancing while audio is silent.
+            if paused_at.is_none() {
+                *paused_at = Some(std::time::Instant::now());
+            }
         }
-        // If crossfade is active, volumes are managed by the crossfade tick
     }
 
     /// Seek to position (milliseconds).
@@ -559,7 +617,7 @@ impl AudioRenderer {
                 self.format.channel_count() as u16,
                 self.stream_volume(),
                 norm,
-                self.eq_state.clone(),
+                Some(self.eq_state.clone()),
                 self.consumed_notify.clone(),
                 true,
             );
@@ -770,7 +828,7 @@ impl AudioRenderer {
             incoming_format.channel_count() as u16,
             0.0, // Start silent, volume will ramp up
             cf_norm,
-            self.eq_state.clone(),
+            Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             false,
         );
@@ -780,6 +838,8 @@ impl AudioRenderer {
             started_at: std::time::Instant::now(),
             duration_ms,
             incoming_format: incoming_format.clone(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
         };
 
         debug!(
@@ -810,12 +870,15 @@ impl AudioRenderer {
             stream,
             started_at,
             duration_ms,
+            paused_accum,
+            paused_at,
             ..
         } = prior
         {
+            let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
             debug!(
                 "🔀 [RENDERER] Crossfade CANCELLED: elapsed={}ms/{}ms",
-                started_at.elapsed().as_millis(),
+                started_at.elapsed().saturating_sub(live_paused).as_millis(),
                 duration_ms,
             );
             stream.silence_and_stop();
@@ -865,8 +928,14 @@ impl AudioRenderer {
 
     /// Tick the crossfade: update volumes based on elapsed time.
     /// Called periodically (e.g., from the decode loop or a timer).
-    /// Returns `true` if the crossfade should be finalized.
-    pub fn tick_crossfade(&mut self) -> bool {
+    ///
+    /// Returns [`CrossfadeTick`]: `Continue` while the fade is in progress,
+    /// `Finalize` when it completes and the incoming stream produced audio, and
+    /// `IncomingStalled` when it reaches completion but the incoming ring is
+    /// still empty (a stalled/failed incoming decoder) so the caller can
+    /// restore the outgoing track and skip the bad one instead of fading into
+    /// silence.
+    pub fn tick_crossfade(&mut self) -> CrossfadeTick {
         // Compute fade coefficients first (immutable borrow), then apply them
         // to both streams in a separate pass so the variant's stream and the
         // primary stream can be touched without overlapping borrows.
@@ -874,20 +943,22 @@ impl AudioRenderer {
             CrossfadeState::Active {
                 started_at,
                 duration_ms,
+                paused_accum,
+                paused_at,
                 ..
             } => {
+                // Include any in-progress pause span (paused_at) so a tick that
+                // somehow runs mid-pause still reports pause-corrected progress.
+                let live_paused = paused_at.map_or(*paused_accum, |t| *paused_accum + t.elapsed());
                 let elapsed_ms = started_at.elapsed().as_millis() as u64;
-                let progress = if *duration_ms > 0 {
-                    (elapsed_ms as f64 / *duration_ms as f64).min(1.0)
-                } else {
-                    1.0
-                };
+                let progress =
+                    crossfade_progress(elapsed_ms, live_paused.as_millis() as u64, *duration_ms);
                 // Equal-power crossfade using cos²/sin² curves.
                 let fade_out = (progress * std::f64::consts::FRAC_PI_2).cos().powi(2);
                 let fade_in = (progress * std::f64::consts::FRAC_PI_2).sin().powi(2);
                 (fade_out, fade_in, progress)
             }
-            _ => return false,
+            _ => return CrossfadeTick::Continue,
         };
 
         // When PipeWire handles user volume, software only applies the fade
@@ -925,7 +996,20 @@ impl AudioRenderer {
             }
         }
 
-        progress >= 1.0
+        if progress < 1.0 {
+            return CrossfadeTick::Continue;
+        }
+
+        // Fade reached completion. Gate the promotion on the incoming stream
+        // having actually produced audio: a stalled/failed incoming decoder
+        // writes nothing, so its ring stays empty. Promoting it would fade the
+        // audible outgoing track into silence with no recovery, so report the
+        // stall instead and let the caller restore the outgoing + skip.
+        if self.crossfade_buffer_count() == 0 {
+            CrossfadeTick::IncomingStalled
+        } else {
+            CrossfadeTick::Finalize
+        }
     }
 
     /// Finalize the crossfade: swap crossfade stream → primary stream.
@@ -936,12 +1020,17 @@ impl AudioRenderer {
             started_at,
             duration_ms,
             incoming_format,
+            paused_accum,
+            paused_at,
         } = std::mem::replace(&mut self.crossfade_state, CrossfadeState::Idle)
         else {
             return 0;
         };
 
-        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        // Subtract paused time so the position offset reflects only the audio
+        // the incoming track actually produced during the fade.
+        let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
+        let elapsed_ms = started_at.elapsed().saturating_sub(live_paused).as_millis() as u64;
 
         debug!(
             "🔀 [RENDERER] Crossfade FINALIZED: elapsed={}ms/{}ms",
@@ -1035,15 +1124,36 @@ impl AudioRenderer {
         }
 
         // Tick crossfade volumes if active
-        if matches!(self.crossfade_state, CrossfadeState::Active { .. }) && self.tick_crossfade() {
-            // Crossfade duration expired — finalize the renderer-side crossfade
-            // synchronously (we already hold the lock). This swaps the crossfade
-            // stream to primary and resets the state to Idle. Then signal the engine
-            // to swap decoders/sources.
-            debug!("🔀 [RENDER_TICK] Crossfade complete — finalizing renderer + signaling engine");
-            self.finalize_crossfade();
-            self.on_renderer_finished();
-            return; // Don't run further checks this tick
+        if matches!(self.crossfade_state, CrossfadeState::Active { .. }) {
+            match self.tick_crossfade() {
+                CrossfadeTick::Continue => {}
+                CrossfadeTick::Finalize => {
+                    // Crossfade duration expired and the incoming stream produced
+                    // audio — finalize the renderer-side crossfade synchronously
+                    // (we already hold the lock). This swaps the crossfade stream
+                    // to primary and resets the state to Idle, then signals the
+                    // engine to swap decoders/sources.
+                    debug!(
+                        "🔀 [RENDER_TICK] Crossfade complete — finalizing renderer + signaling engine"
+                    );
+                    self.finalize_crossfade();
+                    self.on_renderer_finished();
+                    return; // Don't run further checks this tick
+                }
+                CrossfadeTick::IncomingStalled => {
+                    // Fade completed on wall clock but the incoming decoder never
+                    // produced audio. Do NOT promote the silent stream. Signal the
+                    // engine to cancel the crossfade (restoring the outgoing as
+                    // primary at full volume) and skip the bad track via the
+                    // normal end-of-track path.
+                    warn!(
+                        "🔀 [RENDER_TICK] Crossfade completed but incoming stream is empty \
+                         (stalled decode) — recovering by restoring outgoing + skipping"
+                    );
+                    self.on_renderer_crossfade_stalled();
+                    return; // Don't run further checks this tick
+                }
+            }
         }
 
         // Check for crossfade trigger: position-based, NOT EOF-based.
@@ -1137,6 +1247,35 @@ impl AudioRenderer {
             });
         }
     }
+
+    /// Called from `render_tick` when a crossfade reached completion but the
+    /// incoming stream never produced audio (stalled / failed decode).
+    ///
+    /// Unlike `on_renderer_finished`, this does NOT call `finalize_crossfade`
+    /// on the renderer (that would promote the silent stream). It signals the
+    /// engine to cancel the crossfade — restoring the outgoing stream as the
+    /// primary at full volume and clearing the incoming decoder — then run a
+    /// normal end-of-track transition so the bad track is skipped via the
+    /// standard `peek_next_song` path. Spawned (rather than synchronous) so the
+    /// engine lock is acquired off the render thread, matching the
+    /// deadlock-safety rationale on `on_renderer_finished`.
+    fn on_renderer_crossfade_stalled(&mut self) {
+        let generation = self.source_generation.current();
+        warn!("🔀 [RENDERER] Crossfade incoming stalled (generation={generation}) — recovering");
+
+        if let Some(engine_ref) = self.engine.upgrade() {
+            let handle = self.tokio_handle.clone();
+            let src_gen = generation;
+            handle.spawn(async move {
+                let mut engine = engine_ref.lock().await;
+                // Skip if a user action already moved the source on (the
+                // abandoned incoming's late callbacks are discarded anyway).
+                if engine.source_generation() == src_gen {
+                    engine.recover_stalled_crossfade().await;
+                }
+            });
+        }
+    }
 }
 
 impl Default for AudioRenderer {
@@ -1159,7 +1298,64 @@ fn rg_track_gains_differ(current: Option<&ReplayGain>, pending: Option<&ReplayGa
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
+    use ringbuf::{
+        HeapRb,
+        traits::{Producer, Split},
+    };
+
     use super::*;
+    use crate::audio::streaming_source::{SharedVisualizerCallback, StreamingSource};
+
+    /// Build a detached `ActiveStream` for renderer crossfade unit tests.
+    ///
+    /// Splits a `HeapRb` (the renderer's real ring buffer type), wires the
+    /// consumer to a throwaway `StreamingSource` (kept alive so the handle's
+    /// shared state stays valid), and returns the producer-side `ActiveStream`.
+    /// Pre-loads `prefill` samples into the ring so `crossfade_buffer_count()`
+    /// reports a non-zero fill when the test needs a "healthy incoming" stream.
+    fn test_active_stream(prefill: usize) -> (ActiveStream, StreamingSource) {
+        let rb = HeapRb::<f32>::new(crate::audio::RING_BUFFER_CAPACITY);
+        let (mut producer, consumer) = rb.split();
+        if prefill > 0 {
+            let data: Vec<f32> = (0..prefill).map(|i| i as f32 * 0.001).collect();
+            producer.push_slice(&data);
+        }
+        let viz: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(None));
+        let (source, handle) = StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(48_000).expect("48000 is nonzero"),
+            viz,
+            0.0,
+            None,
+            Arc::new(Notify::new()),
+            false,
+        );
+        let stream = ActiveStream {
+            producer,
+            handle,
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        (stream, source)
+    }
+
+    /// Build an `Active` crossfade state that is already past completion on the
+    /// wall clock (`started_at` 60s ago, 1s fade), with the supplied incoming
+    /// stream. The returned `StreamingSource` must be kept alive for the
+    /// duration of the test so the handle's atomics remain valid.
+    fn completed_active_state(stream: ActiveStream) -> CrossfadeState {
+        CrossfadeState::Active {
+            stream,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(60),
+            duration_ms: 1_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+        }
+    }
 
     /// `cancel_crossfade` historically blasted ANY prior state to `Idle`, which
     /// silently disarmed a pending gapless crossfade when the user seeked during
@@ -1212,5 +1408,244 @@ mod tests {
         renderer.disarm_crossfade();
 
         assert!(matches!(renderer.crossfade_state, CrossfadeState::Idle));
+    }
+
+    /// I5: crossfade progress must exclude time spent paused. Pausing mid-fade
+    /// then resuming previously skipped the fade forward by the pause duration
+    /// (or hard-cut to the incoming track), because progress was pure wall
+    /// clock. With pause-aware accounting, 8s wall clock minus 4s paused over a
+    /// 5s fade is 4s of real playing time → 0.8 progress, NOT a completed fade.
+    #[test]
+    fn crossfade_progress_excludes_paused_time() {
+        assert!(
+            (crossfade_progress(8000, 4000, 5000) - 0.8).abs() < 1e-9,
+            "8000ms elapsed − 4000ms paused over a 5000ms fade must be 0.8 progress"
+        );
+    }
+
+    /// I5 control: when no pause occurred and real playing time exceeds the
+    /// fade duration, progress finalizes correctly at 1.0 (clamped).
+    #[test]
+    fn crossfade_progress_finalizes_only_on_real_playing_time() {
+        assert!(
+            (crossfade_progress(6000, 0, 5000) - 1.0).abs() < 1e-9,
+            "6000ms of real playing time over a 5000ms fade must clamp to 1.0"
+        );
+    }
+
+    /// I5: a zero-duration fade is treated as immediately complete.
+    #[test]
+    fn crossfade_progress_zero_duration_is_complete() {
+        assert!((crossfade_progress(0, 0, 0) - 1.0).abs() < 1e-9);
+    }
+
+    /// I6: when the fade reaches completion but the incoming ring is empty (the
+    /// incoming decoder stalled / never produced audio), `tick_crossfade` must
+    /// report `IncomingStalled` so the caller can restore the outgoing track —
+    /// NOT silently `Finalize` and promote a silent stream.
+    #[tokio::test]
+    async fn tick_crossfade_reports_stall_when_incoming_empty_at_completion() {
+        let (stream, _source) = test_active_stream(0);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = completed_active_state(stream);
+
+        assert_eq!(
+            renderer.crossfade_buffer_count(),
+            0,
+            "incoming ring is empty"
+        );
+        assert_eq!(
+            renderer.tick_crossfade(),
+            CrossfadeTick::IncomingStalled,
+            "completed fade with empty incoming must report a stall"
+        );
+    }
+
+    /// I6 control: when the fade completes and the incoming stream produced
+    /// audio (non-empty ring), `tick_crossfade` reports `Finalize` so a healthy
+    /// crossfade still promotes the incoming track exactly as before.
+    #[tokio::test]
+    async fn tick_crossfade_finalizes_when_incoming_filled_at_completion() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = completed_active_state(stream);
+
+        assert!(
+            renderer.crossfade_buffer_count() > 0,
+            "incoming ring is filled"
+        );
+        assert_eq!(
+            renderer.tick_crossfade(),
+            CrossfadeTick::Finalize,
+            "completed fade with filled incoming must finalize"
+        );
+    }
+
+    /// N16: a fresh renderer always carries an `EqState` (no `Option`), so
+    /// every stream it creates gets an `EqProcessor` even before `set_eq_state`
+    /// is called. Previously the field defaulted to `None`, so a stream created
+    /// before login's settings push had a `None` processor for its entire life
+    /// and ignored EQ even after the user enabled it.
+    #[tokio::test]
+    async fn fresh_renderer_seeds_eq_state() {
+        let renderer = AudioRenderer::new();
+        // The seeded default starts disabled (a true no-op for the audio path).
+        assert!(
+            !renderer.eq_state.is_enabled(),
+            "seeded EQ state must default to disabled",
+        );
+    }
+
+    /// N16: `set_eq_state` replaces the stored instance with the canonical
+    /// UI-owned `EqState` so streams created afterwards track the live atomics
+    /// (enabling EQ via the shared handle becomes visible to the renderer).
+    #[tokio::test]
+    async fn set_eq_state_shares_canonical_atomics() {
+        let mut renderer = AudioRenderer::new();
+        let canonical = super::super::eq::EqState::new();
+        renderer.set_eq_state(canonical.clone());
+
+        // Toggling the canonical instance (as the UI would) must be visible
+        // through the renderer's stored state — proving they share atomics.
+        canonical.set_enabled(true);
+        assert!(
+            renderer.eq_state.is_enabled(),
+            "renderer must store the shared instance, not a default copy",
+        );
+    }
+
+    /// I6: while the fade is still in progress, `tick_crossfade` reports
+    /// `Continue` regardless of incoming fill.
+    #[tokio::test]
+    async fn tick_crossfade_continues_before_completion() {
+        let (stream, _source) = test_active_stream(0);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream,
+            started_at: std::time::Instant::now(),
+            duration_ms: 10_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+        };
+
+        assert_eq!(renderer.tick_crossfade(), CrossfadeTick::Continue);
+    }
+
+    /// Regression (crossfade-pause-freeze): the engine unpauses via
+    /// `engine.play() → renderer.start()`, NOT `renderer.resume()`. So
+    /// `start()` MUST fold any in-progress crossfade pause span into
+    /// `paused_accum` and clear `paused_at`. If it leaves `paused_at` set,
+    /// `tick_crossfade`'s `live_paused` tracks wall clock in lockstep with
+    /// `elapsed_ms`, freezing crossfade progress below 1.0 forever — the fade
+    /// never finalizes, the UI position pins at the outgoing track's end, and
+    /// the queue never advances even though the incoming stream is audible.
+    #[tokio::test]
+    async fn start_folds_active_crossfade_pause_into_accum() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        // Mirror the renderer state when the engine calls start() to resume:
+        // still flagged playing (pause() never cleared it) and paused.
+        renderer.playing = true;
+        renderer.paused = true;
+        // A crossfade that began 10s ago and was paused 8s ago (2s into a 5s fade).
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(10),
+            duration_ms: 5_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: Some(std::time::Instant::now() - std::time::Duration::from_secs(8)),
+        };
+
+        // Unpause through the real engine path.
+        renderer.start();
+
+        let CrossfadeState::Active {
+            paused_at,
+            paused_accum,
+            ..
+        } = &renderer.crossfade_state
+        else {
+            panic!("crossfade must remain Active across an unpause");
+        };
+        assert!(
+            paused_at.is_none(),
+            "start() must clear paused_at on unpause (a dangling paused_at freezes progress)"
+        );
+        assert!(
+            *paused_accum >= std::time::Duration::from_secs(7),
+            "the ~8s paused span must be folded into paused_accum, got {paused_accum:?}"
+        );
+    }
+
+    /// Regression: repeated pause/resume cycles within a single crossfade must
+    /// record EACH paused span. `pause()` only stamps `paused_at` when it is
+    /// `None`, so if `start()` fails to clear it on the first resume, the second
+    /// pause is silently dropped and `paused_accum` undercounts — letting
+    /// progress run ahead. Driving pause→start→pause→start through the real
+    /// engine path must clear `paused_at` on every resume and allow every pause
+    /// to re-stamp.
+    #[tokio::test]
+    async fn repeated_pause_resume_via_start_clears_paused_at_each_cycle() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(2),
+            duration_ms: 10_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+        };
+
+        // First pause/resume cycle.
+        renderer.pause();
+        assert!(
+            matches!(
+                renderer.crossfade_state,
+                CrossfadeState::Active {
+                    paused_at: Some(_),
+                    ..
+                }
+            ),
+            "first pause must stamp paused_at"
+        );
+        renderer.start();
+        assert!(
+            matches!(
+                renderer.crossfade_state,
+                CrossfadeState::Active {
+                    paused_at: None,
+                    ..
+                }
+            ),
+            "first unpause via start() must clear paused_at"
+        );
+
+        // Second pause/resume cycle: pause must be able to re-stamp.
+        renderer.pause();
+        assert!(
+            matches!(
+                renderer.crossfade_state,
+                CrossfadeState::Active {
+                    paused_at: Some(_),
+                    ..
+                }
+            ),
+            "second pause must re-stamp paused_at (impossible if the first was never cleared)"
+        );
+        renderer.start();
+        let CrossfadeState::Active { paused_at, .. } = &renderer.crossfade_state else {
+            panic!("crossfade must remain Active");
+        };
+        assert!(
+            paused_at.is_none(),
+            "second unpause via start() must clear paused_at"
+        );
     }
 }

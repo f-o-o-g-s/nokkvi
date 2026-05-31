@@ -214,10 +214,10 @@ impl Nokkvi {
         }
         // Capture child album ids before consuming `msg` so we can fan out
         // mini-artwork fetches for the newly-loaded expansion children.
-        let expansion_album_ids: Vec<(String, String)> = match &msg {
+        let expansion_album_ids: Vec<(String, Option<String>, String)> = match &msg {
             ArtistsMessage::AlbumsLoaded(_, albums) => albums
                 .iter()
-                .map(|a| (a.id.clone(), a.artwork_url.clone()))
+                .map(|a| (a.id.clone(), a.updated_at.clone(), a.artwork_url.clone()))
                 .collect(),
             _ => Vec::new(),
         };
@@ -523,6 +523,7 @@ impl Nokkvi {
             self.artwork.album_art.iter().map(|(k, _)| k).collect();
         let prefetch = super::components::expansion_album_artwork_tasks(
             &cached,
+            &self.artwork.album_art_versions,
             shell.albums().clone(),
             expansion_album_ids,
         );

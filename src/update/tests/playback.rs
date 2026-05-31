@@ -408,3 +408,232 @@ fn settings_search_from_sub_list_is_noop() {
 }
 
 // ============================================================================
+// I22 — song-change fallback uses the finished song's own duration
+// ============================================================================
+
+#[test]
+fn song_change_scrobbles_short_prev_before_long_next() {
+    let mut app = test_app();
+    // Previous song "A": 30s long, listened 27s (>= 90%), not yet submitted.
+    app.scrobble.current_song_id = Some("A".to_string());
+    app.scrobble.current_song_duration = 30;
+    app.scrobble.listening_time = 27.0;
+    app.scrobble.submitted = false;
+    app.scrobble.submission_in_flight = false;
+    app.settings.scrobble_threshold = 0.9;
+    app.playback.duration = 30;
+
+    // Capture the eligibility decision for A against ITS OWN duration BEFORE
+    // the handler overwrites playback.duration with B's 360s. This is the
+    // observable contract: A (27/30s) was eligible.
+    let a_eligible = app
+        .scrobble
+        .should_scrobble(app.scrobble.current_song_duration, 0.9);
+    assert!(a_eligible, "short previous song A should be eligible");
+
+    let mut update = make_playback_update();
+    update.song_id = Some("B".to_string());
+    update.duration = 360;
+    let _ = app.handle_playback_state_updated(update);
+
+    // The fallback ran and reset for B (current_song_id advanced). Had the
+    // fallback used the clobbered playback.duration (360s), A would have been
+    // judged against 360*0.9 and dropped; current_song_duration pins it to 30.
+    assert_eq!(app.scrobble.current_song_id.as_deref(), Some("B"));
+    assert_eq!(app.scrobble.current_song_duration, 360);
+}
+
+// ============================================================================
+// N13 — small forward seeks credit no listening time
+// ============================================================================
+
+#[test]
+fn small_forward_seek_does_not_credit_listening_time() {
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.scrobble.last_position = 10.0;
+    app.scrobble.listening_time = 5.0;
+
+    // 8s forward seek — UNDER the old 10s magnitude window, so the heuristic
+    // alone would have credited it.
+    let _ = app.handle_seek(18.0);
+    assert_eq!(
+        app.scrobble.last_position, 18.0,
+        "handle_seek must advance last_position to the seek target"
+    );
+
+    // Post-seek tick at the new position.
+    let mut update = make_playback_update();
+    update.position = 18;
+    update.song_id = Some("song_1".to_string());
+    let _ = app.handle_playback_state_updated(update);
+
+    assert!(
+        (app.scrobble.listening_time - 5.0).abs() < 0.1,
+        "an 8s forward seek must credit no listening time (stays ~5.0)"
+    );
+    assert_eq!(app.scrobble.last_position, 18.0);
+}
+
+// ============================================================================
+// I16 — stale ticks do not revert optimistic mode toggles
+// ============================================================================
+
+#[test]
+fn stale_tick_does_not_revert_optimistic_random() {
+    let mut app = test_app();
+    let before = app.modes.random;
+    let _ = app.handle_toggle_random();
+    assert_eq!(app.modes.random, !before, "optimistic flip");
+
+    // A tick whose snapshot predates the commit carries the OLD value.
+    let mut update = make_playback_update();
+    update.random = before;
+    let _ = app.handle_playback_state_updated(update);
+    assert_eq!(
+        app.modes.random, !before,
+        "stale in-flight tick must not revert the optimistic toggle"
+    );
+
+    // Commit lands → gate clears → modes hold.
+    let _ = app.handle_random_toggled(!before);
+    assert_eq!(app.modes.random, !before);
+    assert_eq!(app.pending_mode_commits, 0, "gate released after commit");
+}
+
+#[test]
+fn stale_tick_does_not_revert_optimistic_consume() {
+    let mut app = test_app();
+    let before = app.modes.consume;
+    let _ = app.handle_toggle_consume();
+    assert_eq!(app.modes.consume, !before);
+
+    let mut update = make_playback_update();
+    update.consume = before;
+    let _ = app.handle_playback_state_updated(update);
+    assert_eq!(
+        app.modes.consume, !before,
+        "stale tick must not revert optimistic consume"
+    );
+
+    let _ = app.handle_consume_toggled(!before);
+    assert_eq!(app.modes.consume, !before);
+}
+
+#[test]
+fn stale_tick_does_not_revert_optimistic_repeat() {
+    let mut app = test_app();
+    // off -> repeat one
+    let _ = app.handle_toggle_repeat();
+    assert!(app.modes.repeat);
+    assert!(!app.modes.repeat_queue);
+
+    // Stale tick reporting repeat off.
+    let mut update = make_playback_update();
+    update.repeat = false;
+    update.repeat_queue = false;
+    let _ = app.handle_playback_state_updated(update);
+    assert!(
+        app.modes.repeat,
+        "stale tick must not revert optimistic repeat"
+    );
+
+    let _ = app.handle_repeat_toggled(true, false);
+    assert!(app.modes.repeat);
+    assert_eq!(app.pending_mode_commits, 0);
+}
+
+// ============================================================================
+// I26 — mode toggles are no-ops during radio playback
+// ============================================================================
+
+fn radio_test_app() -> crate::Nokkvi {
+    let mut app = test_app();
+    let station = nokkvi_data::types::radio_station::RadioStation {
+        id: "r".into(),
+        name: "n".into(),
+        stream_url: "u".into(),
+        home_page_url: None,
+    };
+    app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+        station,
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+    app
+}
+
+#[test]
+fn radio_active_mode_toggles_are_noops() {
+    let mut app = radio_test_app();
+    let random = app.modes.random;
+    let repeat = app.modes.repeat;
+    let repeat_queue = app.modes.repeat_queue;
+    let consume = app.modes.consume;
+
+    let _ = app.handle_toggle_random();
+    let _ = app.handle_toggle_repeat();
+    let _ = app.handle_toggle_consume();
+
+    assert_eq!(app.modes.random, random, "shuffle unchanged during radio");
+    assert_eq!(app.modes.repeat, repeat, "repeat unchanged during radio");
+    assert_eq!(app.modes.repeat_queue, repeat_queue);
+    assert_eq!(app.modes.consume, consume, "consume unchanged during radio");
+    // Radio no-ops must NOT leak a pending commit count.
+    assert_eq!(
+        app.pending_mode_commits, 0,
+        "radio no-op must not bump the mode-commit gate"
+    );
+}
+
+#[test]
+fn non_radio_mode_toggles_still_flip() {
+    let mut app = test_app();
+    let random = app.modes.random;
+    let consume = app.modes.consume;
+
+    let _ = app.handle_toggle_random();
+    let _ = app.handle_toggle_repeat();
+    let _ = app.handle_toggle_consume();
+
+    assert_eq!(app.modes.random, !random, "shuffle flips off radio");
+    assert!(app.modes.repeat, "repeat advances off radio");
+    assert_eq!(app.modes.consume, !consume, "consume flips off radio");
+}
+
+// ============================================================================
+// I15 — cold-start toggle_play does not optimistically assert Playing
+// ============================================================================
+
+#[test]
+fn toggle_play_does_not_show_playing_when_cold_start_cannot_start() {
+    let mut app = test_app();
+    // Cold start: nothing loaded, but a queue exists so we pass the empty guard.
+    app.playback.playing = false;
+    app.playback.paused = false;
+    app.library.queue_songs = vec![make_queue_song("q1", "T", "A", "Al")];
+
+    let _ = app.handle_toggle_play();
+
+    assert!(
+        !app.playback.playing,
+        "cold-start toggle must not optimistically assert Playing on a no-op path"
+    );
+}
+
+#[test]
+fn toggle_play_resume_of_paused_track_flips_playing() {
+    let mut app = test_app();
+    // Paused, loaded track: resume keeps instant optimistic feedback.
+    app.playback.playing = true;
+    app.playback.paused = true;
+
+    let _ = app.handle_toggle_play();
+
+    assert!(
+        app.playback.playing,
+        "resuming a paused track keeps the optimistic Playing flip"
+    );
+    assert!(!app.playback.paused);
+}

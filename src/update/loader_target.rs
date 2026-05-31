@@ -24,7 +24,8 @@ use nokkvi_data::{backend::app_service::AppService, types::paged_buffer::PagedBu
 use tracing::{debug, error};
 
 use super::components::{
-    PaginatedFetch, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+    PaginatedFetch, passive_artwork_version, prefetch_album_artwork_tasks,
+    prefetch_song_artwork_tasks,
 };
 use crate::{
     Nokkvi,
@@ -84,6 +85,7 @@ pub(crate) trait LoaderTarget {
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = 0;
             sl.selected_indices.clear();
+            sl.anchor_index = None;
         } else {
             let current = Self::slot_list_mut(app).viewport_offset;
             let anchor_idx = anchor_id.and_then(|id| {
@@ -96,7 +98,15 @@ pub(crate) trait LoaderTarget {
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = new_offset;
             sl.selected_offset = None;
-            sl.selected_indices.retain(|&i| i < new_len);
+            // Clear the multi-selection rather than retaining in-range indices:
+            // `set_first_page` wholesale-replaces the buffer, so retained
+            // absolute indices would point at DIFFERENT items after a
+            // reorder / membership change, and a later positional batch op
+            // would silently target the wrong songs. Matches the foreground
+            // branch and the queue precedent (gotchas.md). The anchor-id
+            // VIEWPORT relocation above is preserved.
+            sl.selected_indices.clear();
+            sl.anchor_index = None;
         }
     }
 
@@ -172,8 +182,15 @@ impl LoaderTarget for AlbumsTarget {
             &app.albums_page.common.slot_list,
             &app.library.albums,
             &cached,
+            &app.artwork.album_art_versions,
             shell.albums().clone(),
-            |album| (album.id.clone(), album.artwork_url.clone()),
+            |album| {
+                (
+                    album.id.clone(),
+                    album.updated_at.clone(),
+                    album.artwork_url.clone(),
+                )
+            },
         )
     }
 
@@ -308,8 +325,13 @@ impl LoaderTarget for SongsTarget {
             &app.songs_page.common.slot_list,
             &app.library.songs,
             &cached,
+            &app.artwork.album_art_versions,
             shell.albums().clone(),
-            |song| song.album_id.as_ref(),
+            |song| {
+                song.album_id
+                    .as_ref()
+                    .map(|id| (id, passive_artwork_version(&song.updated_at)))
+            },
         )
     }
 

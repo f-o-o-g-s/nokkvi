@@ -224,6 +224,51 @@ mod tests {
         assert!(jwt.unwrap().is_empty());
     }
 
+    /// Pins the N3/N14 ordering invariant: when an in-flight credential writer
+    /// is drained to completion BEFORE `clear_session` runs, the clear is the
+    /// last write to win, so no non-empty session blob survives logout.
+    #[tokio::test]
+    async fn clear_session_after_drain_wins_over_in_flight_writer() {
+        use std::time::Duration;
+
+        use crate::services::task_manager::TaskManager;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("session.redb");
+        let storage = crate::services::state_storage::StateStorage::new(db_path).unwrap();
+
+        // Initial logged-in session.
+        save_session(&storage, "jwt", "subsonic").unwrap();
+
+        // Straggler credential writer: mid-flight, re-materializes a non-empty
+        // session blob after a delay (simulates a save_session / save_jwt_token
+        // task that is past its last await when logout fires).
+        let tm = TaskManager::new();
+        let storage_clone = storage.clone();
+        tm.spawn_result("straggler_save", move || async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            save_session(&storage_clone, "STALE_JWT", "STALE_SUB")?;
+            Ok::<(), anyhow::Error>(())
+        });
+
+        // Let registration land.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Drain first (writer finishes), THEN clear (clear wins last).
+        let _clean = tm.shutdown_all(Duration::from_millis(500)).await;
+        clear_session(&storage).unwrap();
+
+        let jwt: Option<String> = storage.load(JWT_TOKEN_KEY).unwrap();
+        let sub: Option<String> = storage.load(SUBSONIC_CREDENTIAL_KEY).unwrap();
+        assert_eq!(
+            jwt.unwrap(),
+            String::new(),
+            "draining before clear means the straggler's write was completed \
+             during the drain and then cleared — no non-empty JWT survives"
+        );
+        assert_eq!(sub.unwrap(), String::new());
+    }
+
     #[test]
     fn parse_username_extracts_u_field() {
         let creds = "u=foogs&s=abc123&t=md5hash";
@@ -266,13 +311,13 @@ mod tests {
     /// `save_credentials` itself resolves the config path via `BaseDirs` and
     /// is not test-overridable, but the load-bearing behavior is the
     /// `write_atomic` call — exercising the same template through the same
-    /// helper against a temp path proves the LAST_INTERNAL_WRITE bump fires
-    /// on the production code path. If the helper is silently swapped for a
-    /// non-suppressing `std::fs::write`, this assertion catches it.
+    /// helper against a temp path proves the internal-write registry records
+    /// the (path, content-hash) on the production code path. If the helper is
+    /// silently swapped for a non-suppressing `std::fs::write`, this assertion
+    /// catches it.
     #[test]
-    fn save_credentials_template_bumps_internal_write() {
+    fn save_credentials_template_records_internal_write() {
         let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();
-        use std::sync::atomic::Ordering;
 
         use toml_edit::{DocumentMut, value};
 
@@ -290,17 +335,15 @@ mod tests {
              # Session tokens are managed by the application in app.redb.\n\n{doc}"
         );
 
-        let before = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
-        // Coarse-clock systems would otherwise produce equal before/after.
-        std::thread::sleep(std::time::Duration::from_millis(2));
-
         crate::utils::paths::write_atomic(&path, &output).unwrap();
 
-        let after = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
         assert!(
-            after > before,
-            "save_credentials must route through write_atomic to bump \
-             LAST_INTERNAL_WRITE; before={before} after={after}"
+            crate::utils::paths::was_internal_write(
+                &path,
+                crate::utils::paths::hash_config_bytes(output.as_bytes())
+            ),
+            "save_credentials must route through write_atomic so the watcher \
+             can identity-match its own write"
         );
 
         // Sanity: the file actually landed with the production template.

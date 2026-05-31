@@ -4,7 +4,7 @@
 //! Settings are applied in real-time without restarting the application.
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, mpsc},
     time::Duration,
 };
@@ -855,13 +855,29 @@ impl ConfigWatcher {
         })
     }
 
+    /// Whether a config-watcher event for `path` is one we care about
+    /// hot-reloading: the watched `config.toml`, or a `.toml` file inside the
+    /// themes directory.
+    fn is_relevant_path(&self, path: &Path) -> bool {
+        if *path == self.config_path {
+            return true;
+        }
+        if let Some(ref themes_dir) = self.themes_dir {
+            return path.starts_with(themes_dir) && path.extension().is_some_and(|e| e == "toml");
+        }
+        false
+    }
+
     /// Check for config changes (non-blocking)
     /// Returns Some(new_config) if config file was modified
     pub(crate) fn poll_changes(&self) -> Option<VisualizerConfig> {
         use notify::EventKind;
 
-        // Drain all pending events
-        let mut should_reload = false;
+        // Drain all pending events into the SET of changed-and-relevant paths.
+        // Per-path identity (rather than a single coarse should_reload bool)
+        // lets `decide_reload` distinguish a genuine external edit from the
+        // app's own write even when they land in the same 100ms poll.
+        let mut changed: Vec<PathBuf> = Vec::new();
 
         while let Ok(event_result) = self.receiver.try_recv() {
             if let Ok(event) = event_result {
@@ -871,47 +887,55 @@ impl ConfigWatcher {
 
                 if is_modification {
                     for path in &event.paths {
-                        // config.toml changed
-                        if *path == self.config_path {
-                            should_reload = true;
-                        }
-                        // a .toml file inside themes/ changed
-                        if let Some(ref themes_dir) = self.themes_dir
-                            && path.starts_with(themes_dir)
-                            && path.extension().is_some_and(|e| e == "toml")
-                        {
-                            should_reload = true;
+                        if self.is_relevant_path(path) && !changed.contains(path) {
+                            changed.push(path.clone());
                         }
                     }
                 }
             }
         }
 
-        if should_reload {
-            // Check if this reload was triggered by our own internal write
-            let last_write = nokkvi_data::utils::paths::LAST_INTERNAL_WRITE
-                .load(std::sync::atomic::Ordering::Acquire);
-            if let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                && now.as_millis() as u64 - last_write < 500
-            {
-                debug!(" Ignoring config file change triggered by internal write");
-                return None;
-            }
+        if changed.is_empty() {
+            return None;
+        }
 
-            match load_visualizer_config() {
-                Ok(config) => {
-                    debug!(" Hot-reloaded visualizer config");
-                    Some(config)
-                }
-                Err(e) => {
-                    warn!("  Failed to reload config: {}", e);
-                    None
-                }
+        if !decide_reload(&changed) {
+            debug!(" Ignoring config file change(s) triggered by internal write");
+            return None;
+        }
+
+        match load_visualizer_config() {
+            Ok(config) => {
+                debug!(" Hot-reloaded visualizer config");
+                Some(config)
             }
-        } else {
-            None
+            Err(e) => {
+                warn!("  Failed to reload config: {}", e);
+                None
+            }
         }
     }
+}
+
+/// Pure suppression decision over the set of changed-and-relevant paths.
+///
+/// Returns `true` (reload) unless EVERY changed path is an exact self-write —
+/// i.e. its CURRENT on-disk bytes hash to a `(path, content-hash)` the app
+/// recorded inside the monotonic suppression window. A single external edit
+/// (different path, or different content at the same path) forces a reload,
+/// closing the lost-update bug where a genuine user edit landing in the time
+/// shadow of an unrelated internal write was silently dropped.
+///
+/// Reading a changed file back to hash it can fail (deleted / locked mid-event);
+/// on `Err` the path is treated as NOT a self-write so the reload runs — the
+/// safe direction for a lost-update bug is to surface the user's edit.
+fn decide_reload(changed: &[PathBuf]) -> bool {
+    use nokkvi_data::utils::paths::{hash_config_bytes, was_internal_write};
+
+    changed.iter().any(|path| match std::fs::read(path) {
+        Ok(bytes) => !was_internal_write(path, hash_config_bytes(&bytes)),
+        Err(_) => true,
+    })
 }
 
 /// Create a subscription stream for Iced that polls config changes
@@ -1284,5 +1308,120 @@ style = "wibbly"
         // And the as_wire_str helper.
         assert_eq!(BarsPeakMode::FallFade.as_wire_str(), "fall_fade");
         assert_eq!(BarsPeakMode::FallAccel.as_wire_str(), "fall_accel");
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  Config-watcher suppression (N11 + N12)
+    // ══════════════════════════════════════════════════════════════════
+
+    /// Serializes the two `decide_reload` tests below: both record into the
+    /// process-global internal-write registry in `nokkvi_data`, so running them
+    /// concurrently in the UI test binary could let one's record satisfy the
+    /// other's `was_internal_write` check. `parking_lot::Mutex` avoids poison
+    /// cascades on a test panic.
+    static SUPPRESSION_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    /// Per-test temp dir under `$TMPDIR` (no `tempfile` dep — not in this
+    /// crate's `[dev-dependencies]`). Same precedent as
+    /// `services::mpris_art_writer::tests::ScratchDir`: a fresh
+    /// `nokkvi-visualizer-config-test-<pid>-<counter>/` directory with a Drop
+    /// guard that removes it recursively on scope exit.
+    struct ScratchDir {
+        path: PathBuf,
+    }
+
+    impl ScratchDir {
+        fn new() -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static SEQ: AtomicU64 = AtomicU64::new(0);
+            let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "nokkvi-visualizer-config-test-{}-{}",
+                std::process::id(),
+                seq
+            ));
+            std::fs::create_dir_all(&path).expect("create scratch dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// An external edit to config.toml that lands inside the 500ms time shadow
+    /// of an UNRELATED internal write must still reload (N12 lost-update fix).
+    /// The old single-global-timestamp suppression dropped it; the per-path,
+    /// per-content-hash registry recognizes the changed bytes as NOT a recorded
+    /// self-write and `decide_reload` returns true.
+    #[test]
+    fn poll_changes_reloads_external_edit_inside_internal_write_window() {
+        let _guard = SUPPRESSION_TEST_LOCK.lock();
+        use nokkvi_data::utils::paths::{record_internal_write, write_atomic};
+
+        let dir = ScratchDir::new();
+        // An unrelated internal write opens the suppression window for path_a.
+        let path_a = dir.path().join("themes").join("seed.toml");
+        std::fs::create_dir_all(path_a.parent().unwrap()).unwrap();
+        write_atomic(&path_a, "name = \"Seed\"\n").unwrap();
+
+        // The user externally edits config.toml within that window. The bytes
+        // on disk are NOT what the app wrote (the app never wrote this path),
+        // so it must NOT be suppressed.
+        let config = dir.path().join("config.toml");
+        std::fs::write(&config, "theme = \"user-edit\"\n").unwrap();
+
+        assert!(
+            super::decide_reload(std::slice::from_ref(&config)),
+            "external edit to config.toml inside an unrelated internal-write window must reload"
+        );
+
+        // And a true self-write to config.toml IS suppressed: record the exact
+        // content the app would have written, then the watcher sees those same
+        // bytes on disk.
+        let self_written = "theme = \"app-written\"\n";
+        std::fs::write(&config, self_written).unwrap();
+        record_internal_write(&config, self_written);
+        assert!(
+            !super::decide_reload(std::slice::from_ref(&config)),
+            "a true self-write (recorded path + matching on-disk content) must be suppressed"
+        );
+
+        // A subsequent EXTERNAL re-edit of that same file (different bytes than
+        // the recorded self-write) must reload again.
+        std::fs::write(&config, "theme = \"user-edit-2\"\n").unwrap();
+        assert!(
+            super::decide_reload(std::slice::from_ref(&config)),
+            "external re-edit of the self-written file (different content) must reload"
+        );
+    }
+
+    /// `decide_reload` over a mix of paths reloads when ANY changed path is not
+    /// a self-write, even if another changed path in the same batch is.
+    #[test]
+    fn decide_reload_reloads_if_any_changed_path_is_external() {
+        let _guard = SUPPRESSION_TEST_LOCK.lock();
+        use nokkvi_data::utils::paths::record_internal_write;
+
+        let dir = ScratchDir::new();
+        let self_path = dir.path().join("config.toml");
+        let self_content = "a = 1\n";
+        std::fs::write(&self_path, self_content).unwrap();
+        record_internal_write(&self_path, self_content);
+
+        let external = dir.path().join("themes").join("custom.toml");
+        std::fs::create_dir_all(external.parent().unwrap()).unwrap();
+        std::fs::write(&external, "name = \"Custom\"\n").unwrap();
+
+        assert!(
+            super::decide_reload(&[self_path, external]),
+            "a batch containing one external edit must reload despite a self-write also present"
+        );
     }
 }

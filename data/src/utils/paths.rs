@@ -15,15 +15,18 @@
 //! cache directory.
 
 use std::{
+    collections::{HashMap, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::{
         OnceLock,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 
 const APP_NAME: &str = "nokkvi";
 
@@ -42,18 +45,87 @@ const CONFIG_FILENAME: &str = "config.toml";
 /// not-yet-registered subscriber.
 static MIGRATION_DONE: OnceLock<()> = OnceLock::new();
 
-/// Timestamp (ms since epoch) of the last config.toml write initiated by the app itself.
-/// Used to prevent hot-reload feedback loops when the UI updates a setting.
-pub static LAST_INTERNAL_WRITE: AtomicU64 = AtomicU64::new(0);
+/// How long an internal-write record remains valid for self-write suppression.
+/// A config-watcher event that matches a recorded `(path, content-hash)` inside
+/// this window is treated as the app's own write and ignored; anything older or
+/// non-matching is a genuine external edit and reloads.
+const SUPPRESSION_WINDOW: Duration = Duration::from_millis(500);
 
-/// Wrapper to execute a config write and record its timestamp, suppressing
-/// the hot-reload file watcher for the next 500ms.
-pub fn suppress_config_reload<T>(f: impl FnOnce() -> T) -> T {
-    let result = f();
-    if let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) {
-        LAST_INTERNAL_WRITE.store(now.as_millis() as u64, Ordering::Release);
+/// One recorded internal write: the content hash of the bytes that were written
+/// and the monotonic instant at which the write landed. `recorded_at` uses
+/// `Instant` (not wall-clock) so `elapsed()` is saturating and a backward OS
+/// clock step (NTP, suspend/resume, manual change) can never underflow the
+/// window comparison.
+#[derive(Clone, Copy)]
+struct WriteRecord {
+    content_hash: u64,
+    recorded_at: Instant,
+}
+
+/// Per-path registry of the app's own recent config/theme writes, keyed by the
+/// normalized file path. Replaces the former single process-global wall-clock
+/// timestamp: identity-based suppression (exact path + content hash, within a
+/// monotonic recency window) lets a genuine external edit reload even when it
+/// lands inside the time shadow of an unrelated internal write, while still
+/// ignoring true self-writes that would otherwise trigger a hot-reload
+/// feedback loop.
+static INTERNAL_WRITES: Mutex<Option<HashMap<PathBuf, WriteRecord>>> = Mutex::new(None);
+
+/// Hash arbitrary bytes with the std `DefaultHasher`. Config/theme files are
+/// small, so hashing the full contents is cheap and precisely distinguishes
+/// "the exact bytes we wrote" from "a different external edit".
+pub fn hash_config_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Normalize a path for registry keying so the record side (`write_atomic`,
+/// raw paths) and the check side (`poll_changes`, which receives canonicalized
+/// config paths and raw inotify theme paths) reconcile. `canonicalize` resolves
+/// symlinks the same way inotify does; on error (file already renamed away,
+/// permission) fall back to the path as-given so a missing canonical form does
+/// not silently disable suppression.
+fn normalize_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Record that the app itself just wrote `content` to `path`. Called from
+/// `write_atomic` after the temp file is renamed into place, using the exact
+/// bytes written (never a re-read) so an external edit landing between write
+/// and read cannot be mistaken for the self-write.
+pub fn record_internal_write(path: &Path, content: &str) {
+    let record = WriteRecord {
+        content_hash: hash_config_bytes(content.as_bytes()),
+        recorded_at: Instant::now(),
+    };
+    let mut guard = INTERNAL_WRITES.lock();
+    let map = guard.get_or_insert_with(HashMap::new);
+    // Opportunistically evict stale entries so the map stays bounded to the
+    // handful of config/theme files written in any 500ms window.
+    map.retain(|_, rec| rec.recorded_at.elapsed() < SUPPRESSION_WINDOW);
+    map.insert(normalize_path(path), record);
+}
+
+/// Returns `true` only when the registry holds an entry for `path` whose stored
+/// content hash equals `content_hash` AND was recorded within the monotonic
+/// suppression window. Any mismatch (unknown path, different content, or a stale
+/// record) returns `false` so the change is treated as a genuine external edit
+/// and reloads — the fail-toward-showing-the-user's-edit direction.
+pub fn was_internal_write(path: &Path, content_hash: u64) -> bool {
+    let key = normalize_path(path);
+    let mut guard = INTERNAL_WRITES.lock();
+    let Some(map) = guard.as_mut() else {
+        return false;
+    };
+    // Evict stale entries opportunistically on the read side too.
+    map.retain(|_, rec| rec.recorded_at.elapsed() < SUPPRESSION_WINDOW);
+    match map.get(&key) {
+        Some(rec) => {
+            rec.content_hash == content_hash && rec.recorded_at.elapsed() < SUPPRESSION_WINDOW
+        }
+        None => false,
     }
-    result
 }
 
 /// Monotonic counter used to build unique temp-file names for `write_atomic`.
@@ -62,12 +134,12 @@ pub fn suppress_config_reload<T>(f: impl FnOnce() -> T) -> T {
 /// without forcing a global write lock.
 static TEMP_WRITE_ID: AtomicUsize = AtomicUsize::new(0);
 
-/// Serializes any test that observes / mutates the global `LAST_INTERNAL_WRITE`
-/// atomic. Lives at module scope (not inside `mod tests`) so behavioral tests
-/// in sibling modules (`credentials`, `services::theme_loader`) can take the
-/// same lock and avoid racing each other's bump assertions under parallel
-/// `cargo test`. `parking_lot::Mutex` is used so a test panic doesn't poison
-/// the lock and cascade-fail the group — same precedent as
+/// Serializes any test that observes / mutates the global internal-write
+/// registry (`INTERNAL_WRITES`). Lives at module scope (not inside `mod tests`)
+/// so behavioral tests in sibling modules (`credentials`, `services::theme_loader`)
+/// can take the same lock and avoid racing each other's registry assertions
+/// under parallel `cargo test`. `parking_lot::Mutex` is used so a test panic
+/// doesn't poison the lock and cascade-fail the group — same precedent as
 /// `src/widgets/boat_tests.rs::THEME_MUTATION_LOCK`.
 #[cfg(test)]
 pub(crate) static INTERNAL_WRITE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
@@ -77,8 +149,8 @@ pub(crate) static INTERNAL_WRITE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot
 /// collisions under concurrent writers.
 ///
 /// All production writes to `~/.config/nokkvi/` must route through this
-/// helper so that `LAST_INTERNAL_WRITE` is reliably bumped — bypassing it
-/// re-introduces the spurious-reload class the helper exists to close.
+/// helper so the internal-write registry is reliably recorded — bypassing it
+/// re-introduces the spurious-reload class the registry exists to close.
 pub fn write_atomic(path: &Path, content: &str) -> Result<()> {
     let id = TEMP_WRITE_ID.fetch_add(1, Ordering::Relaxed);
     let temp_name = format!(
@@ -91,8 +163,12 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<()> {
     std::fs::write(&temp_path, content)
         .with_context(|| format!("Failed to write temp file: {}", temp_path.display()))?;
 
-    suppress_config_reload(|| std::fs::rename(&temp_path, path))
+    std::fs::rename(&temp_path, path)
         .with_context(|| format!("Failed to rename temp file to: {}", path.display()))?;
+
+    // Record AFTER the rename lands, using the exact content written, so the
+    // watcher can identity-match its own write and suppress the spurious reload.
+    record_internal_write(path, content);
 
     tracing::debug!(" [ATOMIC WRITE] Atomic write to {}", path.display());
     Ok(())
@@ -346,23 +422,103 @@ mod tests {
     }
 
     #[test]
-    fn test_write_atomic_bumps_last_internal_write() {
+    fn test_write_atomic_records_internal_write() {
         let _guard = super::INTERNAL_WRITE_TEST_LOCK.lock();
 
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
 
-        let before = LAST_INTERNAL_WRITE.load(Ordering::Acquire);
-        // Sleep one ms so the post-write timestamp is guaranteed to be > before
-        // even on systems with coarse-grained millisecond clocks.
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        let content = "k = 1\n";
+        write_atomic(&path, content).unwrap();
 
-        write_atomic(&path, "k = 1\n").unwrap();
-
-        let after = LAST_INTERNAL_WRITE.load(Ordering::Acquire);
+        // After the atomic write, the registry must identity-match the exact
+        // bytes at the exact (canonicalized) path so the watcher suppresses
+        // its own write instead of looping a spurious reload.
         assert!(
-            after > before,
-            "LAST_INTERNAL_WRITE must advance after write_atomic; before={before} after={after}"
+            was_internal_write(&path, hash_config_bytes(content.as_bytes())),
+            "write_atomic must record the (path, content-hash) so was_internal_write matches"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  Internal-write suppression registry (N11 + N12)
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn was_internal_write_true_only_for_matching_path_and_hash() {
+        let _guard = super::INTERNAL_WRITE_TEST_LOCK.lock();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let content = "theme = \"everforest\"\n";
+        // Create the file so canonicalize() resolves the same on record + check.
+        std::fs::write(&path, content).unwrap();
+
+        record_internal_write(&path, content);
+
+        // Exact self-write: matching path + matching content hash.
+        assert!(
+            was_internal_write(&path, hash_config_bytes(content.as_bytes())),
+            "exact (path, content-hash) self-write must be recognized"
+        );
+    }
+
+    #[test]
+    fn external_edit_to_unwritten_path_is_not_suppressed() {
+        let _guard = super::INTERNAL_WRITE_TEST_LOCK.lock();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path_a = dir.path().join("config.toml");
+        let path_b = dir.path().join("themes").join("custom.toml");
+        std::fs::create_dir_all(path_b.parent().unwrap()).unwrap();
+        let content_a = "a = 1\n";
+        std::fs::write(&path_a, content_a).unwrap();
+        std::fs::write(&path_b, "b = 1\n").unwrap();
+
+        record_internal_write(&path_a, content_a);
+
+        let hash_a = hash_config_bytes(content_a.as_bytes());
+        let hash_other = hash_config_bytes(b"a = 2\n");
+        let hash_b = hash_config_bytes(b"b = 1\n");
+
+        // A different path is never a self-write of path_a — even inside the
+        // 500ms window of path_a's internal write (the N12 lost-update fix).
+        assert!(
+            !was_internal_write(&path_b, hash_b),
+            "an external edit to a DIFFERENT path must not be suppressed"
+        );
+        // The SAME path with DIFFERENT content (external re-edit of the file we
+        // just wrote) must not be suppressed either.
+        assert!(
+            !was_internal_write(&path_a, hash_other),
+            "an external edit to the same path with different content must not be suppressed"
+        );
+        // Sanity: the exact self-write still matches.
+        assert!(
+            was_internal_write(&path_a, hash_a),
+            "the exact self-write must still be recognized"
+        );
+    }
+
+    #[test]
+    fn suppression_window_uses_saturating_math() {
+        let _guard = super::INTERNAL_WRITE_TEST_LOCK.lock();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        let content = "k = 1\n";
+        std::fs::write(&path, content).unwrap();
+
+        // Record an internal write, then immediately check. The registry's
+        // recency uses Instant::elapsed (saturating), so no wall-clock skew —
+        // forward OR backward — can underflow the comparison and leak the
+        // self-write through as a spurious reload. This is the N11 fail-closed
+        // guarantee expressed structurally: a fresh record always suppresses.
+        record_internal_write(&path, content);
+        assert!(
+            was_internal_write(&path, hash_config_bytes(content.as_bytes())),
+            "a freshly recorded internal write must always be suppressed; \
+             Instant::elapsed cannot underflow on a backward OS clock step"
         );
     }
 

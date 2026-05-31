@@ -37,6 +37,13 @@ pub struct QueueSongUIViewData {
     pub album: String,
     pub album_id: String,
     pub artwork_url: String,
+    /// Per-song `updated_at` (Subsonic per-mediafile timestamp), copied from
+    /// `Song.updated_at`. It is NOT an album cover version. The passive queue
+    /// mini-thumbnail prefetch deliberately discards it for the album_id-keyed
+    /// dedup gate — a per-song value oscillates across one album's tracks and
+    /// re-fetches every tick — so the UI feeds a constant `None` there instead
+    /// (`update::components::passive_artwork_version`).
+    pub updated_at: Option<String>,
     pub duration: String,
     pub duration_seconds: u32, // For sorting
     pub genre: String,         // For sorting/display
@@ -123,6 +130,7 @@ pub fn build_queue_song_ui_view_data(
         album: song.album.clone(),
         album_id: song.album_id.clone().unwrap_or_default(),
         artwork_url: artwork_url::build_song_artwork_url(song, server_url, subsonic_credential),
+        updated_at: song.updated_at.clone(),
         duration: crate::utils::formatters::format_duration(song.duration),
         duration_seconds: song.duration,
         genre,

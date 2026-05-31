@@ -297,8 +297,12 @@ impl QueueNavigator {
 
         let is_repeat_track =
             queue_manager.get_queue().repeat == crate::types::queue::RepeatMode::Track;
+        let is_consume = queue_manager.get_queue().consume;
 
-        if is_repeat_track {
+        // mpd consume-wins (Queue.cxx: single is disabled while consume is on):
+        // a consuming queue ignores repeat-Track and falls through to the
+        // advance+consume path so the queue actually drains.
+        if is_repeat_track && !is_consume {
             // Clear queued just in case
             queue_manager.clear_queued();
 
@@ -509,6 +513,17 @@ impl QueueNavigator {
         let current_index = queue_manager.get_queue().current_index;
         let is_consume = queue_manager.get_queue().consume;
 
+        // Anchor the consume target to the current row's stable entry_id
+        // (NOT a raw index that a concurrent queue mutation could shift
+        // during the dropped-lock network await below). Captured under the
+        // lock, removed by id after re-acquiring it. Distinct rows of the
+        // same song get distinct entry_ids, so duplicates stay correct.
+        let consume_entry: Option<u64> = if is_consume {
+            current_index.and_then(|i| queue_manager.entry_id_at(i))
+        } else {
+            None
+        };
+
         // Record current song in history before advancing
         let prev_id = self.current_song_id.lock().await.clone();
         if let Some(ref pid) = prev_id
@@ -518,7 +533,25 @@ impl QueueNavigator {
         }
 
         let Some(result) = queue_manager.get_next_song() else {
-            drop(queue_manager);
+            // End of order with nothing to advance to. Under consume, mirror
+            // the auto-advance None branch (decide_transition): consume the
+            // finished song, empty the playhead, and stop the engine so a
+            // Next over the final track drains the queue instead of leaving
+            // the last entry behind. The queue lock has no intervening await
+            // here, so the entry_id resolves against the live queue.
+            if let Some(eid) = consume_entry {
+                let consume_effect = queue_manager.remove_entry_by_id(eid).ok();
+                let reposition_effect = queue_manager.reposition_to_index(None);
+                drop(queue_manager);
+                *self.current_song_id.lock().await = None;
+                if let Some(effect) = consume_effect {
+                    effect.apply_locked(engine).await;
+                }
+                reposition_effect.apply_locked(engine).await;
+                engine.stop().await;
+            } else {
+                drop(queue_manager);
+            }
             return Ok(None);
         };
         drop(queue_manager);
@@ -527,10 +560,11 @@ impl QueueNavigator {
             .await?;
 
         // Consume: remove the previously played song after starting the next.
-        // Use the explicit old index (not song ID) to correctly handle duplicates.
-        if is_consume && let Some(old_idx) = current_index {
+        // Resolve by the entry_id captured before the await so a concurrent
+        // queue mutation can't desync the removal target (drift-immune).
+        if let Some(eid) = consume_entry {
             let mut qm = self.queue_manager.lock().await;
-            let effect = self.consume_song_at_index(&mut qm, old_idx);
+            let effect = qm.remove_entry_by_id(eid).ok();
             drop(qm);
             if let Some(effect) = effect {
                 effect.apply_locked(engine).await;
@@ -557,7 +591,17 @@ impl QueueNavigator {
             PreviousSongResult::InQueue(song, _index) => {
                 debug!("⏮️ Previous: {} - {}", song.artist, song.title);
 
-                let old_current_index = current_index;
+                // Anchor the consume target to the previously-current row's
+                // stable entry_id before dropping the lock for the network
+                // await — a raw index could shift under a concurrent queue
+                // mutation. Note `get_previous_song` has already moved
+                // `current_index` to the previous song, so capture from the
+                // pre-call `current_index` snapshot.
+                let consume_entry: Option<u64> = if is_consume {
+                    current_index.and_then(|i| queue_manager.entry_id_at(i))
+                } else {
+                    None
+                };
 
                 *self.current_song_id.lock().await = Some(song.id.clone());
                 drop(queue_manager);
@@ -565,11 +609,11 @@ impl QueueNavigator {
                 self.play_song_direct(engine, &song, server_url, subsonic_credential)
                     .await?;
 
-                // Consume: remove the previously played song after starting prev
-                // Use the explicit old index to correctly handle duplicates.
-                if is_consume && let Some(old_idx) = old_current_index {
+                // Consume: remove the previously played song after starting prev.
+                // Resolve by the captured entry_id (drift-immune, duplicate-safe).
+                if let Some(eid) = consume_entry {
                     let mut qm = self.queue_manager.lock().await;
-                    let effect = self.consume_song_at_index(&mut qm, old_idx);
+                    let effect = qm.remove_entry_by_id(eid).ok();
                     drop(qm);
                     if let Some(effect) = effect {
                         effect.apply_locked(engine).await;
@@ -801,6 +845,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn decide_consume_repeat_track_advances_and_consumes() {
+        // mpd consume-wins: end-of-track under consume + repeat-Track must
+        // advance + drain, not replay the current song.
+        let songs = vec![make_song("a"), make_song("b")];
+        let mut qm = manager_with_songs(songs, Some(0));
+        qm.queue.consume = true;
+        let _ = qm
+            .set_repeat(crate::types::queue::RepeatMode::Track)
+            .expect("set repeat");
+
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let plan = nav
+            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .await;
+
+        match plan {
+            TrackTransitionPlan::LoadFresh { song, reason, .. } => {
+                assert_eq!(song.id, "b", "must advance, not replay 'a'");
+                assert_eq!(reason, "gapless", "fell through to the advance path");
+            }
+            other => panic!("expected LoadFresh advancing to b, got {other:?}"),
+        }
+
+        // The finished song "a" was consumed (removed) from the queue.
+        let song_ids = qm.lock().await.get_queue().song_ids.clone();
+        assert_eq!(song_ids, vec!["b"], "'a' must be consumed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn decide_path3_no_queued_returns_stop() {
         // Single song at last index, no repeat → peek_next_song() returns
         // None, decide_transition must yield Stop without erroring.
@@ -818,6 +895,80 @@ mod tests {
             matches!(plan, TrackTransitionPlan::Stop),
             "expected Stop, got {plan:?}"
         );
+    }
+
+    /// N19: manual Next over the final track under consume must consume the
+    /// finished song and stop (mirroring the auto-advance None branch), not
+    /// leave the last entry behind.
+    #[tokio::test(flavor = "current_thread")]
+    async fn play_next_last_song_consume_removes_and_stops() {
+        // Single-song queue: a is current and last, consume on, no repeat.
+        let mut qm = manager_with_songs(vec![make_song("a")], Some(0));
+        qm.queue.consume = true;
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let result = nav
+            .play_next(&mut engine, "http://server", "u=test&p=test")
+            .await
+            .expect("play_next ok");
+
+        assert!(result.is_none(), "no next track at end of queue");
+        let q = qm.lock().await;
+        assert!(
+            q.get_queue().song_ids.is_empty(),
+            "the finished song must be consumed",
+        );
+        assert_eq!(q.get_queue().current_index, None);
+    }
+
+    /// N19 multi-song variant: at the last index of a multi-song queue,
+    /// consume + Next removes the last song and stops.
+    #[tokio::test(flavor = "current_thread")]
+    async fn play_next_at_last_index_consume_removes_and_stops() {
+        let mut qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(1));
+        qm.queue.consume = true;
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("b".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let result = nav
+            .play_next(&mut engine, "http://server", "u=test&p=test")
+            .await
+            .expect("play_next ok");
+
+        assert!(result.is_none());
+        let q = qm.lock().await;
+        assert_eq!(q.get_queue().song_ids, vec!["a"], "b consumed");
+        assert_eq!(q.get_queue().current_index, None);
+    }
+
+    /// N19 negative: at the last index WITHOUT consume, Next is a plain no-op
+    /// — the song stays and current_index is unchanged.
+    #[tokio::test(flavor = "current_thread")]
+    async fn play_next_last_song_no_consume_is_noop() {
+        let qm = manager_with_songs(vec![make_song("a")], Some(0));
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let result = nav
+            .play_next(&mut engine, "http://server", "u=test&p=test")
+            .await
+            .expect("play_next ok");
+
+        assert!(result.is_none());
+        let q = qm.lock().await;
+        assert_eq!(
+            q.get_queue().song_ids,
+            vec!["a"],
+            "song stays without consume"
+        );
+        assert_eq!(q.get_queue().current_index, Some(0));
     }
 
     // ── decide_removal_aftermath unit tests ──
