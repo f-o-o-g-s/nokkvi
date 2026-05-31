@@ -289,45 +289,47 @@ fn compute_queue_drop_slot_ignores_stale_stored_slot_count() {
 }
 
 #[test]
-fn compute_queue_drop_slot_rejects_payload_when_queue_grows() {
+fn compute_queue_drop_slot_resolves_to_live_index_when_queue_grows() {
     // The scalability audit's C2 scenario: the cursor is stationary over
     // a queue slot, and `library.queue_songs` mutates beneath it (SSE
     // refresh adds items, optimistic reorder, etc.). iced's
     // `mouse_area::update` only re-fires `on_enter` on cursor- or
-    // bounds-change (`reference-iced/widget/src/mouse_area.rs:320`), so
-    // a new render's freshly-baked item_index never reaches
-    // `hovered_slot`. The drop would mis-route by the size of the
-    // mutation.
+    // bounds-change (`reference-iced/widget/src/mouse_area.rs:320`), so a
+    // new render's freshly-baked item_index never reaches `hovered_slot`.
     //
-    // Staleness gate: the baked `items_len` is compared to the live
-    // length. Mismatch → return None → released drag cancels rather than
-    // dropping at the now-incorrect index.
+    // Under entry_id translation the drop slot is no longer the raw baked
+    // item_index — it is re-resolved against the LIVE queue via the row's
+    // `entry_id`. Appending rows to the END of the queue does not move the
+    // hovered row, so its live index is unchanged: the drop stays correct
+    // without depending on a fragile length-equality gate.
     let mut app = test_app();
     populate_queue(&mut app, 10);
-    let hover = queue_hover(&app, 4, 4); // baked with items_len = 10
+    let hover = queue_hover(&app, 4, 4); // points at the row at full index 4
     app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
-    // Mutation between hover-bake and drop-consume: queue grows by 5.
+    // Mutation between hover-bake and drop-consume: queue grows by 5 at the
+    // tail. The hovered row keeps its position 4.
     populate_queue(&mut app, 5);
     assert_eq!(app.library.queue_songs.len(), 15);
 
     assert_eq!(
         app.compute_queue_drop_slot(),
-        None,
-        "items_len mismatch must cancel the drop — without this, the \
-         cursor-stationary mutation scenario silently inserts at a stale \
-         index"
+        Some(4),
+        "entry_id translation re-resolves the hovered row against the live \
+         queue — a tail append leaves its index at 4, so the drop is still \
+         correct (no fragile length gate needed)"
     );
 }
 
 #[test]
-fn compute_queue_drop_slot_rejects_payload_when_queue_shrinks() {
-    // Mirror of the grow case: consume-mode auto-advance removes the
-    // playing song from the queue, shifting every subsequent index down
-    // by 1.
+fn compute_queue_drop_slot_in_range_after_shrink_resolves_to_live_index() {
+    // Consume-mode auto-advance removes a song from the FRONT of the queue.
+    // With no active search the filtered view IS the live queue, so the
+    // hovered index still addresses a live row (12 < 19) and resolves to
+    // that live position — no fragile length-equality gate cancels it.
     let mut app = test_app();
     populate_queue(&mut app, 20);
-    let hover = queue_hover(&app, 4, 12); // baked with items_len = 20
+    let hover = queue_hover(&app, 4, 12);
     app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
     app.library.queue_songs.remove(0);
@@ -335,24 +337,152 @@ fn compute_queue_drop_slot_rejects_payload_when_queue_shrinks() {
 
     assert_eq!(
         app.compute_queue_drop_slot(),
+        Some(12),
+        "an in-range hovered index resolves against the live queue — the \
+         drop is not cancelled merely because the length changed"
+    );
+}
+
+#[test]
+fn compute_queue_drop_slot_none_when_hovered_index_out_of_range_mid_drag() {
+    // The genuinely-unresolvable case the new feedback path exists for:
+    // the (filtered) queue shrinks below the hovered `item_index` between
+    // hover-bake and drop-consume, so the index no longer addresses any
+    // live row. `compute_queue_drop_slot` yields None (the released drag
+    // then surfaces a warning toast rather than mis-dropping).
+    let mut app = test_app();
+    populate_queue(&mut app, 8);
+    let hover = queue_hover(&app, 4, 6); // points at the row at index 6
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
+
+    // Queue shrinks to 5 rows — index 6 is now out of range.
+    app.library.queue_songs.truncate(5);
+    assert_eq!(app.library.queue_songs.len(), 5);
+
+    assert_eq!(
+        app.compute_queue_drop_slot(),
         None,
-        "consume-mode advance (or any queue-shrink event) during a drag \
-         must invalidate the hover payload — otherwise the drop lands at \
-         what is now a different song"
+        "a hovered index that no longer addresses a live row is \
+         unresolvable and must yield None"
     );
 }
 
 #[test]
 fn compute_queue_drop_slot_accepts_payload_when_queue_unchanged() {
-    // Pair to the rejection tests: the gate must NOT fire spuriously.
-    // No mutation between bake and consume → drop position passes
-    // through.
+    // Pair to the resolution tests: when nothing mutates, the hovered row
+    // resolves to its own (identical) full index.
     let mut app = test_app();
     populate_queue(&mut app, 20);
     let hover = queue_hover(&app, 4, 12);
     app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
     assert_eq!(app.compute_queue_drop_slot(), Some(12));
+}
+
+#[test]
+fn compute_queue_drop_slot_translates_filtered_index_to_full() {
+    // The headline I8 fix: when a queue search filters the queue to a
+    // strict subset, the hovered `item_index` is in FILTERED slot-list
+    // space. It must be translated to the FULL queue index via the row's
+    // entry_id so the downstream insert lands at the right place — and
+    // drops keep working during an active search instead of being silently
+    // cancelled.
+    let mut app = test_app();
+    // Distinctly-titled rows so a "keep" search matches a strict subset.
+    for title in ["keep0", "drop", "keep1", "drop", "keep2"] {
+        app.library
+            .queue_songs
+            .push(make_queue_song(title, title, "ar", "Al"));
+    }
+    app.queue_page.common.search_query = "keep".to_string();
+
+    // Filtered view is [keep0, keep1, keep2]; filtered index 1 = "keep1",
+    // whose FULL-queue index is 2.
+    let filtered_len = app.filter_queue_songs().len();
+    assert_eq!(filtered_len, 3, "search must filter to the keep* subset");
+    let hover = HoveredSlot::Item {
+        slot_index: 0,
+        item_index: 1,
+        items_len: filtered_len,
+    };
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
+
+    assert_eq!(
+        app.compute_queue_drop_slot(),
+        Some(2),
+        "filtered item_index 1 ('keep1') must resolve to its FULL-queue \
+         index 2 — drops work during search instead of cancelling"
+    );
+}
+
+#[test]
+fn compute_queue_drop_slot_identity_when_search_matches_all() {
+    // When the search matches every row (filtered_len == full_len), the
+    // order-preserving filter is an identity, so the resolved full index
+    // equals the filtered index. Locks in that coincidence so a future
+    // fuzzy-ranking change that reorders matches can't silently regress
+    // the contract.
+    let mut app = test_app();
+    for title in ["keep0", "keep1", "keep2", "keep3"] {
+        app.library
+            .queue_songs
+            .push(make_queue_song(title, title, "ar", "Al"));
+    }
+    app.queue_page.common.search_query = "keep".to_string();
+
+    let filtered_len = app.filter_queue_songs().len();
+    assert_eq!(filtered_len, 4, "search must match every row");
+    let hover = HoveredSlot::Item {
+        slot_index: 0,
+        item_index: 2,
+        items_len: filtered_len,
+    };
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
+
+    assert_eq!(
+        app.compute_queue_drop_slot(),
+        Some(2),
+        "search matching all rows → filtered index equals full index"
+    );
+}
+
+#[test]
+fn cross_pane_drag_released_into_unmatchable_filtered_queue_surfaces_toast() {
+    // The now-rare genuinely-unresolvable None path: an active cross-pane
+    // drag releases over a queue row whose entry_id no longer exists in the
+    // live queue (it was removed mid-drag). Instead of a silent debug-only
+    // cancel, the user gets a warning toast. Observable state: no
+    // pending_queue_insert_position is set, and the toast vec grows.
+    let mut app = test_app();
+    populate_queue(&mut app, 10);
+    open_browsing_panel(&mut app, views::BrowsingView::Songs);
+
+    // Active drag in flight.
+    app.cross_pane_drag = Some(crate::state::CrossPaneDragState {
+        origin: iced::Point::new(0.0, 0.0),
+        cursor: iced::Point::new(0.0, 0.0),
+        center_index: Some(0),
+        selection_count: 1,
+    });
+
+    // Cursor hovers a queue row, then the queue shrinks below that index so
+    // the hovered slot no longer addresses a live row.
+    let hover = queue_hover(&app, 4, 8);
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
+    app.library.queue_songs.truncate(5);
+
+    let toasts_before = app.toast.toasts.len();
+    let _ = app.handle_cross_pane_drag_released();
+
+    assert!(
+        app.pending_queue_insert_position.is_none(),
+        "an unresolvable drop must NOT set a pending insert position"
+    );
+    assert!(
+        app.toast.toasts.len() > toasts_before,
+        "an unresolvable drop into a filtered queue must surface feedback \
+         instead of a silent debug-only cancel"
+    );
 }
 
 #[test]
