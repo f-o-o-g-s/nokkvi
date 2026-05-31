@@ -446,9 +446,16 @@ impl Nokkvi {
                 .current_view_page()
                 .and_then(|p| p.reload_message())
                 .map_or_else(Task::none, Task::done),
-            HotkeyMessage::StartRoulette => Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(self.current_view),
-            )),
+            HotkeyMessage::StartRoulette => {
+                // Resolve the focused list: under browser-pane focus the visible
+                // list is the active tab, not self.current_view (pinned to the
+                // PlaylistEditor host during edit, whose roulette total is 0).
+                // current_target_view() returns None for the Similar tab, which
+                // has no roulette support, so the unwrap_or falls back to the
+                // host view and the spin stays a no-op there (intended).
+                let view = self.current_target_view().unwrap_or(self.current_view);
+                self.handle_roulette_message(crate::app_message::RouletteMessage::Start(view))
+            }
         }
     }
 

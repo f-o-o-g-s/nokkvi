@@ -287,6 +287,67 @@ fn roulette_start_on_albums_clears_via_settle_path() {
 }
 
 #[test]
+fn start_roulette_hotkey_targets_focused_browser_tab() {
+    // Under browser-pane focus during playlist edit, current_view is pinned to
+    // PlaylistEditor (roulette_view_total → 0), but the focused list is the
+    // Albums browser tab. The StartRoulette hotkey must resolve the focused
+    // tab so the visible list spins. Pre-fix: Start(PlaylistEditor) → total 0
+    // → roulette stays None.
+    use crate::{
+        state::PaneFocus,
+        views::{BrowsingPanel, BrowsingView},
+    };
+
+    let mut app = test_app();
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "First", "Artist"),
+        make_album("a2", "Second", "Artist"),
+        make_album("a3", "Third", "Artist"),
+        make_album("a4", "Fourth", "Artist"),
+    ]);
+    app.browsing_panel = Some(BrowsingPanel {
+        active_view: BrowsingView::Albums,
+    });
+    app.pane_focus = PaneFocus::Browser;
+    app.current_view = View::PlaylistEditor;
+    // guard_play_action must not block: edit-control roulette needs no editor.
+    app.playlist_editor = None;
+
+    let _ = app.dispatch_hotkey(crate::app_message::HotkeyMessage::StartRoulette);
+
+    assert!(
+        app.roulette.is_some(),
+        "StartRoulette must arm against the focused Albums tab, not the pinned host"
+    );
+    assert_eq!(
+        app.roulette.as_ref().map(|r| r.total_items),
+        Some(4),
+        "spin must be sized to the focused Albums list"
+    );
+}
+
+#[test]
+fn start_roulette_hotkey_uses_current_view_in_single_pane() {
+    // Negative control: no panel → resolve to self.current_view unchanged.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "First", "Artist"),
+        make_album("a2", "Second", "Artist"),
+        make_album("a3", "Third", "Artist"),
+        make_album("a4", "Fourth", "Artist"),
+    ]);
+
+    let _ = app.dispatch_hotkey(crate::app_message::HotkeyMessage::StartRoulette);
+
+    assert_eq!(
+        app.roulette.as_ref().map(|r| r.total_items),
+        Some(4),
+        "single-pane roulette stays armed against current_view's list"
+    );
+}
+
+#[test]
 fn roulette_tick_without_state_is_noop() {
     let mut app = test_app();
     let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Tick(
