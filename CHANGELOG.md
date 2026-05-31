@@ -11,6 +11,40 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - The player bar's playback and mode-toggle buttons now show the theme accent highlight on hover instead of a flat grey one.
+- Pausing during a crossfade now resumes the fade where it left off, instead of jumping ahead, hard-cutting to the next track, or freezing the queue.
+- A crossfade into a track that fails to load now recovers and moves on, instead of fading into silence.
+- Toggling shuffle, repeat, or consume during a crossfade now cancels the fade cleanly instead of switching to the wrong track.
+- The visualizer now reflects the source audio regardless of your equalizer settings, instead of being shaped by EQ.
+- The equalizer now applies to a track that was already playing when you turn EQ on, instead of staying flat until the next track.
+- The saved queue is now reconciled on load, so a restored queue no longer points at the wrong current track or silently drops songs.
+- A corrupted saved queue now recovers to an empty queue on startup instead of bouncing you to the login screen.
+- Repeat-one no longer turns itself off after a relaunch when you manually skipped a track during the session.
+- With repeat-all on, pressing Previous on the first track now wraps to the last track instead of doing nothing.
+- Consume mode now plays and removes the final track and stops cleanly, and no longer loops forever when repeat-one is also on.
+- Skipping manually under consume now removes the track you skipped, even if the queue changed while the skip was in flight.
+- Reordering the queue while shuffle is on no longer re-randomizes the rest of the queue or changes what plays next.
+- Live updates are more robust: the connection backs off between reconnect attempts and no longer keeps reconnecting to a previous server after logout.
+- A server-pushed library refresh no longer interrupts an in-progress playlist edit or drag by resetting scroll and selection.
+- After a background library refresh, a multi-selection is now cleared so actions like Add to Queue or Play can't target the wrong songs.
+- Hand-editing a config or theme file now reliably reloads, even right after the app saved a different setting.
+- Dragging a song into the queue while a search filter is active now works instead of being silently cancelled.
+- In split view, arrow-key navigation, Get Info, and roulette now act on the focused browser tab instead of the wrong pane.
+- Typing a capital letter in a search or text field no longer triggers letter shortcuts like Clear Queue or star.
+- Keyboard shortcuts no longer act on the view behind an open modal (EQ, Info, About, playlist picker); only Escape passes through.
+- Scrobbling now covers long-form content at the 4-minute mark and no longer drops a short track played right before a long one.
+- Scrobbles are no longer submitted more than once, and a failed scrobble now retries instead of being silently lost.
+- Seeking forward within a track no longer counts the skipped span as listening time toward a scrobble.
+- Quickly toggling shuffle, repeat, or consume no longer briefly snaps back to the old state before applying.
+- During radio playback, the shuffle, repeat, and consume buttons now appear dimmed and no longer quietly change your saved library queue.
+- If playback fails to start, the player no longer shows "playing"; it surfaces an error instead.
+- Skipping between radio stations after the current one disappears no longer jumps to an unrelated station.
+- Logging out now finishes pending writes before clearing your session, so a stale queue can't reappear on the next launch.
+- An album cover changed on the server now refreshes in the Albums, Artists, and Genres views instead of showing the old art until restart.
+- Playing a playlist from a chosen track now follows the same edit-mode and radio rules as other play actions.
+- Editing a playlist's comment no longer rewrites its name or reverts a public/private change made on the server.
+- The playlist editor no longer overwrites the whole playlist before it finishes loading, so adding songs to a still-loading playlist is safe.
+- Saving a playlist with no track changes no longer rewrites the entire track list.
+- If a playlist changed on the server while you had it open in the editor, saving now warns you to reload instead of overwriting those changes.
 
 ### Removed
 
