@@ -5,6 +5,8 @@
 //! instead of the focused browser tab. With the browsing panel open and
 //! `pane_focus == Browser`, the focused list is the panel's active tab.
 
+use nokkvi_data::types::song::Song;
+
 use crate::{
     View,
     state::PaneFocus,
@@ -16,6 +18,12 @@ use crate::{
 fn open_browser_pane(app: &mut crate::Nokkvi, tab: BrowsingView) {
     app.browsing_panel = Some(BrowsingPanel { active_view: tab });
     app.pane_focus = PaneFocus::Browser;
+}
+
+/// Build a minimal Song for the Similar-pane tests (no `Default` impl).
+fn similar_song(id: &str, title: &str) -> Song {
+    serde_json::from_value(serde_json::json!({ "id": id, "title": title }))
+        .expect("minimal Song JSON should deserialize")
 }
 
 // ============================================================================
@@ -116,5 +124,78 @@ fn navigate_down_routes_to_queue_when_queue_focused() {
     assert!(
         app.albums_page.common.search_input_focused,
         "the unfocused Albums browser tab must be untouched"
+    );
+}
+
+// ============================================================================
+// I11 — Get Info (Shift+I) resolves the focused browser tab
+// ============================================================================
+
+#[test]
+fn get_info_on_focused_albums_browser_tab_opens_modal() {
+    // current_view pinned to PlaylistEditor (real edit-mode host), browser
+    // focused on Albums with an album centered. Pre-fix: falls through to the
+    // PlaylistEditor catch-all and shows a "not available" toast.
+    let mut app = test_app();
+    app.current_view = View::PlaylistEditor;
+    open_browser_pane(&mut app, BrowsingView::Albums);
+    seed_albums(&mut app, vec![make_album("a1", "Album One", "Artist")]);
+    // viewport_offset 0 + center slot resolves get_center_item_index → Some(0).
+
+    let _ = app.handle_get_info();
+
+    assert!(
+        app.info_modal.visible,
+        "Get Info on a focused Albums browser tab should open the info modal"
+    );
+}
+
+#[test]
+fn get_info_on_focused_songs_browser_tab_opens_modal() {
+    let mut app = test_app();
+    app.current_view = View::PlaylistEditor;
+    open_browser_pane(&mut app, BrowsingView::Songs);
+    seed_songs(&mut app, vec![make_song("s1", "Song One", "Artist")]);
+
+    let _ = app.handle_get_info();
+
+    assert!(
+        app.info_modal.visible,
+        "Get Info on a focused Songs browser tab should open the info modal"
+    );
+}
+
+#[test]
+fn get_info_on_focused_artists_browser_tab_opens_modal() {
+    let mut app = test_app();
+    app.current_view = View::PlaylistEditor;
+    open_browser_pane(&mut app, BrowsingView::Artists);
+    seed_artists(&mut app, vec![make_artist("ar1", "Artist One")]);
+
+    let _ = app.handle_get_info();
+
+    assert!(
+        app.info_modal.visible,
+        "Get Info on a focused Artists browser tab should open the info modal"
+    );
+}
+
+#[test]
+fn get_info_similar_browser_tab_still_opens() {
+    // Regression guard: the dedicated Similar branch must keep working.
+    let mut app = test_app();
+    app.current_view = View::PlaylistEditor;
+    open_browser_pane(&mut app, BrowsingView::Similar);
+    app.similar_songs = Some(crate::state::SimilarSongsState {
+        songs: vec![similar_song("s1", "Similar One")],
+        label: "Similar to: Test".to_string(),
+        loading: false,
+    });
+
+    let _ = app.handle_get_info();
+
+    assert!(
+        app.info_modal.visible,
+        "Get Info on the Similar browser tab should still open the info modal"
     );
 }

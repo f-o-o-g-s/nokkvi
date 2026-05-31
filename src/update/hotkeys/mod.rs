@@ -157,7 +157,14 @@ impl Nokkvi {
                 }
             }
         }
-        match self.current_view {
+        // Resolve the focused list: under browser focus this is the active tab
+        // (Albums/Songs/Artists/Genres), not `self.current_view` (the host view,
+        // e.g. PlaylistEditor during edit). The Similar tab is handled by the
+        // short-circuit above; `current_target_view()` returns None for it so
+        // the `unwrap_or` falls back to the host view, which the catch-all
+        // arm reports as "not available" — correct for Genres/Playlists hosts.
+        let effective_view = self.current_target_view().unwrap_or(self.current_view);
+        match effective_view {
             View::Songs => {
                 let center_idx = self
                     .songs_page
