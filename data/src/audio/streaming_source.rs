@@ -311,6 +311,11 @@ impl Iterator for StreamingSource {
         let raw = self.consumer.try_pop();
         let mut sample = raw.unwrap_or(0.0);
 
+        // Capture the raw sample for the visualizer BEFORE the EQ stage. The
+        // spectrum should reflect the SOURCE track, not the user's EQ/headroom
+        // post-processing chain (matches the volume-independent invariant).
+        let viz_sample = sample;
+
         if let Some(ref mut eq) = self.eq
             && eq.is_enabled()
         {
@@ -365,10 +370,11 @@ impl Iterator for StreamingSource {
         if raw.is_some() && self.handle.feeds_visualizer.load(Ordering::Acquire) {
             let guard = self.visualizer.read();
             if guard.is_some() {
-                // Feed the pre-volume sample scaled to S16 range for the visualizer FFT.
-                // Volume is not applied here — the old PipeWire backend applied volume at
-                // the stream level, so the visualizer always received full-amplitude PCM.
-                self.viz_buffer.push(sample * 32767.0);
+                // Feed the pre-volume AND pre-EQ sample scaled to S16 range for
+                // the visualizer FFT. Neither volume nor EQ is applied here: the
+                // spectrum reflects the source track, not the user's processing
+                // chain (the old PipeWire backend tapped pre-EQ/pre-volume too).
+                self.viz_buffer.push(viz_sample * 32767.0);
                 if self.viz_buffer.len() >= self.viz_batch_size {
                     if let Some(ref cb) = *guard {
                         cb(&self.viz_buffer, self.sample_rate.get());
@@ -523,6 +529,86 @@ mod tests {
             rates.iter().all(|&r| r == 48_000),
             "post-promotion callback fires must carry this stream's rate; saw {:?}",
             *rates
+        );
+    }
+
+    /// Build a callback that records every f32 sample pushed into it.
+    fn recording_callback() -> (SharedVisualizerCallback, Arc<parking_lot::Mutex<Vec<f32>>>) {
+        let observed = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed_for_cb = observed.clone();
+        let cb: VisualizerCallback = Arc::new(move |samples: &[f32], _rate: u32| {
+            observed_for_cb.lock().extend_from_slice(samples);
+        });
+        let slot: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(Some(cb)));
+        (slot, observed)
+    }
+
+    /// Build a feeding `StreamingSource` whose ring is filled with a constant
+    /// `value`, wired to `eq_state`, recording every pushed visualizer sample.
+    fn make_constant_source(
+        value: f32,
+        samples: usize,
+        eq_state: Option<super::super::eq::EqState>,
+    ) -> (StreamingSource, Arc<parking_lot::Mutex<Vec<f32>>>) {
+        let (slot, observed) = recording_callback();
+        let rb = HeapRb::<f32>::new(samples.max(1));
+        let (mut producer, consumer) = rb.split();
+        let data = vec![value; samples];
+        producer.push_slice(&data);
+
+        let (source, _handle) = StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(48_000).expect("test sample rate is nonzero"),
+            slot,
+            1.0,
+            eq_state,
+            Arc::new(Notify::new()),
+            true,
+        );
+        (source, observed)
+    }
+
+    /// N15 / N18: the visualizer tap must read the RAW (pre-EQ, pre-volume)
+    /// sample. With EQ enabled and a band boosted, the post-EQ `sample` differs
+    /// from raw by at least the -1 dB headroom factor (0.891254) plus band
+    /// shaping; the tap must still report `raw * 32767`, not the EQ'd value.
+    #[test]
+    fn visualizer_tap_is_pre_eq() {
+        const RAW: f32 = 0.5;
+        let eq = super::super::eq::EqState::new();
+        eq.set_enabled(true);
+        eq.set_band_gain(5, 12.0); // boost 1 kHz band — forces headroom + shaping
+
+        // 3 full viz batches' worth of samples so the callback fires.
+        let (mut source, observed) = make_constant_source(RAW, 2048 * 3, Some(eq));
+        for _ in 0..(2048 * 3) {
+            let _ = source.next();
+        }
+
+        let pushed = observed.lock();
+        assert!(!pushed.is_empty(), "EQ-enabled stream should feed the viz");
+        let expected = RAW * 32767.0;
+        assert!(
+            pushed.iter().all(|&s| (s - expected).abs() < 1e-3),
+            "viz tap must be pre-EQ ({expected}); saw e.g. {:?}",
+            pushed.first()
+        );
+    }
+
+    /// N15 / N18 control: with EQ disabled the tap is unchanged — raw * 32767.
+    #[test]
+    fn visualizer_tap_matches_raw_when_eq_disabled() {
+        const RAW: f32 = 0.5;
+        let (mut source, observed) = make_constant_source(RAW, 2048 * 2, None);
+        for _ in 0..(2048 * 2) {
+            let _ = source.next();
+        }
+        let pushed = observed.lock();
+        let expected = RAW * 32767.0;
+        assert!(
+            pushed.iter().all(|&s| (s - expected).abs() < 1e-3),
+            "viz tap with no EQ must equal raw * 32767 ({expected})",
         );
     }
 }
