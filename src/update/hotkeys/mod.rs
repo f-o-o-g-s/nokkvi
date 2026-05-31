@@ -67,6 +67,34 @@ impl Nokkvi {
         self.view_page_mut(self.current_view)
     }
 
+    /// Resolve the `View` whose slot list the keyboard is currently steering,
+    /// accounting for the split-view browsing panel.
+    ///
+    /// When the browsing panel is open with browser focus, the focused list is
+    /// the panel's active tab — not `self.current_view` (which is pinned to the
+    /// host view, e.g. `View::PlaylistEditor` during playlist edit). Maps each
+    /// non-`Similar` browser tab to its `View` counterpart.
+    ///
+    /// Returns `None` when the focused tab is `BrowsingView::Similar`: the
+    /// `View` enum has no `Similar` variant, so callers that need a concrete
+    /// `View` must treat `None` as "Similar is focused" (e.g. roulette is
+    /// intentionally unsupported there). Trait-based dispatch should prefer
+    /// `current_view_page()` / `current_view_page_mut()`, which cover Similar.
+    pub(crate) fn current_target_view(&self) -> Option<View> {
+        if self.pane_focus == crate::state::PaneFocus::Browser
+            && let Some(panel) = self.browsing_panel.as_ref()
+        {
+            return match panel.active_view {
+                views::BrowsingView::Albums => Some(View::Albums),
+                views::BrowsingView::Songs => Some(View::Songs),
+                views::BrowsingView::Artists => Some(View::Artists),
+                views::BrowsingView::Genres => Some(View::Genres),
+                views::BrowsingView::Similar => None,
+            };
+        }
+        Some(self.current_view)
+    }
+
     /// Look up a page by explicit `View` — no pane-focus routing.
     /// Used by scrollbar timer handlers that always target a specific view.
     pub(crate) fn view_page(&self, view: View) -> Option<&dyn views::ViewPage> {

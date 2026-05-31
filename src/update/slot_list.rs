@@ -144,16 +144,20 @@ impl Nokkvi {
     fn handle_slot_list_navigate_up(&mut self) -> Task<Message> {
         debug!(
             " [SLOT_LIST] SlotListNavigateUp triggered on {:?}",
-            self.current_view
+            self.current_target_view()
         );
         // Play tab navigation sound
         self.sfx_engine.play(audio::SfxType::Tab);
-        match self.current_view {
-            View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListUp)),
-            other => self.view_page(other).map_or_else(Task::none, |p| {
-                Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::NavigateUp))
-            }),
+        // Settings is never a browser tab, so a Settings early-return is only
+        // reachable when it is the foreground (non-pane) view.
+        if self.current_target_view() == Some(View::Settings) {
+            return Task::done(Message::Settings(views::SettingsMessage::SlotListUp));
         }
+        // Dispatch through the pane-aware accessor so the focused browser tab
+        // (incl. Similar) receives the nav, not the host pane.
+        self.current_view_page().map_or_else(Task::none, |p| {
+            Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::NavigateUp))
+        })
     }
 
     pub(crate) fn handle_slot_list_navigate_down(&mut self) -> Task<Message> {
@@ -162,7 +166,8 @@ impl Nokkvi {
         // but also navigates the slot list in the same keypress.
         // We intentionally don't do this for SlotListUp (default: Backspace) because
         // Backspace is needed for deleting text in the search field.
-        let unfocus_task = if self.current_view == View::Settings {
+        let target_view = self.current_target_view();
+        let unfocus_task = if target_view == Some(View::Settings) {
             if self.settings_page.search_active {
                 self.settings_page.search_active = false;
                 // Keep search_query and slot_list intact so the filtered results
@@ -181,48 +186,52 @@ impl Nokkvi {
 
         debug!(
             " [SLOT_LIST] SlotListNavigateDown triggered on {:?}",
-            self.current_view
+            target_view
         );
         // Play tab navigation sound
         self.sfx_engine.play(audio::SfxType::Tab);
-        let nav_task = match self.current_view {
-            View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListDown)),
-            other => self.view_page(other).map_or_else(Task::none, |p| {
+        let nav_task = if target_view == Some(View::Settings) {
+            Task::done(Message::Settings(views::SettingsMessage::SlotListDown))
+        } else {
+            self.current_view_page().map_or_else(Task::none, |p| {
                 Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::NavigateDown))
-            }),
+            })
         };
         Task::batch([unfocus_task, nav_task])
     }
 
     fn handle_slot_list_set_offset(&mut self, offset: usize) -> Task<Message> {
-        match self.current_view {
-            View::Settings => Task::done(Message::Settings(
+        if self.current_target_view() == Some(View::Settings) {
+            return Task::done(Message::Settings(
                 views::SettingsMessage::SlotListSetOffset(
                     offset,
                     iced::keyboard::Modifiers::default(),
                 ),
-            )),
-            other => self.view_page(other).map_or_else(Task::none, |p| {
-                Task::done(
-                    p.slot_list_message(crate::widgets::SlotListPageMessage::SetOffset(
-                        offset,
-                        iced::keyboard::Modifiers::default(),
-                    )),
-                )
-            }),
+            ));
         }
+        self.current_view_page().map_or_else(Task::none, |p| {
+            Task::done(
+                p.slot_list_message(crate::widgets::SlotListPageMessage::SetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                )),
+            )
+        })
     }
 
     fn handle_slot_list_activate_center(&mut self) -> Task<Message> {
+        let target_view = self.current_target_view();
         // Play enter/activate sound (settings handles its own SFX)
-        if self.current_view != View::Settings {
-            // Check if the current view is empty (accounts for search filtering).
+        if target_view != Some(View::Settings) {
+            // Check if the focused list is empty (accounts for search filtering).
             // We use the same filter_* helpers as view() to detect when the
-            // results are empty even if the raw library is not.
-            let is_empty = match self.current_view {
-                View::Queue => self.filter_queue_songs().is_empty(),
-                View::Albums => self.filter_albums().is_empty(),
-                View::Songs => {
+            // results are empty even if the raw library is not. `None` means
+            // the Similar browser tab is focused — read its songs list so the
+            // SFX matches the focused list rather than the host view.
+            let is_empty = match target_view {
+                Some(View::Queue) => self.filter_queue_songs().is_empty(),
+                Some(View::Albums) => self.filter_albums().is_empty(),
+                Some(View::Songs) => {
                     // Filter songs manually since there's no main.rs helper for it yet
                     nokkvi_data::utils::search::filter_items(
                         &self.library.songs,
@@ -230,27 +239,32 @@ impl Nokkvi {
                     )
                     .is_empty()
                 }
-                View::Artists => nokkvi_data::utils::search::filter_items(
+                Some(View::Artists) => nokkvi_data::utils::search::filter_items(
                     &self.library.artists,
                     &self.artists_page.common.search_query,
                 )
                 .is_empty(),
-                View::Genres => nokkvi_data::utils::search::filter_items(
+                Some(View::Genres) => nokkvi_data::utils::search::filter_items(
                     &self.library.genres,
                     &self.genres_page.common.search_query,
                 )
                 .is_empty(),
-                View::Playlists => nokkvi_data::utils::search::filter_items(
+                Some(View::Playlists) => nokkvi_data::utils::search::filter_items(
                     &self.library.playlists,
                     &self.playlists_page.common.search_query,
                 )
                 .is_empty(),
-                View::Radios => self.filter_radio_stations().is_empty(),
-                View::Settings => false,
-                View::PlaylistEditor => self
+                Some(View::Radios) => self.filter_radio_stations().is_empty(),
+                Some(View::Settings) => false,
+                Some(View::PlaylistEditor) => self
                     .playlist_editor
                     .as_ref()
                     .is_none_or(|e| e.songs.is_empty()),
+                // Similar browser tab focused (no `View` variant).
+                None => self
+                    .similar_songs
+                    .as_ref()
+                    .is_none_or(|s| s.songs.is_empty()),
             };
 
             if is_empty {
@@ -259,11 +273,11 @@ impl Nokkvi {
                 self.sfx_engine.play(audio::SfxType::Enter);
             }
         }
-        match self.current_view {
-            View::Settings => Task::done(Message::Settings(views::SettingsMessage::EditActivate)),
-            other => self.view_page(other).map_or_else(Task::none, |p| {
-                Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::ActivateCenter))
-            }),
+        if target_view == Some(View::Settings) {
+            return Task::done(Message::Settings(views::SettingsMessage::EditActivate));
         }
+        self.current_view_page().map_or_else(Task::none, |p| {
+            Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::ActivateCenter))
+        })
     }
 }

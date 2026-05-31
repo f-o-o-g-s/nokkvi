@@ -32,6 +32,7 @@ mod settings;
 mod settings_sidebar;
 mod settings_slider;
 mod slot_list;
+mod split_view;
 mod star_rating;
 mod state;
 mod window;
