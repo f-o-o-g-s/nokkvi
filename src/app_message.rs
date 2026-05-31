@@ -140,6 +140,12 @@ pub enum ScrobbleMessage {
     /// song_id — the same track looped in repeat-one mode.
     /// Triggers scrobble submission for the completed loop and resets state.
     TrackLooped(String),
+    /// timer_id, song_id — periodic now-playing heartbeat. Fired ~30s after a
+    /// successful now-playing send so the server's ephemeral now-playing entry
+    /// does not age out during a long single track. Re-emits a `NowPlaying`
+    /// only when still live (matching timer_id, playing, not paused, queue
+    /// playback); otherwise it is a no-op.
+    NowPlayingRefresh(u64, String),
 }
 
 /// Hotkey action messages, namespaced under `Message::Hotkey(..)`

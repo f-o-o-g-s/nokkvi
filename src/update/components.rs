@@ -1563,6 +1563,7 @@ impl Nokkvi {
         self.pending_queue_insert_position = None;
         self.start_view_applied = false;
         self.suppress_next_auto_center = false;
+        self.pending_mode_commits = 0;
 
         // Drop the visualizer so its background FFT thread joins now,
         // not at next login's `self.visualizer = Some(new)` overwrite.

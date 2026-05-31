@@ -269,6 +269,13 @@ pub struct Nokkvi {
     /// Transient flag: suppress the next auto-center triggered by a track change.
     /// Set when a click-initiated play fires, cleared after consumption.
     pub suppress_next_auto_center: bool,
+    /// Count of in-flight mode-toggle commits (random / repeat / consume).
+    /// Each optimistic toggle handler bumps this before spawning its async
+    /// backend commit; the matching `*Toggled` result handler decrements it.
+    /// While it is non-zero, the periodic tick stops clobbering the optimistic
+    /// mode flags with a stale backend snapshot (the snapshot may predate the
+    /// commit). Mirrors the `suppress_next_auto_center` idiom.
+    pub pending_mode_commits: u32,
     /// In-flight find-and-expand target — at most one chain runs at a time
     /// across album / artist / genre / song. Set by the matching
     /// `handle_navigate_and_expand_*` (click-driven) or by the
@@ -371,6 +378,7 @@ impl Default for Nokkvi {
             // UI runtime flags (not persisted)
             start_view_applied: false,
             suppress_next_auto_center: false,
+            pending_mode_commits: 0,
             pending_expand: None,
             pending_expand_center_only: false,
             pending_top_pin: None,

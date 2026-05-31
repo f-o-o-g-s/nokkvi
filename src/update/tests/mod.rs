@@ -27,6 +27,7 @@ mod playback;
 mod queue;
 mod redesign_chrome;
 mod roulette;
+mod scrobble;
 mod session;
 mod settings;
 mod settings_sidebar;
