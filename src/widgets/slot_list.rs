@@ -5,9 +5,12 @@
 //!
 //! Provides reusable slot list rendering with configurable item rendering
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use iced::{
-    Color, Element, Length,
-    widget::{button, column, container, mouse_area},
+    Background, Color, Element, Gradient, Length, Radians,
+    gradient::Linear,
+    widget::{Space, Stack, button, column, container, mouse_area},
 };
 
 use crate::{
@@ -117,6 +120,163 @@ pub(crate) struct SlotListRowContext {
     pub metrics: SlotListRowMetrics,
 }
 
+// ============================================================================
+// Now-playing breathing highlight
+// ============================================================================
+
+/// Period of one full breath / one shimmer cycle, in seconds. Driven per frame
+/// by the boat frame tick (`update::boat::handle_boat_tick`) so the motion stays
+/// smooth at any display refresh rate. Tune here to change the speed.
+pub(crate) const GLOW_PERIOD_SECS: f32 = 3.4;
+
+// The now-playing row is a NORMAL full-bleed slot (same fill as selection). Two
+// in-bounds overlays give it life: a pulsing INNER GLOW at the top & bottom
+// edges and a travelling SHIMMER sheen sweeping across. Both are gated on
+// `glow_seed`, derived from the theme accent, and painted by [`glow_overlay`].
+// All values below are tuning knobs.
+
+/// Inner-glow edge alpha at the trough → peak of the breath.
+const INNER_GLOW_MIN_ALPHA: f32 = 0.10;
+const INNER_GLOW_MAX_ALPHA: f32 = 0.42;
+
+/// Travelling sheen: peak alpha, half-width (fraction of the row), diagonal
+/// angle (radians), and the fraction of the period spent sweeping (the rest is
+/// an idle gap before the next sweep).
+const SHIMMER_PEAK_ALPHA: f32 = 0.22;
+const SHIMMER_HALF_WIDTH: f32 = 0.13;
+const SHIMMER_ANGLE_RAD: f32 = 1.9;
+const SHIMMER_SWEEP_FRACTION: f32 = 0.45;
+
+/// How far each glow light is blended from the accent seed toward white. The
+/// light must be brighter than the (accent) fill to read over it; the inner
+/// glow keeps more accent tint, the sheen is closer to white.
+const INNER_GLOW_LIGHT_MIX: f32 = 0.55;
+const SHIMMER_LIGHT_MIX: f32 = 0.85;
+
+/// Global breathing/shimmer phase in `0.0..1.0`, written each frame by the boat
+/// frame tick (`update::boat::handle_boat_tick`) while audio is playing, and
+/// read by the now-playing overlays. A process global (like the theme tokens) so
+/// the row builders stay pure functions of `(state, theme, phase)`.
+static NOW_PLAYING_PHASE: AtomicU32 = AtomicU32::new(0);
+
+/// Store the current phase (`0.0..1.0`). Called once per frame while playing.
+pub(crate) fn set_now_playing_phase(phase: f32) {
+    NOW_PLAYING_PHASE.store(phase.to_bits(), Ordering::Relaxed);
+}
+
+fn now_playing_phase() -> f32 {
+    f32::from_bits(NOW_PLAYING_PHASE.load(Ordering::Relaxed))
+}
+
+/// Linear blend `a` → `b` by `t` (0 = `a`, 1 = `b`), preserving `a`'s alpha.
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a,
+    }
+}
+
+/// Eased 0 → 1 → 0 breath over one period.
+fn breath_k(phase: f32) -> f32 {
+    0.5 - 0.5 * (phase * std::f32::consts::TAU).cos()
+}
+
+/// Inner-glow edge alpha at `phase`.
+fn inner_glow_edge_alpha(phase: f32) -> f32 {
+    INNER_GLOW_MIN_ALPHA + (INNER_GLOW_MAX_ALPHA - INNER_GLOW_MIN_ALPHA) * breath_k(phase)
+}
+
+/// Shimmer band center along the gradient axis at `phase`. Sweeps from just
+/// off-screen-left to just off-screen-right during the sweep window, then parks
+/// off-screen (returns `> 1`, so no band is visible) for the idle gap.
+fn shimmer_band_center(phase: f32) -> f32 {
+    if phase < SHIMMER_SWEEP_FRACTION {
+        let t = phase / SHIMMER_SWEEP_FRACTION;
+        -SHIMMER_HALF_WIDTH + t * (1.0 + 2.0 * SHIMMER_HALF_WIDTH)
+    } else {
+        2.0
+    }
+}
+
+/// Pulsing inner-glow gradient: accent light at the top & bottom edges (angle 0
+/// is vertical: offset 0 = bottom, 1 = top), transparent center, edge alpha
+/// breathing on `phase`.
+fn inner_glow_gradient(seed: Color, phase: f32) -> Gradient {
+    let light = lerp_color(seed, Color::WHITE, INNER_GLOW_LIGHT_MIX);
+    let edge = Color {
+        a: inner_glow_edge_alpha(phase),
+        ..light
+    };
+    let clear = Color { a: 0.0, ..light };
+    Gradient::Linear(
+        Linear::new(Radians(0.0))
+            .add_stop(0.0, edge)
+            .add_stop(0.34, clear)
+            .add_stop(0.66, clear)
+            .add_stop(1.0, edge),
+    )
+}
+
+/// Travelling-sheen gradient: a bright accent-light band sweeping across the row
+/// diagonally, parked off-screen during the idle gap. Out-of-range stops are
+/// silently dropped by `add_stop`, so a parked band leaves a fully transparent
+/// gradient (no visible sheen).
+fn shimmer_gradient(seed: Color, phase: f32) -> Gradient {
+    let light = lerp_color(seed, Color::WHITE, SHIMMER_LIGHT_MIX);
+    let clear = Color { a: 0.0, ..light };
+    let bright = Color {
+        a: SHIMMER_PEAK_ALPHA,
+        ..light
+    };
+    let c = shimmer_band_center(phase);
+    Gradient::Linear(
+        Linear::new(Radians(SHIMMER_ANGLE_RAD))
+            .add_stop(0.0, clear)
+            .add_stop(c - SHIMMER_HALF_WIDTH, clear)
+            .add_stop(c, bright)
+            .add_stop(c + SHIMMER_HALF_WIDTH, clear)
+            .add_stop(1.0, clear),
+    )
+}
+
+/// Overlay the now-playing breathing glow (pulsing inner glow + travelling
+/// shimmer) on top of a full-bleed row. Returns `row` unchanged for every other
+/// row (gated on [`SlotListSlotStyle::glow_seed`]); the now-playing row stays a
+/// normal full-bleed slot with the glow painted on top. The overlay layers are
+/// non-interactive, so the [`Stack`] passes clicks straight through to the row.
+pub(crate) fn glow_overlay<'a, M: 'a>(
+    row: impl Into<Element<'a, M>>,
+    style: SlotListSlotStyle,
+) -> Element<'a, M> {
+    let row = row.into();
+    let Some(seed) = style.glow_seed else {
+        return row;
+    };
+    let inner = container(Space::new().width(Length::Fill).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(Background::Gradient(inner_glow_gradient(
+                seed,
+                now_playing_phase(),
+            ))),
+            ..Default::default()
+        });
+    let shimmer = container(Space::new().width(Length::Fill).height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(Background::Gradient(shimmer_gradient(
+                seed,
+                now_playing_phase(),
+            ))),
+            ..Default::default()
+        });
+    Stack::new().push(row).push(inner).push(shimmer).into()
+}
+
 /// Styling for slot list slots (backgrounds, borders, text colors)
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SlotListSlotStyle {
@@ -133,41 +293,78 @@ pub(crate) struct SlotListSlotStyle {
     /// of a muted theme color that would wash out against the accent fill.
     /// Read by [`slot_list_static_icon_color`].
     pub forces_legible_text: bool,
+    /// `Some(fill)` ONLY on the actively-playing row (queue now-playing). The
+    /// gate + accent source for the breathing glow: [`glow_overlay`] reads it to
+    /// decide whether to stack the pulsing inner glow + travelling shimmer over
+    /// the row, and derives the glow light from `fill` (the theme accent). `None`
+    /// everywhere else — including the expanded-parent headers that share the
+    /// static highlight fill but must not animate. The now-playing row itself
+    /// stays a normal full-bleed slot ([`to_container_style`] ignores this); the
+    /// glow is purely an in-bounds overlay.
+    ///
+    /// [`to_container_style`]: SlotListSlotStyle::to_container_style
+    pub glow_seed: Option<Color>,
 }
 
 impl SlotListSlotStyle {
     /// Get slot styling based on state
+    ///
+    /// `is_highlighted` covers BOTH the now-playing queue row and expanded-parent
+    /// headers (albums/artists/playlists/genres). `is_playing` narrows that to
+    /// the actually-playing track: it picks the unified selection fill and arms
+    /// the breathing ring, while expanded parents (`is_highlighted` without
+    /// `is_playing`) keep the calmer static `playing_fill()`.
     ///
     /// `depth` controls hierarchy-based background darkening for expanded slots:
     /// 0 = parent/root (no darkening), 1 = child, 2 = grandchild.
     pub(crate) fn for_slot(
         is_center: bool,
         is_highlighted: bool,
+        is_playing: bool,
         is_selected: bool,
         has_multi_selection: bool,
         opacity: f32,
         depth: u8,
     ) -> Self {
         if is_highlighted {
-            // Now-playing / expanded-parent fill. Derived from the accent
-            // tokens with guaranteed-legible forced text — recomputed on the
-            // depth-darkened bg so nested rows never push text into the fill.
-            let fill = theme::playing_fill();
+            // Now-playing (queue) row OR an expanded-parent header. The
+            // now-playing row is UNIFIED with the loved selection fill and
+            // breathes; an expanded-parent header keeps the calmer
+            // `playing_fill()` and stays static. Both still get guaranteed-
+            // legible forced text, recomputed on the depth-darkened bg so
+            // nested rows never push text into the fill.
+            let fill = if is_playing {
+                theme::selected_fill_resolved()
+            } else {
+                theme::playing_fill()
+            };
             let bg = if depth > 0 {
                 theme::darken(fill, depth as f32 * 0.15)
             } else {
                 fill
             };
             let txt = theme::legible_text_on(bg);
+            // The actively-playing row wears NO ring — its breathing glow +
+            // shimmer overlay (see `glow_overlay`) is the sole distinguisher, so
+            // the fill alone matches selection and the motion sets it apart.
+            // Expanded-parent headers keep the max-contrast highlight ring.
+            let (border_color, border_width) = if is_playing {
+                (Color::TRANSPARENT, 0.0)
+            } else {
+                (theme::highlight_border(bg, 1.0), 2.0)
+            };
             Self {
                 bg_color: bg,
-                border_color: theme::highlight_border(bg, 1.0),
-                border_width: 2.0,
+                border_color,
+                border_width,
                 border_radius: slot_list_border_radius(),
                 text_color: txt,
                 subtext_color: txt,
                 hover_text_color: txt,
                 forces_legible_text: true,
+                // Only the actively-playing row breathes; an expanded-parent
+                // header shares the highlight branch but stays static.
+                glow_seed: if is_playing { Some(bg) } else { None },
             }
         } else if is_selected || (is_center && !has_multi_selection) {
             // Selected item, or center slot when there is NO explicit
@@ -185,6 +382,7 @@ impl SlotListSlotStyle {
                 subtext_color: txt,
                 hover_text_color: txt,
                 forces_legible_text: true,
+                glow_seed: None,
             }
         // Removed redundant else if is_center branch as it matches the default fallback exactly
         } else {
@@ -222,6 +420,7 @@ impl SlotListSlotStyle {
                 },
                 hover_text_color: theme::accent_bright(),
                 forces_legible_text: false,
+                glow_seed: None,
             }
         }
     }
@@ -229,7 +428,9 @@ impl SlotListSlotStyle {
     /// Convert to an `iced::widget::container::Style` for slot background/border rendering.
     ///
     /// This is the single source of truth for the `SlotListSlotStyle → container::Style`
-    /// conversion used across all view files, empty slots, and drag previews.
+    /// conversion used across all view files, empty slots, and drag previews. The
+    /// now-playing row renders as a normal full-bleed slot here; its breathing glow is
+    /// painted on top as overlays by [`glow_overlay`], not in this style.
     pub(crate) fn to_container_style(self) -> container::Style {
         container::Style {
             background: Some(self.bg_color.into()),
@@ -1480,7 +1681,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
 fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
     use iced::Alignment;
 
-    let style = SlotListSlotStyle::for_slot(false, false, false, false, opacity, 0);
+    let style = SlotListSlotStyle::for_slot(false, false, false, false, false, opacity, 0);
 
     container(
         iced::widget::text("· · ·")
@@ -1851,18 +2052,19 @@ mod tests {
     #[test]
     fn highlight_slots_force_legible_ink() {
         // Normal (unhighlighted) slot -> hover text is the bright accent.
-        let style = SlotListSlotStyle::for_slot(false, false, false, false, 1.0, 0);
+        let style = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 0);
         assert_eq!(style.hover_text_color, crate::theme::accent_bright());
 
-        // Highlighted (playing) slot -> all three text fields are forced to the
-        // legible ink for the derived fill, and stay consistent.
-        let hl = SlotListSlotStyle::for_slot(false, true, false, false, 1.0, 0);
+        // Highlighted expanded-parent slot (is_highlighted, not is_playing) ->
+        // all three text fields are forced to the legible ink for the derived
+        // fill, and stay consistent.
+        let hl = SlotListSlotStyle::for_slot(false, true, false, false, false, 1.0, 0);
         assert_eq!(hl.text_color, crate::theme::legible_text_on(hl.bg_color));
         assert_eq!(hl.hover_text_color, hl.text_color);
         assert_eq!(hl.subtext_color, hl.text_color);
 
         // Selected slot -> same forced-legible-ink rule against its own fill.
-        let sel = SlotListSlotStyle::for_slot(false, false, true, false, 1.0, 0);
+        let sel = SlotListSlotStyle::for_slot(false, false, false, true, false, 1.0, 0);
         assert_eq!(sel.text_color, crate::theme::legible_text_on(sel.bg_color));
         assert_eq!(sel.hover_text_color, sel.text_color);
 
@@ -1887,12 +2089,122 @@ mod tests {
         );
     }
 
+    /// Now-playing rows (`is_playing`) wear the unified selection fill, seed the
+    /// breathing glow, and carry NO ring (the glow is their sole distinguisher).
+    /// Expanded-parent headers share the `is_highlighted` branch but stay static
+    /// — calmer `playing_fill`, no glow, and they KEEP the highlight ring.
+    #[test]
+    fn now_playing_unifies_fill_and_seeds_glow() {
+        // Actively-playing row: is_highlighted + is_playing.
+        let playing = SlotListSlotStyle::for_slot(false, true, true, false, false, 1.0, 0);
+        assert_eq!(
+            playing.bg_color,
+            crate::theme::selected_fill_resolved(),
+            "now-playing fill must be unified with the selection fill"
+        );
+        assert_eq!(
+            playing.glow_seed,
+            Some(playing.bg_color),
+            "now-playing must seed the breathing glow with its own fill"
+        );
+        assert_eq!(
+            playing.border_width, 0.0,
+            "now-playing wears no ring — only the glow overlay distinguishes it"
+        );
+        assert_eq!(playing.border_color, Color::TRANSPARENT);
+
+        // Expanded-parent header: is_highlighted WITHOUT is_playing — keeps the
+        // calmer static fill, never breathes, and KEEPS the highlight ring.
+        let parent = SlotListSlotStyle::for_slot(false, true, false, false, false, 1.0, 0);
+        assert_eq!(
+            parent.bg_color,
+            crate::theme::playing_fill(),
+            "expanded-parent header keeps the calmer playing_fill"
+        );
+        assert_eq!(
+            parent.glow_seed, None,
+            "expanded-parent header must not breathe"
+        );
+        assert_eq!(parent.border_width, 2.0, "expanded-parent keeps its ring");
+        assert_eq!(
+            parent.border_color,
+            crate::theme::highlight_border(parent.bg_color, 1.0),
+            "expanded-parent ring is the max-contrast highlight border"
+        );
+
+        // Plain selection KEEPS its ring (and never breathes).
+        let selected = SlotListSlotStyle::for_slot(false, false, false, true, false, 1.0, 0);
+        assert_eq!(selected.glow_seed, None);
+        assert_eq!(selected.border_width, 2.0, "selection keeps its ring");
+        let normal = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 0);
+        assert_eq!(normal.glow_seed, None);
+    }
+
+    /// The inner glow's edge alpha breathes between its min and max over a
+    /// period, easing through a cosine (min at the trough, max at the peak).
+    #[test]
+    fn inner_glow_breathes_between_min_and_max() {
+        assert!(
+            (inner_glow_edge_alpha(0.0) - INNER_GLOW_MIN_ALPHA).abs() < 1e-6,
+            "trough sits at the minimum edge alpha"
+        );
+        assert!(
+            (inner_glow_edge_alpha(0.5) - INNER_GLOW_MAX_ALPHA).abs() < 1e-6,
+            "peak reaches the maximum edge alpha"
+        );
+        let mid = inner_glow_edge_alpha(0.25);
+        assert!(
+            mid > INNER_GLOW_MIN_ALPHA && mid < INNER_GLOW_MAX_ALPHA,
+            "mid-breath alpha is between the extremes, got {mid}"
+        );
+    }
+
+    /// The shimmer band sweeps from off-screen-left, across the row, then parks
+    /// off-screen (no visible sheen) during the idle gap before the next sweep.
+    #[test]
+    fn shimmer_sweeps_then_parks() {
+        // Enters from just off the left edge at the start of the sweep window.
+        assert!(
+            shimmer_band_center(0.0) < 0.0,
+            "band starts off-screen-left"
+        );
+        // Crosses the middle partway through the sweep window.
+        let mid = shimmer_band_center(SHIMMER_SWEEP_FRACTION * 0.5);
+        assert!(
+            (0.3..=0.7).contains(&mid),
+            "band crosses near the middle mid-sweep, got {mid}"
+        );
+        // Parks off-screen (offset > 1 → all stops dropped → no sheen) in the gap.
+        assert!(
+            shimmer_band_center((SHIMMER_SWEEP_FRACTION + 1.0) * 0.5) > 1.0,
+            "band is parked off-screen during the idle gap"
+        );
+    }
+
+    /// The now-playing row itself stays a normal full-bleed slot: its container
+    /// style is the static fill + border, with the glow living in the overlay.
+    #[test]
+    fn now_playing_container_style_is_a_normal_slot() {
+        let playing = SlotListSlotStyle::for_slot(false, true, true, false, false, 1.0, 0);
+        let style = playing.to_container_style();
+        assert_eq!(
+            style.background,
+            Some(playing.bg_color.into()),
+            "the now-playing fill is the static loved selection color"
+        );
+        assert_eq!(
+            style.shadow.color.a, 0.0,
+            "no shadow on the slot itself — the glow is an overlay"
+        );
+        assert_eq!(style.border.color, playing.border_color);
+    }
+
     fn unfocused_bg(depth: u8) -> iced::Color {
-        SlotListSlotStyle::for_slot(false, false, false, false, 1.0, depth).bg_color
+        SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, depth).bg_color
     }
 
     fn focused_bg(depth: u8) -> iced::Color {
-        SlotListSlotStyle::for_slot(true, false, false, false, 1.0, depth).bg_color
+        SlotListSlotStyle::for_slot(true, false, false, false, false, 1.0, depth).bg_color
     }
 
     #[test]
@@ -2167,7 +2479,7 @@ mod tests {
     #[test]
     fn child_slot_button_builds_an_element() {
         let ctx = dummy_row_context(false, Modifiers::default());
-        let style = SlotListSlotStyle::for_slot(false, false, false, false, 1.0, 1);
+        let style = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 1);
         let row = iced::widget::Row::new().push(iced::widget::text("child row"));
         let _: Element<'_, ()> = child_slot_button(row, &ctx, style, true, |_msg| ());
     }

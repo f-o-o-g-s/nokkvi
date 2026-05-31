@@ -153,6 +153,10 @@ pub struct Nokkvi {
     // -------------------------------------------------------------------------
     pub active_playback: crate::state::ActivePlayback,
     pub playback: crate::state::PlaybackState,
+    /// Monotonic epoch for the now-playing breathing glow. The per-frame boat
+    /// tick (`update::boat::handle_boat_tick`) derives
+    /// `phase = (now - glow_epoch) / GLOW_PERIOD_SECS` from it while playing.
+    pub glow_epoch: std::time::Instant,
     pub scrobble: crate::state::ScrobbleState,
     pub modes: crate::state::PlaybackModes,
     pub sfx: crate::state::SfxState,
@@ -386,6 +390,7 @@ impl Default for Nokkvi {
             // Consolidated state structs with defaults
             active_playback: crate::state::ActivePlayback::default(),
             playback: crate::state::PlaybackState::default(),
+            glow_epoch: std::time::Instant::now(),
             scrobble: crate::state::ScrobbleState::default(),
             modes: crate::state::PlaybackModes::default(),
             sfx: crate::state::SfxState::default(),

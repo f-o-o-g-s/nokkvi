@@ -457,6 +457,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     let style = SlotListSlotStyle::for_slot(
         ctx.is_center,
         false,
+        false,
         ctx.is_selected,
         ctx.has_multi_selection,
         ctx.opacity,
@@ -559,6 +560,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
 ) -> Element<'a, M> {
     let style = SlotListSlotStyle::for_slot(
         ctx.is_center,
+        false,
         false,
         ctx.is_selected,
         ctx.has_multi_selection,

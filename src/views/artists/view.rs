@@ -407,6 +407,7 @@ impl ArtistsPage {
         let style = SlotListSlotStyle::for_slot(
             ctx.is_center,
             is_expanded,
+            false,
             ctx.is_selected,
             ctx.has_multi_selection,
             ctx.opacity,

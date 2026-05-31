@@ -416,6 +416,7 @@ impl SimilarPage {
                 let style = SlotListSlotStyle::for_slot(
                     ctx.is_center,
                     false,
+                    false,
                     ctx.is_selected,
                     ctx.has_multi_selection,
                     ctx.opacity,

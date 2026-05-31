@@ -25,6 +25,17 @@ use crate::{
 /// against the live bar buffer. When hidden, position/velocity/phase are
 /// preserved so the boat resumes mid-stroke when re-shown.
 pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> {
+    // Drive the now-playing breathing glow off this per-frame frame tick so it
+    // stays smooth at any display refresh rate (a fixed-interval timer steps
+    // visibly on high-Hz displays). Runs BEFORE the boat's early-outs so the
+    // glow animates regardless of visualizer mode; frozen while paused/stopped.
+    if app.playback.playing && !app.playback.paused {
+        let phase = (now.duration_since(app.glow_epoch).as_secs_f32()
+            / crate::widgets::slot_list::GLOW_PERIOD_SECS)
+            .fract();
+        crate::widgets::slot_list::set_now_playing_phase(phase);
+    }
+
     // Read mode + config snapshot once per tick. The "visualizer enabled"
     // check is `engine.visualization_mode != VisualizationMode::Off` — that's
     // what gates the shader element in `app_view.rs:319`. There is no

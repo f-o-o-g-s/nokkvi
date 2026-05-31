@@ -232,6 +232,7 @@ where
             let style = SlotListSlotStyle::for_slot(
                 ctx.is_center,
                 is_current,
+                is_current,
                 ctx.is_selected,
                 ctx.has_multi_selection,
                 ctx.opacity,
@@ -431,8 +432,12 @@ where
                 move |m| on_event_slot(SongListRowEvent::Slot(m)),
             );
 
+            // Overlay the breathing glow (pulsing inner glow + travelling
+            // shimmer) on the now-playing row; a no-op pass-through otherwise.
+            let glowing = crate::widgets::slot_list::glow_overlay(slot_button, style);
+
             // Wrap in caller-provided context menu chrome (per-row owned clone).
-            build_context_menu(slot_button, ctx.item_index)
+            build_context_menu(glowing, ctx.item_index)
         });
 
         crate::widgets::slot_list::wrap_with_select_column(

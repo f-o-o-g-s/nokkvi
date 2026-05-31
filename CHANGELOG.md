@@ -6,13 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The currently playing track now has a gentle breathing glow: a soft inner light pulses along its top and bottom edges and a shimmer periodically sweeps across it, both in your theme's accent color so the effect fits every theme.
+
 ### Changed
 
 - The divider between the list and the artwork panel is now a thin line matching the tab bar's underline, instead of a thicker, lighter band.
+- The now-playing row now uses the same fill color as the selection highlight, instead of a separate, louder green that clashed with the palette; the breathing glow is what marks the playing track.
 
 ### Fixed
 
 ### Removed
+
+- The bright border ring around the now-playing row is gone; its breathing glow and shimmer set it apart instead. Regular selection highlights keep their ring.
 
 ## v0.6.5 — 2026-05-31
 
