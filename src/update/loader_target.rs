@@ -181,8 +181,15 @@ impl LoaderTarget for AlbumsTarget {
             &app.albums_page.common.slot_list,
             &app.library.albums,
             &cached,
+            &app.artwork.album_art_versions,
             shell.albums().clone(),
-            |album| (album.id.clone(), album.artwork_url.clone()),
+            |album| {
+                (
+                    album.id.clone(),
+                    album.updated_at.clone(),
+                    album.artwork_url.clone(),
+                )
+            },
         )
     }
 
@@ -317,8 +324,13 @@ impl LoaderTarget for SongsTarget {
             &app.songs_page.common.slot_list,
             &app.library.songs,
             &cached,
+            &app.artwork.album_art_versions,
             shell.albums().clone(),
-            |song| song.album_id.as_ref(),
+            |song| {
+                song.album_id
+                    .as_ref()
+                    .map(|id| (id, song.updated_at.clone()))
+            },
         )
     }
 

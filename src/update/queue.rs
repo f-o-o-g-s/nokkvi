@@ -59,8 +59,15 @@ impl Nokkvi {
                             &self.queue_page.common.slot_list,
                             &self.library.queue_songs,
                             &cached,
+                            &self.artwork.album_art_versions,
                             shell.albums().clone(),
-                            |song| (song.album_id.clone(), song.artwork_url.clone()),
+                            |song| {
+                                (
+                                    song.album_id.clone(),
+                                    song.updated_at.clone(),
+                                    song.artwork_url.clone(),
+                                )
+                            },
                         ));
 
                         // Load large artwork for center song
@@ -617,8 +624,15 @@ impl Nokkvi {
                 &self.queue_page.common.slot_list,
                 &filtered_queue,
                 &cached,
+                &self.artwork.album_art_versions,
                 shell.albums().clone(),
-                |song| (song.album_id.clone(), song.artwork_url.clone()),
+                |song| {
+                    (
+                        song.album_id.clone(),
+                        song.updated_at.clone(),
+                        song.artwork_url.clone(),
+                    )
+                },
             );
             tasks.extend(prefetch_tasks);
 
@@ -668,8 +682,15 @@ impl Nokkvi {
                 &self.queue_page.common.slot_list,
                 items,
                 &cached,
+                &self.artwork.album_art_versions,
                 shell.albums().clone(),
-                |song: &QueueSongUIViewData| (song.album_id.clone(), song.artwork_url.clone()),
+                |song: &QueueSongUIViewData| {
+                    (
+                        song.album_id.clone(),
+                        song.updated_at.clone(),
+                        song.artwork_url.clone(),
+                    )
+                },
             ));
 
             if let Some(center_idx) = self
@@ -707,8 +728,15 @@ impl Nokkvi {
                 &self.queue_page.common.slot_list,
                 &filtered,
                 &cached,
+                &self.artwork.album_art_versions,
                 shell.albums().clone(),
-                |song| (song.album_id.clone(), song.artwork_url.clone()),
+                |song| {
+                    (
+                        song.album_id.clone(),
+                        song.updated_at.clone(),
+                        song.artwork_url.clone(),
+                    )
+                },
             ));
 
             if let Some(center_idx) = self

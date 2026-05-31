@@ -4,7 +4,10 @@
 //! header — the redesign moved every active-state visual onto `accent_bright()`
 //! fills, so the dominant-color path was removed (along with `color-thief`).
 
-use std::{collections::HashSet, num::NonZeroUsize};
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroUsize,
+};
 
 use iced::widget::image;
 
@@ -64,6 +67,19 @@ pub struct ArtworkState {
     /// rendered thumbnails warm. Capacity must stay above the typical viewport
     /// + scrollback or slot lists thrash.
     pub album_art: SnapshottedLru<String, image::Handle>,
+    /// Sibling map recording the `updated_at` cache-buster that warmed each
+    /// `album_art` slot. Kept in lockstep with `album_art` on every put: when
+    /// the server-side cover changes, the album's `updated_at` changes, and a
+    /// later prefetch tick sees `album_art_versions[id] != new_updated_at` and
+    /// treats the slot as a genuine miss — re-fetching the changed cover on any
+    /// surface without re-introducing SSE auto-refresh or threading a full
+    /// `(album_id, updated_at)` key through the ~15 view read sites (N17).
+    ///
+    /// Reset to empty by `Default`, so logout (`ArtworkState::default()`) drops
+    /// it for free. `album_art` evicts silently at capacity, so a version entry
+    /// can outlive its handle — `should_refetch` guards against that by checking
+    /// `album_art` membership, not just this map.
+    pub album_art_versions: HashMap<String, Option<String>>,
     /// Large artwork cache for detail views (LRU-bounded).
     pub large_artwork: SnapshottedLru<String, image::Handle>,
     /// Genre artwork cache.
@@ -80,6 +96,7 @@ impl Default for ArtworkState {
             album_art: SnapshottedLru::new(
                 NonZeroUsize::new(MINI_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
             ),
+            album_art_versions: HashMap::new(),
             large_artwork: SnapshottedLru::new(
                 NonZeroUsize::new(LARGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
             ),
@@ -94,6 +111,7 @@ impl std::fmt::Debug for ArtworkState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArtworkState")
             .field("album_art", &self.album_art)
+            .field("album_art_versions", &self.album_art_versions)
             .field("large_artwork", &self.large_artwork)
             .field("genre", &self.genre)
             .field("playlist", &self.playlist)

@@ -308,8 +308,15 @@ impl Nokkvi {
             &editor.common.slot_list,
             &editor.songs,
             &cached,
+            &self.artwork.album_art_versions,
             shell.albums().clone(),
-            |song| (song.album_id.clone(), song.artwork_url.clone()),
+            |song| {
+                (
+                    song.album_id.clone(),
+                    song.updated_at.clone(),
+                    song.artwork_url.clone(),
+                )
+            },
         );
 
         // Large artwork for the centered row, so the artwork panel fills too.

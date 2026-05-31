@@ -339,6 +339,7 @@ mod tests {
             album: "al".into(),
             album_id: "alid".into(),
             artwork_url: String::new(),
+            updated_at: None,
             duration: "0:00".into(),
             duration_seconds: 0,
             genre: String::new(),

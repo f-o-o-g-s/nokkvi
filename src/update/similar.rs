@@ -65,8 +65,9 @@ impl Nokkvi {
                             &self.similar_page.common.slot_list,
                             &state.songs,
                             &cached,
+                            &self.artwork.album_art_versions,
                             shell.albums().clone(),
-                            |s| s.album_id.as_ref(),
+                            |s| s.album_id.as_ref().map(|id| (id, s.updated_at.clone())),
                         );
                         tasks.extend(prefetch_tasks);
                     }
@@ -252,8 +253,9 @@ impl Nokkvi {
                             &self.similar_page.common.slot_list,
                             &state.songs,
                             &cached,
+                            &self.artwork.album_art_versions,
                             shell.albums().clone(),
-                            |s| s.album_id.as_ref(),
+                            |s| s.album_id.as_ref().map(|id| (id, s.updated_at.clone())),
                         );
                         tasks.extend(prefetch_tasks);
                     }

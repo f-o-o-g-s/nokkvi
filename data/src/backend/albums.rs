@@ -60,11 +60,17 @@ impl AlbumUIViewData {
     /// Convert an `Album` model into UI view data, building the artwork URL.
     pub fn from_album(album: &Album, server_url: &str, subsonic_credential: &str) -> Self {
         let art_id = album.cover_art.as_deref().unwrap_or(&album.id);
-        let artwork_url = crate::utils::artwork_url::build_cover_art_url(
+        // Carry the album's `updated_at` as a cache-buster so that when the
+        // server-side cover changes, the grid thumbnail URL changes too — the
+        // version-aware prefetch dedup then treats it as a genuine miss and
+        // re-fetches (N17). Without the timestamp the passive mini path never
+        // re-fetched a changed cover for the rest of the session.
+        let artwork_url = crate::utils::artwork_url::build_cover_art_url_with_timestamp(
             art_id,
             server_url,
             subsonic_credential,
             Some(crate::utils::artwork_url::THUMBNAIL_SIZE),
+            album.updated_at.as_deref(),
         );
         // Build genres display string: "Black Metal • Heavy Metal • Rock"
         let genres = album.genres.as_ref().map(|g| {
@@ -472,5 +478,52 @@ impl AlbumsService {
         let songs_service = crate::services::api::songs::SongsApiService::new(client);
 
         songs_service.load_album_songs(album_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn album_from_json(value: serde_json::Value) -> Album {
+        serde_json::from_value(value).expect("valid album json")
+    }
+
+    /// The grid thumbnail URL must embed the album's `updated_at` as the
+    /// `_u=` cache-buster so a server-side cover change becomes a genuine
+    /// prefetch miss (N17). Previously `from_album` built the URL with no
+    /// timestamp, so `_u=` was always empty and the passive mini path never
+    /// re-fetched a changed cover for the rest of the session.
+    #[test]
+    fn from_album_thumbnail_includes_updated_at_cache_buster() {
+        let album = album_from_json(serde_json::json!({
+            "id": "al-1",
+            "name": "Test Album",
+            "updatedAt": "2026-05-30T00:00:00Z",
+        }));
+
+        let view = AlbumUIViewData::from_album(&album, "http://srv", "u=x");
+
+        assert!(
+            view.artwork_url.contains("_u=2026-05-30T00:00:00Z"),
+            "thumbnail URL must carry the updated_at cache-buster, got: {}",
+            view.artwork_url
+        );
+    }
+
+    /// When `updated_at` is absent the URL still builds (with an empty
+    /// `_u=`), matching the historical no-timestamp shape — no regression
+    /// for servers that don't expose the field.
+    #[test]
+    fn from_album_thumbnail_empty_cache_buster_when_no_updated_at() {
+        let album = album_from_json(serde_json::json!({
+            "id": "al-2",
+            "name": "No Timestamp",
+        }));
+
+        let view = AlbumUIViewData::from_album(&album, "http://srv", "u=x");
+
+        assert!(view.artwork_url.contains("id=al-2"));
+        assert!(view.artwork_url.ends_with("_u="));
     }
 }

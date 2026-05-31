@@ -18,7 +18,7 @@
 //! - Viewport logic → `SlotListView`
 //! - Playback orchestration → `AppService`
 //! - Artwork prefetching → helper functions in this module
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use iced::{Task, widget::image};
 use nokkvi_data::{
@@ -91,19 +91,50 @@ impl PaginatedFetch {
 /// Pairs: `(playlist_id, playlist_name)` list + resolved song IDs.
 type PlaylistSongResolveResult = Result<(Vec<(String, String)>, Vec<String>), anyhow::Error>;
 
+/// Version-aware prefetch dedup gate (N17).
+///
+/// Returns `true` when an album's 80px thumbnail should be (re-)fetched:
+/// - the slot was never warmed (`id` absent from `album_art`), OR
+/// - the slot is warmed but the recorded `updated_at` differs from the one the
+///   current URL carries — i.e. the server-side cover changed.
+///
+/// `cached_ids` are the live `album_art` keys; `versions` is the sibling
+/// `album_art_versions` map. Checking `album_art` membership (not just the
+/// version map) guards the documented eviction skew: `album_art` evicts
+/// silently at capacity, so a stale version entry whose handle is gone must
+/// still count as a miss.
+pub(super) fn should_refetch(
+    cached_ids: &HashSet<&String>,
+    versions: &HashMap<String, Option<String>>,
+    id: &String,
+    updated_at: &Option<String>,
+) -> bool {
+    if !cached_ids.contains(id) {
+        // Handle absent (never warmed, or evicted) — always a miss.
+        return true;
+    }
+    // Warmed: refetch only when the recorded version no longer matches.
+    versions.get(id) != Some(updated_at)
+}
+
 /// Generate artwork prefetch tasks for a slot list viewport.
 ///
 /// This is the single authoritative implementation of artwork prefetching.
 /// All slot-list-based views should use this instead of inline loops.
+///
+/// The `extract_id_url` closure returns `(album_id, updated_at, url)`: the
+/// `updated_at` feeds the version-aware [`should_refetch`] gate so a changed
+/// server cover re-fetches even when the bare id is already cached (N17).
 pub(super) fn prefetch_album_artwork_tasks<F, T>(
     slot_list: &SlotListView,
     items: &[T],
     cached_ids: &HashSet<&String>,
+    versions: &HashMap<String, Option<String>>,
     albums_vm: AlbumsService,
     extract_id_url: F,
 ) -> Vec<Task<Message>>
 where
-    F: Fn(&T) -> (String, String),
+    F: Fn(&T) -> (String, Option<String>, String),
 {
     let total = items.len();
     if total == 0 {
@@ -116,23 +147,28 @@ where
         .prefetch_indices(total)
         .filter_map(|idx| items.get(idx))
         .filter_map(|item| {
-            let (id, url) = extract_id_url(item);
-            // Skip if cached or already queued in this batch
-            if cached_ids.contains(&id) || already_queued.contains(&id) {
+            let (id, updated_at, url) = extract_id_url(item);
+            // Skip if version-warm (id cached AND recorded version matches) or
+            // already queued in this batch; a changed updated_at is a miss.
+            if !should_refetch(cached_ids, versions, &id, &updated_at)
+                || already_queued.contains(&id)
+            {
                 None
             } else {
                 already_queued.insert(id.clone());
-                Some((id, url))
+                Some((id, updated_at, url))
             }
         })
-        .map(|(id, url)| {
+        .map(|(id, updated_at, url)| {
             let vm = albums_vm.clone();
             Task::perform(
                 async move {
                     let bytes = vm.fetch_artwork_by_url(&url).await.ok();
-                    (id, bytes.map(image::Handle::from_bytes))
+                    (id, updated_at, bytes.map(image::Handle::from_bytes))
                 },
-                |(id, handle)| Message::Artwork(ArtworkMessage::Loaded(id, handle)),
+                |(id, updated_at, handle)| {
+                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, handle))
+                },
             )
         })
         .collect()
@@ -143,17 +179,20 @@ where
 /// Variant of `prefetch_album_artwork_tasks` for songs that have
 /// `Option<album_id>`. Generic over the slice element type — Songs page
 /// passes `SongUIViewData`, Similar page passes raw `Song`. The
-/// `extract_album_id` closure pulls the optional album id out of each
-/// element. Dispatches `Message::Artwork(ArtworkMessage::SongMiniLoaded)`.
+/// `extract_album_id` closure returns `(album_id, updated_at)` so the song
+/// mini path participates in version-aware dedup (N17): the `updated_at`
+/// busts both the dedup gate and the fetch URL.
+/// Dispatches `Message::Artwork(ArtworkMessage::SongMiniLoaded)`.
 pub(super) fn prefetch_song_artwork_tasks<T, F>(
     slot_list: &SlotListView,
     songs: &[T],
     cached_ids: &HashSet<&String>,
+    versions: &HashMap<String, Option<String>>,
     albums_vm: AlbumsService,
     extract_album_id: F,
 ) -> Vec<Task<Message>>
 where
-    F: Fn(&T) -> Option<&String>,
+    F: Fn(&T) -> Option<(&String, Option<String>)>,
 {
     let total = songs.len();
     if total == 0 {
@@ -166,29 +205,31 @@ where
         .prefetch_indices(total)
         .filter_map(|idx| songs.get(idx))
         .filter_map(|song| {
-            extract_album_id(song).and_then(|id| {
-                if cached_ids.contains(id) || already_queued.contains(id) {
+            extract_album_id(song).and_then(|(id, updated_at)| {
+                if !should_refetch(cached_ids, versions, id, &updated_at)
+                    || already_queued.contains(id)
+                {
                     None
                 } else {
                     already_queued.insert(id.clone());
-                    Some(id.clone())
+                    Some((id.clone(), updated_at))
                 }
             })
         })
-        .map(|album_id| {
+        .map(|(album_id, updated_at)| {
             let vm = albums_vm.clone();
             let id = album_id;
             Task::perform(
                 async move {
                     let bytes = vm
-                        .fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), None)
+                        .fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), updated_at.as_deref())
                         .await
                         .ok();
-                    (id, bytes.map(image::Handle::from_bytes))
+                    (id, updated_at, bytes.map(image::Handle::from_bytes))
                 },
-                |(id, handle)| {
+                |(id, updated_at, handle)| {
                     Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
-                        id, handle,
+                        id, updated_at, handle,
                     ))
                 },
             )
@@ -202,11 +243,13 @@ where
 /// `ArtworkMessage::Loaded` so the centralized `handle_artwork_loaded`
 /// arm puts the handle into `album_art` exactly the way Albums view does.
 ///
-/// Callers pass `(album.id, album.artwork_url)` pairs — the URL is
-/// pre-built by `AlbumUIViewData::from_album` from `album.cover_art`
+/// Callers pass `(album.id, album.updated_at, album.artwork_url)` triples —
+/// the URL is pre-built by `AlbumUIViewData::from_album` from `album.cover_art`
 /// (with `album.id` as fallback). For albums whose artwork lives on a
 /// media file (`cover_art = "mf-…"`) this matters — passing only the
-/// album id would build the wrong URL and the fetch would return empty.
+/// album id would build the wrong URL and the fetch would return empty. The
+/// `updated_at` is forwarded into the `Loaded` message so the recorded
+/// `album_art_versions` entry matches the URL's cache-buster (N17).
 ///
 /// Each fetch goes through `fetch_artwork_by_url_with_retry` (3 attempts,
 /// 100 ms / 200 ms backoff). Without retries, large expansions (e.g. a
@@ -217,13 +260,14 @@ where
 /// permanently-blank slot until the next expansion.
 pub(super) fn expansion_album_artwork_tasks(
     cached_ids: &HashSet<&String>,
+    versions: &HashMap<String, Option<String>>,
     albums_vm: AlbumsService,
-    album_ids_urls: Vec<(String, String)>,
+    album_ids_urls: Vec<(String, Option<String>, String)>,
 ) -> Vec<Task<Message>> {
     album_ids_urls
         .into_iter()
-        .filter(|(id, _)| !cached_ids.contains(id))
-        .map(|(id, url)| {
+        .filter(|(id, updated_at, _)| should_refetch(cached_ids, versions, id, updated_at))
+        .map(|(id, updated_at, url)| {
             let vm = albums_vm.clone();
             Task::perform(
                 async move {
@@ -232,9 +276,11 @@ pub(super) fn expansion_album_artwork_tasks(
                         .await
                         .ok()
                         .map(image::Handle::from_bytes);
-                    (id, handle)
+                    (id, updated_at, handle)
                 },
-                |(id, handle)| Message::Artwork(ArtworkMessage::Loaded(id, handle)),
+                |(id, updated_at, handle)| {
+                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, handle))
+                },
             )
         })
         .collect()
@@ -1525,9 +1571,7 @@ impl Nokkvi {
                     let clean = task_manager
                         .shutdown_all(std::time::Duration::from_millis(500))
                         .await;
-                    tracing::debug!(
-                        " [SESSION-RESET] task manager drained ({clean} clean)"
-                    );
+                    tracing::debug!(" [SESSION-RESET] task manager drained ({clean} clean)");
 
                     // (3) Now that no tracked credential/persistence writer can
                     // run after this point, clear the redb session last so it

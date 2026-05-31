@@ -98,8 +98,15 @@ impl Nokkvi {
                     &self.albums_page.common.slot_list,
                     &self.library.albums,
                     &cached,
+                    &self.artwork.album_art_versions,
                     albums_vm,
-                    |album| (album.id.clone(), album.artwork_url.clone()),
+                    |album| {
+                        (
+                            album.id.clone(),
+                            album.updated_at.clone(),
+                            album.artwork_url.clone(),
+                        )
+                    },
                 );
                 if let Some(task) = self.center_large_artwork_load_task(View::Albums) {
                     tasks.push(task);
@@ -115,8 +122,15 @@ impl Nokkvi {
                     &self.queue_page.common.slot_list,
                     &items,
                     &cached,
+                    &self.artwork.album_art_versions,
                     albums_vm,
-                    |song| (song.album_id.clone(), song.artwork_url.clone()),
+                    |song| {
+                        (
+                            song.album_id.clone(),
+                            song.updated_at.clone(),
+                            song.artwork_url.clone(),
+                        )
+                    },
                 );
                 if let Some(task) = self.center_large_artwork_load_task(View::Queue) {
                     tasks.push(task);
@@ -131,8 +145,9 @@ impl Nokkvi {
                     &self.songs_page.common.slot_list,
                     &self.library.songs,
                     &cached,
+                    &self.artwork.album_art_versions,
                     albums_vm,
-                    |s| s.album_id.as_ref(),
+                    |s| s.album_id.as_ref().map(|id| (id, s.updated_at.clone())),
                 );
                 if let Some(task) = self.center_large_artwork_load_task(View::Songs) {
                     tasks.push(task);
@@ -306,7 +321,11 @@ impl Nokkvi {
                         (id, bytes.map(image::Handle::from_bytes))
                     },
                     |(id, handle)| {
-                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(id, handle))
+                        // Artist art has no album `updated_at`; the id-only
+                        // contains() gate above already dedups, so record None.
+                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(
+                            id, None, handle,
+                        ))
                     },
                 ));
             }

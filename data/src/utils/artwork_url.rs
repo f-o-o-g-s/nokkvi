@@ -92,13 +92,18 @@ pub fn build_cover_art_url_with_timestamp(
 /// triggering a network fetch and leaving ~90% of thumbnails blank.
 ///
 /// Always uses [`THUMBNAIL_SIZE`].
+///
+/// Carries the song's `updated_at` as the `_u=` cache-buster so a server-side
+/// cover change busts the URL — the version-aware prefetch dedup then re-fetches
+/// it (N17) instead of serving the stale thumbnail for the rest of the session.
 pub fn build_song_artwork_url(song: &Song, server_url: &str, subsonic_credential: &str) -> String {
     let album_id = song.album_id.as_deref().unwrap_or_default();
-    build_cover_art_url(
+    build_cover_art_url_with_timestamp(
         album_id,
         server_url,
         subsonic_credential,
         Some(THUMBNAIL_SIZE),
+        song.updated_at.as_deref(),
     )
 }
 

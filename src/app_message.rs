@@ -218,7 +218,11 @@ pub enum CollageTarget {
 #[derive(Debug, Clone)]
 pub enum ArtworkMessage {
     // --- Shared Album Artwork ---
-    Loaded(String, Option<image::Handle>),
+    /// `(album_id, updated_at, handle)`. `updated_at` is the cache-buster the
+    /// fetch URL carried; recorded into `album_art_versions` in lockstep with
+    /// the handle so a later server cover change is a version-aware prefetch
+    /// miss (N17).
+    Loaded(String, Option<String>, Option<image::Handle>),
     LargeLoaded(String, Option<image::Handle>),
     LargeArtistLoaded(String, Option<image::Handle>),
     LoadLarge(String),
@@ -251,7 +255,9 @@ pub enum ArtworkMessage {
     CollageBatchReady(CollageTarget, Vec<String>, String, String),
 
     // --- Song Artwork ---
-    SongMiniLoaded(String, Option<image::Handle>),
+    /// `(album_id, updated_at, handle)`. See [`ArtworkMessage::Loaded`] — the
+    /// `updated_at` is recorded into `album_art_versions` alongside the handle.
+    SongMiniLoaded(String, Option<String>, Option<image::Handle>),
 
     // --- Artwork Pane Drag ---
     /// Resize the artwork column via the split handle. `Change` is per-frame
