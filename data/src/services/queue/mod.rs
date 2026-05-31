@@ -66,7 +66,21 @@ const KEY_QUEUE_SONGS: &str = crate::services::storage_keys::QUEUE_SONGS;
 
 impl QueueManager {
     pub fn new(storage: StateStorage) -> Result<Self> {
-        let (queue, pool) = if let Some(queue) = storage.load_binary::<Queue>(KEY_QUEUE_ORDER)? {
+        // ORDER load is best-effort: a physically-corrupt or
+        // schema-incompatible Queue blob must never abort AppService
+        // construction (which would bounce the user to the login screen).
+        // Degrade to an empty queue on decode error, mirroring the pool's
+        // existing degradation below. The bad blob self-heals on the next
+        // save_order once a track plays.
+        let loaded_order: Option<Queue> = match storage.load_binary::<Queue>(KEY_QUEUE_ORDER) {
+            Ok(opt) => opt,
+            Err(e) => {
+                warn!(" [QUEUE] Failed to load persisted queue order, starting empty: {e}");
+                None
+            }
+        };
+
+        let (queue, pool) = if let Some(queue) = loaded_order {
             // Pool load is best-effort: a corrupted/incompatible pool must never
             // block login. Start with an empty pool if anything goes wrong.
             let pool: SongPool = match storage.load_binary(KEY_QUEUE_SONGS) {
@@ -1241,6 +1255,44 @@ pub(crate) mod tests {
         assert_eq!(qm.get_song("a").unwrap().title, "Song a");
         assert_eq!(qm.get_song("b").unwrap().title, "Song b");
         assert!(qm.get_song("nonexistent").is_none());
+    }
+
+    #[test]
+    fn new_recovers_from_corrupt_order_blob() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let db_path = temp.path().join("queue.redb");
+        let storage = StateStorage::new(db_path).expect("temp storage");
+
+        // Write a payload under the ORDER key whose bincode layout cannot
+        // decode as a Queue (a tuple of unrelated shape).
+        storage
+            .save_binary(KEY_QUEUE_ORDER, &("garbage", 123u64, vec![1u8, 2, 3]))
+            .expect("write garbage");
+
+        // new() must recover (Ok) rather than propagate Err.
+        let qm = QueueManager::new(storage).expect("new must degrade to empty, not abort");
+        assert!(qm.get_queue().song_ids.is_empty());
+        assert_eq!(qm.get_queue().current_index, None);
+    }
+
+    #[test]
+    fn new_restores_valid_order_blob() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let db_path = temp.path().join("queue.redb");
+        let storage = StateStorage::new(db_path).expect("temp storage");
+
+        // Round-trip a real, populated queue.
+        {
+            let mut qm = QueueManager::new(storage.clone()).expect("queue manager");
+            qm.pool
+                .insert_many(vec![make_test_song("a"), make_test_song("b")]);
+            qm.replace_song_ids_for_test(vec!["a".to_string(), "b".to_string()], Some(0));
+            qm.save_all().unwrap();
+        }
+
+        let qm2 = QueueManager::new(storage).expect("reload");
+        assert_eq!(qm2.get_queue().song_ids, vec!["a", "b"]);
+        assert_eq!(qm2.get_queue().current_index, Some(0));
     }
 
     #[test]
