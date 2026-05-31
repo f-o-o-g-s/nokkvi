@@ -717,16 +717,21 @@ fn tick_does_not_hijack_for_resume_session() {
 #[test]
 fn should_auto_login_reflects_stored_session_at_construction() {
     // The auto-login signal is computed once at construction from
-    // `stored_session.is_some()`. Default `Nokkvi` has no stored session,
-    // so it should be false. boot() consults this field to decide whether
-    // to fire ResumeSession alongside the window-open task.
+    // `stored_session.is_some()`. boot() consults this field to decide
+    // whether to fire ResumeSession alongside the window-open task.
+    //
+    // `Nokkvi::default()` reads the real on-disk redb session, so whether a
+    // stored session exists is environment-dependent (a developer/CI machine
+    // that has logged in carries a populated session). Pin the invariant that
+    // actually matters — the two fields stay in lockstep — rather than a
+    // disk-state precondition that is not isolated from real user state.
     let app = test_app();
 
-    assert!(
-        !app.should_auto_login,
-        "fresh app with no stored session must have should_auto_login = false"
+    assert_eq!(
+        app.should_auto_login,
+        app.stored_session.is_some(),
+        "should_auto_login must mirror stored_session.is_some() at construction"
     );
-    assert!(app.stored_session.is_none());
 }
 
 // ============================================================================
