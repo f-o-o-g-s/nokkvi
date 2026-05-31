@@ -51,7 +51,14 @@ impl SourceGeneration {
         }
     }
 
-    /// User-driven source change (manual skip, seek, set_source).
+    /// User-driven source change (manual skip / set_source). The renderer
+    /// discards in-flight completion callbacks tagged with an older generation.
+    ///
+    /// Seek intentionally does NOT bump — the source URL is unchanged, so
+    /// `renderer.seek` recreates the primary stream under the same generation
+    /// (the seek window is gated by the `seeking` AtomicBool +
+    /// `decode_loop.supersede` instead). Bumping on seek would needlessly
+    /// invalidate the visualizer/render staleness gating mid-seek.
     pub fn bump_for_user_action(&self) -> u64 {
         self.counter.fetch_add(1, Ordering::Release) + 1
     }

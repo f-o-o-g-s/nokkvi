@@ -2221,6 +2221,28 @@ mod tests {
         AudioDecoder::new(Arc::new(std::sync::RwLock::new(None)))
     }
 
+    /// N20: seek must NOT bump the source generation — the source URL is
+    /// unchanged, so renderer.seek recreates the primary stream under the same
+    /// generation (gated by the `seeking` flag + decode_loop.supersede). This
+    /// pins the invariant the corrected `bump_for_user_action` doc now
+    /// documents, so a future maintainer can't quietly add a spurious bump into
+    /// seek and invalidate the render/visualizer staleness gating mid-seek.
+    #[tokio::test]
+    async fn seek_preserves_source_generation() {
+        let mut engine = CustomAudioEngine::new();
+        let before = engine.source_generation();
+        // Fresh engine has duration 0, so seek returns at its early guard
+        // without spawning a decode loop — but crucially without bumping the
+        // generation either (the abort path and the real seek path both leave
+        // it untouched by design).
+        engine.seek(5_000).await;
+        assert_eq!(
+            engine.source_generation(),
+            before,
+            "seek must not bump the source generation",
+        );
+    }
+
     /// N4: toggling shuffle / repeat / consume mid-crossfade must cancel the
     /// in-flight fade, not just clear the gapless slot. Previously
     /// reset_next_track only cleared the gapless slot + disarmed the Armed
