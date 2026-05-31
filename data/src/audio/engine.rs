@@ -1480,6 +1480,31 @@ impl CustomAudioEngine {
         renderer.disarm_crossfade();
     }
 
+    /// Recover from a crossfade whose incoming stream stalled at completion.
+    ///
+    /// Driven by the renderer's `on_renderer_crossfade_stalled` path (the fade
+    /// reached 100% wall-clock progress but the incoming ring is empty, so the
+    /// incoming decoder never produced audio). Rather than promoting the silent
+    /// decoder — which would fade the audible outgoing track into silence — this
+    /// cancels the crossfade (restoring the outgoing stream as primary at full
+    /// volume and clearing the incoming decoder), bumps the source generation so
+    /// any late callbacks from the abandoned incoming source are discarded by
+    /// the renderer's staleness gate, then runs the normal end-of-track
+    /// transition so the bad track is skipped via the standard prepared/next
+    /// path. No decoder is created while a lock is held (cancel only clears).
+    pub async fn recover_stalled_crossfade(&mut self) {
+        if self.crossfade_phase.is_idle() {
+            return;
+        }
+        warn!("🔀 [CROSSFADE] Incoming stalled at completion — restoring outgoing and skipping");
+        self.cancel_crossfade().await;
+        // The abandoned incoming source is being thrown away; invalidate any of
+        // its in-flight completion callbacks.
+        self.source_generation.bump_for_user_action();
+        // Skip the stalled track via the standard end-of-track machinery.
+        self.on_decoder_finished().await;
+    }
+
     /// Finalize crossfade: promote the incoming track to become the current track.
     /// Called when the renderer finishes mixing (crossfade progress reaches 1.0)
     /// or when the outgoing decoder's buffers are fully consumed.
