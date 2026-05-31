@@ -300,23 +300,30 @@ impl PlaylistsApiService {
         Ok(playlist_id)
     }
 
-    /// Update a playlist's name, optional comment, and visibility.
+    /// Update a playlist's metadata, sending ONLY the dirty fields.
     ///
-    /// `public` is always sent on the wire so non-owner edits surface as a 403
-    /// rather than silently flipping visibility from a partial-update default.
+    /// Navidrome's native API follows a nil-means-leave-unchanged contract
+    /// (see navidrome `playlists.go`): an absent key leaves that field as-is.
+    /// Each of `name` / `comment` / `public` is therefore put on the wire only
+    /// when `Some`, so a comment-only edit no longer re-writes the name and no
+    /// longer replays a stale `public` flag (which could silently revert a
+    /// concurrent visibility change).
+    ///
+    /// NOTE: the historical "always send `public`" behavior — kept as a 403
+    /// probe so a non-owner edit surfaces an error rather than silently
+    /// succeeding — is retained ONLY for the rename path
+    /// (`update/text_input_dialog.rs`), which has no public-dirty concept and
+    /// passes `public: Some(current_public)` deliberately.
     ///
     /// Uses Navidrome native API: PUT /api/playlist/:id
     pub async fn update_playlist(
         &self,
         playlist_id: &str,
-        name: &str,
+        name: Option<&str>,
         comment: Option<&str>,
-        public: bool,
+        public: Option<bool>,
     ) -> Result<()> {
-        let body = match comment {
-            Some(c) => serde_json::json!({ "name": name, "comment": c, "public": public }),
-            None => serde_json::json!({ "name": name, "public": public }),
-        };
+        let body = build_update_playlist_body(name, comment, public);
         self.client
             .put_json(&format!("/api/playlist/{playlist_id}"), &body)
             .await?;
@@ -372,6 +379,30 @@ impl PlaylistsApiService {
         )
         .await
     }
+}
+
+/// Build the PUT body for `update_playlist`, inserting each metadata key only
+/// when it is dirty (`Some`).
+///
+/// An omitted (`None`) field is left out of the JSON object entirely so
+/// Navidrome leaves it unchanged — never emitted as a `null`, which Navidrome
+/// would treat differently from an absent key.
+fn build_update_playlist_body(
+    name: Option<&str>,
+    comment: Option<&str>,
+    public: Option<bool>,
+) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    if let Some(name) = name {
+        map.insert("name".to_string(), serde_json::Value::from(name));
+    }
+    if let Some(comment) = comment {
+        map.insert("comment".to_string(), serde_json::Value::from(comment));
+    }
+    if let Some(public) = public {
+        map.insert("public".to_string(), serde_json::Value::from(public));
+    }
+    serde_json::Value::Object(map)
 }
 
 /// Parse a single Subsonic `getPlaylist` entry into a `Song`.
@@ -517,5 +548,58 @@ mod tests {
             .expect("producer participants must be present");
         assert_eq!(producers.len(), 1);
         assert_eq!(producers[0].name, "Nigel Godrich");
+    }
+
+    // ---- update_playlist body: send only dirty fields (N21) ----
+
+    #[test]
+    fn build_body_omits_clean_fields() {
+        // A comment-only edit must put ONLY the comment on the wire — no `name`
+        // (so a clean name is not re-written) and no `public` (so a concurrent
+        // visibility change is not silently reverted).
+        let body = build_update_playlist_body(None, Some("c"), None);
+        assert!(
+            body.get("name").is_none(),
+            "a clean name must be omitted entirely"
+        );
+        assert!(
+            body.get("public").is_none(),
+            "a clean public flag must be omitted entirely (no silent revert)"
+        );
+        assert_eq!(body["comment"], "c", "the dirty comment must be present");
+    }
+
+    #[test]
+    fn build_body_includes_dirty_public() {
+        // When the public flag is dirty it must be emitted with its value.
+        let body = build_update_playlist_body(None, None, Some(false));
+        assert_eq!(
+            body.get("public"),
+            Some(&json!(false)),
+            "a dirty public flag must be emitted with its (false) value"
+        );
+        assert!(body.get("name").is_none());
+        assert!(body.get("comment").is_none());
+    }
+
+    #[test]
+    fn build_body_never_emits_null_for_omitted_field() {
+        // An omitted field must be ABSENT, never present-as-null — Navidrome
+        // treats a present null differently from an absent key.
+        let body = build_update_playlist_body(Some("n"), None, None);
+        let obj = body.as_object().expect("body must be a JSON object");
+        assert_eq!(obj.len(), 1, "only the single dirty field may be present");
+        assert!(
+            obj.values().all(|v| !v.is_null()),
+            "no field may be emitted as a JSON null"
+        );
+    }
+
+    #[test]
+    fn build_body_includes_all_when_all_dirty() {
+        let body = build_update_playlist_body(Some("n"), Some("c"), Some(true));
+        assert_eq!(body["name"], "n");
+        assert_eq!(body["comment"], "c");
+        assert_eq!(body["public"], json!(true));
     }
 }

@@ -273,15 +273,18 @@ impl Nokkvi {
         self.shell_action_task(
             move |shell| async move {
                 let service = shell.playlists_api().await?;
-                // Update name/comment/visibility if any of them changed
+                // Update name/comment/visibility if any of them changed. Send
+                // ONLY the dirty fields (Navidrome's nil-means-unchanged
+                // contract): a comment-only edit no longer re-writes the name,
+                // and an unchanged `public` flag is never replayed — so a
+                // concurrent server-side visibility change is not silently
+                // reverted.
                 if metadata_changed {
-                    let comment_arg = if comment_changed {
-                        Some(playlist_comment.as_str())
-                    } else {
-                        None
-                    };
+                    let name_arg = name_changed.then_some(playlist_name.as_str());
+                    let comment_arg = comment_changed.then_some(playlist_comment.as_str());
+                    let public_arg = public_changed.then_some(playlist_public);
                     service
-                        .update_playlist(&playlist_id, &playlist_name, comment_arg, playlist_public)
+                        .update_playlist(&playlist_id, name_arg, comment_arg, public_arg)
                         .await?;
                 }
                 service

@@ -85,6 +85,12 @@ impl Nokkvi {
                 // Look up the playlist's current visibility so rename round-trips
                 // it unchanged. Falling back to `true` matches the default-public
                 // policy when the cache hasn't loaded yet.
+                //
+                // Rename deliberately RE-SENDS `public` (the 403-probe behavior):
+                // the rename path has no public-dirty concept, so always sending
+                // the current visibility surfaces a non-owner edit as a 403 rather
+                // than silently succeeding. The editor save path (N21) drops this
+                // probe and sends `public` only when the user changed it.
                 let current_public = self
                     .library
                     .playlists
@@ -97,7 +103,7 @@ impl Nokkvi {
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
                         service
-                            .update_playlist(&playlist_id, &name, None, current_public)
+                            .update_playlist(&playlist_id, Some(&name), None, Some(current_public))
                             .await
                     },
                     Message::PlaylistMutated(PlaylistMutation::Renamed(value)),

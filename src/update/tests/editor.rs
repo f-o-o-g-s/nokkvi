@@ -241,6 +241,37 @@ fn editor_comment_changed_marks_comment_dirty() {
 }
 
 #[test]
+fn comment_only_edit_leaves_name_and_public_clean() {
+    // N21: a comment-only edit must NOT mark name or public dirty — proving the
+    // save path will omit them from the wire (so it cannot re-write the name or
+    // silently revert a concurrent visibility change). Observable PlaylistEditState.
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::CommentChanged(
+        "Updated comment".into(),
+    )));
+
+    let edit = &app
+        .playlist_editor
+        .as_ref()
+        .expect("editor session present")
+        .edit;
+    assert!(
+        edit.is_comment_dirty(),
+        "the comment edit must dirty the comment"
+    );
+    assert!(
+        !edit.is_name_dirty(),
+        "a comment-only edit must leave the name clean (save omits it)"
+    );
+    assert!(
+        !edit.is_public_dirty(),
+        "a comment-only edit must leave public clean (save omits it — no silent revert)"
+    );
+}
+
+#[test]
 fn editor_public_toggled_marks_public_dirty() {
     let mut app = test_app();
     seeded_editor(&mut app);
