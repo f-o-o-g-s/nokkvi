@@ -3,8 +3,9 @@
 //! Uses `toml_edit` to preserve comments, formatting, and ordering when
 //! modifying a single key. Writes route through
 //! `nokkvi_data::utils::paths::write_atomic`, which performs an atomic
-//! temp + rename and bumps `LAST_INTERNAL_WRITE` so the config-watcher
-//! suppresses the self-inflicted reload event.
+//! temp + rename and records the `(path, content-hash)` in the internal-write
+//! registry so the config-watcher identity-matches and suppresses the
+//! self-inflicted reload event.
 
 use anyhow::{Context, Result};
 use nokkvi_data::utils::paths::write_atomic;

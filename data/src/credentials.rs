@@ -266,13 +266,13 @@ mod tests {
     /// `save_credentials` itself resolves the config path via `BaseDirs` and
     /// is not test-overridable, but the load-bearing behavior is the
     /// `write_atomic` call — exercising the same template through the same
-    /// helper against a temp path proves the LAST_INTERNAL_WRITE bump fires
-    /// on the production code path. If the helper is silently swapped for a
-    /// non-suppressing `std::fs::write`, this assertion catches it.
+    /// helper against a temp path proves the internal-write registry records
+    /// the (path, content-hash) on the production code path. If the helper is
+    /// silently swapped for a non-suppressing `std::fs::write`, this assertion
+    /// catches it.
     #[test]
-    fn save_credentials_template_bumps_internal_write() {
+    fn save_credentials_template_records_internal_write() {
         let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();
-        use std::sync::atomic::Ordering;
 
         use toml_edit::{DocumentMut, value};
 
@@ -290,17 +290,15 @@ mod tests {
              # Session tokens are managed by the application in app.redb.\n\n{doc}"
         );
 
-        let before = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
-        // Coarse-clock systems would otherwise produce equal before/after.
-        std::thread::sleep(std::time::Duration::from_millis(2));
-
         crate::utils::paths::write_atomic(&path, &output).unwrap();
 
-        let after = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
         assert!(
-            after > before,
-            "save_credentials must route through write_atomic to bump \
-             LAST_INTERNAL_WRITE; before={before} after={after}"
+            crate::utils::paths::was_internal_write(
+                &path,
+                crate::utils::paths::hash_config_bytes(output.as_bytes())
+            ),
+            "save_credentials must route through write_atomic so the watcher \
+             can identity-match its own write"
         );
 
         // Sanity: the file actually landed with the production template.
