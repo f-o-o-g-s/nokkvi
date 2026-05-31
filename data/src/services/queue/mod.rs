@@ -737,6 +737,15 @@ impl QueueManager {
         }
 
         let mut tx = self.write();
+        // Under shuffle, snapshot the play-order as stable entry_ids BEFORE
+        // the physical move so the upcoming random order can be reproduced
+        // afterward — a move must not re-randomize next-up.
+        let play_order_eids = if tx.queue.shuffle {
+            Some(tx.capture_play_order_entry_ids())
+        } else {
+            None
+        };
+
         let item = tx.queue.song_ids.remove(from);
         let insert_at = if from < to { to - 1 } else { to };
         tx.queue.song_ids.insert(insert_at, item);
@@ -761,10 +770,13 @@ impl QueueManager {
             });
         }
 
-        // Rebuild order after move (indices changed)
-        tx.rebuild_order_and_sync();
-        if tx.queue.shuffle {
-            tx.shuffle_order();
+        // Rebuild order after move (indices changed). Under shuffle, splice
+        // the moved row inside the existing order instead of reshuffling the
+        // whole tail so the user's manual move sticks and next-up stays
+        // deterministic.
+        match play_order_eids {
+            Some(eids) => tx.rebuild_order_from_play_sequence(&eids),
+            None => tx.rebuild_order_and_sync(),
         }
         debug!(
             "📦 [QUEUE] Moved item from {} to {} (inserted at {})",
@@ -829,6 +841,15 @@ impl QueueManager {
 
         let mut tx = self.write();
 
+        // Under shuffle, snapshot the play-order as stable entry_ids BEFORE
+        // the physical reorder so the upcoming random order can be reproduced
+        // afterward (mirrors `move_item`).
+        let play_order_eids = if tx.queue.shuffle {
+            Some(tx.capture_play_order_entry_ids())
+        } else {
+            None
+        };
+
         // Remove rows in descending order so surviving indices stay valid.
         let mut descending: Vec<usize> = to_move.iter().map(|&(i, _, _)| i).collect();
         descending.sort_unstable_by(|a, b| b.cmp(a));
@@ -856,11 +877,12 @@ impl QueueManager {
         tx.queue.current_index =
             current_entry_id.and_then(|eid| tx.entry_ids.iter().position(|&id| id == eid));
 
-        // Order array depends on the physical positions — full rebuild,
-        // then re-shuffle if shuffle is on. Mirrors `sort_queue`.
-        tx.rebuild_order_and_sync();
-        if tx.queue.shuffle {
-            tx.shuffle_order();
+        // Order array depends on the physical positions. Under shuffle,
+        // splice the moved rows inside the existing order (preserving the
+        // random tail) instead of reshuffling; otherwise rebuild identity.
+        match play_order_eids {
+            Some(eids) => tx.rebuild_order_from_play_sequence(&eids),
+            None => tx.rebuild_order_and_sync(),
         }
 
         debug!(
@@ -1315,6 +1337,107 @@ pub(crate) mod tests {
 
         let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
         assert_eq!(ids, vec!["s0", "s1", "s2", "s3", "s4"]);
+    }
+
+    // ── N7: shuffle-aware move preserves upcoming play order ──
+
+    #[test]
+    fn move_item_under_shuffle_preserves_upcoming_order() {
+        let songs: Vec<Song> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|s| make_test_song(s))
+            .collect();
+        let (mut qm, _t) = make_test_manager(songs, Some(0));
+        let _ = qm.toggle_shuffle().unwrap();
+
+        // The play-order sequence of stable row identities before the move.
+        let before_play_eids = qm.capture_play_order_entry_ids();
+        let before_order = qm.queue.order.clone();
+
+        // Move a non-current physical row.
+        let _ = qm.move_item(3, 1).unwrap();
+
+        // The play-order is the SAME multiset of row indices (a permutation).
+        let mut sorted_before = before_order.clone();
+        let mut sorted_after = qm.queue.order.clone();
+        sorted_before.sort();
+        sorted_after.sort();
+        assert_eq!(sorted_before, sorted_after, "order must stay a permutation");
+
+        // The entire play-order sequence of rows is preserved (tail NOT
+        // re-randomized) — each row, moved or not, keeps its play position.
+        let after_play_eids = qm.capture_play_order_entry_ids();
+        assert_eq!(
+            after_play_eids, before_play_eids,
+            "a move under shuffle must not re-randomize the upcoming order",
+        );
+
+        // next-up is deterministic across a repeated identical move sequence.
+        let next1 = qm.queue.order.get(qm.queue.current_order.unwrap() + 1).copied();
+        let songs2: Vec<Song> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|s| make_test_song(s))
+            .collect();
+        let (mut qm2, _t2) = make_test_manager(songs2, Some(0));
+        qm2.queue.shuffle = true;
+        // Force qm2 to the same initial shuffled order as qm BEFORE its move,
+        // then apply the identical move.
+        qm2.queue.order = before_order.clone();
+        qm2.sync_current_order_to_index();
+        let _ = qm2.move_item(3, 1).unwrap();
+        let next2 = qm2.queue.order.get(qm2.queue.current_order.unwrap() + 1).copied();
+        assert_eq!(next1, next2, "identical move on identical order is deterministic");
+    }
+
+    #[test]
+    fn move_batch_under_shuffle_preserves_upcoming_order() {
+        let songs: Vec<Song> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|s| make_test_song(s))
+            .collect();
+        let (mut qm, _t) = make_test_manager(songs, Some(0));
+        let _ = qm.toggle_shuffle().unwrap();
+        let eids = qm.entry_ids().to_vec();
+
+        let before_play_eids = qm.capture_play_order_entry_ids();
+        let before_order = qm.queue.order.clone();
+
+        // Move two non-current rows to the end.
+        let _ = qm
+            .move_batch_by_entry_ids(&[eids[3], eids[4]], MoveBatchTarget::End)
+            .unwrap();
+
+        // Still a valid permutation.
+        let mut sorted_before = before_order.clone();
+        let mut sorted_after = qm.queue.order.clone();
+        sorted_before.sort();
+        sorted_after.sort();
+        assert_eq!(sorted_before, sorted_after);
+
+        // Play-order of rows fully preserved (no tail re-randomization).
+        assert_eq!(qm.capture_play_order_entry_ids(), before_play_eids);
+    }
+
+    /// The current song must stay anchored at play-order position 0 through a
+    /// shuffle-aware move (shuffle invariant: current at order[0]).
+    #[test]
+    fn move_item_under_shuffle_keeps_current_anchored() {
+        let songs: Vec<Song> = (0..6).map(|i| make_test_song(&i.to_string())).collect();
+        let (mut qm, _t) = make_test_manager(songs, Some(2));
+        let _ = qm.toggle_shuffle().unwrap();
+        // After toggle_shuffle, current is anchored at order[0].
+        assert_eq!(qm.queue.current_order, Some(0));
+
+        let _ = qm.move_item(4, 1).unwrap();
+
+        assert_eq!(
+            qm.queue.current_order,
+            Some(0),
+            "current must remain anchored at the head of the play order",
+        );
+        // current_index still resolves the same song.
+        let ci = qm.queue.current_index.unwrap();
+        assert_eq!(qm.queue.order[qm.queue.current_order.unwrap()], ci);
     }
 
     // remove_song current_index tracking tests
