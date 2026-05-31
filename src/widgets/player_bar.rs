@@ -569,23 +569,34 @@ fn mode_text_toggle(
 
 /// Build a flat icon-based mode toggle (repeat / shuffle / consume / crossfade
 /// / visualizer). 38×44 in flat mode, 40×44 in rounded mode.
+///
+/// When `enabled` is false the button renders inert: the icon dims to the
+/// disabled foreground and no `on_press` is attached, so the control is
+/// honestly non-interactive. Used to gate the queue-flow trio (Shuffle /
+/// Repeat / Consume) during radio playback, where they would otherwise mutate
+/// the dormant library queue with no audible effect.
 fn mode_toggle_button<'a>(
     icon_path: &'static str,
     message: PlayerBarMessage,
     active: bool,
     label: &'a str,
+    enabled: bool,
 ) -> Element<'a, PlayerBarMessage> {
-    let icon_color = if active {
+    let icon_color = if !enabled {
+        theme::fg4()
+    } else if active {
         theme::bg0_hard()
     } else {
         theme::fg0()
     };
     let icon = svg_icon(icon_path, 18.0, icon_color);
     let inner = fixed_centered(icon.into(), mode_button_width(), MODE_BUTTON_HEIGHT);
-    let btn = button(inner)
+    let mut btn = button(inner)
         .padding(0)
-        .style(mode_toggle_style(active))
-        .on_press(message);
+        .style(mode_toggle_style(active && enabled));
+    if enabled {
+        btn = btn.on_press(message);
+    }
     HoverOverlay::new(
         tooltip(
             btn,
@@ -1026,12 +1037,16 @@ pub(crate) fn player_bar<'a>(
     // here only when it's NOT in the kebab. SFX has the additional gate of
     // `sound_effects_enabled` (preserves the long-standing "no SFX button
     // when SFX is off" behavior at wide widths).
+    // Queue-flow mode toggles are inert during radio (no queue to act on).
+    // The audio-output modes (crossfade / EQ / visualizer / SFX) stay live.
+    let mode_controls_enabled = !data.is_radio;
     if !repeat_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             repeat_icon,
             PlayerBarMessage::ToggleRepeat,
             repeat_active,
             repeat_tooltip,
+            mode_controls_enabled,
         ));
     }
     if !shuffle_in_kebab {
@@ -1040,6 +1055,7 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ToggleRandom,
             is_random_mode,
             shuffle_tooltip,
+            mode_controls_enabled,
         ));
     }
     if !consume_in_kebab {
@@ -1048,6 +1064,7 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ToggleConsume,
             is_consume_mode,
             consume_tooltip,
+            mode_controls_enabled,
         ));
     }
     if !eq_in_kebab {
@@ -1075,6 +1092,7 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ToggleCrossfade,
             data.crossfade_enabled,
             crossfade_tooltip,
+            true,
         ));
     }
     if !visualizer_in_kebab {
@@ -1083,6 +1101,7 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::CycleVisualization,
             vis_active,
             visualizer_tooltip,
+            true,
         ));
     }
 
