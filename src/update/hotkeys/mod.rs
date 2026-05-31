@@ -477,6 +477,13 @@ impl Nokkvi {
             ));
         }
 
+        // Escape always reaches the dispatcher: it closes overlays / clears
+        // search. Hoisted so both guard blocks below can read it.
+        let is_escape = matches!(
+            key,
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+        );
+
         // When a widget (e.g. text_input search bar) has captured the
         // key event, suppress hotkey dispatch to avoid triggering actions
         // while the user is typing. Exceptions:
@@ -489,10 +496,6 @@ impl Nokkvi {
         //     must stay suppressed, otherwise e.g. a capital D fires
         //     ClearQueue (destructive) mid-edit.
         if status == iced::event::Status::Captured {
-            let is_escape = matches!(
-                key,
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
-            );
             let is_tab = matches!(
                 key,
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
@@ -500,16 +503,50 @@ impl Nokkvi {
             let is_shift_nav = modifiers.shift()
                 && matches!(
                     key,
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
-                        | iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace)
+                    iced::keyboard::Key::Named(
+                        iced::keyboard::key::Named::Tab | iced::keyboard::key::Named::Backspace
+                    )
                 );
             if !is_escape && !is_tab && !modifiers.control() && !is_shift_nav {
                 return Task::none();
             }
         }
 
-        // Look up the key event against the user's hotkey config
-        match crate::hotkeys::handle_hotkey(key, modifiers, &self.hotkey_config) {
+        // Look up the key event against the user's hotkey config once — reused
+        // by the modal-open guard below and the final dispatch.
+        let resolved = crate::hotkeys::handle_hotkey(key, modifiers, &self.hotkey_config);
+
+        // Modal-open suppression: the EQ / Info / About modals and the
+        // default-playlist picker are mouse-opaque but not keyboard-capturing
+        // and host no focused text_input, so bare-key hotkeys arrive
+        // Status::Ignored and would otherwise drive the obscured view (e.g.
+        // Space toggling playback behind an open EQ modal). When any blocking
+        // modal is open, only Escape passes (it closes the modal via the
+        // existing ClearSearch cascade). The picker additionally lets its own
+        // slot-list nav keys through — slot_list.rs already routes those to the
+        // picker when it is open.
+        if self.eq_modal.open
+            || self.about_modal.visible
+            || self.info_modal.visible
+            || self.text_input_dialog.visible
+            || self.default_playlist_picker.is_some()
+        {
+            let is_picker_nav = self.default_playlist_picker.is_some()
+                && matches!(
+                    resolved,
+                    Some(Message::SlotList(
+                        crate::app_message::SlotListMessage::NavigateUp
+                            | crate::app_message::SlotListMessage::NavigateDown
+                            | crate::app_message::SlotListMessage::ActivateCenter
+                    ))
+                );
+            if !is_escape && !is_picker_nav {
+                return Task::none();
+            }
+        }
+
+        // Dispatch the resolved hotkey (Escape + allowed picker nav fall here).
+        match resolved {
             Some(msg) => self.update(msg),
             None => Task::none(),
         }

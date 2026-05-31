@@ -316,6 +316,199 @@ fn shift_tab_not_suppressed_when_captured() {
 }
 
 // ============================================================================
+// Modal-open suppression on the Ignored path (N8 + N9)
+// ============================================================================
+//
+// EQ / Info / About modals (and the default-playlist picker) are mouse-opaque
+// but not keyboard-capturing and host no focused text_input, so bare-key
+// hotkeys arrive Status::Ignored and leaked through to the obscured view.
+// One modal-open guard now suppresses non-Escape keys when any blocking modal
+// is open. The picker additionally lets its own slot-nav keys through.
+
+#[test]
+fn bare_key_suppressed_when_eq_modal_open() {
+    // 'x' = ToggleRandom (mutates modes.random synchronously). With the EQ
+    // modal open it must be swallowed.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.eq_modal.open = true;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the EQ modal is open"
+    );
+}
+
+#[test]
+fn bare_key_suppressed_when_info_modal_open() {
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.info_modal.visible = true;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the Info modal is open"
+    );
+}
+
+#[test]
+fn bare_key_suppressed_when_about_modal_open() {
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.about_modal.visible = true;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the About modal is open"
+    );
+}
+
+#[test]
+fn escape_closes_eq_modal_on_ignored_path() {
+    // Escape must still flow through the guard to close the modal.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.eq_modal.open = true;
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.eq_modal.open,
+        "Escape must still close the EQ modal on the Ignored path"
+    );
+}
+
+#[test]
+fn bare_key_fires_when_no_modal_open() {
+    // Regression guard: single-pane behavior is byte-identical when no modal
+    // is open — ToggleRandom fires.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        app.modes.random,
+        "ToggleRandom must fire normally when no modal is open"
+    );
+}
+
+#[test]
+fn bare_key_suppressed_when_picker_open() {
+    // The default-playlist picker is modal — 'x' (ToggleRandom) must not leak
+    // to the underlying view while it is open.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    app.default_playlist_picker =
+        Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[]));
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom must be suppressed while the default-playlist picker is open"
+    );
+}
+
+#[test]
+fn picker_nav_key_passes_through_when_picker_open() {
+    // Tab (default SlotListDown) must reach the picker route, not be globally
+    // suppressed. The picker's slot_list.rs routing moves its selection; the
+    // observable here is that the key was NOT suppressed — modes/view stay
+    // unchanged (it did not fall through to the underlying view either).
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    // Seed the picker with a playlist so its filtered list has a "Clear" entry
+    // plus a row — enough for SlotListDown to advance the offset.
+    let playlist = nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: "p1".to_string(),
+        name: "One".to_string(),
+        comment: String::new(),
+        duration: 0.0,
+        song_count: 0,
+        owner_name: String::new(),
+        public: false,
+        updated_at: String::new(),
+        artwork_album_ids: Vec::new(),
+        searchable_lower: String::new(),
+    };
+    app.default_playlist_picker =
+        Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[playlist]));
+    let before = app
+        .default_playlist_picker
+        .as_ref()
+        .map(|p| p.slot_list.viewport_offset);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    let after = app
+        .default_playlist_picker
+        .as_ref()
+        .map(|p| p.slot_list.viewport_offset);
+    assert_ne!(
+        before, after,
+        "Tab (SlotListDown) must reach the picker's nav route, not be suppressed"
+    );
+    assert!(
+        !app.modes.random,
+        "Tab must not fall through to the underlying view"
+    );
+}
+
+// ============================================================================
 // Light Mode Persistence (mod.rs)
 // ============================================================================
 
