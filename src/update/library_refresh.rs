@@ -16,6 +16,20 @@ use crate::{
 
 impl Nokkvi {
     pub(crate) fn handle_library_changed(&mut self, change: LibraryChange) -> Task<Message> {
+        // Skip the reload while the user is mid-gesture: a server-pushed
+        // refreshResource arriving during a playlist edit or cross-pane drag
+        // would reset scroll / selection / viewport under the in-progress
+        // interaction. The edit buffer and drag snapshot are decoupled state
+        // that survive, so the next post-gesture SSE event (or the manual
+        // Refresh button) reconciles the library. Placed before the toast
+        // below so no misleading "Library refreshed" message fires either.
+        if self.playlist_editor.is_some() || self.cross_pane_drag.is_some() {
+            tracing::debug!(
+                " [SSE] LibraryChanged received during active edit/drag; skipping reload"
+            );
+            return Task::none();
+        }
+
         let LibraryChange {
             album_ids,
             artist_ids,
