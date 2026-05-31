@@ -117,14 +117,44 @@ pub(super) fn should_refetch(
     versions.get(id) != Some(updated_at)
 }
 
+/// The album-coherent version that the PASSIVE 80px-thumbnail surfaces (queue,
+/// song-mini, similar, playlist editor) feed into the album_id-keyed
+/// [`should_refetch`] gate.
+///
+/// Those rows only carry a PER-SONG `updated_at` (`Song.updated_at`, a
+/// per-mediafile timestamp) — not an album cover version. Feeding that per-song
+/// value into the album_id-keyed `album_art_versions` map makes the recorded
+/// version oscillate across a single album's tracks, so the gate keeps missing
+/// and re-puts identical bytes (a fresh `Handle::from_bytes` texture → flicker).
+///
+/// Returning a constant `None` makes the recorded version album-coherent: every
+/// track of one album maps to the same value, so once an album slot is warm the
+/// gate stays warm (until `album_art` evicts, where the membership branch still
+/// forces a correct re-warm). The argument is taken (and ignored) so the call
+/// sites read as "we deliberately drop the per-song timestamp here".
+///
+/// N17 (server cover-change invalidation) is retained on the Albums view and
+/// the Artists/Genres expansion paths, which pass the album-coherent
+/// `album.updated_at` directly and do not route through this helper.
+pub(super) fn passive_artwork_version(_per_song_updated_at: &Option<String>) -> Option<String> {
+    None
+}
+
 /// Generate artwork prefetch tasks for a slot list viewport.
 ///
 /// This is the single authoritative implementation of artwork prefetching.
 /// All slot-list-based views should use this instead of inline loops.
 ///
-/// The `extract_id_url` closure returns `(album_id, updated_at, url)`: the
-/// `updated_at` feeds the version-aware [`should_refetch`] gate so a changed
+/// The `extract_id_url` closure returns `(album_id, version, url)`: the
+/// `version` feeds the version-aware [`should_refetch`] gate so a changed
 /// server cover re-fetches even when the bare id is already cached (N17).
+///
+/// The album-coherent surfaces (Albums view, Artists/Genres expansion) pass the
+/// album's `updated_at` here, keeping live cover invalidation. The PASSIVE
+/// surfaces (queue, playlist editor) only carry a per-song `updated_at`, which
+/// would oscillate this album_id-keyed gate; they pass
+/// [`passive_artwork_version`] (a constant `None`) instead, so they use id-only
+/// dedup and re-warm the current cover on the next cold load.
 pub(super) fn prefetch_album_artwork_tasks<F, T>(
     slot_list: &SlotListView,
     items: &[T],
@@ -179,10 +209,17 @@ where
 /// Variant of `prefetch_album_artwork_tasks` for songs that have
 /// `Option<album_id>`. Generic over the slice element type — Songs page
 /// passes `SongUIViewData`, Similar page passes raw `Song`. The
-/// `extract_album_id` closure returns `(album_id, updated_at)` so the song
-/// mini path participates in version-aware dedup (N17): the `updated_at`
-/// busts both the dedup gate and the fetch URL.
-/// Dispatches `Message::Artwork(ArtworkMessage::SongMiniLoaded)`.
+/// `extract_album_id` closure returns `(album_id, version)`, where `version`
+/// feeds both the dedup gate and the fetch URL's `_u=` cache-buster.
+///
+/// These are PASSIVE song-mini surfaces (Songs page, Similar page): their rows
+/// carry only a per-song `updated_at`, which would oscillate the album_id-keyed
+/// gate, so they pass [`passive_artwork_version`] (a constant `None`) for the
+/// version. Id-only dedup is used here; the current cover is re-warmed on the
+/// next cold load. A `None` version also yields the documented empty-`_u=` URL
+/// shape, which still returns the current cover (there is no client-side
+/// artwork response cache). Dispatches
+/// `Message::Artwork(ArtworkMessage::SongMiniLoaded)`.
 pub(super) fn prefetch_song_artwork_tasks<T, F>(
     slot_list: &SlotListView,
     songs: &[T],

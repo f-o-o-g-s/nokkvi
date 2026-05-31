@@ -37,9 +37,12 @@ pub struct QueueSongUIViewData {
     pub album: String,
     pub album_id: String,
     pub artwork_url: String,
-    /// Album `updated_at` cache-buster, carried so the queue mini-thumbnail
-    /// prefetch participates in version-aware dedup (N17): a changed cover is a
-    /// genuine miss instead of being blocked by the id-only cache check.
+    /// Per-song `updated_at` (Subsonic per-mediafile timestamp), copied from
+    /// `Song.updated_at`. It is NOT an album cover version. The passive queue
+    /// mini-thumbnail prefetch deliberately discards it for the album_id-keyed
+    /// dedup gate — a per-song value oscillates across one album's tracks and
+    /// re-fetches every tick — so the UI feeds a constant `None` there instead
+    /// (`update::components::passive_artwork_version`).
     pub updated_at: Option<String>,
     pub duration: String,
     pub duration_seconds: u32, // For sorting

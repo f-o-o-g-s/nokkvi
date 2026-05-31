@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use iced::Task;
 use nokkvi_data::backend::queue::QueueSongUIViewData;
 
-use super::components::prefetch_album_artwork_tasks;
+use super::components::{passive_artwork_version, prefetch_album_artwork_tasks};
 use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, EditorMessage, Message},
@@ -342,7 +342,7 @@ impl Nokkvi {
             |song| {
                 (
                     song.album_id.clone(),
-                    song.updated_at.clone(),
+                    passive_artwork_version(&song.updated_at),
                     song.artwork_url.clone(),
                 )
             },

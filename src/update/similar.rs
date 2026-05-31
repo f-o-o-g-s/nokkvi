@@ -67,7 +67,16 @@ impl Nokkvi {
                             &cached,
                             &self.artwork.album_art_versions,
                             shell.albums().clone(),
-                            |s| s.album_id.as_ref().map(|id| (id, s.updated_at.clone())),
+                            |s| {
+                                s.album_id.as_ref().map(|id| {
+                                    (
+                                        id,
+                                        crate::update::components::passive_artwork_version(
+                                            &s.updated_at,
+                                        ),
+                                    )
+                                })
+                            },
                         );
                         tasks.extend(prefetch_tasks);
                     }
@@ -255,7 +264,16 @@ impl Nokkvi {
                             &cached,
                             &self.artwork.album_art_versions,
                             shell.albums().clone(),
-                            |s| s.album_id.as_ref().map(|id| (id, s.updated_at.clone())),
+                            |s| {
+                                s.album_id.as_ref().map(|id| {
+                                    (
+                                        id,
+                                        crate::update::components::passive_artwork_version(
+                                            &s.updated_at,
+                                        ),
+                                    )
+                                })
+                            },
                         );
                         tasks.extend(prefetch_tasks);
                     }

@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use iced::Task;
 use nokkvi_data::{audio, utils::artwork_url::THUMBNAIL_SIZE};
 
-use super::components::{prefetch_album_artwork_tasks, prefetch_song_artwork_tasks};
+use super::components::{
+    passive_artwork_version, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+};
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
@@ -127,7 +129,7 @@ impl Nokkvi {
                     |song| {
                         (
                             song.album_id.clone(),
-                            song.updated_at.clone(),
+                            passive_artwork_version(&song.updated_at),
                             song.artwork_url.clone(),
                         )
                     },
@@ -147,7 +149,11 @@ impl Nokkvi {
                     &cached,
                     &self.artwork.album_art_versions,
                     albums_vm,
-                    |s| s.album_id.as_ref().map(|id| (id, s.updated_at.clone())),
+                    |s| {
+                        s.album_id
+                            .as_ref()
+                            .map(|id| (id, passive_artwork_version(&s.updated_at)))
+                    },
                 );
                 if let Some(task) = self.center_large_artwork_load_task(View::Songs) {
                     tasks.push(task);

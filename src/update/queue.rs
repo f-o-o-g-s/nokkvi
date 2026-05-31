@@ -9,7 +9,7 @@ use nokkvi_data::{
 };
 use tracing::{debug, error, trace};
 
-use super::components::prefetch_album_artwork_tasks;
+use super::components::{passive_artwork_version, prefetch_album_artwork_tasks};
 use crate::{
     Nokkvi, View,
     app_message::{
@@ -64,7 +64,7 @@ impl Nokkvi {
                             |song| {
                                 (
                                     song.album_id.clone(),
-                                    song.updated_at.clone(),
+                                    passive_artwork_version(&song.updated_at),
                                     song.artwork_url.clone(),
                                 )
                             },
@@ -656,7 +656,7 @@ impl Nokkvi {
                 |song| {
                     (
                         song.album_id.clone(),
-                        song.updated_at.clone(),
+                        passive_artwork_version(&song.updated_at),
                         song.artwork_url.clone(),
                     )
                 },
@@ -714,7 +714,7 @@ impl Nokkvi {
                 |song: &QueueSongUIViewData| {
                     (
                         song.album_id.clone(),
-                        song.updated_at.clone(),
+                        passive_artwork_version(&song.updated_at),
                         song.artwork_url.clone(),
                     )
                 },
@@ -760,7 +760,7 @@ impl Nokkvi {
                 |song| {
                     (
                         song.album_id.clone(),
-                        song.updated_at.clone(),
+                        passive_artwork_version(&song.updated_at),
                         song.artwork_url.clone(),
                     )
                 },

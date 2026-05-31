@@ -71,9 +71,15 @@ pub struct ArtworkState {
     /// `album_art` slot. Kept in lockstep with `album_art` on every put: when
     /// the server-side cover changes, the album's `updated_at` changes, and a
     /// later prefetch tick sees `album_art_versions[id] != new_updated_at` and
-    /// treats the slot as a genuine miss — re-fetching the changed cover on any
-    /// surface without re-introducing SSE auto-refresh or threading a full
-    /// `(album_id, updated_at)` key through the ~15 view read sites (N17).
+    /// treats the slot as a genuine miss — re-fetching the changed cover on the
+    /// album-coherent surfaces (Albums view, Artists/Genres expansion) that pass
+    /// `album.updated_at`, without re-introducing SSE auto-refresh or threading a
+    /// full `(album_id, updated_at)` key through the ~15 view read sites (N17).
+    /// The passive surfaces (queue, song-mini, similar, playlist editor) carry
+    /// only a per-song `updated_at`, which would oscillate this album_id-keyed
+    /// map, so they feed a constant `None` (id-only dedup,
+    /// `update::components::passive_artwork_version`) and re-warm the current
+    /// cover on the next cold load.
     ///
     /// Reset to empty by `Default`, so logout (`ArtworkState::default()`) drops
     /// it for free. `album_art` evicts silently at capacity, so a version entry

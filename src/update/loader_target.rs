@@ -24,7 +24,8 @@ use nokkvi_data::{backend::app_service::AppService, types::paged_buffer::PagedBu
 use tracing::{debug, error};
 
 use super::components::{
-    PaginatedFetch, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+    PaginatedFetch, passive_artwork_version, prefetch_album_artwork_tasks,
+    prefetch_song_artwork_tasks,
 };
 use crate::{
     Nokkvi,
@@ -329,7 +330,7 @@ impl LoaderTarget for SongsTarget {
             |song| {
                 song.album_id
                     .as_ref()
-                    .map(|id| (id, song.updated_at.clone()))
+                    .map(|id| (id, passive_artwork_version(&song.updated_at)))
             },
         )
     }
