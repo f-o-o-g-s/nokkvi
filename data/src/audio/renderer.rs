@@ -159,8 +159,13 @@ pub struct AudioRenderer {
     /// Used by the gapless-reuse guard to detect when a track-mode
     /// transition would leave the wrong gain applied to the new track.
     current_replay_gain: Option<ReplayGain>,
-    /// Shared EQ state — passed to each new StreamingSource.
-    eq_state: Option<super::eq::EqState>,
+    /// Shared EQ state — cloned into every new `StreamingSource` so each stream
+    /// always carries an `EqProcessor` bound to the canonical shared atomics.
+    /// Seeded with a default (disabled) instance so a stream created before
+    /// `set_eq_state` lands still has a processor (a disabled processor is a
+    /// true no-op); the engine pushes the canonical UI-owned instance at login
+    /// via `set_eq_state` before the first stream is created.
+    eq_state: super::eq::EqState,
     /// When `true`, PipeWire handles the user's volume via `channelVolumes`.
     /// Software volume is kept at 1.0 during normal playback; crossfade
     /// ramps use only the fade factor (PipeWire applies user volume on top).
@@ -247,9 +252,12 @@ impl AudioRenderer {
         })
     }
 
-    /// Update shared EQ state. Replaces existing eq state, taking effect on new streams.
+    /// Update shared EQ state. Replaces the stored instance, taking effect on
+    /// new streams. The engine pushes the canonical UI-owned `EqState` here at
+    /// login (before first play) so streams track the live `enabled`/gain
+    /// atomics rather than the seeded default's always-disabled atomics.
     pub fn set_eq_state(&mut self, state: super::eq::EqState) {
-        self.eq_state = Some(state);
+        self.eq_state = state;
     }
 }
 
@@ -283,7 +291,7 @@ impl AudioRenderer {
             pending_replay_gain: None,
             pending_crossfade_replay_gain: None,
             current_replay_gain: None,
-            eq_state: None,
+            eq_state: super::eq::EqState::default(),
             pw_volume_active: false,
             consumed_notify: Arc::new(Notify::new()),
         }
@@ -398,7 +406,7 @@ impl AudioRenderer {
             format.channel_count() as u16,
             self.stream_volume(),
             norm,
-            self.eq_state.clone(),
+            Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             true,
         );
@@ -618,7 +626,7 @@ impl AudioRenderer {
                 self.format.channel_count() as u16,
                 self.stream_volume(),
                 norm,
-                self.eq_state.clone(),
+                Some(self.eq_state.clone()),
                 self.consumed_notify.clone(),
                 true,
             );
@@ -829,7 +837,7 @@ impl AudioRenderer {
             incoming_format.channel_count() as u16,
             0.0, // Start silent, volume will ramp up
             cf_norm,
-            self.eq_state.clone(),
+            Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             false,
         );
@@ -1480,6 +1488,39 @@ mod tests {
             renderer.tick_crossfade(),
             CrossfadeTick::Finalize,
             "completed fade with filled incoming must finalize"
+        );
+    }
+
+    /// N16: a fresh renderer always carries an `EqState` (no `Option`), so
+    /// every stream it creates gets an `EqProcessor` even before `set_eq_state`
+    /// is called. Previously the field defaulted to `None`, so a stream created
+    /// before login's settings push had a `None` processor for its entire life
+    /// and ignored EQ even after the user enabled it.
+    #[tokio::test]
+    async fn fresh_renderer_seeds_eq_state() {
+        let renderer = AudioRenderer::new();
+        // The seeded default starts disabled (a true no-op for the audio path).
+        assert!(
+            !renderer.eq_state.is_enabled(),
+            "seeded EQ state must default to disabled",
+        );
+    }
+
+    /// N16: `set_eq_state` replaces the stored instance with the canonical
+    /// UI-owned `EqState` so streams created afterwards track the live atomics
+    /// (enabling EQ via the shared handle becomes visible to the renderer).
+    #[tokio::test]
+    async fn set_eq_state_shares_canonical_atomics() {
+        let mut renderer = AudioRenderer::new();
+        let canonical = super::super::eq::EqState::new();
+        renderer.set_eq_state(canonical.clone());
+
+        // Toggling the canonical instance (as the UI would) must be visible
+        // through the renderer's stored state — proving they share atomics.
+        canonical.set_enabled(true);
+        assert!(
+            renderer.eq_state.is_enabled(),
+            "renderer must store the shared instance, not a default copy",
         );
     }
 

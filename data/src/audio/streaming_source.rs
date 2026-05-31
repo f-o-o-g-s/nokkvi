@@ -596,6 +596,32 @@ mod tests {
         );
     }
 
+    /// N16: a stream constructed with a `Some(EqState)` carries a live
+    /// `EqProcessor` — when EQ is enabled and a band boosted, the OUTPUT sample
+    /// differs from the raw input (the per-stream processor is applied). This
+    /// pins the renderer-side guarantee that every stream gets a processor.
+    #[test]
+    fn streaming_source_applies_eq_when_state_enabled() {
+        const RAW: f32 = 0.5;
+        let eq = super::super::eq::EqState::new();
+        eq.set_enabled(true);
+        eq.set_band_gain(5, 12.0);
+
+        let (mut source, _observed) = make_constant_source(RAW, 4096, Some(eq));
+        // Drive past EQ_CHECK_INTERVAL so coefficients refresh, then collect
+        // outputs once the biquad cascade has settled toward steady state.
+        let mut last = 0.0f32;
+        for _ in 0..4096 {
+            if let Some(s) = source.next() {
+                last = s;
+            }
+        }
+        assert!(
+            (last - RAW).abs() > 1e-3,
+            "enabled EQ must shape the OUTPUT sample away from raw {RAW}; got {last}",
+        );
+    }
+
     /// N15 / N18 control: with EQ disabled the tap is unchanged — raw * 32767.
     #[test]
     fn visualizer_tap_matches_raw_when_eq_disabled() {
