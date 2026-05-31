@@ -10,6 +10,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+### Removed
+
+## v0.6.5 — 2026-05-31
+
+### Added
+
+### Changed
+
+### Fixed
+
 - The player bar's playback and mode-toggle buttons now show the theme accent highlight on hover instead of a flat grey one.
 - Pausing during a crossfade now resumes the fade where it left off, instead of jumping ahead, hard-cutting to the next track, or freezing the queue.
 - A crossfade into a track that fails to load now recovers and moves on, instead of fading into silence.
