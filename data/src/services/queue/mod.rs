@@ -1575,9 +1575,8 @@ pub(crate) mod tests {
         // Index 7 is out of range for the rebuilt order; current_index must
         // land within [0, 2).
         assert!(dirty);
-        match q.current_index {
-            Some(i) => assert!(i < 2, "current_index {i} not clamped"),
-            None => {}
+        if let Some(i) = q.current_index {
+            assert!(i < 2, "current_index {i} not clamped");
         }
     }
 
