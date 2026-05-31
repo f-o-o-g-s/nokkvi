@@ -25,6 +25,19 @@ fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {
             .is_some_and(|v| v.to_str().unwrap_or("").to_lowercase().contains("icecast"))
 }
 
+/// Bounded backoff (ms) between transient-I/O-error retries inside
+/// `read_buffer`. The retry sleep is a synchronous `std::thread::sleep` run
+/// under `block_in_place`, so it parks a tokio worker thread; capping it keeps
+/// that parking brief and lets the engine decode loop's generation check run
+/// frequently enough to abandon a decoder whose source was already skipped.
+///
+/// Grows linearly (100 ms per consecutive error) and clamps at 500 ms — the
+/// same per-attempt ceiling as the radio path's `READ_RECV_TIMEOUT`, while
+/// `MAX_IO_RETRIES` still bounds the total number of attempts before EOF.
+fn io_retry_backoff_ms(consecutive_io_errors: u32) -> u64 {
+    (100 * consecutive_io_errors as u64).min(500)
+}
+
 /// Per-chunk network read timeout. Large enough to outlast normal Icecast jitter
 /// (~25 ms for 128 kbps MP3), small enough to detect a stalled-socket within a
 /// reasonable user-facing window.
@@ -812,8 +825,12 @@ impl AudioDecoder {
                         self.eof = true;
                         break;
                     }
-                    // Retry with exponential backoff for transient network errors
-                    let backoff_ms = 400 * (1u64 << consecutive_io_errors.saturating_sub(1).min(5));
+                    // Retry with bounded backoff for transient network errors.
+                    // Capped so even the worst case parks the block_in_place
+                    // worker thread only briefly, letting the engine decode
+                    // loop's generation check run frequently and abandon a
+                    // decoder whose source was already skipped.
+                    let backoff_ms = io_retry_backoff_ms(consecutive_io_errors);
                     warn!(
                         " [DECODER] I/O error (attempt {}/{}): {:?} - retrying in {}ms",
                         consecutive_io_errors, MAX_IO_RETRIES, io_err, backoff_ms
@@ -1137,6 +1154,43 @@ pub(crate) fn format_hint_from_radio_url(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // io_retry_backoff_ms (N5)
+    // =========================================================================
+
+    /// N5: the transient-I/O retry backoff must stay bounded so a synchronous
+    /// std::thread::sleep under block_in_place never parks a tokio worker for
+    /// multiple seconds (the old `400 * (1 << min(n-1, 5))` formula reached
+    /// 12800 ms at attempt 8, pinning a worker thread for a decoder whose
+    /// source may have already been skipped).
+    #[test]
+    fn io_retry_backoff_is_bounded() {
+        for n in 0..=MAX_IO_RETRIES_FOR_TEST {
+            assert!(
+                io_retry_backoff_ms(n) <= 500,
+                "backoff for {n} consecutive errors must be <= 500ms, got {}",
+                io_retry_backoff_ms(n),
+            );
+        }
+        // Worst observed retry count (MAX_IO_RETRIES = 8) must be capped.
+        assert!(io_retry_backoff_ms(8) <= 500);
+    }
+
+    /// The backoff still grows with consecutive errors (gives transient
+    /// network blips a chance to recover) before saturating at the cap.
+    #[test]
+    fn io_retry_backoff_grows_then_saturates() {
+        assert_eq!(io_retry_backoff_ms(0), 0);
+        assert_eq!(io_retry_backoff_ms(1), 100);
+        assert_eq!(io_retry_backoff_ms(3), 300);
+        assert_eq!(io_retry_backoff_ms(5), 500);
+        assert_eq!(io_retry_backoff_ms(6), 500);
+    }
+
+    /// Mirror of the production `MAX_IO_RETRIES` so the bound test covers the
+    /// full retry range without exposing the const outside `read_buffer`.
+    const MAX_IO_RETRIES_FOR_TEST: u32 = 8;
 
     // =========================================================================
     // format_hint_from_content_type
