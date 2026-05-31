@@ -158,6 +158,35 @@ fn append_chunk_decoded(
     drain_end
 }
 
+/// Reconnect backoff floor: a fresh attempt waits at least this long.
+const SSE_BACKOFF_FLOOR: Duration = Duration::from_secs(2);
+/// Reconnect backoff ceiling: escalation saturates here.
+const SSE_BACKOFF_CAP: Duration = Duration::from_secs(30);
+/// A connection that stayed up at least this long is considered healthy, so
+/// its disconnect resets the backoff floor (and incurs no reconnect sleep).
+const SSE_HEALTHY_UPTIME: Duration = Duration::from_secs(60);
+
+/// Decide the reconnect backoff after a stream-died disconnect.
+///
+/// Pure and clock-free (the caller reads `Instant::now()` / `elapsed()` and
+/// passes the uptime in), so the escalate / cap / reset policy is unit-testable
+/// without I/O.
+///
+/// - A connection that stayed up `>= SSE_HEALTHY_UPTIME` is healthy: returns
+///   `(None, SSE_BACKOFF_FLOOR)` — no sleep, floor reset. This preserves the
+///   original "reset backoff on a good connection" intent while defeating the
+///   flap-resets-backoff defect (a 200 → EOF → 200 flap never stayed up long
+///   enough to count as healthy, so it now escalates).
+/// - A short-lived connection (flap) returns `(Some(prev), min(prev*2, CAP))`:
+///   sleep `prev`, then escalate `2 → 4 → 8 → 16 → 30`, saturating at 30s.
+fn next_backoff(prev: Duration, connection_uptime: Duration) -> (Option<Duration>, Duration) {
+    if connection_uptime >= SSE_HEALTHY_UPTIME {
+        (None, SSE_BACKOFF_FLOOR)
+    } else {
+        (Some(prev), std::cmp::min(prev * 2, SSE_BACKOFF_CAP))
+    }
+}
+
 /// Start the SSE subscription loop
 pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
     sipper(async |mut output| {
@@ -212,7 +241,12 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                     }
 
                     info!(" [SSE] Connected to Navidrome event stream");
-                    backoff = Duration::from_secs(2); // Reset backoff on success
+                    // Record connection start so the post-disconnect backoff
+                    // (`next_backoff`) can tell a healthy connection (reset the
+                    // floor, no sleep) from a flap (escalate). The backoff is
+                    // NOT reset here unconditionally — a 200 → EOF → 200 flap
+                    // would otherwise reset the floor on every short-lived 200.
+                    let connected_at = std::time::Instant::now();
 
                     let mut stream = response.bytes_stream();
                     let mut buffer = String::new();
@@ -331,6 +365,17 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                 break;
                             }
                         }
+                    }
+
+                    // The inner read loop only `break`s on a stream-died path
+                    // (read error / server-ended / read timeout). Throttle the
+                    // reconnect: a healthy connection resets the floor and
+                    // reconnects immediately; a flap escalates 2 → 4 → … → 30s
+                    // so a proxy idle-timeout / restart loop can't spin.
+                    let (sleep, new_backoff) = next_backoff(backoff, connected_at.elapsed());
+                    backoff = new_backoff;
+                    if let Some(d) = sleep {
+                        tokio::time::sleep(d).await;
                     }
                 }
                 Err(e) => {
@@ -504,5 +549,45 @@ mod tests {
             "event: refreshResource\ndata: {\"artist\":\"Sigur Rós\"}\n\n"
         );
         assert!(byte_buffer.is_empty());
+    }
+
+    // ── next_backoff (I17) ──────────────────────────────────────────────
+    //
+    // A connection that drops immediately (uptime ~0) is a flap: backoff must
+    // escalate so a proxy idle-timeout / server-restart loop does not produce a
+    // tight reconnect spin. A connection that stayed up past the healthy
+    // threshold resets the floor and incurs no reconnect sleep.
+
+    /// An immediate flap (zero uptime) escalates: sleep the previous backoff,
+    /// double it for next time.
+    #[test]
+    fn next_backoff_escalates_on_immediate_flap() {
+        assert_eq!(
+            next_backoff(Duration::from_secs(2), Duration::from_secs(0)),
+            (Some(Duration::from_secs(2)), Duration::from_secs(4)),
+        );
+    }
+
+    /// Escalation saturates at the 30s cap and stays there.
+    #[test]
+    fn next_backoff_caps_at_30s() {
+        assert_eq!(
+            next_backoff(Duration::from_secs(16), Duration::from_secs(0)).1,
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(30), Duration::from_secs(0)).1,
+            Duration::from_secs(30),
+        );
+    }
+
+    /// A healthy connection (uptime past the threshold) resets the floor and
+    /// does NOT sleep before reconnecting.
+    #[test]
+    fn next_backoff_resets_on_healthy_uptime() {
+        assert_eq!(
+            next_backoff(Duration::from_secs(16), Duration::from_secs(120)),
+            (None, Duration::from_secs(2)),
+        );
     }
 }
