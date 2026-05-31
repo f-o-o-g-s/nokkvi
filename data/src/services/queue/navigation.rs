@@ -275,6 +275,11 @@ impl QueueManager {
 
         if was_repeat_track {
             self.queue.repeat = RepeatMode::Track;
+            // The transition's save_order ran while repeat was the transient
+            // None, so redb now holds repeat=None. Re-persist the restored
+            // value so a manual skip can't silently drop the repeat-one
+            // preference across a relaunch. Best-effort + idempotent.
+            let _ = self.save_order();
         }
 
         let transition = transition?;
@@ -508,6 +513,36 @@ mod tests {
         assert_eq!(qm.queue.repeat, RepeatMode::Track);
         // current_index should be advanced
         assert_eq!(qm.queue.current_index, Some(2));
+    }
+
+    #[test]
+    fn get_next_repeat_track_persists_repeat_across_reload() {
+        use crate::services::{queue::QueueManager, state_storage::StateStorage};
+
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        // The cloned StateStorage shares the underlying redb so a fresh
+        // QueueManager::new reads back exactly what this manager persisted.
+        let storage: StateStorage = qm.storage.clone();
+
+        // Persist repeat=Track via the write guard.
+        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+
+        // Manual skip once — the bypass transiently sets repeat=None and
+        // save_order fires while it is None.
+        let _ = qm.get_next_song();
+
+        // Reconstruct on the SAME storage: the reloaded repeat must be Track.
+        let qm2 = QueueManager::new(storage).expect("reload");
+        assert_eq!(
+            qm2.get_queue().repeat,
+            RepeatMode::Track,
+            "repeat-one preference must survive a manual skip + relaunch",
+        );
     }
 
     #[test]
