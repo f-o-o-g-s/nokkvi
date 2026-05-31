@@ -330,6 +330,24 @@ impl PlaylistsApiService {
         Ok(())
     }
 
+    /// Fetch a single playlist's current `updatedAt` token.
+    ///
+    /// Used by the editor save path as an optimistic-concurrency guard: it
+    /// re-reads the server's current `updatedAt` just before a destructive
+    /// full-overwrite so a concurrent server-side edit can be detected and the
+    /// overwrite refused. Returns an empty string when the field is absent.
+    ///
+    /// Uses Navidrome native API: GET /api/playlist/:id
+    pub async fn get_playlist_updated_at(&self, playlist_id: &str) -> Result<String> {
+        let body = self
+            .client
+            .get(&format!("/api/playlist/{playlist_id}"), &[])
+            .await?;
+        let playlist: Playlist = serde_json::from_str(&body)
+            .context("Failed to deserialize playlist metadata for staleness check")?;
+        Ok(playlist.updated_at)
+    }
+
     /// Delete a playlist.
     ///
     /// Uses Navidrome native API: DELETE /api/playlist/:id

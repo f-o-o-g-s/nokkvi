@@ -13,6 +13,19 @@ use crate::{
     views::{BrowsingPanel, BrowsingPanelMessage, BrowsingView},
 };
 
+/// Outcome of the async playlist-save task.
+///
+/// Distinguishes a completed save from an aborted one (the server playlist
+/// moved on since the editor opened) so the UI can surface a distinct
+/// "reload before saving" warning rather than a generic error toast.
+enum SaveOutcome {
+    /// Save completed (metadata and/or tracks persisted, or a clean no-op).
+    Saved,
+    /// Aborted: the server playlist changed since the editor opened; the
+    /// destructive track overwrite was refused.
+    Stale,
+}
+
 impl Nokkvi {
     /// Dispatch `SplitViewMessage` sub-enum variants to their per-variant
     /// handlers. Mirrors the per-handler routing pattern other sub-enums
@@ -131,15 +144,21 @@ impl Nokkvi {
         // `handle_editor_songs_loaded`). The editor owns its `PlaylistEditState`
         // and its own track buffer; the live queue is never read or written
         // during the edit session.
-        self.playlist_editor = Some(crate::state::PlaylistEditorState::new(
-            nokkvi_data::types::playlist_edit::PlaylistEditState::new(
-                playlist_id.clone(),
-                playlist_name.clone(),
-                playlist_comment.clone(),
-                playlist_public,
-                Vec::new(),
-            ),
-        ));
+        let mut edit_state = nokkvi_data::types::playlist_edit::PlaylistEditState::new(
+            playlist_id.clone(),
+            playlist_name.clone(),
+            playlist_comment.clone(),
+            playlist_public,
+            Vec::new(),
+        );
+        // Capture the server `updatedAt` from the cached list entry so the save
+        // path can detect a concurrent server-side edit (optimistic-concurrency
+        // guard). Absent (e.g. a freshly-created empty playlist) → empty, which
+        // the staleness check treats as never-stale.
+        if let Some(playlist) = self.library.playlists.iter().find(|p| p.id == playlist_id) {
+            edit_state.set_loaded_updated_at(playlist.updated_at.clone());
+        }
+        self.playlist_editor = Some(crate::state::PlaylistEditorState::new(edit_state));
         // Leave `active_playlist_info` (the "Playing From" banner) untouched:
         // editing is decoupled from playback, so the queue keeps playing from
         // whatever it was playing from. Re-anchoring here would leave a stale
@@ -268,9 +287,15 @@ impl Nokkvi {
         let comment_changed = edit_state.is_comment_dirty();
         let public_changed = edit_state.is_public_dirty();
         let metadata_changed = edit_state.has_metadata_changes();
+        // Track-dirty gate: skip the destructive full-overwrite entirely when
+        // the buffer matches the loaded snapshot (no track edits).
+        let tracks_changed = edit_state.is_dirty(&song_ids);
+        // Optimistic-concurrency token captured at editor open; empty = never
+        // stale (freshly-created playlist).
+        let loaded_updated_at = edit_state.loaded_updated_at().to_string();
 
         info!(
-            " Saving playlist \"{}\" with {} tracks{}{}{}",
+            " Saving playlist \"{}\" with {} tracks{}{}{}{}",
             playlist_name,
             song_ids.len(),
             if name_changed { " (renamed)" } else { "" },
@@ -284,9 +309,14 @@ impl Nokkvi {
             } else {
                 ""
             },
+            if tracks_changed {
+                " (tracks changed)"
+            } else {
+                ""
+            },
         );
 
-        self.shell_action_task(
+        self.shell_task(
             move |shell| async move {
                 let service = shell.playlists_api().await?;
                 // Update name/comment/visibility if any of them changed. Send
@@ -303,12 +333,48 @@ impl Nokkvi {
                         .update_playlist(&playlist_id, name_arg, comment_arg, public_arg)
                         .await?;
                 }
-                service
-                    .replace_playlist_tracks(&playlist_id, &song_ids)
-                    .await
+                // The track overwrite is destructive (full createPlaylist
+                // replace). Run it ONLY when tracks actually changed, and only
+                // after confirming the server playlist has not moved on since
+                // the editor opened — otherwise a concurrent server-side track
+                // edit would be silently destroyed with nothing to roll back to.
+                if tracks_changed {
+                    if !loaded_updated_at.is_empty() {
+                        let current = service.get_playlist_updated_at(&playlist_id).await?;
+                        if current != loaded_updated_at {
+                            return Ok::<SaveOutcome, anyhow::Error>(SaveOutcome::Stale);
+                        }
+                    }
+                    service
+                        .replace_playlist_tracks(&playlist_id, &song_ids)
+                        .await?;
+                }
+                Ok(SaveOutcome::Saved)
             },
-            Message::SplitView(SplitViewMessage::PlaylistEditsSaved),
-            "save playlist edits",
+            |result| match result {
+                Ok(SaveOutcome::Saved) => Message::SplitView(SplitViewMessage::PlaylistEditsSaved),
+                Ok(SaveOutcome::Stale) => {
+                    tracing::warn!(" Aborting playlist save — server changed since edit opened");
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            "Playlist changed on the server — reload before saving".to_string(),
+                            nokkvi_data::types::toast::ToastLevel::Warning,
+                        ),
+                    ))
+                }
+                Err(e) => {
+                    if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                        return msg;
+                    }
+                    error!(" Failed to save playlist edits: {}", e);
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to save playlist edits: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
         )
     }
 

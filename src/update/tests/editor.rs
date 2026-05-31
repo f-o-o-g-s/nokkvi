@@ -433,6 +433,40 @@ fn failed_session_blocks_track_mutations() {
     );
 }
 
+#[test]
+fn save_with_no_track_changes_preserves_clean_session() {
+    // N10 Layer 1: a save on a clean (loaded, non-dirty) editor must skip the
+    // destructive track overwrite. In test_app the replace task never runs
+    // (no app_service), so the observable guarantee is that the editor session
+    // is preserved and reports not-dirty — the gate decision did not corrupt
+    // the session.
+    let mut app = test_app();
+    seeded_editor(&mut app); // Loaded, clean [a,b,c]
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "freshly-loaded editor must be clean before the save"
+    );
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
+
+    assert!(
+        app.playlist_editor.is_some(),
+        "a clean save must preserve the editor session"
+    );
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "a no-track-change save must leave the session clean (no spurious dirty)"
+    );
+}
+
 // --- Phase 4: buffer mutations (reorder / remove) ------------------------
 
 /// Read the editor buffer's song IDs in order.

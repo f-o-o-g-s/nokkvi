@@ -20,6 +20,15 @@ pub struct PlaylistEditState {
     original_public: bool,
     /// Song IDs in order at last save — compared against current queue to detect changes.
     saved_snapshot: Vec<String>,
+    /// Server `updatedAt` token captured when the editor session opened.
+    ///
+    /// Used as an optimistic-concurrency guard: before a destructive
+    /// full-overwrite (`replace_playlist_tracks`), the save path re-reads the
+    /// playlist's current `updatedAt` and aborts if it changed, rather than
+    /// silently destroying a concurrent server-side edit. Empty when the
+    /// playlist had no token (e.g. a freshly-created empty playlist), in which
+    /// case the staleness compare treats it as "not stale".
+    loaded_updated_at: String,
 }
 
 impl PlaylistEditState {
@@ -43,7 +52,33 @@ impl PlaylistEditState {
             original_comment,
             original_public,
             saved_snapshot: song_ids,
+            // Defaulted empty so existing call sites are unchanged; the editor
+            // open path seeds it via `set_loaded_updated_at`.
+            loaded_updated_at: String::new(),
         }
+    }
+
+    /// Seed the server `updatedAt` token captured when the editor opened.
+    ///
+    /// Kept as a setter (rather than a `new()` parameter) so every existing
+    /// `PlaylistEditState::new(...)` call site stays unchanged.
+    pub fn set_loaded_updated_at(&mut self, updated_at: String) {
+        self.loaded_updated_at = updated_at;
+    }
+
+    /// The server `updatedAt` token captured at editor open (empty if none).
+    pub fn loaded_updated_at(&self) -> &str {
+        &self.loaded_updated_at
+    }
+
+    /// Whether the playlist changed on the server since the editor opened.
+    ///
+    /// Compares the captured open-time `updatedAt` against the server's
+    /// current value. An empty captured token (e.g. a freshly-created empty
+    /// playlist with no `updatedAt` yet) is treated as "not stale" so the
+    /// create-and-edit flow is never blocked.
+    pub fn is_stale_against(&self, current_updated_at: &str) -> bool {
+        !self.loaded_updated_at.is_empty() && self.loaded_updated_at != current_updated_at
     }
 
     /// Check whether the current queue differs from the saved snapshot (tracks only).
@@ -261,5 +296,64 @@ mod tests {
         assert!(s.is_public_dirty());
         s.update_snapshot(ids(&["s1"]));
         assert!(!s.is_public_dirty());
+    }
+
+    // ---- Optimistic-concurrency staleness guard (N10) ----
+
+    #[test]
+    fn save_skips_when_tracks_clean() {
+        // Layer 1 gate condition: a loaded session whose buffer matches the
+        // snapshot is NOT dirty, so the save path skips the destructive replace.
+        let s = PlaylistEditState::new(
+            "p1".into(),
+            "Mix".into(),
+            String::new(),
+            true,
+            ids(&["s1", "s2", "s3"]),
+        );
+        assert!(
+            !s.is_dirty(&ids(&["s1", "s2", "s3"])),
+            "an unchanged track list must report not-dirty (replace is skipped)"
+        );
+    }
+
+    #[test]
+    fn loaded_updated_at_round_trips() {
+        let mut s = state("Mix", "");
+        assert_eq!(s.loaded_updated_at(), "", "defaults empty");
+        s.set_loaded_updated_at("2026-05-30T10:00:00Z".into());
+        assert_eq!(s.loaded_updated_at(), "2026-05-30T10:00:00Z");
+    }
+
+    #[test]
+    fn not_stale_when_token_unchanged() {
+        let mut s = state("Mix", "");
+        s.set_loaded_updated_at("2026-05-30T10:00:00Z".into());
+        assert!(
+            !s.is_stale_against("2026-05-30T10:00:00Z"),
+            "an unchanged server token must not be stale"
+        );
+    }
+
+    #[test]
+    fn stale_when_token_changed() {
+        let mut s = state("Mix", "");
+        s.set_loaded_updated_at("2026-05-30T10:00:00Z".into());
+        assert!(
+            s.is_stale_against("2026-05-30T11:30:00Z"),
+            "a changed server token must be stale (abort the overwrite)"
+        );
+    }
+
+    #[test]
+    fn empty_loaded_token_is_never_stale() {
+        // Create-and-edit-empty flow: a freshly-created playlist may have no
+        // updatedAt token. Empty/anything must never be treated as stale.
+        let s = state("Mix", "");
+        assert_eq!(s.loaded_updated_at(), "");
+        assert!(
+            !s.is_stale_against("2026-05-30T11:30:00Z"),
+            "an empty captured token must never block the save (new-playlist flow)"
+        );
     }
 }
