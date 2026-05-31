@@ -312,6 +312,127 @@ fn editor_slot_selection_toggle_updates_selection() {
     );
 }
 
+// --- N22: editor load-state lifecycle gate -------------------------------
+
+#[test]
+fn fresh_editor_session_starts_loading() {
+    // Entering edit mode constructs the editor BEFORE the async resolve
+    // returns. In test_app the resolve never runs, so the session must stay
+    // Loading — distinguishing an in-flight resolve from a genuinely-empty
+    // playlist.
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .load_state,
+        EditorLoadState::Loading,
+        "a freshly-entered editor must start in the Loading state"
+    );
+}
+
+#[test]
+fn editor_songs_loaded_marks_loaded() {
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(vec![
+        make_queue_song("a", "Song A", "Artist", "Album"),
+    ])));
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .load_state,
+        EditorLoadState::Loaded,
+        "a successful resolve must mark the session Loaded"
+    );
+}
+
+#[test]
+fn editor_songs_load_failed_marks_failed() {
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoadFailed));
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .load_state,
+        EditorLoadState::Failed,
+        "a failed resolve must mark the session Failed (editor stays mounted)"
+    );
+    // The session is NOT auto-aborted — the editor remains for reload/discard.
+    assert!(
+        app.playlist_editor.is_some(),
+        "a failed resolve must keep the editor mounted (no auto-abort)"
+    );
+}
+
+#[test]
+fn save_blocked_until_loaded() {
+    // A save dispatched while the session is still Loading must early-return:
+    // the empty buffer is NOT the real playlist, so persisting it would
+    // full-overwrite the server. Observable: the editor session is preserved
+    // and untouched (no replace task is built).
+    let mut app = test_app();
+    enter_edit(&mut app, "pl_1");
+    app.active_playlist_info = None;
+
+    // Session is Loading (the resolve never ran in test_app).
+    let _ = app.update(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
+
+    assert!(
+        app.playlist_editor.is_some(),
+        "a save blocked on a not-yet-loaded session must preserve the editor"
+    );
+    // A warn toast tells the user to wait.
+    assert_eq!(
+        app.toast.toasts.len(),
+        1,
+        "a blocked save must surface exactly one warn toast"
+    );
+    assert_eq!(
+        app.toast.toasts[0].level,
+        nokkvi_data::types::toast::ToastLevel::Warning,
+        "the blocked-save toast must be a warning"
+    );
+}
+
+#[test]
+fn failed_session_blocks_track_mutations() {
+    // A Failed session must not accumulate edits: a remove on a failed-load
+    // session is a no-op (the buffer is unreliable).
+    use crate::state::EditorLoadState;
+
+    let mut app = test_app();
+    seeded_editor(&mut app); // Loaded with [a,b,c]
+    // Force the session Failed after loading to model a mid-session failure.
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.load_state = EditorLoadState::Failed;
+    }
+    let before = editor_ids(&app);
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveAt(1)));
+
+    assert_eq!(
+        editor_ids(&app),
+        before,
+        "a Failed session must block track mutations (buffer is unreliable)"
+    );
+}
+
 // --- Phase 4: buffer mutations (reorder / remove) ------------------------
 
 /// Read the editor buffer's song IDs in order.

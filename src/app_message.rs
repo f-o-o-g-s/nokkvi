@@ -402,6 +402,10 @@ pub enum EditorMessage {
     /// Async resolve result — the playlist's tracks, ready to fill the editor
     /// buffer. The TESTABLE entry point (dispatch with a fabricated payload).
     SongsLoaded(Vec<nokkvi_data::backend::queue::QueueSongUIViewData>),
+    /// Async resolve FAILED — marks the editor session `Failed` so save and
+    /// track mutations are gated off (the empty buffer is not the real
+    /// playlist). The editor stays mounted; the user can reload or discard.
+    SongsLoadFailed,
     /// Async result of a cross-pane drag drop into the editor: the resolved
     /// rows for the dragged browser item(s), to splice into the buffer at the
     /// `at` slot index (relative to the editor's current — possibly filtered —

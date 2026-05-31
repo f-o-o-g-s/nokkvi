@@ -180,13 +180,11 @@ impl Nokkvi {
             |result| match result {
                 Ok(rows) => Message::Editor(EditorMessage::SongsLoaded(rows)),
                 Err(e) => {
+                    // Mark the session Failed AND surface the error: the
+                    // `SongsLoadFailed` handler sets the load-state marker (so
+                    // save/mutations are gated off) and pushes the error toast.
                     error!(" Failed to resolve playlist for editing: {}", e);
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            format!("Failed to load playlist for editing: {e}"),
-                            nokkvi_data::types::toast::ToastLevel::Error,
-                        ),
-                    ))
+                    Message::Editor(EditorMessage::SongsLoadFailed)
                 }
             },
         );
@@ -236,6 +234,24 @@ impl Nokkvi {
     /// Save the current queue as the edited playlist's tracks.
     /// Also renames the playlist if the name was changed.
     pub(crate) fn handle_save_playlist_edits(&mut self) -> Task<Message> {
+        // Gate the save on a successfully-loaded buffer: a still-loading or
+        // failed resolve leaves an empty/partial buffer that is NOT the real
+        // playlist, so persisting it would full-overwrite the server playlist
+        // with garbage. Discard/Exit remain available (they never touch the
+        // server). The editor stays mounted — no auto-abort.
+        match self.playlist_editor.as_ref().map(|e| e.load_state) {
+            Some(crate::state::EditorLoadState::Loaded) => {}
+            Some(crate::state::EditorLoadState::Loading) => {
+                self.toast_warn("Playlist hasn't finished loading");
+                return Task::none();
+            }
+            Some(crate::state::EditorLoadState::Failed) => {
+                self.toast_warn("Playlist failed to load — reload before saving");
+                return Task::none();
+            }
+            None => return Task::none(),
+        }
+
         let Some(edit_state) = self.playlist_editor.as_ref().map(|e| &e.edit) else {
             return Task::none();
         };

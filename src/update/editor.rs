@@ -25,6 +25,17 @@ impl Nokkvi {
     pub(crate) fn handle_editor_message(&mut self, msg: EditorMessage) -> Task<Message> {
         match msg {
             EditorMessage::SongsLoaded(rows) => self.handle_editor_songs_loaded(rows),
+            EditorMessage::SongsLoadFailed => {
+                // Mark the session Failed so save + track mutations are gated
+                // off — the empty buffer is NOT the real playlist. The editor
+                // stays mounted (no auto-abort); Discard/Exit remain available.
+                // (The detailed error was already logged at the resolve site.)
+                if let Some(editor) = self.playlist_editor.as_mut() {
+                    editor.load_state = crate::state::EditorLoadState::Failed;
+                }
+                self.toast_error("Failed to load playlist for editing");
+                Task::none()
+            }
             EditorMessage::SongsInserted { rows, at } => {
                 self.handle_editor_songs_inserted(rows, at)
             }
@@ -83,7 +94,21 @@ impl Nokkvi {
     /// `remove`+`insert` reorders the buffer. Unlike the queue, there is no
     /// backend `MoveItem`/`MoveBatch` round-trip — the buffer is the source of
     /// truth until Save (Phase 6).
+    /// Whether the editor buffer reflects the server playlist and may be
+    /// mutated/saved. A still-loading or failed resolve leaves an empty/partial
+    /// buffer, so track mutations are blocked until `Loaded` (the save gate in
+    /// `handle_save_playlist_edits` is the matching guard).
+    fn editor_is_loaded(&self) -> bool {
+        self.playlist_editor
+            .as_ref()
+            .is_some_and(|e| e.load_state == crate::state::EditorLoadState::Loaded)
+    }
+
     fn handle_editor_drag_reorder(&mut self, event: DragEvent) -> Task<Message> {
+        // Block buffer mutations until the resolve has loaded the real tracks.
+        if !self.editor_is_loaded() {
+            return Task::none();
+        }
         let Some(editor) = self.playlist_editor.as_mut() else {
             return Task::none();
         };
@@ -187,6 +212,10 @@ impl Nokkvi {
     /// lose the targeted one) and drift-immune. Filtered indices are mapped
     /// through the filtered view first (invariant #1).
     fn handle_editor_remove_at(&mut self, idx: usize) -> Task<Message> {
+        // Block buffer mutations until the resolve has loaded the real tracks.
+        if !self.editor_is_loaded() {
+            return Task::none();
+        }
         // Resolve the (possibly filtered) slot index to per-row entry_id(s)
         // BEFORE the mutable borrow — under an active search the index is
         // relative to the filtered view, so map through it (invariant #1).
@@ -346,6 +375,11 @@ impl Nokkvi {
     ) -> Task<Message> {
         if let Some(editor) = self.playlist_editor.as_mut() {
             editor.songs = rows;
+            // The resolve succeeded — mark Loaded so save + track mutations are
+            // allowed (the buffer now reflects the server playlist). The
+            // create-and-edit-empty flow resolves to an empty Ok(vec) → Loaded,
+            // so saving an intentionally-empty playlist is correctly allowed.
+            editor.load_state = crate::state::EditorLoadState::Loaded;
             // Seed the dirty snapshot from the rows just stored so the session
             // starts pristine.
             let loaded_ids: Vec<String> = editor.songs.iter().map(|s| s.id.clone()).collect();
@@ -384,6 +418,12 @@ impl Nokkvi {
         at: usize,
     ) -> Task<Message> {
         if rows.is_empty() {
+            return Task::none();
+        }
+        // Block buffer mutations until the resolve has loaded the real tracks —
+        // a cross-pane drop into a still-loading/failed session must not splice
+        // into an empty/partial buffer that would then full-overwrite on save.
+        if !self.editor_is_loaded() {
             return Task::none();
         }
 
