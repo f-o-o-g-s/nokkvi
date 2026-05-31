@@ -2290,6 +2290,49 @@ pub(crate) mod tests {
     /// the single-row reorder's parallelism implicit on the
     /// `entry_ids.remove`/`entry_ids.insert` pair in
     /// [`QueueManager::move_item`].
+    /// Pins the drift-immunity contract that play_next/play_previous's
+    /// consume removal must honor: anchoring by entry_id survives a
+    /// concurrent shift, while a raw index captured pre-shift removes the
+    /// wrong row.
+    #[test]
+    fn consume_by_entry_id_is_drift_immune() {
+        // Manager 1 — NEW path: capture B's entry_id (current at idx 1),
+        // then a concurrent shift removes an earlier row, then remove by id.
+        let songs = vec![
+            make_test_song("A"),
+            make_test_song("B"),
+            make_test_song("C"),
+            make_test_song("D"),
+        ];
+        let (mut qm, _t) = make_test_manager(songs, Some(1)); // current = B
+        let b_eid = qm.entry_id_at(1).expect("entry_id for B");
+
+        // Concurrent shift: an earlier row is removed → [B, C, D].
+        let _ = qm.remove_song(0).unwrap();
+        assert_eq!(qm.queue.song_ids, vec!["B", "C", "D"]);
+
+        // NEW path removes B (correct) regardless of the index drift.
+        let _ = qm.remove_entry_by_id(b_eid).unwrap();
+        assert_eq!(qm.queue.song_ids, vec!["C", "D"], "B removed by identity");
+
+        // Manager 2 — OLD raw-index path demonstrates the bug: the stale
+        // index 1 now removes C, not B.
+        let songs = vec![
+            make_test_song("A"),
+            make_test_song("B"),
+            make_test_song("C"),
+            make_test_song("D"),
+        ];
+        let (mut qm2, _t2) = make_test_manager(songs, Some(1));
+        let _ = qm2.remove_song(0).unwrap(); // [B, C, D]
+        let _ = qm2.remove_song(1).unwrap(); // raw stale index → removes C
+        assert_eq!(
+            qm2.queue.song_ids,
+            vec!["B", "D"],
+            "raw index removed the WRONG row (C) — the bug the fix avoids",
+        );
+    }
+
     #[test]
     fn entry_ids_survive_move_item() {
         let (mut qm, _temp) = make_test_manager(songs_n(3), None);
