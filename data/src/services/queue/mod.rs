@@ -251,10 +251,8 @@ impl QueueManager {
         // Persist the cleaned state so the repair is durable (best-effort: a
         // failed save must not abort login — the in-memory queue is already
         // consistent).
-        if dirty {
-            if let Err(e) = mgr.save_all() {
-                warn!(" [QUEUE] Failed to persist reconciled queue on load: {e}");
-            }
+        if dirty && let Err(e) = mgr.save_all() {
+            warn!(" [QUEUE] Failed to persist reconciled queue on load: {e}");
         }
 
         Ok(mgr)
@@ -1373,7 +1371,11 @@ pub(crate) mod tests {
         );
 
         // next-up is deterministic across a repeated identical move sequence.
-        let next1 = qm.queue.order.get(qm.queue.current_order.unwrap() + 1).copied();
+        let next1 = qm
+            .queue
+            .order
+            .get(qm.queue.current_order.unwrap() + 1)
+            .copied();
         let songs2: Vec<Song> = ["a", "b", "c", "d", "e"]
             .iter()
             .map(|s| make_test_song(s))
@@ -1385,8 +1387,15 @@ pub(crate) mod tests {
         qm2.queue.order = before_order.clone();
         qm2.sync_current_order_to_index();
         let _ = qm2.move_item(3, 1).unwrap();
-        let next2 = qm2.queue.order.get(qm2.queue.current_order.unwrap() + 1).copied();
-        assert_eq!(next1, next2, "identical move on identical order is deterministic");
+        let next2 = qm2
+            .queue
+            .order
+            .get(qm2.queue.current_order.unwrap() + 1)
+            .copied();
+        assert_eq!(
+            next1, next2,
+            "identical move on identical order is deterministic"
+        );
     }
 
     #[test]
