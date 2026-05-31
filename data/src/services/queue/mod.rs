@@ -522,11 +522,28 @@ impl QueueManager {
         Ok(())
     }
 
-    /// Save both queue ordering and song pool. Used for mutations that
-    /// change both (add, remove, set_queue, reorder + remove).
+    /// Save both queue ordering and song pool in ONE atomic redb
+    /// transaction. Used for mutations that change both (add, remove,
+    /// set_queue, reorder + remove).
+    ///
+    /// Persisting both blobs in a single `save_binary_batch` commit closes
+    /// the torn-write window the prior two-transaction version exposed: a
+    /// crash/kill between the two commits could otherwise leave a new ORDER
+    /// blob paired with a stale (or missing) SONG-POOL, silently dropping
+    /// queue rows on the next load.
     pub fn save_all(&self) -> Result<()> {
-        self.save_order()?;
-        self.save_songs()?;
+        // Hold the encoded buffers in locals so the &[u8] slices passed to
+        // `save_binary_batch` outlive the call. Mirror `save_binary`'s
+        // bincode config + error mapping for on-disk compatibility.
+        let order_bytes =
+            bincode_next::encode_to_vec(&self.queue, bincode_next::config::standard())
+                .map_err(|e| anyhow::anyhow!("bincode encode (queue order): {e}"))?;
+        let pool_bytes = bincode_next::encode_to_vec(&self.pool, bincode_next::config::standard())
+            .map_err(|e| anyhow::anyhow!("bincode encode (song pool): {e}"))?;
+        self.storage.save_binary_batch(&[
+            (KEY_QUEUE_ORDER, order_bytes.as_slice()),
+            (KEY_QUEUE_SONGS, pool_bytes.as_slice()),
+        ])?;
         Ok(())
     }
 
@@ -1224,6 +1241,29 @@ pub(crate) mod tests {
         assert_eq!(qm.get_song("a").unwrap().title, "Song a");
         assert_eq!(qm.get_song("b").unwrap().title, "Song b");
         assert!(qm.get_song("nonexistent").is_none());
+    }
+
+    #[test]
+    fn save_all_persists_order_and_pool_atomically() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (qm, _temp) = make_test_manager(songs, Some(0));
+
+        // Persist order + pool through the atomic batch path.
+        qm.save_all().unwrap();
+
+        // Reconstruct a fresh QueueManager on the SAME StateStorage (clone
+        // shares the underlying redb Arc) and confirm a consistent snapshot.
+        let storage = qm.storage.clone();
+        let qm2 = QueueManager::new(storage).unwrap();
+        assert!(
+            qm2.get_current_song().is_some(),
+            "current song must resolve from the atomically-persisted pool",
+        );
+        assert_eq!(qm2.songs_in_order().len(), 3);
     }
 
     #[test]
