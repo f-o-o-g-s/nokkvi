@@ -1793,9 +1793,22 @@ impl CustomAudioEngine {
     /// Call this whenever the play order changes (shuffle/repeat/consume toggle)
     /// to prevent a stale gapless transition to the wrong song.
     pub async fn reset_next_track(&mut self) {
+        // Cancel an in-flight crossfade FIRST. A mode toggle (shuffle / repeat /
+        // consume) during an active fade must abandon the prepared/in-flight
+        // next track so the engine re-derives it under the new mode — otherwise
+        // finalize_crossfade_engine would still promote the now-wrong incoming
+        // track. cancel_crossfade resets crossfade_phase → Idle, clears the
+        // incoming decoder, and restores the outgoing as primary. Run it before
+        // taking the parking_lot renderer lock below (it acquires that lock and
+        // awaits the decoder lock itself).
+        if !self.crossfade_phase.is_idle() {
+            self.cancel_crossfade().await;
+        }
         self.gapless.lock().await.clear();
         self.next_source.clear();
         self.next_format = AudioFormat::invalid();
+        // Still needed for the Armed-but-not-Active case (cancel_crossfade only
+        // touches Active); harmless when cancel_crossfade already disarmed.
         self.renderer.lock().disarm_crossfade();
     }
 
@@ -2206,6 +2219,32 @@ mod tests {
 
     fn fresh_decoder() -> AudioDecoder {
         AudioDecoder::new(Arc::new(std::sync::RwLock::new(None)))
+    }
+
+    /// N4: toggling shuffle / repeat / consume mid-crossfade must cancel the
+    /// in-flight fade, not just clear the gapless slot. Previously
+    /// reset_next_track only cleared the gapless slot + disarmed the Armed
+    /// flag, leaving an Active crossfade running so finalize_crossfade_engine
+    /// would still promote the (now wrong-under-new-mode) incoming track.
+    #[tokio::test]
+    async fn reset_next_track_cancels_active_crossfade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        assert!(
+            !engine.crossfade_is_idle(),
+            "precondition: engine must start mid-crossfade",
+        );
+
+        engine.reset_next_track().await;
+
+        assert!(
+            engine.crossfade_is_idle(),
+            "reset_next_track must cancel the active crossfade (phase → Idle)",
+        );
     }
 
     #[test]
