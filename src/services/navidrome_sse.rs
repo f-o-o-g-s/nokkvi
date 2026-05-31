@@ -13,7 +13,6 @@ use nokkvi_data::{
     services::navidrome_events::{NavidromeEvent, parse_sse_event},
 };
 use parking_lot::Mutex as ParkingMutex;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, trace, warn};
 
 /// Connection parameters for the SSE stream
@@ -23,7 +22,12 @@ pub(crate) struct SseConnectionInfo {
     pub auth_gateway: AuthGateway,
 }
 
-static SSE_CONNECTION_INFO: OnceLock<Mutex<Option<SseConnectionInfo>>> = OnceLock::new();
+/// Connection slot for the SSE event loop. A synchronous `parking_lot::Mutex`
+/// (mirroring `subscription_slot.rs`) so `register` / `clear` always succeed —
+/// the previous `OnceLock<tokio::Mutex>` + `try_lock` shape could silently drop
+/// a mutation under contention with `run()`'s blocking lock, leaving stale
+/// `auth_gateway` + `server_url` in the slot after a logout (audit Finding 13).
+static SSE_CONNECTION_INFO: ParkingMutex<Option<SseConnectionInfo>> = ParkingMutex::new(None);
 
 /// Tracks SSE event names already logged at debug for this session. Navidrome emits
 /// recurring unknown events (e.g. `nowPlayingCount`); gating prevents log spam while
@@ -32,11 +36,8 @@ static SEEN_UNKNOWN_SSE_EVENTS: OnceLock<ParkingMutex<HashSet<String>>> = OnceLo
 
 /// Register connection details. Called once from handle_login_result.
 pub(crate) fn register(info: SseConnectionInfo) {
-    let slot = SSE_CONNECTION_INFO.get_or_init(|| Mutex::new(None));
-    if let Ok(mut guard) = slot.try_lock() {
-        *guard = Some(info);
-        debug!(" [SSE] Connection info registered");
-    }
+    *SSE_CONNECTION_INFO.lock() = Some(info);
+    debug!(" [SSE] Connection info registered");
 }
 
 /// Drop registered connection info. Called from `reset_session_state` on
@@ -46,11 +47,28 @@ pub(crate) fn register(info: SseConnectionInfo) {
 /// an unreachable one) until the next successful `register()` overwrites
 /// the slot.
 pub(crate) fn clear() {
-    let slot = SSE_CONNECTION_INFO.get_or_init(|| Mutex::new(None));
-    if let Ok(mut guard) = slot.try_lock() {
-        *guard = None;
-        debug!(" [SSE] Connection info cleared");
-    }
+    *SSE_CONNECTION_INFO.lock() = None;
+    debug!(" [SSE] Connection info cleared");
+}
+
+/// Test-only helper: reports whether the SSE connection slot currently holds
+/// connection info. Mirrors `subscription_slot.rs::slot_is_set`; used by the
+/// regression tests that pin the logout-clears-the-slot contract.
+#[cfg(test)]
+pub(crate) fn slot_is_set() -> bool {
+    SSE_CONNECTION_INFO.lock().is_some()
+}
+
+/// Test-only helper: grab the connection-slot lock and hold it for `dur`,
+/// then release. The static is module-private, so the contention regression
+/// test in `update::tests::session` drives the lock through this rather than
+/// reaching into the static directly. Under the old `try_lock` shape a
+/// `register` racing this hold would have silently dropped; the blocking
+/// `parking_lot::Mutex` makes the register wait and complete.
+#[cfg(test)]
+pub(crate) fn hold_slot_lock_blocking(dur: Duration) {
+    let _guard = SSE_CONNECTION_INFO.lock();
+    std::thread::sleep(dur);
 }
 
 /// Structured payload carrying the resource kinds Navidrome reports as changed.
@@ -151,18 +169,15 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
         let mut backoff = Duration::from_secs(2);
 
         loop {
-            // 1. Get connection info
-            let info = {
-                let slot = SSE_CONNECTION_INFO.get_or_init(|| Mutex::new(None));
-                let guard = slot.lock().await;
-                match guard.as_ref() {
-                    Some(info) => info.clone(),
-                    None => {
-                        drop(guard);
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        continue;
-                    }
-                }
+            // 1. Get connection info. The synchronous parking_lot guard is
+            //    dropped at the end of this statement — never held across an
+            //    `.await`. `.cloned()` (not `.take()`): the loop re-reads the
+            //    slot every iteration to pick up JWT refreshes across
+            //    reconnects, so the slot must retain the info.
+            let info = SSE_CONNECTION_INFO.lock().as_ref().cloned();
+            let Some(info) = info else {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
             };
 
             // 2. Read latest JWT (can update across reconnects if redb session is resumed)
