@@ -963,7 +963,11 @@ mod tests {
 
         assert!(result.is_none());
         let q = qm.lock().await;
-        assert_eq!(q.get_queue().song_ids, vec!["a"], "song stays without consume");
+        assert_eq!(
+            q.get_queue().song_ids,
+            vec!["a"],
+            "song stays without consume"
+        );
         assert_eq!(q.get_queue().current_index, Some(0));
     }
 
