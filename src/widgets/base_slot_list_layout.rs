@@ -11,14 +11,14 @@ use nokkvi_data::types::player_settings::{ArtworkColumnMode, ArtworkStretchFit};
 
 use crate::theme;
 
-/// Wrap an artwork panel element with a 2 px `bg1` stripe on its left edge,
-/// visually separating it from the slot list column in Horizontal mode.
+/// Wrap an artwork panel element with a 1 px `border()` hairline on its left
+/// edge, visually separating it from the slot list column in Horizontal mode.
 fn with_left_stripe<'a, Message: 'a>(artwork: Element<'a, Message>) -> Element<'a, Message> {
     let stripe = container(iced::widget::Space::new())
         .width(Length::Fixed(HORIZONTAL_ARTWORK_STRIPE))
         .height(Length::Fill)
         .style(|_| container::Style {
-            background: Some(theme::bg1().into()),
+            background: Some(theme::border().into()),
             ..Default::default()
         });
     row![stripe, artwork].spacing(0).height(Length::Fill).into()
@@ -46,10 +46,10 @@ pub(crate) const ARTWORK_SQUARE_WINDOW_PERCENT: f32 = 0.60;
 /// Maximum artwork panel size in pixels
 pub(crate) const ARTWORK_MAX_SIZE: f32 = 1000.0;
 
-/// Thickness of the `bg1` divider on the left edge of the artwork column in
-/// Horizontal orientation. Vertical orientation runs flush to whatever chrome
-/// sits above it, with no extra inset.
-pub(crate) const HORIZONTAL_ARTWORK_STRIPE: f32 = 2.0;
+/// Thickness of the `border()` hairline on the left edge of the artwork column
+/// in Horizontal orientation. Vertical orientation runs flush to whatever
+/// chrome sits above it, with no extra inset.
+pub(crate) const HORIZONTAL_ARTWORK_STRIPE: f32 = 1.0;
 
 /// Configuration for base slot list layout
 #[derive(Debug, Clone)]
@@ -758,7 +758,7 @@ where
                 .width(Length::Fixed(HORIZONTAL_ARTWORK_STRIPE))
                 .height(Length::Fill)
                 .style(|_| container::Style {
-                    background: Some(theme::bg1().into()),
+                    background: Some(theme::border().into()),
                     ..Default::default()
                 }),
             artwork_side_inner

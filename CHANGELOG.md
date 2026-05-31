@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The divider between the list and the artwork panel is now a thin line matching the tab bar's underline, instead of a thicker, lighter band.
+
 ### Fixed
 
 ### Removed

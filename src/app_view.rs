@@ -299,10 +299,10 @@ impl Nokkvi {
     /// natural-size math for the in-tree panel (Auto-mode square sized
     /// against the actual row height, not the raw window height). Without
     /// the second call the nav-bar overlay under-reaches the artwork's
-    /// real left edge and the `bg1` stripe peeks through above the nav.
+    /// real left edge and the stripe peeks through above the nav.
     ///
     /// The returned extent is the artwork's **inner column width** —
-    /// excluding the 2 px `bg1` stripe (Auto/Always) and the 6 px drag
+    /// excluding the 1 px `border()` stripe (Auto/Always) and the 6 px drag
     /// handle (Always only). `home_view` computes
     /// `nav_visual_width = content_pane_width - extent`, which makes the
     /// nav-overlay's right edge align with the inner artwork's LEFT edge:
