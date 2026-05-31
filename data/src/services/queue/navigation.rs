@@ -343,6 +343,32 @@ impl QueueManager {
             return PreviousSongResult::InQueue(song, idx - 1);
         }
 
+        // Repeat-Playlist backward wrap: Previous at the head with empty
+        // history wraps to the last song, mirroring the forward Next wrap
+        // (order.rs `next_order_index`). Suppressed under consume to match
+        // nokkvi's own forward `!consume` guard — wrapping would replay a
+        // song the queue is draining. Walks song_ids (not the shuffle order
+        // array): the bug only triggers with shuffle OFF, where the two
+        // coincide, matching the idx-1 fallback above.
+        if current_index == Some(0)
+            && self.queue.repeat == RepeatMode::Playlist
+            && !self.queue.consume
+            && !self.queue.song_ids.is_empty()
+            && let Some(last) = self.queue.song_ids.len().checked_sub(1)
+            && let Some(song) = self
+                .queue
+                .song_ids
+                .get(last)
+                .and_then(|id| self.pool.get(id))
+                .cloned()
+        {
+            self.queue.current_index = Some(last);
+            self.sync_current_order_to_index();
+            self.clear_queued();
+            let _ = self.save_order();
+            return PreviousSongResult::InQueue(song, last);
+        }
+
         PreviousSongResult::None
     }
 
@@ -620,6 +646,44 @@ mod tests {
 
         let result = qm.get_previous_song(Some(0));
         assert!(matches!(result, PreviousSongResult::None));
+    }
+
+    #[test]
+    fn previous_at_head_repeat_playlist_wraps_to_last() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        // No shuffle / consume / history.
+
+        let result = qm.get_previous_song(Some(0));
+        match result {
+            PreviousSongResult::InQueue(song, idx) => {
+                assert_eq!(song.id, "c");
+                assert_eq!(idx, 2);
+            }
+            other => panic!("Expected InQueue wrap to last, got {other:?}"),
+        }
+        assert_eq!(qm.queue.current_index, Some(2));
+    }
+
+    #[test]
+    fn previous_at_head_repeat_playlist_consume_returns_none() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        let _ = qm.set_repeat(RepeatMode::Playlist).unwrap();
+        qm.queue.consume = true;
+
+        let result = qm.get_previous_song(Some(0));
+        assert!(matches!(result, PreviousSongResult::None));
+        assert_eq!(qm.queue.current_index, Some(0));
     }
 
     // ── History tests ──
