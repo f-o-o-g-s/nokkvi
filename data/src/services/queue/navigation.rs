@@ -100,8 +100,10 @@ impl QueueManager {
             return None;
         }
 
-        // Mode Priority 1: Repeat Track
-        if self.queue.repeat == RepeatMode::Track {
+        // Mode Priority 1: Repeat Track. mpd consume-wins — a consuming queue
+        // suppresses the replay so the gapless-prepared next track is the real
+        // next song, letting the queue drain.
+        if self.queue.repeat == RepeatMode::Track && !self.queue.consume {
             if let Some(idx) = self.queue.current_index
                 && let Some(id) = self.queue.song_ids.get(idx)
                 && let Some(song) = self.pool.get(id)
@@ -1093,6 +1095,28 @@ mod tests {
             peeked.is_none(),
             "shuffle + consume + repeat-playlist with 1 song should NOT wrap (got {:?})",
             peeked.map(|r| r.song().id.clone())
+        );
+    }
+
+    #[test]
+    fn consume_repeat_track_peek_advances_not_replays() {
+        // mpd consume-wins: consume + repeat-Track must drain the queue
+        // (advance), not replay the current song forever.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.queue.consume = true;
+        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
+
+        let peeked = qm.peek_next_song().unwrap();
+        assert_eq!(peeked.index(), 1, "should advance to next song, not replay");
+        assert_ne!(
+            peeked.reason(),
+            "repeat",
+            "consume must suppress the repeat-track replay",
         );
     }
 

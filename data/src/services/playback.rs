@@ -297,8 +297,12 @@ impl QueueNavigator {
 
         let is_repeat_track =
             queue_manager.get_queue().repeat == crate::types::queue::RepeatMode::Track;
+        let is_consume = queue_manager.get_queue().consume;
 
-        if is_repeat_track {
+        // mpd consume-wins (Queue.cxx: single is disabled while consume is on):
+        // a consuming queue ignores repeat-Track and falls through to the
+        // advance+consume path so the queue actually drains.
+        if is_repeat_track && !is_consume {
             // Clear queued just in case
             queue_manager.clear_queued();
 
@@ -798,6 +802,39 @@ mod tests {
 
         // Repeat-track preserves current_index.
         assert_eq!(qm.lock().await.get_queue().current_index, Some(0));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn decide_consume_repeat_track_advances_and_consumes() {
+        // mpd consume-wins: end-of-track under consume + repeat-Track must
+        // advance + drain, not replay the current song.
+        let songs = vec![make_song("a"), make_song("b")];
+        let mut qm = manager_with_songs(songs, Some(0));
+        qm.queue.consume = true;
+        let _ = qm
+            .set_repeat(crate::types::queue::RepeatMode::Track)
+            .expect("set repeat");
+
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let plan = nav
+            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .await;
+
+        match plan {
+            TrackTransitionPlan::LoadFresh { song, reason, .. } => {
+                assert_eq!(song.id, "b", "must advance, not replay 'a'");
+                assert_eq!(reason, "gapless", "fell through to the advance path");
+            }
+            other => panic!("expected LoadFresh advancing to b, got {other:?}"),
+        }
+
+        // The finished song "a" was consumed (removed) from the queue.
+        let song_ids = qm.lock().await.get_queue().song_ids.clone();
+        assert_eq!(song_ids, vec!["b"], "'a' must be consumed");
     }
 
     #[tokio::test(flavor = "current_thread")]
