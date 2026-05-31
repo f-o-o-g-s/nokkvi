@@ -32,7 +32,7 @@ use crate::{
 /// Build a `Nokkvi` populated with a real `AppService` backed by an
 /// isolated tempfile redb. Returns the redb path so the caller can clean
 /// up after the assertions run.
-async fn test_app_with_shell() -> (crate::Nokkvi, std::path::PathBuf) {
+pub(crate) async fn test_app_with_shell() -> (crate::Nokkvi, std::path::PathBuf) {
     let suffix = format!(
         "test_lane_d_library_{}_{}.redb",
         std::process::id(),
