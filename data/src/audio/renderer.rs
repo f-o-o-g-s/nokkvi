@@ -49,7 +49,26 @@ enum CrossfadeState {
         started_at: std::time::Instant,
         duration_ms: u64,
         incoming_format: AudioFormat,
+        /// Total time spent paused since the crossfade started. Subtracted
+        /// from wall-clock elapsed so progress only advances while audio is
+        /// actually produced (the streams are paused while `paused_at` is set).
+        paused_accum: std::time::Duration,
+        /// When `Some`, the crossfade is currently paused; the span since this
+        /// instant is folded into `paused_accum` on resume.
+        paused_at: Option<std::time::Instant>,
     },
+}
+
+/// Pure crossfade-progress accessor — single source of truth shared by
+/// `tick_crossfade`, `finalize_crossfade`, and the `cancel_crossfade` log so
+/// the three readers can never drift. Subtracts paused time from wall-clock
+/// elapsed and clamps to `[0.0, 1.0]`. A zero duration is treated as complete.
+fn crossfade_progress(elapsed_ms: u64, paused_accum_ms: u64, duration_ms: u64) -> f64 {
+    if duration_ms > 0 {
+        (elapsed_ms.saturating_sub(paused_accum_ms) as f64 / duration_ms as f64).clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
 }
 
 /// Audio renderer that manages streaming sources on the rodio mixer.
@@ -505,8 +524,17 @@ impl AudioRenderer {
         if let Some(ref stream) = self.primary_stream {
             stream.pause();
         }
-        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+        if let CrossfadeState::Active {
+            stream, paused_at, ..
+        } = &mut self.crossfade_state
+        {
             stream.pause();
+            // Stamp the pause start so resume() can fold the paused span into
+            // paused_accum — without this the wall-clock progress keeps
+            // advancing while audio is silent.
+            if paused_at.is_none() {
+                *paused_at = Some(std::time::Instant::now());
+            }
         }
     }
 
@@ -520,8 +548,19 @@ impl AudioRenderer {
         if let Some(ref stream) = self.primary_stream {
             stream.resume();
         }
-        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+        if let CrossfadeState::Active {
+            stream,
+            paused_accum,
+            paused_at,
+            ..
+        } = &mut self.crossfade_state
+        {
             stream.resume();
+            // Fold the paused span into the accumulator so crossfade progress
+            // excludes the time the streams were silent.
+            if let Some(t) = paused_at.take() {
+                *paused_accum += t.elapsed();
+            }
         }
         // Restore volume (may have been changed during pause via set_volume)
         if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
@@ -780,6 +819,8 @@ impl AudioRenderer {
             started_at: std::time::Instant::now(),
             duration_ms,
             incoming_format: incoming_format.clone(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
         };
 
         debug!(
@@ -810,12 +851,15 @@ impl AudioRenderer {
             stream,
             started_at,
             duration_ms,
+            paused_accum,
+            paused_at,
             ..
         } = prior
         {
+            let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
             debug!(
                 "🔀 [RENDERER] Crossfade CANCELLED: elapsed={}ms/{}ms",
-                started_at.elapsed().as_millis(),
+                started_at.elapsed().saturating_sub(live_paused).as_millis(),
                 duration_ms,
             );
             stream.silence_and_stop();
@@ -874,14 +918,19 @@ impl AudioRenderer {
             CrossfadeState::Active {
                 started_at,
                 duration_ms,
+                paused_accum,
+                paused_at,
                 ..
             } => {
+                // Include any in-progress pause span (paused_at) so a tick that
+                // somehow runs mid-pause still reports pause-corrected progress.
+                let live_paused = paused_at.map_or(*paused_accum, |t| *paused_accum + t.elapsed());
                 let elapsed_ms = started_at.elapsed().as_millis() as u64;
-                let progress = if *duration_ms > 0 {
-                    (elapsed_ms as f64 / *duration_ms as f64).min(1.0)
-                } else {
-                    1.0
-                };
+                let progress = crossfade_progress(
+                    elapsed_ms,
+                    live_paused.as_millis() as u64,
+                    *duration_ms,
+                );
                 // Equal-power crossfade using cos²/sin² curves.
                 let fade_out = (progress * std::f64::consts::FRAC_PI_2).cos().powi(2);
                 let fade_in = (progress * std::f64::consts::FRAC_PI_2).sin().powi(2);
@@ -936,12 +985,20 @@ impl AudioRenderer {
             started_at,
             duration_ms,
             incoming_format,
+            paused_accum,
+            paused_at,
         } = std::mem::replace(&mut self.crossfade_state, CrossfadeState::Idle)
         else {
             return 0;
         };
 
-        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        // Subtract paused time so the position offset reflects only the audio
+        // the incoming track actually produced during the fade.
+        let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
+        let elapsed_ms = started_at
+            .elapsed()
+            .saturating_sub(live_paused)
+            .as_millis() as u64;
 
         debug!(
             "🔀 [RENDERER] Crossfade FINALIZED: elapsed={}ms/{}ms",
@@ -1212,5 +1269,34 @@ mod tests {
         renderer.disarm_crossfade();
 
         assert!(matches!(renderer.crossfade_state, CrossfadeState::Idle));
+    }
+
+    /// I5: crossfade progress must exclude time spent paused. Pausing mid-fade
+    /// then resuming previously skipped the fade forward by the pause duration
+    /// (or hard-cut to the incoming track), because progress was pure wall
+    /// clock. With pause-aware accounting, 8s wall clock minus 4s paused over a
+    /// 5s fade is 4s of real playing time → 0.8 progress, NOT a completed fade.
+    #[test]
+    fn crossfade_progress_excludes_paused_time() {
+        assert!(
+            (crossfade_progress(8000, 4000, 5000) - 0.8).abs() < 1e-9,
+            "8000ms elapsed − 4000ms paused over a 5000ms fade must be 0.8 progress"
+        );
+    }
+
+    /// I5 control: when no pause occurred and real playing time exceeds the
+    /// fade duration, progress finalizes correctly at 1.0 (clamped).
+    #[test]
+    fn crossfade_progress_finalizes_only_on_real_playing_time() {
+        assert!(
+            (crossfade_progress(6000, 0, 5000) - 1.0).abs() < 1e-9,
+            "6000ms of real playing time over a 5000ms fade must clamp to 1.0"
+        );
+    }
+
+    /// I5: a zero-duration fade is treated as immediately complete.
+    #[test]
+    fn crossfade_progress_zero_duration_is_complete() {
+        assert!((crossfade_progress(0, 0, 0) - 1.0).abs() < 1e-9);
     }
 }
