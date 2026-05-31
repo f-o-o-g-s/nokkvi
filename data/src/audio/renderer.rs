@@ -515,10 +515,34 @@ impl AudioRenderer {
         // must be cleared — otherwise the source returns silence).
         if let Some(ref stream) = self.primary_stream {
             stream.resume();
-            stream.set_volume(self.stream_volume());
         }
-        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+        if let CrossfadeState::Active {
+            stream,
+            paused_accum,
+            paused_at,
+            ..
+        } = &mut self.crossfade_state
+        {
             stream.resume();
+            // start() — NOT the (unused) resume() — is the engine's unpause
+            // path (engine.play() → renderer.start()). Fold the in-progress
+            // pause span into paused_accum and clear paused_at so
+            // tick_crossfade excludes the silent interval. Without this,
+            // paused_at stays Some and `live_paused` tracks wall clock in
+            // lockstep with `elapsed_ms`, freezing crossfade progress below
+            // 1.0 forever: the fade never finalizes, the UI position pins at
+            // the outgoing track's end, and the queue never advances.
+            if let Some(t) = paused_at.take() {
+                *paused_accum += t.elapsed();
+            }
+        }
+        // Restore primary volume (it may have been changed via set_volume while
+        // paused) only when NOT crossfading — during an active crossfade the
+        // stream volumes are owned by the crossfade tick.
+        if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
+            && let Some(ref stream) = self.primary_stream
+        {
+            stream.set_volume(self.stream_volume());
         }
 
         trace!("▶ Renderer::start() completed — stream active");
@@ -557,46 +581,13 @@ impl AudioRenderer {
         } = &mut self.crossfade_state
         {
             stream.pause();
-            // Stamp the pause start so resume() can fold the paused span into
-            // paused_accum — without this the wall-clock progress keeps
-            // advancing while audio is silent.
+            // Stamp the pause start so start() (the unpause path) can fold the
+            // paused span into paused_accum — without this the wall-clock
+            // progress keeps advancing while audio is silent.
             if paused_at.is_none() {
                 *paused_at = Some(std::time::Instant::now());
             }
         }
-    }
-
-    /// Resume from pause.
-    pub fn resume(&mut self) {
-        if !self.paused {
-            return;
-        }
-        self.paused = false;
-        // Resume the streaming source — it will start pulling and counting again.
-        if let Some(ref stream) = self.primary_stream {
-            stream.resume();
-        }
-        if let CrossfadeState::Active {
-            stream,
-            paused_accum,
-            paused_at,
-            ..
-        } = &mut self.crossfade_state
-        {
-            stream.resume();
-            // Fold the paused span into the accumulator so crossfade progress
-            // excludes the time the streams were silent.
-            if let Some(t) = paused_at.take() {
-                *paused_accum += t.elapsed();
-            }
-        }
-        // Restore volume (may have been changed during pause via set_volume)
-        if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
-            && let Some(ref stream) = self.primary_stream
-        {
-            stream.set_volume(self.stream_volume());
-        }
-        // If crossfade is active, volumes are managed by the crossfade tick
     }
 
     /// Seek to position (milliseconds).
@@ -1542,5 +1533,119 @@ mod tests {
         };
 
         assert_eq!(renderer.tick_crossfade(), CrossfadeTick::Continue);
+    }
+
+    /// Regression (crossfade-pause-freeze): the engine unpauses via
+    /// `engine.play() → renderer.start()`, NOT `renderer.resume()`. So
+    /// `start()` MUST fold any in-progress crossfade pause span into
+    /// `paused_accum` and clear `paused_at`. If it leaves `paused_at` set,
+    /// `tick_crossfade`'s `live_paused` tracks wall clock in lockstep with
+    /// `elapsed_ms`, freezing crossfade progress below 1.0 forever — the fade
+    /// never finalizes, the UI position pins at the outgoing track's end, and
+    /// the queue never advances even though the incoming stream is audible.
+    #[tokio::test]
+    async fn start_folds_active_crossfade_pause_into_accum() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        // Mirror the renderer state when the engine calls start() to resume:
+        // still flagged playing (pause() never cleared it) and paused.
+        renderer.playing = true;
+        renderer.paused = true;
+        // A crossfade that began 10s ago and was paused 8s ago (2s into a 5s fade).
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(10),
+            duration_ms: 5_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: Some(std::time::Instant::now() - std::time::Duration::from_secs(8)),
+        };
+
+        // Unpause through the real engine path.
+        renderer.start();
+
+        let CrossfadeState::Active {
+            paused_at,
+            paused_accum,
+            ..
+        } = &renderer.crossfade_state
+        else {
+            panic!("crossfade must remain Active across an unpause");
+        };
+        assert!(
+            paused_at.is_none(),
+            "start() must clear paused_at on unpause (a dangling paused_at freezes progress)"
+        );
+        assert!(
+            *paused_accum >= std::time::Duration::from_secs(7),
+            "the ~8s paused span must be folded into paused_accum, got {paused_accum:?}"
+        );
+    }
+
+    /// Regression: repeated pause/resume cycles within a single crossfade must
+    /// record EACH paused span. `pause()` only stamps `paused_at` when it is
+    /// `None`, so if `start()` fails to clear it on the first resume, the second
+    /// pause is silently dropped and `paused_accum` undercounts — letting
+    /// progress run ahead. Driving pause→start→pause→start through the real
+    /// engine path must clear `paused_at` on every resume and allow every pause
+    /// to re-stamp.
+    #[tokio::test]
+    async fn repeated_pause_resume_via_start_clears_paused_at_each_cycle() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(2),
+            duration_ms: 10_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+        };
+
+        // First pause/resume cycle.
+        renderer.pause();
+        assert!(
+            matches!(
+                renderer.crossfade_state,
+                CrossfadeState::Active {
+                    paused_at: Some(_),
+                    ..
+                }
+            ),
+            "first pause must stamp paused_at"
+        );
+        renderer.start();
+        assert!(
+            matches!(
+                renderer.crossfade_state,
+                CrossfadeState::Active {
+                    paused_at: None,
+                    ..
+                }
+            ),
+            "first unpause via start() must clear paused_at"
+        );
+
+        // Second pause/resume cycle: pause must be able to re-stamp.
+        renderer.pause();
+        assert!(
+            matches!(
+                renderer.crossfade_state,
+                CrossfadeState::Active {
+                    paused_at: Some(_),
+                    ..
+                }
+            ),
+            "second pause must re-stamp paused_at (impossible if the first was never cleared)"
+        );
+        renderer.start();
+        let CrossfadeState::Active { paused_at, .. } = &renderer.crossfade_state else {
+            panic!("crossfade must remain Active");
+        };
+        assert!(
+            paused_at.is_none(),
+            "second unpause via start() must clear paused_at"
+        );
     }
 }
