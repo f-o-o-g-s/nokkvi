@@ -448,6 +448,57 @@ mod tests {
         assert_eq!(second, 0, "drained JoinSet should report 0 clean tasks");
     }
 
+    /// A task that performs a synchronous (uncancellable) redb write AFTER its
+    /// last `.await` must have that write completed before `shutdown_all`
+    /// returns — pinning the happens-before edge the logout teardown relies on
+    /// to order `clear_session` strictly after the persistence drain (N3).
+    ///
+    /// Multi-thread flavour: the in-flight task performs a blocking
+    /// (uncancellable) commit, which would stall a single-worker runtime.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_all_completes_in_flight_redb_write_before_returning() {
+        use crate::services::state_storage::StateStorage;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("drain.redb");
+        let storage = StateStorage::new(db_path.clone()).unwrap();
+        let storage_clone = storage.clone();
+
+        let tm = TaskManager::new();
+
+        // In-flight task: completes its last `.await` quickly, then enters a
+        // synchronous (uncancellable) region — a blocking sleep stands in for
+        // redb's begin_write/insert/commit — and only then commits the
+        // sentinel. shutdown_all firing mid-commit must still await it to
+        // completion rather than abandoning the post-await blocking write.
+        tm.spawn_result("persist_sentinel", move || async move {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            // No further `.await` past this point: the select! future branch
+            // is now driven to Ready synchronously, so cancellation cannot
+            // pre-empt the blocking commit below.
+            std::thread::sleep(Duration::from_millis(40));
+            storage_clone.save_binary("sentinel", &42u64)?;
+            Ok::<(), anyhow::Error>(())
+        });
+
+        // Let the handle registration land in the JoinSet, and let the task
+        // pass its last await into the synchronous commit region.
+        tokio::time::sleep(Duration::from_millis(15)).await;
+
+        let _clean = tm.shutdown_all(Duration::from_millis(500)).await;
+
+        // Fresh handle proves the write committed during the drain.
+        drop(storage);
+        let storage2 = StateStorage::new(db_path).unwrap();
+        let loaded: Option<u64> = storage2.load_binary("sentinel").unwrap();
+        assert_eq!(
+            loaded,
+            Some(42u64),
+            "shutdown_all must not return before the task's post-await blocking \
+             redb commit finishes"
+        );
+    }
+
     /// spawn_cancellable registers its handle; shutdown_all cancels it cleanly.
     #[tokio::test]
     async fn task_manager_spawn_cancellable_registers_handle() {

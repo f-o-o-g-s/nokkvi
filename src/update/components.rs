@@ -1487,28 +1487,57 @@ impl Nokkvi {
     ///   Login screen doesn't render the player bar.
     /// - retained: last_mpris_position_us — overwritten on next playback.
     pub(crate) fn reset_session_state(&mut self) -> Task<Message> {
-        // Phase 1: stop background work + cache storage handle for re-login.
-        // The engine-stop Task is returned to the caller; everything else
-        // (TaskManager shutdown, redb session clear, storage caching)
-        // runs synchronously here.
+        // Phase 1: cache the storage handle for re-login, then build a single
+        // async teardown Task that — in this strict order — (1) stops the audio
+        // engine, (2) drains the TaskManager so every tracked persistence /
+        // credential write either finishes its synchronous redb commit or is
+        // aborted, and only THEN (3) clears the redb session. Sequencing
+        // clear_session AFTER the awaited drain gives the happens-before edge a
+        // straggler queue/credential writer would otherwise race past (N3/N14):
+        // an in-flight save_session / save_jwt_token / queue-save task can no
+        // longer re-materialize a stale or non-empty blob after the clear.
+        // Mirrors AppService::request_shutdown's engine-first, drain-second
+        // shape and reuses its 500 ms budget.
         let stop_task = if let Some(ref shell) = self.app_service {
-            shell.task_manager().shutdown();
-            if let Err(e) = nokkvi_data::credentials::clear_session(shell.storage()) {
-                tracing::warn!(" [SESSION-RESET] Failed to clear session: {e}");
-            }
+            // Cache the storage Arc before `self.app_service = None` drops the
+            // shell. This is the same DB handle the async body clears — caching
+            // it early is harmless because the drain clears DB *contents*, not
+            // the handle.
             self.cached_storage = Some(shell.storage().clone());
 
-            // Clone the engine Arc before dropping AppService so we can stop
-            // it asynchronously. This kills PipeWire streams, the decode
-            // loop, and the render thread — preventing orphaned audio.
+            let task_manager = shell.task_manager();
             let engine = shell.audio_engine();
+            let storage = shell.storage().clone();
             Task::perform(
                 async move {
-                    let mut guard = engine.lock().await;
-                    guard.stop().await;
+                    // (1) Stop the engine first (kills PipeWire streams, the
+                    // decode loop, and the render thread). Lock, stop, drop the
+                    // guard BEFORE the drain — never hold the engine lock across
+                    // shutdown_all.
+                    {
+                        let mut guard = engine.lock().await;
+                        guard.stop().await;
+                    }
                     tracing::debug!(" [SESSION-RESET] Audio engine stopped");
+
+                    // (2) Drain tracked tasks within the established 500 ms
+                    // budget; stragglers past budget are aborted.
+                    let clean = task_manager
+                        .shutdown_all(std::time::Duration::from_millis(500))
+                        .await;
+                    tracing::debug!(
+                        " [SESSION-RESET] task manager drained ({clean} clean)"
+                    );
+
+                    // (3) Now that no tracked credential/persistence writer can
+                    // run after this point, clear the redb session last so it
+                    // wins. Belt-and-braces for N14: even an untracked refresh
+                    // that snuck a write in during the drain is overwritten.
+                    if let Err(e) = nokkvi_data::credentials::clear_session(&storage) {
+                        tracing::warn!(" [SESSION-RESET] Failed to clear session: {e}");
+                    }
                 },
-                |_| Message::NoOp,
+                |()| Message::NoOp,
             )
         } else {
             Task::none()
