@@ -342,3 +342,135 @@ fn redirect_play_invokes_insert_and_consumes_position() {
         "pending_queue_insert_position must be consumed via take()"
     );
 }
+
+// ============================================================================
+// PlayPlaylistFromTrack prologue (I9 — update/playlists.rs)
+// ============================================================================
+//
+// The from-track play arm must run the same prologue as its album sibling
+// (`AlbumsAction::PlayAlbumFromTrack`): `guard_play_action()` (radio→queue
+// transition + edit-mode block) then `enter_new_playback_context()` (clears a
+// stale `queue_loading_target`), BEFORE it sets `active_playlist_info`.
+
+fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
+    nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: id.to_string(),
+        name: name.to_string(),
+        comment: String::new(),
+        duration: 0.0,
+        song_count: 1,
+        owner_name: String::new(),
+        public: false,
+        updated_at: String::new(),
+        artwork_album_ids: vec![],
+        searchable_lower: name.to_lowercase(),
+    }
+}
+
+/// Seed one playlist `p1` expanded with one child track and center the
+/// playlists slot list on the child so `ActivateCenter` resolves to
+/// `PlayPlaylistFromTrack("p1", 0)`. Flattened layout is `[p1=0, t1=1]`;
+/// `selected_offset = Some(1)` forces the effective center onto the child.
+fn seed_expanded_playlist_centered_on_child(app: &mut crate::Nokkvi) {
+    app.library
+        .playlists
+        .append_page(vec![make_test_playlist("p1", "Playlist One")], 1);
+    expand_playlists_with(app, "p1", vec![make_song("t1", "Track One", "Artist")]);
+    app.playlists_page.common.slot_list.selected_offset = Some(1);
+}
+
+fn activate_center_on_playlists(app: &mut crate::Nokkvi) {
+    use crate::{views::PlaylistsMessage, widgets::SlotListPageMessage};
+    let _ = app.update(crate::app_message::Message::Playlists(
+        PlaylistsMessage::SlotList(SlotListPageMessage::ActivateCenter),
+    ));
+}
+
+#[test]
+fn play_playlist_from_track_transitions_radio_to_queue() {
+    use crate::state::{ActivePlayback, RadioPlaybackState};
+
+    let mut app = test_app();
+    seed_expanded_playlist_centered_on_child(&mut app);
+    app.active_playback = ActivePlayback::Radio(RadioPlaybackState {
+        station: nokkvi_data::types::radio_station::RadioStation {
+            id: "r1".into(),
+            name: "Test".into(),
+            stream_url: "http://example.invalid/stream".into(),
+            home_page_url: None,
+        },
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+
+    activate_center_on_playlists(&mut app);
+
+    assert!(
+        app.active_playback.is_queue(),
+        "playing a playlist from a track must transition active radio back to queue mode \
+         (guard_play_action prologue)"
+    );
+}
+
+#[test]
+fn play_playlist_from_track_clears_stale_queue_loading_target() {
+    let mut app = test_app();
+    seed_expanded_playlist_centered_on_child(&mut app);
+    app.library.queue_loading_target = Some(5);
+
+    activate_center_on_playlists(&mut app);
+
+    assert!(
+        app.library.queue_loading_target.is_none(),
+        "playing a playlist from a track must clear the stale queue_loading_target \
+         (enter_new_playback_context prologue)"
+    );
+}
+
+#[test]
+fn play_playlist_from_track_blocked_during_edit_preserves_context() {
+    use nokkvi_data::types::playlist_edit::PlaylistEditState;
+
+    use crate::state::PlaylistEditorState;
+
+    let mut app = test_app();
+    seed_expanded_playlist_centered_on_child(&mut app);
+    let banner = make_playlist_ctx();
+    app.active_playlist_info = Some(banner.clone());
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_42".into(),
+        "Sunday Set".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    )));
+
+    activate_center_on_playlists(&mut app);
+
+    assert_eq!(
+        app.active_playlist_info.as_ref(),
+        Some(&banner),
+        "an edit-mode-blocked from-track play must early-return and leave the banner context \
+         untouched (never overwrite it with the played playlist)"
+    );
+}
+
+#[test]
+fn play_playlist_from_track_sets_active_playlist_info_when_unblocked() {
+    // Regression guard on the prologue ordering: enter_new_playback_context()
+    // NULLs active_playlist_info, so it MUST run before the set+persist. A
+    // normal (no-radio / no-edit) play must end with the banner pointing at the
+    // played playlist — reversing the order would leave it None.
+    let mut app = test_app();
+    seed_expanded_playlist_centered_on_child(&mut app);
+
+    activate_center_on_playlists(&mut app);
+
+    assert_eq!(
+        app.active_playlist_info.as_ref().map(|ctx| ctx.id.as_str()),
+        Some("p1"),
+        "an unblocked from-track play must set the banner to the played playlist \
+         (set+persist runs after enter_new_playback_context)"
+    );
+}

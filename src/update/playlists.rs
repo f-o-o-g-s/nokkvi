@@ -214,6 +214,16 @@ impl Nokkvi {
                 );
             }
             views::PlaylistsAction::PlayPlaylistFromTrack(playlist_id, track_idx) => {
+                // Mirror the album-sibling prologue (`AlbumsAction::PlayAlbumFromTrack`):
+                // guard the play (edit-mode block + radio→queue transition) then
+                // enter a new playback context (clears a stale queue_loading_target).
+                // Ordering is load-bearing — `enter_new_playback_context()` calls
+                // `clear_active_playlist()` which NULLs `active_playlist_info`, so it
+                // MUST run before the set+persist below.
+                if let Some(task) = self.guard_play_action() {
+                    return task;
+                }
+                self.enter_new_playback_context();
                 // Set the active playlist info for the queue header bar
                 self.active_playlist_info = self
                     .library
