@@ -84,6 +84,7 @@ pub(crate) trait LoaderTarget {
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = 0;
             sl.selected_indices.clear();
+            sl.anchor_index = None;
         } else {
             let current = Self::slot_list_mut(app).viewport_offset;
             let anchor_idx = anchor_id.and_then(|id| {
@@ -96,7 +97,15 @@ pub(crate) trait LoaderTarget {
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = new_offset;
             sl.selected_offset = None;
-            sl.selected_indices.retain(|&i| i < new_len);
+            // Clear the multi-selection rather than retaining in-range indices:
+            // `set_first_page` wholesale-replaces the buffer, so retained
+            // absolute indices would point at DIFFERENT items after a
+            // reorder / membership change, and a later positional batch op
+            // would silently target the wrong songs. Matches the foreground
+            // branch and the queue precedent (gotchas.md). The anchor-id
+            // VIEWPORT relocation above is preserved.
+            sl.selected_indices.clear();
+            sl.anchor_index = None;
         }
     }
 

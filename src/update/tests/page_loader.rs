@@ -342,3 +342,82 @@ fn prefetch_and_maybe_load_next_page_skips_load_page_when_library_empty() {
         "empty library must not chain a page-load — the is_empty() guard fires first"
     );
 }
+
+// ============================================================================
+// apply_viewport_on_load: background reload clears stale multi-selection (N6)
+// ============================================================================
+//
+// `selected_indices` (BTreeSet<usize>) stores ABSOLUTE positional indices.
+// `set_first_page` wholesale-replaces the buffer, so an SSE-driven background
+// reload can reorder / replace membership — retained in-range indices then
+// point at DIFFERENT songs, and a later batch op (Add to Queue / Play / Add
+// to Playlist) resolves them positionally, silently targeting the wrong
+// songs. The old background branch only ran `retain(|&i| i < new_len)`, which
+// guards the out-of-range case but not the wrong-target case. Matching the
+// foreground branch and the queue precedent (gotchas.md), clear both
+// `selected_indices` and `anchor_index` on background reload too.
+
+#[test]
+fn apply_viewport_on_load_background_clears_stale_multiselection() {
+    use crate::update::SongsTarget;
+
+    let mut app = test_app();
+    seed_songs(&mut app, songs_indexed(3));
+    app.songs_page.common.slot_list.selected_indices = [0usize, 1, 2].into_iter().collect();
+    app.songs_page.common.slot_list.anchor_index = Some(0);
+
+    // Content-replacing background reload: same length, entirely new ids.
+    let _ = app.handle_loaded_with::<SongsTarget>(
+        Ok(vec![
+            make_song("sX", "X", "a"),
+            make_song("sY", "Y", "a"),
+            make_song("sZ", "Z", "a"),
+        ]),
+        3,
+        /* background = */ true,
+        Some("sX".into()),
+    );
+
+    assert!(
+        app.songs_page.common.slot_list.selected_indices.is_empty(),
+        "background reload must clear the stale multi-selection (retained \
+         absolute indices would point at different songs after the swap)"
+    );
+    assert!(
+        app.songs_page.common.slot_list.anchor_index.is_none(),
+        "background reload must also clear anchor_index, matching the \
+         foreground branch and the queue precedent"
+    );
+}
+
+#[test]
+fn apply_viewport_on_load_foreground_clears_anchor_index() {
+    use crate::update::SongsTarget;
+
+    // Foreground reload already cleared selected_indices; pin that it now also
+    // clears anchor_index (the latent inconsistency the queue path lacked).
+    let mut app = test_app();
+    seed_songs(&mut app, songs_indexed(3));
+    app.songs_page.common.slot_list.selected_indices = [0usize, 2].into_iter().collect();
+    app.songs_page.common.slot_list.anchor_index = Some(2);
+
+    let _ = app.handle_loaded_with::<SongsTarget>(
+        Ok(vec![
+            make_song("s0", "Song 0", "Artist"),
+            make_song("s1", "Song 1", "Artist"),
+            make_song("s2", "Song 2", "Artist"),
+        ]),
+        3,
+        /* background = */ false,
+        None,
+    );
+
+    assert!(
+        app.songs_page.common.slot_list.selected_indices.is_empty(),
+        "foreground reload must clear the multi-selection"
+    );
+    assert!(
+        app.songs_page.common.slot_list.anchor_index.is_none(),
+        "foreground reload must clear anchor_index"
+    );
+}
