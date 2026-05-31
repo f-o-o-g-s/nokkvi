@@ -239,6 +239,83 @@ fn ctrl_combo_not_suppressed_when_captured() {
 }
 
 // ============================================================================
+// Shift+char hotkeys suppressed during text input (N1)
+// ============================================================================
+//
+// The captured-suppression had a blanket `!modifiers.shift()` exception
+// (justified only for Shift+Tab / Shift+Backspace settings nav). But Shift
+// also produces capital letters while typing, so every plain Shift+key
+// binding fired in a captured text input (e.g. capital D → ClearQueue).
+// The exception is now scoped to ONLY Tab / Backspace.
+
+#[test]
+fn shift_char_suppressed_when_captured() {
+    // Shift+'c' is CenterOnPlaying, which synchronously toasts
+    // "No song is currently playing" when nothing is playing. Captured =
+    // the user is typing a capital C — it must NOT fire (no toast).
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::SHIFT,
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "Shift+char (CenterOnPlaying) must be suppressed when Status::Captured"
+    );
+}
+
+#[test]
+fn shift_char_fires_when_not_captured() {
+    // Same Shift+'c' with Status::Ignored fires normally (toast appears).
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::SHIFT,
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.toast.toasts.is_empty(),
+        "Shift+char (CenterOnPlaying) must fire when no widget is capturing"
+    );
+}
+
+#[test]
+fn shift_tab_not_suppressed_when_captured() {
+    // The scoped exception must PRESERVE Shift+Tab settings-sidebar nav even
+    // when a text input is captured. Shift+Tab → SettingsCategoryNext →
+    // sidebar moves down (observable on the sidebar slot list offset).
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+    let before = app.settings_page.sidebar_slot_list.viewport_offset;
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::SHIFT,
+        iced::event::Status::Captured,
+    );
+
+    assert_ne!(
+        app.settings_page.sidebar_slot_list.viewport_offset, before,
+        "Shift+Tab must still reach the settings sidebar nav when captured"
+    );
+}
+
+// ============================================================================
 // Light Mode Persistence (mod.rs)
 // ============================================================================
 

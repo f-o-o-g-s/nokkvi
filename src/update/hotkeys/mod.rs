@@ -483,8 +483,11 @@ impl Nokkvi {
         //   - Escape: always allowed (close overlays, clear search)
         //   - Tab: always allowed (slot-list navigation)
         //   - Ctrl+key: always allowed (intentional shortcuts like Ctrl+S)
-        //   - Shift+key: always allowed (settings sidebar nav binds
-        //     Shift+Tab / Shift+Backspace; Shift is not a typing modifier)
+        //   - Shift+Tab / Shift+Backspace: allowed for the settings-sidebar
+        //     category nav. The exception is scoped to these two named keys
+        //     only — plain Shift+character (a capital letter while typing)
+        //     must stay suppressed, otherwise e.g. a capital D fires
+        //     ClearQueue (destructive) mid-edit.
         if status == iced::event::Status::Captured {
             let is_escape = matches!(
                 key,
@@ -494,7 +497,13 @@ impl Nokkvi {
                 key,
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
             );
-            if !is_escape && !is_tab && !modifiers.control() && !modifiers.shift() {
+            let is_shift_nav = modifiers.shift()
+                && matches!(
+                    key,
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
+                        | iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace)
+                );
+            if !is_escape && !is_tab && !modifiers.control() && !is_shift_nav {
                 return Task::none();
             }
         }
