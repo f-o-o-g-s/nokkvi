@@ -8,7 +8,8 @@
 //! - **Anchored below the trigger** (vs at cursor position).
 //! - **Stays open after item click** (vs closes), so the user can flip several
 //!   toggles in one open.
-//! - Items render with a check-or-empty icon + label.
+//! - Items render with a styled checkbox glyph (the shared
+//!   [`super::checkbox_glyph::element`]) + label.
 //!
 //! Two entry points share the same widget chassis (overlay positioning,
 //! escape / click-outside, persisted hover state):
@@ -47,8 +48,7 @@ use iced::{
 use crate::{
     theme,
     widgets::menu_constants::{
-        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
-        visible_menu_layout,
+        MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child, visible_menu_layout,
     },
 };
 
@@ -66,17 +66,6 @@ const MAX_NAME_WIDTH: f32 = 220.0;
 /// dropdowns (Albums/Artists/Songs header gear) keep using
 /// `MENU_MIN_WIDTH` — only the library selector overrides this.
 const LIBRARY_SELECTOR_WIDTH: f32 = 340.0;
-
-/// Edge length of the styled checkbox glyph used in two-column rows
-/// (`dropdown_item_two_column`). Mirrors the `MENU_ICON_SIZE` so the
-/// glyph reads at the same visual weight as the single-column rows'
-/// check.svg, but contributes its own filled/outlined chrome.
-const CHECKBOX_GLYPH_SIZE: f32 = 16.0;
-
-/// Corner radius for the styled checkbox glyph. Picked to match the
-/// Gruvbox button chrome elsewhere — 3 px reads as "checkbox" without
-/// looking like a pill.
-const CHECKBOX_CORNER_RADIUS: f32 = 3.0;
 
 /// One row in the dropdown menu. Single-column rows carry a static label
 /// (used by view-header column dropdowns); two-column rows carry an owned
@@ -299,33 +288,16 @@ fn trigger_button<'a, Message: 'a>(
     .into()
 }
 
-/// Render a single dropdown item: check-or-empty icon + label.
+/// Render a single dropdown item: styled checkbox glyph + label. The glyph is
+/// the shared [`super::checkbox_glyph::element`] — identical to the two-column
+/// (library-filter) rows and the kebab `player_modes_menu`, so the three menu
+/// families stay visually in lockstep.
 fn dropdown_item<'a, Message: Clone + 'a>(
     label: &str,
     checked: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let check_icon_path = if checked {
-        "assets/icons/check.svg"
-    } else {
-        // Render an empty 14×14 spacer so labels stay aligned.
-        ""
-    };
-
-    let check_element: Element<'a, Message> = if check_icon_path.is_empty() {
-        iced::widget::Space::new()
-            .width(Length::Fixed(MENU_ICON_SIZE))
-            .height(Length::Fixed(MENU_ICON_SIZE))
-            .into()
-    } else {
-        crate::embedded_svg::svg_widget(check_icon_path)
-            .width(Length::Fixed(MENU_ICON_SIZE))
-            .height(Length::Fixed(MENU_ICON_SIZE))
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg0()),
-            })
-            .into()
-    };
+    let check_element = super::checkbox_glyph::element::<Message>(checked);
 
     let row_content = row![
         check_element,
@@ -374,16 +346,16 @@ fn dropdown_item<'a, Message: Clone + 'a>(
 /// Used by the library selector. The checkbox glyph is a filled
 /// `accent_bright` rounded square with a centered `check.svg` (checked)
 /// or an outlined rounded square (unchecked) — see
-/// [`styled_checkbox_glyph`]. Padding is roomier than [`dropdown_item`]
-/// to give the library names breathing space and match the airier
-/// design intent.
+/// [`super::checkbox_glyph::element`]. Padding is roomier than
+/// [`dropdown_item`] to give the library names breathing space and match
+/// the airier design intent.
 fn dropdown_item_two_column<'a, Message: Clone + 'a>(
     name: &str,
     right_label: &str,
     checked: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
-    let check_element = styled_checkbox_glyph::<Message>(checked);
+    let check_element = super::checkbox_glyph::element::<Message>(checked);
 
     let name_text = text(name.to_string())
         .size(MENU_TEXT_SIZE)
@@ -525,53 +497,6 @@ fn dropdown_header_row<'a, Message: 'a>(label: &str, counter: &str) -> Element<'
             bottom: 8.0,
         })
         .into()
-}
-
-/// Styled checkbox glyph for two-column rows.
-/// - Checked: filled `accent_bright()` rounded square with a centered
-///   `check.svg` glyph in `bg0()` (high contrast against the accent).
-/// - Unchecked: outlined rounded square with a 1.5 px `fg2()` border and
-///   no fill.
-///
-/// Both states render at the same fixed size so the row's name column
-/// stays aligned regardless of state.
-fn styled_checkbox_glyph<'a, Message: 'a>(checked: bool) -> Element<'a, Message> {
-    if checked {
-        let check_icon = crate::embedded_svg::svg_widget("assets/icons/check.svg")
-            .width(Length::Fixed(CHECKBOX_GLYPH_SIZE - 4.0))
-            .height(Length::Fixed(CHECKBOX_GLYPH_SIZE - 4.0))
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::bg0()),
-            });
-        container(check_icon)
-            .width(Length::Fixed(CHECKBOX_GLYPH_SIZE))
-            .height(Length::Fixed(CHECKBOX_GLYPH_SIZE))
-            .center(Length::Fixed(CHECKBOX_GLYPH_SIZE))
-            .style(|_| container::Style {
-                background: Some(theme::accent_bright().into()),
-                border: iced::Border {
-                    radius: CHECKBOX_CORNER_RADIUS.into(),
-                    width: 0.0,
-                    color: theme::accent_bright(),
-                },
-                ..Default::default()
-            })
-            .into()
-    } else {
-        container(iced::widget::Space::new())
-            .width(Length::Fixed(CHECKBOX_GLYPH_SIZE))
-            .height(Length::Fixed(CHECKBOX_GLYPH_SIZE))
-            .style(|_| container::Style {
-                background: None,
-                border: iced::Border {
-                    radius: CHECKBOX_CORNER_RADIUS.into(),
-                    width: 1.5,
-                    color: theme::fg2(),
-                },
-                ..Default::default()
-            })
-            .into()
-    }
 }
 
 // ============================================================================

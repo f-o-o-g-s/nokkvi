@@ -9,9 +9,9 @@
 //! Differences from [`super::hamburger_menu::HamburgerMenu`]:
 //! - Generic over `Message`, with each row carrying its own action — no fixed
 //!   `MenuAction` enum. Caller passes a `Vec<ModeMenuRow<Message>>`.
-//! - Rows render a leading 14×14 check-or-empty icon (mirroring
-//!   `widgets::checkbox_dropdown::dropdown_item`) so toggle state is visible
-//!   on a single glance.
+//! - Rows render a leading styled checkbox glyph (the shared
+//!   `super::checkbox_glyph` recipe, drawn via `checkbox_glyph::draw`) so
+//!   toggle state is visible on a single glance.
 //! - When the trigger is closed, an accent dot is drawn in the icon's
 //!   top-right when any item in `rows` is active. This is the at-a-glance
 //!   "something is on" affordance for hidden mode state.
@@ -57,17 +57,11 @@ const TRIGGER_BORDER_WIDTH: f32 = 1.0;
 const MENU_ROW_INSET: f32 = 6.0;
 const MENU_CHECK_GAP: f32 = 8.0;
 
-// Styled checkbox glyph dimensions — mirror `checkbox_dropdown.rs`'s
-// `styled_checkbox_glyph` (filled `accent_bright()` rounded square + centered
-// `check.svg` in `bg0()` when checked; outlined `fg2()` rounded square when
-// unchecked). Kept as local constants because the kebab menu is a custom
-// widget that draws via low-level `renderer.fill_quad` + `draw_svg` calls,
-// not via composed iced widgets, so it can't share the library-popover's
-// `Element`-returning helper.
-const MENU_CHECKBOX_SIZE: f32 = 16.0;
-const MENU_CHECKBOX_CORNER_RADIUS: f32 = 3.0;
-const MENU_CHECKBOX_INNER_CHECK_SIZE: f32 = 12.0;
-const MENU_CHECKBOX_BORDER_WIDTH: f32 = 1.5;
+// The leading checkbox glyph (geometry + colors) is the shared
+// `super::checkbox_glyph` recipe — see `super::checkbox_glyph::draw`. This
+// overlay hand-draws via low-level `renderer.fill_quad` + `draw_svg`, so it
+// uses the imperative `draw` adapter rather than the `Element`-returning one
+// that `checkbox_dropdown` consumes.
 
 /// Total vertical space taken by a separator row (1px line + padding above/below).
 const SEPARATOR_HEIGHT: f32 = 1.0;
@@ -135,7 +129,7 @@ impl<Message: Clone + 'static> PlayerModesMenu<Message> {
         is_open: bool,
     ) -> Self {
         let icon_svg = crate::embedded_svg::get_svg("assets/icons/ellipsis-vertical.svg");
-        let check_svg = crate::embedded_svg::get_svg("assets/icons/check.svg");
+        let check_svg = crate::embedded_svg::get_svg(super::checkbox_glyph::CHECK_SVG_PATH);
         Self {
             icon_handle: Handle::from_memory(icon_svg.as_bytes()),
             check_handle: Handle::from_memory(check_svg.as_bytes()),
@@ -468,7 +462,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         use iced::{
             advanced::{
                 Renderer,
-                svg::Renderer as SvgRenderer,
                 text::{Renderer as TextRenderer, Text},
             },
             alignment,
@@ -535,66 +528,22 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                         );
                     }
 
-                    // Leading styled checkbox glyph — visual match for the
-                    // library popover's `styled_checkbox_glyph`. Always
-                    // rendered (filled when active, outlined when inactive)
-                    // so labels stay aligned and the checkbox state reads at
-                    // a glance.
+                    // Leading styled checkbox glyph — the shared
+                    // `checkbox_glyph` recipe, identical to the library popover
+                    // and the view-header column dropdown. Always rendered
+                    // (filled when active, outlined when inactive) so labels
+                    // stay aligned and the checkbox state reads at a glance.
                     let check_x = item_bounds.x + 6.0;
-                    let check_y = item_bounds.y + (MENU_ITEM_HEIGHT - MENU_CHECKBOX_SIZE) / 2.0;
-                    let check_bounds = Rectangle {
-                        x: check_x,
-                        y: check_y,
-                        width: MENU_CHECKBOX_SIZE,
-                        height: MENU_CHECKBOX_SIZE,
-                    };
-                    if item.is_active {
-                        renderer.fill_quad(
-                            renderer::Quad {
-                                bounds: check_bounds,
-                                border: iced::Border {
-                                    radius: MENU_CHECKBOX_CORNER_RADIUS.into(),
-                                    width: 0.0,
-                                    color: theme::accent_bright(),
-                                },
-                                ..Default::default()
-                            },
-                            theme::accent_bright(),
-                        );
-                        let inner_bounds = Rectangle {
-                            x: check_bounds.x
-                                + (MENU_CHECKBOX_SIZE - MENU_CHECKBOX_INNER_CHECK_SIZE) / 2.0,
-                            y: check_bounds.y
-                                + (MENU_CHECKBOX_SIZE - MENU_CHECKBOX_INNER_CHECK_SIZE) / 2.0,
-                            width: MENU_CHECKBOX_INNER_CHECK_SIZE,
-                            height: MENU_CHECKBOX_INNER_CHECK_SIZE,
-                        };
-                        renderer.draw_svg(
-                            SvgData {
-                                handle: self.check_handle.clone(),
-                                color: Some(theme::bg0()),
-                                rotation: Radians(0.0),
-                                opacity: 1.0,
-                            },
-                            inner_bounds,
-                            inner_bounds,
-                        );
-                    } else {
-                        renderer.fill_quad(
-                            renderer::Quad {
-                                bounds: check_bounds,
-                                border: iced::Border {
-                                    radius: MENU_CHECKBOX_CORNER_RADIUS.into(),
-                                    width: MENU_CHECKBOX_BORDER_WIDTH,
-                                    color: theme::fg2(),
-                                },
-                                ..Default::default()
-                            },
-                            iced::Color::TRANSPARENT,
-                        );
-                    }
+                    let check_y = item_bounds.y
+                        + (MENU_ITEM_HEIGHT - super::checkbox_glyph::GLYPH_SIZE) / 2.0;
+                    super::checkbox_glyph::draw(
+                        renderer,
+                        Point::new(check_x, check_y),
+                        self.check_handle,
+                        item.is_active,
+                    );
 
-                    let text_x = check_bounds.x + MENU_CHECKBOX_SIZE + MENU_CHECK_GAP;
+                    let text_x = check_x + super::checkbox_glyph::GLYPH_SIZE + MENU_CHECK_GAP;
                     let text_color = if is_hovered {
                         theme::fg0()
                     } else {

@@ -38,6 +38,7 @@ pub(crate) mod visualizer;
 // UI widgets (from old ui/)
 pub(crate) mod about_modal;
 pub(crate) mod checkbox_dropdown;
+pub(crate) mod checkbox_glyph;
 pub(crate) mod context_menu;
 pub(crate) mod default_playlist_chip;
 pub(crate) mod default_playlist_picker;
