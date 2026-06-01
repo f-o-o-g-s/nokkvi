@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The show/hide columns menu now uses the same boxed checkbox style as the player bar menu and library filter, instead of plain checkmarks.
+
 ### Fixed
 
 ### Removed
