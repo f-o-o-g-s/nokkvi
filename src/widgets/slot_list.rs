@@ -1503,16 +1503,44 @@ pub(crate) fn slot_list_metadata_column<'a, Message: Clone + 'a + 'static>(
         .into()
 }
 
+/// Inter-star gap in the five-star rating row, in logical pixels. Shared
+/// between the row's `.spacing()` and [`star_row_intrinsic_width`] so the cap
+/// stays in lockstep with the actual layout — a drift here would mis-size the
+/// row and reintroduce uneven star scaling.
+const STAR_ROW_SPACING: f32 = 2.0;
+
+/// Natural (full-size) width of the five-star rating row: five `icon_size`-wide
+/// stars plus the four inter-star gaps.
+///
+/// The row is handed this as a *fixed* width so the group caps at full size on
+/// wide columns, and on narrower columns iced's flex layout clamps the whole
+/// row down — distributing the deficit *evenly* across all five
+/// `FillPortion(1)` stars rather than squeezing only the trailing one. That
+/// keeps a 5/5 rating legible as five equal stars at any width (the previous
+/// `Fixed`-per-star layout let only the last star shrink, so 5/5 could read as
+/// 4/5).
+fn star_row_intrinsic_width(icon_size: f32, spacing: f32) -> f32 {
+    5.0 * icon_size + 4.0 * spacing
+}
+
 /// Layer a filled SVG icon with a semi-transparent outline SVG on top.
 ///
 /// Used by star ratings and favorite icons to ensure the filled icon has a
 /// visible contrasting edge regardless of the background color / theme.
+///
+/// `width` controls the layout width of the icon: `Length::Fixed(icon_size)`
+/// for a standalone square icon (e.g. the love-column heart), or
+/// `Length::FillPortion(1)` so a star in the rating row shares width evenly
+/// with its siblings and the whole group scales uniformly when clamped. Height
+/// is always `Fixed(icon_size)`; the inner SVGs fill the box and `ContentFit`
+/// keeps the glyph square and centered.
 fn outlined_svg_icon<'a, M: 'a>(
     filled_path: &str,
     outline_path: &str,
     icon_size: f32,
     fill_color: Color,
     opacity: f32,
+    width: Length,
 ) -> Element<'a, M> {
     use iced::widget::svg;
 
@@ -1521,23 +1549,23 @@ fn outlined_svg_icon<'a, M: 'a>(
         ..theme::bg0_hard()
     };
     let fill_svg: Element<'a, M> = crate::embedded_svg::svg_widget(filled_path)
-        .width(Length::Fixed(icon_size))
-        .height(Length::Fixed(icon_size))
+        .width(Length::Fill)
+        .height(Length::Fill)
         .opacity(opacity)
         .style(move |_theme, _status| svg::Style {
             color: Some(fill_color),
         })
         .into();
     let outline_svg: Element<'a, M> = crate::embedded_svg::svg_widget(outline_path)
-        .width(Length::Fixed(icon_size))
-        .height(Length::Fixed(icon_size))
+        .width(Length::Fill)
+        .height(Length::Fill)
         .opacity(opacity)
         .style(move |_theme, _status| svg::Style {
             color: Some(outline_color),
         })
         .into();
     iced::widget::stack![fill_svg, outline_svg]
-        .width(Length::Fixed(icon_size))
+        .width(width)
         .height(Length::Fixed(icon_size))
         .into()
 }
@@ -1573,37 +1601,48 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
     let filled_color = theme::star_bright();
     let empty_color = slot_list_static_icon_color(style, theme::fg4(), 1.0);
 
-    let stars = (1..=5).fold(row![].spacing(2), |r, i| {
-        let star_element: Element<'a, Message> = if rating >= i {
-            outlined_svg_icon(
-                "assets/icons/star-filled.svg",
-                "assets/icons/star.svg",
-                icon_size,
-                filled_color,
-                svg_opacity,
-            )
-        } else {
-            let color = empty_color;
-            crate::embedded_svg::svg_widget("assets/icons/star.svg")
-                .width(Length::Fixed(icon_size))
-                .height(Length::Fixed(icon_size))
-                .opacity(svg_opacity)
-                .style(move |_theme, _status| svg::Style { color: Some(color) })
-                .into()
-        };
+    // Each star takes `FillPortion(1)` so the five share width evenly; the row
+    // is capped to its natural full-size width. On wide columns the stars stay
+    // square at `icon_size`; on narrow ones the flex layout clamps the row and
+    // every star shrinks *together* (never just the trailing one). See
+    // [`star_row_intrinsic_width`].
+    let stars = (1..=5)
+        .fold(row![].spacing(STAR_ROW_SPACING), |r, i| {
+            let star_element: Element<'a, Message> = if rating >= i {
+                outlined_svg_icon(
+                    "assets/icons/star-filled.svg",
+                    "assets/icons/star.svg",
+                    icon_size,
+                    filled_color,
+                    svg_opacity,
+                    Length::FillPortion(1),
+                )
+            } else {
+                let color = empty_color;
+                crate::embedded_svg::svg_widget("assets/icons/star.svg")
+                    .width(Length::FillPortion(1))
+                    .height(Length::Fixed(icon_size))
+                    .opacity(svg_opacity)
+                    .style(move |_theme, _status| svg::Style { color: Some(color) })
+                    .into()
+            };
 
-        // Wrap each star in a clickable mouse_area when on_click is provided
-        let star_element: Element<'a, Message> = if let Some(ref on_click) = on_click {
-            mouse_area(star_element)
-                .on_press(on_click(i))
-                .interaction(iced::mouse::Interaction::Pointer)
-                .into()
-        } else {
-            star_element
-        };
+            // Wrap each star in a clickable mouse_area when on_click is provided
+            let star_element: Element<'a, Message> = if let Some(ref on_click) = on_click {
+                mouse_area(star_element)
+                    .on_press(on_click(i))
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .into()
+            } else {
+                star_element
+            };
 
-        r.push(star_element)
-    });
+            r.push(star_element)
+        })
+        .width(Length::Fixed(star_row_intrinsic_width(
+            icon_size,
+            STAR_ROW_SPACING,
+        )));
 
     match portion {
         Some(p) => container(stars)
@@ -1652,7 +1691,14 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
             "star" => theme::star_bright(),
             _ => theme::danger_bright(),
         };
-        outlined_svg_icon(filled_icon, empty_icon, icon_size, fill_color, svg_opacity)
+        outlined_svg_icon(
+            filled_icon,
+            empty_icon,
+            icon_size,
+            fill_color,
+            svg_opacity,
+            Length::Fixed(icon_size),
+        )
     } else {
         let color = slot_list_static_icon_color(style, theme::fg4(), 1.0);
         crate::embedded_svg::svg_widget(empty_icon)
@@ -1875,6 +1921,15 @@ fn make_slot_button<'a, M: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn star_row_intrinsic_width_sums_stars_and_gaps() {
+        // Five stars + four inter-star gaps at the default spacing.
+        assert!((star_row_intrinsic_width(14.0, STAR_ROW_SPACING) - 78.0).abs() < 0.01);
+        assert!((star_row_intrinsic_width(24.0, STAR_ROW_SPACING) - 128.0).abs() < 0.01);
+        // Zero spacing collapses to exactly five star widths.
+        assert!((star_row_intrinsic_width(20.0, 0.0) - 100.0).abs() < 0.01);
+    }
 
     #[test]
     fn test_config_row_height() {

@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Star ratings now shrink as a group on narrow columns instead of scaling only the last star, so 5 stars no longer read as 4.
+
 ### Removed
 
 ## v0.6.6 — 2026-05-31
