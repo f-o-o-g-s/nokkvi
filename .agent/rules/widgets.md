@@ -8,7 +8,7 @@ globs: src/widgets/**
 ## Global Theme State (`src/theme.rs`)
 
 - **`DUAL_THEME` (`ArcSwap<ResolvedDualTheme>`)**: lock-free color reads (~12 ns/call). Color accessors do an atomic Arc clone — safe from any thread, including the visualizer.
-- **`ROUNDED_MODE` (AtomicBool)**: `is_rounded_mode()` / `set_rounded_mode()`. `ui_border_radius()` → 6.0 or 0.0. ALWAYS use `ui_border_radius()` instead of hardcoded radii.
+- **`rounded_mode` (AtomicU8)** → `RoundedMode` enum: `Off` / `On` / `PlayerOnly` (tri-state, not a bool). `rounded_mode()` reads it; `is_rounded_mode()` is true only for `On`; `set_rounded_mode(RoundedMode)` stores it. `ui_border_radius()` → 6.0 or 0.0 (gated on `is_rounded_mode()`), while `ui_border_radius_player()` also rounds for `PlayerOnly` so the player chrome stays soft when the rest of the UI is flat. ALWAYS use these helpers instead of hardcoded radii.
 - **`opacity_gradient` (AtomicBool)**: non-center slot opacity fade.
 - **`slot_row_height` (AtomicU8)** → `SlotRowHeight` enum: Compact 50, Default 70, Comfortable 90, Spacious 110.
 - **Transparent-border clipping**: Iced clips background to border radius even with a 0px transparent border. Leave radius unset on flush-to-edge bars.
