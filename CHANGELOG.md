@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Removing the currently-playing track while shuffle is on no longer skips a track or stops playback early with songs still left to play.
+- If a playing track was deleted from the server between sessions, restoring the queue on the next launch now resumes at the neighbouring track instead of jumping to the end and stopping after one song.
+- With shuffle on, pressing Previous after relaunching the app now steps back through the shuffled play order instead of the on-screen row order, so it no longer jumps to an unrelated track.
+- Pressing Previous now returns to the exact track that played before, even when two copies of the same song sit next to each other in the queue.
+
 ### Removed
 
 ## v0.6.7 — 2026-06-01
