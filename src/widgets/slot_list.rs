@@ -1076,6 +1076,28 @@ pub(crate) fn slot_list_labeled_index_column<'a, Message: 'a>(
     .into()
 }
 
+/// Alpha applied to `theme::fg2()` for the UNCHECKED select-checkbox outline.
+///
+/// Opaque `fg2()` equals the body-text color in many themes, so a 1 px box ring
+/// painted in it reads even louder than the row text it sits beside. Muting it
+/// to this alpha keeps the outline clearly visible (composited WCAG contrast
+/// ~1.8–4.5 across every shipped theme/mode, floored well above the old
+/// `theme::border()` hairline's invisible 1.0–1.7) while staying subordinate to
+/// the opaque text in all of them. It is the calibrated midpoint between the
+/// invisible `border()` and the over-loud opaque `fg2()`.
+const UNCHECKED_BOX_OUTLINE_ALPHA: f32 = 0.5;
+
+/// Muted `theme::fg2()` outline shared by the per-row select box and the
+/// tri-state header box. Returns a *translucent* `fg2` (not a precomputed blend)
+/// so it composites correctly over whatever backs the box — the row background
+/// for per-row boxes, the `bg0_soft` strip for the header.
+fn unchecked_box_outline() -> iced::Color {
+    iced::Color {
+        a: UNCHECKED_BOX_OUTLINE_ALPHA,
+        ..theme::fg2()
+    }
+}
+
 /// Render the leading multi-select checkbox column for a slot list row.
 ///
 /// Built from a `mouse_area`-wrapped custom 16×16 box (matching the
@@ -1096,9 +1118,13 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
         widget::{Space, mouse_area, svg},
     };
 
-    // Flat redesign: unchecked sits transparent inside the row with a
-    // hairline `theme::border()` outline; checked fills with
-    // `theme::accent_bright()` and matches the row's selected-state colors.
+    // Flat redesign: unchecked sits transparent inside the row with a muted
+    // `theme::fg2()` outline (see `unchecked_box_outline`); checked fills with
+    // `theme::accent_bright()` and matches the row's selected-state colors. The
+    // box lives in its own left column (sibling of the filled row content in
+    // `wrap_with_select_column`), so it is always backed by the plain slot-list
+    // shell bg, never an accent highlight fill; keep it that way or the
+    // unchecked outline needs to become fill-aware.
     let bg_color = if is_checked {
         theme::accent_bright()
     } else {
@@ -1107,7 +1133,7 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
     let border_color = if is_checked {
         theme::accent_bright()
     } else {
-        theme::border()
+        unchecked_box_outline()
     };
     let glyph_color = if is_checked {
         theme::bg0_hard()
@@ -1205,7 +1231,9 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
 
     let visually_checked = state.is_checked_visual();
     // Mirrors `slot_list_select_checkbox` flat treatment so the header
-    // checkbox reads as the same family as the per-row boxes.
+    // checkbox reads as the same family as the per-row boxes: transparent fill
+    // + the muted `unchecked_box_outline()` when not visually checked, over the
+    // `bg0_soft` header strip.
     let bg_color = if visually_checked {
         theme::accent_bright()
     } else {
@@ -1214,7 +1242,7 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
     let border_color = if visually_checked {
         theme::accent_bright()
     } else {
-        theme::border()
+        unchecked_box_outline()
     };
     let glyph_color = if visually_checked {
         theme::bg0_hard()
