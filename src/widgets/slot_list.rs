@@ -220,9 +220,14 @@ fn inner_glow_gradient(seed: Color, phase: f32) -> Gradient {
 }
 
 /// Travelling-sheen gradient: a bright accent-light band sweeping across the row
-/// diagonally, parked off-screen during the idle gap. Out-of-range stops are
-/// silently dropped by `add_stop`, so a parked band leaves a fully transparent
-/// gradient (no visible sheen).
+/// diagonally, parked off-screen during the idle gap. The band's moving stops
+/// (`c` and `c ± SHIMMER_HALF_WIDTH`) drift outside `0.0..=1.0` as the band
+/// enters and leaves, so each is added only when in range. `add_stop` already
+/// ignores an out-of-range offset, but it `log::warn!`s every time it does,
+/// which floods the terminal across the now-playing sweep; filtering first
+/// yields the identical gradient (`add_stop` inserts by sorted offset, so order
+/// is irrelevant) without the log spam. A fully parked band keeps only the two
+/// anchor stops, leaving a transparent (no-sheen) gradient.
 fn shimmer_gradient(seed: Color, phase: f32) -> Gradient {
     let light = lerp_color(seed, Color::WHITE, SHIMMER_LIGHT_MIX);
     let clear = Color { a: 0.0, ..light };
@@ -231,14 +236,17 @@ fn shimmer_gradient(seed: Color, phase: f32) -> Gradient {
         ..light
     };
     let c = shimmer_band_center(phase);
-    Gradient::Linear(
-        Linear::new(Radians(SHIMMER_ANGLE_RAD))
-            .add_stop(0.0, clear)
-            .add_stop(c - SHIMMER_HALF_WIDTH, clear)
-            .add_stop(c, bright)
-            .add_stop(c + SHIMMER_HALF_WIDTH, clear)
-            .add_stop(1.0, clear),
-    )
+    let mut gradient = Linear::new(Radians(SHIMMER_ANGLE_RAD)).add_stop(0.0, clear);
+    for (offset, color) in [
+        (c - SHIMMER_HALF_WIDTH, clear),
+        (c, bright),
+        (c + SHIMMER_HALF_WIDTH, clear),
+    ] {
+        if (0.0..=1.0).contains(&offset) {
+            gradient = gradient.add_stop(offset, color);
+        }
+    }
+    Gradient::Linear(gradient.add_stop(1.0, clear))
 }
 
 /// Overlay the now-playing breathing glow (pulsing inner glow + travelling
