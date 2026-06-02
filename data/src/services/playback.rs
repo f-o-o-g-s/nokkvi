@@ -184,9 +184,12 @@ impl QueueNavigator {
         prev_song_id: &str,
         prev_index: usize,
     ) -> Option<NextTrackResetEffect> {
-        // Record in history
+        // Record in history, keyed by the finished row's stable entry_id so
+        // Previous lands on the exact physical row (matters for adjacent
+        // duplicate-id rows). Resolve the entry_id before the mutable borrow.
         if let Some(prev_song) = queue_manager.get_song(prev_song_id).cloned() {
-            queue_manager.add_to_history(prev_song);
+            let eid = queue_manager.entry_id_at(prev_index);
+            queue_manager.add_to_history(prev_song, eid);
         }
 
         // Consume: remove the finished song from queue + pool
@@ -318,8 +321,11 @@ impl QueueNavigator {
             };
 
             if let Some(song) = song {
-                // Do NOT consume the track since we are repeating it
-                queue_manager.add_to_history(song.clone());
+                // Do NOT consume the track since we are repeating it. The
+                // played row is `idx` (= current_index); key history by its
+                // entry_id (resolve before the mutable borrow).
+                let eid = idx.and_then(|i| queue_manager.entry_id_at(i));
+                queue_manager.add_to_history(song.clone(), eid);
                 drop(queue_manager);
 
                 debug!("▶️ Now Playing: {} - {} (repeat)", song.title, song.artist);
@@ -524,12 +530,21 @@ impl QueueNavigator {
             None
         };
 
-        // Record current song in history before advancing
+        // Record current song in history before advancing. Resolve the
+        // entry_id from the recorded song's OWN row (first-match on its id) so
+        // the (song, entry_id) pair always agrees; Previous then lands on the
+        // exact physical row even with adjacent duplicate-id rows.
         let prev_id = self.current_song_id.lock().await.clone();
         if let Some(ref pid) = prev_id
             && let Some(prev_song) = queue_manager.get_song(pid).cloned()
         {
-            queue_manager.add_to_history(prev_song);
+            let eid = queue_manager
+                .get_queue()
+                .song_ids
+                .iter()
+                .position(|id| id == pid)
+                .and_then(|i| queue_manager.entry_id_at(i));
+            queue_manager.add_to_history(prev_song, eid);
         }
 
         let Some(result) = queue_manager.get_next_song() else {

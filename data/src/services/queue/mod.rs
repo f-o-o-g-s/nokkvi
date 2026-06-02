@@ -27,11 +27,26 @@ use crate::{
     },
 };
 
+/// One playback-history record. Keyed by the per-row `entry_id` (when known)
+/// rather than `Song.id` so Previous lands on the exact physical row that
+/// played — even when two adjacent rows share a song id. `entry_id` is `None`
+/// only when the row context was unavailable at push time (consumed/removed
+/// row, or a defensive missing-index path), in which case history falls back
+/// to id-based dedup and first-match lookup.
+///
+/// Runtime-only — `playback_history` is never serialized, so this type has no
+/// on-disk-compat surface.
+#[derive(Debug, Clone)]
+pub(crate) struct HistoryEntry {
+    pub(crate) entry_id: Option<u64>,
+    pub(crate) song: Song,
+}
+
 pub struct QueueManager {
     pub(crate) queue: Queue,
     pub(crate) pool: SongPool,
     pub(crate) storage: StateStorage,
-    pub(crate) playback_history: Vec<Song>,
+    pub(crate) playback_history: Vec<HistoryEntry>,
     pub(crate) max_history_size: usize,
     /// Per-row unique identifiers, parallel to `queue.song_ids`. Two queue
     /// entries that share a `song_id` (duplicate adds, "Play Next" of an

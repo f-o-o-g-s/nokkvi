@@ -5,7 +5,7 @@
 
 use tracing::{debug, trace};
 
-use super::QueueManager;
+use super::{HistoryEntry, QueueManager};
 use crate::types::{queue::RepeatMode, song::Song};
 
 #[derive(Debug, Clone)]
@@ -306,10 +306,16 @@ impl QueueManager {
 
         // Try to use playback history first
         if let Some(prev) = self.playback_history.last() {
-            let prev_id = prev.id.clone();
+            let prev_id = prev.song.id.clone();
+            let prev_eid = prev.entry_id;
 
-            // Check if the song is still in the queue
-            let found_idx = self.queue.song_ids.iter().position(|id| *id == prev_id);
+            // Resolve the exact played row by entry_id first (lands on the row
+            // that actually played, even with adjacent duplicate-id rows),
+            // falling back to first-match-by-id when there is no row context or
+            // the row was consumed/removed (entry_id no longer present).
+            let found_idx = prev_eid
+                .and_then(|eid| self.index_of_entry(eid))
+                .or_else(|| self.queue.song_ids.iter().position(|id| *id == prev_id));
 
             // Pop after lookup (avoids double-borrow)
             let popped = self.playback_history.pop().expect("checked Some above");
@@ -320,12 +326,12 @@ impl QueueManager {
                 self.sync_current_order_to_index();
                 self.clear_queued();
                 self.save_order().ok();
-                let song = self.pool.get(&prev_id).cloned().unwrap_or(popped);
+                let song = self.pool.get(&prev_id).cloned().unwrap_or(popped.song);
                 return PreviousSongResult::InQueue(song, idx);
             }
 
             // Song not in queue (consumed/removed) — return for re-insertion
-            return PreviousSongResult::Removed(popped);
+            return PreviousSongResult::Removed(popped.song);
         }
 
         // Order-aware backward step (no history available). Mirrors the
@@ -356,14 +362,23 @@ impl QueueManager {
         PreviousSongResult::None
     }
 
-    /// Add a song to playback history.
-    /// Skips if the song is the same as the last history entry (repeat-track guard).
-    pub fn add_to_history(&mut self, song: Song) {
-        // Repeat-track guard: don't fill history with repeated plays of the same song
-        if self.playback_history.last().map(|s| &s.id) == Some(&song.id) {
+    /// Add a song to playback history, keyed by the per-row `entry_id` when
+    /// available.
+    ///
+    /// Repeat-track guard: skips when this push would duplicate the last entry.
+    /// With a known `entry_id`, "duplicate" means the SAME physical row replayed
+    /// (same `entry_id`), so two distinct rows of the same song id are both
+    /// recorded. Without row context (`entry_id == None`), it falls back to the
+    /// legacy `Song.id` comparison so the repeat-track behavior is preserved.
+    pub fn add_to_history(&mut self, song: Song, entry_id: Option<u64>) {
+        let is_duplicate = match entry_id {
+            Some(eid) => self.playback_history.last().and_then(|h| h.entry_id) == Some(eid),
+            None => self.playback_history.last().map(|h| &h.song.id) == Some(&song.id),
+        };
+        if is_duplicate {
             return;
         }
-        self.playback_history.push(song);
+        self.playback_history.push(HistoryEntry { entry_id, song });
         if self.playback_history.len() > self.max_history_size {
             self.playback_history.remove(0);
         }
@@ -573,7 +588,8 @@ mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(2));
 
         // Add "a" to history (simulating having played it)
-        qm.add_to_history(make_test_song("a"));
+        let e0 = qm.entry_id_at(0);
+        qm.add_to_history(make_test_song("a"), e0);
 
         let result = qm.get_previous_song(Some(2));
         match result {
@@ -610,8 +626,8 @@ mod tests {
         let songs = vec![make_test_song("b"), make_test_song("c")];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
-        // Add "x" (not in queue) to history
-        qm.add_to_history(make_test_song("x"));
+        // Add "x" (not in queue) to history — no row context.
+        qm.add_to_history(make_test_song("x"), None);
 
         let result = qm.get_previous_song(Some(0));
         match result {
@@ -768,9 +784,11 @@ mod tests {
         let songs = vec![make_test_song("a")];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
-        qm.add_to_history(make_test_song("x"));
-        qm.add_to_history(make_test_song("x")); // duplicate — should be skipped
-        qm.add_to_history(make_test_song("x")); // duplicate — should be skipped
+        // Same physical row replayed three times (same entry_id) — the
+        // repeat-track guard collapses them to a single history entry.
+        qm.add_to_history(make_test_song("x"), Some(7));
+        qm.add_to_history(make_test_song("x"), Some(7)); // duplicate — skipped
+        qm.add_to_history(make_test_song("x"), Some(7)); // duplicate — skipped
 
         // Only one entry should exist
         assert_eq!(qm.playback_history.len(), 1);
@@ -781,14 +799,71 @@ mod tests {
         let songs = vec![make_test_song("a")];
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
-        // Add more than max_history_size entries
+        // Add more than max_history_size entries (distinct entry_ids).
         for i in 0..150 {
-            qm.add_to_history(make_test_song(&format!("h{i}")));
+            qm.add_to_history(make_test_song(&format!("h{i}")), Some(i as u64));
         }
 
         assert!(qm.playback_history.len() <= qm.max_history_size);
         // Most recent should be the last one added
-        assert_eq!(qm.playback_history.last().unwrap().id, "h149");
+        assert_eq!(qm.playback_history.last().unwrap().song.id, "h149");
+    }
+
+    #[test]
+    fn previous_adjacent_duplicate_rows_lands_on_played_row() {
+        // Two adjacent physical rows of the same id `a`, then `b`.
+        // song_ids=[a,a,b], entry_ids=[e0,e1,e2]. The history must key on the
+        // per-row entry_id so Previous from `b` lands on the SECOND `a` (row 1,
+        // the row that actually played before b), not the first physical `a`.
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.replace_song_ids_for_test(vec!["a".into(), "a".into(), "b".into()], Some(0));
+
+        let e0 = qm.entry_id_at(0);
+        let e1 = qm.entry_id_at(1);
+        // Auto-advance simulation: record each LEFT row with its real entry_id.
+        qm.add_to_history(make_test_song("a"), e0); // first a, row 0
+        qm.add_to_history(make_test_song("a"), e1); // second a, row 1
+        qm.queue.current_index = Some(2); // now playing b
+        qm.sync_current_order_to_index();
+
+        let result = qm.get_previous_song(Some(2));
+        match result {
+            PreviousSongResult::InQueue(song, idx) => {
+                assert_eq!(song.id, "a");
+                assert_eq!(idx, 1, "Previous must land on the SECOND a's row");
+            }
+            other => panic!("Expected InQueue(a, 1), got {other:?}"),
+        }
+        assert_eq!(qm.queue.current_index, Some(1));
+    }
+
+    #[test]
+    fn history_dedup_distinguishes_distinct_rows_same_id() {
+        // song_ids=[a,a,b], entry_ids=[e0,e1,e2]. Two distinct rows of id `a`
+        // are recorded as two history entries; a same-row replay (same
+        // entry_id) is still suppressed by the entry_id repeat-track guard.
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.replace_song_ids_for_test(vec!["a".into(), "a".into(), "b".into()], Some(0));
+
+        let e0 = qm.entry_id_at(0);
+        let e1 = qm.entry_id_at(1);
+        qm.add_to_history(make_test_song("a"), e0); // row 0
+        qm.add_to_history(make_test_song("a"), e1); // row 1 (distinct entry_id)
+        assert_eq!(
+            qm.playback_history.len(),
+            2,
+            "two distinct rows of the same id must both be recorded"
+        );
+
+        // Same physical row replayed (same entry_id) → suppressed.
+        qm.add_to_history(make_test_song("a"), e1);
+        assert_eq!(
+            qm.playback_history.len(),
+            2,
+            "same-row replay must be suppressed by the entry_id guard"
+        );
     }
 
     // ── Shuffle + Consume tests ──
@@ -1075,9 +1150,11 @@ mod tests {
     fn previous_with_shuffle_uses_history() {
         let mut qm = with_modes(true, false, RepeatMode::None);
         // Start playing, advance a few times
-        qm.add_to_history(make_test_song("0"));
+        let e0 = qm.entry_id_at(0);
+        qm.add_to_history(make_test_song("0"), e0);
         let next = qm.get_next_song().unwrap();
-        qm.add_to_history(next.song);
+        let next_eid = qm.entry_id_at(next.index);
+        qm.add_to_history(next.song, next_eid);
 
         // Previous should go back to history
         let prev = qm.get_previous_song(qm.queue.current_index);
@@ -1097,8 +1174,8 @@ mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
 
-        // Add consumed song "a" to history
-        qm.add_to_history(make_test_song("a"));
+        // Add consumed song "a" to history — no longer in queue, no row context.
+        qm.add_to_history(make_test_song("a"), None);
 
         let prev = qm.get_previous_song(Some(0));
         match prev {
