@@ -8,6 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## v0.6.7 — 2026-06-01
+
+### Changed
+
 - The show/hide columns menu now uses the same boxed checkbox style as the player bar menu and library filter, instead of plain checkmarks.
 
 ### Fixed
@@ -16,8 +24,6 @@ All notable changes to this project will be documented in this file.
 - In rounded mode, list views no longer show a stray lighter patch tucked into their top-left or bottom-left corner.
 - Star ratings now shrink as a group on narrow columns instead of scaling only the last star, so 5 stars no longer read as 4.
 - The now-playing row's shimmer animation no longer floods the log with repeated gradient-range warnings.
-
-### Removed
 
 ## v0.6.6 — 2026-05-31
 
