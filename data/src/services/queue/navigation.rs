@@ -299,7 +299,7 @@ impl QueueManager {
     }
 
     /// Get previous song using playback history or previous index
-    pub fn get_previous_song(&mut self, current_index: Option<usize>) -> PreviousSongResult {
+    pub fn get_previous_song(&mut self, _current_index: Option<usize>) -> PreviousSongResult {
         if self.queue.song_ids.is_empty() && self.playback_history.is_empty() {
             return PreviousSongResult::None;
         }
@@ -328,47 +328,29 @@ impl QueueManager {
             return PreviousSongResult::Removed(popped);
         }
 
-        // Fall back to previous index (no history available)
-        if let Some(idx) = current_index
-            && idx > 0
+        // Order-aware backward step (no history available). Mirrors the
+        // forward `next_order_index` walk: compute the previous ORDER
+        // position, map through `order[prev]` to the physical index, and set
+        // BOTH `current_index` and `current_order`. Reduces to physical
+        // idx-1 / wrap-to-last when shuffle is off (identity order). Setting
+        // both fields directly (rather than via `sync_current_order_to_index`)
+        // keeps the invariant `order[current_order] == current_index` exact
+        // even with duplicate physical ids, where a first-match sync could
+        // re-derive the wrong order slot.
+        if let Some(prev_order) = self.prev_order_index()
+            && let Some(&phys) = self.queue.order.get(prev_order)
             && let Some(song) = self
                 .queue
                 .song_ids
-                .get(idx - 1)
+                .get(phys)
                 .and_then(|id| self.pool.get(id))
                 .cloned()
         {
-            self.queue.current_index = Some(idx - 1);
-            self.sync_current_order_to_index();
+            self.queue.current_index = Some(phys);
+            self.queue.current_order = Some(prev_order);
             self.clear_queued();
             self.save_order().ok();
-            return PreviousSongResult::InQueue(song, idx - 1);
-        }
-
-        // Repeat-Playlist backward wrap: Previous at the head with empty
-        // history wraps to the last song, mirroring the forward Next wrap
-        // (order.rs `next_order_index`). Suppressed under consume to match
-        // nokkvi's own forward `!consume` guard — wrapping would replay a
-        // song the queue is draining. Walks song_ids (not the shuffle order
-        // array): the bug only triggers with shuffle OFF, where the two
-        // coincide, matching the idx-1 fallback above.
-        if current_index == Some(0)
-            && self.queue.repeat == RepeatMode::Playlist
-            && !self.queue.consume
-            && !self.queue.song_ids.is_empty()
-            && let Some(last) = self.queue.song_ids.len().checked_sub(1)
-            && let Some(song) = self
-                .queue
-                .song_ids
-                .get(last)
-                .and_then(|id| self.pool.get(id))
-                .cloned()
-        {
-            self.queue.current_index = Some(last);
-            self.sync_current_order_to_index();
-            self.clear_queued();
-            let _ = self.save_order();
-            return PreviousSongResult::InQueue(song, last);
+            return PreviousSongResult::InQueue(song, phys);
         }
 
         PreviousSongResult::None
@@ -686,6 +668,97 @@ mod tests {
         let result = qm.get_previous_song(Some(0));
         assert!(matches!(result, PreviousSongResult::None));
         assert_eq!(qm.queue.current_index, Some(0));
+    }
+
+    #[test]
+    fn previous_under_shuffle_empty_history_walks_order_mid() {
+        // Restored shuffled queue with EMPTY history (history is never
+        // persisted). order=[2,0,3,1] is a permutation; playing d at
+        // physical index 3 = order position 2. The true play-order
+        // predecessor is order[1]=0=physical a, NOT the physical neighbor c.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(3));
+        qm.queue.shuffle = true;
+        qm.queue.order = vec![2, 0, 3, 1];
+        qm.queue.current_index = Some(3);
+        qm.queue.current_order = Some(2);
+        qm.queue.repeat = RepeatMode::None;
+
+        let result = qm.get_previous_song(Some(3));
+        match result {
+            PreviousSongResult::InQueue(song, idx) => {
+                assert_eq!(song.id, "a");
+                assert_eq!(idx, 0);
+            }
+            other => panic!("Expected InQueue(a, 0), got {other:?}"),
+        }
+        // Invariant order[current_order] == current_index holds: order[1]==0.
+        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.queue.current_order, Some(1));
+    }
+
+    #[test]
+    fn previous_under_shuffle_empty_history_wraps_order_head() {
+        // Restored shuffled queue, empty history, current at PLAY-ORDER head
+        // with repeat Playlist. order=[3,0,2,1] so the physical-neighbor
+        // answer (idx-1) and the order-wrap answer DIFFER: playing physical
+        // index 3 = order[0]; the physical neighbor is song_ids[2]=c, but the
+        // order-wrap predecessor is order[len-1]=order[3]=1=physical b.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(3));
+        qm.queue.shuffle = true;
+        qm.queue.order = vec![3, 0, 2, 1];
+        qm.queue.current_index = Some(3);
+        qm.queue.current_order = Some(0);
+        qm.queue.repeat = RepeatMode::Playlist;
+        qm.queue.consume = false;
+
+        let result = qm.get_previous_song(Some(3));
+        match result {
+            PreviousSongResult::InQueue(song, idx) => {
+                assert_eq!(song.id, "b");
+                assert_eq!(idx, 1);
+            }
+            other => panic!("Expected InQueue(b, 1), got {other:?}"),
+        }
+        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.current_order, Some(3));
+    }
+
+    #[test]
+    fn previous_under_shuffle_empty_history_head_no_repeat_returns_none() {
+        // Restored shuffled queue at play-order head, repeat None, empty
+        // history. order=[2,0,3,1]; current physical = order[0]=2 (playing c).
+        // With no order predecessor and no repeat-wrap, Previous must return
+        // None and leave current_index untouched — NOT surface the physical
+        // neighbor b.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(2));
+        qm.queue.shuffle = true;
+        qm.queue.order = vec![2, 0, 3, 1];
+        qm.queue.current_index = Some(2);
+        qm.queue.current_order = Some(0);
+        qm.queue.repeat = RepeatMode::None;
+        qm.queue.consume = false;
+
+        let result = qm.get_previous_song(Some(2));
+        assert!(matches!(result, PreviousSongResult::None));
+        assert_eq!(qm.queue.current_index, Some(2));
     }
 
     // ── History tests ──

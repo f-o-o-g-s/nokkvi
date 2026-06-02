@@ -134,6 +134,24 @@ impl QueueManager {
         }
     }
 
+    /// Compute the previous order index based on current position and repeat
+    /// mode. Mirrors `next_order_index`: returns `None` at the play-order head
+    /// with no repeat. Order-aware so Previous walks `order[]`, not physical
+    /// `song_ids`, under shuffle.
+    pub(crate) fn prev_order_index(&self) -> Option<usize> {
+        if self.queue.order.is_empty() {
+            return None;
+        }
+        let cur = self.queue.current_order?;
+        if cur > 0 {
+            Some(cur - 1)
+        } else if self.queue.repeat == RepeatMode::Playlist && !self.queue.consume {
+            Some(self.queue.order.len().saturating_sub(1))
+        } else {
+            None
+        }
+    }
+
     /// Insert new song_ids indices into the order array at the end.
     /// Used when songs are appended to the queue.
     pub(crate) fn extend_order(&mut self, new_indices: std::ops::Range<usize>) {
