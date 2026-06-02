@@ -32,6 +32,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         },
         macro_rows.take("general.crossfade_enabled"),
         macro_rows.take("general.crossfade_duration"),
+        macro_rows.take("general.rewind_on_previous"),
         // --- Volume Normalization ---
         SettingsEntry::Header {
             label: "Volume Normalization",

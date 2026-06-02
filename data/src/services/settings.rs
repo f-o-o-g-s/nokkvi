@@ -354,6 +354,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_rewind_on_previous(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.rewind_on_previous = enabled;
+        self.save()
+    }
+
     pub fn set_queue_show_default_playlist(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.queue_show_default_playlist = enabled;
         self.save()
@@ -1157,6 +1162,7 @@ mod sentinel_roundtrip_tests {
             // Playback / crossfade
             crossfade_enabled: true,    // default false
             crossfade_duration_secs: 9, // default 5
+            rewind_on_previous: true,   // default false
 
             // Playlists
             quick_add_to_playlist: true,       // default false

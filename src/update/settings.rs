@@ -78,6 +78,7 @@ impl Nokkvi {
         let playback = PlaybackSettingsData {
             crossfade_enabled: self.engine.crossfade_enabled,
             crossfade_duration_secs: i64::from(self.engine.crossfade_duration_secs),
+            rewind_on_previous: self.settings.rewind_on_previous,
             volume_normalization: self.engine.volume_normalization.as_label().into(),
             normalization_level: self.engine.normalization_level.as_label().into(),
             replay_gain_preamp_db: self.engine.replay_gain_preamp_db.round() as i64,

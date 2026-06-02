@@ -127,6 +127,8 @@ impl Default for InterfaceSettingsData {
 pub struct PlaybackSettingsData {
     pub crossfade_enabled: bool,
     pub crossfade_duration_secs: i64,
+    /// Whether Previous restarts the current track past the threshold (default false).
+    pub rewind_on_previous: bool,
     /// Volume-normalization mode label ("Off" / "AGC" / "ReplayGain (Track)" / "ReplayGain (Album)")
     pub volume_normalization: Cow<'static, str>,
     pub normalization_level: Cow<'static, str>,
@@ -151,6 +153,7 @@ impl Default for PlaybackSettingsData {
         Self {
             crossfade_enabled: false,
             crossfade_duration_secs: 0,
+            rewind_on_previous: false,
             volume_normalization: Cow::Borrowed("test-default"),
             normalization_level: Cow::Borrowed("test-default"),
             replay_gain_preamp_db: 0,
@@ -218,6 +221,7 @@ mod tests {
         assert_eq!(data.replay_gain_preamp_db, 0);
         assert_eq!(data.replay_gain_fallback_db, 0);
         assert!(!data.crossfade_enabled);
+        assert!(!data.rewind_on_previous);
         assert!(!data.replay_gain_fallback_to_agc);
         assert!(!data.replay_gain_prevent_clipping);
         assert!(!data.scrobbling_enabled);

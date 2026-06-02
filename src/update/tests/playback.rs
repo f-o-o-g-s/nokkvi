@@ -637,3 +637,88 @@ fn toggle_play_resume_of_paused_track_flips_playing() {
     );
     assert!(!app.playback.paused);
 }
+
+// ============================================================================
+// Previous: rewind-on-previous (opt-in restart vs step-back), Tier A #1
+// ============================================================================
+//
+// `settings.rewind_on_previous` (off by default, mirrors fooyin) gates whether
+// Previous restarts the current track once it has played past
+// `PREV_RESTART_THRESHOLD_SECS`. The observable hook is `scrobble.last_position`:
+// a restart routes through `handle_seek(0.0)`, which advances `last_position`
+// to 0.0 synchronously before returning the task; the step-back path calls
+// `shell.previous()` and never touches it. So `last_position == 0.0` means
+// "restarted" and an untouched sentinel means "stepped back". (`app_service`
+// is None in tests, so the async `shell_task` is a no-op — only the
+// synchronous decision is observable, which is exactly what we pin.)
+
+#[test]
+fn prev_track_restarts_current_when_enabled_and_past_threshold() {
+    let mut app = test_app();
+    app.settings.rewind_on_previous = true;
+    // A track that has played well past the restart threshold.
+    app.playback.position = 8;
+    // Sentinel distinct from the restart target (0.0).
+    app.scrobble.last_position = 99.0;
+
+    let _ = app.handle_prev_track();
+
+    assert_eq!(
+        app.scrobble.last_position, 0.0,
+        "with the setting on, Previous past the threshold restarts the current track (seek to 0)"
+    );
+}
+
+#[test]
+fn prev_track_setting_off_always_steps_back() {
+    let mut app = test_app();
+    // Default is OFF (fooyin default): even past the threshold, Previous steps
+    // back and must never restart-seek.
+    assert!(
+        !app.settings.rewind_on_previous,
+        "rewind_on_previous must default to off"
+    );
+    app.playback.position = 8;
+    app.scrobble.last_position = 99.0;
+
+    let _ = app.handle_prev_track();
+
+    assert_eq!(
+        app.scrobble.last_position, 99.0,
+        "with the setting off, Previous steps back regardless of position (no restart-seek)"
+    );
+}
+
+#[test]
+fn prev_track_steps_back_when_within_threshold() {
+    let mut app = test_app();
+    app.settings.rewind_on_previous = true;
+    // Within the first few seconds, Previous steps to the previous track even
+    // when the setting is on.
+    app.playback.position = 1;
+    app.scrobble.last_position = 99.0;
+
+    let _ = app.handle_prev_track();
+
+    assert_eq!(
+        app.scrobble.last_position, 99.0,
+        "Previous within the threshold steps back and must NOT seek (last_position untouched)"
+    );
+}
+
+#[test]
+fn prev_track_radio_ignores_restart_when_enabled() {
+    let mut app = radio_test_app();
+    app.settings.rewind_on_previous = true;
+    // Even with the setting on and past the threshold, radio Previous cycles
+    // stations — never restart-seeks.
+    app.playback.position = 8;
+    app.scrobble.last_position = 99.0;
+
+    let _ = app.handle_prev_track();
+
+    assert_eq!(
+        app.scrobble.last_position, 99.0,
+        "radio Previous must cycle stations, not restart-seek, regardless of position"
+    );
+}

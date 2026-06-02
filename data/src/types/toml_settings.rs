@@ -189,6 +189,9 @@ pub struct TomlSettings {
     // -- Playback --
     pub crossfade_enabled: bool,
     pub crossfade_duration_secs: u32,
+    /// Whether the Previous button restarts the current track (instead of
+    /// stepping back) once it has played past the threshold. Default false.
+    pub rewind_on_previous: bool,
     /// Volume normalization mode (default: Off). On-disk key is
     /// `volume_normalization_mode`.
     #[serde(rename = "volume_normalization_mode")]
@@ -364,6 +367,7 @@ impl Default for TomlSettings {
             strip_separator: crate::types::player_settings::StripSeparator::Slash,
             crossfade_enabled: true,
             crossfade_duration_secs: 7,
+            rewind_on_previous: false,
             volume_normalization: VolumeNormalizationMode::default(),
             normalization_level: NormalizationLevel::default(),
             replay_gain_preamp_db: 0.0,

@@ -73,6 +73,23 @@ define_settings! {
                 read_field: |d| d.crossfade_duration_secs,
             },
         },
+        RewindOnPrevious {
+            key: "general.rewind_on_previous",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_rewind_on_previous(v),
+            toml_apply: |ts, p| p.rewind_on_previous = ts.rewind_on_previous,
+            read: |src, out| out.rewind_on_previous = src.rewind_on_previous,
+            write: |ps, ts| ts.rewind_on_previous = ps.rewind_on_previous,
+            ui_meta: {
+                label: "Rewind on Previous",
+                category: "Playback",
+                subtitle: Some(
+                    "Previous restarts the current track if it's played past 5s, instead of skipping back",
+                ),
+                default: false,
+                read_field: |d| d.rewind_on_previous,
+            },
+        },
         VolumeNormalization {
             key: "general.volume_normalization",
             value_type: Enum,
@@ -295,6 +312,7 @@ mod tests {
         PlaybackSettingsData {
             crossfade_enabled: false,
             crossfade_duration_secs: 5,
+            rewind_on_previous: false,
             volume_normalization: "Off".into(),
             normalization_level: "Normal".into(),
             replay_gain_preamp_db: 0,
@@ -309,16 +327,17 @@ mod tests {
         }
     }
 
-    /// 7 entries get ui_meta: 3 unconditional Playback rows, 2 Scrobbling,
-    /// and 2 Playlists. The 5 conditional AGC/RG knobs and the
+    /// 8 entries get ui_meta: 4 unconditional Playback rows (crossfade enable,
+    /// crossfade duration, rewind-on-previous, volume normalization), 2
+    /// Scrobbling, and 2 Playlists. The 5 conditional AGC/RG knobs and the
     /// `default_playlist_name` dialog row stay hand-written; the 6
     /// lifecycle-only entries (queue column visibility, opacity_gradient,
     /// rounded_mode) emit nothing here.
     #[test]
-    fn build_playback_tab_settings_items_emits_seven_rows() {
+    fn build_playback_tab_settings_items_emits_eight_rows() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 7);
+        assert_eq!(entries.len(), 8);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -500,6 +519,7 @@ mod tests {
         let mut ts = TomlSettings::default();
         ts.crossfade_enabled = true;
         ts.crossfade_duration_secs = 9;
+        ts.rewind_on_previous = true;
         ts.replay_gain_preamp_db = 4.0;
         ts.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
         ts.normalization_level = NormalizationLevel::Loud;
@@ -512,6 +532,7 @@ mod tests {
 
         assert!(p.crossfade_enabled);
         assert_eq!(p.crossfade_duration_secs, 9);
+        assert!(p.rewind_on_previous);
         assert_eq!(p.replay_gain_preamp_db, 4.0);
         assert_eq!(
             p.volume_normalization,
@@ -534,6 +555,7 @@ mod tests {
         let mut src = PersistedPlayerSettings::default();
         src.crossfade_enabled = true;
         src.crossfade_duration_secs = 9;
+        src.rewind_on_previous = true;
         src.replay_gain_preamp_db = 4.0;
         src.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
         src.normalization_level = NormalizationLevel::Loud;
@@ -546,6 +568,7 @@ mod tests {
 
         assert!(ui.crossfade_enabled);
         assert_eq!(ui.crossfade_duration_secs, 9);
+        assert!(ui.rewind_on_previous);
         assert_eq!(ui.replay_gain_preamp_db, 4.0);
         assert_eq!(
             ui.volume_normalization,
@@ -569,6 +592,7 @@ mod tests {
         let mut ps = crate::types::player_settings::LivePlayerSettings::default();
         ps.crossfade_enabled = true;
         ps.crossfade_duration_secs = 9;
+        ps.rewind_on_previous = true;
         ps.replay_gain_preamp_db = 4.0;
         ps.replay_gain_fallback_db = 1.5;
         ps.replay_gain_fallback_to_agc = true;
@@ -591,6 +615,7 @@ mod tests {
 
         assert!(ts.crossfade_enabled);
         assert_eq!(ts.crossfade_duration_secs, 9);
+        assert!(ts.rewind_on_previous);
         assert!((ts.replay_gain_preamp_db - 4.0).abs() < f32::EPSILON);
         assert!((ts.replay_gain_fallback_db - 1.5).abs() < f32::EPSILON);
         assert!(ts.replay_gain_fallback_to_agc);

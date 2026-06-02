@@ -9,6 +9,13 @@ use crate::{
     views,
 };
 
+/// Elapsed seconds at or past which "Previous" restarts the current track
+/// instead of stepping to the previous one, when the `rewind_on_previous`
+/// setting is enabled — matching fooyin's opt-in "Rewind track on previous"
+/// behavior (5-second threshold). Compared against `playback.position` (whole
+/// seconds), so restart engages once the clock reaches 0:05.
+const PREV_RESTART_THRESHOLD_SECS: u32 = 5;
+
 /// Resolve the next radio-station index when cycling.
 ///
 /// `current_pos` is the position of the currently-playing station in the list,
@@ -824,6 +831,16 @@ impl Nokkvi {
     pub(crate) fn handle_prev_track(&mut self) -> Task<Message> {
         if self.active_playback.is_radio() {
             return self.cycle_radio_station(false);
+        }
+        // With "rewind on previous" enabled, Previous restarts the current
+        // track once it has played past the threshold rather than stepping
+        // back — fooyin's opt-in convention (off by default). Route through
+        // `handle_seek` so the anti-seek-fraud guard (advancing
+        // `scrobble.last_position` to the target) and the radio gate both apply
+        // unchanged, and no queue navigation / consume-removal is reached.
+        if self.settings.rewind_on_previous && self.playback.position >= PREV_RESTART_THRESHOLD_SECS
+        {
+            return self.handle_seek(0.0);
         }
         // NOTE: We intentionally do NOT reset the visualizer here.
         // The auto-sensitivity naturally adapts between tracks. Resetting it

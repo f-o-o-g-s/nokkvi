@@ -395,7 +395,7 @@ mod tests {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
         // `volume_normalization = "test-default"` matches neither "AGC" nor
         // any ReplayGain label, so the conditional knobs are omitted —
-        // matching the 8-item Off baseline.
+        // matching the 9-item Off baseline.
         let data = PlaybackSettingsData::default();
         let entries = build_playback_items(&data);
 
@@ -407,8 +407,8 @@ mod tests {
         // Off mode hides AGC level + RG knobs.
         assert_eq!(
             count_items(&entries),
-            8,
-            "Off mode: crossfade_enabled, crossfade_duration, volume_normalization, scrobbling_enabled, scrobble_threshold, quick_add_to_playlist, default_playlist_name, queue_show_default_playlist"
+            9,
+            "Off mode: crossfade_enabled, crossfade_duration, rewind_on_previous, volume_normalization, scrobbling_enabled, scrobble_threshold, quick_add_to_playlist, default_playlist_name, queue_show_default_playlist"
         );
     }
 
@@ -421,7 +421,7 @@ mod tests {
         };
         let entries = build_playback_items(&data);
         // AGC mode adds the target-level dropdown.
-        assert_eq!(count_items(&entries), 9);
+        assert_eq!(count_items(&entries), 10);
     }
 
     #[test]
@@ -433,7 +433,7 @@ mod tests {
         };
         let entries = build_playback_items(&data);
         // RG modes add 4 knobs: preamp, fallback_db, fallback_to_agc, prevent_clipping.
-        assert_eq!(count_items(&entries), 12);
+        assert_eq!(count_items(&entries), 13);
     }
 
     /// Find the first `SettingItem` matching `key` and assert it carries the

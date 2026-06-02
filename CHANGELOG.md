@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Optional "Rewind on Previous" setting (off by default): the Previous button restarts the current track instead of skipping back once it's played past 5 seconds.
+
 ### Changed
 
 ### Fixed

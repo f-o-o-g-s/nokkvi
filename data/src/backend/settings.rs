@@ -203,6 +203,7 @@ impl SettingsService {
     delegate_setter!(set_slot_text_links, bool);
     delegate_setter!(set_crossfade_enabled, bool);
     delegate_setter!(set_crossfade_duration, u32);
+    delegate_setter!(set_rewind_on_previous, bool);
     delegate_setter!(set_quick_add_to_playlist, bool);
     delegate_setter!(set_queue_show_default_playlist, bool);
     delegate_setter!(set_horizontal_volume, bool);

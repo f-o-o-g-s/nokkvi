@@ -71,6 +71,9 @@ pub struct LivePlayerSettings {
     pub crossfade_enabled: bool,
     /// Crossfade duration in seconds (1–12)
     pub crossfade_duration_secs: u32,
+    /// Whether the Previous button restarts the current track once it has
+    /// played past the threshold (default false).
+    pub rewind_on_previous: bool,
     /// Default playlist ID for quick-add (None = no default)
     pub default_playlist_id: Option<String>,
     /// Default playlist display name (for settings UI)

@@ -92,6 +92,10 @@ pub struct PersistedPlayerSettings {
     /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]
     pub crossfade_duration_secs: u32,
+    /// Whether the Previous button restarts the current track once it has
+    /// played past the threshold (default false).
+    #[serde(default)]
+    pub rewind_on_previous: bool,
     /// Default playlist ID for quick-add (None = no default)
     #[serde(default)]
     pub default_playlist_id: Option<String>,
@@ -496,6 +500,7 @@ impl Default for PersistedPlayerSettings {
             slot_text_links: default_true(),
             crossfade_enabled: true,
             crossfade_duration_secs: default_crossfade_duration_secs(),
+            rewind_on_previous: false,
             default_playlist_id: None,
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,
