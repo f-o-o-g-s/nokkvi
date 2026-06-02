@@ -1319,5 +1319,102 @@ mod proptest_navigation {
                 "shuffle didn't visit all songs: {:?}", visited
             );
         }
+
+        /// QUEUE-1 regression: removing the currently-playing row under a
+        /// shuffled order must reach every still-upcoming survivor exactly
+        /// once before stopping, with no replay. The upcoming survivors are
+        /// the song ids at order[current_order+1..] (captured before removal);
+        /// after removing the current row the derive fix makes the next
+        /// upcoming survivor the new current, so draining via get_next_song
+        /// must reproduce exactly that upcoming set, in order, with no repeats.
+        #[test]
+        fn remove_current_under_shuffle_reaches_all_upcoming(
+            n in 2usize..8,
+            co_pick in 0usize..8,
+        ) {
+            let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
+            let (mut qm, _temp) = make_test_manager(songs, Some(0));
+            let _ = qm.toggle_shuffle().unwrap();
+            qm.queue.consume = false;
+            let _ = qm.set_repeat(RepeatMode::None).unwrap();
+
+            // Pick a random valid current_order and re-anchor the invariant
+            // (toggle_shuffle keeps song 0 anchored at current_order=0; choose
+            // a fresh position and sync current_index to order[co]).
+            let co = co_pick % n;
+            qm.queue.current_order = Some(co);
+            qm.queue.current_index = Some(qm.queue.order[co]);
+            qm.queue.queued = None;
+
+            // Capture the play-order tail strictly after current_order BEFORE
+            // removal: these genuinely-upcoming survivors must all be reached.
+            let upcoming_before: Vec<String> = qm.queue.order[co + 1..]
+                .iter()
+                .map(|&phys| qm.queue.song_ids[phys].clone())
+                .collect();
+
+            // Remove the currently-playing physical row.
+            let cur_phys = qm.queue.current_index.unwrap();
+            let _ = qm.remove_song(cur_phys).unwrap();
+
+            // Invariant restored after removal.
+            let (post_co, post_ci) = (qm.queue.current_order, qm.queue.current_index);
+            if let (Some(c_ord), Some(c_idx)) = (post_co, post_ci) {
+                prop_assert_eq!(
+                    qm.queue.order[c_ord], c_idx,
+                    "invariant order[co]==ci broken after remove (n={}, co={})", n, co
+                );
+            }
+
+            // The true reachable set is the post-removal play-order tail from
+            // the new current_order: order[post_co..] mapped to song ids. The
+            // derive fix makes the next-upcoming survivor (or, in the last-slot
+            // case, the survivor that slid into the slot) the new current, so
+            // draining current + get_next_song* must reproduce exactly this.
+            let expected: Vec<String> = match post_co {
+                Some(c) => qm.queue.order[c..]
+                    .iter()
+                    .map(|&phys| qm.queue.song_ids[phys].clone())
+                    .collect(),
+                None => Vec::new(),
+            };
+
+            // Drain via get_next_song collecting the play sequence.
+            let mut seq: Vec<String> = Vec::new();
+            if let Some(ci) = post_ci {
+                seq.push(qm.queue.song_ids[ci].clone());
+            }
+            let cap = n + 5;
+            let mut count = 0;
+            while let Some(next) = qm.get_next_song() {
+                seq.push(next.song.id.clone());
+                count += 1;
+                prop_assert!(count <= cap, "drain did not terminate (n={}, co={})", n, co);
+            }
+
+            // No id repeated (no replay / over-play).
+            let mut dedup = seq.clone();
+            dedup.sort();
+            dedup.dedup();
+            prop_assert_eq!(
+                dedup.len(), seq.len(),
+                "drain replayed/over-played a song: {:?} (n={}, co={})", seq, n, co
+            );
+
+            // Exact reachability: drain equals the post-removal play-order tail.
+            prop_assert_eq!(
+                seq.clone(), expected,
+                "drain != post-removal play-order tail: {:?} (n={}, co={})", seq, n, co
+            );
+
+            // And every genuinely-upcoming survivor (captured before removal)
+            // is reached — guards against silently dropping the unplayed tail.
+            for up in &upcoming_before {
+                prop_assert!(
+                    seq.contains(up),
+                    "upcoming survivor {} stranded (n={}, co={}, seq={:?})", up, n, co, seq
+                );
+            }
+        }
     }
 }

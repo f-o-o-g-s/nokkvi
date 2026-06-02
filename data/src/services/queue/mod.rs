@@ -427,9 +427,24 @@ impl QueueManager {
                 // Removed before current — shift back
                 tx.queue.current_index = Some(cur - 1);
             } else if index == cur {
-                // Removed the current song — clamp to valid range
-                let new_len = tx.queue.song_ids.len();
-                tx.queue.current_index = Some(cur.min(new_len - 1));
+                // Removed the current song. remove_from_order has already moved
+                // current_order onto the play-order slot the next surviving
+                // upcoming song slid into, so derive current_index from
+                // order[current_order] to restore the invariant
+                // order[current_order] == current_index. Under a shuffled
+                // (non-identity) order a bare physical clamp (cur.min(len-1))
+                // diverges from the order clamp, desyncing the two and causing
+                // the next peek/transition to replay or strand survivors. The
+                // or_else physical clamp is a defensive fallback for the
+                // (unreachable while non-empty) current_order == None case.
+                tx.queue.current_index = tx
+                    .queue
+                    .current_order
+                    .and_then(|co| tx.queue.order.get(co).copied())
+                    .or_else(|| {
+                        let new_len = tx.queue.song_ids.len();
+                        Some(cur.min(new_len - 1))
+                    });
             }
             // index > cur: no adjustment needed
         }
@@ -1862,6 +1877,178 @@ pub(crate) mod tests {
         // Order should now be [0, 1, 2] (indices adjusted)
         assert_eq!(qm.queue.order, vec![0, 1, 2]);
         assert_eq!(qm.queue.song_ids, vec!["a", "c", "d"]);
+    }
+
+    // ── QUEUE-1: removing the playing row under shuffle must keep the
+    //    invariant order[current_order] == current_index AND reach every
+    //    still-upcoming survivor exactly once before stopping (no replay,
+    //    no strand). These tests drain via get_next_song() and assert the
+    //    EXACT play sequence so the bare sync_current_order_to_index()
+    //    one-liner (which strands / over-plays) cannot pass.
+
+    /// Drain the queue from the current song: push the current song id, then
+    /// repeatedly call get_next_song() collecting each id until None (capped to
+    /// avoid spinning under repeat modes). Returns the full play sequence.
+    fn drain_play_sequence(qm: &mut QueueManager, cap: usize) -> Vec<String> {
+        let mut seq = Vec::new();
+        if let Some(idx) = qm.queue.current_index
+            && let Some(id) = qm.queue.song_ids.get(idx)
+        {
+            seq.push(id.clone());
+        }
+        for _ in 0..cap {
+            match qm.get_next_song() {
+                Some(next) => seq.push(next.song.id.clone()),
+                None => break,
+            }
+        }
+        seq
+    }
+
+    fn assert_no_repeats(seq: &[String]) {
+        let mut sorted = seq.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            seq.len(),
+            "play sequence replays/over-plays a song: {seq:?}"
+        );
+    }
+
+    /// STRANDING DISCRIMINATOR. order=[0,2,1], playing s0 (current_order=0).
+    /// Upcoming survivors after removing s0 are s2 (order pos 1) then s1
+    /// (order pos 2). The correct derive fix drains to exactly [s2, s1]. The
+    /// rejected bare sync_current_order_to_index() one-liner STRANDS s2 and
+    /// drains to only [s1]. This is the test that enforces the spec's
+    /// acceptance bar "do NOT ship the bare one-liner alone".
+    #[test]
+    fn remove_current_under_shuffle_strands_with_bare_oneliner() {
+        let songs = vec![
+            make_test_song("s0"),
+            make_test_song("s1"),
+            make_test_song("s2"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = true;
+        qm.queue.consume = false;
+        qm.queue.repeat = RepeatMode::None;
+        qm.queue.order = vec![0, 2, 1];
+        qm.queue.current_index = Some(0); // order[0] == 0 == s0, invariant holds
+        qm.queue.current_order = Some(0);
+
+        let _ = qm.remove_song(0).unwrap(); // remove playing s0
+        // song_ids after removal: [s1, s2]
+        assert_eq!(qm.queue.song_ids, vec!["s1", "s2"]);
+
+        // (a) invariant restored
+        let co = qm.queue.current_order.expect("current_order set");
+        let ci = qm.queue.current_index.expect("current_index set");
+        assert_eq!(qm.queue.order[co], ci, "invariant order[co]==ci broken");
+
+        // (b) no immediate replay of the removed/current song
+        let cur_id = qm.queue.song_ids[ci].clone();
+        if let Some(peek) = qm.peek_next_song() {
+            assert_ne!(peek.song().id, cur_id, "peek replays the current song");
+        }
+
+        // (c) exact reachability: both upcoming survivors reached, in order,
+        //     with no repeats. Bare one-liner strands s2 → drains to [s1].
+        let seq = drain_play_sequence(&mut qm, 8);
+        assert_no_repeats(&seq);
+        assert_eq!(
+            seq,
+            vec!["s2".to_string(), "s1".to_string()],
+            "drain must reach both upcoming survivors s2 then s1"
+        );
+    }
+
+    /// MID-ORDER placement. order=[2,1,0,3], playing s1 (current_order=1).
+    /// Upcoming survivors are order[2]=s0 then order[3]=s3; s2 sits at the
+    /// already-played order pos 0 and must NOT be revisited. Correct fix
+    /// drains to exactly [s0, s3]. Bare one-liner yields [s2, s0, s3]
+    /// (over-plays already-played s2) which the exact-sequence assert rejects.
+    #[test]
+    fn remove_current_under_shuffle_mid_order_reaches_all_survivors() {
+        let songs = vec![
+            make_test_song("s0"),
+            make_test_song("s1"),
+            make_test_song("s2"),
+            make_test_song("s3"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
+        qm.queue.shuffle = true;
+        qm.queue.consume = false;
+        qm.queue.repeat = RepeatMode::None;
+        qm.queue.order = vec![2, 1, 0, 3];
+        qm.queue.current_index = Some(1); // order[1] == 1 == s1, invariant holds
+        qm.queue.current_order = Some(1);
+
+        let _ = qm.remove_song(1).unwrap(); // remove playing s1
+        // song_ids after removal: [s0, s2, s3]
+        assert_eq!(qm.queue.song_ids, vec!["s0", "s2", "s3"]);
+
+        // (a) invariant restored
+        let co = qm.queue.current_order.expect("current_order set");
+        let ci = qm.queue.current_index.expect("current_index set");
+        assert_eq!(qm.queue.order[co], ci, "invariant order[co]==ci broken");
+
+        // (b) no immediate replay
+        let cur_id = qm.queue.song_ids[ci].clone();
+        if let Some(peek) = qm.peek_next_song() {
+            assert_ne!(peek.song().id, cur_id, "peek replays the current song");
+        }
+
+        // (c) exact play sequence [s0, s3], no repeats, s2 not over-played.
+        let seq = drain_play_sequence(&mut qm, 8);
+        assert_no_repeats(&seq);
+        assert_eq!(
+            seq,
+            vec!["s0".to_string(), "s3".to_string()],
+            "drain must be exactly [s0, s3]"
+        );
+    }
+
+    /// LAST-ORDER-SLOT placement. order=[2,0,1], playing s1 (current_order=2,
+    /// the last order slot). Nothing sits after the last order position, so the
+    /// upcoming set is empty. After removal the play-order survivor that slid
+    /// into the slot (s0) is the new current and a clean None stop is correct.
+    /// Correct fix drains to exactly [s0] with no replay; s2 (already-played at
+    /// order pos 0) is correctly not revisited.
+    #[test]
+    fn remove_current_under_shuffle_last_order_slot_no_replay_no_strand() {
+        let songs = vec![
+            make_test_song("s0"),
+            make_test_song("s1"),
+            make_test_song("s2"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
+        qm.queue.shuffle = true;
+        qm.queue.consume = false;
+        qm.queue.repeat = RepeatMode::None;
+        qm.queue.order = vec![2, 0, 1];
+        qm.queue.current_index = Some(1); // order[2] == 1 == s1, invariant holds
+        qm.queue.current_order = Some(2);
+
+        let _ = qm.remove_song(1).unwrap(); // remove playing s1
+        // song_ids after removal: [s0, s2]
+        assert_eq!(qm.queue.song_ids, vec!["s0", "s2"]);
+
+        // (a) invariant restored
+        let co = qm.queue.current_order.expect("current_order set");
+        let ci = qm.queue.current_index.expect("current_index set");
+        assert_eq!(qm.queue.order[co], ci, "invariant order[co]==ci broken");
+
+        // (b) no replay of the current song
+        let cur_id = qm.queue.song_ids[ci].clone();
+        if let Some(peek) = qm.peek_next_song() {
+            assert_ne!(peek.song().id, cur_id, "peek replays the current song");
+        }
+
+        // (c) exact play sequence [s0], no repeats, clean stop, no strand.
+        let seq = drain_play_sequence(&mut qm, 8);
+        assert_no_repeats(&seq);
+        assert_eq!(seq, vec!["s0".to_string()], "drain must be exactly [s0]");
     }
 
     #[test]
