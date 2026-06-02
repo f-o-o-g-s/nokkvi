@@ -76,7 +76,7 @@ const KEY_QUEUE_SONGS: &str = crate::services::storage_keys::QUEUE_SONGS;
 ///    canonical identity order (matches `rebuild_order`) and drop
 ///    `current_order`.
 /// 3. Remap `current_index` through the old→new map; if its row was pruned,
-///    clamp to the last valid index (or `None` when the queue is now empty).
+///    clamp to the adjacent survivor (or `None` when the queue is now empty).
 /// 4. Re-derive `current_order` from `current_index`'s position in `order`.
 /// 5. ALWAYS clear `queued` — gapless-prep transient, never valid across a
 ///    relaunch.
@@ -137,8 +137,12 @@ fn reconcile_loaded_queue(queue: &mut Queue, pool: &SongPool) -> bool {
         Some(old) => match remap.get(old).copied().flatten() {
             Some(new) => Some(new),
             None if new_len == 0 => None,
-            // Its row was pruned — clamp to the last valid index.
-            None => Some(new_len - 1),
+            // Its row was pruned — clamp to the adjacent survivor
+            // (stay-in-place), matching remove_from_order. NOTE: `old` is in
+            // OLD song_ids space, so when rows BEFORE the playhead are pruned
+            // in the same reconcile this can overshoot the precise successor;
+            // it is still never worse than the queue tail and never replays.
+            None => Some(old.min(new_len - 1)),
         },
         None => None,
     };
@@ -1579,6 +1583,31 @@ pub(crate) mod tests {
         // order is a valid permutation of 0..3 with no entry >= 3.
         assert!(order_is_identity_permutation(&q.order, 3));
         assert!(q.order.iter().all(|&i| i < 3));
+    }
+
+    #[test]
+    fn reconcile_pruned_current_clamps_to_adjacent_survivor() {
+        // song_ids [A,B,C,D,E], identity order, current=Some(2) (=C).
+        // Pool drops C (the currently-playing row). The surviving playhead
+        // must stay in place at the adjacent survivor (D), NOT jump to the
+        // queue tail (E), so the unplayed middle isn't silently skipped.
+        let mut q = queue_with(&["A", "B", "C", "D", "E"], Some(2));
+        let pool = pool_with(&["A", "B", "D", "E"]);
+
+        let dirty = reconcile_loaded_queue(&mut q, &pool);
+        assert!(dirty);
+        assert_eq!(q.song_ids, vec!["A", "B", "D", "E"]);
+        // Adjacent survivor, NOT Some(3) (the tail).
+        assert_eq!(q.current_index, Some(2));
+        // Resolves to D, not E.
+        assert_eq!(q.song_ids[q.current_index.unwrap()], "D");
+        // Invariant + sync: order[current_order] == current_index.
+        assert_eq!(q.current_order, Some(2));
+        assert_eq!(q.order[q.current_order.unwrap()], q.current_index.unwrap());
+        // Forward reachability of the tail: order=[0,1,2,3] so the next
+        // forward step (order[current_order+1]) maps to song_ids[3] == "E".
+        assert_eq!(q.order, vec![0, 1, 2, 3]);
+        assert_eq!(q.song_ids[q.order[q.current_order.unwrap() + 1]], "E");
     }
 
     #[test]
