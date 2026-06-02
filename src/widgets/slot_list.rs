@@ -1792,9 +1792,9 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
 /// above) and no bottom padding (the last row meets the player bar with
 /// zero gap). Rounded mode adds an outer `ui_radius_lg()` shell with a
 /// 1 px `theme::border()` outline that clips the touching row hairlines
-/// into a single sealed perimeter. The shell's TOP-LEFT corner is kept
+/// into a single sealed perimeter. The shell's LEFT corners are kept
 /// square on purpose — see the inline note on the `radius:` field for why
-/// rounding it there bleeds the background behind the shell.
+/// rounding them there bleeds the background behind the shell.
 pub(crate) fn slot_list_background_container<'a, Message: 'a>(
     slot_list_content: Element<'a, Message>,
 ) -> Element<'a, Message> {
@@ -1807,18 +1807,20 @@ pub(crate) fn slot_list_background_container<'a, Message: 'a>(
                 border: iced::Border {
                     color: theme::border(),
                     width: 1.0,
-                    // Square the TOP-LEFT corner only. This shell runs
-                    // edge-to-edge and butts flush against the view header
-                    // strip above it (see this fn's doc comment), so a rounded
-                    // top-left plus `clip(true)` leaves the corner wedge
-                    // outside the arc unpainted — the lighter surface sitting
-                    // behind the shell then bleeds through there. It is most
-                    // visible under the `bg0_soft` select-all header bar; the
-                    // top-right corner is hidden by the slot-list scrollbar,
-                    // which is why only the left shows it. Zeroing just this
-                    // corner removes the wedge while the other three keep the
+                    // Square both LEFT corners. This shell runs edge-to-edge
+                    // and butts flush against the view header strip above it
+                    // and the player bar below it (see this fn's doc comment),
+                    // so a rounded left corner plus `clip(true)` leaves the
+                    // corner wedge outside the arc unpainted — the lighter
+                    // surface sitting behind the shell then bleeds through
+                    // there. Top-left is most visible under the `bg0_soft`
+                    // select-all header bar; bottom-left shows the same wedge
+                    // where the last row meets the player bar. Both RIGHT
+                    // corners are hidden by the slot-list scrollbar, which is
+                    // why only the left edge shows it. Zeroing the left edge
+                    // removes both wedges while the right keeps the
                     // `ui_radius_lg()` shell rounding. Intentional — not a bug.
-                    radius: theme::ui_radius_lg().top_left(0.0),
+                    radius: theme::ui_radius_lg().left(0.0),
                 },
                 ..Default::default()
             })

@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - The empty (unchecked) checkboxes in the list-view Select column now have a soft, readable outline in every theme, instead of a near-black frame that blended into the row and was hard to see.
-- In rounded mode, list views no longer show a stray lighter patch tucked into their top-left corner.
+- In rounded mode, list views no longer show a stray lighter patch tucked into their top-left or bottom-left corner.
 - Star ratings now shrink as a group on narrow columns instead of scaling only the last star, so 5 stars no longer read as 4.
 - The now-playing row's shimmer animation no longer floods the log with repeated gradient-range warnings.
 
