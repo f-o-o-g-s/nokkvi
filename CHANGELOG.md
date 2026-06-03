@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The application icon (desktop launcher and system tray) now uses the default Everforest theme colors instead of the previous Gruvbox-based palette.
+
 ### Fixed
 
 - Removing the currently-playing track while shuffle is on no longer skips a track or stops playback early with songs still left to play.
