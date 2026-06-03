@@ -13,10 +13,12 @@ use serde::{Deserialize, Serialize};
 // Theme File (top-level)
 // ============================================================================
 
-/// Bundled Everforest theme TOML, used as the first-run default and as the
-/// schema-evolution baseline. Pulled into a module-level constant so the
-/// parse test (`everforest_toml_parses_cleanly`) and the `Default` impl
-/// share the same string.
+/// Bundled Everforest theme TOML. Everforest is no longer the first-run
+/// default — that is Svalbard, via `DEFAULT_THEME` in `theme_loader.rs`. This
+/// const remains the schema-evolution baseline and the deep corrupt-file
+/// fallback (`ThemeFile::default`). Pulled into a module-level constant so the
+/// parse test (`everforest_toml_parses_cleanly`) and the `Default` impl share
+/// the same string.
 const EVERFOREST_TOML: &str = include_str!("../../../themes/everforest.toml");
 
 /// Complete theme file — the root struct for `{name}.toml`.
@@ -430,8 +432,8 @@ mod tests {
         assert_eq!(palette.star.bright, "#f9f06b");
     }
 
-    /// The bundled `everforest.toml` (the first-run default theme) must always
-    /// parse cleanly against the current `ThemeFile` schema. If a future
+    /// The bundled `everforest.toml` (the schema-evolution baseline theme) must
+    /// always parse cleanly against the current `ThemeFile` schema. If a future
     /// refactor renames a field or changes a serde shape, this test fails at
     /// the source instead of at user-startup time.
     #[test]

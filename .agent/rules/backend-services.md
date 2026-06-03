@@ -100,7 +100,7 @@ AppService (orchestrator)
 |-------|----------|---------|
 | **redb** (`~/.local/state/nokkvi/app.redb`) | `services/state_storage.rs` | Generic key/value (`save` / `load` JSON, `save_binary` / `load_binary` bincode). Stores queue order + song pool, `user_settings`, JWT, Subsonic credential |
 | **TOML config** (`~/.config/nokkvi/config.toml`, `config.debug.toml` in debug builds) | `services/toml_settings_io.rs` | Hot-reloadable via `toml_edit`. `verbose_config` writes all defaults |
-| **Theme files** (`~/.config/nokkvi/themes/`) | `services/theme_loader.rs` | Named `.toml`. **22 built-in** (compiled via `include_str!`, seeded on first run; `everforest` is the first-run default). Discovery, load/save, restore-builtin |
+| **Theme files** (`~/.config/nokkvi/themes/`) | `services/theme_loader.rs` | Named `.toml`. **22 built-in** (compiled via `include_str!`, seeded on first run; `svalbard` is the first-run default). Discovery, load/save, restore-builtin |
 | **Artwork** | (no disk cache) | Server-only. Session-scoped Handle reuse in UI maps |
 | **Config writer** | `src/config_writer.rs` (UI crate) | Typed `ConfigKey { AppScalar, AppArrayEntry, Theme, ThemeArrayEntry }`. Per-key TOML updates routed through `nokkvi_data::utils::paths::write_atomic` (temp file + rename + `LAST_INTERNAL_WRITE` tag for the config watcher's reflection-suppression) |
 | **Credentials** | `data/src/credentials.rs` | `server_url` / `username` in `config.toml`; JWT + Subsonic credential in redb. **No password on disk** — JWT auto-refreshes via `X-ND-Authorization`; expired JWT (48h default) drops to the login screen |

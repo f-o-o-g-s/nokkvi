@@ -24,6 +24,10 @@ struct BuiltinTheme {
 /// All built-in themes. Order matters — first is the default.
 const BUILTIN_THEMES: &[BuiltinTheme] = &[
     BuiltinTheme {
+        stem: "svalbard",
+        content: include_str!("../../../themes/svalbard.toml"),
+    },
+    BuiltinTheme {
         stem: "everforest",
         content: include_str!("../../../themes/everforest.toml"),
     },
@@ -317,7 +321,7 @@ pub fn restore_builtin(name: &str) -> Result<()> {
 // ============================================================================
 
 /// Default theme name when none is configured.
-pub const DEFAULT_THEME: &str = "everforest";
+pub const DEFAULT_THEME: &str = "svalbard";
 
 /// Read the `theme = "..."` key from config.toml.
 ///
@@ -424,7 +428,7 @@ mod tests {
     #[test]
     fn test_all_builtin_themes_parse() {
         let registry = builtin_registry();
-        assert_eq!(registry.len(), 21, "Expected 21 built-in themes");
+        assert_eq!(registry.len(), 22, "Expected 22 built-in themes");
 
         for builtin in BUILTIN_THEMES {
             let theme = ThemeFile::load(builtin.content).unwrap_or_else(|e| {
@@ -451,10 +455,12 @@ mod tests {
     #[test]
     fn test_seed_and_discover() {
         let (_tmp, themes) = seed_to_temp();
-        assert_eq!(themes.len(), 21);
+        assert_eq!(themes.len(), 22);
         assert!(themes.iter().all(|t| t.is_builtin));
 
-        // Check a specific one
+        // Check the new default and a legacy builtin
+        let svalbard = themes.iter().find(|t| t.stem == "svalbard").unwrap();
+        assert_eq!(svalbard.display_name, "Svalbard");
         let everforest = themes.iter().find(|t| t.stem == "everforest").unwrap();
         assert_eq!(everforest.display_name, "Everforest");
     }
@@ -499,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_default_theme_name() {
-        assert_eq!(DEFAULT_THEME, "everforest");
+        assert_eq!(DEFAULT_THEME, "svalbard");
     }
 
     #[test]

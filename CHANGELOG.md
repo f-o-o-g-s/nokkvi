@@ -10,7 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- The application icon (desktop launcher and system tray) now uses the default Everforest theme colors instead of the previous Gruvbox-based palette.
+- Nokkvi's default theme is now **Svalbard**, a custom cold-petrol Nordic palette created for the project. Everforest is still available as a built-in theme; it is simply no longer the default. Configs that already pin a theme are unaffected, and new installs start on Svalbard.
+- The application icon (desktop launcher and system tray) was redesigned for Svalbard. The longship-and-visualizer mark now sits on a transparent ground with a dark outer stroke, replacing the squircle backdrop and the earlier Everforest-coloured version.
 
 ### Fixed
 

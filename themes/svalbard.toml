@@ -1,0 +1,105 @@
+# Svalbard ("cold prow") — Nokkvi's default theme. A muted, fully dark, custom
+# palette: icy low-saturation petrol backgrounds, a soft fog foreground, and one
+# cold blue-teal accent. The light section below is a coherent icy companion.
+# The wordmark stays "nokkvi"; Svalbard names the theme.
+name = "Svalbard"
+
+[dark]
+border = "#0C1110"
+
+[dark.background]
+default = "#161F1E"
+hard = "#111817"
+level1 = "#1C2625"
+level2 = "#22302E"
+level3 = "#2A3A37"
+level4 = "#324541"
+soft = "#161F1E"
+
+[dark.foreground]
+bright = "#E7ECEB"
+gray = "#6C7976"
+level1 = "#CED7D5"
+level2 = "#9BAAA7"
+level3 = "#828F8C"
+level4 = "#6C7976"
+
+[dark.accent]
+border_light = "#92B7B2"
+bright = "#92B7B2"
+now_playing = "#A8C5C0"
+primary = "#6D9A94"
+selected = "#2A3A37"
+
+[dark.danger]
+bright = "#C58489"
+base = "#C58489"
+
+[dark.success]
+bright = "#84A99F"
+base = "#84A99F"
+
+[dark.warning]
+bright = "#CBA576"
+base = "#CBA576"
+
+[dark.star]
+bright = "#CBA576"
+base = "#CBA576"
+
+[dark.visualizer]
+bar_gradient_colors = ["#5E887F", "#6D9A94", "#80A9A3", "#92B7B2", "#A8C5C0", "#BFD0CA"]
+border_color = "#111817"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#E7ECEB", "#A8C5C0", "#E7ECEB", "#A8C5C0", "#E7ECEB", "#A8C5C0"]
+
+[light]
+border = "#C5D5D1"
+
+[light.background]
+default = "#F1F6F4"
+hard = "#E4ECE9"
+level1 = "#DBE4E1"
+level2 = "#CDD8D4"
+level3 = "#B5C4BF"
+level4 = "#9CAEA8"
+soft = "#F1F6F4"
+
+[light.foreground]
+bright = "#121A18"
+gray = "#8A9793"
+level1 = "#121A18"
+level2 = "#364643"
+level3 = "#52635F"
+level4 = "#6C7976"
+
+[light.accent]
+border_light = "#C5D5D1"
+bright = "#6D9A94"
+now_playing = "#5A8983"
+primary = "#4A7771"
+selected = "#CDD8D4"
+
+[light.danger]
+bright = "#A75A60"
+base = "#A75A60"
+
+[light.success]
+bright = "#57867E"
+base = "#57867E"
+
+[light.warning]
+bright = "#A67C4C"
+base = "#A67C4C"
+
+[light.star]
+bright = "#A67C4C"
+base = "#A67C4C"
+
+[light.visualizer]
+bar_gradient_colors = ["#5E887F", "#6D9A94", "#80A9A3", "#92B7B2", "#A8C5C0", "#BFD0CA"]
+border_color = "#111817"
+border_opacity = 0.50
+led_border_opacity = 1.0
+peak_gradient_colors = ["#4A7771", "#A75A60", "#4A7771", "#A75A60", "#4A7771", "#A75A60"]
