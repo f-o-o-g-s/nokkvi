@@ -14,7 +14,7 @@ use tokio_util::{
 };
 use tracing::{debug, error, trace, warn};
 
-use super::{USER_AGENT, range_http_reader::RangeHttpReader};
+use super::range_http_reader::RangeHttpReader;
 use crate::audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry};
 
 /// Detect if an HTTP response originates from an Icecast/SHOUTcast radio server.
@@ -317,7 +317,6 @@ impl AudioDecoder {
 
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .user_agent(USER_AGENT)
                 .build()
                 .context("Failed to create HTTP client")?;
 
@@ -444,7 +443,6 @@ impl AudioDecoder {
                 // See: CurlInputPlugin.cxx CURLOPT_CONNECTTIMEOUT / LOW_SPEED_TIME /
                 //      CURLOPT_TCP_KEEPALIVE.
                 let client = reqwest::Client::builder()
-                    .user_agent(USER_AGENT)
                     // G2 fix: abort DNS/SYN hangs quickly (matches MPD CONNECTTIMEOUT=10s).
                     .connect_timeout(std::time::Duration::from_secs(10))
                     // G1 fix (reqwest layer): abort stalled transfers where bytes stop

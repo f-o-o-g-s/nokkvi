@@ -51,10 +51,6 @@ impl RangeHttpReader {
     /// Create a new HTTP client with optimal settings for streaming
     fn create_client() -> reqwest::blocking::Client {
         reqwest::blocking::Client::builder()
-            // Same desktop-browser UA the decoder advertises. Keeps Navidrome's
-            // optional UA filter behaviour consistent across all three audio
-            // HTTP clients (decoder HEAD probe, decoder infinite stream, this).
-            .user_agent(super::USER_AGENT)
             // Fast fail on connect - 5s is plenty for local server
             .connect_timeout(std::time::Duration::from_secs(5))
             // Reduced from 30s - 10s is enough for chunk reads, prevents long stalls

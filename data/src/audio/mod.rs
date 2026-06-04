@@ -52,17 +52,11 @@ pub(super) fn load_f32(atomic: &AtomicU32) -> f32 {
     f32::from_bits(atomic.load(Ordering::Relaxed))
 }
 
-/// Shared HTTP User-Agent for all outbound Navidrome/Subsonic requests.
-/// Centralizing this string means a future User-Agent filter on the Navidrome
-/// side affects all three HTTP clients (decoder HEAD probe, decoder infinite-
-/// stream, range_http_reader chunk fetch) consistently.
-pub(super) const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicU32;
 
-    use super::{RING_BUFFER_CAPACITY, USER_AGENT, load_f32, store_f32};
+    use super::{RING_BUFFER_CAPACITY, load_f32, store_f32};
 
     #[test]
     fn store_load_f32_roundtrip() {
@@ -106,20 +100,6 @@ mod tests {
             crate::audio::rodio_output::RING_BUFFER_CAPACITY,
             "audio::RING_BUFFER_CAPACITY re-export must point at the same const \
              as rodio_output::RING_BUFFER_CAPACITY"
-        );
-    }
-
-    #[test]
-    fn user_agent_is_chrome_desktop() {
-        assert!(
-            USER_AGENT.starts_with("Mozilla/5.0"),
-            "USER_AGENT should advertise a browser-style header so Navidrome's \
-             optional User-Agent filter treats us like a desktop client"
-        );
-        assert!(
-            USER_AGENT.contains("Chrome"),
-            "USER_AGENT should explicitly mention Chrome — Navidrome operators \
-             commonly allowlist Chromium-family browsers"
         );
     }
 }
