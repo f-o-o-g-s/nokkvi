@@ -943,6 +943,17 @@ impl CustomAudioEngine {
                                 );
                             }
 
+                            // NOTE: deliberately NOT gated on `is_crossfade_armed()`.
+                            // When crossfade is on, this inline gapless swap fires
+                            // at decoder-EOF (~track_end - decode_lead), while the
+                            // renderer's crossfade trigger fires at track_end - xfade
+                            // and clears the prepared slot. At SAMPLES_PER_BUFFER_UNIT
+                            // = 800 the decode_lead (0.27..1.18s for crossfade 1..12s)
+                            // is always < the >=1s crossfade lead, so the crossfade
+                            // deterministically wins the race and no stale arm is
+                            // stranded — see `phantom_unreachable_decode_lead_lt_xfade`.
+                            // Raising SAMPLES_PER_BUFFER_UNIT could invert this and
+                            // re-arm a phantom crossfade; that test guards against it.
                             if formats_match && rg_allows_swap {
                                 let next_duration = next_dec.duration();
                                 let next_source_url = std::mem::take(&mut slot.source);
@@ -2555,6 +2566,30 @@ mod tests {
         assert_eq!(samples_to_buffer_units(0), 0);
         assert_eq!(samples_to_buffer_units(1599), 1);
         assert_eq!(samples_to_buffer_units(1600), 2);
+    }
+
+    /// Load-bearing invariant for keeping the inline gapless swap UNgated on
+    /// `is_crossfade_armed()` (i.e. for not needing the phantom-crossfade fix):
+    /// on stock main the decoder-EOF lead (`high_watermark × SAMPLES_PER_BUFFER_UNIT`
+    /// seconds) is always smaller than the crossfade duration, so the renderer's
+    /// position-based crossfade trigger fires first and no stale arm is stranded.
+    /// A future `SAMPLES_PER_BUFFER_UNIT` bump (the abandoned watermark change)
+    /// that re-arms the phantom would trip this test in CI.
+    #[test]
+    fn phantom_unreachable_decode_lead_lt_xfade() {
+        // Interleaved samples/sec at the most demanding common rate (44.1k stereo
+        // gives the largest lead-in-seconds for a given unit count).
+        const FRAME_RATE: f64 = 44_100.0 * 2.0;
+        for cf_secs in 1..=12u64 {
+            let (high, _low) = compute_watermarks(cf_secs * 1000);
+            let decode_lead_sec = (high * SAMPLES_PER_BUFFER_UNIT) as f64 / FRAME_RATE;
+            assert!(
+                decode_lead_sec < cf_secs as f64,
+                "decode lead {decode_lead_sec:.3}s must stay below the {cf_secs}s crossfade \
+                 lead, else the inline gapless swap can win the race and strand a phantom \
+                 crossfade (raise SAMPLES_PER_BUFFER_UNIT at your peril)"
+            );
+        }
     }
 
     /// `LiveStringSlot::set` overwrites prior values and accepts `None` to
