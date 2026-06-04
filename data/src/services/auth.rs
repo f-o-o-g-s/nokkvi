@@ -52,7 +52,10 @@ impl AuthService {
 
         let login_url = format!("{server_url}/auth/login");
 
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .user_agent(crate::USER_AGENT)
+            .build()
+            .expect("Failed to build HTTP client");
         let response = client
             .post(&login_url)
             .json(&serde_json::json!({

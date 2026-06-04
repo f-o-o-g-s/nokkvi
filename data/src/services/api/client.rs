@@ -73,6 +73,7 @@ impl ApiClient {
     pub fn new(base_url: Url, token: String) -> Self {
         // Configure client with shorter idle timeout for faster shutdown
         let client = Client::builder()
+            .user_agent(crate::USER_AGENT)
             .pool_idle_timeout(std::time::Duration::from_secs(5))
             .build()
             .expect("Failed to build HTTP client");

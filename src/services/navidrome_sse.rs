@@ -191,6 +191,7 @@ fn next_backoff(prev: Duration, connection_uptime: Duration) -> (Option<Duration
 pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
     sipper(async |mut output| {
         let client = reqwest::Client::builder()
+            .user_agent(nokkvi_data::USER_AGENT)
             .timeout(Duration::from_secs(60 * 60 * 24)) // 24 hour total connection timeout
             .build()
             .unwrap_or_default();

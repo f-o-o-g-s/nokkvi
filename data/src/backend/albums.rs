@@ -249,7 +249,12 @@ impl AlbumsService {
         Self {
             inner: LazyAuthedService::new(AlbumsApiService::new),
             total_count: ReactiveInt::new(0),
-            artwork_client: Arc::new(reqwest::Client::new()),
+            artwork_client: Arc::new(
+                reqwest::Client::builder()
+                    .user_agent(crate::USER_AGENT)
+                    .build()
+                    .expect("Failed to build artwork HTTP client"),
+            ),
             artwork_semaphore: Arc::new(Semaphore::new(ARTWORK_CONCURRENCY_LIMIT)),
         }
     }
