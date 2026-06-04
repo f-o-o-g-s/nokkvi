@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.6.8 — 2026-06-03
+
+### Added
+
 - Optional "Rewind on Previous" setting (off by default): the Previous button restarts the current track instead of skipping back once it's played past 5 seconds.
 
 ### Changed
@@ -19,8 +29,6 @@ All notable changes to this project will be documented in this file.
 - If a playing track was deleted from the server between sessions, restoring the queue on the next launch now resumes at the neighbouring track instead of jumping to the end and stopping after one song.
 - With shuffle on, pressing Previous after relaunching the app now steps back through the shuffled play order instead of the on-screen row order, so it no longer jumps to an unrelated track.
 - Pressing Previous now returns to the exact track that played before, even when two copies of the same song sit next to each other in the queue.
-
-### Removed
 
 ## v0.6.7 — 2026-06-01
 

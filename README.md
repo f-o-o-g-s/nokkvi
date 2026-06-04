@@ -72,14 +72,14 @@ cd nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu
 ./install.sh
 ```
 
-Runtime requirements: `pipewire` and `fontconfig` installed system-wide (Arch: `sudo pacman -S pipewire fontconfig`).
+Runtime requirements: `pipewire`, `alsa-lib`, and `fontconfig` installed system-wide (Arch: `sudo pacman -S pipewire alsa-lib fontconfig`).
 
 **Arch (AUR):** [`nokkvi-bin`](https://aur.archlinux.org/packages/nokkvi-bin) tracks the released tarballs above; [`nokkvi-git`](https://aur.archlinux.org/packages/nokkvi-git) builds from `main`. Install with your AUR helper of choice (e.g. `yay -S nokkvi-bin` or `paru -S nokkvi-bin`).
 
 ## Quickstart (build from source)
 
 ```bash
-sudo pacman -S pipewire fontconfig pkgconf cmake # Arch system deps (cmake builds bundled libopus)
+sudo pacman -S pipewire alsa-lib fontconfig pkgconf cmake # Arch system deps (cmake builds bundled libopus)
 cargo build --release                           # build
 ./install.sh                                    # install binary, .desktop, icon
 ```
