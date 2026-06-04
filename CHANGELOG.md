@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Nokkvi now registers as a single player in Navidrome instead of appearing as two separate ones.
+
 ### Removed
 
 ## v0.6.8 — 2026-06-03
