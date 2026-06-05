@@ -45,6 +45,10 @@ pub struct RadiosViewData<'a> {
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus can resolve their own open/closed status.
     pub open_menu: Option<&'a crate::app_message::OpenMenu>,
+    /// Stream id of the station currently driving radio playback, if any.
+    /// Borrowed from `active_playback`; the row whose id matches gets the
+    /// now-playing breathing glow (parity with the queue/song-list slot).
+    pub current_playing_station_id: Option<&'a str>,
 }
 
 // ============================================================================
@@ -271,6 +275,7 @@ impl RadiosPage {
 
         let stations = data.stations.as_ref();
         let open_menu_for_rows = data.open_menu;
+        let current_station_id = data.current_playing_station_id;
 
         // Render slot list — flat list, each row is a radio station
         let slot_list_content = slot_list_view_with_scroll(
@@ -284,10 +289,16 @@ impl RadiosPage {
                 RadiosMessage::SlotList,
             )),
             |station, ctx| {
+                // The station currently driving radio playback gets the
+                // now-playing highlight + breathing glow, matching the
+                // queue/song-list slot. Both `is_highlighted` and `is_playing`
+                // take this flag so the row breathes rather than wearing the
+                // static highlight ring.
+                let is_playing = current_station_id == Some(station.id.as_str());
                 let style = SlotListSlotStyle::for_slot(
                     ctx.is_center,
-                    false,
-                    false,
+                    is_playing,
+                    is_playing,
                     ctx.is_selected,
                     ctx.has_multi_selection,
                     ctx.opacity,
@@ -354,12 +365,17 @@ impl RadiosPage {
                     RadiosMessage::SlotList,
                 );
 
+                // Overlay the breathing glow (pulsing inner glow + travelling
+                // shimmer) on the now-playing station row; a no-op pass-through
+                // otherwise.
+                let glowing = crate::widgets::slot_list::glow_overlay(slot_button, style);
+
                 let cm_id = crate::app_message::ContextMenuId::RadioRow(ctx.item_index);
                 let (cm_open, cm_position) =
                     crate::widgets::context_menu::open_state_for(open_menu_for_rows, &cm_id);
                 let cm_id_for_msg = cm_id.clone();
                 crate::widgets::context_menu::context_menu(
-                    slot_button,
+                    glowing,
                     crate::widgets::context_menu::radio_entries(),
                     {
                         let station_cloned = station.clone();

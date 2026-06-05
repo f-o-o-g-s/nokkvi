@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Nokkvi now registers as a single player in Navidrome instead of appearing as two separate ones.
+- The Radio view now gives the currently-playing station the same breathing glow as the now-playing track elsewhere, instead of leaving it unmarked.
 
 ### Removed
 

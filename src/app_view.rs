@@ -1613,6 +1613,10 @@ impl Nokkvi {
                     elevated,
                     modifiers: self.window.keyboard_modifiers,
                     open_menu: self.open_menu.as_ref(),
+                    current_playing_station_id: self
+                        .active_playback
+                        .radio_station()
+                        .map(|s| s.id.as_str()),
                 };
                 self.radios_page.view(view_data).map(Message::Radios)
             }
