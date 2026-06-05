@@ -271,4 +271,13 @@ pub struct LivePlayerSettings {
     /// When true and `show_tray_icon` is on, the window's close button hides
     /// the window into the tray instead of quitting the application.
     pub close_to_tray: bool,
+
+    // -- Rating reminder --
+    /// Whether the rate-this-track desktop notification is enabled.
+    pub rating_reminder_enabled: bool,
+    /// When the rating reminder fires (scrobble-confirmed vs percentage played).
+    pub rating_reminder_trigger: RatingReminderTrigger,
+    /// For the percentage trigger: fire once this percent of the track has
+    /// played (clamped 60–90).
+    pub rating_reminder_percent: u32,
 }

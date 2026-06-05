@@ -146,6 +146,12 @@ pub struct PlaybackSettingsData {
     pub quick_add_to_playlist: bool,
     pub default_playlist_name: Cow<'static, str>,
     pub queue_show_default_playlist: bool,
+    /// Whether the rate-this-track desktop reminder is enabled.
+    pub rating_reminder_enabled: bool,
+    /// Reminder trigger label ("On Scrobble" / "Percentage Played").
+    pub rating_reminder_trigger: Cow<'static, str>,
+    /// Percent of the track played that fires the reminder (percentage mode).
+    pub rating_reminder_percent: i64,
 }
 
 impl Default for PlaybackSettingsData {
@@ -165,6 +171,9 @@ impl Default for PlaybackSettingsData {
             quick_add_to_playlist: false,
             default_playlist_name: Cow::Borrowed("test-default"),
             queue_show_default_playlist: false,
+            rating_reminder_enabled: false,
+            rating_reminder_trigger: Cow::Borrowed("test-default"),
+            rating_reminder_percent: 0,
         }
     }
 }

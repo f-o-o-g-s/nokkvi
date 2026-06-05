@@ -4,8 +4,8 @@ use crate::types::{
     hotkey_config::HotkeyConfig,
     player_settings::{
         ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
-        NavDisplayMode, NavLayout, NormalizationLevel, RoundedMode, SlotRowHeight,
-        StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
+        NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+        SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
         VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
     },
     queue::{QueueSortPreferences, SortPreferences},
@@ -424,6 +424,18 @@ pub struct PersistedPlayerSettings {
     /// hides the window into the tray instead of quitting the app.
     #[serde(default)]
     pub close_to_tray: bool,
+
+    // -- Rating reminder --
+    /// Whether the rate-this-track desktop notification is enabled (default false).
+    #[serde(default)]
+    pub rating_reminder_enabled: bool,
+    /// When the rating reminder fires (default: on scrobble).
+    #[serde(default)]
+    pub rating_reminder_trigger: RatingReminderTrigger,
+    /// Percent of track played that fires the reminder in percentage mode
+    /// (default 75; UI clamp 60–90).
+    #[serde(default = "default_rating_reminder_percent")]
+    pub rating_reminder_percent: u32,
 }
 
 fn default_artwork_column_width_pct() -> f32 {
@@ -474,6 +486,9 @@ fn default_crossfade_duration_secs() -> u32 {
 }
 fn default_true() -> bool {
     true
+}
+fn default_rating_reminder_percent() -> u32 {
+    75
 }
 
 impl Default for PersistedPlayerSettings {
@@ -597,6 +612,9 @@ impl Default for PersistedPlayerSettings {
             artwork_vertical_height_pct: default_artwork_vertical_height_pct(),
             show_tray_icon: false,
             close_to_tray: false,
+            rating_reminder_enabled: false,
+            rating_reminder_trigger: RatingReminderTrigger::default(),
+            rating_reminder_percent: default_rating_reminder_percent(),
         }
     }
 }

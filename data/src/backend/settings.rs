@@ -22,8 +22,8 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior,
             LibraryPageSize, LivePlayerSettings, NavDisplayMode, NavLayout, NormalizationLevel,
-            RoundedMode, SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
-            VisualizationMode, VolumeNormalizationMode,
+            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
+            TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
         },
         queue_sort_mode::QueueSortMode,
         sort_mode::SortMode,
@@ -203,6 +203,9 @@ impl SettingsService {
     delegate_setter!(set_slot_text_links, bool);
     delegate_setter!(set_crossfade_enabled, bool);
     delegate_setter!(set_crossfade_duration, u32);
+    delegate_setter!(set_rating_reminder_enabled, bool);
+    delegate_setter!(set_rating_reminder_trigger, RatingReminderTrigger);
+    delegate_setter!(set_rating_reminder_percent, u32);
     delegate_setter!(set_rewind_on_previous, bool);
     delegate_setter!(set_quick_add_to_playlist, bool);
     delegate_setter!(set_queue_show_default_playlist, bool);

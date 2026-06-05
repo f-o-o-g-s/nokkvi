@@ -12,8 +12,8 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, NavDisplayMode,
-            NavLayout, NormalizationLevel, RoundedMode, SlotRowHeight, StripClickAction,
-            TrackInfoDisplay, VolumeNormalizationMode,
+            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
+            StripClickAction, TrackInfoDisplay, VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -340,6 +340,21 @@ impl SettingsManager {
 
     pub fn set_crossfade_duration(&mut self, duration_secs: u32) -> Result<()> {
         self.settings.player.crossfade_duration_secs = duration_secs.clamp(1, 12);
+        self.save()
+    }
+
+    pub fn set_rating_reminder_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.rating_reminder_enabled = enabled;
+        self.save()
+    }
+
+    pub fn set_rating_reminder_trigger(&mut self, trigger: RatingReminderTrigger) -> Result<()> {
+        self.settings.player.rating_reminder_trigger = trigger;
+        self.save()
+    }
+
+    pub fn set_rating_reminder_percent(&mut self, percent: u32) -> Result<()> {
+        self.settings.player.rating_reminder_percent = percent.clamp(60, 90);
         self.save()
     }
 
@@ -1283,6 +1298,11 @@ mod sentinel_roundtrip_tests {
             // System tray
             show_tray_icon: true, // default false
             close_to_tray: true,  // default false
+
+            // Rating reminder
+            rating_reminder_enabled: true, // default false
+            rating_reminder_trigger: RatingReminderTrigger::PercentagePlayed, // default OnScrobble
+            rating_reminder_percent: 85,   // default 75
         }
     }
 
@@ -1354,6 +1374,20 @@ mod sentinel_roundtrip_tests {
         assert_eq!(
             ui_ps1.crossfade_duration_secs,
             ui_ps2.crossfade_duration_secs
+        );
+
+        // Rating reminder
+        assert_eq!(
+            ui_ps1.rating_reminder_enabled,
+            ui_ps2.rating_reminder_enabled
+        );
+        assert_eq!(
+            ui_ps1.rating_reminder_trigger,
+            ui_ps2.rating_reminder_trigger
+        );
+        assert_eq!(
+            ui_ps1.rating_reminder_percent,
+            ui_ps2.rating_reminder_percent
         );
 
         // Playlists
@@ -1869,6 +1903,8 @@ name = "sentinel preset"
         );
         assert_eq!(lhs.artwork_column_mode, rhs.artwork_column_mode);
         assert_eq!(lhs.show_tray_icon, rhs.show_tray_icon);
+        assert_eq!(lhs.rating_reminder_trigger, rhs.rating_reminder_trigger);
+        assert_eq!(lhs.rating_reminder_percent, rhs.rating_reminder_percent);
     }
 
     /// Field-mapping integrity test for the `define_settings!` `read:`

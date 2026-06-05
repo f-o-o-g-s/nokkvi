@@ -21,7 +21,9 @@
 use crate::{
     define_settings,
     types::{
-        player_settings::{NormalizationLevel, RoundedMode, VolumeNormalizationMode},
+        player_settings::{
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, VolumeNormalizationMode,
+        },
         settings_data::PlaybackSettingsData,
     },
 };
@@ -192,6 +194,66 @@ define_settings! {
             },
         },
 
+        // -- Rating reminder --------------------------------------------------
+        RatingReminderEnabled {
+            key: "general.rating_reminder_enabled",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_rating_reminder_enabled(v),
+            toml_apply: |ts, p| p.rating_reminder_enabled = ts.rating_reminder_enabled,
+            read: |src, out| out.rating_reminder_enabled = src.rating_reminder_enabled,
+            write: |ps, ts| ts.rating_reminder_enabled = ps.rating_reminder_enabled,
+            ui_meta: {
+                label: "Rating Reminder",
+                category: "Rating Reminder",
+                subtitle: Some(
+                    "Desktop notification reminding you to rate the current track",
+                ),
+                default: false,
+                read_field: |d| d.rating_reminder_enabled,
+            },
+        },
+        RatingReminderTriggerKey {
+            key: "general.rating_reminder_trigger",
+            value_type: Enum,
+            setter: |mgr, v: String| {
+                mgr.set_rating_reminder_trigger(RatingReminderTrigger::from_label(&v))
+            },
+            toml_apply: |ts, p| p.rating_reminder_trigger = ts.rating_reminder_trigger,
+            read: |src, out| out.rating_reminder_trigger = src.rating_reminder_trigger,
+            write: |ps, ts| ts.rating_reminder_trigger = ps.rating_reminder_trigger,
+            ui_meta: {
+                label: "Reminder Timing",
+                category: "Rating Reminder",
+                subtitle: Some(
+                    "Fire when the track scrobbles, or once a set percentage has played",
+                ),
+                default: "On Scrobble",
+                options: &["On Scrobble", "Percentage Played"],
+                read_field: |d| d.rating_reminder_trigger.as_ref(),
+            },
+        },
+        RatingReminderPercent {
+            key: "general.rating_reminder_percent",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_rating_reminder_percent(v as u32),
+            toml_apply: |ts, p| p.rating_reminder_percent = ts.rating_reminder_percent,
+            read: |src, out| out.rating_reminder_percent = src.rating_reminder_percent,
+            write: |ps, ts| ts.rating_reminder_percent = ps.rating_reminder_percent,
+            ui_meta: {
+                label: "Reminder Percentage",
+                category: "Rating Reminder",
+                subtitle: Some(
+                    "Percent of the track that must play before the reminder fires",
+                ),
+                default: 75_i64,
+                min: 60_i64,
+                max: 90_i64,
+                step: 5_i64,
+                unit: "%",
+                read_field: |d| d.rating_reminder_percent,
+            },
+        },
+
         // -- Playlists --------------------------------------------------------
         QuickAddToPlaylist {
             key: "general.quick_add_to_playlist",
@@ -324,20 +386,26 @@ mod tests {
             quick_add_to_playlist: false,
             default_playlist_name: "".into(),
             queue_show_default_playlist: false,
+            rating_reminder_enabled: false,
+            rating_reminder_trigger: "On Scrobble".into(),
+            rating_reminder_percent: 75,
         }
     }
 
-    /// 8 entries get ui_meta: 4 unconditional Playback rows (crossfade enable,
+    /// 11 entries get ui_meta: 4 unconditional Playback rows (crossfade enable,
     /// crossfade duration, rewind-on-previous, volume normalization), 2
-    /// Scrobbling, and 2 Playlists. The 5 conditional AGC/RG knobs and the
+    /// Scrobbling, 3 Rating Reminder (enable, trigger, percentage), and 2
+    /// Playlists. The 5 conditional AGC/RG knobs and the
     /// `default_playlist_name` dialog row stay hand-written; the 6
     /// lifecycle-only entries (queue column visibility, opacity_gradient,
-    /// rounded_mode) emit nothing here.
+    /// rounded_mode) emit nothing here. The Rating Reminder trigger/percentage
+    /// rows are emitted here unconditionally but the UI builder
+    /// (`items_playback.rs`) only splices them in when the feature is enabled.
     #[test]
-    fn build_playback_tab_settings_items_emits_eight_rows() {
+    fn build_playback_tab_settings_items_emits_eleven_rows() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 8);
+        assert_eq!(entries.len(), 11);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }

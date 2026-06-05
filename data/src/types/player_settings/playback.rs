@@ -75,6 +75,39 @@ impl VolumeNormalizationMode {
     }
 }
 
+define_labeled_enum! {
+    /// When the rate-this-track desktop reminder fires.
+    ///
+    /// `OnScrobble` fires the instant the server confirms a play (the scrobble
+    /// submission lands), which means the listener genuinely heard most of the
+    /// track. `PercentagePlayed` fires once a configurable fraction of the
+    /// track has elapsed (position-based, see `rating_reminder_percent`).
+    ///
+    /// Serializes to snake_case strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum RatingReminderTrigger {
+        /// Fire when the track's play is confirmed (scrobbled) by the server.
+        #[default]
+        OnScrobble { label: "On Scrobble", wire: "on_scrobble" },
+        /// Fire once a configurable percentage of the track has played.
+        PercentagePlayed { label: "Percentage Played", wire: "percentage_played" },
+    }
+}
+
+impl RatingReminderTrigger {
+    /// Whether this trigger fires off the position-based percentage threshold
+    /// (as opposed to the scrobble-confirmed edge).
+    pub fn is_percentage(self) -> bool {
+        matches!(self, Self::PercentagePlayed)
+    }
+
+    /// Whether this trigger fires off the scrobble-confirmed edge.
+    pub fn is_scrobble(self) -> bool {
+        matches!(self, Self::OnScrobble)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

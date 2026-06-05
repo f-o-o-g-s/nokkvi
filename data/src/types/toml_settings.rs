@@ -10,9 +10,9 @@ use crate::{
     audio::eq::CustomEqPreset,
     types::player_settings::{
         ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
-        NavDisplayMode, NavLayout, NormalizationLevel, RoundedMode, SlotRowHeight,
-        StripClickAction, TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
-        deserialize_rounded_mode_with_bool_compat,
+        NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+        SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
+        VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
     },
 };
 
@@ -235,10 +235,22 @@ pub struct TomlSettings {
     pub show_tray_icon: bool,
     #[serde(default)]
     pub close_to_tray: bool,
+
+    // -- Rating reminder --
+    #[serde(default)]
+    pub rating_reminder_enabled: bool,
+    #[serde(default)]
+    pub rating_reminder_trigger: RatingReminderTrigger,
+    #[serde(default = "default_rating_reminder_percent")]
+    pub rating_reminder_percent: u32,
 }
 
 fn default_replay_gain_prevent_clipping() -> bool {
     true
+}
+
+fn default_rating_reminder_percent() -> u32 {
+    75
 }
 
 fn default_true() -> bool {
@@ -386,6 +398,9 @@ impl Default for TomlSettings {
             custom_eq_presets: Vec::new(),
             show_tray_icon: false,
             close_to_tray: false,
+            rating_reminder_enabled: false,
+            rating_reminder_trigger: RatingReminderTrigger::default(),
+            rating_reminder_percent: 75,
         }
     }
 }

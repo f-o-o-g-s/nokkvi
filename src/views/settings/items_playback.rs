@@ -1,13 +1,15 @@
 //! Playback tab setting entries.
 //!
-//! Contains four sections: Transitions (crossfade), Volume Normalization
-//! (mode dropdown + AGC target knob + ReplayGain knobs), Scrobbling, and
-//! Playlists. 7 flat rows come from `define_settings!` via
-//! `build_playback_tab_settings_items`. The conditional AGC target-level
-//! knob, the four ReplayGain knobs (only shown in RG modes), and the
+//! Contains five sections: Transitions (crossfade), Volume Normalization
+//! (mode dropdown + AGC target knob + ReplayGain knobs), Scrobbling, Rating
+//! Reminder (enable + conditional timing/percentage), and Playlists. Flat
+//! rows come from `define_settings!` via `build_playback_tab_settings_items`.
+//! The conditional AGC target-level knob, the four ReplayGain knobs (only
+//! shown in RG modes), the Rating Reminder timing/percentage rows (only shown
+//! when the reminder is enabled / in percentage mode), and the
 //! `default_playlist_name` dialog sentinel row stay hand-written so the
-//! mode-conditional logic and the picker dialog construction live next to
-//! each other.
+//! conditional logic and the picker dialog construction live next to the rows
+//! they gate.
 
 // See `items_general.rs` for why the data struct lives in the data crate.
 use nokkvi_data::services::settings_tables::playback::build_playback_tab_settings_items;
@@ -20,6 +22,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     const TRANSITIONS: &str = "assets/icons/audio-waveform.svg";
     const NORMALIZATION: &str = "assets/icons/sliders-vertical.svg";
     const SCR: &str = "assets/icons/radio-tower.svg";
+    const REMIND: &str = "assets/icons/star.svg";
     const LIST: &str = "assets/icons/list-music.svg";
 
     let mut macro_rows = MacroRows::new(build_playback_tab_settings_items(data));
@@ -115,6 +118,24 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         },
         macro_rows.take("general.scrobbling_enabled"),
         macro_rows.take("general.scrobble_threshold"),
+        // --- Rating Reminder ---
+        SettingsEntry::Header {
+            label: "Rating Reminder",
+            icon: REMIND,
+        },
+        macro_rows.take("general.rating_reminder_enabled"),
+    ]);
+
+    // The timing controls only matter once the reminder is enabled; the
+    // percentage knob is further gated to the percentage trigger.
+    if data.rating_reminder_enabled {
+        items.push(macro_rows.take("general.rating_reminder_trigger"));
+        if data.rating_reminder_trigger.as_ref() == "Percentage Played" {
+            items.push(macro_rows.take("general.rating_reminder_percent"));
+        }
+    }
+
+    items.extend([
         // --- Playlists ---
         SettingsEntry::Header {
             label: "Playlists",
