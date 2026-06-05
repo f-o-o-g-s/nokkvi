@@ -44,6 +44,12 @@ const CHUNK_SIZE: u64 = 256 * 1024; // 256KB chunks
 const MAX_CACHED_CHUNKS: usize = 16;
 /// Chunks the background task keeps resident ahead of the read cursor.
 const PREFETCH_WINDOW_CHUNKS: usize = 5;
+/// Low watermark for batch-refilling the window. The task lets the resident-ahead
+/// window drain to this before refetching up to the full window in a burst
+/// (hysteresis), so refills batch instead of one GET per chunk the cursor passes
+/// — matching queue2's low/high, MPD's resume-384KB/pause-512KB, and mpv's
+/// curl-ring 50%/100%.
+const PREFETCH_LOW_WATERMARK_CHUNKS: usize = PREFETCH_WINDOW_CHUNKS / 2; // = 2
 /// Headroom reserved for chunks the demuxer reads *behind* the cursor (FLAC
 /// resync / backtrack), so a forward prefetch can never evict a not-yet-read
 /// window chunk. `1` is the current chunk.
@@ -129,6 +135,52 @@ fn chunks_to_prefetch(cursor: u64, content_length: u64, store: &ChunkStore) -> V
         }
     }
     missing
+}
+
+/// Count the forward-window chunks `[cursor_chunk+1 ..= +WINDOW]` currently
+/// resident in the store (within the file). `resident + chunks_to_prefetch().len()`
+/// equals `window_capacity`.
+fn resident_ahead_count(cursor: u64, content_length: u64, store: &ChunkStore) -> usize {
+    let current = cursor / CHUNK_SIZE;
+    let mut count = 0;
+    for idx in (current + 1)..=(current + PREFETCH_WINDOW_CHUNKS as u64) {
+        if idx * CHUNK_SIZE >= content_length {
+            break;
+        }
+        if store.contains(idx) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Number of forward-window slots that actually exist within the file (the
+/// window shrinks near EOF).
+fn window_capacity(cursor: u64, content_length: u64) -> usize {
+    let current = cursor / CHUNK_SIZE;
+    let mut capacity = 0;
+    for idx in (current + 1)..=(current + PREFETCH_WINDOW_CHUNKS as u64) {
+        if idx * CHUNK_SIZE >= content_length {
+            break;
+        }
+        capacity += 1;
+    }
+    capacity
+}
+
+/// Hysteresis latch for batch-refilling. Begin refilling once the resident window
+/// drops below the low watermark; keep refilling until the window is full again;
+/// hold the prior state in between. Stops the producer from issuing one fetch per
+/// chunk the cursor advances past.
+fn update_refilling(resident: usize, capacity: usize, refilling: bool) -> bool {
+    let low = PREFETCH_LOW_WATERMARK_CHUNKS.min(capacity);
+    if resident < low {
+        true
+    } else if resident >= capacity {
+        false // window full (or at EOF)
+    } else {
+        refilling // within the hysteresis band — hold
+    }
 }
 
 /// HTTP reader with Range request support for random access.
@@ -445,20 +497,31 @@ async fn prefetch_loop(
         }
     };
 
+    let mut refilling = false;
     loop {
         if cancel.is_cancelled() {
             return;
         }
 
         let cursor = read_cursor.load(Ordering::Relaxed);
-        let missing = {
+        let (resident, capacity, missing) = {
             let store = store.lock();
-            chunks_to_prefetch(cursor, content_length, &store)
+            (
+                resident_ahead_count(cursor, content_length, &store),
+                window_capacity(cursor, content_length),
+                chunks_to_prefetch(cursor, content_length, &store),
+            )
         };
 
-        if missing.is_empty() {
-            // Window full (or at EOF): idle until the cursor advances. Without
-            // this the idle gapless-prep decoder would pin a CPU core.
+        // Hysteresis: only (re)fill once the resident window has drained below the
+        // low watermark, then burst back up to the full window. Between low and
+        // full we idle, so refills batch instead of one GET per chunk passed.
+        refilling = update_refilling(resident, capacity, refilling);
+
+        if !refilling || missing.is_empty() {
+            // Not below the low mark yet (or already full / at EOF): idle until
+            // the cursor advances. Without this the idle gapless-prep decoder
+            // would pin a CPU core.
             tokio::select! {
                 _ = cancel.cancelled() => return,
                 _ = tokio::time::sleep(Duration::from_millis(PREFETCH_IDLE_POLL_MS)) => {}
@@ -677,6 +740,45 @@ mod tests {
         assert_eq!(chunks_to_prefetch(0, content_length, &store), vec![1]);
         // Cursor in the last chunk → nothing ahead.
         assert!(chunks_to_prefetch(CHUNK_SIZE, content_length, &store).is_empty());
+    }
+
+    #[test]
+    fn resident_count_and_window_capacity_track_the_forward_window() {
+        let content_length = CHUNK_SIZE * 100;
+        let mut store = ChunkStore::new();
+        assert_eq!(window_capacity(0, content_length), PREFETCH_WINDOW_CHUNKS);
+        assert_eq!(resident_ahead_count(0, content_length, &store), 0);
+        store.insert(1, arc(&[0]));
+        store.insert(2, arc(&[0]));
+        assert_eq!(resident_ahead_count(0, content_length, &store), 2);
+        // Invariant the latch relies on: resident + missing == capacity.
+        assert_eq!(
+            resident_ahead_count(0, content_length, &store)
+                + chunks_to_prefetch(0, content_length, &store).len(),
+            window_capacity(0, content_length)
+        );
+    }
+
+    #[test]
+    fn window_capacity_clamps_near_eof() {
+        let content_length = CHUNK_SIZE + 10; // ~2 chunks total
+        assert_eq!(window_capacity(0, content_length), 1);
+        assert_eq!(window_capacity(CHUNK_SIZE, content_length), 0);
+    }
+
+    #[test]
+    fn update_refilling_batches_via_low_watermark_hysteresis() {
+        let cap = PREFETCH_WINDOW_CHUNKS;
+        let low = PREFETCH_LOW_WATERMARK_CHUNKS;
+        // Drop below low → begin a refill burst.
+        assert!(update_refilling(low - 1, cap, false));
+        // Window full → stop refilling.
+        assert!(!update_refilling(cap, cap, true));
+        // Within the band → hold prior state (don't top up one chunk at a time).
+        assert!(!update_refilling(cap - 1, cap, false));
+        assert!(update_refilling(low + 1, cap, true));
+        // Near EOF (capacity < low): "full" as soon as resident == capacity.
+        assert!(!update_refilling(1, 1, false));
     }
 
     #[test]
