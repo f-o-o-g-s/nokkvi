@@ -397,6 +397,21 @@ impl Nokkvi {
                 // NOTE: crossfade triggering has moved to the renderer
                 // (render_buffers queue-size check). The tick handler only
                 // handles gapless preparation now.
+
+                // Rating reminder (percentage-played trigger): fire once the
+                // configured fraction of the track has elapsed. Integer compare
+                // (pos·100 ≥ pct·dur) avoids float. `maybe_fire_rating_reminder`
+                // applies all suppression and the once-per-track latch.
+                if self.settings.rating_reminder_enabled
+                    && self.settings.rating_reminder_trigger.is_percentage()
+                {
+                    let pct = self.settings.rating_reminder_percent;
+                    if pos.saturating_mul(100) >= pct.saturating_mul(dur)
+                        && let Some(song_id) = self.scrobble.current_song_id.clone()
+                    {
+                        self.maybe_fire_rating_reminder(&song_id);
+                    }
+                }
             }
         }
 

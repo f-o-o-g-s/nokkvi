@@ -241,6 +241,13 @@ pub struct Nokkvi {
     pub mpris_connection: Option<services::mpris::MprisConnection>,
     /// Last position (µs) pushed to MPRIS — used to detect seek discontinuities
     pub last_mpris_position_us: i64,
+    /// Handle to push rate-this-track reminders to the notification service.
+    /// `None` until the subscription connects (or while the feature is off).
+    pub notification_connection: Option<services::notifications::NotificationConnection>,
+    /// The last song a rating reminder fired for — the once-per-track latch
+    /// that keeps repeat-one loops (which clear the scrobble latch each lap)
+    /// from re-reminding the same track.
+    pub last_reminded_song_id: Option<String>,
 
     // -------------------------------------------------------------------------
     // System Tray (StatusNotifierItem)
@@ -416,6 +423,8 @@ impl Default for Nokkvi {
             boat: crate::widgets::boat::BoatState::default(),
             mpris_connection: None,
             last_mpris_position_us: 0,
+            notification_connection: None,
+            last_reminded_song_id: None,
             tray_connection: None,
             tray_window_hidden: false,
             main_window_id: None,
@@ -552,6 +561,17 @@ impl Nokkvi {
             iced::Subscription::none()
         };
 
+        // Rating-reminder desktop notifications. Conditionally spawned like the
+        // tray: when `rating_reminder_enabled` is off the subscription leaves
+        // the batch and iced cancels it, closing the command channel and
+        // tearing down the dbus connection. So we never hold a session-bus
+        // connection unless the feature is on.
+        let notifications = if self.settings.rating_reminder_enabled {
+            iced::Subscription::run(services::notifications::run).map(Message::Notification)
+        } else {
+            iced::Subscription::none()
+        };
+
         // Window lifecycle: capture the main window's id on first open and
         // intercept close-button presses so we can branch on the
         // close-to-tray setting.
@@ -628,6 +648,7 @@ impl Nokkvi {
             login_events,
             mpris,
             tray,
+            notifications,
             window_open_sub,
             window_close_sub,
             config_watcher,

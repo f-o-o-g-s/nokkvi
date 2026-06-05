@@ -35,6 +35,7 @@ mod mpris;
 #[macro_use]
 mod navigation_macros;
 mod navigation;
+mod notifications;
 mod page_loader;
 mod playback;
 mod queue;

@@ -814,6 +814,9 @@ pub enum Message {
     // --- MPRIS D-Bus Integration ---
     Mpris(services::mpris::MprisEvent),
 
+    // --- Rating-reminder desktop notifications ---
+    Notification(services::notifications::NotificationEvent),
+
     // --- System Tray (StatusNotifierItem) ---
     Tray(services::tray::TrayEvent),
     /// First (or only) window opened — capture its id so the tray handler can

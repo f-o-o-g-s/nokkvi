@@ -401,15 +401,38 @@ mod tests {
 
         assert_eq!(
             count_headers(&entries),
-            4,
-            "Expected 4 sections: Transitions, Volume Normalization, Scrobbling, Playlists"
+            5,
+            "Expected 5 sections: Transitions, Volume Normalization, Scrobbling, Rating Reminder, Playlists"
         );
-        // Off mode hides AGC level + RG knobs.
+        // Off mode hides AGC level + RG knobs; rating reminder is disabled by
+        // default so only its enable toggle shows (timing rows are gated off).
         assert_eq!(
             count_items(&entries),
-            9,
-            "Off mode: crossfade_enabled, crossfade_duration, rewind_on_previous, volume_normalization, scrobbling_enabled, scrobble_threshold, quick_add_to_playlist, default_playlist_name, queue_show_default_playlist"
+            10,
+            "Off mode: crossfade_enabled, crossfade_duration, rewind_on_previous, volume_normalization, scrobbling_enabled, scrobble_threshold, rating_reminder_enabled, quick_add_to_playlist, default_playlist_name, queue_show_default_playlist"
         );
+    }
+
+    #[test]
+    fn playback_items_structure_rating_reminder_enabled_shows_timing_rows() {
+        use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        // Enabled + percentage trigger surfaces both the timing dropdown and
+        // the percentage knob (+2 over the Off baseline of 10).
+        let data = PlaybackSettingsData {
+            rating_reminder_enabled: true,
+            rating_reminder_trigger: "Percentage Played".into(),
+            ..Default::default()
+        };
+        let entries = build_playback_items(&data);
+        assert_eq!(count_items(&entries), 12);
+
+        // On-scrobble trigger hides the percentage knob (+1 over baseline).
+        let scrobble = PlaybackSettingsData {
+            rating_reminder_enabled: true,
+            rating_reminder_trigger: "On Scrobble".into(),
+            ..Default::default()
+        };
+        assert_eq!(count_items(&build_playback_items(&scrobble)), 11);
     }
 
     #[test]
@@ -420,8 +443,8 @@ mod tests {
             ..Default::default()
         };
         let entries = build_playback_items(&data);
-        // AGC mode adds the target-level dropdown.
-        assert_eq!(count_items(&entries), 10);
+        // AGC mode adds the target-level dropdown (10 Off baseline + 1).
+        assert_eq!(count_items(&entries), 11);
     }
 
     #[test]
@@ -432,8 +455,9 @@ mod tests {
             ..Default::default()
         };
         let entries = build_playback_items(&data);
-        // RG modes add 4 knobs: preamp, fallback_db, fallback_to_agc, prevent_clipping.
-        assert_eq!(count_items(&entries), 13);
+        // RG modes add 4 knobs: preamp, fallback_db, fallback_to_agc,
+        // prevent_clipping (10 Off baseline + 4).
+        assert_eq!(count_items(&entries), 14);
     }
 
     /// Find the first `SettingItem` matching `key` and assert it carries the

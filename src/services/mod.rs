@@ -6,6 +6,7 @@ pub(crate) mod loop_subscription;
 pub(crate) mod mpris;
 pub(crate) mod mpris_art_writer;
 pub(crate) mod navidrome_sse;
+pub(crate) mod notifications;
 pub(crate) mod queue_changed_subscription;
 pub(crate) mod subscription_slot;
 pub(crate) mod task_subscription;

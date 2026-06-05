@@ -60,6 +60,7 @@ mod loader_target;
 mod menus;
 mod mpris;
 mod navigation;
+mod notifications;
 mod pending_expand_resolve;
 mod playback;
 mod player_bar;
@@ -424,6 +425,11 @@ impl Nokkvi {
             // MPRIS D-Bus Integration
             // -----------------------------------------------------------------
             Message::Mpris(event) => self.handle_mpris(event),
+
+            // -----------------------------------------------------------------
+            // Rating-reminder desktop notifications
+            // -----------------------------------------------------------------
+            Message::Notification(event) => self.handle_notification(event),
 
             // -----------------------------------------------------------------
             // System Tray (StatusNotifierItem)

@@ -192,6 +192,15 @@ impl Nokkvi {
                 // Latch on CONFIRMED success only, and clear the in-flight guard.
                 self.scrobble.submitted = true;
                 self.scrobble.submission_in_flight = false;
+                // Rating reminder (scrobble-confirmed trigger): a confirmed
+                // scrobble means the server counted a real listen — the moment
+                // to nudge the user to rate the track before it's gone. This one
+                // handler is the fan-in for all submission paths (mid-playback,
+                // song-change fallback, repeat-one), so it covers them with no
+                // duplication. Suppression lives in `maybe_fire_rating_reminder`.
+                if self.settings.rating_reminder_trigger.is_scrobble() {
+                    self.maybe_fire_rating_reminder(&song_id);
+                }
                 Task::done(Message::Hotkey(HotkeyMessage::SongPlayCountIncremented(
                     song_id,
                 )))
