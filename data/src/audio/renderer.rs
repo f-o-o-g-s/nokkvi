@@ -91,17 +91,45 @@ fn crossfade_progress(elapsed_ms: u64, paused_accum_ms: u64, duration_ms: u64) -
     }
 }
 
-/// Rebuffer low watermark: pause-and-rebuffer when the decoded ring drains below
-/// ~0.2s of audio mid-track on a FINITE stream (issue #9). `frame_rate` is
-/// `sample_rate * channels`.
-fn rebuffer_low_samples(frame_rate: u32) -> usize {
-    (frame_rate / 5) as usize
+/// Decode-loop backpressure floor: the primary decode loop stops filling the
+/// decoded ring once it holds `BASE_HIGH * SAMPLES_PER_BUFFER_UNIT` (= 96_000)
+/// interleaved samples (engine.rs `compute_watermarks`) — a FIXED count,
+/// independent of sample rate. Derived from the engine constants directly so it
+/// cannot silently drift if either is retuned. The rebuffer thresholds below
+/// must stay within it.
+const DECODE_BACKPRESSURE_FLOOR_SAMPLES: usize =
+    super::engine::BASE_HIGH * super::engine::SAMPLES_PER_BUFFER_UNIT;
+
+/// Resume-target ceiling: a safe margin below the backpressure floor. During a
+/// rebuffer the output is paused, so the decode loop fills the ring right up to
+/// that floor and no further — a resume target ABOVE it (a hi-res `frame_rate`,
+/// above 48 kHz stereo) could therefore never be reached, and the rebuffer would
+/// enter and hang until `MAX_REBUFFER_TICKS` (issue #9 hi-res unit mismatch).
+/// 4/5 leaves margin below the floor for decode-packet overshoot and timing.
+const REBUFFER_RESUME_CEILING_SAMPLES: usize = DECODE_BACKPRESSURE_FLOOR_SAMPLES * 4 / 5;
+
+// Load-bearing invariant: the resume target must stay below the backpressure
+// floor, or a hi-res rebuffer could never refill enough to exit. Enforced at
+// compile time so a future retuning of the ceiling ratio can't reintroduce the
+// hang (mirrors engine.rs's `PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT` guard).
+const _: () = assert!(REBUFFER_RESUME_CEILING_SAMPLES < DECODE_BACKPRESSURE_FLOOR_SAMPLES);
+
+/// Rebuffer resume target: how much decoded audio to refill before resuming —
+/// ~0.87s at 44.1k stereo, less at hi-res — clamped to the decode loop's
+/// backpressure floor so the ring can always reach it (in the spirit of mpv
+/// `cache-pause-wait` / MPD `buffer_before_play`, both ~1s). Without the clamp a
+/// hi-res stream's full-second target exceeds the floor and the rebuffer could
+/// never refill to it to exit (issue #9).
+fn rebuffer_resume_samples(frame_rate: u32) -> usize {
+    (frame_rate as usize).min(REBUFFER_RESUME_CEILING_SAMPLES)
 }
 
-/// Rebuffer resume target: refill ~1s of decoded audio before resuming, matching
-/// mpv `cache-pause-wait` and MPD `buffer_before_play` (both ~1s).
-fn rebuffer_resume_samples(frame_rate: u32) -> usize {
-    frame_rate as usize
+/// Rebuffer low watermark: enter pause-and-rebuffer when the decoded ring drains
+/// below ~0.2s of audio mid-track on a FINITE stream (issue #9), but always at
+/// most half the resume target so enter/resume keep a clean hysteresis gap even
+/// when `resume` is clamped on hi-res. `frame_rate` is `sample_rate * channels`.
+fn rebuffer_low_samples(frame_rate: u32) -> usize {
+    ((frame_rate / 5) as usize).min(rebuffer_resume_samples(frame_rate) / 2)
 }
 
 /// Safety valve: if a finite stream stays drained this many render ticks (~10s at
@@ -1190,6 +1218,14 @@ impl AudioRenderer {
 
         // Update format to the incoming track's format
         self.format = incoming_format;
+        // The promoted track must re-prime the network rebuffer against ITS OWN
+        // format — carrying a stale `rebuffer_primed` across a sample-rate change
+        // is the one path that can enter rebuffer on a format whose resume target
+        // is unreachable (issue #9 crossfade carryover). Reset the latch exactly
+        // as start()/stop()/seek() do.
+        self.rebuffering = false;
+        self.rebuffer_primed = false;
+        self.rebuffer_ticks = 0;
         // Promote the crossfade RG to "current" — it's now baked into the
         // new primary stream's `amplify` factor.
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
@@ -1488,6 +1524,11 @@ mod tests {
 
     const FR: u32 = 44_100 * 2; // 44.1k stereo frame rate
     const FR_S: usize = FR as usize; // same, as a sample count for the buffer arg
+    const HR_FR: u32 = 96_000 * 2; // 96k stereo frame rate (hi-res) = 192_000
+    // Decode-loop backpressure cap: engine.rs `BASE_HIGH(120) *
+    // SAMPLES_PER_BUFFER_UNIT(800)`. The most the decoded ring ever holds,
+    // independent of sample rate — so a hi-res `frame_rate` exceeds it.
+    const BACKPRESSURE_CAP: usize = 96_000;
 
     #[test]
     fn rebuffer_does_not_enter_before_primed() {
@@ -1662,6 +1703,103 @@ mod tests {
         );
         assert_eq!(a, RebufferAction::Exit);
         assert!(!reb);
+    }
+
+    #[test]
+    fn rebuffer_functions_on_hi_res_within_backpressure_cap() {
+        // The decode loop caps the decoded ring at ~96_000 samples regardless of
+        // sample rate, so on hi-res (96k stereo, frame_rate 192_000) the resume
+        // target MUST stay reachable under that cap. Otherwise the ring can never
+        // reach `resume`, so it never primes / never exits and hangs until
+        // MAX_REBUFFER_TICKS (issue #9 hi-res unit mismatch).
+        let (mut reb, mut primed, mut ticks) = (false, false, 0);
+        // Ring filled to the backpressure cap (the most it can ever hold) → must
+        // prime even at hi-res.
+        rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            HR_FR,
+            BACKPRESSURE_CAP,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert!(
+            primed,
+            "hi-res must prime once the ring reaches the backpressure cap"
+        );
+        // Drain below low mid-track → enter rebuffer.
+        let a = rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            HR_FR,
+            0,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert_eq!(a, RebufferAction::Enter);
+        // Refill to the cap (the most the ring can hold) → must EXIT, not hang.
+        let a = rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            HR_FR,
+            BACKPRESSURE_CAP,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert_eq!(
+            a,
+            RebufferAction::Exit,
+            "hi-res rebuffer must resume within the backpressure cap, not hang"
+        );
+        assert!(!reb);
+    }
+
+    /// A crossfade from a primeable (<=48k) track into a hi-res track must NOT
+    /// carry a stale `rebuffer_primed` across the format change — otherwise the
+    /// hi-res track could enter rebuffer on an unreachable resume target and hang
+    /// ~10s (issue #9 crossfade carryover). `finalize_crossfade` must reset the
+    /// rebuffer latch like `start()`/`stop()`/`seek()` do.
+    #[tokio::test]
+    async fn finalize_crossfade_resets_rebuffer_latch() {
+        let mut renderer = AudioRenderer::new();
+        let (incoming, _src) = test_active_stream(0);
+        // Simulate the latch carried over from the outgoing low-rate track.
+        renderer.rebuffering = true;
+        renderer.rebuffer_primed = true;
+        renderer.rebuffer_ticks = 42;
+        // Completed crossfade whose incoming track is hi-res (96k stereo).
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream: incoming,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(60),
+            duration_ms: 1_000,
+            incoming_format: AudioFormat::new(crate::audio::format::SampleFormat::S16, 96_000, 2),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+        };
+
+        renderer.finalize_crossfade();
+
+        assert!(
+            !renderer.rebuffer_primed,
+            "finalize_crossfade must clear rebuffer_primed so the promoted track re-primes"
+        );
+        assert!(
+            !renderer.rebuffering,
+            "finalize_crossfade must clear the rebuffering flag"
+        );
+        assert_eq!(
+            renderer.rebuffer_ticks, 0,
+            "finalize_crossfade must reset rebuffer_ticks"
+        );
     }
 
     /// Build a detached `ActiveStream` for renderer crossfade unit tests.

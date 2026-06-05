@@ -138,8 +138,9 @@ fn decode_buffer_size(format: &AudioFormat) -> usize {
 
 /// Samples-per-100ms approximation used for buffer-unit conversion. Paired
 /// with `compute_watermarks`'s `BUFFER_MS = 100` — if either is tuned, both
-/// must follow.
-const SAMPLES_PER_BUFFER_UNIT: usize = 800;
+/// must follow. `pub(crate)` so the renderer's rebuffer thresholds can derive
+/// the backpressure floor from this exact constant instead of hand-copying it.
+pub(crate) const SAMPLES_PER_BUFFER_UNIT: usize = 800;
 
 /// Convert a raw sample count into the "buffer unit" scale used by
 /// `compute_watermarks`. Both the primary and crossfade decode loops use
@@ -160,17 +161,23 @@ const SEEK_PREBUFFER_COUNT: usize = 10;
 // convention so a future tuning can't silently invert the relationship.
 const _: () = assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
 
+/// Base decoded-ring cushion floor, in high-watermark buffer units: `BASE_HIGH *
+/// SAMPLES_PER_BUFFER_UNIT(800) / 88200 ≈ 1.1s` at 44.1k stereo. It is the
+/// minimum `high_watermark` `compute_watermarks` returns (crossfade only raises
+/// it), so `BASE_HIGH * SAMPLES_PER_BUFFER_UNIT` is the fixed-sample backpressure
+/// floor the renderer's rebuffer thresholds must stay under (see
+/// `rebuffer_resume_samples` in renderer.rs). Safe to exceed the crossfade lead
+/// because the inline gapless swap is gated on the crossfade (see
+/// `should_attempt_gapless_swap`), so a large decode_lead no longer wins the
+/// gapless-vs-crossfade race. `pub(crate)` so the renderer can derive that floor.
+pub(crate) const BASE_HIGH: usize = 120;
+
 /// Compute backpressure watermarks scaled by crossfade duration.
 ///
 /// Returns `(high_watermark, low_watermark)` — the thresholds at which the
 /// decode loop pauses/resumes fetching. Shared by both the primary and
 /// crossfade decode loops.
 fn compute_watermarks(crossfade_ms: u64) -> (usize, usize) {
-    // Decoded-ring cushion floor: 120 * SAMPLES_PER_BUFFER_UNIT(800) / 88200 ≈
-    // 1.1s at 44.1k stereo. Safe to exceed the crossfade lead because the inline
-    // gapless swap is gated on the crossfade (see should_attempt_gapless_swap),
-    // so a large decode_lead no longer wins the gapless-vs-crossfade race.
-    const BASE_HIGH: usize = 120;
     const BUFFER_MS: u64 = 100;
     let cf_buffers = if crossfade_ms > 0 {
         (crossfade_ms / BUFFER_MS) as usize + 10 // crossfade duration + margin
