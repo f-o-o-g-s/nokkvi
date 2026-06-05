@@ -203,6 +203,19 @@ pub(crate) fn get_visualizer_colors() -> VisualizerColors {
     }
 }
 
+/// Get the **dark** palette's visualizer colors regardless of the active
+/// light/dark mode. The boat doodad (hull outline, anchor, rope) uses this so
+/// it stays well-defined: light themes drop `border_opacity` (e.g. Svalbard
+/// `1.0` → `0.5`), which faded the boat's thin outline to near-invisible. The
+/// boat still recolors across *themes* (each theme's dark visualizer border),
+/// it just no longer fades on the light/dark toggle — mirroring the mode-stable
+/// logo fills. The wave itself keeps `get_visualizer_colors()` so it still
+/// honors the light-mode styling.
+#[inline]
+pub(crate) fn get_visualizer_colors_dark() -> VisualizerColors {
+    THEME_FILE.read().dark.visualizer.clone()
+}
+
 /// Read a single color field from the active mode's theme without cloning the
 /// 22-field `ResolvedTheme`. The closure receives a borrow of the active
 /// palette (dark or light) and returns the desired `Color`. `ArcSwap::load`
@@ -217,6 +230,36 @@ fn read_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
         &dual.dark
     };
     f(theme)
+}
+
+/// Read a single color field from the **dark** palette regardless of the active
+/// light/dark mode. The app logo uses this so the mark keeps one stable look:
+/// the bright-body longship reads on both light and dark backgrounds (its fixed
+/// dark outline carries the definition), whereas tracking light mode inverts the
+/// body to dark ink and turns the mark into an unreadable blob on a light
+/// background. The logo still recolors across *themes* (each theme's dark
+/// palette) — it just no longer flips with the light/dark toggle.
+#[inline]
+fn read_dark_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
+    f(&DUAL_THEME.load().dark)
+}
+
+/// Logo body fill (sail + hull): the active theme's dark `fg0`, mode-stable.
+#[inline]
+pub(crate) fn logo_body() -> Color {
+    read_dark_color(|t| t.fg0)
+}
+
+/// Logo shield/bar fill (the three blocks): the active theme's dark `accent`.
+#[inline]
+pub(crate) fn logo_shields() -> Color {
+    read_dark_color(|t| t.accent)
+}
+
+/// Logo wood (mast + yard): the active theme's dark `warning`, mode-stable.
+#[inline]
+pub(crate) fn logo_wood() -> Color {
+    read_dark_color(|t| t.warning)
 }
 
 // ============================================================================

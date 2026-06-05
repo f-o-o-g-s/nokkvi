@@ -18,34 +18,45 @@ use super::{
 /// same global palette state.
 use crate::theme::TEST_THEME_LOCK as THEME_MUTATION_LOCK;
 
-/// Theme-change behavior: when the active palette changes, the next
-/// `cache_handle_for` call must produce a handle whose bytes (and
-/// therefore `id()`) reflect the new colors. Without the generation
-/// check this is a stale-cache bug — the user changes themes and the
-/// boat keeps showing the old palette until restart.
+/// Theme-change invalidation: a `theme_generation()` advance must drop the
+/// cached handle so the next build picks up new colors. The boat is now
+/// mode-stable (it reads each theme's dark palette regardless of light/dark),
+/// so a light/dark flip produces identical bytes — we therefore assert the
+/// invalidation *mechanism* (a generation bump makes the cache miss) rather
+/// than a byte/id change. Without `clear_if_theme_changed`, editing the active
+/// theme's colors would leave the boat showing the old palette until restart.
 #[test]
-fn cache_handle_for_rebuilds_when_active_theme_changes() {
+fn cache_handle_for_invalidates_when_theme_generation_advances() {
     let _guard = THEME_MUTATION_LOCK.lock();
 
     let mut state = BoatState::default();
     let initial_mode = crate::theme::is_light_mode();
 
-    let id_before = state.cache_handle_for(0.0, 1.0, false).id();
+    // Build + cache a handle for this orientation, then confirm it's a hit.
+    let _ = state.cache_handle_for(0.0, 1.0, false);
+    let cached_before = state.cached_handle_for(0.0, 1.0, false).is_some();
 
-    // Flip light/dark — `themed_boat_svg()` now substitutes different
-    // colors, so a freshly-built handle has different bytes (and id).
+    // A theme/mode change bumps theme_generation(); the cache must miss.
     crate::theme::set_light_mode(!initial_mode);
+    let invalidated = state.cached_handle_for(0.0, 1.0, false).is_none();
 
-    let id_after = state.cache_handle_for(0.0, 1.0, false).id();
+    // Rebuilding after the change repopulates the cache for that orientation.
+    let _ = state.cache_handle_for(0.0, 1.0, false);
+    let cached_after_rebuild = state.cached_handle_for(0.0, 1.0, false).is_some();
 
     // Restore before any assertion fires so a panic still leaves global
     // state clean for other tests in this group.
     crate::theme::set_light_mode(initial_mode);
 
-    assert_ne!(
-        id_before, id_after,
-        "handle must rebuild after a theme/mode change (got \
-         id_before = id_after = {id_before}, meaning stale cache)"
+    assert!(cached_before, "freshly built handle must be cached");
+    assert!(
+        invalidated,
+        "a theme-generation advance must invalidate the cached handle \
+         (stale-cache guard); otherwise the boat keeps old colors until restart"
+    );
+    assert!(
+        cached_after_rebuild,
+        "rebuilding after the change must repopulate the cache"
     );
 }
 
@@ -1563,21 +1574,36 @@ fn cache_anchor_handle_returns_cached_when_theme_unchanged() {
 }
 
 #[test]
-fn cache_anchor_handle_rebuilds_when_active_theme_changes() {
+fn cache_anchor_handle_invalidates_when_theme_generation_advances() {
     let _guard = THEME_MUTATION_LOCK.lock();
 
     let mut state = BoatState::default();
     let initial_mode = crate::theme::is_light_mode();
 
-    let id_before = state.cache_anchor_handle().id();
-    crate::theme::set_light_mode(!initial_mode);
-    let id_after = state.cache_anchor_handle().id();
-    crate::theme::set_light_mode(initial_mode);
+    // The anchor is mode-stable (dark visualizer border regardless of mode), so
+    // a light/dark flip produces identical bytes; assert the invalidation
+    // *mechanism* (a generation bump clears the cache) rather than a byte/id
+    // change — same contract as the boat-handle cache.
+    let _ = state.cache_anchor_handle();
+    let cached_before = state.cached_anchor_handle().is_some();
 
-    assert_ne!(
-        id_before, id_after,
-        "anchor handle must rebuild after a theme/mode change \
-         (got id_before = id_after = {id_before}, meaning stale cache)"
+    crate::theme::set_light_mode(!initial_mode);
+    let invalidated = state.cached_anchor_handle().is_none();
+
+    let _ = state.cache_anchor_handle();
+    let cached_after_rebuild = state.cached_anchor_handle().is_some();
+
+    crate::theme::set_light_mode(initial_mode); // restore before asserting
+
+    assert!(cached_before, "freshly built anchor handle must be cached");
+    assert!(
+        invalidated,
+        "a theme-generation advance must invalidate the cached anchor handle \
+         (stale-cache guard)"
+    );
+    assert!(
+        cached_after_rebuild,
+        "rebuilding after the change must repopulate the anchor cache"
     );
 }
 

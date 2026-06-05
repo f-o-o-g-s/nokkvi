@@ -499,7 +499,9 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         // amplitude scales with the rope's current length (longer rope
         // = bigger swing arc, which reads more naturally than a fixed
         // pixel offset on a stretched line).
-        let viz_colors = crate::theme::get_visualizer_colors();
+        // Dark-variant visualizer colors so the rope stays as visible as the
+        // boat's outline in light mode (both use the mode-stable dark border).
+        let viz_colors = crate::theme::get_visualizer_colors_dark();
         let rope_color =
             parse_hex_color(&viz_colors.border_color).unwrap_or(Color::from_rgb(0.5, 0.5, 0.5));
         let rope_alpha = viz_colors.border_opacity * opacity;

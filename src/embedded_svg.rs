@@ -74,20 +74,25 @@ fn color_to_hex(c: Color) -> String {
 }
 
 /// Return the Nokkvi logo SVG with its fills remapped to the active theme:
-/// body (sail + hull) → `fg0()`, shields (the three blocks) → `accent()`,
-/// wood (mast + yard) → `warning()`.
+/// body (sail + hull) → `logo_body()`, shields (the three blocks) →
+/// `logo_shields()`, wood (mast + yard) → `logo_wood()`.
+///
+/// Those accessors read each theme's **dark** palette regardless of the active
+/// light/dark mode, so the mark is mode-stable: it still recolors when you
+/// switch themes, but the light/dark toggle no longer flips it. Tracking light
+/// mode used to invert the body to dark ink, turning the longship into an
+/// unreadable blob on a light background.
 ///
 /// The near-black group outline (`LOGO_TOKEN_OUTLINE`) is deliberately left
-/// fixed so the mark keeps its shape definition on light themes (where a
-/// theme-tracked outline could go transparent). The boat overlay overrides
-/// that stroke separately in `themed_boat_svg()`.
+/// fixed so the mark keeps its shape definition on any background. The boat
+/// overlay overrides that stroke separately in `themed_boat_svg()`.
 pub(crate) fn themed_logo_svg() -> String {
     use crate::theme;
 
     LOGO_SVG
-        .replace(LOGO_TOKEN_BODY, &color_to_hex(theme::fg0()))
-        .replace(LOGO_TOKEN_SHIELDS, &color_to_hex(theme::accent()))
-        .replace(LOGO_TOKEN_WOOD, &color_to_hex(theme::warning()))
+        .replace(LOGO_TOKEN_BODY, &color_to_hex(theme::logo_body()))
+        .replace(LOGO_TOKEN_SHIELDS, &color_to_hex(theme::logo_shields()))
+        .replace(LOGO_TOKEN_WOOD, &color_to_hex(theme::logo_wood()))
 }
 
 /// Boat-context group stroke width as a fraction of the viewBox width. The
@@ -142,9 +147,10 @@ fn strip_stroke_width_attrs(svg: &str) -> String {
 /// Geometry is derived entirely from `LOGO_VIEWBOX`
 /// (`70.96 119.96 881.07 881.07`, center `(511.495, 560.495)`):
 ///
-/// - The master's authored `#111817` group stroke is recolored to the active
-///   visualizer `border_color`/`border_opacity` (same source as the lines-mode
-///   wave outline), its width rescaled to `w · BOAT_GROUP_STROKE_FRACTION`, and
+/// - The master's authored `#111817` group stroke is recolored to the **dark**
+///   visualizer `border_color`/`border_opacity` (mode-stable, so the outline
+///   stays solid in light mode instead of fading with the wave), its width
+///   rescaled to `w · BOAT_GROUP_STROKE_FRACTION`, and
 ///   the per-path rigging widths stripped so the whole boat shares one
 ///   hairline. `paint-order:stroke markers fill` is KEPT so the stroke paints
 ///   behind the fill, hiding the interior seams of the compound hull and
@@ -169,7 +175,7 @@ fn strip_stroke_width_attrs(svg: &str) -> String {
 /// automatically via `BoatState::clear_if_theme_changed`, which keys on
 /// `theme_generation()`.
 pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool, vertical_flip: bool) -> String {
-    let viz = crate::theme::get_visualizer_colors();
+    let viz = crate::theme::get_visualizer_colors_dark();
     let [min_x, min_y, w, h] = LOGO_VIEWBOX;
     let cx = min_x + w / 2.0;
     let cy = min_y + h / 2.0;
@@ -266,7 +272,7 @@ const ANCHOR_STROKE_WIDTH_SVG_UNITS: f32 = 1.4;
 /// `theme_generation()` so a light/dark flip or palette swap rebuilds
 /// the handle on the next render.
 pub(crate) fn themed_anchor_svg() -> String {
-    let viz = crate::theme::get_visualizer_colors();
+    let viz = crate::theme::get_visualizer_colors_dark();
     let stroke = viz.border_color;
     let opacity = viz.border_opacity;
     let stroke_w = ANCHOR_STROKE_WIDTH_SVG_UNITS;
@@ -402,29 +408,24 @@ mod tests {
         );
     }
 
-    /// Every boat SVG variant must carry the active theme's visualizer
-    /// border color and opacity as a stroke on each path, alongside the
-    /// existing fill — that's how the boat outline reads as part of the
-    /// same theme as the lines-mode wave outline. Sourced from
-    /// `crate::theme::get_visualizer_colors()`, which is the same
-    /// accessor `widgets/visualizer/mod.rs` uses for the wave's border.
     /// The boat must STRUCTURALLY transform the master's group stroke: recolor
-    /// it to the visualizer border, inject a stroke-opacity, scale the group
-    /// stroke-width down, strip every per-path rigging width, and drop
-    /// paint-order. We assert the structure rather than color identity because
-    /// under the default Svalbard theme `border_color` equals the master's
-    /// outline `#111817` in both modes — a color-equality check would pass on a
-    /// dead recolor. Holds `TEST_THEME_LOCK` so no concurrent test flips the
-    /// mode between the `viz` read and the boat build.
+    /// it to the **dark** visualizer border, inject a stroke-opacity, scale the
+    /// group stroke-width down, strip every per-path rigging width, and KEEP
+    /// paint-order (so the fill hides the compound-path seams). We assert the
+    /// structure rather than color identity because under the default Svalbard
+    /// theme `border_color` equals the master's outline `#111817` in both modes
+    /// — a color-equality check would pass on a dead recolor. Holds
+    /// `TEST_THEME_LOCK` so no concurrent test flips the mode between the `viz`
+    /// read and the boat build.
     #[test]
     fn themed_boat_svg_recolors_and_scales_group_stroke() {
         let _guard = crate::theme::TEST_THEME_LOCK.lock();
-        let viz = crate::theme::get_visualizer_colors();
+        let viz = crate::theme::get_visualizer_colors_dark();
         let logo = themed_logo_svg();
         let boat = themed_boat_svg(0.0, false, false);
 
         // The static logo carries no stroke-opacity; the boat injects exactly
-        // one (on the group) from the active visualizer border opacity.
+        // one (on the group) from the dark visualizer border opacity.
         assert_eq!(
             logo.matches("stroke-opacity=").count(),
             0,
@@ -594,69 +595,56 @@ mod tests {
         })
     }
 
-    /// Under the default theme every role hex equals its sentinel, so a content
-    /// check can't tell a real remap from a no-op. Flip light/dark — where at
-    /// least `fg0` moves off its sentinel — and assert in BOTH modes that each
-    /// role maps to its accessor at its path count, the outline stays fixed, the
-    /// output tracks the theme, and no uppercase hex survives. Serialized via
+    /// The logo is mode-stable: the light/dark toggle must NOT change it (the
+    /// fix for light mode inverting the body to dark ink). It still maps each
+    /// role to the theme's dark-palette accessor at its path count, keeps the
+    /// fixed outline, and leaves no uppercase hex. Serialized via
     /// `TEST_THEME_LOCK` (pokes the light-mode atomic).
     #[test]
-    fn themed_logo_svg_remaps_roles_on_theme_flip() {
+    fn themed_logo_svg_is_mode_stable_and_maps_roles() {
         use crate::theme;
         let _guard = theme::TEST_THEME_LOCK.lock();
         let was_light = theme::is_light_mode();
 
         theme::set_light_mode(false);
         let dark = themed_logo_svg();
-        let dark_roles = (
-            color_to_hex(theme::fg0()),
-            color_to_hex(theme::accent()),
-            color_to_hex(theme::warning()),
-        );
-
         theme::set_light_mode(true);
         let light = themed_logo_svg();
-        let light_roles = (
-            color_to_hex(theme::fg0()),
-            color_to_hex(theme::accent()),
-            color_to_hex(theme::warning()),
-        );
-
         theme::set_light_mode(was_light); // restore before any assertion fires
 
-        // Output tracks the active theme (catches a total no-op / identity bug).
-        assert_ne!(
+        // The light/dark toggle must not change the logo.
+        assert_eq!(
             dark, light,
-            "themed logo must change with the active palette"
+            "logo must be identical in light and dark mode (it reads the dark \
+             palette regardless of the active mode)"
         );
 
-        // Each role maps to its accessor at its path count, in BOTH modes.
-        for (out, fg0, accent, warning) in [
-            (&dark, &dark_roles.0, &dark_roles.1, &dark_roles.2),
-            (&light, &light_roles.0, &light_roles.1, &light_roles.2),
-        ] {
-            assert_eq!(
-                out.matches(fg0.as_str()).count(),
-                2,
-                "body (sail+hull) → fg0 ×2"
-            );
-            assert_eq!(
-                out.matches(accent.as_str()).count(),
-                3,
-                "shields → accent ×3"
-            );
-            assert_eq!(
-                out.matches(warning.as_str()).count(),
-                2,
-                "wood → warning ×2"
-            );
-            assert_eq!(
-                out.matches(LOGO_TOKEN_OUTLINE).count(),
-                1,
-                "outline must stay the fixed near-black"
-            );
-            assert!(!has_uppercase_hex(out), "no uppercase hex may survive");
-        }
+        // Each role maps to its mode-stable accessor at its path count. The
+        // accessors ignore mode, so reading them here is mode-independent.
+        let body = color_to_hex(theme::logo_body());
+        let shields = color_to_hex(theme::logo_shields());
+        let wood = color_to_hex(theme::logo_wood());
+        assert_eq!(
+            dark.matches(&body).count(),
+            2,
+            "body (sail+hull) → logo_body ×2"
+        );
+        assert_eq!(
+            dark.matches(&shields).count(),
+            3,
+            "shields (3 blocks) → logo_shields ×3"
+        );
+        assert_eq!(
+            dark.matches(&wood).count(),
+            2,
+            "wood (mast+yard) → logo_wood ×2"
+        );
+        assert_eq!(
+            dark.matches(LOGO_TOKEN_OUTLINE).count(),
+            1,
+            "outline must stay the fixed near-black"
+        );
+        assert!(!has_uppercase_hex(&dark), "no uppercase hex may survive");
     }
 
     /// `LOGO_VIEWBOX` must track the master's declared viewBox — all boat
@@ -695,23 +683,23 @@ mod tests {
         );
     }
 
-    /// The themed anchor SVG must carry the active theme's border color
-    /// as the stroke on every anchor path. Same accessor as
-    /// `themed_boat_svg`, so a theme change picks both up uniformly.
+    /// The themed anchor SVG must carry the **dark** visualizer border color
+    /// and opacity as its stroke. Same accessor as `themed_boat_svg`, so the
+    /// boat and its anchor stay mode-stable together.
     #[test]
     fn themed_anchor_svg_uses_theme_stroke() {
         let _guard = crate::theme::TEST_THEME_LOCK.lock();
-        let viz = crate::theme::get_visualizer_colors();
+        let viz = crate::theme::get_visualizer_colors_dark();
         let out = themed_anchor_svg();
         assert!(
             out.contains(&format!("stroke=\"{}\"", viz.border_color)),
-            "anchor stroke must come from the active theme's border_color \
+            "anchor stroke must come from the dark visualizer border_color \
              (expected {}, got: {out})",
             viz.border_color
         );
         assert!(
             out.contains(&format!("stroke-opacity=\"{}\"", viz.border_opacity)),
-            "anchor must inherit the theme's border opacity"
+            "anchor must inherit the dark visualizer border opacity"
         );
     }
 
