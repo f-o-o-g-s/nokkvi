@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- New optional "Rating Reminder" setting (off by default, on the Playback tab): a desktop notification that reminds you to rate the current track before it changes, for when your attention has drifted to other work. You choose when it fires: on scrobble (once the server counts the play), or once a configurable percentage of the track has played. It stays quiet for tracks you have already rated or loved, for radio, for very short tracks, and it never nags twice for the same track.
+
 ### Changed
 
 - Replaced the app logo with a new Viking longship mark across the About modal, login page, visualizer boat, README, and desktop/tray icons. The in-app logo and boat recolor with the active theme and stay consistent in both light and dark mode; the OS and tray icons use the Svalbard default palette.
