@@ -14,8 +14,8 @@ use crate::widgets::visualizer::state::catmull_rom_1d;
 /// Boat height as a fraction of the visualizer height. v1 default.
 pub(crate) const BOAT_HEIGHT_FRACTION: f32 = 0.18;
 
-/// Boat aspect ratio (width / height). The placeholder logo SVG is square,
-/// so the boat is rendered as a square.
+/// Boat aspect ratio (width / height). The logo master SVG has a square
+/// viewBox (`881.07 × 881.07`), so the boat is rendered as a square.
 pub(crate) const BOAT_ASPECT_RATIO: f32 = 1.0;
 
 /// Fraction of the boat's height that sits below the wave line ("waterline

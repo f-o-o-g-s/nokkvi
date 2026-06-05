@@ -46,6 +46,8 @@ The release workflow extracts the section matching the pushed tag verbatim into 
 
 Read `README.md` and verify the feature list, dependencies, and build instructions match the current codebase. Update any stale sections. Don't touch screenshots or media.
 
+**Logo assets:** if the logo artwork changed this release, regenerate the committed derived assets from the canonical master before tagging: `sh scripts/gen-logo-assets.sh <new-art.svg>` rebuilds `assets/logo/nokkvi_master.svg` and re-derives `assets/nokkvi_logo.svg`, `assets/nokkvi_logo_readme.svg`, `assets/org.nokkvi.nokkvi.svg`, and `assets/org.nokkvi.nokkvi.png` (pinned scour 0.38.2 / rsvg-convert 2.62.x). Stage the master plus all four derived outputs in the same commit, and run `sh scripts/gen-logo-assets.sh --check` to confirm they are in sync. The tarball and AUR builds consume these committed assets and never regenerate them (no rasterizer in their deps).
+
 ## 3. Bump version
 
 **Default to a patch bump** regardless of whether the changes are fixes or features (e.g. `0.3.7` → `0.3.8`). Patch numbers are allowed to grow arbitrarily — `0.3.99`, `0.3.128` are all fine. Early-iteration honesty over semver purity.

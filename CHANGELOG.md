@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Replaced the app logo with a new Viking longship mark across the About modal, login page, visualizer boat, README, and desktop/tray icons. The in-app logo (About, login, and the surfing boat) now follows the active theme; the static OS and tray icons stay on the Svalbard default palette.
+
 ### Fixed
 
 - Nokkvi now registers as a single player in Navidrome instead of appearing as two separate ones.

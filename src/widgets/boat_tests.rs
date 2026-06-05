@@ -10,16 +10,13 @@ use super::{
     },
     *,
 };
-
 // --- handle caching --------------------------------------------------------
-
-/// Sequential guard. The handle-cache tests poke `theme::set_light_mode`
-/// (a global atomic), so they must not run interleaved with each other.
-/// `cargo test` is multi-threaded by default — this mutex serializes the
-/// whole group without forcing the entire suite to single-threaded mode.
-/// `parking_lot::Mutex` is used because a test panic in one test would
-/// otherwise poison the std lock and cascade-fail the rest of the group.
-static THEME_MUTATION_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Sequential guard for tests that poke `theme::set_light_mode` (a global
+/// atomic), so they don't interleave. Aliased to the crate-wide
+/// `theme::TEST_THEME_LOCK` so these boat handle-cache tests also serialize
+/// against the themed-SVG tests in `embedded_svg.rs` — both groups mutate the
+/// same global palette state.
+use crate::theme::TEST_THEME_LOCK as THEME_MUTATION_LOCK;
 
 /// Theme-change behavior: when the active palette changes, the next
 /// `cache_handle_for` call must produce a handle whose bytes (and

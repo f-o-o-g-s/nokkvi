@@ -57,6 +57,14 @@ pub(crate) fn theme_generation() -> u64 {
     THEME_GENERATION.load(Ordering::Relaxed)
 }
 
+/// Crate-wide serialization guard for tests that poke the global light-mode
+/// atomic (`set_light_mode`). `cargo test` runs multi-threaded, so any two
+/// tests that flip the active palette must not interleave — the boat handle
+/// cache tests and the themed-SVG tests both lock this. `parking_lot::Mutex`
+/// is used so a panic in one test poisons nothing and the group keeps running.
+#[cfg(test)]
+pub(crate) static TEST_THEME_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 // ============================================================================
 // UI Mode Flags (grouped to avoid scattered statics)
 // ============================================================================
