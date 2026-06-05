@@ -166,7 +166,11 @@ const _: () = assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
 /// decode loop pauses/resumes fetching. Shared by both the primary and
 /// crossfade decode loops.
 fn compute_watermarks(crossfade_ms: u64) -> (usize, usize) {
-    const BASE_HIGH: usize = 30; // ~3 seconds at 100ms per buffer
+    // Decoded-ring cushion floor: 120 * SAMPLES_PER_BUFFER_UNIT(800) / 88200 ≈
+    // 1.1s at 44.1k stereo. Safe to exceed the crossfade lead because the inline
+    // gapless swap is gated on the crossfade (see should_attempt_gapless_swap),
+    // so a large decode_lead no longer wins the gapless-vs-crossfade race.
+    const BASE_HIGH: usize = 120;
     const BUFFER_MS: u64 = 100;
     let cf_buffers = if crossfade_ms > 0 {
         (crossfade_ms / BUFFER_MS) as usize + 10 // crossfade duration + margin
@@ -175,6 +179,22 @@ fn compute_watermarks(crossfade_ms: u64) -> (usize, usize) {
     };
     let high = BASE_HIGH.max(cf_buffers);
     (high, high / 3)
+}
+
+/// The inline gapless swap stands down when a crossfade is armed OR active, so
+/// the renderer's position-based crossfade trigger owns the transition. This
+/// decouples the decoded-cushion size (BASE_HIGH / decode_lead) from the
+/// crossfade lead — without the gate, a cushion >= the crossfade duration would
+/// let the EOF gapless swap win the race and strand a phantom (dead-air)
+/// crossfade. BOTH predicates are required: render_tick flips Armed->Active
+/// synchronously while the engine clears the prepared slot asynchronously, so a
+/// gate on `armed` alone leaves a window where `armed==false` but the slot is
+/// still prepared.
+fn should_attempt_gapless_swap(
+    renderer_crossfade_armed: bool,
+    renderer_crossfade_active: bool,
+) -> bool {
+    !renderer_crossfade_armed && !renderer_crossfade_active
 }
 
 /// Thread-safe slot holding an optional metadata string with non-blocking
@@ -936,25 +956,32 @@ impl CustomAudioEngine {
                             // RG-track mode: the live stream's amplify factor is baked
                             // at create time; deny gapless when the next track needs a
                             // different gain.
-                            let rg_allows_swap = renderer.lock().gapless_swap_allowed();
+                            let (rg_allows_swap, cf_armed, cf_active) = {
+                                let r = renderer.lock();
+                                (
+                                    r.gapless_swap_allowed(),
+                                    r.is_crossfade_armed(),
+                                    r.is_crossfade_active(),
+                                )
+                            };
                             if !rg_allows_swap {
                                 tracing::debug!(
                                     "🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap"
                                 );
                             }
 
-                            // NOTE: deliberately NOT gated on `is_crossfade_armed()`.
-                            // When crossfade is on, this inline gapless swap fires
-                            // at decoder-EOF (~track_end - decode_lead), while the
-                            // renderer's crossfade trigger fires at track_end - xfade
-                            // and clears the prepared slot. At SAMPLES_PER_BUFFER_UNIT
-                            // = 800 the decode_lead (0.27..1.18s for crossfade 1..12s)
-                            // is always < the >=1s crossfade lead, so the crossfade
-                            // deterministically wins the race and no stale arm is
-                            // stranded — see `phantom_unreachable_decode_lead_lt_xfade`.
-                            // Raising SAMPLES_PER_BUFFER_UNIT could invert this and
-                            // re-arm a phantom crossfade; that test guards against it.
-                            if formats_match && rg_allows_swap {
+                            // Crossfade owns the transition: when a crossfade is
+                            // armed or active, the inline gapless swap stands down
+                            // (should_attempt_gapless_swap) so the renderer's
+                            // position-based trigger fires the configured fade. This
+                            // decouples the decoded cushion (BASE_HIGH=120, ~1.1s)
+                            // from the crossfade lead; reverting the gate would let a
+                            // cushion >= the crossfade duration re-strand a phantom
+                            // crossfade (the dead-air bug).
+                            if formats_match
+                                && rg_allows_swap
+                                && should_attempt_gapless_swap(cf_armed, cf_active)
+                            {
                                 let next_duration = next_dec.duration();
                                 let next_source_url = std::mem::take(&mut slot.source);
                                 let next_codec = next_dec.live_codec();
@@ -1002,12 +1029,19 @@ impl CustomAudioEngine {
                                 backpressure_active = false;
                                 true
                             } else {
-                                tracing::debug!(
-                                    "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
-                                    current_format,
-                                    next_fmt
-                                );
-                                // Put the decoder back so a future swap can retry.
+                                if !should_attempt_gapless_swap(cf_armed, cf_active) {
+                                    tracing::debug!(
+                                        "🔀 [DECODE LOOP] Crossfade armed/active — deferring transition to the renderer trigger (skipping inline gapless)"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
+                                        current_format,
+                                        next_fmt
+                                    );
+                                }
+                                // Put the decoder back so a future swap can retry,
+                                // or so the renderer's crossfade trigger can take it.
                                 slot.decoder = Some(next_dec);
                                 drop(slot);
                                 false
@@ -2568,28 +2602,27 @@ mod tests {
         assert_eq!(samples_to_buffer_units(1600), 2);
     }
 
-    /// Load-bearing invariant for keeping the inline gapless swap UNgated on
-    /// `is_crossfade_armed()` (i.e. for not needing the phantom-crossfade fix):
-    /// on stock main the decoder-EOF lead (`high_watermark × SAMPLES_PER_BUFFER_UNIT`
-    /// seconds) is always smaller than the crossfade duration, so the renderer's
-    /// position-based crossfade trigger fires first and no stale arm is stranded.
-    /// A future `SAMPLES_PER_BUFFER_UNIT` bump (the abandoned watermark change)
-    /// that re-arms the phantom would trip this test in CI.
+    /// Pins the gate invariant that REPLACES the old `phantom_unreachable` test:
+    /// when a crossfade is armed OR active the inline gapless swap stands down, so
+    /// the renderer's position-based trigger owns the transition. This is what
+    /// lets BASE_HIGH grow the decoded cushion past the crossfade lead without
+    /// re-arming the phantom-crossfade (dead-air) bug. Both predicates matter —
+    /// render_tick flips Armed->Active synchronously while the engine clears the
+    /// prepared slot asynchronously.
     #[test]
-    fn phantom_unreachable_decode_lead_lt_xfade() {
-        // Interleaved samples/sec at the most demanding common rate (44.1k stereo
-        // gives the largest lead-in-seconds for a given unit count).
-        const FRAME_RATE: f64 = 44_100.0 * 2.0;
-        for cf_secs in 1..=12u64 {
-            let (high, _low) = compute_watermarks(cf_secs * 1000);
-            let decode_lead_sec = (high * SAMPLES_PER_BUFFER_UNIT) as f64 / FRAME_RATE;
-            assert!(
-                decode_lead_sec < cf_secs as f64,
-                "decode lead {decode_lead_sec:.3}s must stay below the {cf_secs}s crossfade \
-                 lead, else the inline gapless swap can win the race and strand a phantom \
-                 crossfade (raise SAMPLES_PER_BUFFER_UNIT at your peril)"
-            );
-        }
+    fn should_attempt_gapless_swap_defers_when_crossfade_armed_or_active() {
+        assert!(
+            !should_attempt_gapless_swap(true, false),
+            "armed crossfade ⇒ defer to the renderer trigger"
+        );
+        assert!(
+            !should_attempt_gapless_swap(false, true),
+            "active crossfade ⇒ defer (covers the Armed->Active window)"
+        );
+        assert!(
+            should_attempt_gapless_swap(false, false),
+            "no crossfade ⇒ the inline gapless swap proceeds"
+        );
     }
 
     /// `LiveStringSlot::set` overwrites prior values and accepts `None` to
