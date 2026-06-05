@@ -308,6 +308,9 @@ pub struct CustomAudioEngine {
     /// Shared with the renderer to gate crossfade trigger: prevents false
     /// triggers from transiently empty buffers after a seek.
     decoder_eof: Arc<AtomicBool>,
+    /// Set by the decode loop to the cached stream type. Shared with the renderer
+    /// so the mid-track network rebuffer only runs on FINITE (seekable) streams.
+    stream_is_infinite: Arc<AtomicBool>,
 
     /// Lock-free crossfade duration for the decode loop's dynamic backpressure.
     /// Updated by `set_crossfade_duration()`, read by the spawned decode task.
@@ -361,6 +364,7 @@ impl CustomAudioEngine {
             live_sample_rate: Arc::new(AtomicU32::new(0)),
             source_generation: SourceGeneration::new(),
             decoder_eof: Arc::new(AtomicBool::new(false)),
+            stream_is_infinite: Arc::new(AtomicBool::new(false)),
             crossfade_duration_shared: Arc::new(AtomicU64::new(5000)),
             crossfade_phase: CrossfadePhase::Idle,
             crossfade_enabled: false,
@@ -642,6 +646,7 @@ impl CustomAudioEngine {
         let renderer = self.renderer.clone();
         let live_bitrate = self.live_bitrate.clone();
         let decoder_eof = self.decoder_eof.clone();
+        let stream_is_infinite_arc = self.stream_is_infinite.clone();
         let crossfade_duration_shared = self.crossfade_duration_shared.clone();
 
         // Gapless: pass next-track state so the decode loop can swap inline
@@ -780,6 +785,8 @@ impl CustomAudioEngine {
                 if !stream_type_checked {
                     stream_is_infinite_cached = decoder_guard.is_infinite_stream();
                     stream_type_checked = true;
+                    // Publish to the renderer so its mid-track rebuffer skips radio.
+                    stream_is_infinite_arc.store(stream_is_infinite_cached, Ordering::Release);
                 }
 
                 let is_eof = decoder_guard.is_eof();
@@ -1905,6 +1912,7 @@ impl CustomAudioEngine {
             engine,
             self.source_generation.clone(),
             self.decoder_eof.clone(),
+            self.stream_is_infinite.clone(),
         );
     }
 

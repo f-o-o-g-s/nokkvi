@@ -91,6 +91,100 @@ fn crossfade_progress(elapsed_ms: u64, paused_accum_ms: u64, duration_ms: u64) -
     }
 }
 
+/// Rebuffer low watermark: pause-and-rebuffer when the decoded ring drains below
+/// ~0.2s of audio mid-track on a FINITE stream (issue #9). `frame_rate` is
+/// `sample_rate * channels`.
+fn rebuffer_low_samples(frame_rate: u32) -> usize {
+    (frame_rate / 5) as usize
+}
+
+/// Rebuffer resume target: refill ~1s of decoded audio before resuming, matching
+/// mpv `cache-pause-wait` and MPD `buffer_before_play` (both ~1s).
+fn rebuffer_resume_samples(frame_rate: u32) -> usize {
+    frame_rate as usize
+}
+
+/// Safety valve: if a finite stream stays drained this many render ticks (~10s at
+/// 20ms/tick) it likely never recovers (a dead socket that never signals EOF —
+/// the decode loop's empty-buffer branch loops forever with `decoder_eof=false`),
+/// so give up rebuffering and let the completion/empty-buffer path run instead of
+/// pausing indefinitely.
+const MAX_REBUFFER_TICKS: u32 = 500;
+
+/// What `render_tick` should do about the network rebuffer this tick.
+#[derive(PartialEq, Eq, Debug)]
+enum RebufferAction {
+    /// Enter rebuffer: pause the output stream, then early-return.
+    Enter,
+    /// Stay in rebuffer: early-return (skip the completion gate on the empty ring).
+    Hold,
+    /// Leave rebuffer: resume the output stream, then continue.
+    Exit,
+    /// Nothing to do; continue `render_tick` normally.
+    None,
+}
+
+/// Pure pause-and-rebuffer state machine for the FINITE (seekable, non-infinite)
+/// path. Mutates the latch fields and returns the action `render_tick` applies.
+/// Never fires during a crossfade, on radio, before the ring has primed once
+/// after a start/seek, at genuine end-of-track (decoder EOF), or with an invalid
+/// format — the guards that keep it from disrupting normal playback.
+#[allow(clippy::too_many_arguments)]
+fn rebuffer_action(
+    playing: bool,
+    is_infinite: bool,
+    crossfade_idle: bool,
+    eof: bool,
+    frame_rate: u32,
+    buffer: usize,
+    rebuffering: &mut bool,
+    primed: &mut bool,
+    ticks: &mut u32,
+) -> RebufferAction {
+    if frame_rate == 0 {
+        return RebufferAction::None; // no valid format yet — never rebuffer
+    }
+    let low = rebuffer_low_samples(frame_rate);
+    let resume = rebuffer_resume_samples(frame_rate);
+
+    // Prime once the ring has reached the resume target, so a cold track start
+    // (ring at 0 during prebuffer) cannot false-pause at 0:00.
+    if !*primed && buffer >= resume {
+        *primed = true;
+    }
+
+    // Never rebuffer during a crossfade/gapless transition or on radio.
+    if !crossfade_idle || is_infinite {
+        if *rebuffering {
+            *rebuffering = false;
+            return RebufferAction::Exit;
+        }
+        return RebufferAction::None;
+    }
+
+    if *rebuffering {
+        if buffer >= resume || eof {
+            *rebuffering = false;
+            return RebufferAction::Exit;
+        }
+        *ticks += 1;
+        if *ticks > MAX_REBUFFER_TICKS {
+            *rebuffering = false; // give up — let the completion path run
+            return RebufferAction::Exit;
+        }
+        return RebufferAction::Hold;
+    }
+
+    // Enter only if primed, actively playing, mid-track (not EOF), drained below low.
+    if playing && *primed && !eof && buffer < low {
+        *rebuffering = true;
+        *ticks = 0;
+        return RebufferAction::Enter;
+    }
+
+    RebufferAction::None
+}
+
 /// Audio renderer that manages streaming sources on the rodio mixer.
 pub struct AudioRenderer {
     /// The rodio output — holds the cpal stream and mixer.
@@ -121,6 +215,20 @@ pub struct AudioRenderer {
     source_generation: SourceGeneration,
     /// Set by the engine's decode loop when the primary decoder reaches EOF.
     decoder_eof: Arc<AtomicBool>,
+    /// Set by the engine's decode loop to the cached stream type. The mid-track
+    /// network rebuffer only runs on FINITE (seekable) streams, never radio.
+    stream_is_infinite: Arc<AtomicBool>,
+    /// True while pausing the output to refill the decoded ring after a mid-track
+    /// underrun (issue #9). Distinct from `paused` (user pause): it silences only
+    /// the stream output, leaving `render_tick` bookkeeping and the UI
+    /// PlaybackState as "playing".
+    rebuffering: bool,
+    /// The ring must reach the resume target once after a start/seek before a
+    /// rebuffer can fire, so a cold track start does not false-pause at 0:00.
+    rebuffer_primed: bool,
+    /// Consecutive ticks held in rebuffer; the safety valve gives up after
+    /// `MAX_REBUFFER_TICKS` so a dead finite socket can't pause forever.
+    rebuffer_ticks: u32,
 
     /// Crossfade phase + per-phase data. See [`CrossfadeState`].
     crossfade_state: CrossfadeState,
@@ -278,6 +386,10 @@ impl AudioRenderer {
             tokio_handle: tokio::runtime::Handle::current(),
             source_generation: SourceGeneration::new(),
             decoder_eof: Arc::new(AtomicBool::new(false)),
+            stream_is_infinite: Arc::new(AtomicBool::new(false)),
+            rebuffering: false,
+            rebuffer_primed: false,
+            rebuffer_ticks: 0,
             crossfade_state: CrossfadeState::Idle,
             crossfade_finalized_elapsed_ms: 0,
             viz_callback: std::sync::Arc::new(parking_lot::RwLock::new(None)),
@@ -313,10 +425,12 @@ impl AudioRenderer {
         engine: Weak<Mutex<super::engine::CustomAudioEngine>>,
         source_generation: SourceGeneration,
         decoder_eof: Arc<AtomicBool>,
+        stream_is_infinite: Arc<AtomicBool>,
     ) {
         self.engine = engine;
         self.source_generation = source_generation;
         self.decoder_eof = decoder_eof;
+        self.stream_is_infinite = stream_is_infinite;
     }
 
     // =========================================================================
@@ -503,6 +617,17 @@ impl AudioRenderer {
         self.finished_called = false;
         self.decoder_eof.store(false, Ordering::Release);
 
+        // Network rebuffer (issue #9): a new track / seek / unpause must never
+        // resume-as-rebuffer a stale stream. Clear the latch unconditionally (so
+        // it resets even on the early-return path) and unpause the output in case
+        // a rebuffer had paused it.
+        self.rebuffering = false;
+        self.rebuffer_primed = false;
+        self.rebuffer_ticks = 0;
+        if let Some(ref stream) = self.primary_stream {
+            stream.resume();
+        }
+
         if self.playing && !self.paused {
             trace!("▶ Renderer::start() already playing, returning early");
             return;
@@ -554,6 +679,9 @@ impl AudioRenderer {
         self.playing = false;
         self.paused = false;
         self.finished_called = false;
+        self.rebuffering = false;
+        self.rebuffer_primed = false;
+        self.rebuffer_ticks = 0;
 
         // Cancel crossfade and disarm any pending crossfade trigger
         self.cancel_crossfade();
@@ -571,6 +699,9 @@ impl AudioRenderer {
     /// Pause playback.
     pub fn pause(&mut self) {
         self.paused = true;
+        // A user pause subsumes any in-progress network rebuffer (the stream is
+        // paused either way); clear the flag so resume goes through start().
+        self.rebuffering = false;
         // Pause the streaming source — it will emit silence and stop
         // counting samples, so position freezes correctly.
         if let Some(ref stream) = self.primary_stream {
@@ -597,6 +728,11 @@ impl AudioRenderer {
 
         self.position_offset = position_ms;
         self.finished_called = false;
+        // The ring is about to be cleared + the stream recreated, so reset the
+        // rebuffer latch (a fresh ring must re-prime before it can pause).
+        self.rebuffering = false;
+        self.rebuffer_primed = false;
+        self.rebuffer_ticks = 0;
 
         // Clear the ring buffer by stopping and recreating the stream
         if let Some(old_stream) = self.primary_stream.take() {
@@ -1209,6 +1345,48 @@ impl AudioRenderer {
             }
         }
 
+        // ---- Network rebuffer (issue #9): on a mid-track underrun on a FINITE
+        // stream, pause the output and refill ~1s before resuming, instead of
+        // emitting silence. Mirrors mpv/MPD/GStreamer pause-and-rebuffer; the
+        // try_pop().unwrap_or(0.0) silence in StreamingSource stays as the xrun
+        // backstop only. Runs AFTER the crossfade trigger (never fights a fade)
+        // and BEFORE the completion gate (never pauses a finishing track). ----
+        let frame_rate = self.format.sample_rate() * self.format.channel_count();
+        let is_infinite = self.stream_is_infinite.load(Ordering::Acquire);
+        let eof = self.decoder_eof.load(Ordering::Acquire);
+        let cf_idle = matches!(self.crossfade_state, CrossfadeState::Idle);
+        match rebuffer_action(
+            self.playing,
+            is_infinite,
+            cf_idle,
+            eof,
+            frame_rate,
+            self.buffer_count(),
+            &mut self.rebuffering,
+            &mut self.rebuffer_primed,
+            &mut self.rebuffer_ticks,
+        ) {
+            RebufferAction::Enter => {
+                if let Some(ref stream) = self.primary_stream {
+                    stream.pause();
+                }
+                debug!(
+                    "🔌 [REBUFFER] ring drained mid-track ({} samples) — pausing to refill",
+                    self.buffer_count()
+                );
+                return;
+            }
+            RebufferAction::Hold => return,
+            RebufferAction::Exit => {
+                if let Some(ref stream) = self.primary_stream {
+                    stream.resume();
+                }
+                debug!("🔌 [REBUFFER] refilled to resume target — resuming output");
+                // fall through to the completion gate
+            }
+            RebufferAction::None => {}
+        }
+
         // Check for track completion (ring buffer empty + decoder EOF + not crossfading)
         if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
             && !self.finished_called
@@ -1307,6 +1485,184 @@ mod tests {
 
     use super::*;
     use crate::audio::streaming_source::{SharedVisualizerCallback, StreamingSource};
+
+    const FR: u32 = 44_100 * 2; // 44.1k stereo frame rate
+    const FR_S: usize = FR as usize; // same, as a sample count for the buffer arg
+
+    #[test]
+    fn rebuffer_does_not_enter_before_primed() {
+        // Cold start: ring at 0 but never primed → must NOT pause (no 0:00 hitch).
+        let (mut reb, mut primed, mut ticks) = (false, false, 0);
+        let a = rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            FR,
+            0,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert_eq!(a, RebufferAction::None);
+        assert!(!reb);
+    }
+
+    #[test]
+    fn rebuffer_primes_then_enters_on_mid_track_drain() {
+        let (mut reb, mut primed, mut ticks) = (false, false, 0);
+        // Reach the resume target → primes (buffer high, no pause).
+        rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            FR,
+            FR_S,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert!(primed && !reb);
+        // Now drain below the low mark mid-track → enter rebuffer.
+        let a = rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            FR,
+            FR_S / 10,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert_eq!(a, RebufferAction::Enter);
+        assert!(reb);
+    }
+
+    #[test]
+    fn rebuffer_resumes_at_target() {
+        let (mut reb, mut primed, mut ticks) = (true, true, 3);
+        let a = rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            FR,
+            FR_S,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert_eq!(a, RebufferAction::Exit);
+        assert!(!reb);
+    }
+
+    #[test]
+    fn rebuffer_never_enters_at_eof_or_crossfade_or_radio_or_invalid_format() {
+        // primed + drained, but EOF → genuine end-of-track, never rebuffer.
+        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        assert_eq!(
+            rebuffer_action(
+                true,
+                false,
+                true,
+                true,
+                FR,
+                0,
+                &mut reb,
+                &mut primed,
+                &mut ticks
+            ),
+            RebufferAction::None
+        );
+        // crossfade not idle → never rebuffer.
+        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        assert_eq!(
+            rebuffer_action(
+                true,
+                false,
+                false,
+                false,
+                FR,
+                0,
+                &mut reb,
+                &mut primed,
+                &mut ticks
+            ),
+            RebufferAction::None
+        );
+        // radio (infinite) → never rebuffer.
+        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        assert_eq!(
+            rebuffer_action(
+                true,
+                true,
+                true,
+                false,
+                FR,
+                0,
+                &mut reb,
+                &mut primed,
+                &mut ticks
+            ),
+            RebufferAction::None
+        );
+        // invalid format (frame_rate 0) → no-op.
+        let (mut reb, mut primed, mut ticks) = (false, true, 0);
+        assert_eq!(
+            rebuffer_action(
+                true,
+                false,
+                true,
+                false,
+                0,
+                0,
+                &mut reb,
+                &mut primed,
+                &mut ticks
+            ),
+            RebufferAction::None
+        );
+    }
+
+    #[test]
+    fn rebuffer_exits_if_crossfade_starts_mid_rebuffer() {
+        // Already rebuffering, then a crossfade arms (cf_idle=false) → resume.
+        let (mut reb, mut primed, mut ticks) = (true, true, 2);
+        let a = rebuffer_action(
+            true,
+            false,
+            false,
+            false,
+            FR,
+            0,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert_eq!(a, RebufferAction::Exit);
+        assert!(!reb);
+    }
+
+    #[test]
+    fn rebuffer_safety_valve_gives_up_after_max_ticks() {
+        let (mut reb, mut primed, mut ticks) = (true, true, MAX_REBUFFER_TICKS);
+        // One more tick past the cap on a still-drained stream → give up.
+        let a = rebuffer_action(
+            true,
+            false,
+            true,
+            false,
+            FR,
+            0,
+            &mut reb,
+            &mut primed,
+            &mut ticks,
+        );
+        assert_eq!(a, RebufferAction::Exit);
+        assert!(!reb);
+    }
 
     /// Build a detached `ActiveStream` for renderer crossfade unit tests.
     ///
