@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Replaced the app logo with a new Viking longship mark across the About modal, login page, visualizer boat, README, and desktop/tray icons. The in-app logo (About, login, and the surfing boat) now follows the active theme; the static OS and tray icons stay on the Svalbard default palette.
+- Replaced the app logo with a new Viking longship mark across the About modal, login page, visualizer boat, README, and desktop/tray icons. The in-app logo and boat recolor with the active theme and stay consistent in both light and dark mode; the OS and tray icons use the Svalbard default palette.
 
 ### Fixed
 
