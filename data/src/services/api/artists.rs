@@ -70,8 +70,8 @@ impl ArtistsApiService {
         // alongside `params` so the `&str` borrows pushed below outlive
         // the call to `get_with_headers`. See `albums.rs` for the
         // companion comment.
-        let mut library_id_strings: Vec<String> =
-            library_ids.iter().map(|id| id.to_string()).collect();
+        let library_id_strings =
+            crate::services::api::songs::collect_library_id_strings(library_ids, filter);
 
         // Apply ID filter if present
         if let Some(f) = filter {
@@ -79,9 +79,9 @@ impl ArtistsApiService {
                 crate::types::filter::LibraryFilter::ArtistId { id, .. } => {
                     params.push(("id", id));
                 }
-                crate::types::filter::LibraryFilter::LibraryIds(ids) => {
-                    library_id_strings.extend(ids.iter().map(|id| id.to_string()));
-                }
+                // `LibraryFilter::LibraryIds` is folded into
+                // `library_id_strings` above via the shared helper.
+                crate::types::filter::LibraryFilter::LibraryIds(_) => {}
                 // AlbumId / GenreId are not meaningful filters on the
                 // /api/artist endpoint — leave the request unfiltered.
                 crate::types::filter::LibraryFilter::AlbumId { .. }

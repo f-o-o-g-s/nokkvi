@@ -191,12 +191,10 @@ impl PlaylistsApiService {
             .and_then(|sr| sr.get("playlist"))
             .and_then(|pl| pl.get("entry"))
         {
-            // Handle both array and single object cases
-            let entries: Vec<serde_json::Value> = if entry_value.is_array() {
-                entry_value.as_array().cloned().unwrap_or_default()
-            } else {
-                vec![entry_value.clone()]
-            };
+            // Subsonic returns a single object instead of a one-element
+            // array; `deserialize_one_or_many` absorbs that quirk.
+            let entries: Vec<serde_json::Value> =
+                subsonic::deserialize_one_or_many(entry_value.clone())?;
 
             for entry in entries {
                 let song = parse_subsonic_song_entry(entry)?;
@@ -240,12 +238,9 @@ impl PlaylistsApiService {
         if let Some(playlist) = parsed.subsonic_response.playlist
             && let Some(entry_value) = playlist.entry
         {
-            // Handle both array and single object cases
-            let entries: Vec<SubsonicSongEntry> = if entry_value.is_array() {
-                serde_json::from_value(entry_value)?
-            } else {
-                vec![serde_json::from_value(entry_value)?]
-            };
+            // Subsonic returns a single object instead of a one-element
+            // array; `deserialize_one_or_many` absorbs that quirk.
+            let entries: Vec<SubsonicSongEntry> = subsonic::deserialize_one_or_many(entry_value)?;
 
             for entry in entries {
                 if let Some(album_id) = entry.album_id

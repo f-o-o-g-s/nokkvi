@@ -118,6 +118,25 @@ fn check_subsonic_response_status(
     Ok(())
 }
 
+/// Coerce a Subsonic JSON field that may be either a single object or an
+/// array into a `Vec<T>`.
+///
+/// Subsonic's XML→JSON bridge collapses a single-element collection to a bare
+/// object (e.g. one `<genre>` / `<internetRadioStation>` / playlist `<entry>`)
+/// instead of a one-element array, so every "list" field needs the same
+/// one-or-many fan-out. This centralizes that quirk: an array deserializes
+/// straight to `Vec<T>`; a single value is wrapped in a one-element Vec. Parse
+/// failures propagate via `?` rather than panicking.
+pub(crate) fn deserialize_one_or_many<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
+) -> Result<Vec<T>> {
+    if value.is_array() {
+        Ok(serde_json::from_value(value)?)
+    } else {
+        Ok(vec![serde_json::from_value(value)?])
+    }
+}
+
 /// Build a Subsonic REST API URL (GET-style, credentials in query string).
 ///
 /// Only used for streaming URLs where POST is not possible due to HTTP Range
@@ -213,5 +232,67 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("star song"));
         assert!(msg.contains("Song not found"));
+    }
+
+    /// A JSON array deserializes element-for-element into the target Vec —
+    /// both scalar and struct element types round-trip.
+    #[test]
+    fn deserialize_one_or_many_handles_array() {
+        let nums: Vec<i64> = deserialize_one_or_many(serde_json::json!([1, 2, 3]))
+            .expect("array of scalars must deserialize");
+        assert_eq!(nums, vec![1, 2, 3]);
+
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct Item {
+            id: String,
+        }
+        let items: Vec<Item> =
+            deserialize_one_or_many(serde_json::json!([{ "id": "a" }, { "id": "b" }]))
+                .expect("array of structs must deserialize");
+        assert_eq!(
+            items,
+            vec![
+                Item {
+                    id: "a".to_string()
+                },
+                Item {
+                    id: "b".to_string()
+                }
+            ]
+        );
+    }
+
+    /// A single JSON object (NOT wrapped in `[]`) returns a one-element Vec —
+    /// this is the Subsonic single-element quirk the helper exists to absorb.
+    #[test]
+    fn deserialize_one_or_many_handles_single_object() {
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct Item {
+            id: String,
+        }
+        let items: Vec<Item> = deserialize_one_or_many(serde_json::json!({ "id": "solo" }))
+            .expect("single object must deserialize to a one-element Vec");
+        assert_eq!(
+            items,
+            vec![Item {
+                id: "solo".to_string()
+            }]
+        );
+    }
+
+    /// A value whose shape does not match `T` returns `Err` (via `?`) rather
+    /// than panicking — guards the propagation path.
+    #[test]
+    fn deserialize_one_or_many_propagates_parse_error() {
+        // i64 target fed a string element: serde_json must error, not panic.
+        let result: Result<Vec<i64>> = deserialize_one_or_many(serde_json::json!(["not a number"]));
+        assert!(result.is_err(), "shape mismatch must produce an error");
+
+        // Single-object branch is equally guarded.
+        let result: Result<Vec<i64>> = deserialize_one_or_many(serde_json::json!({ "k": "v" }));
+        assert!(
+            result.is_err(),
+            "single-object shape mismatch must produce an error"
+        );
     }
 }

@@ -80,14 +80,9 @@ impl RadiosApiService {
         if let Some(radio_obj) = parsed.subsonic_response.internet_radio_stations
             && let Some(station_value) = radio_obj.internet_radio_station
         {
-            // Handle both array and single object cases (Subsonic JSON quirk)
-            let station_array: Vec<RadioStation> = if station_value.is_array() {
-                serde_json::from_value(station_value)?
-            } else {
-                vec![serde_json::from_value(station_value)?]
-            };
-
-            stations = station_array;
+            // Subsonic can return a single object or an array (JSON quirk);
+            // `deserialize_one_or_many` absorbs that.
+            stations = crate::services::api::subsonic::deserialize_one_or_many(station_value)?;
         }
 
         debug!(

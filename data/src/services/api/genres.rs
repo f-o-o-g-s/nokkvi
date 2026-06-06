@@ -125,8 +125,10 @@ impl GenresApiService {
 
         // Owned `String`s for any `library_id` filter param values. Owned
         // alongside `params` so the `&str` borrows pushed below outlive
-        // the call to `get_with_headers`.
-        let library_id_strings: Vec<String> = library_ids.iter().map(|id| id.to_string()).collect();
+        // the call to `get_with_headers`. `/api/genre` has no `LibraryFilter`
+        // slot, so the shared helper is called with `None`.
+        let library_id_strings =
+            crate::services::api::songs::collect_library_id_strings(library_ids, None);
         for s in &library_id_strings {
             params.push(("library_id", s.as_str()));
         }
@@ -234,12 +236,10 @@ impl GenresApiService {
         if let Some(genres_obj) = parsed.subsonic_response.genres
             && let Some(genre_value) = genres_obj.genre
         {
-            // Handle both array and single object cases
-            let genre_array: Vec<SubsonicGenre> = if genre_value.is_array() {
-                serde_json::from_value(genre_value)?
-            } else {
-                vec![serde_json::from_value(genre_value)?]
-            };
+            // Subsonic returns a single object instead of a one-element array;
+            // `deserialize_one_or_many` absorbs that quirk.
+            let genre_array: Vec<SubsonicGenre> =
+                crate::services::api::subsonic::deserialize_one_or_many(genre_value)?;
 
             for g in genre_array {
                 if let Some(name) = g.value {

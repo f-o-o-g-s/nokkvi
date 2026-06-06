@@ -66,8 +66,8 @@ impl AlbumsApiService {
         // `library_ids` argument with any `LibraryFilter::LibraryIds`
         // routed through the filter slot (both express "scope by music
         // folder", just from different navigation surfaces).
-        let mut library_id_strings: Vec<String> =
-            library_ids.iter().map(|id| id.to_string()).collect();
+        let library_id_strings =
+            crate::services::api::songs::collect_library_id_strings(library_ids, filter);
 
         // Apply ID filter if present
         if let Some(f) = filter {
@@ -79,9 +79,9 @@ impl AlbumsApiService {
                     params.push(("genre_id", name));
                 }
                 crate::types::filter::LibraryFilter::AlbumId { id, .. } => params.push(("id", id)),
-                crate::types::filter::LibraryFilter::LibraryIds(ids) => {
-                    library_id_strings.extend(ids.iter().map(|id| id.to_string()));
-                }
+                // `LibraryFilter::LibraryIds` is folded into
+                // `library_id_strings` above via the shared helper.
+                crate::types::filter::LibraryFilter::LibraryIds(_) => {}
             }
         } else if let Some(query) = search_query
             && !query.is_empty()

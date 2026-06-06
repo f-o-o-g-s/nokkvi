@@ -144,13 +144,12 @@ impl SongsApiService {
     /// Fold the orthogonal `library_ids` slice and any
     /// `LibraryFilter::LibraryIds` payload into a single owned
     /// `Vec<String>` so the borrows pushed into `build_song_params` outlive
-    /// the params Vec. Shared by both the single-page and paginated paths.
+    /// the params Vec. Shared by both the single-page and paginated paths —
+    /// a thin delegate over the module-level [`collect_library_id_strings`]
+    /// so the per-endpoint browse loaders (albums / artists / genres) reuse
+    /// the exact same fold logic.
     fn collect_library_id_strings(shape: &SongQueryShape<'_>) -> Vec<String> {
-        let mut strings: Vec<String> = shape.library_ids.iter().map(|id| id.to_string()).collect();
-        if let Some(crate::types::filter::LibraryFilter::LibraryIds(ids)) = shape.filter {
-            strings.extend(ids.iter().map(|id| id.to_string()));
-        }
-        strings
+        collect_library_id_strings(shape.library_ids, shape.filter)
     }
 
     /// Single `/api/song` request, used when the caller specified an explicit
@@ -357,6 +356,30 @@ impl SongsApiService {
     }
 }
 
+/// Fold the orthogonal `library_ids` slice and any
+/// `LibraryFilter::LibraryIds` filter payload into a single owned
+/// `Vec<String>` of `library_id` param values.
+///
+/// Shared across every browse loader (songs / albums / artists / genres):
+/// the multi-library scope arrives two ways — as the orthogonal
+/// `library_ids: &[i32]` argument and, on the future "show everything in
+/// libraries X, Y" navigation surface, as a [`LibraryFilter::LibraryIds`]
+/// payload. Both express the same `library_id IN (...)` server filter
+/// (`reference-navidrome/persistence/sql_tags.go`), so they fold into one
+/// repeat-per-id list. The owned `Vec<String>` outlives the borrows pushed
+/// into each endpoint's params Vec. Endpoints without a filter slot (genres)
+/// pass `None`.
+pub(crate) fn collect_library_id_strings(
+    library_ids: &[i32],
+    filter: Option<&crate::types::filter::LibraryFilter>,
+) -> Vec<String> {
+    let mut strings: Vec<String> = library_ids.iter().map(|id| id.to_string()).collect();
+    if let Some(crate::types::filter::LibraryFilter::LibraryIds(ids)) = filter {
+        strings.extend(ids.iter().map(|id| id.to_string()));
+    }
+    strings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +480,35 @@ mod tests {
                 .any(|(k, v)| *k == "artists_id" && *v == "abc")
         );
         assert_eq!(params.iter().filter(|(k, _)| *k == "library_id").count(), 0);
+    }
+
+    /// The module-level free fn (shared by albums / artists / genres) folds
+    /// the orthogonal `library_ids` arg and any `LibraryFilter::LibraryIds`
+    /// payload, ignores non-library filter variants, and handles the empty
+    /// case — mirroring the `SongQueryShape`-bound delegate above so both
+    /// paths stay in lockstep.
+    #[test]
+    fn collect_library_id_strings_merges_orthogonal_and_filter() {
+        // Orthogonal arg + LibraryIds payload merge (arg first, then payload).
+        assert_eq!(
+            collect_library_id_strings(&[1, 2], Some(&LibraryFilter::LibraryIds(vec![10, 20]))),
+            vec!["1", "2", "10", "20"]
+        );
+
+        // Empty arg + no filter → empty Vec (no library_id param emitted).
+        assert!(collect_library_id_strings(&[], None).is_empty());
+
+        // A non-library filter variant does NOT contribute library ids.
+        assert_eq!(
+            collect_library_id_strings(
+                &[5],
+                Some(&LibraryFilter::ArtistId {
+                    id: "abc".to_string(),
+                    name: "Some Artist".to_string(),
+                })
+            ),
+            vec!["5"]
+        );
     }
 
     /// Negative library IDs (defensive — server uses signed int32) and
