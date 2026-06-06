@@ -652,6 +652,96 @@ mod wgsl_config_identity_tests {
              both shaders must mirror its field list verbatim or the bytemuck cast UB-fails."
         );
     }
+
+    /// Field names of the Rust `VisualizerConfig` (shader.rs), in declaration
+    /// order, with the 3-u32 `_pad` collapsed to a single `_pad` token to match
+    /// how this test normalizes the WGSL `_pad0/_pad1/_pad2` split. Update this
+    /// list AND shader.rs's const-asserts whenever a config field changes.
+    const RUST_CONFIG_FIELDS: &[&str] = &[
+        "bar_count",
+        "mode",
+        "border_width",
+        "peak_enabled",
+        "peak_thickness",
+        "peak_alpha",
+        "line_thickness",
+        "bar_width",
+        "bar_spacing",
+        "edge_spacing",
+        "time",
+        "led_bars",
+        "led_segment_height",
+        "led_border_opacity",
+        "border_opacity",
+        "gradient_mode",
+        "peak_gradient_mode",
+        "peak_mode",
+        "peak_hold_time",
+        "peak_fade_time",
+        "flash_count",
+        "bar_depth_3d",
+        "gradient_orientation",
+        "average_energy",
+        "global_opacity",
+        "lines_outline_thickness",
+        "lines_outline_opacity",
+        "lines_animation_speed",
+        "lines_gradient_mode",
+        "lines_fill_opacity",
+        "lines_mirror",
+        "lines_glow_intensity",
+        "lines_style",
+        "_pad",
+        "flash_data",
+    ];
+
+    /// Pull the field-name token from each line of an extracted Config block,
+    /// skipping the `struct Config {` opener + closing `}`, and collapsing the
+    /// consecutive `_pad0/_pad1/_pad2` lines into a single `_pad` token (the
+    /// Rust struct declares them as one `_pad: [u32; 3]` member).
+    fn wgsl_field_names(block: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for line in block.lines() {
+            let line = line.trim();
+            if line == "struct Config {" || line == "}" || line.is_empty() {
+                continue;
+            }
+            let name = line.split(':').next().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+            let normalized = if name.starts_with("_pad") {
+                "_pad"
+            } else {
+                name
+            };
+            // Collapse the consecutive _pad members into one token.
+            if normalized == "_pad" && out.last().map(String::as_str) == Some("_pad") {
+                continue;
+            }
+            out.push(normalized.to_string());
+        }
+        out
+    }
+
+    #[test]
+    fn wgsl_config_field_names_match_rust_struct() {
+        const BARS: &str = include_str!("shaders/bars.wgsl");
+        let bars_cfg = extract_config_block(BARS);
+        let wgsl_names = wgsl_field_names(&bars_cfg);
+        let rust_names: Vec<String> = RUST_CONFIG_FIELDS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        assert_eq!(
+            wgsl_names, rust_names,
+            "WGSL Config field list (bars.wgsl) drifted from Rust VisualizerConfig (shader.rs). \
+             The Rust struct is the byte-layout source of truth; the WGSL mirror must match its \
+             field order or the bytemuck::Pod GPU upload reinterprets memory (silent UB). \
+             lines.wgsl is checked against bars.wgsl by wgsl_config_blocks_declare_identical_fields, \
+             so this transitively covers it."
+        );
+    }
 }
 
 #[cfg(test)]

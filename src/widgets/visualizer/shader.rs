@@ -66,6 +66,32 @@ pub(crate) struct VisualizerConfig {
 unsafe impl bytemuck::Pod for VisualizerConfig {}
 unsafe impl bytemuck::Zeroable for VisualizerConfig {}
 
+// --- Byte-layout interlock: VisualizerConfig (Rust) <-> Config (bars.wgsl / lines.wgsl) ---
+// bytemuck::Pod makes a Rust-vs-WGSL field-order/size mismatch SILENT memory
+// reinterpretation, not a compile error. naga validates each .wgsl internally but
+// cannot see this struct. These const-asserts + the offset_of checks below + the
+// wgsl-vs-rust field-name test in mod.rs are the only guard on the GPU upload contract.
+const _: () = assert!(
+    core::mem::align_of::<VisualizerConfig>() == 16,
+    "VisualizerConfig must stay 16-byte aligned for the std140-style WGSL uniform",
+);
+const _: () = assert!(
+    core::mem::size_of::<VisualizerConfig>() == 8336,
+    "VisualizerConfig size changed — update bars.wgsl + lines.wgsl Config and this assert",
+);
+// First and last scalar before the pad, plus the two array members, anchor the layout.
+const _: () = assert!(core::mem::offset_of!(VisualizerConfig, bar_count) == 0);
+const _: () = assert!(core::mem::offset_of!(VisualizerConfig, time) == 40);
+const _: () = assert!(core::mem::offset_of!(VisualizerConfig, lines_style) == 128);
+const _: () = assert!(
+    core::mem::offset_of!(VisualizerConfig, _pad) == 132,
+    "_pad must sit at 132 so flash_data lands on a 16-byte boundary (144)",
+);
+const _: () = assert!(
+    core::mem::offset_of!(VisualizerConfig, flash_data) == 144,
+    "flash_data must be 16-byte aligned (WGSL array<vec4<f32>> stride = 16)",
+);
+
 /// GPU-rendered visualizer primitive
 /// Contains per-frame data to upload to GPU
 #[derive(Debug)]
@@ -735,5 +761,23 @@ impl<Message> shader::Program<Message> for ShaderVisualizer {
         adjusted_params.peak_thickness = self.params.peak_thickness;
 
         VisualizerPrimitive::new(&self.state, self.mode, &adjusted_params)
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn config_size_and_alignment_are_pinned() {
+        assert_eq!(core::mem::size_of::<VisualizerConfig>(), 8336);
+        assert_eq!(core::mem::align_of::<VisualizerConfig>(), 16);
+        assert_eq!(core::mem::size_of::<VisualizerConfig>() % 16, 0);
+    }
+
+    #[test]
+    fn flash_data_is_sixteen_byte_aligned() {
+        assert_eq!(core::mem::offset_of!(VisualizerConfig, _pad), 132);
+        assert_eq!(core::mem::offset_of!(VisualizerConfig, flash_data) % 16, 0);
     }
 }
