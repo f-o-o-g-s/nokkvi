@@ -29,12 +29,12 @@ pub struct SimilarPage {
 // Select is opt-in like everywhere else in the app; all others default on to match the historical layout.
 super::define_view_columns! {
     SimilarColumn => SimilarColumnVisibility {
-        Select: select = false => set_similar_show_select,
-        Index: index = true => set_similar_show_index,
-        Thumbnail: thumbnail = true => set_similar_show_thumbnail,
-        Album: album = true => set_similar_show_album,
-        Duration: duration = true => set_similar_show_duration,
-        Love: love = true => set_similar_show_love,
+        Select: select = false => set_similar_show_select @ similar_show_select,
+        Index: index = true => set_similar_show_index @ similar_show_index,
+        Thumbnail: thumbnail = true => set_similar_show_thumbnail @ similar_show_thumbnail,
+        Album: album = true => set_similar_show_album @ similar_show_album,
+        Duration: duration = true => set_similar_show_duration @ similar_show_duration,
+        Love: love = true => set_similar_show_love @ similar_show_love,
     }
 }
 
@@ -829,5 +829,31 @@ mod tests {
             matches!(action, SimilarAction::None),
             "expected None for out-of-bounds, got {action:?}",
         );
+    }
+
+    #[test]
+    fn similar_column_visibility_restore_from_reads_settings() {
+        use nokkvi_data::types::player_settings::LivePlayerSettings;
+
+        // Mirror of the queue round-trip test for the smallest WITH-setter
+        // invocation. Alternating true/false by declaration order so adjacent
+        // fields differ — pins the `@ settings_field` token mapping for Similar.
+        let settings = LivePlayerSettings {
+            similar_show_select: true,
+            similar_show_index: false,
+            similar_show_thumbnail: true,
+            similar_show_album: false,
+            similar_show_duration: true,
+            similar_show_love: false,
+            ..Default::default()
+        };
+
+        let v = SimilarColumnVisibility::restore_from(&settings);
+        assert_eq!(v.select, settings.similar_show_select);
+        assert_eq!(v.index, settings.similar_show_index);
+        assert_eq!(v.thumbnail, settings.similar_show_thumbnail);
+        assert_eq!(v.album, settings.similar_show_album);
+        assert_eq!(v.duration, settings.similar_show_duration);
+        assert_eq!(v.love, settings.similar_show_love);
     }
 }

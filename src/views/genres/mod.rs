@@ -41,11 +41,11 @@ pub struct GenresPage {
 // render their artwork column.
 super::define_view_columns! {
     GenresColumn => GenresColumnVisibility {
-        Select: select = false => set_genres_show_select,
-        Index: index = true => set_genres_show_index,
-        Thumbnail: thumbnail = true => set_genres_show_thumbnail,
-        AlbumCount: albumcount = true => set_genres_show_albumcount,
-        SongCount: songcount = true => set_genres_show_songcount,
+        Select: select = false => set_genres_show_select @ genres_show_select,
+        Index: index = true => set_genres_show_index @ genres_show_index,
+        Thumbnail: thumbnail = true => set_genres_show_thumbnail @ genres_show_thumbnail,
+        AlbumCount: albumcount = true => set_genres_show_albumcount @ genres_show_albumcount,
+        SongCount: songcount = true => set_genres_show_songcount @ genres_show_songcount,
     }
 }
 

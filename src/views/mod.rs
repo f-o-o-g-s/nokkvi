@@ -365,10 +365,15 @@ macro_rules! define_view_columns {
     // WITH setter annotations — production views that persist column visibility.
     // `=> $setter` maps each variant to its `SettingsManager` method name and
     // emits `impl ColumnPersist` so `Nokkvi::persist_column_visibility` can
-    // dispatch without per-view boilerplate.
+    // dispatch without per-view boilerplate. `@ $settings_field` names the
+    // matching `LivePlayerSettings` bool field so the macro can also emit the
+    // READ path (`restore_from`) in lockstep with the WRITE path — there is no
+    // `paste` dep to derive the field by stripping `set_` from `$setter`, so the
+    // field name is passed explicitly and verified by the persist→restore
+    // round-trip tests.
     (
         $col_enum:ident => $vis_struct:ident {
-            $( $variant:ident : $field:ident = $default:expr => $setter:ident ),* $(,)?
+            $( $variant:ident : $field:ident = $default:expr => $setter:ident @ $settings_field:ident ),* $(,)?
         }
     ) => {
         $crate::views::define_view_columns!(
@@ -384,6 +389,22 @@ macro_rules! define_view_columns {
                 match self {
                     $( Self::$variant => sm.$setter(value) ),*
                 }
+            }
+        }
+
+        impl $vis_struct {
+            /// Build a visibility struct from persisted `LivePlayerSettings`.
+            ///
+            /// Generated in lockstep with `apply_to_settings` (the WRITE path)
+            /// from the same per-column declaration, so the write/read paths
+            /// can never drift: adding a column here emits both directions, and
+            /// a stale field mapping is caught by the per-page round-trip test.
+            /// Returns by value because the call sites assign the whole `Copy`
+            /// `column_visibility` struct.
+            pub fn restore_from(
+                settings: &nokkvi_data::types::player_settings::LivePlayerSettings,
+            ) -> Self {
+                Self { $( $field: settings.$settings_field ),* }
             }
         }
     };

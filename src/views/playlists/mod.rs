@@ -40,12 +40,12 @@ pub struct PlaylistsPage {
 // is active regardless of the user toggle (see view::playlists_*_visible).
 super::define_view_columns! {
     PlaylistsColumn => PlaylistsColumnVisibility {
-        Select: select = false => set_playlists_show_select,
-        Index: index = true => set_playlists_show_index,
-        Thumbnail: thumbnail = true => set_playlists_show_thumbnail,
-        SongCount: songcount = false => set_playlists_show_songcount,
-        Duration: duration = false => set_playlists_show_duration,
-        UpdatedAt: updatedat = false => set_playlists_show_updatedat,
+        Select: select = false => set_playlists_show_select @ playlists_show_select,
+        Index: index = true => set_playlists_show_index @ playlists_show_index,
+        Thumbnail: thumbnail = true => set_playlists_show_thumbnail @ playlists_show_thumbnail,
+        SongCount: songcount = false => set_playlists_show_songcount @ playlists_show_songcount,
+        Duration: duration = false => set_playlists_show_duration @ playlists_show_duration,
+        UpdatedAt: updatedat = false => set_playlists_show_updatedat @ playlists_show_updatedat,
     }
 }
 

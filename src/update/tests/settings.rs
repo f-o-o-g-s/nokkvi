@@ -266,6 +266,201 @@ fn player_settings_loaded_playlists_artwork_overlay_flips_atomic() {
 }
 
 // ============================================================================
+// Column-visibility restore wiring (audit rank 6)
+// ============================================================================
+//
+// `handle_player_settings_loaded` must rebuild every page's `column_visibility`
+// struct from the persisted `LivePlayerSettings` via the macro-generated
+// `restore_from`. These tests pin (a) that the handler wires `restore_from` for
+// all seven pages and reads the right per-column field, and (b) the total number
+// of macro-owned column fields, so a future `*_show_*` column added to
+// `LivePlayerSettings` without a macro entry trips this guard instead of
+// silently snapping back to default on load.
+
+#[test]
+fn player_settings_loaded_restores_all_column_visibility() {
+    let mut app = test_app();
+
+    // Every one of the 50 column `*_show_*` fields, set to an alternating
+    // true/false pattern by declaration order so each adjacent pair differs.
+    // Any assertion below fails if `restore_from` read the wrong field (the
+    // realistic drift is a copy-pasted `@ token` matching a neighbor) or if the
+    // handler skipped a page. The non-column `*_show_*` fields
+    // (queue_show_default_playlist + 5 strip_show_*) are left at their defaults
+    // via `..Default::default()`.
+    let settings = LivePlayerSettings {
+        // Queue
+        queue_show_select: true,
+        queue_show_index: false,
+        queue_show_thumbnail: true,
+        queue_show_stars: false,
+        queue_show_album: true,
+        queue_show_duration: false,
+        queue_show_love: true,
+        queue_show_plays: false,
+        queue_show_genre: true,
+        // Artists
+        artists_show_select: true,
+        artists_show_index: false,
+        artists_show_thumbnail: true,
+        artists_show_stars: false,
+        artists_show_albumcount: true,
+        artists_show_songcount: false,
+        artists_show_plays: true,
+        artists_show_love: false,
+        // Genres
+        genres_show_select: true,
+        genres_show_index: false,
+        genres_show_thumbnail: true,
+        genres_show_albumcount: false,
+        genres_show_songcount: true,
+        // Playlists
+        playlists_show_select: true,
+        playlists_show_index: false,
+        playlists_show_thumbnail: true,
+        playlists_show_songcount: false,
+        playlists_show_duration: true,
+        playlists_show_updatedat: false,
+        // Albums
+        albums_show_select: true,
+        albums_show_index: false,
+        albums_show_thumbnail: true,
+        albums_show_stars: false,
+        albums_show_songcount: true,
+        albums_show_plays: false,
+        albums_show_love: true,
+        // Songs
+        songs_show_select: true,
+        songs_show_index: false,
+        songs_show_thumbnail: true,
+        songs_show_stars: false,
+        songs_show_album: true,
+        songs_show_duration: false,
+        songs_show_plays: true,
+        songs_show_love: false,
+        songs_show_genre: true,
+        // Similar
+        similar_show_select: true,
+        similar_show_index: false,
+        similar_show_thumbnail: true,
+        similar_show_album: false,
+        similar_show_duration: true,
+        similar_show_love: false,
+        ..Default::default()
+    };
+
+    let _ = app.handle_player_settings_loaded(settings.clone());
+
+    // Queue
+    let q = app.queue_page.column_visibility;
+    assert_eq!(q.select, settings.queue_show_select);
+    assert_eq!(q.index, settings.queue_show_index);
+    assert_eq!(q.thumbnail, settings.queue_show_thumbnail);
+    assert_eq!(q.stars, settings.queue_show_stars);
+    assert_eq!(q.album, settings.queue_show_album);
+    assert_eq!(q.duration, settings.queue_show_duration);
+    assert_eq!(q.love, settings.queue_show_love);
+    assert_eq!(q.plays, settings.queue_show_plays);
+    assert_eq!(q.genre, settings.queue_show_genre);
+
+    // Artists
+    let a = app.artists_page.column_visibility;
+    assert_eq!(a.select, settings.artists_show_select);
+    assert_eq!(a.index, settings.artists_show_index);
+    assert_eq!(a.thumbnail, settings.artists_show_thumbnail);
+    assert_eq!(a.stars, settings.artists_show_stars);
+    assert_eq!(a.albumcount, settings.artists_show_albumcount);
+    assert_eq!(a.songcount, settings.artists_show_songcount);
+    assert_eq!(a.plays, settings.artists_show_plays);
+    assert_eq!(a.love, settings.artists_show_love);
+
+    // Genres
+    let g = app.genres_page.column_visibility;
+    assert_eq!(g.select, settings.genres_show_select);
+    assert_eq!(g.index, settings.genres_show_index);
+    assert_eq!(g.thumbnail, settings.genres_show_thumbnail);
+    assert_eq!(g.albumcount, settings.genres_show_albumcount);
+    assert_eq!(g.songcount, settings.genres_show_songcount);
+
+    // Playlists
+    let p = app.playlists_page.column_visibility;
+    assert_eq!(p.select, settings.playlists_show_select);
+    assert_eq!(p.index, settings.playlists_show_index);
+    assert_eq!(p.thumbnail, settings.playlists_show_thumbnail);
+    assert_eq!(p.songcount, settings.playlists_show_songcount);
+    assert_eq!(p.duration, settings.playlists_show_duration);
+    assert_eq!(p.updatedat, settings.playlists_show_updatedat);
+
+    // Albums
+    let al = app.albums_page.column_visibility;
+    assert_eq!(al.select, settings.albums_show_select);
+    assert_eq!(al.index, settings.albums_show_index);
+    assert_eq!(al.thumbnail, settings.albums_show_thumbnail);
+    assert_eq!(al.stars, settings.albums_show_stars);
+    assert_eq!(al.songcount, settings.albums_show_songcount);
+    assert_eq!(al.plays, settings.albums_show_plays);
+    assert_eq!(al.love, settings.albums_show_love);
+
+    // Songs
+    let s = app.songs_page.column_visibility;
+    assert_eq!(s.select, settings.songs_show_select);
+    assert_eq!(s.index, settings.songs_show_index);
+    assert_eq!(s.thumbnail, settings.songs_show_thumbnail);
+    assert_eq!(s.stars, settings.songs_show_stars);
+    assert_eq!(s.album, settings.songs_show_album);
+    assert_eq!(s.duration, settings.songs_show_duration);
+    assert_eq!(s.plays, settings.songs_show_plays);
+    assert_eq!(s.love, settings.songs_show_love);
+    assert_eq!(s.genre, settings.songs_show_genre);
+
+    // Similar
+    let si = app.similar_page.column_visibility;
+    assert_eq!(si.select, settings.similar_show_select);
+    assert_eq!(si.index, settings.similar_show_index);
+    assert_eq!(si.thumbnail, settings.similar_show_thumbnail);
+    assert_eq!(si.album, settings.similar_show_album);
+    assert_eq!(si.duration, settings.similar_show_duration);
+    assert_eq!(si.love, settings.similar_show_love);
+}
+
+#[test]
+fn column_macro_covers_expected_field_count() {
+    use std::mem::size_of;
+
+    // Completeness guard. Each `*ColumnVisibility` is a struct of `bool` fields,
+    // one per column the macro owns; `size_of` == field count (bool is 1 byte,
+    // no padding for an all-bool struct). The sum across the 7 production
+    // visibility structs MUST equal the number of column `*_show_*` fields the
+    // macro restores. If a future agent adds a `*_show_*` COLUMN field to
+    // `LivePlayerSettings` but forgets the macro entry, the restore is silently
+    // dropped on load — this count (paired with the per-page round-trip tests)
+    // flags the drift.
+    //
+    // 50 column fields total today (verified against
+    // data/src/types/player_settings/mod.rs). The 6 INTENTIONALLY-EXCLUDED
+    // `*_show_*` fields are NOT columns and must NOT be counted here:
+    //   - queue_show_default_playlist  (header chip, read directly in app_view)
+    //   - strip_show_title / strip_show_artist / strip_show_album /
+    //     strip_show_format_info / strip_show_labels  (metadata-strip toggles)
+    const EXPECTED_COLUMN_FIELDS: usize = 50;
+
+    let total = size_of::<crate::views::queue::QueueColumnVisibility>()
+        + size_of::<crate::views::artists::ArtistsColumnVisibility>()
+        + size_of::<crate::views::genres::GenresColumnVisibility>()
+        + size_of::<crate::views::playlists::PlaylistsColumnVisibility>()
+        + size_of::<crate::views::albums::AlbumsColumnVisibility>()
+        + size_of::<crate::views::songs::SongsColumnVisibility>()
+        + size_of::<crate::views::similar::SimilarColumnVisibility>();
+
+    assert_eq!(
+        total, EXPECTED_COLUMN_FIELDS,
+        "column-visibility field count drifted: a column was added/removed in a \
+         define_view_columns! invocation. Update EXPECTED_COLUMN_FIELDS and ensure \
+         the matching LivePlayerSettings field + macro @ token exist (see comment)."
+    );
+}
+
+// ============================================================================
 // Restore-defaults sentinel routing (Tier 0 #0.2)
 // ============================================================================
 //

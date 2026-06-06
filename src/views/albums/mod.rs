@@ -53,13 +53,13 @@ pub struct AlbumsPage {
 // Select defaults off — opt-in discovery affordance for multi-selection.
 super::define_view_columns! {
     AlbumsColumn => AlbumsColumnVisibility {
-        Select: select = false => set_albums_show_select,
-        Index: index = true => set_albums_show_index,
-        Thumbnail: thumbnail = true => set_albums_show_thumbnail,
-        Stars: stars = false => set_albums_show_stars,
-        SongCount: songcount = true => set_albums_show_songcount,
-        Plays: plays = false => set_albums_show_plays,
-        Love: love = true => set_albums_show_love,
+        Select: select = false => set_albums_show_select @ albums_show_select,
+        Index: index = true => set_albums_show_index @ albums_show_index,
+        Thumbnail: thumbnail = true => set_albums_show_thumbnail @ albums_show_thumbnail,
+        Stars: stars = false => set_albums_show_stars @ albums_show_stars,
+        SongCount: songcount = true => set_albums_show_songcount @ albums_show_songcount,
+        Plays: plays = false => set_albums_show_plays @ albums_show_plays,
+        Love: love = true => set_albums_show_love @ albums_show_love,
     }
 }
 

@@ -47,15 +47,15 @@ pub struct SongsPage {
 // regardless of toggle. Select opt-in — checkbox column for multi-selection.
 super::define_view_columns! {
     SongsColumn => SongsColumnVisibility {
-        Select: select = false => set_songs_show_select,
-        Index: index = true => set_songs_show_index,
-        Thumbnail: thumbnail = true => set_songs_show_thumbnail,
-        Stars: stars = false => set_songs_show_stars,
-        Album: album = true => set_songs_show_album,
-        Duration: duration = true => set_songs_show_duration,
-        Plays: plays = false => set_songs_show_plays,
-        Love: love = true => set_songs_show_love,
-        Genre: genre = false => set_songs_show_genre,
+        Select: select = false => set_songs_show_select @ songs_show_select,
+        Index: index = true => set_songs_show_index @ songs_show_index,
+        Thumbnail: thumbnail = true => set_songs_show_thumbnail @ songs_show_thumbnail,
+        Stars: stars = false => set_songs_show_stars @ songs_show_stars,
+        Album: album = true => set_songs_show_album @ songs_show_album,
+        Duration: duration = true => set_songs_show_duration @ songs_show_duration,
+        Plays: plays = false => set_songs_show_plays @ songs_show_plays,
+        Love: love = true => set_songs_show_love @ songs_show_love,
+        Genre: genre = false => set_songs_show_genre @ songs_show_genre,
     }
 }
 

@@ -58,15 +58,15 @@ pub struct QueuePage {
 // columns stay always-on.
 super::define_view_columns! {
     QueueColumn => QueueColumnVisibility {
-        Select: select = false => set_queue_show_select,
-        Index: index = true => set_queue_show_index,
-        Thumbnail: thumbnail = true => set_queue_show_thumbnail,
-        Stars: stars = true => set_queue_show_stars,
-        Album: album = true => set_queue_show_album,
-        Duration: duration = true => set_queue_show_duration,
-        Love: love = true => set_queue_show_love,
-        Plays: plays = false => set_queue_show_plays,
-        Genre: genre = false => set_queue_show_genre,
+        Select: select = false => set_queue_show_select @ queue_show_select,
+        Index: index = true => set_queue_show_index @ queue_show_index,
+        Thumbnail: thumbnail = true => set_queue_show_thumbnail @ queue_show_thumbnail,
+        Stars: stars = true => set_queue_show_stars @ queue_show_stars,
+        Album: album = true => set_queue_show_album @ queue_show_album,
+        Duration: duration = true => set_queue_show_duration @ queue_show_duration,
+        Love: love = true => set_queue_show_love @ queue_show_love,
+        Plays: plays = false => set_queue_show_plays @ queue_show_plays,
+        Genre: genre = false => set_queue_show_genre @ queue_show_genre,
     }
 }
 
@@ -328,5 +328,39 @@ mod tests {
     fn queue_column_visibility_default_keeps_genre_off() {
         let v = QueueColumnVisibility::default();
         assert!(!v.genre);
+    }
+
+    #[test]
+    fn queue_column_visibility_restore_from_reads_settings() {
+        use nokkvi_data::types::player_settings::LivePlayerSettings;
+
+        // Alternating true/false by declaration order so every ADJACENT pair of
+        // fields differs. `restore_from` must map each `LivePlayerSettings` field
+        // to the matching struct field; a copy-pasted `@ settings_field` token
+        // (the realistic drift — duplicating a neighbor) would read a value that
+        // differs from the expected one and trip the matching assert below.
+        let settings = LivePlayerSettings {
+            queue_show_select: true,
+            queue_show_index: false,
+            queue_show_thumbnail: true,
+            queue_show_stars: false,
+            queue_show_album: true,
+            queue_show_duration: false,
+            queue_show_love: true,
+            queue_show_plays: false,
+            queue_show_genre: true,
+            ..Default::default()
+        };
+
+        let v = QueueColumnVisibility::restore_from(&settings);
+        assert_eq!(v.select, settings.queue_show_select);
+        assert_eq!(v.index, settings.queue_show_index);
+        assert_eq!(v.thumbnail, settings.queue_show_thumbnail);
+        assert_eq!(v.stars, settings.queue_show_stars);
+        assert_eq!(v.album, settings.queue_show_album);
+        assert_eq!(v.duration, settings.queue_show_duration);
+        assert_eq!(v.love, settings.queue_show_love);
+        assert_eq!(v.plays, settings.queue_show_plays);
+        assert_eq!(v.genre, settings.queue_show_genre);
     }
 }
