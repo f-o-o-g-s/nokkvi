@@ -46,8 +46,8 @@ trigger: always_on
 ## Dependencies
 
 Discuss before adding new crates. Existing workspace runtime deps:
-- **UI crate** (`Cargo.toml`): `iced` (forked), `nokkvi-data`, `nokkvi-ipc`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `lru`, `bytemuck`, `libc`
-- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `tracing`, `image`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `pipewire` (linux-only)
+- **UI crate** (`Cargo.toml`): `iced` (forked), `nokkvi-data`, `nokkvi-ipc`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `zbus`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `lru`, `bytemuck`, `libc`
+- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `tracing`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `pipewire` (linux-only)
 - **IPC crate** (`nokkvi-ipc/Cargo.toml`): `tokio` (net/io-util/macros/rt/sync/fs only), `interprocess`, `serde` (+ `serde_json`), `futures`, `thiserror`, `tracing`. Iced-free invariant — the client path links this before iced exists. Tests: `serial_test`, `tempfile`
 - **Test-only `[dev-dependencies]`**: `proptest`, `tempfile`
 
@@ -87,7 +87,7 @@ cargo build --release                        # release build
 | redb | Queue, session tokens (JWT + Subsonic credential) | Via `state_storage.rs`, `services/queue/`, `credentials.rs`. **No password on disk** — JWT auto-refreshes, expired JWT drops to login |
 | Credentials | Server URL, username | In `config.toml`. Password never persists |
 
-Settings actions carry a typed `ConfigKey` (`AppScalar` / `AppArrayEntry` / `Theme` / `ThemeArrayEntry`) so the writer matches on the variant rather than sniffing key prefixes.
+Settings actions carry a typed `ConfigKey` (`AppScalar` / `Theme` / `ThemeArrayEntry`) so the writer matches on the variant rather than sniffing key prefixes.
 
 ## Release & Versioning
 

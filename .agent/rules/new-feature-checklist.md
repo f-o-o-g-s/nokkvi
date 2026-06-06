@@ -30,7 +30,7 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] **Scrobbling**: check `update/scrobbling.rs` for track-lifecycle hooks
 - [ ] **Sort/Search**: extend `SortMode` (or `QueueSortMode`); search is immediate (no debounce)
 - [ ] **Settings**: General / Interface / Playback knobs are declared via `define_settings!` in `data/src/services/settings_tables/{general,interface,playback}.rs` (each entry includes `on_dispatch` + `write` for both directions of the TOML round-trip). Theme / Visualizer / Hotkey items still build via `views/settings/items_*.rs` using `SettingMeta::new(key, label, category).with_subtitle(...)` (subtitle is optional)
-- [ ] **Config write routing**: settings → `ConfigKey::AppScalar` / `AppArrayEntry` / `Theme` / `ThemeArrayEntry` (typed dispatch in `config_writer.rs`). Sentinel pseudo-keys (restore-all, apply-preset) route through `SentinelKind` in `views/settings/sentinel.rs`
+- [ ] **Config write routing**: settings → `ConfigKey::AppScalar` / `Theme` / `ThemeArrayEntry` (typed dispatch in `config_writer.rs`). Sentinel pseudo-keys (restore-all, apply-preset) route through `SentinelKind` in `views/settings/sentinel.rs`
 - [ ] **Playlist edit guard**: `guard_play_action()` on every play handler
 - [ ] **HasCommonAction**: implement on the action enum if the view has SearchChanged/SortModeChanged/SortOrderChanged
 - [ ] **Single-active overlay menu**: hamburger / kebab / dropdown / context menus bubble `Message::SetOpenMenu(Some(OpenMenu::…))` instead of owning local `is_open` state

@@ -37,7 +37,7 @@ One native PipeWire stream via a shared `rodio::Mixer`:
 - **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Use `engine.load_track_with_rg(url, rg)` — the atomic pair that stashes ReplayGain on the renderer and then calls `set_source(url)`, replacing the historical `set_pending_replay_gain` + `load_track` / `set_source` pairing in `PlaybackController`.
 - **`SourceGeneration`**: typed atomic counter; `bump_for_user_action()` on every user-driven source change. The renderer snapshots `current()` before releasing the engine lock and discards stale completion callbacks.
 - **Next-track reset**: `reset_next_track()` clears the prepared decoder and disarms crossfade. Every queue mutator (mode toggles, move/insert/remove/sort, set_queue, add_songs, reposition_to_index) returns `NextTrackResetEffect` — a `#[must_use]` token that the caller dispatches via `apply_to(&engine)` (engine mutex) or `apply_locked(&mut engine)` (engine lock already held). The token makes the reset a compile-time obligation, so a new reorder path can't reintroduce the shuffle + crossfade UI-vs-engine desync.
-- **Track-completion path**: the playback navigator releases its lock across engine I/O — do not re-introduce a held lock around `transition_to_queued()` / `set_source()`.
+- **Track-completion path**: the playback navigator releases its lock across engine I/O — do not re-introduce a held lock around `PeekedQueue::transition()` / `set_source()`.
 - Decoupled render thread: 20 ms intervals (50 Hz), handles crossfade tick + completion detection.
 
 ## Volume

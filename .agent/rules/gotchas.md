@@ -8,13 +8,13 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 ## Queue & Indices
 
 - **Filtered indices**: when search is active, slot-list indices are relative to `filtered_songs` — always map through the filtered view before queue mutations.
-- **Queue rows are addressed by `entry_id` (per-row `u64`), not indices, not `track_number`**: `track_number` is a 1-based queue-position label stamped at backend-projection time (`data/src/backend/queue.rs:188`). It drifts the moment the UI applies an optimistic local mutation, and stays stale until the backend re-projection arrives. Every UI write path against the queue carries `entry_id`(s) and bottoms out at: `play_entry_from_queue`, `move_queue_batch_by_entry_ids`, `remove_entries_by_ids`, `play_next_in_queue`. The Focus path mirrors: `FocusCurrentPlaying` / `FocusOnSong` carry `u64` and the handler does `position(|s| s.entry_id == eid)` — never compare `track_number`. `MoveItem` (single-row drag) still uses raw indices because its dispatch is search-guarded; if a future caller plumbs MoveItem from a filtered context, migrate it to `entry_id` like `MoveBatch`.
+- **Queue rows are addressed by `entry_id` (per-row `u64`), not indices, not `track_number`**: `track_number` is a 1-based queue-position label stamped at backend-projection time (`build_queue_song_ui_view_data` in `data/src/backend/queue.rs`). It drifts the moment the UI applies an optimistic local mutation, and stays stale until the backend re-projection arrives. Every UI write path against the queue carries `entry_id`(s) and bottoms out at: `play_entry_from_queue`, `move_queue_batch_by_entry_ids`, `remove_entries_by_ids`, `play_next_in_queue`. The Focus path mirrors: `FocusCurrentPlaying` / `FocusOnSong` carry `u64` and the handler does `position(|s| s.entry_id == eid)` — never compare `track_number`. `MoveItem` (single-row drag) still uses raw indices because its dispatch is search-guarded; if a future caller plumbs MoveItem from a filtered context, migrate it to `entry_id` like `MoveBatch`.
 - **Stale multi-selection across refreshes**: `handle_queue_loaded` and `apply_queue_sort` clear `selected_indices` + `anchor_index`. Without this, indices kept pointing at whatever rows occupied those positions after a consume-mode auto-advance / external refresh — different songs.
 - **Three sources of truth for "what's playing"**: `QueueManager.current_index`, `QueueNavigator.current_song_id`, and the engine's active source. The remove path uses `decide_removal_aftermath` (pure) → `PlaybackController::apply_removal_aftermath` to keep all three in sync; never bypass it. History append is intentionally skipped on remove (the song was deleted, not skipped past).
-- **Queue peek/transition**: track transitions go `peek_next_song()` → `transition_to_queued()`. Use `reposition_to_index()` ONLY for non-transition updates (play-from-here).
+- **Queue peek/transition**: track transitions go `peek_next_song()` → `PeekedQueue::transition()`. Use `reposition_to_index()` ONLY for non-transition updates (play-from-here).
 - **Progressive queue generation**: `ProgressiveQueueAppendPage` chains check `progressive_queue_generation` before appending — stale chains silently stop.
 - **Play button cold-start**: resolves the selected row via `get_center_item_index` and plays its `entry_id` via `play_entry_from_queue` — not `queue_songs.first()`, not `track_number - 1`.
-- **Gapless re-peek on mutation**: a queue mutation between gapless prep and `on_track_finished` calls `clear_queued()`, so `transition_to_queued()` would return `None`. The navigator re-peeks when `queued.is_none() && !needs_load` before transitioning.
+- **Gapless re-peek on mutation**: a queue mutation between gapless prep and `on_track_finished` calls `clear_queued()`, so `transition_to_queued_internal()` would return `None`. The navigator re-peeks when `queued.is_none() && !needs_load` before transitioning.
 
 ## Multi-Selection & Batch
 
@@ -54,9 +54,9 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 
 ## Config & Persistence
 
-- **Typed config writer routing**: `ConfigKey::AppScalar` / `AppArrayEntry` → `config.toml`; `ConfigKey::Theme` / `ThemeArrayEntry` → active theme file. Match on the variant — never sniff key prefixes.
-- **Config reload suppression**: `suppress_config_reload()` blocks the file watcher, but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
-- **Font is global, not per-theme**: `font_family` lives in `PlayerSettings` / `TomlSettings` and routes to `config.toml`. EQ modal `pick_list` must explicitly receive the active app font.
+- **Typed config writer routing**: `ConfigKey::AppScalar` → `config.toml`; `ConfigKey::Theme` / `ThemeArrayEntry` → active theme file. Match on the variant — never sniff key prefixes.
+- **Config reload suppression**: the file watcher suppresses its own reflections via an identity-based registry — `record_internal_write()` stamps each write's `(path, content-hash)` and `was_internal_write()` (`data/src/utils/paths.rs`) matches it within a monotonic 500ms window — but GUI-initiated theme/visualizer writes still need a manual `ThemeConfigReloaded` trigger after the write.
+- **Font is global, not per-theme**: `font_family` lives in `LivePlayerSettings` / `TomlSettings` and routes to `config.toml`. EQ modal `pick_list` must explicitly receive the active app font.
 - **Database lock on re-login**: redb holds an exclusive lock; cache `StateStorage` on `Nokkvi.cached_storage` and reuse via `AppService::new_with_storage()`. Stop the engine + `TaskManager` on logout.
 
 ## Assets & Icons

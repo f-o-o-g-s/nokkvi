@@ -137,10 +137,10 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 - **Artwork**: use `iced::widget::image::Handle::from_bytes(data)` for refreshable artwork — `Handle::from_path` keys on path and produces stale GPU textures when the file is overwritten. All artwork LRUs are `SnapshottedLru<K, V>` newtypes (`src/state/snapshotted_lru.rs`); never pair a bare `lru::LruCache` with a manual `HashMap` snapshot.
 - **Queue artwork URLs**: queue song mini thumbnails MUST request 80px using `album_id` to hit the prefetch cache; large artwork fallback MUST use the user's `artwork_resolution` setting (`ArtworkResolution::to_size()` → 1000/1500/2000 or `None` for Original) — never reuse the 80px URL.
 - **Filtered queue indices**: when a search is active, slot-list indices are relative to `filtered_songs`. Always map through the filtered view before doing queue mutations.
-- **Queue navigation**: use `peek_next_song()` → `transition_to_queued()` for transitions. Use `reposition_to_index()` ONLY for non-transition updates like play-from-here.
+- **Queue navigation**: use `peek_next_song()` → `PeekedQueue::transition()` for transitions. Use `reposition_to_index()` ONLY for non-transition updates like play-from-here.
 - **`HoverOverlay`**: canonical pattern is `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells. Wrapping a native `button` works in some places (after `HoverOverlay::update` started issuing `request_redraw`), but reach for the canonical `mouse_area + container` pattern first.
 - **`guard_play_action()` at the top of every play handler** — protects against split-view + playlist-edit conflicts.
-- **Config-watcher feedback loops**: `suppress_config_reload()` blocks the file watcher's reflection, but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
+- **Config-watcher feedback loops**: the file watcher suppresses its own write reflections via a `(path, content-hash)` registry (`was_internal_write` in `data/src/utils/paths.rs`), but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
 - **Database lock on re-login**: `StateStorage` is cached on `Nokkvi.cached_storage` and reused via `AppService::new_with_storage()` — redb holds an exclusive lock so a fresh open after logout will fail. Stop the engine + `TaskManager` on logout.
 - **`CenterOnPlaying` (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path instead.
 

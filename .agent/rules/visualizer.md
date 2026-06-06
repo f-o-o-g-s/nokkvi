@@ -14,18 +14,18 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 ## Module Structure
 
 - `widgets/visualizer/mod.rs` — `ShaderVisualizer` Iced widget glue; `build_shader_params(...)` constructs the 32-field `ShaderParams` from a config snapshot, theme palette, and viewport
-- `widgets/visualizer/state.rs` — `VisualizerState` runtime (audio callback, FFT pipeline, peak/effect state, display buffers); `VisualizerTiming` is a unit-conversion newtype (ms → seconds, percent → unit)
+- `widgets/visualizer/state.rs` — `VisualizerState` runtime (audio callback, FFT pipeline, peak/effect state, display buffers); `VisualizerTiming` is a zero-sized struct holding the per-frame tick constants (`TICK_RATE_HZ = 60`, `TICK_INTERVAL`, and ms/secs variants) all derived from one rate
 - `widgets/visualizer/pipeline.rs` — `MAX_BARS = 2048`, GPU buffers, `Pipeline::new`
 - `widgets/visualizer/shader.rs` — `ShaderParams` struct, render dispatch, MSAA texture cache, blit shader
 - `widgets/visualizer/shaders/bars.wgsl`, `lines.wgsl` — share a `Config` struct (must stay in sync with `ShaderParams` field order)
 
-**Render path:** non-MSAA fast path by default; switches to **4× MSAA → resolve → blit** when perspective lean is active (`is_msaa_required()` toggles per-frame).
+**Render path:** non-MSAA fast path by default; switches to **4× MSAA → resolve → blit** when perspective lean is active (the `has_perspective` flag on `VisualizerPrimitive`, set from `bar_depth_3d > 0.001`, gates the path per-frame).
 
 `VisualizationMode` enum (`data/src/types/player_settings/visualizer.rs`): `Off`, `Bars`, `Lines` (cycled by the player-bar toggle). `MIN_BAR_COUNT = 4`; bar width interpolates between `bar_width_min` and `bar_width_max` over a 400→2560px window range.
 
 ## Bars Mode
 
-Mode enums in `src/visualizer_config.rs` (real Rust enums, not strings — Group G `define_labeled_enum!` migration; each has `as_wire_str()` + `from_wire_str()` matching `#[serde(rename_all = "snake_case")]`):
+Mode enums in `src/visualizer_config.rs` (real Rust enums, not strings — hand-rolled `#[derive(Serialize, Deserialize)]` `#[serde(rename_all = "snake_case")]` `#[repr(u32)]` enums, each with a manual `as_wire_str()`; deserialization is via the derived `Deserialize`):
 - `BarsPeakMode`: `None` / `Fade` / `Fall` / `FallAccel` / `FallFade`. `peak_fall_speed` 1–20.
 - `BarsGradientMode`: `Static` (0) / `Wave` (2) / `Shimmer` (3) / `Energy` (4) / `Alternate` (5). **Discriminant `1` is intentionally skipped** — `bars.wgsl` has no branch for it; the `bars_gradient_mode_never_emits_dead_1u` test in `src/visualizer_config.rs` pins this against accidental future use.
 - `BarsGradientOrientation`: `Vertical` (within-bar) / `Horizontal` (bass → treble across bars).

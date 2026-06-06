@@ -11,7 +11,7 @@ All slot-list-based views implement `ViewPage` (in `views/mod.rs`) — explicit 
 - `current_view_page() / current_view_page_mut()` — pane-aware routing (delegates to browsing panel in split-view)
 - `view_page(View) / view_page_mut(View)` — direct lookup by `View` enum
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged / SortModeChanged / SortOrderChanged dispatch (handled centrally in `handle_common_view_action()`)
-- `impl_expansion_update!` macro — deduplicates expansion handling (7 common arms for expansion views)
+- `impl_expansion_update!` macro — deduplicates expansion handling (9 common arms for expansion views)
 - `synth_set_offset_message(&self, offset: usize) -> Option<Message>` — builds a per-view `SlotList(SlotListPageMessage::SetOffset(offset, default_modifiers))` message; used by `handle_seek_settled` to trigger artwork prefetch after scrollbar seek. Expansion views implement this; Queue and Settings return `None`.
 - `reload_message(&self) -> Option<Message>` — emits the view's "reload from server" message (the `R` hotkey + manual refresh button bind through this). Reloadable views return `Some(...)`; views without server backing return `None`. Replaces the prior `RefreshView` 7-arm match in update routing.
 - `slot_list_message(&self, msg: SlotListPageMessage) -> Message` — wraps a `SlotListPageMessage` in the view's per-view `*Message::SlotList(...)` variant. Lets cross-view dispatch (slot_list.rs, roulette.rs, center-on-playing) fan out without a manual match on `View`.
@@ -58,7 +58,7 @@ Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search ma
 
 ## Column Visibility (Albums / Artists / Genres / Playlists / Queue / Songs / Similar)
 
-`view_header.rs` exposes a `checkbox_dropdown` of column toggles per view. The dropdown is a controlled overlay — opening it dispatches `Message::SetOpenMenu(Some(OpenMenu::CheckboxDropdown { view, trigger_bounds }))`. Similar lives only inside the browsing panel and lacks a `View::Similar` variant, so it uses its own `OpenMenu::CheckboxDropdownSimilar { trigger_bounds }`. Column flags persist on `PlayerSettings` (`{view}_show_*` fields, including `_select`, `_index`, `_thumbnail`, `_album`, `_genre`, `_stars`, `_default_playlist`, etc.). Stars use responsive hide rather than per-mode toggling.
+`widgets/checkbox_dropdown.rs` exposes a `checkbox_dropdown` (wrapped per view by `view_columns_dropdown`) of column toggles. The dropdown is a controlled overlay — opening it dispatches `Message::SetOpenMenu(Some(OpenMenu::CheckboxDropdown { view, trigger_bounds }))`. Similar lives only inside the browsing panel and lacks a `View::Similar` variant, so it uses its own `OpenMenu::CheckboxDropdownSimilar { trigger_bounds }`. Column flags persist on `PersistedPlayerSettings` (`{view}_show_*` fields, including `_select`, `_index`, `_thumbnail`, `_album`, `_genre`, `_stars`, `_default_playlist`, etc.). Stars use responsive hide rather than per-mode toggling.
 
 **Multi-select column**: opt-in `{view}_show_select` flag adds a per-row checkbox + tri-state "select all" header bar to every slot-list view. Helpers `wrap_with_select_column()` and `compose_header_with_select()` (`widgets/slot_list.rs`) keep per-view plumbing minimal; the checkbox state mirrors `selected_indices` regardless of how membership was set.
 
@@ -78,7 +78,7 @@ Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`
 
 ## Playlist Editing
 
-`PlaylistEditState` for dirty detection. Inline name/comment editing in queue header (stacked vertically). Save via `handle_save_playlist_edits()`. Browsing panel cannot close during edit.
+`PlaylistEditState` for dirty detection. Inline name/comment editing lives in the dedicated `View::PlaylistEditor` view's edit-bar header (eyebrow + name input + comment input, stacked vertically). Save via `handle_save_playlist_edits()`. Browsing panel cannot close during edit.
 
 ## Queue Sort
 
@@ -116,7 +116,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-
 
 ## View Data Refresh
 
-- **Manual**: header Refresh button or the `RefreshView` hotkey (default `R`) → `set_needs_fetch()` on `PagedBuffer`
+- **Manual**: header Refresh button or the `RefreshView` hotkey (default `R`) → `RefreshViewData` → the view's `reload_message()`, which busts the cache and refetches from source
 - **Automatic**: Navidrome SSE → `update/library_refresh.rs` → ID-anchored background reload that preserves scroll position. The `background: true` flag on loaded messages prevents scroll jumps. Suppressed by `suppress_library_refresh_toasts`.
 
 ## Modals
