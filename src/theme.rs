@@ -410,6 +410,16 @@ pub(crate) fn set_rounded_mode(mode: RoundedMode) {
     debug!(" Rounded mode changed: rounded_mode={}", mode);
 }
 
+/// Gate a radius value: return `value` when `gate` is set, `0.0` (square) when
+/// not. The single shared body behind every `ui_radius_*` / `ui_border_radius*`
+/// helper — each public helper supplies only its gate predicate
+/// ([`is_rounded_mode`] or [`is_rounded_for_player`]) and its scale constant.
+/// `#[inline]` so the per-frame render path pays nothing for the indirection.
+#[inline]
+fn gated_radius(gate: bool, value: f32) -> iced::border::Radius {
+    if gate { value.into() } else { 0.0.into() }
+}
+
 /// Get the legacy UI border radius (6 px in rounded mode, 0 in flat).
 ///
 /// Kept for back-compat while widgets migrate to the scale helpers
@@ -417,11 +427,7 @@ pub(crate) fn set_rounded_mode(mode: RoundedMode) {
 /// helper directly. Player widgets must call [`ui_border_radius_player`].
 #[inline]
 pub(crate) fn ui_border_radius() -> iced::border::Radius {
-    if is_rounded_mode() {
-        ROUNDED_RADIUS.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_mode(), ROUNDED_RADIUS)
 }
 
 /// Player-chrome variant of [`ui_border_radius`] — rounds for `On` AND
@@ -429,66 +435,42 @@ pub(crate) fn ui_border_radius() -> iced::border::Radius {
 /// player_modes_menu and the `PlayerBar`-scoped track info strip.
 #[inline]
 pub(crate) fn ui_border_radius_player() -> iced::border::Radius {
-    if is_rounded_for_player() {
-        ROUNDED_RADIUS.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_for_player(), ROUNDED_RADIUS)
 }
 
 /// Scale step `xs` — 4 px in rounded mode, 0 in flat. Use for checkboxes,
 /// swatches, tiny chips.
 #[inline]
 pub(crate) fn ui_radius_xs() -> iced::border::Radius {
-    if is_rounded_mode() {
-        R_XS.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_mode(), R_XS)
 }
 
 /// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
 /// badges, format pills.
 #[inline]
 pub(crate) fn ui_radius_sm() -> iced::border::Radius {
-    if is_rounded_mode() {
-        R_SM.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_mode(), R_SM)
 }
 
 /// Scale step `md` — 12 px in rounded mode, 0 in flat. Use for cards,
 /// popovers, album art, category tiles.
 #[inline]
 pub(crate) fn ui_radius_md() -> iced::border::Radius {
-    if is_rounded_mode() {
-        R_MD.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_mode(), R_MD)
 }
 
 /// Scale step `lg` — 18 px in rounded mode, 0 in flat. Use for list shells,
 /// modal frames, stats strips.
 #[inline]
 pub(crate) fn ui_radius_lg() -> iced::border::Radius {
-    if is_rounded_mode() {
-        R_LG.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_mode(), R_LG)
 }
 
 /// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
 /// transport buttons, search field, slider handles.
 #[inline]
 pub(crate) fn ui_radius_pill() -> iced::border::Radius {
-    if is_rounded_mode() {
-        R_PILL.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_mode(), R_PILL)
 }
 
 // ----------------------------------------------------------------------------
@@ -507,21 +489,13 @@ pub(crate) fn ui_radius_pill() -> iced::border::Radius {
 /// Player-chrome variant of [`ui_radius_sm`].
 #[inline]
 pub(crate) fn ui_radius_sm_player() -> iced::border::Radius {
-    if is_rounded_for_player() {
-        R_SM.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_for_player(), R_SM)
 }
 
 /// Player-chrome variant of [`ui_radius_pill`].
 #[inline]
 pub(crate) fn ui_radius_pill_player() -> iced::border::Radius {
-    if is_rounded_for_player() {
-        R_PILL.into()
-    } else {
-        0.0.into()
-    }
+    gated_radius(is_rounded_for_player(), R_PILL)
 }
 
 // ----------------------------------------------------------------------------
@@ -2271,6 +2245,74 @@ mod tests {
         }
 
         UI_MODE.light_mode.store(saved, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------------------------------
+    // Radius helpers — every `ui_radius_*` / `ui_border_radius*` helper now
+    // delegates to `gated_radius`. Sweep all three RoundedMode states and pin
+    // each helper's gate predicate + value, so a wrong gate or a forked
+    // non-zero fallback in a future hand-added `_player` variant breaks here.
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn radius_helpers_gate_and_value_across_modes() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = UI_MODE.rounded_mode.load(Ordering::Relaxed);
+
+        // Flatten a Radius to its four corners; the `f32 -> Radius` `From` sets
+        // all four equal, so one expected value covers them all.
+        let corners = |radius: iced::border::Radius| {
+            [
+                radius.top_left,
+                radius.top_right,
+                radius.bottom_right,
+                radius.bottom_left,
+            ]
+        };
+        let all = |v: f32| [v, v, v, v];
+
+        // Off: every helper is square (0.0), player variants included.
+        set_rounded_mode(RoundedMode::Off);
+        for got in [
+            ui_border_radius(),
+            ui_border_radius_player(),
+            ui_radius_xs(),
+            ui_radius_sm(),
+            ui_radius_md(),
+            ui_radius_lg(),
+            ui_radius_pill(),
+            ui_radius_sm_player(),
+            ui_radius_pill_player(),
+        ] {
+            assert_eq!(corners(got), all(0.0), "Off mode must be square");
+        }
+
+        // On: every helper returns its scale value.
+        set_rounded_mode(RoundedMode::On);
+        assert_eq!(corners(ui_border_radius()), all(ROUNDED_RADIUS));
+        assert_eq!(corners(ui_border_radius_player()), all(ROUNDED_RADIUS));
+        assert_eq!(corners(ui_radius_xs()), all(R_XS));
+        assert_eq!(corners(ui_radius_sm()), all(R_SM));
+        assert_eq!(corners(ui_radius_md()), all(R_MD));
+        assert_eq!(corners(ui_radius_lg()), all(R_LG));
+        assert_eq!(corners(ui_radius_pill()), all(R_PILL));
+        assert_eq!(corners(ui_radius_sm_player()), all(R_SM));
+        assert_eq!(corners(ui_radius_pill_player()), all(R_PILL));
+
+        // PlayerOnly: only the `_player` (is_rounded_for_player) helpers round;
+        // the global `is_rounded_mode` helpers stay square.
+        set_rounded_mode(RoundedMode::PlayerOnly);
+        assert_eq!(corners(ui_border_radius()), all(0.0));
+        assert_eq!(corners(ui_radius_xs()), all(0.0));
+        assert_eq!(corners(ui_radius_sm()), all(0.0));
+        assert_eq!(corners(ui_radius_md()), all(0.0));
+        assert_eq!(corners(ui_radius_lg()), all(0.0));
+        assert_eq!(corners(ui_radius_pill()), all(0.0));
+        assert_eq!(corners(ui_border_radius_player()), all(ROUNDED_RADIUS));
+        assert_eq!(corners(ui_radius_sm_player()), all(R_SM));
+        assert_eq!(corners(ui_radius_pill_player()), all(R_PILL));
+
+        UI_MODE.rounded_mode.store(saved, Ordering::Relaxed);
     }
 
     // ------------------------------------------------------------------------
