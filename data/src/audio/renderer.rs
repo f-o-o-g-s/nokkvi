@@ -649,9 +649,7 @@ impl AudioRenderer {
         // resume-as-rebuffer a stale stream. Clear the latch unconditionally (so
         // it resets even on the early-return path) and unpause the output in case
         // a rebuffer had paused it.
-        self.rebuffering = false;
-        self.rebuffer_primed = false;
-        self.rebuffer_ticks = 0;
+        self.reset_rebuffer_latch();
         if let Some(ref stream) = self.primary_stream {
             stream.resume();
         }
@@ -707,9 +705,7 @@ impl AudioRenderer {
         self.playing = false;
         self.paused = false;
         self.finished_called = false;
-        self.rebuffering = false;
-        self.rebuffer_primed = false;
-        self.rebuffer_ticks = 0;
+        self.reset_rebuffer_latch();
 
         // Cancel crossfade and disarm any pending crossfade trigger
         self.cancel_crossfade();
@@ -722,6 +718,17 @@ impl AudioRenderer {
 
         self.position_offset = 0;
         trace!("⏹ Renderer: stop() completed");
+    }
+
+    /// Zero the network-rebuffer latch (issue #9). Called by every lifecycle
+    /// transition that starts a fresh ring (start/stop/seek/finalize_crossfade)
+    /// so a promoted/new stream re-primes against its OWN format instead of
+    /// carrying a stale `rebuffer_primed` into an unreachable resume target.
+    /// pause() deliberately does NOT use this — it only clears `rebuffering`.
+    fn reset_rebuffer_latch(&mut self) {
+        self.rebuffering = false;
+        self.rebuffer_primed = false;
+        self.rebuffer_ticks = 0;
     }
 
     /// Pause playback.
@@ -758,9 +765,7 @@ impl AudioRenderer {
         self.finished_called = false;
         // The ring is about to be cleared + the stream recreated, so reset the
         // rebuffer latch (a fresh ring must re-prime before it can pause).
-        self.rebuffering = false;
-        self.rebuffer_primed = false;
-        self.rebuffer_ticks = 0;
+        self.reset_rebuffer_latch();
 
         // Clear the ring buffer by stopping and recreating the stream
         if let Some(old_stream) = self.primary_stream.take() {
@@ -1223,9 +1228,7 @@ impl AudioRenderer {
         // is the one path that can enter rebuffer on a format whose resume target
         // is unreachable (issue #9 crossfade carryover). Reset the latch exactly
         // as start()/stop()/seek() do.
-        self.rebuffering = false;
-        self.rebuffer_primed = false;
-        self.rebuffer_ticks = 0;
+        self.reset_rebuffer_latch();
         // Promote the crossfade RG to "current" — it's now baked into the
         // new primary stream's `amplify` factor.
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
@@ -1761,6 +1764,28 @@ mod tests {
             "hi-res rebuffer must resume within the backpressure cap, not hang"
         );
         assert!(!reb);
+    }
+
+    /// The extracted `reset_rebuffer_latch` helper must zero all three latch
+    /// fields. This is the direct red-green net for the start/stop/seek sites,
+    /// which (unlike finalize_crossfade) have no dedicated latch-reset assertion.
+    /// `#[tokio::test]` because `AudioRenderer::new()` calls
+    /// `tokio::runtime::Handle::current()` and needs a running reactor.
+    #[tokio::test]
+    async fn reset_rebuffer_latch_zeroes_all_three_fields() {
+        let mut renderer = AudioRenderer::new();
+        renderer.rebuffering = true;
+        renderer.rebuffer_primed = true;
+        renderer.rebuffer_ticks = 42;
+
+        renderer.reset_rebuffer_latch();
+
+        assert!(!renderer.rebuffering, "must clear the rebuffering flag");
+        assert!(
+            !renderer.rebuffer_primed,
+            "must clear rebuffer_primed so a fresh ring re-primes"
+        );
+        assert_eq!(renderer.rebuffer_ticks, 0, "must reset rebuffer_ticks");
     }
 
     /// A crossfade from a primeable (<=48k) track into a hi-res track must NOT
