@@ -117,6 +117,11 @@
 //! | `switch-view` | act_str   | `{"view":name}`; arg `view` (one of `albums`/  |
 //! |               |           | `queue`/`songs`/`artists`/`genres`/`playlists`/|
 //! |               |           | `radios`/`settings`). Invalid → `invalid_args`.|
+//! | `nav-up`      | dispatch  | `{"ok":true}`; move focused list up (async).   |
+//! | `nav-down`    | dispatch  | `{"ok":true}`; move focused list down (async). |
+//! | `enter`       | dispatch  | `{"ok":true}`; activate centered item.         |
+//! | `selection`   | act       | `{view,kind,name,artist,rating,starred}` of    |
+//! |               |           | the centered item; `kind:null` if none. Read.  |
 //! | `love`        | act       | `{"loved":bool}`; toggle star on playing track.|
 //! |               |           | `no_playing_track` error if nothing playing.   |
 //! | `rate`        | act_str   | `{"rating":0..5}`; arg `delta` `"+N"`/`"-N"`    |
@@ -130,7 +135,7 @@ use serde_json::json;
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, NavigationMessage, PlaybackMessage},
+    app_message::{Message, NavigationMessage, PlaybackMessage, SlotListMessage},
     services::ipc::IpcIncoming,
 };
 
@@ -346,6 +351,50 @@ pub(crate) fn parse_view_name(name: &str) -> Result<View, String> {
     }
 }
 
+/// Canonical lowercase name for a [`View`] — the inverse of [`parse_view_name`]
+/// (plus `playlist-editor`, which has no nav tab and isn't a `switch-view`
+/// target). Used by the `selection` verb to report the focused view.
+fn view_name(view: View) -> &'static str {
+    match view {
+        View::Albums => "albums",
+        View::Queue => "queue",
+        View::Songs => "songs",
+        View::Artists => "artists",
+        View::Genres => "genres",
+        View::Playlists => "playlists",
+        View::Radios => "radios",
+        View::Settings => "settings",
+        View::PlaylistEditor => "playlist-editor",
+    }
+}
+
+/// JSON snapshot of the focused view's centered item for the `selection` verb.
+/// Reuses [`Nokkvi::get_center_item_info`] — the same resolver the rating/star
+/// hotkeys use — so it's accurate across every list view. Always returns the
+/// same key set so scripts see a stable schema; a `null` `kind` means nothing
+/// selectable is centered (empty list, Settings, the playlist editor).
+fn selection_json(app: &Nokkvi) -> serde_json::Value {
+    let view = view_name(app.current_view);
+    match app.get_center_item_info() {
+        Some(info) => json!({
+            "view": view,
+            "kind": info.kind.to_string(),
+            "name": info.name,
+            "artist": info.artist,
+            "rating": info.rating,
+            "starred": info.starred,
+        }),
+        None => json!({
+            "view": view,
+            "kind": null,
+            "name": null,
+            "artist": null,
+            "rating": null,
+            "starred": null,
+        }),
+    }
+}
+
 // VolumeCommitted bypasses the 500ms VolumeChanged throttle — discrete
 // external commands (playerctl, IPC) must persist immediately so rapid
 // presses don't silently drop on next launch. Mirrors the MPRIS SetVolume
@@ -430,6 +479,20 @@ define_commands! {
         let task = Task::done(Message::Navigation(NavigationMessage::SwitchView(view)));
         Ok((task, json!({ "view": raw })))
     });
+    // Slot-list navigation — the in-app Backspace/Tab/Enter hotkeys, exposed so
+    // a WM keybind or script can drive the focused list without focusing the
+    // window. Routed through Message::SlotList so the existing handler resolves
+    // the focused pane/view and applies all guards (roulette, picker, play
+    // gate). The move is async (a further per-page message), so the resulting
+    // center can't be echoed here — query `selection` to read where it landed.
+    "nav-up"      => dispatch (Message::SlotList(SlotListMessage::NavigateUp));
+    "nav-down"    => dispatch (Message::SlotList(SlotListMessage::NavigateDown));
+    // Activate the centered item (Enter): plays in Queue/Songs, expands or
+    // navigates in Albums/Artists/Genres/Playlists, edits a Settings row.
+    "enter"       => dispatch (Message::SlotList(SlotListMessage::ActivateCenter));
+    // Read-only: the focused view's currently-centered item (or a null-valued
+    // record when nothing is selectable — empty list, Settings, editor).
+    "selection"   => act      (|app: &mut Nokkvi| Ok((Task::none(), selection_json(app))));
     // Toggle star on whatever's currently playing — the original seed's pain
     // ("rate from a WM hotkey without focusing the window"). Acts on
     // `scrobble.current_song_id` (authoritative for "the playing track")

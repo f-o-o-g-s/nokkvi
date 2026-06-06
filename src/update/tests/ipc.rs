@@ -164,6 +164,38 @@ fn play_and_toggle_play_echo_a_state_key() {
 }
 
 #[test]
+fn navigation_verbs_acknowledge_with_ok_true() {
+    // nav-up/nav-down/enter route an existing SlotListMessage through the normal
+    // loop (fire-and-forget); the move/activation is async, so they ack.
+    for verb in ["nav-up", "nav-down", "enter"] {
+        let resp = drive(verb);
+        assert_eq!(resp.data, Some(json!({ "ok": true })), "{verb}");
+        assert!(resp.error.is_none(), "{verb}");
+    }
+}
+
+#[test]
+fn selection_returns_a_stable_record_with_the_focused_view() {
+    // Pure read of the centered item. test_app()'s library is empty, so nothing
+    // is selectable → `kind` is null, but the key set (and `view`) is stable.
+    let resp = drive("selection");
+    assert!(resp.error.is_none());
+    let data = resp.data.expect("selection must carry data");
+    assert!(
+        data.get("view").and_then(|v| v.as_str()).is_some(),
+        "selection must report the focused view, got: {data}"
+    );
+    for key in ["kind", "name", "artist", "rating", "starred"] {
+        assert!(
+            data.get(key).is_some(),
+            "selection must keep a stable schema (missing `{key}`): {data}"
+        );
+    }
+    // Empty library → nothing centered.
+    assert_eq!(data.get("kind"), Some(&serde_json::Value::Null));
+}
+
+#[test]
 fn status_returns_a_full_state_snapshot() {
     let resp = drive("status");
     assert!(resp.error.is_none());
@@ -221,6 +253,11 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         "switch-view",
         "love",
         "rate",
+        // Navigation
+        "nav-up",
+        "nav-down",
+        "enter",
+        "selection",
     ]
     .into_iter()
     .collect();

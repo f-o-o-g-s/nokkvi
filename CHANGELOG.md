@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - New `nokkvi status` command prints the current playback state, track, volume, and shuffle/repeat/consume modes as JSON.
+- New `nav-up`, `nav-down`, `enter`, and `selection` CLI commands drive and inspect the focused list — move the selection, activate the centered item, or read it.
 
 ### Changed
 

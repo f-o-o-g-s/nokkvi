@@ -1153,6 +1153,10 @@ fn print_cli_help() {
     println!("  clear-queue      Empty the queue and stop playback");
     println!("  switch-view <v>  Switch the top pane to <v> (albums/queue/songs/");
     println!("                   artists/genres/playlists/radios/settings)");
+    println!("  nav-up           Move the focused list selection up (Backspace)");
+    println!("  nav-down         Move the focused list selection down (Tab)");
+    println!("  enter            Activate the centered item (play/expand/edit)");
+    println!("  selection        Print the focused view's centered item (JSON)");
     println!("  love             Toggle star on the currently-playing track");
     println!("  rate <±N | 0-5>  Adjust playing track rating: delta (+1/-1) or 0..5");
     println!();
