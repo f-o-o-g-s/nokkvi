@@ -723,4 +723,38 @@ mod tests {
         let parsed: PersistedPlayerSettings = serde_json::from_str(json).expect("deserialize");
         assert!(parsed.replay_gain_prevent_clipping);
     }
+
+    #[test]
+    fn live_first_launch_overrides_agree_with_persisted_defaults() {
+        // `Nokkvi::default()` (src/main.rs) derives `LivePlayerSettings` (all-zero)
+        // but hand-restores exactly FIVE fields to non-zero first-launch values so
+        // the pre-`PlayerSettingsLoaded` window matches the persisted shape. This
+        // pins those five values against `PersistedPlayerSettings::default()`: if a
+        // future "retune defaults" commit changes any persisted default here without
+        // updating the hand-restored block in src/main.rs, this test fails loudly.
+        //
+        // The data crate cannot reference the UI-crate `Nokkvi` type, so it asserts
+        // the persisted-side values directly; the UI-crate companion test
+        // `nokkvi_default_overrides_match_persisted_defaults` closes the loop by
+        // pinning `Nokkvi::default().settings` against these same persisted defaults.
+        let p = PersistedPlayerSettings::default();
+
+        assert!(
+            p.scrobbling_enabled,
+            "scrobbling_enabled must default to true"
+        );
+        assert!(
+            (p.scrobble_threshold - 0.50).abs() < f64::EPSILON,
+            "scrobble_threshold must default to 0.50"
+        );
+        assert_eq!(
+            p.start_view, "Queue",
+            "start_view must default to \"Queue\""
+        );
+        assert!(p.stable_viewport, "stable_viewport must default to true");
+        assert!(
+            p.auto_follow_playing,
+            "auto_follow_playing must default to true"
+        );
+    }
 }

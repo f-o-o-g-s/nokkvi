@@ -10,8 +10,9 @@
 //! is a peer of `info_modal` / `about_modal`, replacing the 4 EQ-modal
 //! fields that previously lived on `WindowState`.
 
-use nokkvi_data::types::player_settings::{
-    ArtworkResolution, EnterBehavior, LibraryPageSize, LivePlayerSettings,
+use nokkvi_data::types::{
+    player_settings::{ArtworkResolution, EnterBehavior, LibraryPageSize, LivePlayerSettings},
+    settings::PersistedPlayerSettings,
 };
 
 use crate::test_helpers::*;
@@ -89,6 +90,28 @@ fn nokkvi_default_preserves_pre_substruct_field_values() {
     );
     assert_eq!(app.settings.verbose_config, defaults.verbose_config);
     assert_eq!(app.settings.artwork_resolution, defaults.artwork_resolution);
+}
+
+#[test]
+fn nokkvi_default_overrides_match_persisted_defaults() {
+    // Cross-struct agreement pin: the five fields `Nokkvi::default()`
+    // hand-restores (see src/main.rs) must equal `PersistedPlayerSettings`'s
+    // shipped defaults. These are the only fields where Live::default() and
+    // Persisted::default() are designed to match — the rest stay all-zero on
+    // first launch until `PlayerSettingsLoaded` overwrites them. If a future
+    // defaults retune desyncs main.rs from the persisted side, this fails.
+    //
+    // Complements `nokkvi_default_preserves_pre_substruct_field_values`: that
+    // test pins the literal values; this one pins agreement with the source of
+    // truth so the two can't silently drift apart.
+    let app = test_app();
+    let p = PersistedPlayerSettings::default();
+
+    assert_eq!(app.settings.scrobbling_enabled, p.scrobbling_enabled);
+    assert!((app.settings.scrobble_threshold - p.scrobble_threshold as f32).abs() < f32::EPSILON);
+    assert_eq!(app.settings.start_view, p.start_view);
+    assert_eq!(app.settings.stable_viewport, p.stable_viewport);
+    assert_eq!(app.settings.auto_follow_playing, p.auto_follow_playing);
 }
 
 #[test]

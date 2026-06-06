@@ -375,9 +375,12 @@ impl Default for Nokkvi {
             similar_songs_generation: 0,
             // Persisted player settings (overridden by PlayerSettingsLoaded).
             // LivePlayerSettings derives Default, which zeros every field —
-            // the 18 fields previously hand-defaulted on Nokkvi are restored
-            // here so first-launch behavior (before PlayerSettingsLoaded
-            // fires) matches the pre-substruct shape.
+            // the 5 fields below are hand-restored to non-zero values so
+            // first-launch behavior (before PlayerSettingsLoaded fires)
+            // matches the pre-substruct shape. These 5 must stay in agreement
+            // with PersistedPlayerSettings::default(); the remaining fields
+            // intentionally stay at LivePlayerSettings::default() (all-zero)
+            // until PlayerSettingsLoaded overwrites them from redb.
             settings: nokkvi_data::types::player_settings::LivePlayerSettings {
                 scrobbling_enabled: true,
                 scrobble_threshold: 0.50,
