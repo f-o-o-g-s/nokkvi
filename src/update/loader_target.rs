@@ -690,7 +690,7 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
-                if e.contains("Unauthorized") {
+                if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
                     T::library_mut(self).set_loading(false);
                     return self.handle_session_expired();
                 }
@@ -728,7 +728,7 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
-                if e.contains("Unauthorized") {
+                if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
                     T::library_mut(self).set_loading(false);
                     return self.handle_session_expired();
                 }

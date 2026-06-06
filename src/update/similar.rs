@@ -286,7 +286,7 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
-                if e.contains("Unauthorized") {
+                if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
                     return self.handle_session_expired();
                 }
                 warn!("🎵 Failed to load similar songs: {}", e);
