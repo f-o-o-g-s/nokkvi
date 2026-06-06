@@ -383,6 +383,22 @@ impl QueueManager {
             self.playback_history.remove(0);
         }
     }
+
+    /// Record the leaving row in history, keyed by the FIRST-MATCH queue
+    /// position of `song_id`. Resolves the row's stable `entry_id` from the
+    /// recorded song's own row so the (song, entry_id) pair always agrees,
+    /// then delegates to [`Self::add_to_history`]. No-ops when `song_id` is
+    /// not in the pool. Single source of truth for the three manual-play
+    /// primitives (`play_entry_from_queue`, `play_song_from_queue`,
+    /// `play_next`); the consume and repeat-track paths that already hold a
+    /// clean index call `add_to_history` directly.
+    pub fn add_to_history_by_song_id(&mut self, song_id: &str) {
+        let Some(song) = self.get_song(song_id).cloned() else {
+            return;
+        };
+        let eid = self.index_of(song_id).and_then(|i| self.entry_id_at(i));
+        self.add_to_history(song, eid);
+    }
 }
 
 #[cfg(test)]
@@ -863,6 +879,56 @@ mod tests {
             qm.playback_history.len(),
             2,
             "same-row replay must be suppressed by the entry_id guard"
+        );
+    }
+
+    #[test]
+    fn add_to_history_by_song_id_keys_on_first_match_row() {
+        // song_ids=[a,a,b]. The by-song-id wrapper must resolve the entry_id
+        // from the FIRST physical occurrence of `a` (row 0), matching the
+        // inlined `position(|id| id == song_id)` semantics it replaces.
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.replace_song_ids_for_test(vec!["a".into(), "a".into(), "b".into()], Some(0));
+
+        qm.add_to_history_by_song_id("a");
+        assert_eq!(qm.playback_history.len(), 1);
+        assert_eq!(
+            qm.playback_history.last().and_then(|h| h.entry_id),
+            qm.entry_id_at(0),
+            "wrapper must key history on the first-match row's entry_id"
+        );
+    }
+
+    #[test]
+    fn add_to_history_by_song_id_noops_for_unknown_song() {
+        // The wrapper's pool-presence guard replaces the old call-site
+        // `if let Some(current_song) = get_song(...)` guard: an unknown id
+        // records nothing.
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+
+        qm.add_to_history_by_song_id("not_in_pool");
+        assert!(
+            qm.playback_history.is_empty(),
+            "unknown song id must not push a history entry"
+        );
+    }
+
+    #[test]
+    fn add_to_history_by_song_id_respects_repeat_track_dedup() {
+        // song_ids=[a,b]. Calling the wrapper twice for `a` resolves the same
+        // first-match entry_id both times, so the entry_id repeat-track guard
+        // in add_to_history suppresses the second push.
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+
+        qm.add_to_history_by_song_id("a");
+        qm.add_to_history_by_song_id("a");
+        assert_eq!(
+            qm.playback_history.len(),
+            1,
+            "wrapper must not bypass the existing repeat-track dedup guard"
         );
     }
 

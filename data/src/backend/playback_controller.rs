@@ -710,18 +710,10 @@ impl PlaybackController {
                 .await;
 
             let mut qm = queue_manager.lock().await;
-            if let Some(ref cid) = current_id
-                && let Some(current_song) = qm.get_song(cid).cloned()
-            {
+            if let Some(ref cid) = current_id {
                 // Key history by the leaving row's stable entry_id, resolved
                 // from the recorded song's OWN row so (song, entry_id) agree.
-                let eid = qm
-                    .get_queue()
-                    .song_ids
-                    .iter()
-                    .position(|id| id == cid)
-                    .and_then(|i| qm.entry_id_at(i));
-                qm.add_to_history(current_song, eid);
+                qm.add_to_history_by_song_id(cid);
             }
 
             let queue_index = qm.index_of_entry(entry_id).ok_or_else(|| {
@@ -790,17 +782,9 @@ impl PlaybackController {
             let current_id = queue_navigator.get_current_song_id().await;
             if let Some(ref cid) = current_id {
                 let mut qm = queue_manager.lock().await;
-                if let Some(current_song) = qm.get_song(cid).cloned() {
-                    // Key history by the leaving row's stable entry_id,
-                    // resolved from the recorded song's OWN row.
-                    let eid = qm
-                        .get_queue()
-                        .song_ids
-                        .iter()
-                        .position(|id| id == cid)
-                        .and_then(|i| qm.entry_id_at(i));
-                    qm.add_to_history(current_song, eid);
-                }
+                // Key history by the leaving row's stable entry_id,
+                // resolved from the recorded song's OWN row.
+                qm.add_to_history_by_song_id(cid);
             }
         }
 

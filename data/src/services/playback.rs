@@ -530,21 +530,13 @@ impl QueueNavigator {
             None
         };
 
-        // Record current song in history before advancing. Resolve the
-        // entry_id from the recorded song's OWN row (first-match on its id) so
-        // the (song, entry_id) pair always agrees; Previous then lands on the
-        // exact physical row even with adjacent duplicate-id rows.
+        // Record current song in history before advancing. The helper resolves
+        // the entry_id from the recorded song's OWN first-match row so the
+        // (song, entry_id) pair always agrees; Previous then lands on the exact
+        // physical row even with adjacent duplicate-id rows.
         let prev_id = self.current_song_id.lock().await.clone();
-        if let Some(ref pid) = prev_id
-            && let Some(prev_song) = queue_manager.get_song(pid).cloned()
-        {
-            let eid = queue_manager
-                .get_queue()
-                .song_ids
-                .iter()
-                .position(|id| id == pid)
-                .and_then(|i| queue_manager.entry_id_at(i));
-            queue_manager.add_to_history(prev_song, eid);
+        if let Some(ref pid) = prev_id {
+            queue_manager.add_to_history_by_song_id(pid);
         }
 
         let Some(result) = queue_manager.get_next_song() else {
