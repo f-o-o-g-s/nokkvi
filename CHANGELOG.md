@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - The `nokkvi` command-line verbs now print a JSON result instead of nothing, so toggles like `nokkvi consume` confirm their new state in the shell.
+- `nokkvi rate` and `nokkvi love` now show an in-window toast confirming the change, like the in-app rating and star hotkeys.
 
 ### Fixed
 

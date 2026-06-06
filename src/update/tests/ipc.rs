@@ -482,6 +482,33 @@ fn love_with_playing_track_responds_ok() {
 }
 
 #[test]
+fn love_pushes_an_in_window_toast() {
+    // IPC curation should surface the same in-window toast the Shift+L hotkey
+    // shows, so a `nokkvi love` from a WM keybind gives visible feedback.
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song-123".into());
+    app.playback.title = "Below The Waterfall Room".into();
+    let (incoming, rx) = make_incoming("love");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+    rx.blocking_recv().expect("responder must fire for love");
+
+    let toast = app
+        .toast
+        .toasts
+        .iter()
+        .find(|t| t.message.contains("Starred"))
+        .expect("love should push a Starred/Unstarred toast");
+    assert!(
+        toast.message.contains("Below The Waterfall Room"),
+        "toast should name the track, got: {}",
+        toast.message
+    );
+    assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Success);
+}
+
+#[test]
 fn rate_with_no_playing_track_returns_no_playing_track_error() {
     let resp = drive_with_args("rate", json!({"delta": "+1"}));
     let err = resp.error.expect("no playing track → error");
@@ -539,6 +566,39 @@ fn rate_echoes_resulting_rating() {
     let resp = drive_rate_with_song("4");
     assert_eq!(resp.data, Some(json!({ "rating": 4 })));
     assert!(resp.error.is_none());
+}
+
+#[test]
+fn rate_pushes_an_in_window_toast() {
+    // IPC rating should surface the same in-window toast the rating hotkey
+    // shows, so a `nokkvi rate` from a WM keybind gives visible feedback.
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song-123".into());
+    app.playback.title = "Below The Waterfall Room".into();
+    app.playback.artist = "Hello Meteor".into();
+    let (incoming, rx) = make_incoming_with_args("rate", json!({"delta": "4"}));
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+    rx.blocking_recv().expect("responder must fire for rate");
+
+    let toast = app
+        .toast
+        .toasts
+        .iter()
+        .find(|t| t.message.contains("Rated"))
+        .expect("rate should push a Rated toast");
+    assert!(
+        toast.message.contains("4/5"),
+        "toast should show the new rating, got: {}",
+        toast.message
+    );
+    assert!(
+        toast.message.contains("Below The Waterfall Room"),
+        "toast should name the track, got: {}",
+        toast.message
+    );
+    assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Success);
 }
 
 #[test]

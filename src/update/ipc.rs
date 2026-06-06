@@ -438,6 +438,11 @@ define_commands! {
         let song_id = current_playing_song_id(app)?;
         let starred = current_starred(app, &song_id);
         let loved = !starred;
+        // Mirror the Shift+L hotkey's in-window toast (handle_toggle_star) so a
+        // `nokkvi love` from a WM keybind gives the same visible feedback.
+        let marker = if loved { "★ Starred" } else { "☆ Unstarred" };
+        let label = format!("{marker}: {}", app.playback.title);
+        app.toast_success(label);
         let task = app.toggle_star_with_revert_task(song_id, ItemKind::Song, loved);
         Ok((task, json!({ "loved": loved })))
     });
@@ -446,6 +451,15 @@ define_commands! {
         let current = current_rating(app, &song_id);
         let new_rating = parse_rating_change(raw, current)
             .map_err(|message| ("invalid_args", message))?;
+        // Mirror the rating hotkey's in-window toast (handle_rating_change) so a
+        // `nokkvi rate` from a WM keybind gives the same visible feedback. Acts
+        // on the playing track, so its title/artist are the player-bar fields.
+        let display_name = if app.playback.artist.is_empty() {
+            app.playback.title.clone()
+        } else {
+            format!("{} - {}", app.playback.title, app.playback.artist)
+        };
+        app.toast_success(format!("⭐ Rated {display_name}: {new_rating}/5"));
         let task = app.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
         Ok((task, json!({ "rating": new_rating })))
     });
