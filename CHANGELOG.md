@@ -6,7 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- New `nokkvi status` command prints the current playback state, track, volume, and shuffle/repeat/consume modes as JSON.
+
 ### Changed
+
+- The `nokkvi` command-line verbs now print a JSON result instead of nothing, so toggles like `nokkvi consume` confirm their new state in the shell.
 
 ### Fixed
 
