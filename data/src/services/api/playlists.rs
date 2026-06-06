@@ -104,8 +104,7 @@ impl PlaylistsApiService {
         // reject the wire form.
         let _ = library_ids;
         // For random view, we load by name and shuffle client-side
-        let is_random = sort_mode == "random";
-        let actual_sort_mode = if is_random { "name" } else { sort_mode };
+        let (is_random, actual_sort_mode) = sort::resolve_random_sort_mode(sort_mode);
 
         // Map viewType to API sort parameter
         let sort_param = sort::map_sort_mode(SortDomain::Playlists, actual_sort_mode);

@@ -44,6 +44,23 @@ pub(crate) fn default_order(domain: SortDomain, sort_mode: &str) -> &'static str
     }
 }
 
+/// Resolve the client-side-random sort convention shared by the artists,
+/// genres, and playlists loaders.
+///
+/// Navidrome does not support `_sort=random` for those domains, so they request
+/// `name` from the server and shuffle the result client-side (see
+/// [`apply_random_shuffle`]). Returns `(is_random, actual_sort_mode)`: when
+/// `sort_mode` is `"random"` the loader loads by `"name"` and shuffles;
+/// otherwise `sort_mode` passes through unchanged. Albums and songs deliberately
+/// do NOT use this — their `random` is server-supported via `_sort=random`.
+pub(crate) fn resolve_random_sort_mode(sort_mode: &str) -> (bool, &str) {
+    if sort_mode == "random" {
+        (true, "name")
+    } else {
+        (false, sort_mode)
+    }
+}
+
 /// Shuffle a vector of entities in-place (client-side random sort).
 ///
 /// Navidrome does not support `_sort=random` for artists, genres, or playlists,
@@ -334,6 +351,25 @@ mod tests {
                 "{domain:?} unknown-sort default order must be ASC"
             );
         }
+    }
+
+    // =========================================================================
+    // `resolve_random_sort_mode` — the shared client-side-random preamble used
+    // by the artists/genres/playlists loaders.
+    // =========================================================================
+
+    #[test]
+    fn resolve_random_maps_random_to_name_and_flags_it() {
+        assert_eq!(resolve_random_sort_mode("random"), (true, "name"));
+    }
+
+    #[test]
+    fn resolve_random_passes_non_random_modes_through_unchanged() {
+        assert_eq!(resolve_random_sort_mode("favorited"), (false, "favorited"));
+        assert_eq!(resolve_random_sort_mode("name"), (false, "name"));
+        // The empty string is not "random", so it passes through (the loader's
+        // own empty-order fallback handles ordering downstream).
+        assert_eq!(resolve_random_sort_mode(""), (false, ""));
     }
 
     // =========================================================================

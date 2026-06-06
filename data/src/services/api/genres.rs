@@ -94,8 +94,7 @@ impl GenresApiService {
         library_ids: &[i32],
     ) -> Result<(Vec<Genre>, u32)> {
         // For random view, we load by name and shuffle client-side
-        let is_random = sort_mode == "random";
-        let actual_sort_mode = if is_random { "name" } else { sort_mode };
+        let (is_random, actual_sort_mode) = sort::resolve_random_sort_mode(sort_mode);
 
         // Map viewType to API sort parameter
         let sort_param = sort::map_sort_mode(SortDomain::Genres, actual_sort_mode);
