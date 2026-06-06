@@ -68,8 +68,8 @@ impl<'a> QueueOrchestrator<'a> {
     }
 
     /// Insert immediately after the current song (single splice).
-    /// Mirrors today's `play_next_*` family + the private
-    /// `AppService::play_next_songs` helper at app_service.rs:759-777.
+    /// Mirrors today's `play_next_*` family + the `QueueOrchestrator::play_next`
+    /// verb / the former private `AppService::play_next_songs` helper.
     /// Preserves that helper's empty-input rejection and debug log verbatim.
     pub async fn play_next(&self, songs: Vec<Song>) -> Result<()> {
         if songs.is_empty() {
@@ -108,7 +108,8 @@ mod tests {
     /// Test fixture — real `QueueService` + real `PlaybackController` over
     /// tempfile-backed `StateStorage`. The audio engine is constructed but
     /// never asked to play, so PipeWire is not touched (mirrors the safe
-    /// pattern at `services/playback.rs:602`).
+    /// pattern in the services/playback.rs test module (`CustomAudioEngine::new()`
+    /// constructed but never played)).
     struct Fixture {
         _temp: TempDir,
         queue: QueueService,

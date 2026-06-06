@@ -86,9 +86,11 @@ impl Nokkvi {
 
     /// Reorder the editor buffer in response to a drag-and-drop.
     ///
-    /// Mirrors the queue's `DragReorder` handler (`views/queue/update.rs:117`):
-    /// single-row drag is **guarded while a search query is active** (mirror of
-    /// the queue's `:119` guard) because filtered slot indices would otherwise
+    /// Mirrors the queue's `DragReorder` handler (the `DragReorder` handler in
+    /// `views/queue/update.rs`): single-row drag is **guarded while a search query
+    /// is active** (mirror of the queue's search-active drag guard,
+    /// `drag_allowed = self.common.search_query.is_empty()`) because filtered slot
+    /// indices would otherwise
     /// move the wrong row (invariant #1). With no search, slot indices map to
     /// buffer indices through the editor's own slot-list, then a plain
     /// `remove`+`insert` reorders the buffer. Unlike the queue, there is no
@@ -175,7 +177,8 @@ impl Nokkvi {
     }
 
     /// In-memory batch reorder mirroring the queue's `MoveBatch` optimistic
-    /// local reorder (`update/queue.rs:296`): remove the selected rows
+    /// local reorder (mirrors the queue's `QueueAction::MoveBatch` optimistic
+    /// local reorder): remove the selected rows
     /// (descending so earlier removals don't shift later indices), then insert
     /// them as a contiguous block before `target`, adjusting the insert point
     /// for rows removed from before the target.
@@ -204,8 +207,9 @@ impl Nokkvi {
 
     /// Remove from the editor buffer at a slot index (multi-selection aware).
     ///
-    /// Mirrors the queue's context-menu remove (`views/queue/update.rs:198` +
-    /// `update/queue.rs:377`): `evaluate_context_menu` expands the clicked row
+    /// Mirrors the queue's context-menu remove (the `QueueContextEntry::RemoveFromQueue`
+    /// arm in `views/queue/update.rs` + the `QueueAction::RemoveFromQueue` handler in
+    /// `update/queue.rs`): `evaluate_context_menu` expands the clicked row
     /// to the full multi-selection when the clicked row is selected, otherwise
     /// targets just that row. Targets are resolved to per-row `entry_id`s at the
     /// boundary so removal is duplicate-aware (two rows of the same song_id only
@@ -259,8 +263,8 @@ impl Nokkvi {
         editor.songs.retain(|s| !id_set.contains(&s.entry_id));
 
         // Clean up the slot-list cursor/selection so nothing dangles past the
-        // shrunk buffer (mirrors `handle_queue_loaded`'s cleanup at
-        // `update/queue.rs:46`/`:85`): drop the click-to-focus marker and clamp
+        // shrunk buffer (mirrors `handle_queue_loaded`'s selected-offset/viewport
+        // cleanup in `update/queue.rs`): drop the click-to-focus marker and clamp
         // the viewport offset into range. `evaluate_context_menu` +
         // `clear_multi_selection` above already cleared the multi-selection.
         let new_total = editor.songs.len();

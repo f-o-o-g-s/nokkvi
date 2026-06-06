@@ -749,7 +749,7 @@ mod fft_shutdown_guard_tests {
 
     #[test]
     fn intermediate_clone_drop_keeps_fft_thread_running() {
-        // Models `app_view.rs:448` per-frame `viz.clone().mode(...)…`:
+        // Models the per-frame `self.visualizer.clone().mode(...)…` builder clone in app_view's view():
         // the builder clone drops at end of frame while `self.visualizer`
         // still owns the original. Shutdown must wait until the original
         // also drops.

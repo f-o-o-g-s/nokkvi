@@ -38,7 +38,8 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
 
     // Read mode + config snapshot once per tick. The "visualizer enabled"
     // check is `engine.visualization_mode != VisualizationMode::Off` — that's
-    // what gates the shader element in `app_view.rs:319`. There is no
+    // what gates the shader element in the app_view visualizer-element build
+    // (keyed on `engine.visualization_mode != VisualizationMode::Off`). There is no
     // separate `cfg.enabled` flag, so the `Lines` discriminator covers both
     // "visualizer on" and "lines mode" in a single check.
     let in_lines_mode = app.engine.visualization_mode == VisualizationMode::Lines;
