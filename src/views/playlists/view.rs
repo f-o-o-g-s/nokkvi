@@ -259,15 +259,10 @@ impl PlaylistsPage {
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
-                    crate::widgets::slot_list::wrap_with_select_column(
+                    crate::widgets::slot_list::wrap_with_select_column_for(
                         select_header_visible,
-                        ctx.is_selected,
-                        ctx.item_index,
-                        |i| {
-                            PlaylistsMessage::SlotList(
-                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
-                            )
-                        },
+                        &ctx,
+                        PlaylistsMessage::SlotList,
                         row,
                     )
                 }
@@ -277,15 +272,10 @@ impl PlaylistsPage {
                             .child_sub_index_label(ctx.item_index, playlists, |p| &p.id);
                     let row =
                         self.render_track_row(song, &ctx, &sub_index_label, data.stable_viewport);
-                    crate::widgets::slot_list::wrap_with_select_column(
+                    crate::widgets::slot_list::wrap_with_select_column_for(
                         select_header_visible,
-                        ctx.is_selected,
-                        ctx.item_index,
-                        |i| {
-                            PlaylistsMessage::SlotList(
-                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
-                            )
-                        },
+                        &ctx,
+                        PlaylistsMessage::SlotList,
                         row,
                     )
                 }

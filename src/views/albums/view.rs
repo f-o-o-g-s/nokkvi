@@ -186,15 +186,10 @@ impl AlbumsPage {
                         data.stable_viewport,
                         data.overlay.open_menu,
                     );
-                    crate::widgets::slot_list::wrap_with_select_column(
+                    crate::widgets::slot_list::wrap_with_select_column_for(
                         select_header_visible,
-                        ctx.is_selected,
-                        ctx.item_index,
-                        |i| {
-                            AlbumsMessage::SlotList(
-                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
-                            )
-                        },
+                        &ctx,
+                        AlbumsMessage::SlotList,
                         row,
                     )
                 }
@@ -209,15 +204,10 @@ impl AlbumsPage {
                         data.stable_viewport,
                         data.overlay.open_menu,
                     );
-                    crate::widgets::slot_list::wrap_with_select_column(
+                    crate::widgets::slot_list::wrap_with_select_column_for(
                         select_header_visible,
-                        ctx.is_selected,
-                        ctx.item_index,
-                        |i| {
-                            AlbumsMessage::SlotList(
-                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
-                            )
-                        },
+                        &ctx,
+                        AlbumsMessage::SlotList,
                         row,
                     )
                 }

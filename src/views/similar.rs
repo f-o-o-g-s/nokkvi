@@ -558,11 +558,10 @@ impl SimilarPage {
                     SimilarMessage::ContextMenuAction,
                     SimilarMessage::SetOpenMenu,
                 );
-                crate::widgets::slot_list::wrap_with_select_column(
+                crate::widgets::slot_list::wrap_with_select_column_for(
                     select_header_visible,
-                    ctx.is_selected,
-                    ctx.item_index,
-                    |idx| SimilarMessage::SlotList(SlotListPageMessage::SelectionToggle(idx)),
+                    &ctx,
+                    SimilarMessage::SlotList,
                     cm_row,
                 )
             },

@@ -180,18 +180,9 @@ impl SongsPage {
 
                 // Get centralized slot list slot styling
                 use crate::widgets::slot_list::{
-                    SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
-                    slot_list_text,
+                    SLOT_LIST_SLOT_PADDING, slot_list_index_column, slot_list_text,
                 };
-                let style = SlotListSlotStyle::for_slot(
-                    ctx.is_center,
-                    false,
-                    false,
-                    ctx.is_selected,
-                    ctx.has_multi_selection,
-                    ctx.opacity,
-                    0,
-                );
+                let style = ctx.slot_style(false, false, 0);
 
                 let m = ctx.metrics;
                 let artwork_size = m.artwork_size;
@@ -455,15 +446,10 @@ impl SongsPage {
                     SongsMessage::ContextMenuAction,
                     SongsMessage::SetOpenMenu,
                 );
-                crate::widgets::slot_list::wrap_with_select_column(
+                crate::widgets::slot_list::wrap_with_select_column_for(
                     select_header_visible,
-                    ctx.is_selected,
-                    ctx.item_index,
-                    |i| {
-                        SongsMessage::SlotList(
-                            crate::widgets::SlotListPageMessage::SelectionToggle(i),
-                        )
-                    },
+                    &ctx,
+                    SongsMessage::SlotList,
                     cm_row,
                 )
             },

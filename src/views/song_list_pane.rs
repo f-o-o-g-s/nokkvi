@@ -227,17 +227,9 @@ where
 
             // Get centralized slot list slot styling
             use crate::widgets::slot_list::{
-                SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
+                SLOT_LIST_SLOT_PADDING, slot_list_index_column, slot_list_text,
             };
-            let style = SlotListSlotStyle::for_slot(
-                ctx.is_center,
-                is_current,
-                is_current,
-                ctx.is_selected,
-                ctx.has_multi_selection,
-                ctx.opacity,
-                0,
-            );
+            let style = ctx.slot_style(is_current, is_current, 0);
 
             let m = ctx.metrics;
             let artwork_size = m.artwork_size;
@@ -440,6 +432,12 @@ where
             build_context_menu(glowing, ctx.item_index)
         });
 
+        // Intentionally bypasses `wrap_with_select_column_for`: selection here
+        // routes through the pane's `SongListRowEvent::Slot` event channel via a
+        // captured `on_event_select` closure, not a plain fn-pointer, so the
+        // context-driven convenience wrapper cannot express it. Stays on the
+        // base helper directly, mirroring how `for_slot_list` itself stays
+        // per-call for the same reason.
         crate::widgets::slot_list::wrap_with_select_column(
             column_visibility.select,
             ctx.is_selected,

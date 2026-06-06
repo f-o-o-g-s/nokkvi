@@ -120,6 +120,31 @@ pub(crate) struct SlotListRowContext {
     pub metrics: SlotListRowMetrics,
 }
 
+impl SlotListRowContext {
+    /// Forward this row context's positional state into
+    /// [`SlotListSlotStyle::for_slot`], shrinking the 7-arg transposition-prone
+    /// call down to the 3 per-renderer-varying inputs. The other four
+    /// (`is_center` / `is_selected` / `has_multi_selection` / `opacity`) are
+    /// always the context's own fields, so routing them here means a renderer
+    /// can never accidentally transpose them.
+    pub(crate) fn slot_style(
+        &self,
+        is_highlighted: bool,
+        is_playing: bool,
+        depth: u8,
+    ) -> SlotListSlotStyle {
+        SlotListSlotStyle::for_slot(
+            self.is_center,
+            is_highlighted,
+            is_playing,
+            self.is_selected,
+            self.has_multi_selection,
+            self.opacity,
+            depth,
+        )
+    }
+}
+
 // ============================================================================
 // Now-playing breathing highlight
 // ============================================================================
@@ -1220,6 +1245,35 @@ pub(crate) fn wrap_with_select_column<'a, Message: 'a + Clone>(
         .align_y(iced::Alignment::Center)
         .spacing(0.0)
         .into()
+}
+
+/// Context-driven convenience wrapper over [`wrap_with_select_column`] for the
+/// common slot-list views.
+///
+/// Pulls `is_selected` / `item_index` off the row context and synthesizes the
+/// identical `SlotListPageMessage::SelectionToggle` lambda that every
+/// select-column view repeats verbatim, so each call site shrinks to the
+/// per-view `wrap` constructor (`AlbumsMessage::SlotList`, etc.). `wrap` lifts a
+/// `SlotListPageMessage` into the caller's outer message type — the same pattern
+/// as [`primary_slot_button`]. Returns `inner` unchanged when `show` is false.
+///
+/// Sites that route selection through a bespoke event channel rather than a
+/// plain fn-pointer (e.g. the song-list pane's `SongListRowEvent::Slot`) keep
+/// calling [`wrap_with_select_column`] directly.
+pub(crate) fn wrap_with_select_column_for<'a, M: 'a + Clone>(
+    show: bool,
+    ctx: &SlotListRowContext,
+    wrap: impl Fn(SlotListPageMessage) -> M + 'a,
+    inner: Element<'a, M>,
+) -> Element<'a, M> {
+    let item_index = ctx.item_index;
+    wrap_with_select_column(
+        show,
+        ctx.is_selected,
+        item_index,
+        move |i| wrap(SlotListPageMessage::SelectionToggle(i)),
+        inner,
+    )
 }
 
 /// Render the tri-state "select all" header bar that sits above the slot
@@ -2665,5 +2719,85 @@ mod tests {
             }
             other => panic!("expected SetOffset with CTRL, got {other:?}"),
         }
+    }
+
+    // ========================================================================
+    // SlotListRowContext::slot_style — forwarder parity with for_slot
+    // ========================================================================
+    //
+    // Pins that the convenience forwarder never transposes one of the four
+    // context-owned positional args into for_slot. If a future edit reorders
+    // for_slot's params (or the forwarder), the field-by-field equality below
+    // breaks loudly.
+
+    /// Build a row context with distinctive, non-default style-bearing fields so
+    /// a transposed arg in `slot_style` would change the resulting style.
+    fn style_probe_row_context() -> SlotListRowContext {
+        SlotListRowContext {
+            item_index: 3,
+            is_center: true,
+            is_selected: true,
+            has_multi_selection: false,
+            opacity: 0.5,
+            scale_factor: 1.0,
+            row_height: 70.0,
+            modifiers: Modifiers::default(),
+            metrics: SlotListRowMetrics::from_row(70.0, 1.0),
+        }
+    }
+
+    /// Assert two styles are equal field-by-field (no `PartialEq` on the type).
+    fn assert_slot_style_eq(a: &SlotListSlotStyle, b: &SlotListSlotStyle) {
+        assert_eq!(a.bg_color, b.bg_color, "bg_color");
+        assert_eq!(a.border_color, b.border_color, "border_color");
+        assert_eq!(a.border_width, b.border_width, "border_width");
+        assert_eq!(a.text_color, b.text_color, "text_color");
+        assert_eq!(a.subtext_color, b.subtext_color, "subtext_color");
+        assert_eq!(a.hover_text_color, b.hover_text_color, "hover_text_color");
+        assert_eq!(
+            a.forces_legible_text, b.forces_legible_text,
+            "forces_legible_text"
+        );
+        assert_eq!(a.glow_seed, b.glow_seed, "glow_seed");
+    }
+
+    #[test]
+    fn slot_style_forwards_ctx_fields_into_for_slot() {
+        let ctx = style_probe_row_context();
+        // Cover the per-renderer-varying input matrix: plain, expanded-parent
+        // highlight, actively-playing, and a deeper expansion depth.
+        for (is_highlighted, is_playing, depth) in [
+            (false, false, 0u8),
+            (true, false, 0),
+            (true, true, 0),
+            (false, false, 2),
+        ] {
+            let forwarded = ctx.slot_style(is_highlighted, is_playing, depth);
+            let direct = SlotListSlotStyle::for_slot(
+                ctx.is_center,
+                is_highlighted,
+                is_playing,
+                ctx.is_selected,
+                ctx.has_multi_selection,
+                ctx.opacity,
+                depth,
+            );
+            assert_slot_style_eq(&forwarded, &direct);
+        }
+    }
+
+    #[test]
+    fn wrap_with_select_column_for_hidden_returns_inner_unchanged() {
+        // With show=false the helper must be a pass-through: the typed Message
+        // variant already makes a miscopied lambda a compile error, so this is
+        // belt-and-suspenders for the show-gate delegation to
+        // wrap_with_select_column's early return.
+        let ctx = dummy_row_context(false, Modifiers::default());
+        let _: Element<'_, ()> = wrap_with_select_column_for(
+            false, // show
+            &ctx,
+            |_msg| (),
+            iced::widget::text("row").into(),
+        );
     }
 }
