@@ -70,13 +70,14 @@ fn ping_command_yields_pong_payload() {
 }
 
 #[test]
-fn fire_and_forget_verbs_all_respond_ok_with_no_payload() {
-    // Single table-driven test for every Phase 0 + Phase 1 verb whose contract
-    // is "ack now, side-effects later" — adding the next verb is one row, not
-    // a new test function. Pins the IPC-layer contract (responder fires,
-    // request_id echoed, data empty, no error). Playback side-effects are
-    // covered by the existing playback handler tests.
+fn every_verb_carries_a_data_payload_so_success_is_never_silent() {
+    // The MPD "no command is silent" discipline: every successful verb must
+    // return a non-null `data` payload so the CLI always prints something.
+    // This pins that invariant across the whole no-arg set; the exact shapes
+    // are asserted by the per-verb tests below.
     for verb in [
+        "ping",
+        "status",
         "next",
         "previous",
         "play",
@@ -86,15 +87,98 @@ fn fire_and_forget_verbs_all_respond_ok_with_no_payload() {
         "shuffle",
         "repeat",
         "consume",
+        "clear-queue",
     ] {
         let resp = drive(verb);
         assert_eq!(resp.request_id, 7, "{verb}: request_id must echo");
-        assert!(
-            resp.data.is_none(),
-            "{verb}: fire-and-forget verbs should not carry data"
-        );
         assert!(resp.error.is_none(), "{verb}: should not error");
+        let data = resp
+            .data
+            .unwrap_or_else(|| panic!("{verb}: must carry data"));
+        assert!(
+            !data.is_null(),
+            "{verb}: data must not be null (success is never silent)"
+        );
     }
+}
+
+#[test]
+fn async_result_verbs_acknowledge_with_ok_true() {
+    // `next`/`previous` change the current track asynchronously, so there is no
+    // resulting state to echo synchronously — they acknowledge with {"ok":true}.
+    for verb in ["next", "previous"] {
+        let resp = drive(verb);
+        assert_eq!(resp.data, Some(json!({ "ok": true })), "{verb}");
+        assert!(resp.error.is_none(), "{verb}");
+    }
+}
+
+#[test]
+fn consume_echoes_resulting_state() {
+    // test_app() starts with consume off and a non-radio active_playback, so
+    // the toggle flips it on and the response echoes the post-flip value.
+    let resp = drive("consume");
+    assert_eq!(resp.data, Some(json!({ "consume": true })));
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn shuffle_echoes_resulting_random_state() {
+    let resp = drive("shuffle");
+    assert_eq!(resp.data, Some(json!({ "random": true })));
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn repeat_echoes_resulting_mode_token() {
+    // Cycle starts at off → one on the first toggle.
+    let resp = drive("repeat");
+    assert_eq!(resp.data, Some(json!({ "repeat": "one" })));
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn pause_and_stop_echo_play_state() {
+    // handle_pause sets paused synchronously; handle_stop clears both. These
+    // are deterministic regardless of whether a track is loaded.
+    assert_eq!(drive("pause").data, Some(json!({ "state": "paused" })));
+    assert_eq!(drive("stop").data, Some(json!({ "state": "stopped" })));
+}
+
+#[test]
+fn play_and_toggle_play_echo_a_state_key() {
+    // With test_app()'s empty queue, the exact resulting state depends on the
+    // cold-start path, so pin the shape (a "state" string, no error) rather
+    // than the value.
+    for verb in ["play", "play-pause"] {
+        let resp = drive(verb);
+        assert!(resp.error.is_none(), "{verb}");
+        let data = resp
+            .data
+            .unwrap_or_else(|| panic!("{verb}: must carry data"));
+        assert!(
+            data.get("state").and_then(|v| v.as_str()).is_some(),
+            "{verb}: data must carry a string `state` key, got {data}"
+        );
+    }
+}
+
+#[test]
+fn status_returns_a_full_state_snapshot() {
+    let resp = drive("status");
+    assert!(resp.error.is_none());
+    let data = resp.data.expect("status must carry data");
+    for key in [
+        "state", "title", "artist", "album", "position", "duration", "volume", "random", "repeat",
+        "consume",
+    ] {
+        assert!(
+            data.get(key).is_some(),
+            "status data missing `{key}` key: {data}"
+        );
+    }
+    // status is a pure read — it must NOT mutate modes (consume stays off).
+    assert_eq!(data.get("consume"), Some(&json!(false)));
 }
 
 #[test]
@@ -118,6 +202,8 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
     let expected: BTreeSet<&str> = [
         // Phase 0
         "ping",
+        // Query
+        "status",
         // Phase 1
         "next",
         "previous",
@@ -149,7 +235,7 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
 }
 
 /// CLI arg routing is macro-driven via `IPC_CLI_ARGS`. Adding a verb that
-/// takes an arg without using `with_f32` / `try_act_str` would silently
+/// takes an arg without using `with_f32` / `act_str` would silently
 /// land it in `IPC_CLI_ARGS` as `None`, so the CLI would forward
 /// `Value::Null` and the server would always return `invalid_args`. This
 /// pins the exact set of verbs the CLI knows how to wrap and which arg
@@ -179,10 +265,10 @@ fn cli_args_const_lists_every_arg_taking_verb() {
 }
 
 #[test]
-fn seek_accepts_f32_position_arg() {
+fn seek_accepts_f32_position_arg_and_echoes_it() {
     let resp = drive_with_args("seek", json!({"position": 42.5}));
     assert_eq!(resp.request_id, 7);
-    assert!(resp.data.is_none());
+    assert_eq!(resp.data, Some(json!({ "position": 42.5 })));
     assert!(resp.error.is_none());
 }
 
@@ -192,6 +278,33 @@ fn seek_accepts_integer_arg_via_json_number_coercion() {
     // where a CLI user types `nokkvi seek 30` without a decimal.
     let resp = drive_with_args("seek", json!({"position": 30}));
     assert!(resp.error.is_none());
+}
+
+#[test]
+fn seek_during_radio_returns_unavailable_error_not_a_false_echo() {
+    // handle_seek no-ops on radio playback, so the verb must surface an error
+    // rather than echo a `{"position": …}` success that never happened.
+    let mut app = test_app();
+    app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+        station: nokkvi_data::types::radio_station::RadioStation {
+            id: "r".into(),
+            name: "n".into(),
+            stream_url: "u".into(),
+            home_page_url: None,
+        },
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+    let (incoming, rx) = make_incoming_with_args("seek", json!({"position": 42.0}));
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire for seek");
+    assert!(resp.data.is_none());
+    let err = resp.error.expect("radio seek must error");
+    assert_eq!(err.code, "unavailable");
 }
 
 #[test]
@@ -211,9 +324,10 @@ fn seek_wrong_arg_type_returns_invalid_args_error() {
 }
 
 #[test]
-fn volume_accepts_absolute_string_arg() {
+fn volume_accepts_absolute_string_arg_and_echoes_committed_value() {
     let resp = drive_with_args("volume", json!({"value": "0.6"}));
     assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "volume": 0.6 })));
 }
 
 #[test]
@@ -244,13 +358,11 @@ fn volume_missing_arg_returns_invalid_args_error() {
 
 #[test]
 fn volume_numeric_arg_returns_invalid_args_error() {
-    // try_act_str arm requires the arg as a JSON string; legacy CLIs sending
+    // act_str arm requires the arg as a JSON string; legacy CLIs sending
     // `{"value": 0.6}` (number) get the macro's "missing required string arg"
     // error rather than silently mis-parsing.
     let resp = drive_with_args("volume", json!({"value": 0.6}));
-    let err = resp
-        .error
-        .expect("numeric volume must error post try_act_str");
+    let err = resp.error.expect("numeric volume must error post act_str");
     assert_eq!(err.code, "invalid_args");
     assert!(err.message.contains("value"));
 }
@@ -282,13 +394,14 @@ fn volume_rejects_empty_value() {
 
 #[test]
 fn clear_queue_responds_ok_from_any_view() {
-    // `clear-queue` is a try_act verb that bypasses the in-app handler's
+    // `clear-queue` is an `act` verb that bypasses the in-app handler's
     // "Not in queue view" gate. The IPC contract is: responder fires ok with
-    // no payload regardless of which view the running instance is on. The
-    // actual backend wipe is exercised by the playback-handler tests.
+    // an {"ok":true} acknowledgement regardless of which view the running
+    // instance is on. The actual backend wipe is exercised by the
+    // playback-handler tests.
     let resp = drive("clear-queue");
     assert_eq!(resp.request_id, 7);
-    assert!(resp.data.is_none());
+    assert_eq!(resp.data, Some(json!({ "ok": true })));
     assert!(resp.error.is_none());
 }
 
@@ -309,7 +422,11 @@ fn switch_view_with_valid_view_name_responds_ok() {
             resp.error.is_none(),
             "{view_name}: should be a valid view target"
         );
-        assert!(resp.data.is_none());
+        assert_eq!(
+            resp.data,
+            Some(json!({ "view": view_name })),
+            "{view_name}: should echo the view name"
+        );
     }
 }
 
@@ -358,7 +475,9 @@ fn love_with_playing_track_responds_ok() {
 
     let resp = rx.blocking_recv().expect("responder must fire for love");
     assert_eq!(resp.request_id, 7);
-    assert!(resp.data.is_none());
+    // Empty queue → current_starred falls back to false, so the optimistic
+    // toggle targets `loved: true` and the response echoes it.
+    assert_eq!(resp.data, Some(json!({ "loved": true })));
     assert!(resp.error.is_none());
 }
 
@@ -411,6 +530,15 @@ fn rate_accepts_absolute_zero_through_five() {
         let resp = drive_rate_with_song(abs);
         assert!(resp.error.is_none(), "{abs}: should accept");
     }
+}
+
+#[test]
+fn rate_echoes_resulting_rating() {
+    // Empty queue → current_rating falls back to 0, so an absolute "4" lands
+    // at 4 and the response echoes it.
+    let resp = drive_rate_with_song("4");
+    assert_eq!(resp.data, Some(json!({ "rating": 4 })));
+    assert!(resp.error.is_none());
 }
 
 #[test]

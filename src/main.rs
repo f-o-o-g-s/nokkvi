@@ -1138,6 +1138,7 @@ fn print_cli_help() {
     println!();
     println!("Commands:");
     println!("  ping             Probe the running instance over the IPC socket");
+    println!("  status           Print playback state, track, volume, and modes (JSON)");
     println!("  next             Skip to the next track in the queue");
     println!("  previous         Return to the previous track in the queue");
     println!("  play             Start playback");
@@ -1154,6 +1155,10 @@ fn print_cli_help() {
     println!("                   artists/genres/playlists/radios/settings)");
     println!("  love             Toggle star on the currently-playing track");
     println!("  rate <±N | 0-5>  Adjust playing track rating: delta (+1/-1) or 0..5");
+    println!();
+    println!("Each command prints a compact JSON result on success (mutating verbs echo");
+    println!("their resulting state, e.g. {{\"consume\":true}}); errors print to stderr with a");
+    println!("non-zero exit status.");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");
@@ -1229,8 +1234,9 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
 /// caller would otherwise initialize iced just to surface the error.
 ///
 /// Exit codes:
-///   0 — server answered with a non-error payload (data printed to stdout, or
-///       nothing for fire-and-forget verbs whose response carries no `data`).
+///   0 — server answered with a non-error response; the `data` payload is
+///       printed to stdout (every verb carries one — mutating verbs echo their
+///       resulting state, others a JSON ack — so success is never silent).
 ///   1 — could not reach a running instance, or server returned an error.
 fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     let Some(path) = nokkvi_ipc::find_live_socket() else {
@@ -1257,15 +1263,20 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
                 }
                 std::process::exit(1);
             }
-            if let Some(value) = response.data.as_ref() {
-                #[allow(clippy::print_stdout)]
-                {
-                    let payload = match value {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    };
-                    println!("{payload}");
-                }
+            #[allow(clippy::print_stdout)]
+            {
+                // Every server success now carries a `data` payload (mutating
+                // verbs echo their resulting state; others send `{"ok":true}`),
+                // so a successful command is never silent. The `None` branch is
+                // a belt-and-suspenders fallback for hand-written/older clients:
+                // print a JSON ack rather than nothing. String payloads print
+                // unquoted; objects/numbers print as compact JSON.
+                let payload = match response.data.as_ref() {
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    Some(other) => other.to_string(),
+                    None => "{\"ok\":true}".to_string(),
+                };
+                println!("{payload}");
             }
             Ok(())
         }
