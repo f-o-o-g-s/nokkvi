@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Renaming a playlist no longer erases its comment, and editing the comment no longer erases the name (and neither one silently switches the playlist to private). Navidrome replaces the entire playlist record on every metadata save, so Nokkvi now always sends the name, comment, and visibility together, reading back the current values first; a save changes only the field you actually edited.
 - Renaming a playlist or editing its comment from the queue's "Playing From" bar (the pencil button) now updates the bar to the new text immediately. Previously it snapped back to the old name or comment the moment you saved, and if the background refresh was filtered by an active playlist search or failed on a network hiccup, the bar (and the saved-session copy on disk) could stay wrong until the next successful reload.
 - Saving a playlist edit that changed both its details and its song order no longer sometimes refuses with a false "changed on the server" warning and silently drops the song changes. Saving more than once without leaving the editor now works too.
 - Opening the playlist editor from the "Playing From" bar now reflects the playlist's real public/private state even before the Playlists view has loaded (for example right after launch), instead of always showing it as public.

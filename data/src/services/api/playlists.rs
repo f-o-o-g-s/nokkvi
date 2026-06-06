@@ -300,22 +300,25 @@ impl PlaylistsApiService {
         Ok(playlist_id)
     }
 
-    /// Update a playlist's metadata, sending ONLY the dirty fields.
+    /// Update a playlist's metadata. A `None` field is left unchanged.
     ///
-    /// Navidrome's native API follows a nil-means-leave-unchanged contract
-    /// (see navidrome `playlists.go`): an absent key leaves that field as-is.
-    /// Each of `name` / `comment` / `public` is therefore put on the wire only
-    /// when `Some`, so a comment-only edit no longer re-writes the name and no
-    /// longer replays a stale `public` flag (which could silently revert a
-    /// concurrent visibility change).
+    /// Navidrome's `PUT /api/playlist/:id` is a FULL REPLACE of name / comment /
+    /// public, NOT a partial merge: the REST layer binds the JSON body into a
+    /// fresh `model.Playlist`, so any key absent from the body arrives as a Go
+    /// zero value (`""` / `false`), and `updatePlaylistEntity` → `updateMetadata`
+    /// then write all three columns unconditionally (reference-navidrome
+    /// `core/playlists/rest_adapter.go:99-128` + `playlists.go:231`). Sending a
+    /// subset therefore CLEARS the omitted fields server-side — a rename-only
+    /// PUT would wipe the comment and silently flip the playlist private.
     ///
-    /// NOTE: the historical "always send `public`" behavior — kept as a 403
-    /// probe so a non-owner edit surfaces an error rather than silently
-    /// succeeding — is retained ONLY for the rename path
-    /// (`update/text_input_dialog.rs`), which has no public-dirty concept and
-    /// passes `public: Some(current_public)` deliberately.
+    /// To offer true "nil-means-unchanged" semantics we re-read the current
+    /// record and overlay only the provided (`Some`) fields, then always send
+    /// the full `(name, comment, public)` triple. Re-reading also means an
+    /// unspecified field round-trips the server's *current* value, so a
+    /// concurrent change to a field this edit did not touch is preserved rather
+    /// than reverted to a stale local copy.
     ///
-    /// Uses Navidrome native API: PUT /api/playlist/:id
+    /// Uses Navidrome native API: GET + PUT /api/playlist/:id
     pub async fn update_playlist(
         &self,
         playlist_id: &str,
@@ -323,11 +326,24 @@ impl PlaylistsApiService {
         comment: Option<&str>,
         public: Option<bool>,
     ) -> Result<()> {
+        let current = self.get_playlist(playlist_id).await?;
+        let (name, comment, public) = merge_playlist_update(&current, name, comment, public);
         let body = build_update_playlist_body(name, comment, public);
         self.client
             .put_json(&format!("/api/playlist/{playlist_id}"), &body)
             .await?;
         Ok(())
+    }
+
+    /// Fetch a single playlist's current metadata.
+    ///
+    /// Uses Navidrome native API: GET /api/playlist/:id
+    pub async fn get_playlist(&self, playlist_id: &str) -> Result<Playlist> {
+        let body = self
+            .client
+            .get(&format!("/api/playlist/{playlist_id}"), &[])
+            .await?;
+        serde_json::from_str(&body).context("Failed to deserialize playlist metadata")
     }
 
     /// Fetch a single playlist's current `updatedAt` token.
@@ -339,13 +355,7 @@ impl PlaylistsApiService {
     ///
     /// Uses Navidrome native API: GET /api/playlist/:id
     pub async fn get_playlist_updated_at(&self, playlist_id: &str) -> Result<String> {
-        let body = self
-            .client
-            .get(&format!("/api/playlist/{playlist_id}"), &[])
-            .await?;
-        let playlist: Playlist = serde_json::from_str(&body)
-            .context("Failed to deserialize playlist metadata for staleness check")?;
-        Ok(playlist.updated_at)
+        Ok(self.get_playlist(playlist_id).await?.updated_at)
     }
 
     /// Delete a playlist.
@@ -399,28 +409,29 @@ impl PlaylistsApiService {
     }
 }
 
-/// Build the PUT body for `update_playlist`, inserting each metadata key only
-/// when it is dirty (`Some`).
-///
-/// An omitted (`None`) field is left out of the JSON object entirely so
-/// Navidrome leaves it unchanged — never emitted as a `null`, which Navidrome
-/// would treat differently from an absent key.
-fn build_update_playlist_body(
-    name: Option<&str>,
-    comment: Option<&str>,
+/// Overlay the caller's provided (`Some`) fields onto the current server
+/// record; a `None` field keeps the server's current value. This is how
+/// [`PlaylistsApiService::update_playlist`] offers "nil-means-unchanged"
+/// semantics on top of Navidrome's full-replace PUT.
+fn merge_playlist_update<'a>(
+    current: &'a Playlist,
+    name: Option<&'a str>,
+    comment: Option<&'a str>,
     public: Option<bool>,
-) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    if let Some(name) = name {
-        map.insert("name".to_string(), serde_json::Value::from(name));
-    }
-    if let Some(comment) = comment {
-        map.insert("comment".to_string(), serde_json::Value::from(comment));
-    }
-    if let Some(public) = public {
-        map.insert("public".to_string(), serde_json::Value::from(public));
-    }
-    serde_json::Value::Object(map)
+) -> (&'a str, &'a str, bool) {
+    (
+        name.unwrap_or(current.name.as_str()),
+        comment.unwrap_or(current.comment.as_str()),
+        public.unwrap_or(current.public),
+    )
+}
+
+/// Build the PUT body for `update_playlist` — ALWAYS the full
+/// `(name, comment, public)` triple. Navidrome zero-fills any omitted key
+/// (see [`PlaylistsApiService::update_playlist`]), so emitting a subset would
+/// clear the missing fields server-side.
+fn build_update_playlist_body(name: &str, comment: &str, public: bool) -> serde_json::Value {
+    serde_json::json!({ "name": name, "comment": comment, "public": public })
 }
 
 /// Parse a single Subsonic `getPlaylist` entry into a `Song`.
@@ -568,56 +579,72 @@ mod tests {
         assert_eq!(producers[0].name, "Nigel Godrich");
     }
 
-    // ---- update_playlist body: send only dirty fields (N21) ----
+    // ---- update_playlist body + merge: Navidrome full-replace contract ----
+    //
+    // Navidrome's PUT zero-fills any omitted key, so a partial body would CLEAR
+    // the missing fields. We instead read-merge: overlay the dirty fields onto
+    // the current record and always send the full triple.
 
-    #[test]
-    fn build_body_omits_clean_fields() {
-        // A comment-only edit must put ONLY the comment on the wire — no `name`
-        // (so a clean name is not re-written) and no `public` (so a concurrent
-        // visibility change is not silently reverted).
-        let body = build_update_playlist_body(None, Some("c"), None);
-        assert!(
-            body.get("name").is_none(),
-            "a clean name must be omitted entirely"
-        );
-        assert!(
-            body.get("public").is_none(),
-            "a clean public flag must be omitted entirely (no silent revert)"
-        );
-        assert_eq!(body["comment"], "c", "the dirty comment must be present");
+    fn playlist_with(name: &str, comment: &str, public: bool) -> Playlist {
+        serde_json::from_value(json!({
+            "id": "p1",
+            "name": name,
+            "comment": comment,
+            "public": public,
+            "updatedAt": "2026-06-06T00:00:00Z",
+        }))
+        .expect("playlist fixture must deserialize")
     }
 
     #[test]
-    fn build_body_includes_dirty_public() {
-        // When the public flag is dirty it must be emitted with its value.
-        let body = build_update_playlist_body(None, None, Some(false));
-        assert_eq!(
-            body.get("public"),
-            Some(&json!(false)),
-            "a dirty public flag must be emitted with its (false) value"
-        );
-        assert!(body.get("name").is_none());
-        assert!(body.get("comment").is_none());
-    }
-
-    #[test]
-    fn build_body_never_emits_null_for_omitted_field() {
-        // An omitted field must be ABSENT, never present-as-null — Navidrome
-        // treats a present null differently from an absent key.
-        let body = build_update_playlist_body(Some("n"), None, None);
+    fn build_body_always_sends_full_triple() {
+        // The body MUST always carry all three fields — a subset would let
+        // Navidrome zero-fill (clear) the omitted name/comment/public.
+        let body = build_update_playlist_body("n", "c", true);
         let obj = body.as_object().expect("body must be a JSON object");
-        assert_eq!(obj.len(), 1, "only the single dirty field may be present");
-        assert!(
-            obj.values().all(|v| !v.is_null()),
-            "no field may be emitted as a JSON null"
+        assert_eq!(
+            obj.len(),
+            3,
+            "must always send exactly name + comment + public"
         );
-    }
-
-    #[test]
-    fn build_body_includes_all_when_all_dirty() {
-        let body = build_update_playlist_body(Some("n"), Some("c"), Some(true));
         assert_eq!(body["name"], "n");
         assert_eq!(body["comment"], "c");
         assert_eq!(body["public"], json!(true));
+    }
+
+    #[test]
+    fn merge_rename_keeps_current_comment_and_public() {
+        // Regression for the reported data loss: a rename (name = Some, comment
+        // and public = None) must PRESERVE the server's current comment and
+        // public — never wipe the comment or flip the playlist private.
+        let current = playlist_with("Old Name", "keep me", true);
+        let (name, comment, public) = merge_playlist_update(&current, Some("New Name"), None, None);
+        assert_eq!(name, "New Name");
+        assert_eq!(comment, "keep me", "a rename must not clear the comment");
+        assert!(public, "a rename must not flip the playlist private");
+    }
+
+    #[test]
+    fn merge_comment_edit_keeps_current_name() {
+        // The mirror case: editing only the comment must preserve the name.
+        let current = playlist_with("Keep Name", "old comment", false);
+        let (name, comment, public) =
+            merge_playlist_update(&current, None, Some("new comment"), None);
+        assert_eq!(name, "Keep Name", "a comment edit must not clear the name");
+        assert_eq!(comment, "new comment");
+        assert!(
+            !public,
+            "an unspecified public flag must round-trip the current value"
+        );
+    }
+
+    #[test]
+    fn merge_overlays_all_provided_fields() {
+        let current = playlist_with("Old", "old c", false);
+        let (name, comment, public) =
+            merge_playlist_update(&current, Some("New"), Some("new c"), Some(true));
+        assert_eq!(name, "New");
+        assert_eq!(comment, "new c");
+        assert!(public);
     }
 }

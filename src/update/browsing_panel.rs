@@ -355,12 +355,12 @@ impl Nokkvi {
                         return Ok::<SaveOutcome, anyhow::Error>(SaveOutcome::Stale);
                     }
                 }
-                // Update name/comment/visibility if any of them changed. Send
-                // ONLY the dirty fields (Navidrome's nil-means-unchanged
-                // contract): a comment-only edit no longer re-writes the name,
-                // and an unchanged `public` flag is never replayed — so a
-                // concurrent server-side visibility change is not silently
-                // reverted.
+                // Update name/comment/visibility if any of them changed. Pass
+                // only the dirty fields as `Some`; `update_playlist` re-reads the
+                // current record and overlays them before sending the full
+                // triple (Navidrome's PUT is a FULL REPLACE that zero-fills any
+                // omitted field), so a rename cannot wipe the comment and an
+                // untouched field keeps its current server value.
                 if metadata_changed {
                     let name_arg = name_changed.then_some(playlist_name.as_str());
                     let comment_arg = comment_changed.then_some(playlist_comment.as_str());
