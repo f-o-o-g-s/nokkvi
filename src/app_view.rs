@@ -1284,6 +1284,9 @@ impl Nokkvi {
         let library_selector_open = lib.popover_open;
         let library_selector_bounds = lib.trigger_bounds;
 
+        // One lookup feeds both the open flag and the menu position.
+        let (strip_context_open, strip_context_position) = strip_context_state(&self.open_menu);
+
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,
             editor_session_active: self.playlist_editor.is_some(),
@@ -1308,14 +1311,8 @@ impl Nokkvi {
                 self.open_menu,
                 Some(crate::app_message::OpenMenu::Hamburger)
             ),
-            strip_context_open: {
-                let (open, _) = strip_context_state(&self.open_menu);
-                open
-            },
-            strip_context_position: {
-                let (_, pos) = strip_context_state(&self.open_menu);
-                pos
-            },
+            strip_context_open,
+            strip_context_position,
             library_count,
             active_library_count,
             library_selector_open,

@@ -582,6 +582,25 @@ pub struct OverlayMenuViewData<'a> {
     pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
+// ----------------------------------------------------------------------------
+// Why there is no `ViewportLayoutViewData` sub-struct.
+//
+// The slot-list `*ViewData` structs also share a viewport/layout scalar group
+// (`window_width`, `window_height`, `scale_factor`, `modifiers`, `elevated`,
+// plus `stable_viewport` on most). A 2026-06 audit follow-up considered folding
+// these into a sub-struct mirroring `OverlayMenuViewData`; it is intentionally
+// left inlined because it does not earn its keep:
+//   - Unlike the overlay trio (produced together by `column_dropdown_state`),
+//     these fields come from independent sources, so there is no shared factory
+//     call a sub-struct would fold away.
+//   - They are `Copy` scalars the compiler already keeps honest: a forgotten
+//     field is a named-field error at each literal, not silent drift, so a
+//     sub-struct prevents no AI-agent bug class.
+//   - The group is not uniform — `SimilarViewData` omits `stable_viewport` and
+//     `RadiosViewData` reorders the fields and skips the overlay embed — so a
+//     clean embed would force a phantom field or an exception carve-out.
+// ----------------------------------------------------------------------------
+
 // ============================================================================
 // Shared closure factories — keep per-view view.rs/update.rs free of the
 // `(f * total as f32) as usize` boilerplate by composing the routing layer
