@@ -29,11 +29,14 @@ git log --oneline "${last_version_commit}..HEAD" --no-merges
 
 Promote the existing `## [Unreleased]` section in `CHANGELOG.md` to `## vX.Y.Z — YYYY-MM-DD` and seed a fresh empty `## [Unreleased]` block above it (with empty `### Added` / `### Changed` / `### Fixed` / `### Removed` sub-headings ready to fill in).
 
-**Style rubric** (matches the rmpc-style format the repo settled on):
+**Style rubric** — the canonical changelog style for the repo (rmpc-style); `/commit` and `/unreleased` keep a one-line summary and defer here for the full rules + example:
 
 - **Categories**: **Added** / **Changed** / **Fixed** / **Removed**. Omit any with no entries.
-- **One bullet = one sentence = one user-visible effect.** Aim for ≤ 25 words. Lead with what the user perceives now ("Volume changes via the wheel now persist past the 500ms throttle.") and stop.
-- **Root-cause prose stays in the commit body.** When a fix has an interesting "why" worth keeping (incidents, races, surprising mechanisms), put it in the commit message body — `git log` is the engineering record; CHANGELOG is the user-facing summary. If a single change needs more than one sentence to describe its effect, that usually means two changes — split into two bullets.
+- **One bullet = one sentence = one user-visible effect. ≤ 25 words — a hard cap, not a target.** Lead with what the user perceives now ("Volume changes via the wheel now persist past the 500ms throttle.") and stop.
+- **One sentence, full stop.** A second sentence, a semicolon, or a "because / since / so that / which means" clause is the *mechanism* — cut it. Mechanism goes in the commit body (`git log` is the engineering record; CHANGELOG is the user-facing summary). If the effect genuinely needs two sentences, it's two changes — split into two bullets.
+- **Self-check every bullet before saving:** over ~25 words, or a second sentence/clause explaining *why* or *how*? Trim. For example:
+  - ❌ *Renaming a playlist no longer erases its comment. Navidrome replaces the entire record on every save, so Nokkvi now sends the name, comment, and visibility together, reading current values first.* (mechanism inlined, two sentences)
+  - ✅ *Renaming a playlist or editing its comment no longer wipes the other field or flips it to private.*
 - **Frame by user-visible effect**, not internal mechanism. Skip internal type names, file paths, function names, PR numbers.
 - **Drop internal-only churn**: CI, workflow, lockfile, dep bumps with no runtime effect, refactors with no behavior change. If a refactor produces a perceptible effect (memory, startup time, fewer crashes), record the effect, not the refactor.
 - **Version-header format**: keep `## vX.Y.Z — YYYY-MM-DD` exact — `.github/workflows/release.yml`'s awk extractor matches on it character-by-character.

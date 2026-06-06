@@ -18,13 +18,10 @@ Propose entries for the `## [Unreleased]` block of `CHANGELOG.md` from commits m
    - Removed features or `BREAKING CHANGE:` → **Removed**
    - `chore:` / `ci:` / `build:` / `test:` / `docs:` → drop unless the effect is user-visible (e.g. a runtime dep bump users will notice → **Changed**; a docs-only commit → drop, that's the docs site's concern).
 
-4. Apply the style rubric from `.agent/workflows/package.md` § 1:
-   - **One bullet = one sentence = one user-visible effect**, ≤ 25 words. Lead with what the user perceives now and stop.
-   - **Root-cause prose stays in the commit body, not here.** If a commit's body has interesting "why" (incident, race, surprising mechanism), that stays where `git log -1 <sha>` will surface it. The changelog is the user-facing summary; the commit log is the engineering record.
-   - If a single change needs more than one sentence to describe its effect, that usually means two changes — split into two bullets.
-   - No internal type names, file paths, function names, or PR numbers.
-   - No CI/workflow/lockfile/dep-bump churn.
-   - Collapse multi-commit features into a single bullet.
+4. Apply the canonical changelog style rubric in `.agent/workflows/package.md` § 1 (full rules + a before/after example live there). Load-bearing summary:
+   - **One bullet = one sentence = one user-visible effect, ≤ 25 words (a hard cap).** Lead with what the user perceives now and stop.
+   - The mechanism/why lives in the commit body where `git log -1 <sha>` surfaces it, not here. If the effect truly needs two sentences, it's two changes — split them.
+   - Skip internal names/paths/PR numbers and CI/dep-bump churn; collapse a multi-commit feature into one bullet.
 
 5. Skip any commit whose user-visible effect is already covered by an existing bullet under `## [Unreleased]`. When in doubt, ask the user rather than duplicate.
 
