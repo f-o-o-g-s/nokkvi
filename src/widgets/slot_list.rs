@@ -817,8 +817,11 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
 
 /// Build the slot elements for a slot list view.
 ///
-/// Shared by `slot_list_view`, `slot_list_view_with_drag`, etc. to avoid duplicating
-/// the effective-center calculation and slot rendering logic.
+/// Shared by `slot_list_view`, `slot_list_view_with_drag`, etc. to avoid
+/// duplicating slot rendering logic. The slot→item index mapping (including
+/// the effective-center calculation) is owned by
+/// `SlotListView::slot_to_item` / `SlotListView::effective_center`, which the
+/// drag mappers also call so rendering and dragging stay in lockstep.
 ///
 /// When `on_hover` is `Some`, each slot is wrapped in a `mouse_area` that
 /// fires `on_enter` / `on_exit` carrying the slot's `HoveredSlot`
@@ -843,12 +846,17 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
     // using the real viewport_offset would cause items to disappear off the
     // top as the user scrolls down.
     let top_packing = total_items < config.slot_count;
+    // Presentation-only center used for opacity gradient (:`calculate_slot_opacity_with_center`)
+    // and the center-styling fallback (`slot_index == effective_center` below).
+    // The ITEM-INDEX mapping is owned by `SlotListView::slot_to_item` — do not
+    // reuse this value for index resolution. In top-packing mode this clamps
+    // to the visible viewport row; otherwise it is the shared effective_center
+    // (`config.center_slot == config.slot_count / 2` by the
+    // `center_slot_is_always_middle` invariant).
     let effective_center = if top_packing {
         sl.viewport_offset.min(total_items.saturating_sub(1))
     } else {
-        let items_at_and_after = total_items.saturating_sub(sl.viewport_offset);
-        let end_push = config.slot_count.saturating_sub(items_at_and_after);
-        config.center_slot.min(sl.viewport_offset).max(end_push)
+        sl.effective_center(total_items, config.slot_count, config.center_slot)
     };
 
     let metrics = SlotListRowMetrics::from_row(row_height, 1.0);
@@ -864,17 +872,18 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
 
         let mut is_center_slot = false;
 
-        // In top-packing mode, map slots directly to item indices (slot N → item N),
-        // ignoring viewport_offset which is meaningless when all items fit.
-        let item_index_opt = if top_packing {
-            if slot_index < total_items {
-                Some(slot_index)
-            } else {
-                None
-            }
-        } else {
-            sl.get_slot_item_index_with_center(slot_index, total_items, effective_center)
-        };
+        // Resolve the item index through the shared slot→item owner
+        // (`allow_end = false` is the render reject: target >= total_items and
+        // top-packing cap slot < total_items). Top-packing vs end_push are
+        // handled internally, so this is the single source for both rendering
+        // and the drag mappers.
+        let item_index_opt = sl.slot_to_item(
+            slot_index,
+            total_items,
+            config.slot_count,
+            config.center_slot,
+            false,
+        );
 
         let slot_content: Element<'a, Message> = if let Some(item_index) = item_index_opt {
             if let Some(item) = items.get(item_index) {

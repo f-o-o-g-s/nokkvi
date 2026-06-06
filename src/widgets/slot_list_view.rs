@@ -133,24 +133,93 @@ impl SlotListView {
         Some(target_index as usize)
     }
 
+    /// Compute the effective center slot for the current viewport, shared by
+    /// rendering (`build_slot_list_slots`) and the drag slot→item mappers.
+    ///
+    /// `slot_count` bounds the end-push clamp; `center_slot` is the center
+    /// source — passed explicitly so the free-function renderer can feed its
+    /// `config.center_slot` (keeping that field and the
+    /// `center_slot_is_always_middle` invariant the source of truth) while the
+    /// drag mappers, which only hold `self.slot_count`, feed `slot_count / 2`.
+    /// Both are equal by the invariant, so this is the single standardized
+    /// effective-center formula for the non-top-packing path.
+    ///
+    /// `pub(crate)` (not private) because `build_slot_list_slots` lives in the
+    /// sibling `slot_list` module and calls it through `sl: &SlotListView` —
+    /// true module privacy is impossible for a cross-module free-fn caller.
+    pub(crate) fn effective_center(
+        &self,
+        total_items: usize,
+        slot_count: usize,
+        center_slot: usize,
+    ) -> usize {
+        let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
+        let end_push = slot_count.saturating_sub(items_at_and_after);
+        center_slot.min(self.viewport_offset).max(end_push)
+    }
+
+    /// Map a visual slot index to an absolute item index — the single owner of
+    /// the slot→item viewport mapping, shared by rendering and both drag
+    /// mappers.
+    ///
+    /// `center_slot` is the center source (see [`effective_center`]); callers
+    /// pass `config.center_slot` (renderer) or `slot_count / 2` (drag mappers),
+    /// equal by the `center_slot_is_always_middle` invariant.
+    ///
+    /// `allow_end` encodes the render-vs-drop divergence:
+    /// - `false` (render): rejects `target >= total_items`, and in top-packing
+    ///   mode caps at `slot < total_items`.
+    /// - `true` (drop): allows `target == total_items` (insert-after-last), and
+    ///   in top-packing mode caps at `slot <= total_items`.
+    ///
+    /// `pub(crate)` for the same cross-module reason as [`effective_center`].
+    pub(crate) fn slot_to_item(
+        &self,
+        slot_index: usize,
+        total_items: usize,
+        slot_count: usize,
+        center_slot: usize,
+        allow_end: bool,
+    ) -> Option<usize> {
+        // Top-packing: slot N maps directly to item N (viewport_offset ignored).
+        if total_items < slot_count {
+            let in_range = if allow_end {
+                slot_index <= total_items
+            } else {
+                slot_index < total_items
+            };
+            return if in_range { Some(slot_index) } else { None };
+        }
+        if total_items == 0 {
+            return None;
+        }
+        let effective_center = self.effective_center(total_items, slot_count, center_slot);
+        let offset_from_center = slot_index as i32 - effective_center as i32;
+        let target_index = self.viewport_offset as i32 + offset_from_center;
+        let upper_ok = if allow_end {
+            target_index <= total_items as i32
+        } else {
+            target_index < total_items as i32
+        };
+        if target_index < 0 || !upper_ok {
+            return None;
+        }
+        Some(target_index as usize)
+    }
+
     /// Translate a drag-column slot index to an absolute item index.
     ///
-    /// Replicates the `effective_center` computation from `build_slot_list_slots`
-    /// so the drag handler uses exactly the same slot→item mapping as rendering.
+    /// Delegates to the shared [`slot_to_item`](Self::slot_to_item) owner with
+    /// `allow_end = false` so the drag handler uses exactly the same slot→item
+    /// mapping as rendering (rejecting `target >= total_items`).
     pub fn slot_to_item_index(&self, slot_index: usize, total_items: usize) -> Option<usize> {
-        // Top-packing: slot N maps directly to item N (viewport_offset is ignored).
-        if total_items < self.slot_count {
-            return if slot_index < total_items {
-                Some(slot_index)
-            } else {
-                None
-            };
-        }
-        let center_slot = self.slot_count / 2;
-        let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
-        let end_push = self.slot_count.saturating_sub(items_at_and_after);
-        let effective_center = center_slot.min(self.viewport_offset).max(end_push);
-        self.get_slot_item_index_with_center(slot_index, total_items, effective_center)
+        self.slot_to_item(
+            slot_index,
+            total_items,
+            self.slot_count,
+            self.slot_count / 2,
+            false,
+        )
     }
 
     /// Like `slot_to_item_index` but allows the result to equal `total_items`.
@@ -158,39 +227,20 @@ impl SlotListView {
     /// Drop targets use insert-before semantics, so `total_items` is a valid
     /// target meaning "after the last item". The regular `slot_to_item_index`
     /// rejects this because it's out of range for *rendering*, but it's valid
-    /// for *dropping*.
+    /// for *dropping*. Delegates to the shared
+    /// [`slot_to_item`](Self::slot_to_item) owner with `allow_end = true`.
     pub fn slot_to_item_index_for_drop(
         &self,
         slot_index: usize,
         total_items: usize,
     ) -> Option<usize> {
-        // Top-packing: slot N maps directly to item N.
-        // Allow total_items as a valid drop target (insert-after-last).
-        if total_items < self.slot_count {
-            return if slot_index <= total_items {
-                Some(slot_index)
-            } else {
-                None
-            };
-        }
-
-        let center_slot = self.slot_count / 2;
-        let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
-        let end_push = self.slot_count.saturating_sub(items_at_and_after);
-        let effective_center = center_slot.min(self.viewport_offset).max(end_push);
-
-        if total_items == 0 {
-            return None;
-        }
-
-        let offset_from_center = slot_index as i32 - effective_center as i32;
-        let target_index = self.viewport_offset as i32 + offset_from_center;
-
-        if target_index < 0 || target_index > total_items as i32 {
-            return None;
-        }
-
-        Some(target_index as usize)
+        self.slot_to_item(
+            slot_index,
+            total_items,
+            self.slot_count,
+            self.slot_count / 2,
+            true,
+        )
     }
 
     /// Calculate which item index should be displayed in a given slot
@@ -655,6 +705,157 @@ mod tests {
                              {expected_neg} (offset -{offset})"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Characterization tests for the slot->item viewport mapping.
+    //
+    // These pin TODAY's behavior of `slot_to_item_index` /
+    // `slot_to_item_index_for_drop` / the render path before the mapping was
+    // centralized on `slot_to_item`. They are the regression net guarding the
+    // refactor: the three formerly-duplicated formula copies must stay
+    // byte-for-byte equivalent, and the render-vs-drop divergences (`<` vs
+    // `<=` top-packing caps, `>=` vs `>` range rejects) must be preserved
+    // exactly.
+    // ---------------------------------------------------------------------
+
+    /// Inline copy of the pre-refactor render-path effective_center formula
+    /// (non-top-packing branch of `build_slot_list_slots`). Used by the
+    /// characterization tests to assert the refactor preserves the math.
+    fn legacy_effective_center(vp: usize, total_items: usize, slot_count: usize) -> usize {
+        let center_slot = slot_count / 2;
+        let items_at_and_after = total_items.saturating_sub(vp);
+        let end_push = slot_count.saturating_sub(items_at_and_after);
+        center_slot.min(vp).max(end_push)
+    }
+
+    #[test]
+    fn slot_to_item_index_matches_render_path_mid_list() {
+        let mut sl = SlotListView::new();
+        sl.slot_count = 9;
+        sl.viewport_offset = 20;
+        let total_items = 100;
+        let effective_center = legacy_effective_center(20, total_items, 9);
+
+        for slot in 0..9 {
+            assert_eq!(
+                sl.slot_to_item_index(slot, total_items),
+                sl.get_slot_item_index_with_center(slot, total_items, effective_center),
+                "slot {slot}: drag mapper must equal the render path (reject >=, same center)"
+            );
+        }
+    }
+
+    #[test]
+    fn slot_to_item_index_for_drop_allows_end_boundary() {
+        // Pin the non-top-packing `>=` (render) vs `>` (drop) range divergence.
+        // It only becomes observable when a slot maps to exactly total_items;
+        // with total_items >= slot_count that requires the viewport to sit one
+        // past the last index (end_push pins effective_center at slot_count, so
+        // the bottom slot resolves to total_items). Render rejects this as
+        // out-of-range for drawing; drop allows it as insert-after-last.
+        let mut sl = SlotListView::new();
+        sl.slot_count = 9;
+        let total_items = 9; // == slot_count, so non-top-packing branch
+        sl.viewport_offset = 10; // one past the last index
+
+        // Find the slot that maps to exactly total_items under the drop path.
+        let end_slot = (0..9)
+            .find(|&slot| sl.slot_to_item_index_for_drop(slot, total_items) == Some(total_items))
+            .expect("a slot must map to total_items when vp sits one past the end");
+
+        assert_eq!(
+            sl.slot_to_item_index_for_drop(end_slot, total_items),
+            Some(total_items),
+            "drop path allows target == total_items (insert-after-last)"
+        );
+        assert_eq!(
+            sl.slot_to_item_index(end_slot, total_items),
+            None,
+            "render path rejects target == total_items (out of range for drawing)"
+        );
+    }
+
+    #[test]
+    fn slot_to_item_top_packing_render_vs_drop_caps() {
+        // Fewer items than slots → top-packing (slot N maps to item N).
+        let mut sl = SlotListView::new();
+        sl.slot_count = 9;
+        sl.viewport_offset = 0;
+        let total_items = 3;
+
+        for slot in 0..9 {
+            let render = sl.slot_to_item_index(slot, total_items);
+            let drop = sl.slot_to_item_index_for_drop(slot, total_items);
+
+            if slot < total_items {
+                assert_eq!(
+                    render,
+                    Some(slot),
+                    "render: slot {slot} < total maps directly"
+                );
+            } else {
+                assert_eq!(render, None, "render: slot {slot} >= total is empty");
+            }
+
+            if slot <= total_items {
+                assert_eq!(drop, Some(slot), "drop: slot {slot} <= total maps directly");
+            } else {
+                assert_eq!(drop, None, "drop: slot {slot} > total is rejected");
+            }
+        }
+
+        // The boundary slot that distinguishes < from <=.
+        assert_eq!(sl.slot_to_item_index(total_items, total_items), None);
+        assert_eq!(
+            sl.slot_to_item_index_for_drop(total_items, total_items),
+            Some(total_items),
+            "the == boundary is the render-vs-drop divergence in top-packing mode"
+        );
+    }
+
+    #[test]
+    fn slot_to_item_end_push_clamp_matches_legacy() {
+        // Near the end with more items than slots: end_push clamps
+        // effective_center. The drag mapper must reproduce the legacy
+        // center_slot.min(vp).max(end_push) → get_slot_item_index_with_center
+        // result exactly.
+        let mut sl = SlotListView::new();
+        sl.slot_count = 9;
+        sl.viewport_offset = 11;
+        let total_items = 12;
+        let effective_center = legacy_effective_center(11, total_items, 9);
+
+        for slot in 0..9 {
+            assert_eq!(
+                sl.slot_to_item_index(slot, total_items),
+                sl.get_slot_item_index_with_center(slot, total_items, effective_center),
+                "slot {slot}: end_push clamp path must match legacy formula"
+            );
+        }
+    }
+
+    #[test]
+    fn effective_center_equals_config_center_slot_invariant() {
+        // The standardized center source uses center_slot = slot_count / 2 —
+        // exactly the value SlotListConfig stores in `center_slot` by the
+        // `center_slot_is_always_middle` invariant. Verify the shared
+        // `effective_center` helper equals the inline legacy formula across a
+        // range of slot counts / viewport offsets / list lengths.
+        for slot_count in [1usize, 3, 5, 9, 11, 29] {
+            for total_items in [slot_count, slot_count + 1, slot_count * 3, 500] {
+                for vp in [0usize, total_items / 2, total_items.saturating_sub(1)] {
+                    let mut sl = SlotListView::new();
+                    sl.slot_count = slot_count;
+                    sl.viewport_offset = vp;
+                    assert_eq!(
+                        sl.effective_center(total_items, slot_count, slot_count / 2),
+                        legacy_effective_center(vp, total_items, slot_count),
+                        "slot_count={slot_count}, total={total_items}, vp={vp}"
+                    );
                 }
             }
         }
