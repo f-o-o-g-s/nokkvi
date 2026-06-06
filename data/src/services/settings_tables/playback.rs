@@ -184,7 +184,7 @@ define_settings! {
             ui_meta: {
                 label: "Scrobble Threshold",
                 category: "Scrobbling",
-                subtitle: Some("% of track duration needed to scrobble"),
+                subtitle: Some("% of track, or 4 min, to scrobble"),
                 default: 50_i64,
                 min: 25_i64,
                 max: 90_i64,

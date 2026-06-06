@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - The About modal now credits Claude Opus 4.8 as the shipwright (previously Opus 4.7).
+- The Scrobble Threshold setting's description now mentions that a scrobble also fires after 4 minutes of listening, not only at the percentage you set.
 
 ### Fixed
 
