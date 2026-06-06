@@ -725,18 +725,25 @@ fn build_queue_view_data_wires_window_width_and_elevated() {
 
 #[test]
 fn build_queue_view_data_matches_settings_and_counts() {
-    let app = test_app();
+    let mut app = test_app();
+    // Distinct, non-default values so a stable_viewport <-> queue_show_default_playlist
+    // cross-wire (or a wrong count source) FAILS. Under plain defaults these fields
+    // can both be false, which would let a field swap pass silently.
+    app.settings.stable_viewport = true;
+    app.settings.queue_show_default_playlist = false;
+    app.library.queue_loading_target = Some(7);
 
     let vd = app.build_queue_view_data(100.0, false);
-    assert_eq!(vd.stable_viewport, app.settings.stable_viewport);
-    assert_eq!(
-        vd.show_default_playlist_chip,
-        app.settings.queue_show_default_playlist
+    assert!(
+        vd.stable_viewport,
+        "stable_viewport must wire from settings.stable_viewport"
+    );
+    assert!(
+        !vd.show_default_playlist_chip,
+        "show_default_playlist_chip must wire from settings.queue_show_default_playlist"
     );
     assert_eq!(
-        vd.total_queue_count,
-        app.library
-            .queue_loading_target
-            .unwrap_or(app.library.queue_songs.len())
+        vd.total_queue_count, 7,
+        "total_queue_count must use queue_loading_target"
     );
 }

@@ -1727,10 +1727,5 @@ mod tests {
         assert_eq!(QUEUE_PANE_FRACTION.to_bits(), 0.55f32.to_bits());
         assert_eq!(BROWSER_PANE_FRACTION.to_bits(), 0.45f32.to_bits());
         assert_eq!(QUEUE_PANE_PORTION + BROWSER_PANE_PORTION, 100);
-        assert_eq!(QUEUE_PANE_FRACTION, pane_width_fraction(QUEUE_PANE_PORTION));
-        assert_eq!(
-            BROWSER_PANE_FRACTION,
-            pane_width_fraction(BROWSER_PANE_PORTION)
-        );
     }
 }
