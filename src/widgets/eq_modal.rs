@@ -87,6 +87,14 @@ const BAND_FREQS: [&str; 10] = [
     "32", "64", "125", "250", "500", "1K", "2K", "4K", "8K", "16K",
 ];
 
+// Compile-time guard: the visible band labels must stay 1:1 with the DSP
+// center-frequency array (`nokkvi_data::audio::eq::EQ_BANDS_HZ`). Adding or
+// removing a band in one array without the other now fails the build.
+const _: () = assert!(
+    BAND_FREQS.len() == nokkvi_data::audio::eq::EQ_BANDS_HZ.len(),
+    "EQ label array length must match DSP band-frequency array length",
+);
+
 pub(crate) fn eq_modal_overlay<'a>(
     visible: bool,
     eq_enabled: bool,
@@ -459,7 +467,53 @@ fn gains_match(a: &[f32; 10], b: &[f32; 10]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::gains_match;
+    use super::{BAND_FREQS, gains_match};
+
+    /// Pins each visible band label to its DSP center frequency, encoding the
+    /// intentional ISO-rounding divergences (label `32` for the 31 Hz band,
+    /// `64` for 62 Hz) and the `K` thousands-suffix as the spec. The
+    /// `const _: ()` assert beside `BAND_FREQS` already guards *count* drift;
+    /// this test guards a future *value* change in `EQ_BANDS_HZ` — any edit to
+    /// either array now forces a deliberate review of this label mapping.
+    #[test]
+    fn band_freq_labels_pin_to_dsp_frequencies() {
+        // Length parity with the DSP center-frequency array (mirrors the
+        // compile-time `const _: ()` assert, asserted here at runtime too so a
+        // count change is caught even if the const-block is ever removed).
+        assert_eq!(
+            BAND_FREQS.len(),
+            nokkvi_data::audio::eq::EQ_BANDS_HZ.len(),
+            "EQ label array length must match DSP band-frequency array length",
+        );
+
+        // (DSP center frequency in Hz, intended display label). The 31->32 and
+        // 62->64 rows are the intentional ISO-power-of-two label rounding; the
+        // rest are exact, with `K` standing in for `000`.
+        let expected: [(f32, &str); 10] = [
+            (31.0, "32"),
+            (62.0, "64"),
+            (125.0, "125"),
+            (250.0, "250"),
+            (500.0, "500"),
+            (1000.0, "1K"),
+            (2000.0, "2K"),
+            (4000.0, "4K"),
+            (8000.0, "8K"),
+            (16000.0, "16K"),
+        ];
+
+        for (i, (freq, label)) in expected.iter().enumerate() {
+            assert_eq!(
+                nokkvi_data::audio::eq::EQ_BANDS_HZ[i],
+                *freq,
+                "DSP center frequency for band {i} changed; review the label mapping",
+            );
+            assert_eq!(
+                BAND_FREQS[i], *label,
+                "display label for band {i} changed; review the DSP frequency mapping",
+            );
+        }
+    }
 
     /// Pair lifted from a real config.toml: rounded top-level `eq_gains`
     /// vs full-precision nested `[[custom_eq_presets]].gains`.

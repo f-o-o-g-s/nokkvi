@@ -62,7 +62,11 @@ impl EqState {
 }
 
 /// ISO standard 10-band graphic EQ center frequencies.
-const EQ_BANDS_HZ: [f32; 10] = [
+///
+/// Cross-crate length source of truth: the UI's `BAND_FREQS` label array in
+/// `src/widgets/eq_modal.rs` is pinned to this array by a `const _: ()` assert
+/// and a unit test there, so band count/value changes here force a label review.
+pub const EQ_BANDS_HZ: [f32; 10] = [
     31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
 ];
 
