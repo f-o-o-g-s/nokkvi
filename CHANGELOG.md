@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - New `nokkvi status` command prints the current playback state, track, volume, and shuffle/repeat/consume modes as JSON.
 - New `nav-up`, `nav-down`, `enter`, and `selection` CLI commands drive and inspect the focused list — move the selection, activate the centered item, or read it.
 - New `nokkvi add-to-queue` command enqueues the focused list item (the Shift+A hotkey) and reports what it added.
+- New `nokkvi remove-from-queue` command removes the centered queue song (the Ctrl+D hotkey) and reports what it removed.
 
 ### Changed
 

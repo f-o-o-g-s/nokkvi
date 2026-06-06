@@ -174,6 +174,38 @@ fn add_to_queue_echoes_added_item_or_null() {
 }
 
 #[test]
+fn remove_from_queue_outside_queue_view_errors() {
+    // Queue-gated: the centered item only has meaning in the queue view, so the
+    // verb errors (rather than silently no-opping) when run elsewhere.
+    let mut app = test_app();
+    app.current_view = crate::View::Albums;
+    let (incoming, rx) = make_incoming("remove-from-queue");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire");
+    let err = resp.error.expect("must error outside the queue view");
+    assert_eq!(err.code, "not_in_queue_view");
+}
+
+#[test]
+fn remove_from_queue_in_empty_queue_reports_null() {
+    // In the queue view with nothing centered (empty queue), it reports
+    // `{"removed": null}` rather than claiming a removal.
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    let (incoming, rx) = make_incoming("remove-from-queue");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire");
+    assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "removed": null })));
+}
+
+#[test]
 fn navigation_verbs_acknowledge_with_ok_true() {
     // nav-up/nav-down/enter route an existing SlotListMessage through the normal
     // loop (fire-and-forget); the move/activation is async, so they ack.
@@ -261,6 +293,7 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         "consume",
         "clear-queue",
         "add-to-queue",
+        "remove-from-queue",
         "switch-view",
         "love",
         "rate",

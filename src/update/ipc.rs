@@ -116,6 +116,9 @@
 //! | `clear-queue` | act       | `{"ok":true}`; `clear_queue_action()` (gate-free).|
 //! | `add-to-queue`| act       | `{"added":name\|null}`; enqueue the focused item|
 //! |               |           | (Shift+A); null when nothing is selected.       |
+//! | `remove-from-queue` | act | `{"removed":name\|null}`; remove the centered    |
+//! |               |           | queue song (Ctrl+D); `not_in_queue_view` error |
+//! |               |           | outside the queue view.                        |
 //! | `switch-view` | act_str   | `{"view":name}`; arg `view` (one of `albums`/  |
 //! |               |           | `queue`/`songs`/`artists`/`genres`/`playlists`/|
 //! |               |           | `radios`/`settings`). Invalid → `invalid_args`.|
@@ -488,6 +491,23 @@ define_commands! {
         };
         let task = app.handle_add_to_queue();
         Ok((task, json!({ "added": added })))
+    });
+    // Remove the centered queue song — the in-app Ctrl+D hotkey. Queue-gated:
+    // the centered item only has meaning in the queue view, so this errors
+    // elsewhere (unlike clear-queue, which is ungated because it needs no
+    // selection). The Queue branch of get_center_item_info resolves the same
+    // filtered-center song handle_remove_from_queue removes, so the echo is
+    // exact; null when the queue is empty (no song centered).
+    "remove-from-queue" => act (|app: &mut Nokkvi| {
+        if app.current_view != View::Queue {
+            return Err((
+                "not_in_queue_view",
+                "remove-from-queue only works in the queue view".to_string(),
+            ));
+        }
+        let removed = app.get_center_item_info().map(|info| info.name);
+        let task = app.handle_remove_from_queue();
+        Ok((task, json!({ "removed": removed })))
     });
     // Switch the top-pane view. The `view` arg is required and validated
     // against the View enum before dispatch; the actual switch goes through
