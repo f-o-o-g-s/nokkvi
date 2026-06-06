@@ -407,6 +407,81 @@ fn settings_search_from_sub_list_is_noop() {
     );
 }
 
+/// Find the cached-entry index of the row with `key`, set the slot-list center
+/// to it, and return that index. Mirrors the focus-then-activate flow.
+#[cfg(test)]
+fn focus_settings_key(page: &mut crate::views::SettingsPage, key: &str) {
+    let idx = page
+        .cached_entries
+        .iter()
+        .position(|e| {
+            matches!(e, crate::views::settings::items::SettingsEntry::Item(item)
+                if item.key.as_ref() == key)
+        })
+        .unwrap_or_else(|| panic!("settings entries should contain key {key}"));
+    let total = page.cached_entries.len();
+    page.slot_list.set_offset(idx, total);
+}
+
+#[test]
+fn settings_edit_activate_default_playlist_returns_picker_action() {
+    use crate::views::settings::{SettingsAction, SettingsMessage, SettingsTab};
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    page.active_category = SettingsTab::Playback;
+    page.refresh_entries(&data);
+    focus_settings_key(&mut page, "general.default_playlist_name");
+
+    let action = page.update(SettingsMessage::EditActivate, &data);
+    assert!(
+        matches!(action, SettingsAction::OpenDefaultPlaylistPicker),
+        "Enter on default-playlist row should open the picker, got {action:?}"
+    );
+}
+
+#[test]
+fn settings_edit_activate_local_music_path_returns_text_input() {
+    use crate::views::settings::{SettingsAction, SettingsMessage, SettingsTab};
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    page.active_category = SettingsTab::General;
+    page.refresh_entries(&data);
+    focus_settings_key(&mut page, "general.local_music_path");
+
+    let action = page.update(SettingsMessage::EditActivate, &data);
+    assert!(
+        matches!(action, SettingsAction::OpenTextInput { ref key, .. }
+            if key == "general.local_music_path"),
+        "Enter on local-music-path row should open the text input dialog, got {action:?}"
+    );
+}
+
+#[test]
+fn settings_edit_activate_font_family_opens_font_sub_list() {
+    use crate::views::settings::{SettingsAction, SettingsMessage, SettingsTab};
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    page.active_category = SettingsTab::Interface;
+    page.refresh_entries(&data);
+    focus_settings_key(&mut page, "font_family");
+
+    let action = page.update(SettingsMessage::EditActivate, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Font picker activation returns None and mutates state, got {action:?}"
+    );
+    assert!(
+        page.font_sub_list.is_some(),
+        "font picker sub-list should open after activating the font_family row"
+    );
+}
+
 // ============================================================================
 // I22 — song-change fallback uses the finished song's own duration
 // ============================================================================

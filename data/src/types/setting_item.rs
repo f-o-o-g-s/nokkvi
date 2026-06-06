@@ -61,6 +61,17 @@ impl<'a> SettingMeta<'a> {
     }
 }
 
+/// Structural activation intent for a row, set by the builder next to
+/// `with_enter_hint()`. Lets `EditActivate` dispatch on the enum instead
+/// of string-matching the key, so a key rename can't silently break the
+/// action while leaving the (flag-driven) Enter hint intact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivateKind {
+    FontPicker,
+    TextInputDialog,
+    PlaylistPicker,
+}
+
 /// A single navigable setting in the slot list.
 #[derive(Debug, Clone)]
 pub struct SettingItem {
@@ -88,6 +99,9 @@ pub struct SettingItem {
     /// can't be inferred from the value type alone (font picker, local music
     /// path text input, default playlist picker).
     pub needs_enter_hint: bool,
+    /// Structural activation intent (see `ActivateKind`). `None` for rows
+    /// whose activation is fully determined by their value type.
+    pub on_activate: Option<ActivateKind>,
 }
 
 impl SettingItem {
@@ -103,6 +117,7 @@ impl SettingItem {
             subtitle: m.subtitle,
             is_theme_key: false,
             needs_enter_hint: false,
+            on_activate: None,
         })
     }
 
@@ -287,6 +302,15 @@ impl SettingsEntry {
     pub fn with_enter_hint(mut self) -> Self {
         if let SettingsEntry::Item(ref mut item) = self {
             item.needs_enter_hint = true;
+        }
+        self
+    }
+
+    /// Attach a structural activation intent. No-op on headers. Pair with
+    /// `with_enter_hint()` on dialog/picker rows.
+    pub fn with_activate(mut self, kind: ActivateKind) -> Self {
+        if let SettingsEntry::Item(ref mut item) = self {
+            item.on_activate = Some(kind);
         }
         self
     }

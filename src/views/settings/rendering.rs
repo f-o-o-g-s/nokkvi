@@ -1315,8 +1315,9 @@ mod tests {
     use super::*;
 
     /// Construct a bare `SettingItem` for predicate tests, with all defaults
-    /// (`needs_enter_hint = false`, `is_theme_key = false`, no subtitle, no
-    /// icon). Callers tweak whichever fields the test asserts against.
+    /// (`needs_enter_hint = false`, `is_theme_key = false`, `on_activate = None`,
+    /// no subtitle, no icon). Callers tweak whichever fields the test asserts
+    /// against.
     fn bare_item(key: &'static str, value: SettingValue) -> SettingItem {
         let default = value.clone();
         SettingItem {
@@ -1329,6 +1330,7 @@ mod tests {
             subtitle: None,
             is_theme_key: false,
             needs_enter_hint: false,
+            on_activate: None,
         }
     }
 

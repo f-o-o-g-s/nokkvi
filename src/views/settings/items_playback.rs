@@ -15,7 +15,7 @@
 use nokkvi_data::services::settings_tables::playback::build_playback_tab_settings_items;
 pub(crate) use nokkvi_data::types::settings_data::PlaybackSettingsData;
 
-use super::items::{MacroRows, SettingItem, SettingMeta, SettingsEntry};
+use super::items::{ActivateKind, MacroRows, SettingItem, SettingMeta, SettingsEntry};
 
 /// Build settings entries for the Playback tab.
 pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsEntry> {
@@ -158,7 +158,8 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             },
             "Not set",
         )
-        .with_enter_hint(),
+        .with_enter_hint()
+        .with_activate(ActivateKind::PlaylistPicker),
         macro_rows.take("general.queue_show_default_playlist"),
     ]);
 

@@ -783,6 +783,7 @@ mod tests {
                 subtitle: None,
                 is_theme_key: false,
                 needs_enter_hint: false,
+                on_activate: None,
             }),
             SettingsEntry::Item(SettingItem {
                 key: crate::visualizer_config::keys::WAVES.into(),
@@ -794,6 +795,7 @@ mod tests {
                 subtitle: None,
                 is_theme_key: false,
                 needs_enter_hint: false,
+                on_activate: None,
             }),
         ];
 

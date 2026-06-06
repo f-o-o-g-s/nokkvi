@@ -10,7 +10,7 @@
 // `Vec<SettingsEntry>` directly. Re-exported here so existing
 // `crate::views::settings::items::*` import paths keep resolving.
 pub(crate) use nokkvi_data::types::{
-    setting_item::{SettingItem, SettingMeta, SettingsEntry},
+    setting_item::{ActivateKind, SettingItem, SettingMeta, SettingsEntry},
     setting_value::SettingValue,
 };
 
@@ -512,6 +512,52 @@ mod tests {
         let data = GeneralSettingsData::default();
         let entries = build_general_items(&data);
         assert_entry_needs_enter_hint(&entries, "general.local_music_path");
+    }
+
+    /// Find the first `SettingItem` matching `key` and return its
+    /// `on_activate` intent.
+    fn entry_on_activate(entries: &[SettingsEntry], key: &str) -> Option<ActivateKind> {
+        entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(it) if it.key.as_ref() == key => Some(it),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing settings entry for key {key}"))
+            .on_activate
+    }
+
+    /// The three dialog/picker rows carry a structural `on_activate` intent so
+    /// `EditActivate` dispatches on the enum instead of string-matching the key.
+    /// Guards against a key rename silently dropping the action while leaving the
+    /// (flag-driven) Enter hint intact.
+    #[test]
+    fn setting_items_carry_on_activate_intent() {
+        use super::super::{
+            items_interface::{InterfaceSettingsData, build_interface_items},
+            items_playback::{PlaybackSettingsData, build_playback_items},
+        };
+
+        let interface = build_interface_items(&InterfaceSettingsData::default());
+        assert_eq!(
+            entry_on_activate(&interface, "font_family"),
+            Some(ActivateKind::FontPicker),
+            "font_family row should carry FontPicker activation intent"
+        );
+
+        let general = build_general_items(&GeneralSettingsData::default());
+        assert_eq!(
+            entry_on_activate(&general, "general.local_music_path"),
+            Some(ActivateKind::TextInputDialog),
+            "local_music_path row should carry TextInputDialog activation intent"
+        );
+
+        let playback = build_playback_items(&PlaybackSettingsData::default());
+        assert_eq!(
+            entry_on_activate(&playback, "general.default_playlist_name"),
+            Some(ActivateKind::PlaylistPicker),
+            "default_playlist_name row should carry PlaylistPicker activation intent"
+        );
     }
 
     #[test]

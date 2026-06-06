@@ -18,7 +18,7 @@ use nokkvi_data::{
     types::player_settings::ArtworkColumnMode,
 };
 
-use super::items::{MacroRows, SettingItem, SettingMeta, SettingsEntry};
+use super::items::{ActivateKind, MacroRows, SettingItem, SettingMeta, SettingsEntry};
 
 /// Build settings entries for the Interface tab.
 pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<SettingsEntry> {
@@ -70,7 +70,8 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             font_display,
             "(system default)",
         )
-        .with_enter_hint(),
+        .with_enter_hint()
+        .with_activate(ActivateKind::FontPicker),
         // --- Metadata Strip ---
         SettingsEntry::Header {
             label: "Metadata Strip",

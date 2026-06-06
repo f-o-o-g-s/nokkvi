@@ -29,7 +29,7 @@ pub(crate) mod sentinel;
 mod sub_lists;
 mod view;
 
-use items::{SettingValue, SettingsEntry};
+use items::{ActivateKind, SettingValue, SettingsEntry};
 pub(crate) use sub_lists::{FontSubListState, SubListState};
 
 /// Normalize and validate a hex color string.
@@ -852,33 +852,32 @@ impl SettingsPage {
                                         v if v.is_editable() => {
                                             self.editing_index = Some(center_idx);
                                         }
-                                        // Font family: open font picker sub-list
-                                        SettingValue::Text(_)
-                                            if item.key.as_ref() == "font_family" =>
-                                        {
-                                            let fonts = self.system_fonts().to_vec();
-                                            self.font_sub_list = Some(FontSubListState::new(
-                                                fonts,
-                                                self.slot_list.viewport_offset,
-                                            ));
-                                        }
-                                        // Local music path: open text input dialog for free-text edit
-                                        SettingValue::Text(current)
-                                            if item.key.as_ref() == "general.local_music_path" =>
-                                        {
-                                            return SettingsAction::OpenTextInput {
-                                                key: item.key.to_string(),
-                                                current_value: current.clone(),
-                                                label: item.label.clone(),
-                                            };
-                                        }
-                                        // Default playlist: open the root-level picker modal
-                                        SettingValue::Text(_)
-                                            if item.key.as_ref()
-                                                == "general.default_playlist_name" =>
-                                        {
-                                            return SettingsAction::OpenDefaultPlaylistPicker;
-                                        }
+                                        // Structural activation intent (font
+                                        // picker / text dialog / playlist
+                                        // picker). Set by the builder via
+                                        // `with_activate`; matched here instead
+                                        // of string-matching the key so a key
+                                        // rename can't drift the action.
+                                        SettingValue::Text(current) => match item.on_activate {
+                                            Some(ActivateKind::FontPicker) => {
+                                                let fonts = self.system_fonts().to_vec();
+                                                self.font_sub_list = Some(FontSubListState::new(
+                                                    fonts,
+                                                    self.slot_list.viewport_offset,
+                                                ));
+                                            }
+                                            Some(ActivateKind::TextInputDialog) => {
+                                                return SettingsAction::OpenTextInput {
+                                                    key: item.key.to_string(),
+                                                    current_value: current.clone(),
+                                                    label: item.label.clone(),
+                                                };
+                                            }
+                                            Some(ActivateKind::PlaylistPicker) => {
+                                                return SettingsAction::OpenDefaultPlaylistPicker;
+                                            }
+                                            None => {}
+                                        },
                                         _ => {}
                                     }
                                 }

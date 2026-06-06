@@ -24,7 +24,7 @@ use nokkvi_data::services::settings_tables::general::build_general_tab_settings_
 pub(crate) use nokkvi_data::types::settings_data::GeneralSettingsData;
 
 use super::{
-    items::{MacroRows, SettingItem, SettingMeta, SettingsEntry},
+    items::{ActivateKind, MacroRows, SettingItem, SettingMeta, SettingsEntry},
     sentinel::SentinelKind,
 };
 
@@ -83,7 +83,8 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
         // should show the "Enter ↵" affordance on this row.
         macro_rows
             .take("general.local_music_path")
-            .with_enter_hint(),
+            .with_enter_hint()
+            .with_activate(ActivateKind::TextInputDialog),
         macro_rows.take("general.verbose_config"),
         // --- Account (hand-written: read-only mirrors + logout dialog sentinel) ---
         SettingsEntry::Header {
