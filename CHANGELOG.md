@@ -8,6 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## v0.6.10 — 2026-06-06
+
+### Changed
+
 - The About modal now credits Claude Opus 4.8 as the shipwright (previously Opus 4.7).
 - The Scrobble Threshold setting's description now mentions that a scrobble also fires after 4 minutes of listening, not only at the percentage you set.
 
@@ -21,8 +29,6 @@ All notable changes to this project will be documented in this file.
 - The Crossfade settings' "Restore Default" now restores the real defaults (on, 7 seconds) instead of turning crossfade off and setting 5 seconds.
 - Dragging a track from the browser pane into an empty playlist now adds it, instead of silently doing nothing.
 - Adding a song to the playlist you're currently editing now appears in the editor right away instead of leaving it looking unchanged.
-
-### Removed
 
 ## v0.6.9 — 2026-06-05
 
