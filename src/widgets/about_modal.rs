@@ -85,7 +85,7 @@ pub(crate) fn build_about_rows(data: &AboutViewData<'_>) -> Vec<(&'static str, S
 
     let mut rows: Vec<(&'static str, String)> = vec![
         ("Captain", "foogs".to_string()),
-        ("Shipwrights", "Claude Opus 4.7".to_string()),
+        ("Shipwrights", "Claude Opus 4.8".to_string()),
         ("Version", version.to_string()),
     ];
     if !git_hash.is_empty() {
