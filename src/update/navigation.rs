@@ -69,8 +69,7 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
             app.albums_page.common.search_query.clear();
             app.albums_page.expansion.clear();
             app.albums_page.common.slot_list.viewport_offset = 0;
-            app.albums_page.common.slot_list.selected_indices.clear();
-            app.albums_page.common.slot_list.selected_offset = None;
+            app.albums_page.common.clear_selection_for_expand_prime();
             app.library.albums.clear();
         }
         crate::state::PendingExpand::Artist { .. } => {
@@ -79,8 +78,7 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
             app.artists_page.common.search_query.clear();
             app.artists_page.expansion.clear();
             app.artists_page.common.slot_list.viewport_offset = 0;
-            app.artists_page.common.slot_list.selected_indices.clear();
-            app.artists_page.common.slot_list.selected_offset = None;
+            app.artists_page.common.clear_selection_for_expand_prime();
             app.library.artists.clear();
         }
         crate::state::PendingExpand::Genre { .. } => {
@@ -89,8 +87,7 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
             app.genres_page.common.search_query.clear();
             app.genres_page.expansion.clear();
             app.genres_page.common.slot_list.viewport_offset = 0;
-            app.genres_page.common.slot_list.selected_indices.clear();
-            app.genres_page.common.slot_list.selected_offset = None;
+            app.genres_page.common.clear_selection_for_expand_prime();
             app.library.genres.clear();
         }
         crate::state::PendingExpand::Song { .. } => {
@@ -99,8 +96,7 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
             app.songs_page.common.search_query.clear();
             // Songs aren't expandable — no expansion field to clear.
             app.songs_page.common.slot_list.viewport_offset = 0;
-            app.songs_page.common.slot_list.selected_indices.clear();
-            app.songs_page.common.slot_list.selected_offset = None;
+            app.songs_page.common.clear_selection_for_expand_prime();
             app.library.songs.clear();
         }
     }

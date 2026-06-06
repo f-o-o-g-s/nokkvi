@@ -354,6 +354,54 @@ impl SlotListView {
         }
     }
 
+    /// Clear the multi-selection set and anchor while KEEPING the focus-cursor
+    /// marker (`selected_offset`). The `SlotListView`-level counterpart of
+    /// [`SlotListPageState::clear_multi_selection`], for callers that hold a
+    /// bare `&mut SlotListView` and own their own viewport reset.
+    pub fn clear_multi_selection(&mut self) {
+        self.selected_indices.clear();
+        self.anchor_index = None;
+    }
+
+    /// Clear the multi-selection set, anchor, AND the focus-cursor marker.
+    ///
+    /// The "wholesale buffer-replace" reset: when the backing buffer is
+    /// replaced (background reload, search reset) the retained absolute
+    /// `selected_indices` would point at *different* items, so a later
+    /// positional batch op would silently target the wrong songs. Drops all
+    /// three selection fields together. The viewport offset is left to the
+    /// caller (it owns its own anchor-id relocation / clamp).
+    pub fn clear_selection_for_refresh(&mut self) {
+        self.selected_indices.clear();
+        self.anchor_index = None;
+        self.selected_offset = None;
+    }
+
+    /// Drop only the click-to-focus marker (`selected_offset`), leaving the
+    /// multi-selection set and anchor intact. Used after a buffer shrink where
+    /// the multi-selection was already cleared separately and only the focus
+    /// cursor needs to be cleaned up (the caller still owns its viewport clamp).
+    pub fn clear_focus_cursor(&mut self) {
+        self.selected_offset = None;
+    }
+
+    /// Empty the multi-selection set only, keeping the anchor and the
+    /// focus-cursor marker. Used immediately before a batch play action: the
+    /// selection has already been read into the play payload, so the indices
+    /// are dropped while the cursor stays put.
+    pub fn clear_selection_indices_only(&mut self) {
+        self.selected_indices.clear();
+    }
+
+    /// Clear the multi-selection set and the focus-cursor marker but
+    /// deliberately keep the anchor. Used by the find-and-expand prime path,
+    /// which resets the page to a clean pre-expand state without disturbing the
+    /// anchor the subsequent expand relies on.
+    pub fn clear_selection_for_expand_prime(&mut self) {
+        self.selected_indices.clear();
+        self.selected_offset = None;
+    }
+
     /// Record a scroll event for transient scrollbar animation.
     /// Sets `last_scrolled` to now and increments `scroll_generation_id`.
     pub fn record_scroll(&mut self) {

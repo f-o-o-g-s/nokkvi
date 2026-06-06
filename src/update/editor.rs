@@ -264,7 +264,7 @@ impl Nokkvi {
         // the viewport offset into range. `evaluate_context_menu` +
         // `clear_multi_selection` above already cleared the multi-selection.
         let new_total = editor.songs.len();
-        editor.common.slot_list.selected_offset = None;
+        editor.common.slot_list.clear_focus_cursor();
         if new_total > 0 && editor.common.slot_list.viewport_offset >= new_total {
             editor.common.slot_list.viewport_offset = new_total.saturating_sub(1);
         } else if new_total == 0 {
@@ -386,8 +386,7 @@ impl Nokkvi {
             editor.edit.update_snapshot(loaded_ids);
             // Drop any stale multi-selection — the loaded rows may not line up
             // with whatever was selected in a prior session.
-            editor.common.slot_list.selected_indices.clear();
-            editor.common.slot_list.anchor_index = None;
+            editor.common.slot_list.clear_multi_selection();
         }
         // Prefetch mini artwork for the freshly-loaded buffer so the rows show
         // their covers instead of blank gray placeholders. The editor never
@@ -472,8 +471,7 @@ impl Nokkvi {
         }
 
         // Drop any stale selection so it does not point at shifted rows.
-        editor.common.clear_multi_selection();
-        editor.common.slot_list.selected_offset = None;
+        editor.common.clear_selection_for_refresh();
         // Fetch art for the newly dropped rows.
         self.editor_artwork_prefetch_tasks()
     }

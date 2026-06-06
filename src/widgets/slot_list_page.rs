@@ -206,12 +206,40 @@ impl SlotListPageState {
     }
 
     /// Clear current multi-selection and return true if anything was cleared.
+    ///
+    /// Drops `selected_indices` + `anchor_index` but KEEPS the focus-cursor
+    /// marker (`selected_offset`). For the other selection-clear shapes use the
+    /// named intent methods below.
     pub fn clear_multi_selection(&mut self) -> bool {
         let has_selection =
             !self.slot_list.selected_indices.is_empty() || self.slot_list.anchor_index.is_some();
         self.slot_list.selected_indices.clear();
         self.slot_list.anchor_index = None;
         has_selection
+    }
+
+    /// Wholesale-buffer-replace reset: clear indices + anchor + focus marker.
+    /// Delegates to [`SlotListView::clear_selection_for_refresh`].
+    pub fn clear_selection_for_refresh(&mut self) {
+        self.slot_list.clear_selection_for_refresh();
+    }
+
+    /// Drop only the click-to-focus marker, keeping indices + anchor.
+    /// Delegates to [`SlotListView::clear_focus_cursor`].
+    pub fn clear_focus_cursor(&mut self) {
+        self.slot_list.clear_focus_cursor();
+    }
+
+    /// Empty the multi-selection set only (pre-batch-play), keeping anchor +
+    /// focus marker. Delegates to [`SlotListView::clear_selection_indices_only`].
+    pub fn clear_selection_indices_only(&mut self) {
+        self.slot_list.clear_selection_indices_only();
+    }
+
+    /// Find-and-expand prime reset: clear indices + focus marker, keep anchor.
+    /// Delegates to [`SlotListView::clear_selection_for_expand_prime`].
+    pub fn clear_selection_for_expand_prime(&mut self) {
+        self.slot_list.clear_selection_for_expand_prime();
     }
 
     /// Toggle membership of `offset` in the multi-selection set. Used by the
@@ -939,5 +967,95 @@ mod tests {
         assert!(!state.slot_list.selected_indices.contains(&2));
         // Tri-state should be Some (not All, not None)
         assert_eq!(state.select_all_state(5), SelectAllState::Some);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Named selection-clear intent methods
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn clear_selection_for_refresh_clears_all_three() {
+        // Wholesale buffer-replace subset: indices + anchor + focus marker all
+        // drop, because retained absolute indices would point at different
+        // items after the buffer is replaced.
+        let mut state = SlotListPageState::default();
+        state.slot_list.selected_indices.insert(1);
+        state.slot_list.selected_indices.insert(3);
+        state.slot_list.anchor_index = Some(1);
+        state.slot_list.selected_offset = Some(2);
+
+        state.clear_selection_for_refresh();
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+        assert_eq!(state.slot_list.selected_offset, None);
+    }
+
+    #[test]
+    fn clear_focus_cursor_drops_offset_keeps_selection() {
+        // Mirrors editor.rs context-menu cleanup: only the click-to-focus
+        // marker is dropped; the multi-selection set and anchor stay intact.
+        let mut state = SlotListPageState::default();
+        state.slot_list.selected_indices.insert(4);
+        state.slot_list.anchor_index = Some(4);
+        state.slot_list.selected_offset = Some(4);
+
+        state.clear_focus_cursor();
+
+        assert_eq!(state.slot_list.selected_offset, None);
+        assert!(state.slot_list.selected_indices.contains(&4));
+        assert_eq!(state.slot_list.anchor_index, Some(4));
+    }
+
+    #[test]
+    fn clear_selection_indices_only_keeps_offset_and_anchor() {
+        // Pre-play_batch_task clear (songs/albums/playlists): empties the
+        // selection set but leaves anchor and focus marker untouched.
+        let mut state = SlotListPageState::default();
+        state.slot_list.selected_indices.insert(0);
+        state.slot_list.selected_indices.insert(1);
+        state.slot_list.anchor_index = Some(0);
+        state.slot_list.selected_offset = Some(5);
+
+        state.clear_selection_indices_only();
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, Some(0));
+        assert_eq!(state.slot_list.selected_offset, Some(5));
+    }
+
+    #[test]
+    fn clear_selection_for_expand_prime_clears_indices_and_offset_keeps_anchor() {
+        // Navigation find-and-expand prime: indices + focus marker drop, but
+        // the anchor is deliberately left set (proves the prime path does NOT
+        // clear the anchor, matching the inline reset it replaces).
+        let mut state = SlotListPageState::default();
+        state.slot_list.selected_indices.insert(2);
+        state.slot_list.anchor_index = Some(2);
+        state.slot_list.selected_offset = Some(2);
+
+        state.clear_selection_for_expand_prime();
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.selected_offset, None);
+        assert_eq!(state.slot_list.anchor_index, Some(2));
+    }
+
+    #[test]
+    fn clear_multi_selection_still_keeps_focus_marker() {
+        // Regression-pin: clear_multi_selection drops indices + anchor but
+        // leaves the focus marker, and returns true when something was
+        // selected (the bool contract callers rely on).
+        let mut state = SlotListPageState::default();
+        state.slot_list.selected_indices.insert(3);
+        state.slot_list.anchor_index = Some(3);
+        state.slot_list.selected_offset = Some(3);
+
+        let had_selection = state.clear_multi_selection();
+
+        assert!(had_selection);
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+        assert_eq!(state.slot_list.selected_offset, Some(3));
     }
 }

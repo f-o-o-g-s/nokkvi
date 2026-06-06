@@ -434,7 +434,10 @@ impl Nokkvi {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
             AlbumsAction::PlayBatch(payload) => {
-                self.albums_page.common.slot_list.selected_indices.clear();
+                self.albums_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
                 return self.play_batch_task(payload);
             }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {

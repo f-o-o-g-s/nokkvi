@@ -179,7 +179,7 @@ impl PlaylistsPage {
                     }
                 }
                 PlaylistsMessage::FocusAndExpand(idx) => {
-                    self.common.slot_list.selected_indices.clear();
+                    self.common.slot_list.clear_selection_indices_only();
                     let (t1, _) = self.update(
                         PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
                             idx,

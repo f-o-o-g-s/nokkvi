@@ -357,7 +357,10 @@ impl Nokkvi {
                 return self.play_next_batch_task(payload);
             }
             SongsAction::PlayBatch(payload) => {
-                self.songs_page.common.slot_list.selected_indices.clear();
+                self.songs_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
                 return self.play_batch_task(payload);
             }
             SongsAction::ShowInfo(item) => {

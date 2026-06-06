@@ -79,8 +79,7 @@ impl Nokkvi {
         if let Some(page) = self.current_view_page_mut() {
             // If there's an active multi-selection, Escape clears it first
             if !page.common().slot_list.selected_indices.is_empty() {
-                page.common_mut().slot_list.selected_indices.clear();
-                page.common_mut().slot_list.anchor_index = None;
+                page.common_mut().slot_list.clear_multi_selection();
                 return Task::none();
             }
 

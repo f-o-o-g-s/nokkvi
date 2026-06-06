@@ -43,8 +43,7 @@ impl Nokkvi {
                 // Drop any stale multi-selection — the new contents may not
                 // line up with the rows the user had selected before the
                 // reload (consume-mode advance, SSE refresh, navigation).
-                self.queue_page.common.slot_list.selected_indices.clear();
-                self.queue_page.common.slot_list.anchor_index = None;
+                self.queue_page.common.slot_list.clear_multi_selection();
 
                 // Load artwork for queue songs using canonical prefetch
                 let mut tasks: Vec<Task<Message>> = Vec::new();
@@ -802,8 +801,7 @@ impl Nokkvi {
     ) -> std::borrow::Cow<'_, [QueueSongUIViewData]> {
         // Drop any multi-selection — the in-place reorder leaves the indices
         // pointing at different songs.
-        self.queue_page.common.slot_list.selected_indices.clear();
-        self.queue_page.common.slot_list.anchor_index = None;
+        self.queue_page.common.slot_list.clear_multi_selection();
         self.sort_queue_songs();
         let filtered = self.filter_queue_songs().into_owned();
         // Re-center on the currently playing song in the new sort order
@@ -842,8 +840,7 @@ impl Nokkvi {
     /// mode survives a relaunch.
     pub(crate) fn dispatch_random_queue_shuffle(&mut self) -> Task<Message> {
         // Drop multi-selection — indices won't survive the reorder.
-        self.queue_page.common.slot_list.selected_indices.clear();
-        self.queue_page.common.slot_list.anchor_index = None;
+        self.queue_page.common.slot_list.clear_multi_selection();
         // The cached signature was keyed against the previous deterministic
         // mode; clear it so the next deterministic pick actually re-sorts
         // the now-randomized list.
