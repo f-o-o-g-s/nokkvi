@@ -195,35 +195,14 @@ impl Nokkvi {
                 }) {
                     let item = match entry {
                         SlotListEntry::Child(song, _) => InfoModalItem::from_song_view_data(song),
-                        SlotListEntry::Parent(album) => InfoModalItem::Album {
-                            name: album.name.clone(),
-                            album_artist: Some(album.artist.clone()),
-                            release_type: album.release_type.clone(),
-                            genre: album.genre.clone(),
-                            genres: album.genres.clone(),
-                            duration: album.duration,
-                            year: album.year,
-                            song_count: Some(album.song_count),
-                            compilation: album.compilation,
-                            size: album.size,
-                            is_starred: album.is_starred,
-                            rating: album.rating,
-                            play_count: album.play_count,
-                            play_date: album.play_date.clone(),
-                            updated_at: album.updated_at.clone(),
-                            created_at: album.created_at.clone(),
-                            mbz_album_id: album.mbz_album_id.clone(),
-                            comment: album.comment.clone(),
-                            id: album.id.clone(),
-                            tags: album.tags.clone(),
-                            participants: album.participants.clone(),
-                            representative_path: self
-                                .albums_page
+                        SlotListEntry::Parent(album) => InfoModalItem::from_album_view_data(
+                            album,
+                            self.albums_page
                                 .expansion
                                 .children
                                 .first()
                                 .map(|s| s.path.clone()),
-                        },
+                        ),
                     };
                     return self.update(Message::InfoModal(
                         crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
@@ -237,30 +216,9 @@ impl Nokkvi {
                     |a| &a.id,
                 ) {
                     let item = match entry {
-                        SlotListEntry::Child(album, _) => InfoModalItem::Album {
-                            name: album.name.clone(),
-                            album_artist: Some(album.artist.clone()),
-                            release_type: album.release_type.clone(),
-                            genre: album.genre.clone(),
-                            genres: album.genres.clone(),
-                            duration: album.duration,
-                            year: album.year,
-                            song_count: Some(album.song_count),
-                            compilation: album.compilation,
-                            size: album.size,
-                            is_starred: album.is_starred,
-                            rating: album.rating,
-                            play_count: album.play_count,
-                            play_date: album.play_date.clone(),
-                            updated_at: album.updated_at.clone(),
-                            created_at: album.created_at.clone(),
-                            mbz_album_id: album.mbz_album_id.clone(),
-                            comment: album.comment.clone(),
-                            id: album.id.clone(),
-                            tags: album.tags.clone(),
-                            participants: album.participants.clone(),
-                            representative_path: None,
-                        },
+                        SlotListEntry::Child(album, _) => {
+                            InfoModalItem::from_album_view_data(album, None)
+                        }
                         SlotListEntry::Parent(artist) => InfoModalItem::Artist {
                             name: artist.name.clone(),
                             song_count: Some(artist.song_count),

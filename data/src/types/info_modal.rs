@@ -633,6 +633,41 @@ impl InfoModalItem {
             participants: song.participants.clone(),
         }
     }
+
+    /// Construct an `Album` info modal item from an `AlbumUIViewData`.
+    /// `representative_path` is caller-supplied (derived from the album's
+    /// expanded song children) because it is not present on the projection;
+    /// pass `Some(path)` to enable the modal's "Show in Folder" button.
+    /// DRY helper used by the albums/artists/genres views and the Get-Info hotkey.
+    pub fn from_album_view_data(
+        album: &crate::backend::albums::AlbumUIViewData,
+        representative_path: Option<String>,
+    ) -> Self {
+        Self::Album {
+            name: album.name.clone(),
+            album_artist: Some(album.artist.clone()),
+            release_type: album.release_type.clone(),
+            genre: album.genre.clone(),
+            genres: album.genres.clone(),
+            duration: album.duration,
+            year: album.year,
+            song_count: Some(album.song_count),
+            compilation: album.compilation,
+            size: album.size,
+            is_starred: album.is_starred,
+            rating: album.rating,
+            play_count: album.play_count,
+            play_date: album.play_date.clone(),
+            updated_at: album.updated_at.clone(),
+            created_at: album.created_at.clone(),
+            mbz_album_id: album.mbz_album_id.clone(),
+            comment: album.comment.clone(),
+            id: album.id.clone(),
+            tags: album.tags.clone(),
+            participants: album.participants.clone(),
+            representative_path,
+        }
+    }
 }
 
 /// Flatten HashMap tags into sorted (key, joined_values) pairs for display.
@@ -691,4 +726,158 @@ fn titlecase(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::albums::AlbumUIViewData;
+
+    /// Build a minimal `AlbumUIViewData` from album JSON for the threading test.
+    fn view_from_json(value: serde_json::Value) -> AlbumUIViewData {
+        let album = serde_json::from_value(value).expect("valid album json");
+        AlbumUIViewData::from_album(&album, "http://srv", "u=x")
+    }
+
+    /// `representative_path` is caller-supplied and threads straight through to
+    /// the Album variant, where it gates the modal's "Show in Folder" button via
+    /// `folder_path()`. This pins the exact divergence the audit flagged:
+    /// `Some(path)` enables the button, `None` disables it.
+    #[test]
+    fn from_album_view_data_threads_representative_path() {
+        let view = view_from_json(serde_json::json!({
+            "id": "al-1",
+            "name": "Test Album",
+        }));
+
+        // Some(path) → representative_path threaded + folder_path() resolves.
+        let item =
+            InfoModalItem::from_album_view_data(&view, Some("/music/al-1/01.flac".to_string()));
+        match &item {
+            InfoModalItem::Album {
+                representative_path,
+                ..
+            } => assert_eq!(
+                representative_path.as_deref(),
+                Some("/music/al-1/01.flac"),
+                "representative_path must thread through unchanged"
+            ),
+            other => panic!("expected Album variant, got {other:?}"),
+        }
+        assert_eq!(
+            item.folder_path().as_deref(),
+            Some("/music/al-1"),
+            "folder_path() must enable the 'Show in Folder' button when a path is supplied"
+        );
+
+        // None → representative_path stays None + folder_path() returns None.
+        let item_none = InfoModalItem::from_album_view_data(&view, None);
+        match &item_none {
+            InfoModalItem::Album {
+                representative_path,
+                ..
+            } => assert!(
+                representative_path.is_none(),
+                "representative_path must stay None when caller passes None"
+            ),
+            other => panic!("expected Album variant, got {other:?}"),
+        }
+        assert_eq!(
+            item_none.folder_path(),
+            None,
+            "folder_path() must be None (no 'Show in Folder' button) when no path is supplied"
+        );
+    }
+
+    /// Guards the 21-field mapping against future drift inside the single source
+    /// of truth. Builds an `AlbumUIViewData` with distinctive non-default values
+    /// and asserts every field lands in the right place, with `album_artist` and
+    /// `song_count` correctly `Some`-wrapped.
+    #[test]
+    fn from_album_view_data_maps_all_fields() {
+        let view = AlbumUIViewData {
+            id: "al-7".to_string(),
+            name: "Distinctive Name".to_string(),
+            artist: "The Artist".to_string(),
+            artist_id: "ar-7".to_string(),
+            song_count: 7,
+            artwork_url: "http://srv/art".to_string(),
+            year: Some(1999),
+            genre: Some("Rock".to_string()),
+            genres: Some("Rock • Pop".to_string()),
+            duration: Some(2400.0),
+            is_starred: true,
+            play_count: Some(42),
+            created_at: Some("2026-01-01".to_string()),
+            play_date: Some("2026-02-02".to_string()),
+            rating: Some(4),
+            compilation: Some(true),
+            size: Some(123_456),
+            updated_at: Some("2026-03-03".to_string()),
+            mbz_album_id: Some("mbz-7".to_string()),
+            release_type: Some("EP".to_string()),
+            comment: Some("a comment".to_string()),
+            tags: vec![("Media".to_string(), "CD".to_string())],
+            participants: vec![("Producer".to_string(), "Someone".to_string())],
+            release_date: Some("1999-05-05".to_string()),
+            original_date: Some("1999-01-01".to_string()),
+            original_year: Some(1999),
+            searchable_lower: "distinctive name the artist".to_string(),
+        };
+
+        let item = InfoModalItem::from_album_view_data(&view, None);
+        let InfoModalItem::Album {
+            name,
+            album_artist,
+            release_type,
+            genre,
+            genres,
+            duration,
+            year,
+            song_count,
+            compilation,
+            size,
+            is_starred,
+            rating,
+            play_count,
+            play_date,
+            updated_at,
+            created_at,
+            mbz_album_id,
+            comment,
+            id,
+            tags,
+            participants,
+            representative_path,
+        } = item
+        else {
+            panic!("expected Album variant");
+        };
+
+        assert_eq!(name, "Distinctive Name");
+        assert_eq!(album_artist.as_deref(), Some("The Artist"));
+        assert_eq!(release_type.as_deref(), Some("EP"));
+        assert_eq!(genre.as_deref(), Some("Rock"));
+        assert_eq!(genres.as_deref(), Some("Rock • Pop"));
+        assert_eq!(duration, Some(2400.0));
+        assert_eq!(year, Some(1999));
+        assert_eq!(song_count, Some(7));
+        assert_eq!(compilation, Some(true));
+        assert_eq!(size, Some(123_456));
+        assert!(is_starred);
+        assert_eq!(rating, Some(4));
+        assert_eq!(play_count, Some(42));
+        assert_eq!(play_date.as_deref(), Some("2026-02-02"));
+        assert_eq!(updated_at.as_deref(), Some("2026-03-03"));
+        assert_eq!(created_at.as_deref(), Some("2026-01-01"));
+        assert_eq!(mbz_album_id.as_deref(), Some("mbz-7"));
+        assert_eq!(comment.as_deref(), Some("a comment"));
+        assert_eq!(id, "al-7");
+        assert_eq!(tags, vec![("Media".to_string(), "CD".to_string())]);
+        assert_eq!(
+            participants,
+            vec![("Producer".to_string(), "Someone".to_string())]
+        );
+        assert_eq!(representative_path, None);
+    }
 }

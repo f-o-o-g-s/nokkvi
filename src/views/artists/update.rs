@@ -315,30 +315,7 @@ impl ArtistsPage {
                             Some(SlotListEntry::Child(album, _)) => match entry {
                                 LibraryContextEntry::GetInfo => {
                                     use nokkvi_data::types::info_modal::InfoModalItem;
-                                    let item = InfoModalItem::Album {
-                                        name: album.name.clone(),
-                                        album_artist: Some(album.artist.clone()),
-                                        release_type: album.release_type.clone(),
-                                        genre: album.genre.clone(),
-                                        genres: album.genres.clone(),
-                                        duration: album.duration,
-                                        year: album.year,
-                                        song_count: Some(album.song_count),
-                                        compilation: album.compilation,
-                                        size: album.size,
-                                        is_starred: album.is_starred,
-                                        rating: album.rating,
-                                        play_count: album.play_count,
-                                        play_date: album.play_date.clone(),
-                                        updated_at: album.updated_at.clone(),
-                                        created_at: album.created_at.clone(),
-                                        mbz_album_id: album.mbz_album_id.clone(),
-                                        comment: album.comment.clone(),
-                                        id: album.id.clone(),
-                                        tags: album.tags.clone(),
-                                        participants: album.participants.clone(),
-                                        representative_path: None,
-                                    };
+                                    let item = InfoModalItem::from_album_view_data(album, None);
                                     (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
                                 }
                                 LibraryContextEntry::ShowInFolder => (
