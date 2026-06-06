@@ -639,3 +639,65 @@ fn press_no_op_with_ctrl_or_shift_modifier() {
     let _ = app.handle_cross_pane_drag_pressed();
     assert_eq!(app.cross_pane_drag_pressed_item, None);
 }
+
+// --- Editor drop-target resolution (empty-playlist drop bug) ---------------
+
+/// Build an empty, *loaded* editor session for `playlist_id`. Mirrors the
+/// freshly-created-playlist flow: create + edit an empty playlist, whose async
+/// resolve returns an empty `Ok(vec)` → `SongsLoaded` marks it `Loaded`.
+fn empty_loaded_editor(app: &mut crate::Nokkvi, playlist_id: &str) {
+    use nokkvi_data::types::playlist_edit::PlaylistEditState;
+
+    use crate::{app_message::EditorMessage, state::PlaylistEditorState};
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        playlist_id.into(),
+        "New Playlist".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    )));
+    let _ = app.update(crate::app_message::Message::Editor(
+        EditorMessage::SongsLoaded(Vec::new()),
+    ));
+}
+
+#[test]
+fn compute_editor_drop_slot_resolves_zero_for_empty_editor_with_hover() {
+    // The fix: a genuinely-empty editor renders its empty state through the
+    // hover-capable helper, which publishes `HoveredSlot::Empty { items_len: 0 }`
+    // while the cursor is over the pane. `compute_editor_drop_slot` must then
+    // accept it (0 == buffer len → not stale) and resolve an insert-at-0 drop,
+    // so a song dragged into a brand-new empty playlist actually lands.
+    let mut app = test_app();
+    empty_loaded_editor(&mut app, "pl_new_empty");
+    app.playlist_editor
+        .as_mut()
+        .expect("editor session present")
+        .common
+        .slot_list
+        .hovered_slot = Some(HoveredSlot::Empty {
+        slot_index: 0,
+        items_len: 0,
+    });
+
+    assert_eq!(
+        app.compute_editor_drop_slot(),
+        Some(0),
+        "empty editor with an Empty{{items_len:0}} hover must resolve insert-at-0"
+    );
+}
+
+#[test]
+fn compute_editor_drop_slot_is_none_for_empty_editor_without_hover() {
+    // Documents the bug being fixed: with no hover-emitting widget (the old
+    // plain empty state), `hovered_slot` stays None and the drop resolves to
+    // None — the silent cancel the user saw as "nothing gets added".
+    let mut app = test_app();
+    empty_loaded_editor(&mut app, "pl_new_empty");
+
+    assert_eq!(
+        app.compute_editor_drop_slot(),
+        None,
+        "empty editor with no hovered slot must resolve no drop target"
+    );
+}

@@ -104,12 +104,40 @@ impl PlaylistEditorState {
         // Empty state: keep the same root widget type as the populated path
         // (CLAUDE.md gotcha — protects the edit-bar `text_input` focus).
         if data.songs.is_empty() {
-            let message = if data.total_count == 0 {
-                "This playlist is empty."
-            } else {
-                "No songs match your search."
-            };
-            return widgets::base_slot_list_empty_state(header, message, &layout_config);
+            // A genuinely-empty playlist (no active search) is still a valid
+            // cross-pane-drag drop target: render the empty state through the
+            // hover-capable helper so the pane publishes a
+            // `HoveredSlot::Empty { items_len: 0 }`. `compute_editor_drop_slot`
+            // then accepts it (`0 == buffer len`) and resolves an insert-at-0
+            // drop. Without this, the empty editor renders no hover-emitting
+            // slot widget, so a drop silently cancels (the populated path's
+            // trailing empty slots are what normally provide this target).
+            //
+            // The "no search matches" case (total_count > 0) keeps the plain,
+            // non-droppable empty state — dropping into a filtered-empty view
+            // has no unambiguous insert position.
+            if data.total_count == 0 {
+                let hovered = crate::widgets::HoveredSlot::Empty {
+                    slot_index: 0,
+                    items_len: 0,
+                };
+                return widgets::base_slot_list_empty_state_with_hover(
+                    header,
+                    "This playlist is empty.",
+                    &layout_config,
+                    EditorMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(
+                        hovered,
+                    )),
+                    EditorMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(
+                        hovered,
+                    )),
+                );
+            }
+            return widgets::base_slot_list_empty_state(
+                header,
+                "No songs match your search.",
+                &layout_config,
+            );
         }
 
         let vertical_artwork_chrome =

@@ -1284,3 +1284,95 @@ fn enter_edit_seeds_staleness_token_from_active_context_when_list_empty() {
         "with the playlists list empty, the staleness token must fall back to the active context"
     );
 }
+
+// --- Append-to-open-editor refresh decision (UI-not-refreshing bug) ---------
+
+#[test]
+fn append_reload_matches_clean_open_editor() {
+    // A backend append to the playlist currently open (clean, loaded) in the
+    // editor must be eligible for a buffer re-resolve so the new tracks appear.
+    let mut app = test_app();
+    seeded_editor(&mut app); // clean, loaded, playlist_id = "pl_1"
+
+    assert!(
+        app.editor_matches_clean_for_reload("pl_1"),
+        "a clean, loaded editor on the appended playlist must opt into a reload"
+    );
+}
+
+#[test]
+fn append_reload_skips_other_playlist() {
+    // Appending to a DIFFERENT playlist must not touch the open editor.
+    let mut app = test_app();
+    seeded_editor(&mut app); // editor on "pl_1"
+
+    assert!(
+        !app.editor_matches_clean_for_reload("pl_other"),
+        "an append to a different playlist must not trigger an editor reload"
+    );
+}
+
+#[test]
+fn append_reload_skips_when_no_editor() {
+    let app = test_app();
+    assert!(
+        !app.editor_matches_clean_for_reload("pl_1"),
+        "no edit session means nothing to reload"
+    );
+}
+
+#[test]
+fn append_reload_skips_while_loading() {
+    // A still-loading session has an empty/partial buffer that is NOT the real
+    // playlist; re-resolving it is pointless and the load is already in flight.
+    let mut app = test_app();
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    ))); // never SongsLoaded → load_state stays Loading
+
+    assert!(
+        !app.editor_matches_clean_for_reload("pl_1"),
+        "a Loading editor must not be reloaded"
+    );
+}
+
+#[test]
+fn append_reload_skips_when_metadata_dirty() {
+    // Unsaved metadata edits must not be clobbered by a re-resolve.
+    let mut app = test_app();
+    seeded_editor(&mut app);
+    let _ = app.update(Message::Editor(EditorMessage::NameChanged(
+        "Renamed Playlist".into(),
+    )));
+
+    assert!(
+        !app.editor_matches_clean_for_reload("pl_1"),
+        "a metadata-dirty editor must not be auto-reloaded"
+    );
+}
+
+#[test]
+fn append_reload_skips_when_tracks_dirty() {
+    // Unsaved track edits (e.g. a prior drag-add) must not be clobbered by a
+    // re-resolve — Save's track-dirty gate then leaves the backend append
+    // intact since this clean-only path declined to overwrite the buffer.
+    let mut app = test_app();
+    seeded_editor(&mut app); // 3 songs, clean
+    let _ = app.update(Message::Editor(EditorMessage::SongsInserted {
+        rows: vec![make_queue_song("d", "Song D", "Artist", "Album")],
+        at: 3,
+    }));
+
+    assert!(
+        app.editor_song_ids().len() == 4,
+        "precondition: the drag-add must have made the buffer dirty"
+    );
+    assert!(
+        !app.editor_matches_clean_for_reload("pl_1"),
+        "a track-dirty editor must not be auto-reloaded"
+    );
+}

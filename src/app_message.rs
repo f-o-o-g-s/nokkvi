@@ -24,7 +24,13 @@ pub enum PlaylistMutation {
     Created(String, Option<String>),
     /// (name, playlist_id) — playlist_id used to set queue header when overwritten from queue
     Overwritten(String, Option<String>),
-    Appended(String),
+    /// Songs appended to a playlist. `name` drives the toast; `id` lets the
+    /// handler re-resolve the open editor's buffer when the append targeted the
+    /// playlist currently being edited (so the new tracks appear).
+    Appended {
+        name: String,
+        id: String,
+    },
 }
 
 impl std::fmt::Display for PlaylistMutation {
@@ -34,7 +40,7 @@ impl std::fmt::Display for PlaylistMutation {
             Self::Renamed(name) => write!(f, "Renamed to '{name}'"),
             Self::Created(name, _) => write!(f, "Created playlist '{name}'"),
             Self::Overwritten(name, _) => write!(f, "Overwritten playlist '{name}'"),
-            Self::Appended(name) => write!(f, "Added songs to '{name}'"),
+            Self::Appended { name, .. } => write!(f, "Added songs to '{name}'"),
         }
     }
 }

@@ -266,12 +266,16 @@ impl Nokkvi {
                     })
                     .unwrap_or_default();
                 self.text_input_dialog.close();
+                let id_for_msg = playlist_id.clone();
                 self.shell_action_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
                         service.add_songs_to_playlist(&playlist_id, &song_ids).await
                     },
-                    Message::PlaylistMutated(PlaylistMutation::Appended(playlist_name)),
+                    Message::PlaylistMutated(PlaylistMutation::Appended {
+                        name: playlist_name,
+                        id: id_for_msg,
+                    }),
                     "add songs to playlist",
                 )
             }

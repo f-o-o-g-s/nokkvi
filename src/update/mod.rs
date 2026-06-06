@@ -264,7 +264,18 @@ impl Nokkvi {
                     _ => {}
                 }
                 self.toast_success(mutation.to_string());
-                self.handle_load_playlists()
+                // When the append targeted the playlist currently open in the
+                // editor, re-resolve its decoupled buffer so the new tracks
+                // appear (the editor never re-fetches on its own after the
+                // initial load). Gated on a clean, loaded session so unsaved
+                // staged edits are not discarded.
+                let editor_reload = match &mutation {
+                    crate::app_message::PlaylistMutation::Appended { id, .. } => {
+                        self.editor_reload_task_if_clean_match(id)
+                    }
+                    _ => Task::none(),
+                };
+                Task::batch([editor_reload, self.handle_load_playlists()])
             }
             Message::PlaylistsFetchedForDialog(playlists) => {
                 self.text_input_dialog.open_save_playlist(&playlists);
@@ -276,6 +287,7 @@ impl Nokkvi {
                     && let Some(ref default_id) = self.settings.default_playlist_id
                 {
                     let playlist_id = default_id.clone();
+                    let id_for_msg = playlist_id.clone();
                     let playlist_name = self.settings.default_playlist_name.clone();
                     let count = song_ids.len();
                     return self.shell_action_task(
@@ -283,12 +295,13 @@ impl Nokkvi {
                             let service = shell.playlists_api().await?;
                             service.add_songs_to_playlist(&playlist_id, &song_ids).await
                         },
-                        Message::PlaylistMutated(crate::app_message::PlaylistMutation::Appended(
-                            format!(
+                        Message::PlaylistMutated(crate::app_message::PlaylistMutation::Appended {
+                            name: format!(
                                 "{playlist_name}' ({count} song{})",
                                 if count == 1 { "" } else { "s" }
                             ),
-                        )),
+                            id: id_for_msg,
+                        }),
                         "quick-add to default playlist",
                     );
                 }

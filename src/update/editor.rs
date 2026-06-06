@@ -367,6 +367,51 @@ impl Nokkvi {
         Task::batch(tasks)
     }
 
+    /// Re-resolve the open editor's buffer when a backend append targeted the
+    /// playlist currently being edited, so the new tracks appear.
+    ///
+    /// Returns `Task::none()` unless ALL hold: an edit session is active, its
+    /// `playlist_id` matches `playlist_id`, the session is `Loaded`, and the
+    /// buffer/metadata are clean. Re-resolving a *dirty* buffer would discard
+    /// staged edits, so the refresh is skipped in that case — Save's track-dirty
+    /// gate (`PlaylistEditState::is_dirty`) then leaves the backend append
+    /// intact since a clean buffer is never full-overwritten. On a transient
+    /// resolve failure the session is left untouched (`Loaded`, pre-append
+    /// buffer) rather than marked Failed — the append already persisted, so the
+    /// stale view is harmless and the next Save is a no-op on tracks.
+    pub(crate) fn editor_reload_task_if_clean_match(&self, playlist_id: &str) -> Task<Message> {
+        if !self.editor_matches_clean_for_reload(playlist_id) {
+            return Task::none();
+        }
+        let id = playlist_id.to_string();
+        self.shell_task(
+            move |shell| async move { shell.resolve_playlist_for_editor(&id).await },
+            |result| match result {
+                Ok(rows) => Message::Editor(EditorMessage::SongsLoaded(rows)),
+                Err(e) => {
+                    tracing::error!(" Failed to re-resolve editor buffer after append: {}", e);
+                    Message::NoOp
+                }
+            },
+        )
+    }
+
+    /// Whether a backend append to `playlist_id` should trigger an editor
+    /// re-resolve. True only when an edit session is active on that exact
+    /// playlist, the session is `Loaded`, and neither the tracks nor the
+    /// metadata are dirty. Pulled out as a pure predicate so the reload
+    /// decision is unit-testable (the returned `Task` is not introspectable).
+    pub(crate) fn editor_matches_clean_for_reload(&self, playlist_id: &str) -> bool {
+        self.playlist_editor.as_ref().is_some_and(|e| {
+            e.edit.playlist_id == *playlist_id
+                && e.load_state == crate::state::EditorLoadState::Loaded
+                && !e.edit.has_metadata_changes()
+                && !e
+                    .edit
+                    .is_dirty(&e.songs.iter().map(|s| s.id.clone()).collect::<Vec<_>>())
+        })
+    }
+
     /// Fill the editor buffer with the async-resolved playlist rows.
     ///
     /// Seeds the dirty snapshot from the loaded rows so a freshly-loaded

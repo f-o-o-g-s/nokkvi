@@ -79,26 +79,17 @@ pub(crate) fn format_count_with_commas(n: u32) -> String {
     out
 }
 
-/// Empty state that routes through base_slot_list_layout to preserve widget tree
-/// structure (and thus text_input focus) when transitioning between results/no-results.
-/// Use this instead of empty_state_message for views that use base_slot_list_layout.
-pub(crate) fn base_slot_list_empty_state<'a, M: 'a>(
-    header: impl Into<iced::Element<'a, M>>,
-    message: &'a str,
-    layout_config: &crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig,
-) -> iced::Element<'a, M> {
+/// Build the centered empty-state message element that occupies the slot-list
+/// slot area. Shared by the plain and hover-capable empty-state helpers.
+fn base_slot_list_empty_content<'a, M: 'a>(message: &'a str) -> iced::Element<'a, M> {
     use iced::{
         Alignment, Length,
         widget::{container, text},
     };
 
-    use crate::{
-        theme,
-        widgets::base_slot_list_layout::{base_slot_list_empty_artwork, base_slot_list_layout},
-    };
+    use crate::theme;
 
-    // Build an empty-state content element that occupies the slot list slot
-    let empty_content = container(
+    container(
         text(message)
             .size(16)
             .font(theme::ui_font())
@@ -109,11 +100,61 @@ pub(crate) fn base_slot_list_empty_state<'a, M: 'a>(
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
     .style(theme::container_bg0_hard)
-    .into();
+    .into()
+}
+
+/// Empty state that routes through base_slot_list_layout to preserve widget tree
+/// structure (and thus text_input focus) when transitioning between results/no-results.
+/// Use this instead of empty_state_message for views that use base_slot_list_layout.
+pub(crate) fn base_slot_list_empty_state<'a, M: 'a>(
+    header: impl Into<iced::Element<'a, M>>,
+    message: &'a str,
+    layout_config: &crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig,
+) -> iced::Element<'a, M> {
+    use crate::widgets::base_slot_list_layout::{
+        base_slot_list_empty_artwork, base_slot_list_layout,
+    };
+
+    // Build an empty-state content element that occupies the slot list slot
+    let empty_content = base_slot_list_empty_content(message);
 
     // Use a placeholder artwork element to maintain the same root widget type
     // (Row when artwork is visible, Column when not) as the normal results path.
     // Passing None here would switch from Row→Column, destroying text_input focus.
+    let artwork = base_slot_list_empty_artwork(layout_config);
+    base_slot_list_layout(layout_config, header.into(), empty_content, artwork)
+}
+
+/// Empty state whose message area is also a cross-pane-drag drop target.
+///
+/// Identical to [`base_slot_list_empty_state`] but wraps the centered message in
+/// a `mouse_area` that republishes `on_enter` / `on_exit` (and `on_enter` again
+/// on every `on_move`). A list that renders no per-row slot widgets — e.g. a
+/// freshly-created, still-empty playlist editor — otherwise has nothing to
+/// populate `hovered_slot`, so a cross-pane drop silently cancels. With this the
+/// empty pane resolves a `HoveredSlot::Empty` drop target like a populated list's
+/// trailing empty slots do. Requires `M: Clone` because the hover messages are
+/// re-emitted across events.
+pub(crate) fn base_slot_list_empty_state_with_hover<'a, M: Clone + 'a>(
+    header: impl Into<iced::Element<'a, M>>,
+    message: &'a str,
+    layout_config: &crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig,
+    on_enter: M,
+    on_exit: M,
+) -> iced::Element<'a, M> {
+    use iced::widget::mouse_area;
+
+    use crate::widgets::base_slot_list_layout::{
+        base_slot_list_empty_artwork, base_slot_list_layout,
+    };
+
+    let move_msg = on_enter.clone();
+    let empty_content = mouse_area(base_slot_list_empty_content(message))
+        .on_enter(on_enter)
+        .on_exit(on_exit)
+        .on_move(move |_pt| move_msg.clone())
+        .into();
+
     let artwork = base_slot_list_empty_artwork(layout_config);
     base_slot_list_layout(layout_config, header.into(), empty_content, artwork)
 }

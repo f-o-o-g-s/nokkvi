@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 - Saving a playlist more than once without leaving the editor now works.
 - Opening the playlist editor from the "Playing From" bar now shows the playlist's real public/private state even before the Playlists view has loaded.
 - The Crossfade settings' "Restore Default" now restores the real defaults (on, 7 seconds) instead of turning crossfade off and setting 5 seconds.
+- Dragging a track from the browser pane into an empty playlist now adds it, instead of silently doing nothing.
+- Adding a song to the playlist you're currently editing now appears in the editor right away instead of leaving it looking unchanged.
 
 ### Removed
 
