@@ -701,3 +701,42 @@ async fn queue_slot_hover_does_not_dispatch_artwork_prefetch() {
 
     let _ = std::fs::remove_file(db_path);
 }
+
+// ============================================================================
+// build_queue_view_data helper (app_view.rs)
+//
+// The split-pane and single-view branches share one builder; these pin the
+// two parameters that diverge between them and the non-parametrized field
+// wiring, so a future field re-order/mis-wire in the single helper is caught.
+// ============================================================================
+
+#[test]
+fn build_queue_view_data_wires_window_width_and_elevated() {
+    let app = test_app();
+
+    let vd = app.build_queue_view_data(640.0, true);
+    assert_eq!(vd.window_width, 640.0);
+    assert!(vd.elevated);
+
+    let vd2 = app.build_queue_view_data(320.0, false);
+    assert_eq!(vd2.window_width, 320.0);
+    assert!(!vd2.elevated);
+}
+
+#[test]
+fn build_queue_view_data_matches_settings_and_counts() {
+    let app = test_app();
+
+    let vd = app.build_queue_view_data(100.0, false);
+    assert_eq!(vd.stable_viewport, app.settings.stable_viewport);
+    assert_eq!(
+        vd.show_default_playlist_chip,
+        app.settings.queue_show_default_playlist
+    );
+    assert_eq!(
+        vd.total_queue_count,
+        app.library
+            .queue_loading_target
+            .unwrap_or(app.library.queue_songs.len())
+    );
+}

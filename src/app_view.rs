@@ -1025,8 +1025,9 @@ impl Nokkvi {
     // tuple. Folding `column_dropdown_state(...)` into the helper keeps both
     // branches limited to a one-line call.
     //
-    // Queue/Playlists/Similar each render in only one branch (or have
-    // branch-specific extra fields like queue's edit-mode info) so they stay
+    // Queue is built the same way (`build_queue_view_data`); it differs only
+    // in `window_width` and `elevated` between the split-pane and single-view
+    // branches. Playlists and Similar render in only one branch and stay
     // inline at the call site.
     // -------------------------------------------------------------------------
 
@@ -1165,6 +1166,48 @@ impl Nokkvi {
         }
     }
 
+    /// Build `QueueViewData` from current app state. Shared by the
+    /// browsing-panel split-view branch and the normal single-view branch.
+    /// The two call sites differ only in `window_width` and `elevated`, so
+    /// those are the parameters; everything else is read off `&self`.
+    pub(crate) fn build_queue_view_data(
+        &self,
+        window_width: f32,
+        elevated: bool,
+    ) -> views::QueueViewData<'_> {
+        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+            column_dropdown_state(&self.open_menu, View::Queue);
+        views::QueueViewData {
+            queue_songs: self.filter_queue_songs(),
+            album_art: &self.artwork.album_art.snapshot,
+            large_artwork: &self.artwork.large_artwork.snapshot,
+            window_width,
+            window_height: self.window.height,
+            scale_factor: self.window.scale_factor,
+            modifiers: self.window.keyboard_modifiers,
+            current_playing_song_id: self.scrobble.current_song_id.clone(),
+            current_playing_entry_id: self.last_queue_current_entry_id,
+            is_playing: self.playback.playing && !self.playback.paused,
+            total_queue_count: self
+                .library
+                .queue_loading_target
+                .unwrap_or(self.library.queue_songs.len()),
+            stable_viewport: self.settings.stable_viewport,
+            elevated,
+            playlist_context_info: self.active_playlist_info.clone(),
+            playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
+            playlist_cover: self.active_playlist_strip_cover(),
+            overlay: views::OverlayMenuViewData {
+                column_dropdown_open,
+                column_dropdown_trigger_bounds,
+                open_menu: self.open_menu.as_ref(),
+            },
+            show_default_playlist_chip: self.settings.queue_show_default_playlist,
+            default_playlist_name: &self.settings.default_playlist_name,
+            drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Navigation Bar: Delegate to nav_bar component
     // -------------------------------------------------------------------------
@@ -1296,39 +1339,8 @@ impl Nokkvi {
                     editor.view(editor_data).map(Message::Editor)
                 }
                 _ => {
-                    let filtered_queue_songs = self.filter_queue_songs();
-                    let current_playing_song_id = self.scrobble.current_song_id.clone();
-                    let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                        column_dropdown_state(&self.open_menu, View::Queue);
-                    let queue_view_data = views::QueueViewData {
-                        queue_songs: filtered_queue_songs,
-                        album_art: &self.artwork.album_art.snapshot,
-                        large_artwork,
-                        window_width: self.content_pane_width() * 0.55,
-                        window_height: self.window.height,
-                        scale_factor: self.window.scale_factor,
-                        modifiers: self.window.keyboard_modifiers,
-                        current_playing_song_id,
-                        current_playing_entry_id: self.last_queue_current_entry_id,
-                        is_playing: self.playback.playing && !self.playback.paused,
-                        total_queue_count: self
-                            .library
-                            .queue_loading_target
-                            .unwrap_or(self.library.queue_songs.len()),
-                        stable_viewport: self.settings.stable_viewport,
-                        elevated: false,
-                        playlist_context_info: self.active_playlist_info.clone(),
-                        playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
-                        playlist_cover: self.active_playlist_strip_cover(),
-                        overlay: views::OverlayMenuViewData {
-                            column_dropdown_open,
-                            column_dropdown_trigger_bounds,
-                            open_menu: self.open_menu.as_ref(),
-                        },
-                        show_default_playlist_chip: self.settings.queue_show_default_playlist,
-                        default_playlist_name: &self.settings.default_playlist_name,
-                        drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
-                    };
+                    let queue_view_data =
+                        self.build_queue_view_data(self.content_pane_width() * 0.55, false);
                     self.queue_page.view(queue_view_data).map(Message::Queue)
                 }
             };
@@ -1504,39 +1516,7 @@ impl Nokkvi {
                 self.albums_page.view(view_data).map(Message::Albums)
             }
             View::Queue => {
-                let filtered_queue_songs = self.filter_queue_songs();
-                let current_playing_song_id = self.scrobble.current_song_id.clone();
-                let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                    column_dropdown_state(&self.open_menu, View::Queue);
-                let view_data = views::QueueViewData {
-                    queue_songs: filtered_queue_songs,
-                    album_art: &self.artwork.album_art.snapshot,
-                    large_artwork,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
-                    scale_factor: self.window.scale_factor,
-                    modifiers: self.window.keyboard_modifiers,
-                    current_playing_song_id,
-                    current_playing_entry_id: self.last_queue_current_entry_id,
-                    is_playing: self.playback.playing && !self.playback.paused,
-                    total_queue_count: self
-                        .library
-                        .queue_loading_target
-                        .unwrap_or(self.library.queue_songs.len()),
-                    stable_viewport: self.settings.stable_viewport,
-                    elevated,
-                    playlist_context_info: self.active_playlist_info.clone(),
-                    playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
-                    playlist_cover: self.active_playlist_strip_cover(),
-                    overlay: views::OverlayMenuViewData {
-                        column_dropdown_open,
-                        column_dropdown_trigger_bounds,
-                        open_menu: self.open_menu.as_ref(),
-                    },
-                    show_default_playlist_chip: self.settings.queue_show_default_playlist,
-                    default_playlist_name: &self.settings.default_playlist_name,
-                    drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
-                };
+                let view_data = self.build_queue_view_data(self.content_pane_width(), elevated);
                 self.queue_page.view(view_data).map(Message::Queue)
             }
             View::Artists => {
