@@ -440,7 +440,9 @@ fn save_edits_only_refreshes_banner_when_playing_the_edited_playlist() {
         playlist_comment: String::new(),
         playlist_public: false,
     }));
-    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved));
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved(
+        String::new(),
+    )));
     assert_eq!(
         app.active_playlist_info.as_ref().map(|c| c.id.as_str()),
         Some("playing"),
@@ -460,7 +462,9 @@ fn save_edits_only_refreshes_banner_when_playing_the_edited_playlist() {
         playlist_comment: String::new(),
         playlist_public: false,
     }));
-    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved));
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved(
+        String::new(),
+    )));
     assert_eq!(
         app.active_playlist_info.as_ref().map(|c| c.id.as_str()),
         Some("edited"),

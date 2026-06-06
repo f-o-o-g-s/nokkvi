@@ -20,7 +20,10 @@ use crate::{
 /// "reload before saving" warning rather than a generic error toast.
 enum SaveOutcome {
     /// Save completed (metadata and/or tracks persisted, or a clean no-op).
-    Saved,
+    /// Carries the server's new `updatedAt` token (empty when the post-write
+    /// re-read was skipped or failed) so the editor's optimistic-concurrency
+    /// guard can advance for a subsequent save in the same still-mounted session.
+    Saved(String),
     /// Aborted: the server playlist changed since the editor opened; the
     /// destructive track overwrite was refused.
     Stale,
@@ -47,7 +50,9 @@ impl Nokkvi {
             SplitViewMessage::ToggleBrowsingPanel => self.handle_toggle_browsing_panel(),
             SplitViewMessage::SwitchPaneFocus => self.handle_switch_pane_focus(),
             SplitViewMessage::SavePlaylistEdits => self.handle_save_playlist_edits(),
-            SplitViewMessage::PlaylistEditsSaved => self.handle_playlist_edits_saved(),
+            SplitViewMessage::PlaylistEditsSaved(updated_at) => {
+                self.handle_playlist_edits_saved(updated_at)
+            }
         }
     }
 
@@ -151,12 +156,29 @@ impl Nokkvi {
             playlist_public,
             Vec::new(),
         );
-        // Capture the server `updatedAt` from the cached list entry so the save
-        // path can detect a concurrent server-side edit (optimistic-concurrency
-        // guard). Absent (e.g. a freshly-created empty playlist) → empty, which
-        // the staleness check treats as never-stale.
-        if let Some(playlist) = self.library.playlists.iter().find(|p| p.id == playlist_id) {
-            edit_state.set_loaded_updated_at(playlist.updated_at.clone());
+        // Capture the server `updatedAt` so the save path can detect a
+        // concurrent server-side edit (optimistic-concurrency guard). Prefer the
+        // freshest playlists-list entry; fall back to the active-playlist context
+        // — the same object the queue-banner entry sources name/comment from —
+        // for the case where the list is not loaded (e.g. a restored session
+        // opened on Queue, never visiting Playlists). Absent in both (e.g. a
+        // freshly-created empty playlist) → empty, which the staleness check
+        // treats as never-stale.
+        let loaded_updated_at = self
+            .library
+            .playlists
+            .iter()
+            .find(|p| p.id == playlist_id)
+            .map(|p| p.updated_at.clone())
+            .or_else(|| {
+                self.active_playlist_info
+                    .as_ref()
+                    .filter(|ctx| ctx.id == playlist_id)
+                    .map(|ctx| ctx.updated.clone())
+            })
+            .unwrap_or_default();
+        if !loaded_updated_at.is_empty() {
+            edit_state.set_loaded_updated_at(loaded_updated_at);
         }
         self.playlist_editor = Some(crate::state::PlaylistEditorState::new(edit_state));
         // Leave `active_playlist_info` (the "Playing From" banner) untouched:
@@ -319,6 +341,20 @@ impl Nokkvi {
         self.shell_task(
             move |shell| async move {
                 let service = shell.playlists_api().await?;
+                // Optimistic-concurrency guard, BEFORE any write. The track
+                // overwrite is destructive (full createPlaylist replace), so it
+                // runs only when tracks changed and only after confirming the
+                // server playlist has not moved on since the editor opened.
+                // Checking BEFORE the metadata write is load-bearing: that write
+                // bumps the server's own `updatedAt`, so re-reading it afterward
+                // would compare the editor-open token against THIS save's own
+                // change and false-abort — silently dropping the track edits.
+                if tracks_changed && !loaded_updated_at.is_empty() {
+                    let current = service.get_playlist_updated_at(&playlist_id).await?;
+                    if current != loaded_updated_at {
+                        return Ok::<SaveOutcome, anyhow::Error>(SaveOutcome::Stale);
+                    }
+                }
                 // Update name/comment/visibility if any of them changed. Send
                 // ONLY the dirty fields (Navidrome's nil-means-unchanged
                 // contract): a comment-only edit no longer re-writes the name,
@@ -333,26 +369,31 @@ impl Nokkvi {
                         .update_playlist(&playlist_id, name_arg, comment_arg, public_arg)
                         .await?;
                 }
-                // The track overwrite is destructive (full createPlaylist
-                // replace). Run it ONLY when tracks actually changed, and only
-                // after confirming the server playlist has not moved on since
-                // the editor opened — otherwise a concurrent server-side track
-                // edit would be silently destroyed with nothing to roll back to.
                 if tracks_changed {
-                    if !loaded_updated_at.is_empty() {
-                        let current = service.get_playlist_updated_at(&playlist_id).await?;
-                        if current != loaded_updated_at {
-                            return Ok::<SaveOutcome, anyhow::Error>(SaveOutcome::Stale);
-                        }
-                    }
                     service
                         .replace_playlist_tracks(&playlist_id, &song_ids)
                         .await?;
                 }
-                Ok(SaveOutcome::Saved)
+                // Re-read the server token AFTER the writes so the editor's
+                // staleness guard advances to what THIS save produced; a second
+                // save in the still-mounted session then compares against the
+                // value just written, not the now-stale open-time token. Best
+                // effort — a failed re-read yields an empty token, which the
+                // saved-handler treats as "leave the prior token in place".
+                let new_updated_at = if metadata_changed || tracks_changed {
+                    service
+                        .get_playlist_updated_at(&playlist_id)
+                        .await
+                        .unwrap_or_default()
+                } else {
+                    loaded_updated_at.clone()
+                };
+                Ok(SaveOutcome::Saved(new_updated_at))
             },
             |result| match result {
-                Ok(SaveOutcome::Saved) => Message::SplitView(SplitViewMessage::PlaylistEditsSaved),
+                Ok(SaveOutcome::Saved(new_updated_at)) => {
+                    Message::SplitView(SplitViewMessage::PlaylistEditsSaved(new_updated_at))
+                }
                 Ok(SaveOutcome::Stale) => {
                     tracing::warn!(" Aborting playlist save — server changed since edit opened");
                     Message::Toast(crate::app_message::ToastMessage::Push(
@@ -379,7 +420,7 @@ impl Nokkvi {
     }
 
     /// Handle successful playlist save — update snapshot and show toast.
-    pub(crate) fn handle_playlist_edits_saved(&mut self) -> Task<Message> {
+    pub(crate) fn handle_playlist_edits_saved(&mut self, new_updated_at: String) -> Task<Message> {
         let current_ids = self.editor_song_ids();
 
         if let Some(edit_state) = self.playlist_editor.as_mut().map(|e| &mut e.edit) {
@@ -387,6 +428,14 @@ impl Nokkvi {
             let comment = edit_state.playlist_comment.clone();
             let id = edit_state.playlist_id.clone();
             edit_state.update_snapshot(current_ids);
+            // Advance the optimistic-concurrency token to the server's new value
+            // so a SECOND save in this still-mounted session compares against
+            // what THIS save wrote — the editor-open token is now stale by one
+            // (or two) writes. Empty means the save task could not re-read it:
+            // keep the prior token rather than blanking (which disables the guard).
+            if !new_updated_at.is_empty() {
+                edit_state.set_loaded_updated_at(new_updated_at);
+            }
             self.toast_success(format!("Playlist \"{name}\" saved"));
 
             // Only refresh the "Playing From" banner when the live queue is
@@ -398,21 +447,37 @@ impl Nokkvi {
                 .as_ref()
                 .is_some_and(|ctx| ctx.id == id)
             {
-                self.active_playlist_info = Some(
-                    self.library
-                        .playlists
-                        .iter()
-                        .find(|p| p.id == id)
-                        .map_or_else(
-                            || crate::state::ActivePlaylistContext::minimal(id, name, comment),
-                            crate::state::ActivePlaylistContext::from_playlist,
-                        ),
-                );
+                // Borrow the richer fields (count / duration / public / updated)
+                // from the cached list entry when present, but FORCE the just-
+                // saved name/comment. The cache still holds the PRE-edit values
+                // (LoadPlaylists below refreshes it asynchronously), so trusting
+                // `from_playlist` wholesale would snap the banner — and the
+                // persisted redb copy — back to the old text the instant the user
+                // saves, and leave it wrong if that reload is filtered or fails.
+                let mut ctx = self
+                    .library
+                    .playlists
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map_or_else(
+                        || {
+                            crate::state::ActivePlaylistContext::minimal(
+                                id.clone(),
+                                name.clone(),
+                                comment.clone(),
+                            )
+                        },
+                        crate::state::ActivePlaylistContext::from_playlist,
+                    );
+                ctx.name = name;
+                ctx.comment = comment;
+                self.active_playlist_info = Some(ctx);
                 self.persist_active_playlist_info();
             }
         }
 
         // Reload playlists so the Playlists view reflects any rename immediately
+        // and the banner's count / duration / updated fields reconcile to server.
         Task::done(Message::LoadPlaylists)
     }
 }

@@ -510,16 +510,18 @@ impl Nokkvi {
                 }
             }
             QueueAction::EditPlaylist => {
-                // Enter edit mode for the currently-playing playlist. Look up
-                // the cached visibility from the playlists library; fall back
-                // to default-public when the playlists list hasn't loaded yet.
+                // Enter edit mode for the currently-playing playlist. Prefer the
+                // freshest cached visibility from the playlists library; fall
+                // back to the context's own (played / persisted) flag when the
+                // playlists list hasn't loaded yet, rather than defaulting to
+                // public — a private playlist must not open looking public.
                 if let Some(ref ctx) = self.active_playlist_info {
                     let playlist_public = self
                         .library
                         .playlists
                         .iter()
                         .find(|p| p.id == ctx.id)
-                        .is_none_or(|p| p.public);
+                        .map_or(ctx.public, |p| p.public);
                     return Task::done(Message::SplitView(SplitViewMessage::EnterEditMode {
                         playlist_id: ctx.id.clone(),
                         playlist_name: ctx.name.clone(),

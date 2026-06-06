@@ -859,7 +859,9 @@ fn save_success_seeds_snapshot_from_editor_buffer() {
         "the reorder must leave the session dirty before save"
     );
 
-    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved));
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved(
+        String::new(),
+    )));
 
     assert!(
         !app.playlist_editor
@@ -1109,5 +1111,176 @@ fn scrobble_and_mpris_handlers_are_independent_of_editor_by_construction() {
         editor_buffer_snapshot(&app),
         editor_before,
         "scrobble/MPRIS-adjacent messages must never touch the editor buffer (bugs 8/9)"
+    );
+}
+
+// --- Phase 8: CRUD-from-queue-banner fixes --------------------------------
+//
+// These pin the save/enter behavior reachable from the queue "Playing From"
+// banner's edit button (QueueAction::EditPlaylist), the exact path the user hit.
+
+/// A library-list playlist entry with explicit name/comment/updated_at, for
+/// seeding `library.playlists` (the post-save cache the banner-refresh reads).
+fn playlist_entry(
+    id: &str,
+    name: &str,
+    comment: &str,
+    updated_at: &str,
+) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
+    nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: id.into(),
+        name: name.into(),
+        comment: comment.into(),
+        duration: 0.0,
+        song_count: 0,
+        owner_name: String::new(),
+        public: true,
+        updated_at: updated_at.into(),
+        artwork_album_ids: vec![],
+        searchable_lower: name.to_lowercase(),
+    }
+}
+
+/// Seed a loaded editor session for a specific playlist id/name/comment so the
+/// save handler's `id`/name/comment line up with a chosen `active_playlist_info`.
+fn seeded_editor_for(app: &mut crate::Nokkvi, id: &str, name: &str, comment: &str) {
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        id.into(),
+        name.into(),
+        comment.into(),
+        true,
+        Vec::new(),
+    )));
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(vec![
+        make_queue_song("a", "Song A", "Artist", "Album"),
+        make_queue_song("b", "Song B", "Artist", "Album"),
+    ])));
+}
+
+#[test]
+fn save_reflects_typed_name_in_banner_over_stale_cache() {
+    // Bug: playing FROM a playlist, edit it from the queue banner, RENAME, Save.
+    // The banner must show the just-typed name. The save handler rebuilds
+    // active_playlist_info from library.playlists, which still holds the OLD
+    // name (the reload is async and hasn't run), so the refresh must NOT let the
+    // stale cache entry clobber the name the user just typed and saved.
+    let mut app = test_app();
+    app.library.playlists.append_page(
+        vec![playlist_entry("pl_1", "Old Name", "Old comment", "T0")],
+        1,
+    );
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "pl_1".into(),
+        "Old Name".into(),
+        "Old comment".into(),
+    ));
+    seeded_editor_for(&mut app, "pl_1", "Old Name", "Old comment");
+
+    let _ = app.update(Message::Editor(EditorMessage::NameChanged(
+        "New Name".into(),
+    )));
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved(
+        String::new(),
+    )));
+
+    assert_eq!(
+        app.active_playlist_info.as_ref().map(|c| c.name.as_str()),
+        Some("New Name"),
+        "the Playing-From banner must show the just-saved name, not the stale library-cache value"
+    );
+}
+
+#[test]
+fn save_reflects_typed_comment_in_banner_over_stale_cache() {
+    // Same bug, comment field: editing the comment and saving must surface the
+    // new comment in the banner, not snap back to the stale cached comment.
+    let mut app = test_app();
+    app.library.playlists.append_page(
+        vec![playlist_entry("pl_1", "Old Name", "Old comment", "T0")],
+        1,
+    );
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "pl_1".into(),
+        "Old Name".into(),
+        "Old comment".into(),
+    ));
+    seeded_editor_for(&mut app, "pl_1", "Old Name", "Old comment");
+
+    let _ = app.update(Message::Editor(EditorMessage::CommentChanged(
+        "New comment".into(),
+    )));
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved(
+        String::new(),
+    )));
+
+    assert_eq!(
+        app.active_playlist_info
+            .as_ref()
+            .map(|c| c.comment.as_str()),
+        Some("New comment"),
+        "the Playing-From banner must show the just-saved comment, not the stale cache value"
+    );
+}
+
+#[test]
+fn save_advances_loaded_updated_at_token() {
+    // A successful save must advance the editor's optimistic-concurrency token
+    // to the server's new updatedAt (carried on PlaylistEditsSaved). Otherwise a
+    // SECOND track-changing save in the same still-mounted session re-reads a
+    // server token the FIRST save already bumped and false-aborts as "stale".
+    let mut app = test_app();
+    seeded_editor_for(&mut app, "pl_1", "Mix", "");
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.edit.set_loaded_updated_at("T0".into());
+    }
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistEditsSaved(
+        "T1".into(),
+    )));
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .edit
+            .loaded_updated_at(),
+        "T1",
+        "a successful save must advance the staleness token to the server's new value"
+    );
+}
+
+#[test]
+fn enter_edit_seeds_staleness_token_from_active_context_when_list_empty() {
+    // Banner-edit entry with the playlists list NOT loaded (e.g. a restored
+    // session that opened on Queue): the optimistic-concurrency token must fall
+    // back to the active-playlist context (same object the name/comment come
+    // from) instead of staying empty, which would silently disable the guard.
+    let mut app = test_app();
+    // library.playlists is empty; the active context carries the server token.
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::from_persisted(
+        "pl_1".into(),
+        "Mix".into(),
+        String::new(),
+        0.0,
+        "SERVER_TOKEN".into(),
+        true,
+        3,
+    ));
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
+        playlist_id: "pl_1".into(),
+        playlist_name: "Mix".into(),
+        playlist_comment: String::new(),
+        playlist_public: true,
+    }));
+
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .expect("editor session present")
+            .edit
+            .loaded_updated_at(),
+        "SERVER_TOKEN",
+        "with the playlists list empty, the staleness token must fall back to the active context"
     );
 }

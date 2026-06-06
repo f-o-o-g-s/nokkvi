@@ -382,8 +382,10 @@ pub enum SplitViewMessage {
     SwitchPaneFocus,
     /// Save current queue as the edited playlist's tracks.
     SavePlaylistEdits,
-    /// Playlist edits saved successfully.
-    PlaylistEditsSaved,
+    /// Playlist edits saved successfully. Carries the server's new `updatedAt`
+    /// token (empty when unavailable) so the editor's optimistic-concurrency
+    /// guard can advance for a subsequent save in the same still-mounted session.
+    PlaylistEditsSaved(String),
 }
 
 /// Playlist-editor messages, namespaced under `Message::Editor(..)`.
@@ -1035,11 +1037,11 @@ mod tests {
             Message::SplitView(SplitViewMessage::SavePlaylistEdits)
         ));
 
-        // PlaylistEditsSaved
-        let msg = Message::SplitView(SplitViewMessage::PlaylistEditsSaved);
+        // PlaylistEditsSaved carries the new server updatedAt token.
+        let msg = Message::SplitView(SplitViewMessage::PlaylistEditsSaved("T1".into()));
         assert!(matches!(
             msg,
-            Message::SplitView(SplitViewMessage::PlaylistEditsSaved)
+            Message::SplitView(SplitViewMessage::PlaylistEditsSaved(_))
         ));
     }
 
