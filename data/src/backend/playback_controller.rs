@@ -668,23 +668,44 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
-        // 3. Load and play. `load_track_with_rg` already invalidates gapless
-        //    prep, but discharge the `set_queue` effect explicitly so the
-        //    obligation isn't dropped — the work itself coalesces.
+        // 3-4. Load, play, discharge the set_queue reset, and update the
+        //      navigator so consume mode knows what's playing.
+        self.load_play_and_set_current(
+            &stream_url,
+            song.replay_gain.clone(),
+            effect,
+            song.id.clone(),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Shared engine-load epilogue for the 3 same-shape play primitives:
+    /// acquire the engine lock, load the track, play, discharge the queue
+    /// mutation's `NextTrackResetEffect` while the lock is held, drop the lock,
+    /// then update the navigator's `current_song_id` (used by consume mode).
+    ///
+    /// EXCLUDES `play_song_direct` (method on `QueueNavigator`, caller-held
+    /// `&mut engine`, set-before-load), `apply_removal_aftermath` (conditional
+    /// resume, no effect), and the cold-start branch (engine lock already held).
+    async fn load_play_and_set_current(
+        &self,
+        stream_url: &str,
+        rg: Option<crate::types::song::ReplayGain>,
+        effect: crate::types::next_track_reset::NextTrackResetEffect,
+        song_id: String,
+    ) -> Result<()> {
         let mut engine = self.audio_engine.lock().await;
-        engine
-            .load_track_with_rg(&stream_url, song.replay_gain.clone())
-            .await;
+        engine.load_track_with_rg(stream_url, rg).await;
         engine.play().await?;
         effect.apply_locked(&mut engine).await;
         drop(engine);
-
-        // 4. Update navigator's current_song_id so consume mode knows what's playing
-        let queue_navigator = self.queue_navigator.lock().await;
-        queue_navigator
-            .set_current_song_id(Some(song.id.clone()))
+        self.queue_navigator
+            .lock()
+            .await
+            .set_current_song_id(Some(song_id))
             .await;
-
         Ok(())
     }
 
@@ -749,18 +770,8 @@ impl PlaybackController {
             qm.get_song(&song_id).and_then(|s| s.replay_gain.clone())
         };
 
-        let mut engine = self.audio_engine.lock().await;
-        engine.load_track_with_rg(&stream_url, rg).await;
-        engine.play().await?;
-        reposition_effect.apply_locked(&mut engine).await;
-        drop(engine);
-
-        // Update navigator's current_song_id so consume mode knows what's playing
-        self.queue_navigator
-            .lock()
-            .await
-            .set_current_song_id(Some(song_id))
-            .await;
+        self.load_play_and_set_current(&stream_url, rg, reposition_effect, song_id)
+            .await?;
 
         Ok(())
     }
@@ -813,17 +824,8 @@ impl PlaybackController {
             qm.get_song(song_id).and_then(|s| s.replay_gain.clone())
         };
 
-        let mut engine = self.audio_engine.lock().await;
-        engine.load_track_with_rg(&stream_url, rg).await;
-        engine.play().await?;
-        reposition_effect.apply_locked(&mut engine).await;
-        drop(engine);
-
-        // Update navigator's current_song_id so consume mode knows what's playing
-        let queue_navigator = self.queue_navigator.lock().await;
-        queue_navigator
-            .set_current_song_id(Some(song_id.to_string()))
-            .await;
+        self.load_play_and_set_current(&stream_url, rg, reposition_effect, song_id.to_string())
+            .await?;
 
         Ok(())
     }
