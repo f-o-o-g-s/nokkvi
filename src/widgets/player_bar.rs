@@ -204,6 +204,151 @@ pub(crate) enum ModeId {
     Repeat,
 }
 
+/// Per-render presentation of one mode toggle: dynamic icon + the two label
+/// strings (full tooltip, terse kebab label) + the message its press emits.
+/// Single source of truth for the strings that were previously spelled twice
+/// (the inline tooltip block and the kebab-label block). Widget-type
+/// (icon vs text toggle for EQ/SFX), enabled-policy, the SFX `sound_effects_enabled`
+/// gate, and the three orderings (CULL_ORDER / inline / kebab) stay at the
+/// render sites — the descriptor owns only icon + the two strings + message.
+struct ModeDescriptor {
+    /// SVG path for the 5 icon-based modes; `None` for EQ/SFX (text toggles).
+    icon: Option<&'static str>,
+    tooltip: &'static str,
+    kebab_label: &'static str,
+    message: PlayerBarMessage,
+}
+
+/// Build the per-render descriptor for one mode from the current view state.
+/// Labels/icons are runtime-derived and message ctors are unit variants, so
+/// the descriptor is constructed fresh per render rather than from a const
+/// table. Note: the `active`/enabled args at the render sites (repeat_active,
+/// is_random_mode, mode_controls_enabled, the SFX gate) are NOT owned here —
+/// they are the enabled/active-policy surface the audit deliberately scopes
+/// out and stay render-side.
+fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
+    use nokkvi_data::types::player_settings::VisualizationMode;
+    match mode {
+        ModeId::Repeat => {
+            let queue = data.is_repeat_queue_mode;
+            let track = data.is_repeat_mode;
+            ModeDescriptor {
+                icon: Some(if queue {
+                    "assets/icons/repeat-2.svg"
+                } else {
+                    "assets/icons/repeat-1.svg"
+                }),
+                tooltip: if queue {
+                    "Repeat Queue: Restart queue when it ends"
+                } else if track {
+                    "Repeat Track: Loop the current track"
+                } else {
+                    "Repeat: Off"
+                },
+                kebab_label: if queue {
+                    "Repeat: Queue"
+                } else if track {
+                    "Repeat: Track"
+                } else {
+                    "Repeat: Off"
+                },
+                message: PlayerBarMessage::ToggleRepeat,
+            }
+        }
+        ModeId::Shuffle => ModeDescriptor {
+            icon: Some("assets/icons/shuffle.svg"),
+            tooltip: if data.is_random_mode {
+                "Shuffle: Playing in random order"
+            } else {
+                "Shuffle: Off"
+            },
+            kebab_label: if data.is_random_mode {
+                "Shuffle: On"
+            } else {
+                "Shuffle: Off"
+            },
+            message: PlayerBarMessage::ToggleRandom,
+        },
+        ModeId::Consume => ModeDescriptor {
+            icon: Some("assets/icons/cookie.svg"),
+            tooltip: if data.is_consume_mode {
+                "Consume: Tracks removed from queue after playing"
+            } else {
+                "Consume: Off"
+            },
+            kebab_label: if data.is_consume_mode {
+                "Consume: On"
+            } else {
+                "Consume: Off"
+            },
+            message: PlayerBarMessage::ToggleConsume,
+        },
+        ModeId::Eq => ModeDescriptor {
+            // Text toggle "EQ" at the render site.
+            icon: None,
+            tooltip: if data.eq_enabled {
+                "Equalizer: Active"
+            } else {
+                "Equalizer: Disabled"
+            },
+            kebab_label: if data.eq_enabled {
+                "Equalizer: On"
+            } else {
+                "Equalizer: Off"
+            },
+            message: PlayerBarMessage::ToggleEq,
+        },
+        ModeId::Sfx => ModeDescriptor {
+            // Text toggle "SFX" at the render site.
+            icon: None,
+            // The inline SFX button only renders when SFX is on, so its
+            // tooltip is a static "enabled" string — intentionally asymmetric
+            // with the kebab label (which flips On/Off). A test pins this so a
+            // future agent doesn't silently unify the two.
+            tooltip: "Sound Effects: UI sounds enabled",
+            kebab_label: if data.sound_effects_enabled {
+                "UI Sound Effects: On"
+            } else {
+                "UI Sound Effects: Off"
+            },
+            message: PlayerBarMessage::ToggleSoundEffects,
+        },
+        ModeId::Crossfade => ModeDescriptor {
+            icon: Some("assets/icons/blend.svg"),
+            tooltip: if data.crossfade_enabled {
+                "Crossfade: Active"
+            } else {
+                "Crossfade: Off"
+            },
+            kebab_label: if data.crossfade_enabled {
+                "Crossfade: On"
+            } else {
+                "Crossfade: Off"
+            },
+            message: PlayerBarMessage::ToggleCrossfade,
+        },
+        ModeId::Visualizer => ModeDescriptor {
+            icon: Some(match data.visualization_mode {
+                VisualizationMode::Lines => "assets/icons/audio-waveform.svg",
+                VisualizationMode::Bars | VisualizationMode::Off => "assets/icons/audio-lines.svg",
+            }),
+            tooltip: match data.visualization_mode {
+                VisualizationMode::Off => "Visualizer: Off",
+                VisualizationMode::Lines => "Visualizer: Waveform",
+                VisualizationMode::Bars => "Visualizer: Bars",
+            },
+            // Equals the tooltip verbatim today, but kept as a separate field
+            // so a future divergence has a home — do not collapse to one.
+            kebab_label: match data.visualization_mode {
+                VisualizationMode::Off => "Visualizer: Off",
+                VisualizationMode::Lines => "Visualizer: Waveform",
+                VisualizationMode::Bars => "Visualizer: Bars",
+            },
+            message: PlayerBarMessage::CycleVisualization,
+        },
+    }
+}
+
 /// Cull priority — index `i` is the i-th mode to fold into the kebab as the
 /// window narrows. Ordered to match the inline row's right-to-left disappear
 /// (rightmost-first) so gaps close cleanly from the right edge.
@@ -929,11 +1074,6 @@ pub(crate) fn player_bar<'a>(
     let repeat_active = is_repeat_mode || is_repeat_queue_mode;
     use nokkvi_data::types::player_settings::VisualizationMode;
     let vis_active = visualization_mode != VisualizationMode::Off;
-    let vis_icon = if visualization_mode == VisualizationMode::Lines {
-        "assets/icons/audio-waveform.svg"
-    } else {
-        "assets/icons/audio-lines.svg"
-    };
     let window_width = data.window_width;
 
     // SFX volume slider keeps its own width-based gate (independent of the
@@ -941,84 +1081,18 @@ pub(crate) fn player_bar<'a>(
     // deserves a separate threshold).
     let show_sfx_slider = window_width >= BREAKPOINT_HIDE_SFX_SLIDER;
 
-    // Tooltip strings for inline mode-toggle buttons (Wide / Medium tiers).
-    let repeat_icon = if is_repeat_queue_mode {
-        "assets/icons/repeat-2.svg"
-    } else {
-        "assets/icons/repeat-1.svg"
-    };
-    let repeat_tooltip: &'static str = if is_repeat_queue_mode {
-        "Repeat Queue: Restart queue when it ends"
-    } else if is_repeat_mode {
-        "Repeat Track: Loop the current track"
-    } else {
-        "Repeat: Off"
-    };
-    let shuffle_tooltip: &'static str = if is_random_mode {
-        "Shuffle: Playing in random order"
-    } else {
-        "Shuffle: Off"
-    };
-    let consume_tooltip: &'static str = if is_consume_mode {
-        "Consume: Tracks removed from queue after playing"
-    } else {
-        "Consume: Off"
-    };
-    let crossfade_tooltip: &'static str = if data.crossfade_enabled {
-        "Crossfade: Active"
-    } else {
-        "Crossfade: Off"
-    };
-    let visualizer_tooltip: &'static str = match visualization_mode {
-        VisualizationMode::Off => "Visualizer: Off",
-        VisualizationMode::Lines => "Visualizer: Waveform",
-        VisualizationMode::Bars => "Visualizer: Bars",
-    };
-    let eq_tooltip: &'static str = if eq_enabled {
-        "Equalizer: Active"
-    } else {
-        "Equalizer: Disabled"
-    };
-
-    // Shorter labels for kebab-menu rows (Medium / Narrow tiers). Reads
-    // tighter inside a 220px-wide menu than the full tooltip strings.
-    let shuffle_menu_label = if is_random_mode {
-        "Shuffle: On"
-    } else {
-        "Shuffle: Off"
-    };
-    let repeat_menu_label = if is_repeat_queue_mode {
-        "Repeat: Queue"
-    } else if is_repeat_mode {
-        "Repeat: Track"
-    } else {
-        "Repeat: Off"
-    };
-    let consume_menu_label = if is_consume_mode {
-        "Consume: On"
-    } else {
-        "Consume: Off"
-    };
-    let eq_menu_label = if eq_enabled {
-        "Equalizer: On"
-    } else {
-        "Equalizer: Off"
-    };
-    let crossfade_menu_label = if data.crossfade_enabled {
-        "Crossfade: On"
-    } else {
-        "Crossfade: Off"
-    };
-    let visualizer_menu_label: &'static str = match visualization_mode {
-        VisualizationMode::Off => "Visualizer: Off",
-        VisualizationMode::Lines => "Visualizer: Waveform",
-        VisualizationMode::Bars => "Visualizer: Bars",
-    };
-    let sfx_menu_label = if sound_effects_enabled {
-        "UI Sound Effects: On"
-    } else {
-        "UI Sound Effects: Off"
-    };
+    // Single source of truth for each mode's icon + the two label strings
+    // (full inline tooltip, terse kebab label) + the toggle message. Built
+    // once per render; the inline row and kebab construction below both pull
+    // from these. Widget-type, enabled-policy, the SFX gate, and the three
+    // orderings stay at the render sites.
+    let repeat = mode_descriptor(ModeId::Repeat, data);
+    let shuffle = mode_descriptor(ModeId::Shuffle, data);
+    let consume = mode_descriptor(ModeId::Consume, data);
+    let eq = mode_descriptor(ModeId::Eq, data);
+    let sfx = mode_descriptor(ModeId::Sfx, data);
+    let crossfade = mode_descriptor(ModeId::Crossfade, data);
+    let visualizer = mode_descriptor(ModeId::Visualizer, data);
 
     // Per-mode kebab membership — derived once from the layout snapshot so
     // the inline row and kebab construction stay in sync.
@@ -1042,28 +1116,28 @@ pub(crate) fn player_bar<'a>(
     let mode_controls_enabled = !data.is_radio;
     if !repeat_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            repeat_icon,
-            PlayerBarMessage::ToggleRepeat,
+            repeat.icon.unwrap_or("assets/icons/repeat-1.svg"),
+            repeat.message.clone(),
             repeat_active,
-            repeat_tooltip,
+            repeat.tooltip,
             mode_controls_enabled,
         ));
     }
     if !shuffle_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            "assets/icons/shuffle.svg",
-            PlayerBarMessage::ToggleRandom,
+            shuffle.icon.unwrap_or("assets/icons/shuffle.svg"),
+            shuffle.message.clone(),
             is_random_mode,
-            shuffle_tooltip,
+            shuffle.tooltip,
             mode_controls_enabled,
         ));
     }
     if !consume_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            "assets/icons/cookie.svg",
-            PlayerBarMessage::ToggleConsume,
+            consume.icon.unwrap_or("assets/icons/cookie.svg"),
+            consume.message.clone(),
             is_consume_mode,
-            consume_tooltip,
+            consume.tooltip,
             mode_controls_enabled,
         ));
     }
@@ -1071,36 +1145,37 @@ pub(crate) fn player_bar<'a>(
         // EQ inline button — flat text-labeled toggle.
         mode_toggles_row = mode_toggles_row.push(mode_text_toggle(
             "EQ",
-            PlayerBarMessage::ToggleEq,
+            eq.message.clone(),
             eq_enabled,
-            eq_tooltip,
+            eq.tooltip,
         ));
     }
     if !sfx_in_kebab && sound_effects_enabled {
         // SFX inline button — flat text-labeled toggle. Only renders when
-        // SFX is on AND not yet folded into the kebab.
+        // SFX is on AND not yet folded into the kebab. `sfx.tooltip` is the
+        // static "enabled" string by design (asymmetric with the kebab label).
         mode_toggles_row = mode_toggles_row.push(mode_text_toggle(
             "SFX",
-            PlayerBarMessage::ToggleSoundEffects,
+            sfx.message.clone(),
             true,
-            "Sound Effects: UI sounds enabled",
+            sfx.tooltip,
         ));
     }
     if !crossfade_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            "assets/icons/blend.svg",
-            PlayerBarMessage::ToggleCrossfade,
+            crossfade.icon.unwrap_or("assets/icons/blend.svg"),
+            crossfade.message.clone(),
             data.crossfade_enabled,
-            crossfade_tooltip,
+            crossfade.tooltip,
             true,
         ));
     }
     if !visualizer_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            vis_icon,
-            PlayerBarMessage::CycleVisualization,
+            visualizer.icon.unwrap_or("assets/icons/audio-lines.svg"),
+            visualizer.message.clone(),
             vis_active,
-            visualizer_tooltip,
+            visualizer.tooltip,
             true,
         ));
     }
@@ -1122,23 +1197,23 @@ pub(crate) fn player_bar<'a>(
         let mut kebab_rows = Vec::with_capacity(layout.kebab_mode_count as usize + 1);
         if shuffle_in_kebab {
             kebab_rows.push(mode_menu_item(
-                shuffle_menu_label,
+                shuffle.kebab_label,
                 is_random_mode,
-                PlayerBarMessage::ToggleRandom,
+                shuffle.message.clone(),
             ));
         }
         if repeat_in_kebab {
             kebab_rows.push(mode_menu_item(
-                repeat_menu_label,
+                repeat.kebab_label,
                 repeat_active,
-                PlayerBarMessage::ToggleRepeat,
+                repeat.message.clone(),
             ));
         }
         if consume_in_kebab {
             kebab_rows.push(mode_menu_item(
-                consume_menu_label,
+                consume.kebab_label,
                 is_consume_mode,
-                PlayerBarMessage::ToggleConsume,
+                consume.message.clone(),
             ));
         }
         if queue_group_has_items && audio_group_has_items {
@@ -1146,30 +1221,30 @@ pub(crate) fn player_bar<'a>(
         }
         if crossfade_in_kebab {
             kebab_rows.push(mode_menu_item(
-                crossfade_menu_label,
+                crossfade.kebab_label,
                 data.crossfade_enabled,
-                PlayerBarMessage::ToggleCrossfade,
+                crossfade.message.clone(),
             ));
         }
         if eq_in_kebab {
             kebab_rows.push(mode_menu_item(
-                eq_menu_label,
+                eq.kebab_label,
                 eq_enabled,
-                PlayerBarMessage::ToggleEq,
+                eq.message.clone(),
             ));
         }
         if visualizer_in_kebab {
             kebab_rows.push(mode_menu_item(
-                visualizer_menu_label,
+                visualizer.kebab_label,
                 vis_active,
-                PlayerBarMessage::CycleVisualization,
+                visualizer.message.clone(),
             ));
         }
         if sfx_in_kebab {
             kebab_rows.push(mode_menu_item(
-                sfx_menu_label,
+                sfx.kebab_label,
                 sound_effects_enabled,
-                PlayerBarMessage::ToggleSoundEffects,
+                sfx.message.clone(),
             ));
         }
 
@@ -1812,6 +1887,165 @@ mod layout_tests {
             ModeId::Repeat,
         ] {
             assert!(l.is_in_kebab(mode));
+        }
+    }
+}
+
+#[cfg(test)]
+mod mode_descriptor_tests {
+    use nokkvi_data::types::player_settings::VisualizationMode;
+
+    use super::{
+        CULL_ORDER, ModeId, PlayerBarLayout, PlayerBarMessage, PlayerBarViewData, mode_descriptor,
+    };
+
+    /// Baseline view data with every mode toggled off / neutral. Individual
+    /// tests flip just the fields they exercise.
+    fn sample_data() -> PlayerBarViewData {
+        PlayerBarViewData {
+            playback_position: 0,
+            playback_duration: 0,
+            playback_playing: false,
+            playback_paused: false,
+            volume: 1.0,
+            has_queue: false,
+            is_radio: false,
+            is_random_mode: false,
+            is_repeat_mode: false,
+            is_repeat_queue_mode: false,
+            is_consume_mode: false,
+            eq_enabled: false,
+            sound_effects_enabled: false,
+            sfx_volume: 1.0,
+            crossfade_enabled: false,
+            visualization_mode: VisualizationMode::Off,
+            window_width: 1200.0,
+            layout: PlayerBarLayout::default(),
+            is_light_mode: false,
+            track_title: String::new(),
+            track_artist: String::new(),
+            track_album: String::new(),
+            radio_name: None,
+            artwork_handle: None,
+            hamburger_open: false,
+            player_modes_open: false,
+        }
+    }
+
+    /// Repeat is the most state-rich icon mode: its icon, tooltip, and kebab
+    /// label all key off the queue/track/off tri-state. Pins all three plus
+    /// the message ctor.
+    #[test]
+    fn repeat_descriptor_strings_track_queue_track_off_state() {
+        // Queue repeat.
+        let mut data = sample_data();
+        data.is_repeat_queue_mode = true;
+        let d = mode_descriptor(ModeId::Repeat, &data);
+        assert_eq!(d.icon, Some("assets/icons/repeat-2.svg"));
+        assert_eq!(d.tooltip, "Repeat Queue: Restart queue when it ends");
+        assert_eq!(d.kebab_label, "Repeat: Queue");
+        assert!(matches!(d.message, PlayerBarMessage::ToggleRepeat));
+
+        // Track repeat (queue off).
+        let mut data = sample_data();
+        data.is_repeat_mode = true;
+        let d = mode_descriptor(ModeId::Repeat, &data);
+        assert_eq!(d.icon, Some("assets/icons/repeat-1.svg"));
+        assert_eq!(d.tooltip, "Repeat Track: Loop the current track");
+        assert_eq!(d.kebab_label, "Repeat: Track");
+
+        // Off.
+        let d = mode_descriptor(ModeId::Repeat, &sample_data());
+        assert_eq!(d.icon, Some("assets/icons/repeat-1.svg"));
+        assert_eq!(d.tooltip, "Repeat: Off");
+        assert_eq!(d.kebab_label, "Repeat: Off");
+    }
+
+    /// Visualizer couples a dynamic icon to a three-way mode. Pins the
+    /// icon + dual-label pair for every `VisualizationMode`.
+    #[test]
+    fn visualizer_descriptor_matches_visualization_mode() {
+        let cases = [
+            (
+                VisualizationMode::Off,
+                "assets/icons/audio-lines.svg",
+                "Visualizer: Off",
+            ),
+            (
+                VisualizationMode::Lines,
+                "assets/icons/audio-waveform.svg",
+                "Visualizer: Waveform",
+            ),
+            (
+                VisualizationMode::Bars,
+                "assets/icons/audio-lines.svg",
+                "Visualizer: Bars",
+            ),
+        ];
+        for (mode, icon, label) in cases {
+            let mut data = sample_data();
+            data.visualization_mode = mode;
+            let d = mode_descriptor(ModeId::Visualizer, &data);
+            assert_eq!(d.icon, Some(icon), "icon for {mode:?}");
+            assert_eq!(d.tooltip, label, "tooltip for {mode:?}");
+            assert_eq!(d.kebab_label, label, "kebab_label for {mode:?}");
+            assert!(matches!(d.message, PlayerBarMessage::CycleVisualization));
+        }
+    }
+
+    /// EQ and SFX are the two text-toggle modes (icon == None). SFX has an
+    /// intentional inline-vs-kebab string asymmetry: a STATIC tooltip
+    /// ("...enabled", since the inline button only renders when on) versus a
+    /// kebab label that flips On/Off. EQ has its own Active/Disabled vs On/Off
+    /// asymmetry. Pinning both stops a future agent from silently unifying them.
+    #[test]
+    fn text_toggle_modes_have_none_icon_and_distinct_sfx_strings() {
+        // EQ off.
+        let eq_off = mode_descriptor(ModeId::Eq, &sample_data());
+        assert_eq!(eq_off.icon, None);
+        assert_eq!(eq_off.tooltip, "Equalizer: Disabled");
+        assert_eq!(eq_off.kebab_label, "Equalizer: Off");
+        // EQ on.
+        let mut data = sample_data();
+        data.eq_enabled = true;
+        let eq_on = mode_descriptor(ModeId::Eq, &data);
+        assert_eq!(eq_on.tooltip, "Equalizer: Active");
+        assert_eq!(eq_on.kebab_label, "Equalizer: On");
+
+        // SFX off — tooltip stays the static "enabled" string by design.
+        let sfx_off = mode_descriptor(ModeId::Sfx, &sample_data());
+        assert_eq!(sfx_off.icon, None);
+        assert_eq!(sfx_off.tooltip, "Sound Effects: UI sounds enabled");
+        assert_eq!(sfx_off.kebab_label, "UI Sound Effects: Off");
+        // SFX on — tooltip unchanged; only the kebab label flips.
+        let mut data = sample_data();
+        data.sound_effects_enabled = true;
+        let sfx_on = mode_descriptor(ModeId::Sfx, &data);
+        assert_eq!(sfx_on.tooltip, "Sound Effects: UI sounds enabled");
+        assert_eq!(sfx_on.kebab_label, "UI Sound Effects: On");
+        assert_eq!(
+            sfx_off.tooltip, sfx_on.tooltip,
+            "SFX inline tooltip must stay static across the on/off flip",
+        );
+    }
+
+    /// Guards the message-routing half of the spec against a copy-paste swap:
+    /// every `ModeId` must map to its own toggle message ctor.
+    #[test]
+    fn every_mode_id_yields_its_own_toggle_message() {
+        let data = sample_data();
+        for mode in CULL_ORDER {
+            let d = mode_descriptor(mode, &data);
+            let ok = match mode {
+                ModeId::Repeat => matches!(d.message, PlayerBarMessage::ToggleRepeat),
+                ModeId::Shuffle => matches!(d.message, PlayerBarMessage::ToggleRandom),
+                ModeId::Consume => matches!(d.message, PlayerBarMessage::ToggleConsume),
+                ModeId::Eq => matches!(d.message, PlayerBarMessage::ToggleEq),
+                ModeId::Sfx => matches!(d.message, PlayerBarMessage::ToggleSoundEffects),
+                ModeId::Crossfade => matches!(d.message, PlayerBarMessage::ToggleCrossfade),
+                ModeId::Visualizer => matches!(d.message, PlayerBarMessage::CycleVisualization),
+            };
+            assert!(ok, "wrong message ctor for {mode:?}: {:?}", d.message);
         }
     }
 }
