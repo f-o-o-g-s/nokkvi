@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.6.9 — 2026-06-05
+
+### Added
+
 - New optional "Rating Reminder" setting (off by default, on the Playback tab): a desktop notification that reminds you to rate the current track before it changes, for when your attention has drifted to other work. You choose when it fires: on scrobble (once the server counts the play), or once a configurable percentage of the track has played. It stays quiet for tracks you have already rated or loved, for radio, for very short tracks, and it never nags twice for the same track.
 
 ### Changed
@@ -17,8 +27,6 @@ All notable changes to this project will be documented in this file.
 - Streaming over a slow or remote connection (especially FLAC) is much smoother. Nokkvi now reads further ahead in the background and keeps a larger decoded audio buffer, so brief network hiccups are absorbed instead of causing a stutter, and if the buffer does run dry mid-track it briefly pauses to refill instead of playing silence.
 - Nokkvi now registers as a single player in Navidrome instead of appearing as two separate ones.
 - The Radio view now gives the currently-playing station the same breathing glow as the now-playing track elsewhere, instead of leaving it unmarked.
-
-### Removed
 
 ## v0.6.8 — 2026-06-03
 
