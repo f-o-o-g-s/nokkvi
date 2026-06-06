@@ -1151,6 +1151,7 @@ fn print_cli_help() {
     println!("  repeat           Cycle repeat mode (off → one → queue)");
     println!("  consume          Toggle consume mode (drop played tracks)");
     println!("  clear-queue      Empty the queue and stop playback");
+    println!("  add-to-queue     Add the focused list item to the queue");
     println!("  switch-view <v>  Switch the top pane to <v> (albums/queue/songs/");
     println!("                   artists/genres/playlists/radios/settings)");
     println!("  nav-up           Move the focused list selection up (Backspace)");

@@ -164,6 +164,16 @@ fn play_and_toggle_play_echo_a_state_key() {
 }
 
 #[test]
+fn add_to_queue_echoes_added_item_or_null() {
+    // test_app()'s library is empty, so nothing is focused → the verb reports
+    // `{"added": null}` (matching the in-app "No item selected" path) rather
+    // than claiming an enqueue that didn't happen.
+    let resp = drive("add-to-queue");
+    assert_eq!(resp.data, Some(json!({ "added": null })));
+    assert!(resp.error.is_none());
+}
+
+#[test]
 fn navigation_verbs_acknowledge_with_ok_true() {
     // nav-up/nav-down/enter route an existing SlotListMessage through the normal
     // loop (fire-and-forget); the move/activation is async, so they ack.
@@ -250,6 +260,7 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         // Phase 2
         "consume",
         "clear-queue",
+        "add-to-queue",
         "switch-view",
         "love",
         "rate",

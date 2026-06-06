@@ -114,6 +114,8 @@
 //! | `repeat`      | act       | `{"repeat":"off"\|"one"\|"queue"}`; cycles.     |
 //! | `consume`     | act       | `{"consume":bool}`; calls `handle_toggle_consume`.|
 //! | `clear-queue` | act       | `{"ok":true}`; `clear_queue_action()` (gate-free).|
+//! | `add-to-queue`| act       | `{"added":name\|null}`; enqueue the focused item|
+//! |               |           | (Shift+A); null when nothing is selected.       |
 //! | `switch-view` | act_str   | `{"view":name}`; arg `view` (one of `albums`/  |
 //! |               |           | `queue`/`songs`/`artists`/`genres`/`playlists`/|
 //! |               |           | `radios`/`settings`). Invalid → `invalid_args`.|
@@ -468,6 +470,25 @@ define_commands! {
     // callers expect `nokkvi clear-queue` to clear from any view. The shared
     // clear_queue_action() lives in src/update/hotkeys/queue.rs.
     "clear-queue" => act      (|app: &mut Nokkvi| Ok((app.clear_queue_action(), json!({ "ok": true }))));
+    // Add the focused item (centered song/album/artist/genre/playlist) to the
+    // queue — the in-app Shift+A hotkey. `add_to_queue_message()` resolving to
+    // Some is the exact condition handle_add_to_queue uses to decide there's an
+    // item to enqueue, so gate the echo on it: report the focused item's name,
+    // or null when nothing is selected (mirrors the "No item selected" toast).
+    // The actual enqueue + "Added 'X' to queue" toast run via the real handler.
+    "add-to-queue" => act      (|app: &mut Nokkvi| {
+        let will_add = app
+            .current_view_page()
+            .and_then(|page| page.add_to_queue_message())
+            .is_some();
+        let added = if will_add {
+            app.get_center_item_info().map(|info| info.name)
+        } else {
+            None
+        };
+        let task = app.handle_add_to_queue();
+        Ok((task, json!({ "added": added })))
+    });
     // Switch the top-pane view. The `view` arg is required and validated
     // against the View enum before dispatch; the actual switch goes through
     // the normal NavigationMessage::SwitchView path so view-change side
