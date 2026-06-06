@@ -86,8 +86,8 @@ impl Nokkvi {
 
     /// Reorder the editor buffer in response to a drag-and-drop.
     ///
-    /// Mirrors the queue's `DragReorder` handler (the `DragReorder` handler in
-    /// `views/queue/update.rs`): single-row drag is **guarded while a search query
+    /// Mirrors the queue's `DragReorder` handler in `views/queue/update.rs`:
+    /// single-row drag is **guarded while a search query
     /// is active** (mirror of the queue's search-active drag guard,
     /// `drag_allowed = self.common.search_query.is_empty()`) because filtered slot
     /// indices would otherwise

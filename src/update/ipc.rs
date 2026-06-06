@@ -317,7 +317,7 @@ pub(crate) fn parse_view_name(name: &str) -> Result<View, String> {
 // VolumeCommitted bypasses the 500ms VolumeChanged throttle — discrete
 // external commands (playerctl, IPC) must persist immediately so rapid
 // presses don't silently drop on next launch. Mirrors the MPRIS SetVolume
-// handler — the `MprisEvent::SetVolume` arm in src/update/mpris.rs::handle_mpris_event.
+// handler — the `MprisEvent::SetVolume` arm in src/update/mpris.rs::handle_mpris.
 define_commands! {
     "ping"        => respond  (json!("pong"));
     "next"        => dispatch (Message::Playback(PlaybackMessage::NextTrack));

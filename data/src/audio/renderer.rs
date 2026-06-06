@@ -1767,9 +1767,10 @@ mod tests {
     }
 
     /// The extracted `reset_rebuffer_latch` helper must zero all three latch
-    /// fields. This is the direct red-green net for the start/stop/seek sites,
-    /// which (unlike finalize_crossfade) have no dedicated latch-reset assertion.
-    /// `#[tokio::test]` because `AudioRenderer::new()` calls
+    /// fields. This guards the helper BODY itself; it does not assert that
+    /// start/stop/seek call it (that call-site coverage is unchanged from before
+    /// the extraction — finalize_crossfade keeps its own dedicated assertion
+    /// below). `#[tokio::test]` because `AudioRenderer::new()` calls
     /// `tokio::runtime::Handle::current()` and needs a running reactor.
     #[tokio::test]
     async fn reset_rebuffer_latch_zeroes_all_three_fields() {

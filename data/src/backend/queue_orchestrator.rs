@@ -108,8 +108,8 @@ mod tests {
     /// Test fixture — real `QueueService` + real `PlaybackController` over
     /// tempfile-backed `StateStorage`. The audio engine is constructed but
     /// never asked to play, so PipeWire is not touched (mirrors the safe
-    /// pattern in the services/playback.rs test module (`CustomAudioEngine::new()`
-    /// constructed but never played)).
+    /// pattern in the services/playback.rs test module: `CustomAudioEngine::new()`
+    /// constructed but never played).
     struct Fixture {
         _temp: TempDir,
         queue: QueueService,

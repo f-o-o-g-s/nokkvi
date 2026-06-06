@@ -726,10 +726,12 @@ fn column_macro_covers_expected_field_count() {
     // one per column the macro owns; `size_of` == field count (bool is 1 byte,
     // no padding for an all-bool struct). The sum across the 7 production
     // visibility structs MUST equal the number of column `*_show_*` fields the
-    // macro restores. If a future agent adds a `*_show_*` COLUMN field to
-    // `LivePlayerSettings` but forgets the macro entry, the restore is silently
-    // dropped on load — this count (paired with the per-page round-trip tests)
-    // flags the drift.
+    // macro restores. This guard trips when a column is ADDED or REMOVED in a
+    // `define_view_columns!` invocation without updating the count below — the
+    // realistic drift. It does NOT auto-detect a brand-new `LivePlayerSettings`
+    // `*_show_*` field that lacks a macro entry (a settings-only field leaves the
+    // struct sizes unchanged); catching that direction relies on also adding the
+    // column + its per-page round-trip assertion.
     //
     // 50 column fields total today (verified against
     // data/src/types/player_settings/mod.rs). The 6 INTENTIONALLY-EXCLUDED
