@@ -87,7 +87,7 @@ pub struct PersistedPlayerSettings {
     #[serde(default = "default_true")]
     pub slot_text_links: bool,
     /// Whether crossfade between tracks is enabled (default: true)
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub crossfade_enabled: bool,
     /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]

@@ -52,7 +52,7 @@ define_settings! {
                 label: "Crossfade",
                 category: "Playback",
                 subtitle: Some("Fade between tracks instead of gapless transitions"),
-                default: false,
+                default: true,
                 read_field: |d| d.crossfade_enabled,
             },
         },
@@ -67,7 +67,7 @@ define_settings! {
                 label: "Crossfade Duration",
                 category: "Playback",
                 subtitle: Some("Duration of crossfade between tracks"),
-                default: 5_i64,
+                default: 7_i64,
                 min: 1_i64,
                 max: 15_i64,
                 step: 1_i64,
@@ -703,5 +703,54 @@ mod tests {
         assert!(ts.quick_add_to_playlist);
         assert!(ts.queue_show_default_playlist);
         assert!(!ts.scrobbling_enabled);
+    }
+
+    /// Parity guard: every Playback-tab row's `ui_meta.default` must agree with
+    /// the canonical `PersistedPlayerSettings::default()` projected through the
+    /// production `dump_playback_tab_player_settings` -> `PlaybackSettingsData`
+    /// path (the same projection the live UI builds in `update/settings.rs`).
+    ///
+    /// This mirrors the live `ResetToDefault` guard (`views/settings/mod.rs`),
+    /// which compares `value.display() != default.display()`: on a fresh-default
+    /// build the two must be equal so that "restore default" is a correct no-op.
+    /// When the macro `ui_meta.default` literals drift away from the struct
+    /// `Default` impl (as crossfade did in 7e8dc60), this trips — catching the
+    /// whole ui_meta-vs-canonical-default drift class for Playback rows.
+    #[test]
+    fn ui_meta_defaults_match_persisted_player_settings_defaults() {
+        let p = PersistedPlayerSettings::default();
+        let mut live = crate::types::player_settings::LivePlayerSettings::default();
+        dump_playback_tab_player_settings(&p, &mut live);
+
+        let data = PlaybackSettingsData {
+            crossfade_enabled: live.crossfade_enabled,
+            crossfade_duration_secs: i64::from(live.crossfade_duration_secs),
+            rewind_on_previous: live.rewind_on_previous,
+            volume_normalization: live.volume_normalization.as_label().into(),
+            normalization_level: live.normalization_level.as_label().into(),
+            replay_gain_preamp_db: live.replay_gain_preamp_db.round() as i64,
+            replay_gain_fallback_db: live.replay_gain_fallback_db.round() as i64,
+            replay_gain_fallback_to_agc: live.replay_gain_fallback_to_agc,
+            replay_gain_prevent_clipping: live.replay_gain_prevent_clipping,
+            scrobbling_enabled: live.scrobbling_enabled,
+            scrobble_threshold: f64::from(live.scrobble_threshold),
+            quick_add_to_playlist: live.quick_add_to_playlist,
+            default_playlist_name: live.default_playlist_name.clone().into(),
+            queue_show_default_playlist: live.queue_show_default_playlist,
+            rating_reminder_enabled: live.rating_reminder_enabled,
+            rating_reminder_trigger: live.rating_reminder_trigger.as_label().into(),
+            rating_reminder_percent: i64::from(live.rating_reminder_percent),
+        };
+
+        for e in build_playback_tab_settings_items(&data) {
+            if let SettingsEntry::Item(item) = e {
+                assert_eq!(
+                    item.value.display(),
+                    item.default.display(),
+                    "ui_meta default for {} disagrees with PersistedPlayerSettings::default()",
+                    item.key
+                );
+            }
+        }
     }
 }
