@@ -266,6 +266,301 @@ fn player_settings_loaded_playlists_artwork_overlay_flips_atomic() {
 }
 
 // ============================================================================
+// Themeable-flag mirror completeness guard (audit rank 8)
+// ============================================================================
+//
+// `handle_player_settings_loaded` mirrors every settings-driven theme field
+// (`settings.rounded_mode`, `settings.nav_layout`, …) into a process-global
+// theme atomic via a 1:1 block of `crate::theme::set_*(settings.*)` calls
+// (playback.rs). The 5 per-view `*_artwork_overlay` tests above each pin ONE
+// field; this test is the all-fields completeness sweep. Adding a new themeable
+// field to `LivePlayerSettings` + a getter/setter in `theme.rs` but FORGETTING
+// the matching `set_*` mirror line leaves the new field unreflected on load —
+// this test pre-seeds every atomic to the OPPOSITE of the value it will load,
+// runs the handler, and asserts each getter now equals the loaded value. A
+// missing mirror line leaves the stale (pre-seeded) value and the assertion
+// fires, naming the exact field so the maintainer finds the dropped `set_*`.
+//
+// EXCLUDED: `light_mode`. The handler calls `set_light_mode` from
+// `load_light_mode_from_config()` (config.toml), NOT `settings.light_mode` —
+// it is not a `LivePlayerSettings` field, so it is correctly out of scope.
+//
+// LOSSY GETTERS AVOIDED: `is_rounded_mode()` collapses the 3-variant
+// `RoundedMode` to a bool (PlayerOnly -> false), and `slot_row_height()`
+// returns f32 pixels. The faithful getters `rounded_mode()` /
+// `slot_row_height_variant()` are used instead.
+
+#[test]
+fn player_settings_loaded_mirrors_all_theme_atomics() {
+    use nokkvi_data::types::player_settings::{
+        ArtworkColumnMode, ArtworkStretchFit, NavDisplayMode, NavLayout, RoundedMode,
+        SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
+    };
+
+    // Serialize against the 5 artwork-overlay tests: this sweep sets the same
+    // process-global `*_artwork_overlay` atomics (plus ~22 others), so without
+    // the shared lock one test's restore could clobber another's assertion.
+    let _guard = OVERLAY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    // --- Snapshot every mutated atomic so nothing bleeds into other tests. ---
+    let prior_rounded_mode = crate::theme::rounded_mode();
+    let prior_nav_layout = crate::theme::nav_layout();
+    let prior_nav_display_mode = crate::theme::nav_display_mode();
+    let prior_track_info_display = crate::theme::track_info_display();
+    let prior_slot_row_height = crate::theme::slot_row_height_variant();
+    let prior_opacity_gradient = crate::theme::is_opacity_gradient();
+    let prior_slot_text_links = crate::theme::is_slot_text_links();
+    let prior_horizontal_volume = crate::theme::is_horizontal_volume();
+    let prior_font_family = crate::theme::font_family();
+    let prior_strip_show_title = crate::theme::strip_show_title();
+    let prior_strip_show_artist = crate::theme::strip_show_artist();
+    let prior_strip_show_album = crate::theme::strip_show_album();
+    let prior_strip_show_format_info = crate::theme::strip_show_format_info();
+    let prior_strip_merged_mode = crate::theme::strip_merged_mode();
+    let prior_strip_click_action = crate::theme::strip_click_action();
+    let prior_strip_show_labels = crate::theme::strip_show_labels();
+    let prior_strip_separator = crate::theme::strip_separator();
+    let prior_albums_overlay = crate::theme::albums_artwork_overlay();
+    let prior_artists_overlay = crate::theme::artists_artwork_overlay();
+    let prior_songs_overlay = crate::theme::songs_artwork_overlay();
+    let prior_playlists_overlay = crate::theme::playlists_artwork_overlay();
+    let prior_artwork_column_mode = crate::theme::artwork_column_mode();
+    let prior_artwork_column_stretch_fit = crate::theme::artwork_column_stretch_fit();
+    let prior_artwork_column_width_pct = crate::theme::artwork_column_width_pct();
+    let prior_artwork_auto_max_pct = crate::theme::artwork_auto_max_pct();
+    let prior_artwork_vertical_height_pct = crate::theme::artwork_vertical_height_pct();
+
+    // --- Pre-seed every atomic to a value DISTINCT from what we'll load. ---
+    // Without this, a dropped `set_*` line could coincidentally already hold
+    // the target value and the test would pass falsely. Each pre-seed is the
+    // enum's #[default] / the opposite bool / a different float from the load.
+    crate::theme::set_rounded_mode(RoundedMode::On);
+    crate::theme::set_nav_layout(NavLayout::Top);
+    crate::theme::set_nav_display_mode(NavDisplayMode::TextOnly);
+    crate::theme::set_track_info_display(TrackInfoDisplay::Off);
+    crate::theme::set_slot_row_height(SlotRowHeight::Default);
+    crate::theme::set_opacity_gradient(false);
+    crate::theme::set_slot_text_links(false);
+    crate::theme::set_horizontal_volume(false);
+    crate::theme::set_font_family("NokkviPreSeedDistinctFont".to_string());
+    crate::theme::set_strip_show_title(false);
+    crate::theme::set_strip_show_artist(false);
+    crate::theme::set_strip_show_album(false);
+    crate::theme::set_strip_show_format_info(false);
+    crate::theme::set_strip_merged_mode(false);
+    crate::theme::set_strip_click_action(StripClickAction::GoToQueue);
+    crate::theme::set_strip_show_labels(false);
+    crate::theme::set_strip_separator(StripSeparator::Dot);
+    crate::theme::set_albums_artwork_overlay(false);
+    crate::theme::set_artists_artwork_overlay(false);
+    crate::theme::set_songs_artwork_overlay(false);
+    crate::theme::set_playlists_artwork_overlay(false);
+    crate::theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
+    crate::theme::set_artwork_column_stretch_fit(ArtworkStretchFit::Cover);
+    crate::theme::set_artwork_column_width_pct(0.99);
+    crate::theme::set_artwork_auto_max_pct(0.99);
+    crate::theme::set_artwork_vertical_height_pct(0.99);
+
+    // --- Build a LivePlayerSettings with every themeable field non-default. ---
+    // Floats compare exactly: the atomics store `f32::to_bits` and the getters
+    // do `from_bits`, an exact round-trip, so `==` is safe here.
+    let settings = LivePlayerSettings {
+        rounded_mode: RoundedMode::PlayerOnly,
+        nav_layout: NavLayout::Side,
+        nav_display_mode: NavDisplayMode::IconsOnly,
+        track_info_display: TrackInfoDisplay::TopBar,
+        slot_row_height: SlotRowHeight::Spacious,
+        opacity_gradient: true,
+        slot_text_links: true,
+        horizontal_volume: true,
+        font_family: "NokkviTestSentinelFont".to_string(),
+        strip_show_title: true,
+        strip_show_artist: true,
+        strip_show_album: true,
+        strip_show_format_info: true,
+        strip_merged_mode: true,
+        strip_click_action: StripClickAction::CopyTrackInfo,
+        strip_show_labels: true,
+        strip_separator: StripSeparator::Pipe,
+        albums_artwork_overlay: true,
+        artists_artwork_overlay: true,
+        songs_artwork_overlay: true,
+        playlists_artwork_overlay: true,
+        artwork_column_mode: ArtworkColumnMode::AlwaysVerticalStretched,
+        artwork_column_stretch_fit: ArtworkStretchFit::Fill,
+        artwork_column_width_pct: 0.37,
+        artwork_auto_max_pct: 0.55,
+        artwork_vertical_height_pct: 0.42,
+        ..Default::default()
+    };
+
+    let mut app = test_app();
+    let _ = app.handle_player_settings_loaded(settings.clone());
+
+    // --- Assert every settings-driven getter now reflects the loaded value. ---
+    // Each message names the field so a future skipped mirror line points the
+    // maintainer at the exact missing `crate::theme::set_*` call in playback.rs.
+    assert_eq!(
+        crate::theme::rounded_mode(),
+        settings.rounded_mode,
+        "rounded_mode not mirrored (missing set_rounded_mode in handle_player_settings_loaded)"
+    );
+    assert_eq!(
+        crate::theme::nav_layout(),
+        settings.nav_layout,
+        "nav_layout not mirrored (missing set_nav_layout)"
+    );
+    assert_eq!(
+        crate::theme::nav_display_mode(),
+        settings.nav_display_mode,
+        "nav_display_mode not mirrored (missing set_nav_display_mode)"
+    );
+    assert_eq!(
+        crate::theme::track_info_display(),
+        settings.track_info_display,
+        "track_info_display not mirrored (missing set_track_info_display)"
+    );
+    assert_eq!(
+        crate::theme::slot_row_height_variant(),
+        settings.slot_row_height,
+        "slot_row_height not mirrored (missing set_slot_row_height)"
+    );
+    assert_eq!(
+        crate::theme::is_opacity_gradient(),
+        settings.opacity_gradient,
+        "opacity_gradient not mirrored (missing set_opacity_gradient)"
+    );
+    assert_eq!(
+        crate::theme::is_slot_text_links(),
+        settings.slot_text_links,
+        "slot_text_links not mirrored (missing set_slot_text_links)"
+    );
+    assert_eq!(
+        crate::theme::is_horizontal_volume(),
+        settings.horizontal_volume,
+        "horizontal_volume not mirrored (missing set_horizontal_volume)"
+    );
+    assert_eq!(
+        crate::theme::font_family(),
+        settings.font_family,
+        "font_family not mirrored (missing set_font_family)"
+    );
+    assert_eq!(
+        crate::theme::strip_show_title(),
+        settings.strip_show_title,
+        "strip_show_title not mirrored (missing set_strip_show_title)"
+    );
+    assert_eq!(
+        crate::theme::strip_show_artist(),
+        settings.strip_show_artist,
+        "strip_show_artist not mirrored (missing set_strip_show_artist)"
+    );
+    assert_eq!(
+        crate::theme::strip_show_album(),
+        settings.strip_show_album,
+        "strip_show_album not mirrored (missing set_strip_show_album)"
+    );
+    assert_eq!(
+        crate::theme::strip_show_format_info(),
+        settings.strip_show_format_info,
+        "strip_show_format_info not mirrored (missing set_strip_show_format_info)"
+    );
+    assert_eq!(
+        crate::theme::strip_merged_mode(),
+        settings.strip_merged_mode,
+        "strip_merged_mode not mirrored (missing set_strip_merged_mode)"
+    );
+    assert_eq!(
+        crate::theme::strip_click_action(),
+        settings.strip_click_action,
+        "strip_click_action not mirrored (missing set_strip_click_action)"
+    );
+    assert_eq!(
+        crate::theme::strip_show_labels(),
+        settings.strip_show_labels,
+        "strip_show_labels not mirrored (missing set_strip_show_labels)"
+    );
+    assert_eq!(
+        crate::theme::strip_separator(),
+        settings.strip_separator,
+        "strip_separator not mirrored (missing set_strip_separator)"
+    );
+    assert_eq!(
+        crate::theme::albums_artwork_overlay(),
+        settings.albums_artwork_overlay,
+        "albums_artwork_overlay not mirrored (missing set_albums_artwork_overlay)"
+    );
+    assert_eq!(
+        crate::theme::artists_artwork_overlay(),
+        settings.artists_artwork_overlay,
+        "artists_artwork_overlay not mirrored (missing set_artists_artwork_overlay)"
+    );
+    assert_eq!(
+        crate::theme::songs_artwork_overlay(),
+        settings.songs_artwork_overlay,
+        "songs_artwork_overlay not mirrored (missing set_songs_artwork_overlay)"
+    );
+    assert_eq!(
+        crate::theme::playlists_artwork_overlay(),
+        settings.playlists_artwork_overlay,
+        "playlists_artwork_overlay not mirrored (missing set_playlists_artwork_overlay)"
+    );
+    assert_eq!(
+        crate::theme::artwork_column_mode(),
+        settings.artwork_column_mode,
+        "artwork_column_mode not mirrored (missing set_artwork_column_mode)"
+    );
+    assert_eq!(
+        crate::theme::artwork_column_stretch_fit(),
+        settings.artwork_column_stretch_fit,
+        "artwork_column_stretch_fit not mirrored (missing set_artwork_column_stretch_fit)"
+    );
+    assert_eq!(
+        crate::theme::artwork_column_width_pct(),
+        settings.artwork_column_width_pct,
+        "artwork_column_width_pct not mirrored (missing set_artwork_column_width_pct)"
+    );
+    assert_eq!(
+        crate::theme::artwork_auto_max_pct(),
+        settings.artwork_auto_max_pct,
+        "artwork_auto_max_pct not mirrored (missing set_artwork_auto_max_pct)"
+    );
+    assert_eq!(
+        crate::theme::artwork_vertical_height_pct(),
+        settings.artwork_vertical_height_pct,
+        "artwork_vertical_height_pct not mirrored (missing set_artwork_vertical_height_pct)"
+    );
+
+    // --- Restore every mutated atomic from the snapshot. ---
+    crate::theme::set_rounded_mode(prior_rounded_mode);
+    crate::theme::set_nav_layout(prior_nav_layout);
+    crate::theme::set_nav_display_mode(prior_nav_display_mode);
+    crate::theme::set_track_info_display(prior_track_info_display);
+    crate::theme::set_slot_row_height(prior_slot_row_height);
+    crate::theme::set_opacity_gradient(prior_opacity_gradient);
+    crate::theme::set_slot_text_links(prior_slot_text_links);
+    crate::theme::set_horizontal_volume(prior_horizontal_volume);
+    crate::theme::set_font_family(prior_font_family);
+    crate::theme::set_strip_show_title(prior_strip_show_title);
+    crate::theme::set_strip_show_artist(prior_strip_show_artist);
+    crate::theme::set_strip_show_album(prior_strip_show_album);
+    crate::theme::set_strip_show_format_info(prior_strip_show_format_info);
+    crate::theme::set_strip_merged_mode(prior_strip_merged_mode);
+    crate::theme::set_strip_click_action(prior_strip_click_action);
+    crate::theme::set_strip_show_labels(prior_strip_show_labels);
+    crate::theme::set_strip_separator(prior_strip_separator);
+    crate::theme::set_albums_artwork_overlay(prior_albums_overlay);
+    crate::theme::set_artists_artwork_overlay(prior_artists_overlay);
+    crate::theme::set_songs_artwork_overlay(prior_songs_overlay);
+    crate::theme::set_playlists_artwork_overlay(prior_playlists_overlay);
+    crate::theme::set_artwork_column_mode(prior_artwork_column_mode);
+    crate::theme::set_artwork_column_stretch_fit(prior_artwork_column_stretch_fit);
+    crate::theme::set_artwork_column_width_pct(prior_artwork_column_width_pct);
+    crate::theme::set_artwork_auto_max_pct(prior_artwork_auto_max_pct);
+    crate::theme::set_artwork_vertical_height_pct(prior_artwork_vertical_height_pct);
+}
+
+// ============================================================================
 // Column-visibility restore wiring (audit rank 6)
 // ============================================================================
 //
