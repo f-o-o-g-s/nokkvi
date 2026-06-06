@@ -162,6 +162,38 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
     }
 }
 
+// ============================================================================
+// Split-view pane proportions (single source of truth)
+// ============================================================================
+//
+// The browsing-panel split lays the two panes out with iced `FillPortion`
+// (a relative integer weight), while each pane's slot-list math needs an
+// absolute pixel width derived as a fraction of `content_pane_width()`.
+// Both derive from the SAME two portion weights so a retune (e.g. 60/40)
+// can never leave the fraction and the FillPortion out of step. The derived
+// f32 fractions are bit-identical to the prior hardcoded 0.55 / 0.45.
+
+/// iced `FillPortion` weight for the queue (left) pane in split view.
+const QUEUE_PANE_PORTION: u16 = 55;
+/// iced `FillPortion` weight for the browsing (right) pane in split view.
+const BROWSER_PANE_PORTION: u16 = 45;
+
+/// Fraction of `content_pane_width()` a pane occupies, derived from its
+/// `FillPortion` weight relative to the total. `const fn` so both the
+/// compile-time guard and the call sites share one definition.
+const fn pane_width_fraction(portion: u16) -> f32 {
+    portion as f32 / (QUEUE_PANE_PORTION + BROWSER_PANE_PORTION) as f32
+}
+
+/// Slot-math width fraction for the queue (left) pane.
+const QUEUE_PANE_FRACTION: f32 = pane_width_fraction(QUEUE_PANE_PORTION);
+/// Slot-math width fraction for the browsing (right) pane.
+const BROWSER_PANE_FRACTION: f32 = pane_width_fraction(BROWSER_PANE_PORTION);
+
+// Rendered-value parity guard: the derived fractions must equal the literals
+// they replaced, so a portion retune cannot silently shift pixels off-ratio.
+const _: () = assert!(QUEUE_PANE_FRACTION + BROWSER_PANE_FRACTION == 1.0);
+
 impl Nokkvi {
     // =========================================================================
     // SECTION: View Functions
@@ -1325,7 +1357,7 @@ impl Nokkvi {
                         songs: std::borrow::Cow::Borrowed(&editor.songs),
                         album_art: &self.artwork.album_art.snapshot,
                         large_artwork,
-                        window_width: self.content_pane_width() * 0.55,
+                        window_width: self.content_pane_width() * QUEUE_PANE_FRACTION,
                         window_height: self.window.height,
                         modifiers: self.window.keyboard_modifiers,
                         total_count: editor.songs.len(),
@@ -1339,8 +1371,10 @@ impl Nokkvi {
                     editor.view(editor_data).map(Message::Editor)
                 }
                 _ => {
-                    let queue_view_data =
-                        self.build_queue_view_data(self.content_pane_width() * 0.55, false);
+                    let queue_view_data = self.build_queue_view_data(
+                        self.content_pane_width() * QUEUE_PANE_FRACTION,
+                        false,
+                    );
                     self.queue_page.view(queue_view_data).map(Message::Queue)
                 }
             };
@@ -1366,7 +1400,7 @@ impl Nokkvi {
                 };
 
             let queue_container = container(queue_pane)
-                .width(Length::FillPortion(55))
+                .width(Length::FillPortion(QUEUE_PANE_PORTION))
                 .height(Length::Fill)
                 .style(if self.cross_pane_drag.is_some() {
                     // Drop target highlight during active drag
@@ -1404,11 +1438,11 @@ impl Nokkvi {
                 let view_content: Element<'_, Message> = match panel.active_view {
                     views::BrowsingView::Albums => {
                         // Browser pane: stable_viewport hardcoded `true`
-                        // (click to highlight, not play); 0.45 width portion
-                        // of the content pane; `in_browsing_panel = true`
+                        // (click to highlight, not play); `BROWSER_PANE_FRACTION`
+                        // width portion of the content pane; `in_browsing_panel = true`
                         // suppresses the "Center on Playing" header button.
                         let view_data = self.build_albums_view_data(
-                            self.content_pane_width() * 0.45,
+                            self.content_pane_width() * BROWSER_PANE_FRACTION,
                             browser_height,
                             true,
                             true,
@@ -1418,7 +1452,7 @@ impl Nokkvi {
                     }
                     views::BrowsingView::Songs => {
                         let view_data = self.build_songs_view_data(
-                            self.content_pane_width() * 0.45,
+                            self.content_pane_width() * BROWSER_PANE_FRACTION,
                             browser_height,
                             true,
                             true,
@@ -1428,7 +1462,7 @@ impl Nokkvi {
                     }
                     views::BrowsingView::Artists => {
                         let view_data = self.build_artists_view_data(
-                            self.content_pane_width() * 0.45,
+                            self.content_pane_width() * BROWSER_PANE_FRACTION,
                             browser_height,
                             true,
                             true,
@@ -1438,7 +1472,7 @@ impl Nokkvi {
                     }
                     views::BrowsingView::Genres => {
                         let view_data = self.build_genres_view_data(
-                            self.content_pane_width() * 0.45,
+                            self.content_pane_width() * BROWSER_PANE_FRACTION,
                             browser_height,
                             true,
                             true,
@@ -1457,7 +1491,7 @@ impl Nokkvi {
                             songs,
                             album_art: &self.artwork.album_art.snapshot,
                             large_artwork,
-                            window_width: self.content_pane_width() * 0.45,
+                            window_width: self.content_pane_width() * BROWSER_PANE_FRACTION,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
@@ -1482,7 +1516,7 @@ impl Nokkvi {
             };
 
             let browser_container = container(browser_content)
-                .width(Length::FillPortion(45))
+                .width(Length::FillPortion(BROWSER_PANE_PORTION))
                 .height(Length::Fill)
                 .style(pane_border_style(browser_focused));
 
@@ -1681,5 +1715,22 @@ mod tests {
             Some(widgets::NavView::Radios)
         );
         assert_eq!(Option::<widgets::NavView>::from(View::Settings), None);
+    }
+
+    /// The split-pane slot-math fractions are derived from the `FillPortion`
+    /// weights, and must stay bit-identical to the `0.55` / `0.45` literals
+    /// they replaced — otherwise a portion retune that forgets to keep the
+    /// fraction in step would silently shift pixels off-ratio. This is a
+    /// permanent drift guard, not a runtime behavior test.
+    #[test]
+    fn split_pane_fractions_match_fill_portions() {
+        assert_eq!(QUEUE_PANE_FRACTION.to_bits(), 0.55f32.to_bits());
+        assert_eq!(BROWSER_PANE_FRACTION.to_bits(), 0.45f32.to_bits());
+        assert_eq!(QUEUE_PANE_PORTION + BROWSER_PANE_PORTION, 100);
+        assert_eq!(QUEUE_PANE_FRACTION, pane_width_fraction(QUEUE_PANE_PORTION));
+        assert_eq!(
+            BROWSER_PANE_FRACTION,
+            pane_width_fraction(BROWSER_PANE_PORTION)
+        );
     }
 }
