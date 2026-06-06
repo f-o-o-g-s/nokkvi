@@ -266,19 +266,11 @@ impl GenresPage {
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
         use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
+            SLOT_LIST_SLOT_PADDING, slot_list_index_column, slot_list_text,
         };
 
         let is_expanded = self.expansion.is_expanded_parent(&genre.id);
-        let style = SlotListSlotStyle::for_slot(
-            ctx.is_center,
-            is_expanded,
-            false,
-            ctx.is_selected,
-            ctx.has_multi_selection,
-            ctx.opacity,
-            0,
-        );
+        let style = ctx.slot_style(is_expanded, false, 0);
 
         let m = ctx.metrics;
         let artwork_size = m.artwork_size;

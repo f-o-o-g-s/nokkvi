@@ -419,20 +419,10 @@ impl PlaylistsPage {
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, PlaylistsMessage> {
-        use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
-        };
+        use crate::widgets::slot_list::{SLOT_LIST_SLOT_PADDING, slot_list_index_column};
 
         let is_expanded = self.expansion.is_expanded_parent(&playlist.id);
-        let style = SlotListSlotStyle::for_slot(
-            ctx.is_center,
-            is_expanded,
-            false,
-            ctx.is_selected,
-            ctx.has_multi_selection,
-            ctx.opacity,
-            0,
-        );
+        let style = ctx.slot_style(is_expanded, false, 0);
 
         let m = ctx.metrics;
         let artwork_size = m.artwork_size;

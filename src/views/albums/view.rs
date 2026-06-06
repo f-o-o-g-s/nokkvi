@@ -362,9 +362,7 @@ impl AlbumsPage {
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, AlbumsMessage> {
-        use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
-        };
+        use crate::widgets::slot_list::{SLOT_LIST_SLOT_PADDING, slot_list_index_column};
 
         let album_id = album.id.clone();
         let album_name = album.name.clone();
@@ -376,15 +374,7 @@ impl AlbumsPage {
 
         // Check if this album is the expanded one
         let is_expanded = self.expansion.is_expanded_parent(&album.id);
-        let style = SlotListSlotStyle::for_slot(
-            ctx.is_center,
-            is_expanded,
-            false,
-            ctx.is_selected,
-            ctx.has_multi_selection,
-            ctx.opacity,
-            0,
-        );
+        let style = ctx.slot_style(is_expanded, false, 0);
 
         let m = ctx.metrics;
         let artwork_size = m.artwork_size;

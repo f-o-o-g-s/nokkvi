@@ -243,7 +243,7 @@ impl RadiosPage {
         });
 
         use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListConfig, SlotListSlotStyle, chrome_height_with_header,
+            SLOT_LIST_SLOT_PADDING, SlotListConfig, chrome_height_with_header,
             slot_list_text_column, slot_list_view_with_scroll,
         };
 
@@ -295,15 +295,7 @@ impl RadiosPage {
                 // take this flag so the row breathes rather than wearing the
                 // static highlight ring.
                 let is_playing = current_station_id == Some(station.id.as_str());
-                let style = SlotListSlotStyle::for_slot(
-                    ctx.is_center,
-                    is_playing,
-                    is_playing,
-                    ctx.is_selected,
-                    ctx.has_multi_selection,
-                    ctx.opacity,
-                    0,
-                );
+                let style = ctx.slot_style(is_playing, is_playing, 0);
 
                 let m = ctx.metrics;
 

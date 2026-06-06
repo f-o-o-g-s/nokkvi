@@ -413,9 +413,8 @@ use nokkvi_data::utils::formatters;
 use crate::widgets::{
     SlotListPageMessage,
     slot_list::{
-        SLOT_LIST_SLOT_PADDING, SlotListRowContext, SlotListSlotStyle, child_slot_button,
-        slot_list_favorite_icon, slot_list_labeled_index_column, slot_list_metadata_column,
-        slot_list_text,
+        SLOT_LIST_SLOT_PADDING, SlotListRowContext, child_slot_button, slot_list_favorite_icon,
+        slot_list_labeled_index_column, slot_list_metadata_column, slot_list_text,
     },
 };
 
@@ -454,15 +453,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
 ) -> Element<'a, M> {
     // Visual hierarchy comes from the per-depth `bg0/bg1/bg2` ramp inside
     // `for_slot`'s unfocused branch — not from forcing the now-playing branch.
-    let style = SlotListSlotStyle::for_slot(
-        ctx.is_center,
-        false,
-        false,
-        ctx.is_selected,
-        ctx.has_multi_selection,
-        ctx.opacity,
-        depth,
-    );
+    let style = ctx.slot_style(false, false, depth);
 
     let title_size = ctx.metrics.title_size;
     let meta_size = ctx.metrics.metadata_size;
@@ -558,15 +549,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     on_artist_click: Option<M>,
     depth: u8,
 ) -> Element<'a, M> {
-    let style = SlotListSlotStyle::for_slot(
-        ctx.is_center,
-        false,
-        false,
-        ctx.is_selected,
-        ctx.has_multi_selection,
-        ctx.opacity,
-        depth,
-    );
+    let style = ctx.slot_style(false, false, depth);
 
     let title_size = ctx.metrics.title_size;
     let meta_size = ctx.metrics.metadata_size;

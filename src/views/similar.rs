@@ -410,18 +410,9 @@ impl SimilarPage {
                 let is_starred = song.starred;
 
                 use crate::widgets::slot_list::{
-                    SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
-                    slot_list_text,
+                    SLOT_LIST_SLOT_PADDING, slot_list_index_column, slot_list_text,
                 };
-                let style = SlotListSlotStyle::for_slot(
-                    ctx.is_center,
-                    false,
-                    false,
-                    ctx.is_selected,
-                    ctx.has_multi_selection,
-                    ctx.opacity,
-                    0,
-                );
+                let style = ctx.slot_style(false, false, 0);
 
                 let m = ctx.metrics;
                 let artwork_size = m.artwork_size;

@@ -2725,20 +2725,27 @@ mod tests {
     // SlotListRowContext::slot_style — forwarder parity with for_slot
     // ========================================================================
     //
-    // Pins that the convenience forwarder never transposes one of the four
-    // context-owned positional args into for_slot. If a future edit reorders
-    // for_slot's params (or the forwarder), the field-by-field equality below
-    // breaks loudly.
+    // Pins that the convenience forwarder maps each of the four context-owned
+    // fields (is_center / is_selected / has_multi_selection / opacity) to the
+    // correct positional arg of for_slot. (A reorder of for_slot's own params
+    // is caught by for_slot's dedicated tests, not here — both paths would shift
+    // together.) The configs below differ pairwise in their three bool fields,
+    // so a swap of any two inside slot_style breaks at least one case loudly.
 
-    /// Build a row context with distinctive, non-default style-bearing fields so
-    /// a transposed arg in `slot_style` would change the resulting style.
-    fn style_probe_row_context() -> SlotListRowContext {
+    /// Build a row context with the four style-bearing fields set explicitly, so
+    /// a transposed arg in `slot_style` changes the resulting style.
+    fn style_probe_row_context(
+        is_center: bool,
+        is_selected: bool,
+        has_multi_selection: bool,
+        opacity: f32,
+    ) -> SlotListRowContext {
         SlotListRowContext {
             item_index: 3,
-            is_center: true,
-            is_selected: true,
-            has_multi_selection: false,
-            opacity: 0.5,
+            is_center,
+            is_selected,
+            has_multi_selection,
+            opacity,
             scale_factor: 1.0,
             row_height: 70.0,
             modifiers: Modifiers::default(),
@@ -2763,26 +2770,36 @@ mod tests {
 
     #[test]
     fn slot_style_forwards_ctx_fields_into_for_slot() {
-        let ctx = style_probe_row_context();
-        // Cover the per-renderer-varying input matrix: plain, expanded-parent
-        // highlight, actively-playing, and a deeper expansion depth.
-        for (is_highlighted, is_playing, depth) in [
+        // Configs whose (is_center, is_selected, has_multi_selection) triples
+        // differ pairwise, so swapping any two context-owned fields inside
+        // slot_style produces a different style in at least one config.
+        let contexts = [
+            style_probe_row_context(true, false, false, 0.5),
+            style_probe_row_context(false, true, false, 0.8),
+            style_probe_row_context(false, false, true, 1.0),
+        ];
+        // Per-renderer-varying inputs: plain, expanded-parent highlight,
+        // actively-playing, and a deeper expansion depth.
+        let call_matrix = [
             (false, false, 0u8),
             (true, false, 0),
             (true, true, 0),
             (false, false, 2),
-        ] {
-            let forwarded = ctx.slot_style(is_highlighted, is_playing, depth);
-            let direct = SlotListSlotStyle::for_slot(
-                ctx.is_center,
-                is_highlighted,
-                is_playing,
-                ctx.is_selected,
-                ctx.has_multi_selection,
-                ctx.opacity,
-                depth,
-            );
-            assert_slot_style_eq(&forwarded, &direct);
+        ];
+        for ctx in &contexts {
+            for (is_highlighted, is_playing, depth) in call_matrix {
+                let forwarded = ctx.slot_style(is_highlighted, is_playing, depth);
+                let direct = SlotListSlotStyle::for_slot(
+                    ctx.is_center,
+                    is_highlighted,
+                    is_playing,
+                    ctx.is_selected,
+                    ctx.has_multi_selection,
+                    ctx.opacity,
+                    depth,
+                );
+                assert_slot_style_eq(&forwarded, &direct);
+            }
         }
     }
 
