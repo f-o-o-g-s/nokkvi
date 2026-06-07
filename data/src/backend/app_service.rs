@@ -271,7 +271,7 @@ impl AppService {
     pub async fn next(&self) -> Result<bool> {
         self.playback.next().await
     }
-    pub async fn previous(&self) -> Result<()> {
+    pub async fn previous(&self) -> Result<crate::services::queue::PreviousOutcome> {
         self.playback.previous().await
     }
     pub async fn seek(&self, position_seconds: f64) -> Result<()> {

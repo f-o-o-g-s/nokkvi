@@ -23,6 +23,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Pressing Previous while Shuffle and Consume are both on no longer leaves an unplayed track stranded; it's blocked with an explanatory toast.
+
 ### Removed
 
 - The dedicated Stop button has been removed from the player bar; Stop is still available via media keys and the `nokkvi stop` command.

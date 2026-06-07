@@ -32,8 +32,27 @@ pub enum PreviousSongResult {
     InQueue(Song, usize),
     /// Song from history but no longer in queue (consumed/removed) — caller should re-insert
     Removed(Song),
+    /// The previous song was consumed (gone from the queue) and shuffle is on.
+    /// Re-inserting it would land at a random play-order slot and strand a
+    /// still-unplayed survivor behind the playhead, so the step-back is blocked.
+    /// History is left intact so repeated Previous is idempotent.
+    BlockedConsumeShuffle,
     /// No previous song available
     None,
+}
+
+/// UI-facing outcome of a Previous request, threaded up from
+/// [`crate::services::QueueNavigator::play_previous`] through
+/// `PlaybackController::previous` to the update layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviousOutcome {
+    /// Previous was handled normally — a track started, or there was simply
+    /// nothing to step back to. Either way the UI refreshes as usual.
+    Stepped,
+    /// Stepping back was blocked because it would land on a consumed track
+    /// while shuffle is on. The UI surfaces an explanatory toast and leaves
+    /// the queue untouched.
+    BlockedConsumeShuffle,
 }
 
 /// Borrow guard returned by [`QueueManager::peek_next_song`].
@@ -328,6 +347,21 @@ impl QueueManager {
                 self.save_order().ok();
                 let song = self.pool.get(&prev_id).cloned().unwrap_or(popped.song);
                 return PreviousSongResult::InQueue(song, idx);
+            }
+
+            // Song not in queue (consumed/removed). Stepping back onto it
+            // re-inserts it. Under shuffle that re-insert lands at a random
+            // play-order slot (`insert_into_order`) and re-deriving
+            // `current_order` onto it strands a still-unplayed survivor behind
+            // the playhead — it would never play. There is no coherent
+            // "step back" under shuffle+consume, so block it: restore the
+            // popped history entry (keeps repeated Previous idempotent and
+            // preserves history if shuffle is later turned off) and signal the
+            // caller to no-op with an explanatory toast. Linear consume is
+            // unaffected — identity order re-inserts coherently before current.
+            if self.queue.consume && self.queue.shuffle {
+                self.playback_history.push(popped);
+                return PreviousSongResult::BlockedConsumeShuffle;
             }
 
             // Song not in queue (consumed/removed) — return for re-insertion
@@ -651,6 +685,79 @@ mod tests {
                 assert_eq!(song.id, "x");
             }
             other => panic!("Expected Removed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn previous_consumed_under_shuffle_is_blocked_and_preserves_history() {
+        // Consume removed the just-played song from the queue (it now lives
+        // only in history). Under shuffle, stepping back onto it would
+        // re-insert it at a random play-order slot and strand a still-unplayed
+        // survivor behind the playhead, so the step-back must be blocked.
+        let songs = vec![make_test_song("b"), make_test_song("c")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = true;
+        qm.queue.consume = true;
+
+        // "a" was consumed: present in history, absent from the queue.
+        qm.add_to_history(make_test_song("a"), None);
+        let history_before = qm.playback_history.len();
+        let song_ids_before = qm.queue.song_ids.clone();
+
+        let result = qm.get_previous_song(Some(0));
+
+        assert!(
+            matches!(result, PreviousSongResult::BlockedConsumeShuffle),
+            "expected BlockedConsumeShuffle, got {result:?}"
+        );
+        // History is restored (repeated Previous stays idempotent) and the
+        // queue is untouched (no re-insertion).
+        assert_eq!(qm.playback_history.len(), history_before);
+        assert_eq!(qm.playback_history.last().unwrap().song.id, "a");
+        assert_eq!(qm.queue.song_ids, song_ids_before);
+    }
+
+    #[test]
+    fn previous_consumed_linear_still_returns_removed() {
+        // Without shuffle the historical re-insert is coherent (identity order
+        // lands the track right before current), so a consumed song must still
+        // report Removed for re-insertion — the block is shuffle-only.
+        let songs = vec![make_test_song("b"), make_test_song("c")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = false;
+        qm.queue.consume = true;
+        qm.add_to_history(make_test_song("a"), None);
+
+        let result = qm.get_previous_song(Some(0));
+        match result {
+            PreviousSongResult::Removed(song) => assert_eq!(song.id, "a"),
+            other => panic!("Expected Removed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn previous_in_queue_under_shuffle_consume_not_blocked() {
+        // A previous song that is still present in the queue resolves InQueue
+        // before the block is ever consulted — guarding against over-blocking
+        // legitimate step-backs under shuffle+consume.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(2));
+        qm.queue.shuffle = true;
+        qm.queue.consume = true;
+        let e0 = qm.entry_id_at(0);
+        qm.add_to_history(make_test_song("a"), e0);
+
+        let result = qm.get_previous_song(Some(2));
+        match result {
+            PreviousSongResult::InQueue(song, idx) => {
+                assert_eq!(song.id, "a");
+                assert_eq!(idx, 0);
+            }
+            other => panic!("Expected InQueue (not blocked), got {other:?}"),
         }
     }
 

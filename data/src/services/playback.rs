@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{
     audio::engine::CustomAudioEngine,
-    services::queue::QueueManager,
+    services::queue::{PreviousOutcome, QueueManager},
     types::{NextTrackResetEffect, song::Song},
 };
 
@@ -587,7 +587,7 @@ impl QueueNavigator {
         engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
-    ) -> Result<Option<(Song, String)>> {
+    ) -> Result<PreviousOutcome> {
         use crate::services::queue::PreviousSongResult;
 
         let mut queue_manager = self.queue_manager.lock().await;
@@ -628,7 +628,7 @@ impl QueueNavigator {
                 }
 
                 debug!("▶️ Now Playing: {} - {}", song.title, song.artist);
-                Ok(Some((song, "prev".to_string())))
+                Ok(PreviousOutcome::Stepped)
             }
             PreviousSongResult::Removed(song) => {
                 debug!(
@@ -651,12 +651,20 @@ impl QueueNavigator {
                     "▶️ Now Playing (re-inserted): {} - {}",
                     song.title, song.artist
                 );
-                Ok(Some((song, "prev".to_string())))
+                Ok(PreviousOutcome::Stepped)
+            }
+            PreviousSongResult::BlockedConsumeShuffle => {
+                // Consumed-track step-back under shuffle. History was left
+                // intact by `get_previous_song`; nothing to play or mutate —
+                // signal the UI to surface an explanatory toast.
+                drop(queue_manager);
+                debug!("⏮️ Previous blocked: consumed track under shuffle");
+                Ok(PreviousOutcome::BlockedConsumeShuffle)
             }
             PreviousSongResult::None => {
                 drop(queue_manager);
                 debug!("⏮️ No previous song available");
-                Ok(None)
+                Ok(PreviousOutcome::Stepped)
             }
         }
     }

@@ -17,6 +17,7 @@ use crate::{
     backend::{queue::QueueService, settings::SettingsService},
     services::{
         playback::{QueueNavigator, RemovalAftermath},
+        queue::PreviousOutcome,
         task_manager::TaskManager,
     },
     utils::url_redaction::redact_subsonic_url,
@@ -354,10 +355,10 @@ impl PlaybackController {
     }
 
     /// Play previous track
-    pub async fn previous(&self) -> Result<()> {
+    pub async fn previous(&self) -> Result<PreviousOutcome> {
         let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
         if server_url.is_empty() {
-            return Ok(());
+            return Ok(PreviousOutcome::Stepped);
         }
 
         let mut engine = self.audio_engine.lock().await;
@@ -367,12 +368,15 @@ impl PlaybackController {
             .play_previous(&mut engine, &server_url, &subsonic_credential)
             .await
         {
-            Ok(_) => {
+            Ok(outcome) => {
                 drop(queue_navigator);
                 drop(engine);
-                // Sync reactive current_index for UI highlighting
-                self.queue_service.refresh_from_queue().await?;
-                Ok(())
+                // A blocked step-back changed nothing, so skip the reactive
+                // refresh; otherwise sync current_index for UI highlighting.
+                if outcome == PreviousOutcome::Stepped {
+                    self.queue_service.refresh_from_queue().await?;
+                }
+                Ok(outcome)
             }
             Err(e) => {
                 drop(queue_navigator);

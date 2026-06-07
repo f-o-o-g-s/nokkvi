@@ -5,7 +5,7 @@ use tracing::{debug, trace};
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, PlaybackMessage, ScrobbleMessage},
+    app_message::{Message, PlaybackMessage, ScrobbleMessage, ToastMessage},
     views,
 };
 
@@ -864,11 +864,23 @@ impl Nokkvi {
         let is_consume = self.modes.consume;
         self.shell_task(
             move |shell| async move {
-                let _ = shell.previous().await;
-                is_consume
+                // `BlockedConsumeShuffle` means the step-back was refused
+                // because it would land on a consumed track under shuffle
+                // (re-inserting would strand a surviving track). Nothing
+                // changed, so surface a toast instead of reloading the queue.
+                let blocked = matches!(
+                    shell.previous().await,
+                    Ok(nokkvi_data::services::queue::PreviousOutcome::BlockedConsumeShuffle)
+                );
+                (blocked, is_consume)
             },
-            |consume| {
-                if consume {
+            |(blocked, consume)| {
+                if blocked {
+                    Message::Toast(ToastMessage::Push(nokkvi_data::types::toast::Toast::new(
+                        "Can't step back while Shuffle and Consume are both on",
+                        nokkvi_data::types::toast::ToastLevel::Warning,
+                    )))
+                } else if consume {
                     Message::LoadQueue
                 } else {
                     Message::Playback(PlaybackMessage::Tick)
