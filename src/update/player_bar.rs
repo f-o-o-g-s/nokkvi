@@ -13,7 +13,7 @@ impl Nokkvi {
         match msg {
             PlayerBarMessage::Play => Task::done(Message::Playback(PlaybackMessage::Play)),
             PlayerBarMessage::Pause => Task::done(Message::Playback(PlaybackMessage::Pause)),
-            PlayerBarMessage::Stop => Task::done(Message::Playback(PlaybackMessage::Stop)),
+            // No inline Stop button — Stop stays reachable via MPRIS + `nokkvi stop`.
             PlayerBarMessage::NextTrack => {
                 Task::done(Message::Playback(PlaybackMessage::NextTrack))
             }

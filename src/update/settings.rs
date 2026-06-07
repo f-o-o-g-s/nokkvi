@@ -53,6 +53,8 @@ impl Nokkvi {
             track_info_display: crate::theme::track_info_display().as_label().into(),
             slot_row_height: crate::theme::slot_row_height_variant().as_label().into(),
             horizontal_volume: crate::theme::is_horizontal_volume(),
+            mini_player_show_volume: crate::theme::mini_player_show_volume(),
+            mini_player_show_modes: crate::theme::mini_player_show_modes(),
             slot_text_links: crate::theme::is_slot_text_links(),
             font_family: crate::theme::font_family().into(),
             strip_show_title: crate::theme::strip_show_title(),

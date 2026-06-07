@@ -28,6 +28,44 @@ pub(crate) struct State {
     last_update: Option<std::time::Instant>,
 }
 
+/// One end-cap label for the filled capsule scrub. `full` is the entire string
+/// (time + codec / bitrate), drawn at the dimmer metadata opacity; `time` is the
+/// elapsed / duration portion re-drawn at full opacity over the same outer-edge
+/// alignment anchor (left cap → left edge, right cap → right edge), so only the
+/// codec / bitrate reads dimmer than the time. When the cap carries no metadata,
+/// `time == full` and it renders fully opaque.
+#[derive(Debug, Clone)]
+pub struct CapLabel {
+    pub full: String,
+    pub time: String,
+}
+
+impl CapLabel {
+    /// Cap with no metadata — `time == full`, renders fully opaque.
+    pub fn time_only(time: impl Into<String>) -> Self {
+        let time = time.into();
+        Self {
+            full: time.clone(),
+            time,
+        }
+    }
+
+    /// Cap whose `time` stays opaque while the rest of `full` (codec / bitrate)
+    /// renders dimmer.
+    pub fn new(full: impl Into<String>, time: impl Into<String>) -> Self {
+        Self {
+            full: full.into(),
+            time: time.into(),
+        }
+    }
+
+    /// Whether there's a dimmer codec / bitrate segment to underpaint (i.e. the
+    /// full string differs from the bare time).
+    fn has_meta(&self) -> bool {
+        self.full != self.time
+    }
+}
+
 /// Custom progress bar with flat styling
 pub struct ProgressBar<'a, Message> {
     position: f32,
@@ -37,6 +75,14 @@ pub struct ProgressBar<'a, Message> {
     width: Length,
     height: f32,
     hide_handle: bool,
+    interactive: bool,
+    filled: bool,
+    /// `(left, right)` end-cap labels drawn overlaid on the FILLED track. Each
+    /// cap is rendered with the fill / track regions clipped so the text stays
+    /// legible (dark over the bright fill, light over the dark track), splitting
+    /// color at the fill edge; the codec / bitrate portion is underpainted at a
+    /// dimmer opacity so the time pops. Capsule scrub only. See [`CapLabel`].
+    time_labels: Option<(CapLabel, CapLabel)>,
 }
 
 /// Visual thickness of the progress track within the widget bounds.
@@ -59,7 +105,26 @@ impl<'a, Message> ProgressBar<'a, Message> {
             width: Length::Fill,
             height: 24.0,
             hide_handle: false,
+            interactive: true,
+            filled: false,
+            time_labels: None,
         }
+    }
+
+    /// Draw the track + progress fill at the FULL widget height (a solid bar)
+    /// instead of the default thin 6 px centered track. Used by the MiniPlayer
+    /// capsule scrub, where the progress reads as one continuous filled block.
+    pub fn filled(mut self, filled: bool) -> Self {
+        self.filled = filled;
+        self
+    }
+
+    /// Overlay the left / right end-cap labels on the filled track with
+    /// color-aware (fill-vs-track) coloring and a dimmer codec / bitrate
+    /// segment. Only drawn in [`Self::filled`] mode. See [`CapLabel`].
+    pub fn time_labels(mut self, left: CapLabel, right: CapLabel) -> Self {
+        self.time_labels = Some((left, right));
+        self
     }
 
     #[allow(clippy::wrong_self_convention)] // Builder pattern setter, not an accessor
@@ -73,6 +138,14 @@ impl<'a, Message> ProgressBar<'a, Message> {
         self
     }
 
+    /// Whether click/drag seeking is enabled. Defaults to `true`. Set `false`
+    /// for non-seekable streams (radio). Decoupled from [`Self::hide_handle`]
+    /// so a handle-less overlay scrub can still be clickable to seek.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
+        self
+    }
+
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self
@@ -83,16 +156,21 @@ impl<'a, Message> ProgressBar<'a, Message> {
         self
     }
 
-    /// Calculate seek position from cursor X coordinate
+    /// Calculate seek position from cursor X coordinate. Filled mode maps the
+    /// FULL width (no handle inset, since it has no handle); the thin track
+    /// reserves `HANDLE_SIZE` so the handle center tracks the cursor.
     fn locate(&self, cursor_x: f32, bounds: Rectangle) -> f32 {
-        let effective_width = bounds.width - HANDLE_SIZE;
+        let (effective_width, offset) = if self.filled {
+            (bounds.width, 0.0)
+        } else {
+            (bounds.width - HANDLE_SIZE, HANDLE_SIZE / 2.0)
+        };
 
         if effective_width <= 0.0 {
             return 0.0;
         }
 
-        // Calculate position relative to track (accounting for handle width)
-        let relative_x = cursor_x - bounds.x - HANDLE_SIZE / 2.0;
+        let relative_x = cursor_x - bounds.x - offset;
         let percentage = (relative_x / effective_width).clamp(0.0, 1.0);
         percentage * self.duration
     }
@@ -148,8 +226,10 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             shell.request_redraw();
         }
 
-        // If handle is hidden, disable mouse interaction
-        if self.hide_handle {
+        // Non-seekable streams (radio) disable all interaction. Note this is
+        // decoupled from `hide_handle`: an overlay scrub hides the handle but
+        // stays seekable.
+        if !self.interactive {
             return;
         }
 
@@ -174,8 +254,10 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                         height: bounds.height,
                     };
 
-                    // Check if user clicked on the handle itself
-                    let clicked_on_handle = cursor_position.x >= handle_bounds.x
+                    // Check if user clicked on the handle itself. Filled mode
+                    // has no handle, so it's always a track-click.
+                    let clicked_on_handle = !self.filled
+                        && cursor_position.x >= handle_bounds.x
                         && cursor_position.x <= handle_bounds.x + handle_bounds.width
                         && cursor_position.y >= handle_bounds.y
                         && cursor_position.y <= handle_bounds.y + handle_bounds.height;
@@ -193,6 +275,12 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
                         // Update visual position and seek immediately
                         state.drag_progress = new_progress;
+                        // Filled mode has no grabbable handle, so a track press
+                        // also begins a drag — enabling click-and-drag scrub
+                        // from anywhere along the bar.
+                        if self.filled {
+                            state.is_dragging = true;
+                        }
                         shell.publish((self.on_seek)(seek_pos));
                         shell.capture_event();
                         shell.request_redraw();
@@ -260,23 +348,50 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         } else {
             0.0
         };
-        let effective_width = bounds.width - HANDLE_SIZE;
+        // Filled mode has no handle, so its fill spans the full width; the thin
+        // track reserves HANDLE_SIZE so the handle center tracks the fill edge.
+        let effective_width = if self.filled {
+            bounds.width
+        } else {
+            bounds.width - HANDLE_SIZE
+        };
         let handle_x = bounds.x + progress * effective_width;
 
-        // Flat track: 6px thin, centered vertically in widget bounds.
-        // `ui_radius_pill()` returns `0.0.into()` in flat mode and the
-        // pill radius in rounded mode — no separate ladder needed.
-        let track_y = bounds.y + (bounds.height - TRACK_THICKNESS) / 2.0;
-        let track_radius = crate::theme::ui_radius_pill_player();
+        // Default: a 6px thin track centered vertically. Filled mode: a solid
+        // full-height bar (capsule scrub) — the track spans the whole widget.
+        // `ui_radius_pill()` returns `0.0.into()` in flat mode and the pill
+        // radius in rounded mode — no separate ladder needed.
+        let (track_y, track_h) = if self.filled {
+            (bounds.y, bounds.height)
+        } else {
+            (
+                bounds.y + (bounds.height - TRACK_THICKNESS) / 2.0,
+                TRACK_THICKNESS,
+            )
+        };
+        // Filled (capsule) mode is always square so the track butts flush
+        // against its time end-caps as one connected element — even in rounded
+        // mode. The thin track follows the theme pill radius.
+        let track_radius = if self.filled {
+            iced::border::Radius::from(0.0)
+        } else {
+            crate::theme::ui_radius_pill_player()
+        };
+        // Filled mode uses the darker `bg0` track (capsule); thin uses `bg2`.
+        let track_bg = if self.filled {
+            crate::theme::bg0()
+        } else {
+            crate::theme::bg2()
+        };
 
-        // Track background — bg2 fill, no border.
+        // Track background.
         renderer.fill_quad(
             renderer::Quad {
                 bounds: Rectangle {
                     x: bounds.x,
                     y: track_y,
                     width: bounds.width,
-                    height: TRACK_THICKNESS,
+                    height: track_h,
                 },
                 border: iced::Border {
                     radius: track_radius,
@@ -284,15 +399,16 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                 },
                 ..Default::default()
             },
-            crate::theme::bg2(),
+            track_bg,
         );
 
-        // Progress fill — accent_bright, from left edge to handle center.
-        // Per design, the fill stops at the handle's left edge — handle_x is
-        // already the left edge of the handle, so fill width is exactly handle_x
-        // (offset from track origin) plus HANDLE_SIZE/2 to reach the handle's
-        // center.
-        let fill_width = (handle_x - bounds.x + HANDLE_SIZE / 2.0).clamp(0.0, bounds.width);
+        // Progress fill — accent_bright. Filled mode fills edge-to-edge to the
+        // progress point; the thin track fills to the handle center.
+        let fill_width = if self.filled {
+            (progress * bounds.width).clamp(0.0, bounds.width)
+        } else {
+            (handle_x - bounds.x + HANDLE_SIZE / 2.0).clamp(0.0, bounds.width)
+        };
         if fill_width > 0.0 {
             renderer.fill_quad(
                 renderer::Quad {
@@ -300,7 +416,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                         x: bounds.x,
                         y: track_y,
                         width: fill_width,
-                        height: TRACK_THICKNESS,
+                        height: track_h,
                     },
                     border: iced::Border {
                         radius: track_radius,
@@ -312,7 +428,9 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             );
         }
 
-        if !self.hide_handle {
+        // Filled (capsule) mode is structurally handle-less — it reads like a
+        // level meter — so the handle never draws there regardless of the flag.
+        if !self.hide_handle && !self.filled {
             // Handle on a separate layer so it draws above any neighboring quads.
             let handle_clip = bounds;
             renderer.with_layer(handle_clip, |renderer| {
@@ -340,6 +458,111 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             });
         }
 
+        // Color-aware overlaid end-cap labels (filled / capsule mode). Each cap
+        // is painted twice — clipped to the fill region (dark text over the
+        // bright fill) and the track region (light text over the dark track) —
+        // so it stays legible and flips color exactly at the fill edge. The
+        // codec / bitrate is underpainted at a dimmer opacity (the full string),
+        // then the bare time is repainted opaque over the same outer-edge anchor
+        // so only the time pops.
+        if self.filled
+            && let Some((left, right)) = &self.time_labels
+        {
+            use iced::{
+                Pixels,
+                advanced::text::{self, Renderer as TextRenderer, Shaping, Text},
+                alignment,
+            };
+
+            const PAD: f32 = 10.0;
+            /// Codec / bitrate opacity relative to the time — reads as secondary.
+            const META_ALPHA: f32 = 0.6;
+            let on_fill = crate::theme::bg0_hard();
+            let on_track = crate::theme::fg1();
+            let dim = |c: iced::Color| iced::Color {
+                a: c.a * META_ALPHA,
+                ..c
+            };
+            let font = crate::theme::ui_font();
+            let fill_clip = Rectangle {
+                x: bounds.x,
+                y: bounds.y,
+                width: fill_width,
+                height: bounds.height,
+            };
+            let track_clip = Rectangle {
+                x: bounds.x + fill_width,
+                y: bounds.y,
+                width: (bounds.width - fill_width).max(0.0),
+                height: bounds.height,
+            };
+            let make = |content: String, align_x: text::Alignment| Text {
+                content,
+                bounds: bounds.size(),
+                size: Pixels(11.0),
+                line_height: text::LineHeight::default(),
+                font,
+                align_x,
+                align_y: alignment::Vertical::Center,
+                shaping: Shaping::Basic,
+                wrapping: text::Wrapping::None,
+                ellipsis: text::Ellipsis::default(),
+                hint_factor: Some(1.0),
+            };
+            let cy = bounds.center_y();
+            let left_pos = Point::new(bounds.x + PAD, cy);
+            let right_pos = Point::new(bounds.x + bounds.width - PAD, cy);
+
+            // Paint a string in both the fill and track regions (color split at
+            // the fill edge).
+            let mut paint = |content: &str,
+                             align_x: text::Alignment,
+                             pos: Point,
+                             fill_c: iced::Color,
+                             track_c: iced::Color| {
+                renderer.fill_text(make(content.to_string(), align_x), pos, fill_c, fill_clip);
+                renderer.fill_text(make(content.to_string(), align_x), pos, track_c, track_clip);
+            };
+
+            // LEFT cap — time anchored at the left edge, codec / kHz trailing
+            // toward center (underpainted dimmer, then time repainted opaque).
+            if left.has_meta() {
+                paint(
+                    &left.full,
+                    text::Alignment::Left,
+                    left_pos,
+                    dim(on_fill),
+                    dim(on_track),
+                );
+            }
+            paint(
+                &left.time,
+                text::Alignment::Left,
+                left_pos,
+                on_fill,
+                on_track,
+            );
+
+            // RIGHT cap — time anchored at the right edge, kbps leading from
+            // center (underpainted dimmer, then time repainted opaque).
+            if right.has_meta() {
+                paint(
+                    &right.full,
+                    text::Alignment::Right,
+                    right_pos,
+                    dim(on_fill),
+                    dim(on_track),
+                );
+            }
+            paint(
+                &right.time,
+                text::Alignment::Right,
+                right_pos,
+                on_fill,
+                on_track,
+            );
+        }
+
         // Tooltip is drawn via overlay() for proper z-ordering
     }
 
@@ -351,7 +574,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        if self.hide_handle {
+        if !self.interactive {
             return mouse::Interaction::default();
         }
 
@@ -551,4 +774,52 @@ pub(crate) fn progress_bar<'a, Message: Clone + 'a>(
     on_seek: impl Fn(f32) -> Message + 'a,
 ) -> ProgressBar<'a, Message> {
     ProgressBar::new(position, duration, on_seek)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bar(duration: f32, filled: bool) -> ProgressBar<'static, ()> {
+        ProgressBar::new(0.0, duration, |_| ()).filled(filled)
+    }
+
+    /// Filled (capsule) mode seeks across the FULL width — the edges map to the
+    /// track ends with no handle inset, so click/drag-to-seek lands accurately.
+    #[test]
+    fn filled_locate_maps_full_width_edges_to_ends() {
+        let b = bar(100.0, true);
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: CAPSULE_DEFAULT_TEST_HEIGHT,
+        };
+        assert_eq!(b.locate(0.0, bounds), 0.0);
+        assert_eq!(b.locate(50.0, bounds), 50.0);
+        assert_eq!(b.locate(100.0, bounds), 100.0);
+    }
+
+    /// Thin mode reserves `HANDLE_SIZE`; the cursor at the handle's leftmost
+    /// center (x = HANDLE_SIZE/2) maps to the start. Guards against a future
+    /// refactor leaking the handle offset into filled mode.
+    #[test]
+    fn thin_locate_insets_by_half_handle() {
+        let b = bar(100.0, false);
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: CAPSULE_DEFAULT_TEST_HEIGHT,
+        };
+        assert_eq!(b.locate(HANDLE_SIZE / 2.0, bounds), 0.0);
+    }
+
+    #[test]
+    fn cap_label_has_meta_distinguishes_time_only() {
+        assert!(!CapLabel::time_only("3:40").has_meta());
+        assert!(CapLabel::new("3:40 · FLAC 44.1kHz", "3:40").has_meta());
+    }
+
+    const CAPSULE_DEFAULT_TEST_HEIGHT: f32 = 20.0;
 }

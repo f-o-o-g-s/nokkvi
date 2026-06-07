@@ -91,6 +91,11 @@ struct UiModeFlags {
     slot_text_links: AtomicBool,
     /// Whether volume sliders are displayed horizontally in the player bar
     horizontal_volume: AtomicBool,
+    /// Whether the mini-player bar shows the volume slider (mini-player mode only)
+    mini_player_show_volume: AtomicBool,
+    /// Whether the mini-player bar shows the mode toggles / kebab menu
+    /// (mini-player mode only)
+    mini_player_show_modes: AtomicBool,
     /// Whether the title field is shown in the track info strip
     strip_show_title: AtomicBool,
     /// Whether the artist field is shown in the track info strip
@@ -147,6 +152,8 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     opacity_gradient: AtomicBool::new(true),
     slot_text_links: AtomicBool::new(true),
     horizontal_volume: AtomicBool::new(false),
+    mini_player_show_volume: AtomicBool::new(true),
+    mini_player_show_modes: AtomicBool::new(true),
     strip_show_title: AtomicBool::new(true),
     strip_show_artist: AtomicBool::new(true),
     strip_show_album: AtomicBool::new(true),
@@ -838,6 +845,40 @@ pub(crate) fn is_horizontal_volume() -> bool {
 pub(crate) fn set_horizontal_volume(enabled: bool) {
     UI_MODE.horizontal_volume.store(enabled, Ordering::Relaxed);
     debug!(" Horizontal volume changed: horizontal_volume={}", enabled);
+}
+
+/// Returns true if the mini-player bar shows the volume slider (mini-player
+/// mode only)
+#[inline]
+pub(crate) fn mini_player_show_volume() -> bool {
+    UI_MODE.mini_player_show_volume.load(Ordering::Relaxed)
+}
+
+/// Set whether the mini-player bar shows the volume slider (call when the user
+/// toggles the setting)
+#[inline]
+pub(crate) fn set_mini_player_show_volume(shown: bool) {
+    UI_MODE
+        .mini_player_show_volume
+        .store(shown, Ordering::Relaxed);
+    debug!("Mini-player show volume changed: mini_player_show_volume={shown}");
+}
+
+/// Returns true if the mini-player bar shows the mode toggles / kebab menu
+/// (mini-player mode only)
+#[inline]
+pub(crate) fn mini_player_show_modes() -> bool {
+    UI_MODE.mini_player_show_modes.load(Ordering::Relaxed)
+}
+
+/// Set whether the mini-player bar shows the mode toggles / kebab menu (call
+/// when the user toggles the setting)
+#[inline]
+pub(crate) fn set_mini_player_show_modes(shown: bool) {
+    UI_MODE
+        .mini_player_show_modes
+        .store(shown, Ordering::Relaxed);
+    debug!("Mini-player show modes changed: mini_player_show_modes={shown}");
 }
 
 // ============================================================================

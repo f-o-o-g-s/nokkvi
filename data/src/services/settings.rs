@@ -384,6 +384,16 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_mini_player_show_volume(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.mini_player_show_volume = enabled;
+        self.save()
+    }
+
+    pub fn set_mini_player_show_modes(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.mini_player_show_modes = enabled;
+        self.save()
+    }
+
     pub fn set_font_family(&mut self, family: String) -> Result<()> {
         self.settings.player.font_family = family;
         self.save()
@@ -1183,6 +1193,8 @@ mod sentinel_roundtrip_tests {
             quick_add_to_playlist: true,       // default false
             queue_show_default_playlist: true, // default false
             horizontal_volume: true,           // default false
+            mini_player_show_volume: false,    // default true
+            mini_player_show_modes: false,     // default true
             font_family: "Sentinel Mono".to_string(),
 
             // Volume normalization
@@ -1397,6 +1409,11 @@ mod sentinel_roundtrip_tests {
             ui_ps2.queue_show_default_playlist
         );
         assert_eq!(ui_ps1.horizontal_volume, ui_ps2.horizontal_volume);
+        assert_eq!(
+            ui_ps1.mini_player_show_volume,
+            ui_ps2.mini_player_show_volume
+        );
+        assert_eq!(ui_ps1.mini_player_show_modes, ui_ps2.mini_player_show_modes);
         assert_eq!(ui_ps1.font_family, ui_ps2.font_family);
 
         // Volume normalization
@@ -1687,6 +1704,8 @@ horizontal_volume = false
 library_page_size = "massive"
 light_mode = false
 local_music_path = "/tmp/test_library"
+mini_player_show_modes = true
+mini_player_show_volume = true
 nav_display_mode = "icons_only"
 nav_layout = "none"
 normalization_level = "normal"

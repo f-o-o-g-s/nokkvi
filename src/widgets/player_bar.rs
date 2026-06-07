@@ -11,7 +11,10 @@ use iced::{
     widget::{Svg, button, column, container, mouse_area, row, svg, text, tooltip},
 };
 
-use crate::{theme, widgets, widgets::hover_overlay::HoverOverlay};
+use crate::{
+    theme, widgets,
+    widgets::{hover_overlay::HoverOverlay, progress_bar::CapLabel},
+};
 
 // Player bar dimensions (flat redesign). 72 px in both modes — the design
 // CSS specified 64 in flat mode and 72 in rounded, but the 8 px difference
@@ -20,6 +23,16 @@ use crate::{theme, widgets, widgets::hover_overlay::HoverOverlay};
 // gives the transport + mode buttons the same airy breathing room across
 // the two visual languages.
 const BASE_PLAYER_BAR_HEIGHT: f32 = 72.0;
+/// 1 px separator line (theme `border()`) framing the MiniPlayer capsule scrub
+/// on its top and bottom edges, matching the app's divider language.
+const SCRUB_SEPARATOR_HEIGHT: f32 = 1.0;
+/// MiniPlayer bar height — a connected "capsule" progress scrub (with elapsed /
+/// duration end-caps) rides the top as its own row, framed by a 1 px separator
+/// above and below, directly over the content row (sized to the artwork). The
+/// capsule is a real layout row, so the bar is taller than the base.
+/// `sep + capsule + sep + artwork`.
+const MINI_PLAYER_BAR_HEIGHT: f32 =
+    2.0 * SCRUB_SEPARATOR_HEIGHT + CAPSULE_SCRUB_HEIGHT + MINI_PLAYER_ARTWORK_SIZE;
 const CONTROL_ROW_HEIGHT: f32 = 44.0;
 /// Transport button (prev/play/pause/stop/next) — 40×40, borderless flat icon.
 const TRANSPORT_SIZE: f32 = 40.0;
@@ -30,28 +43,13 @@ const MODE_BUTTON_HEIGHT: f32 = 44.0;
 /// Re-uses the canonical constant from `track_info_strip.rs` to avoid drift.
 use super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR as INFO_STRIP_WITH_SEPARATOR;
 
-/// Compact transport-button size used while in `MiniPlayer` display mode.
-/// 28 px (with a 14 px glyph) lets the buttons stack above the progress
-/// scrub inside the existing 72 px bar instead of bumping bar height. The
-/// icon scales 1:2 with the button so the proportions match the standard
-/// 40/20 buttons.
-const MINI_PLAYER_TRANSPORT_SIZE: f32 = 28.0;
-const MINI_PLAYER_TRANSPORT_ICON_SIZE: f32 = 14.0;
-
-/// Compact progress-row height in MiniPlayer stacked mode: matches the
-/// progress widget's intrinsic 24 px so the row introduces no extra
-/// vertical padding around the scrub.
-const MINI_PLAYER_PROGRESS_ROW_HEIGHT: f32 = 24.0;
-
-/// Vertical gap between the centered transports row and the progress row
-/// inside the MiniPlayer stacked column.
-const MINI_PLAYER_STACK_SPACING: f32 = 4.0;
-
-/// Vertical padding applied to the main row in `MiniPlayer` rounded mode.
-/// Slimmer than the default [10, 12] so 28 (transports) + 4 (gap) + 24
-/// (progress) = 56 px of stacked content fits inside the 72 px bar with a
-/// few px of slack. Flat mode already runs at zero vertical padding.
-const MINI_PLAYER_ROUNDED_PADDING: [u16; 2] = [6, 12];
+/// Height of the MiniPlayer "capsule" seek scrub — a full-width connected
+/// progress bar across the top of the bar, with elapsed/duration time end-caps
+/// butted against the track so they read as one continuous progress element.
+const CAPSULE_SCRUB_HEIGHT: f32 = 20.0;
+/// Height of the vertical divider between the volume utility and the transports
+/// in the MiniPlayer right cluster.
+const MINI_DIVIDER_HEIGHT: f32 = 24.0;
 
 #[inline]
 fn mode_button_width() -> f32 {
@@ -70,14 +68,13 @@ const SECTION_BUTTON_GAP: f32 = 4.0;
 /// progress, progress and modes, modes and volume).
 const MAIN_ROW_INNER_GAP: f32 = 6.0;
 
-/// Width of the transport-controls section for the currently-rendered count
-/// of buttons. 5-button uncollapsed (prev/play/pause/stop/next) or 3-button
-/// collapsed (prev / play-or-pause / next) — the section sizes to fit only
-/// what's on screen, so the progress track can claim the rest of the row.
+/// Width of the transport-controls section — always the 3-button modern set
+/// (prev / play-or-pause toggle / next). The section sizes to fit exactly those,
+/// so the progress track can claim the rest of the row.
 #[inline]
-pub(crate) fn transport_section_width(transports_collapsed: bool) -> f32 {
-    let n = if transports_collapsed { 3.0 } else { 5.0 };
-    n * TRANSPORT_SIZE + (n - 1.0) * SECTION_BUTTON_GAP
+pub(crate) fn transport_section_width() -> f32 {
+    const N: f32 = 3.0;
+    N * TRANSPORT_SIZE + (N - 1.0) * SECTION_BUTTON_GAP
 }
 
 /// Width of the mode-toggles section for the currently-rendered layout —
@@ -123,35 +120,72 @@ pub(crate) fn volume_section_width(show_sfx_slider: bool) -> f32 {
     }
 }
 
-/// Side length of the artwork thumbnail rendered to the left of the
-/// transport controls in `TrackInfoDisplay::MiniPlayer` mode.
+/// Side length of the artwork thumbnail at the left of the `MiniPlayer`
+/// content row. The capsule seek scrub is its own row above the content row
+/// (framed by 1 px separators), so the content row is sized to this artwork and
+/// the bar height is `sep + capsule + sep + artwork` ([`MINI_PLAYER_BAR_HEIGHT`]).
 pub(crate) const MINI_PLAYER_ARTWORK_SIZE: f32 = 56.0;
-/// Width of the title/artist/album text column next to that artwork.
-const MINI_PLAYER_TEXT_WIDTH: f32 = 180.0;
-/// Gap between the artwork and the text column inside the section.
+/// Gap between the artwork and the flexible text column inside the section.
 const MINI_PLAYER_INNER_GAP: f32 = 8.0;
-/// Total horizontal extent of the mini-player section. Fed to the
-/// `Length::Fixed` wrapper in `main_row` so the progress bar flexes
-/// into the remainder.
-pub(crate) const MINI_PLAYER_SECTION_WIDTH: f32 =
-    MINI_PLAYER_ARTWORK_SIZE + MINI_PLAYER_INNER_GAP + MINI_PLAYER_TEXT_WIDTH;
+/// Minimum horizontal room the metadata section needs (artwork + gap + a small
+/// legible text slice) before it hides entirely in the COMPACT regime. The text
+/// column is `Length::Fill` and each line ellipsizes (no marquee), so above this
+/// width it simply fills the available room — see [`show_mini_player_section`].
+const MINI_PLAYER_MIN_METADATA_WIDTH: f32 = MINI_PLAYER_ARTWORK_SIZE + MINI_PLAYER_INNER_GAP + 50.0;
 
-/// Window-width threshold below which the mini-player section hides so
-/// the rest of the bar retains breathing room. Set well below the pre-stack
-/// 760 px figure because MiniPlayer mode now lifts the transports out of the
-/// main row and stacks them on top of the progress scrub at the smaller
-/// 28 px scale — that 156 px no longer competes with the mini-player section
-/// for horizontal space. Tuned to leave the progress widget itself ≳100 px
-/// wide at the boundary (244 mini + ~160 stacked column min + ~80 modes/vol
-/// + gaps + padding ≈ 540).
-pub(crate) const MINI_PLAYER_HIDE_BELOW: f32 = 540.0;
+/// Minimum width the metadata section + right cluster need to coexist in the
+/// COMPACT MiniPlayer regime, for the given layout. The capsule seek scrub is a
+/// separate row above, so this concerns only the content row
+/// `[metadata (flexible) | transports | divider | volume | kebab]`. The metadata
+/// text is `Length::Fill` and ellipsizes; below this width even a minimal slice
+/// can no longer sit beside the cluster, so the whole section hides (replaced by
+/// a Fill spacer). Computed from the ACTUAL current cluster (kebab + optional
+/// hamburger, the live volume orientation, current transport collapse) rather
+/// than a fixed worst-case constant, so metadata stays visible as long as it
+/// genuinely fits. Used ONLY by the compact regime; the three-section regime
+/// renders metadata unconditionally (its Fill half is always far wider).
+fn mini_player_min_width(width: f32, layout: PlayerBarLayout) -> f32 {
+    let has_hamburger = theme::is_none_nav();
+    let show_sfx = width >= BREAKPOINT_HIDE_SFX_SLIDER;
+    // Only reserve room for the controls actually rendered. `mini_player_show_modes`
+    // gates the ENTIRE mode_toggles row (inline buttons, kebab, AND the
+    // NavLayout::None hamburger), so zero the whole mode-section term when off.
+    let show_modes = theme::mini_player_show_modes();
+    let show_volume = theme::mini_player_show_volume();
+    let mode_w = if show_modes {
+        mode_section_width(layout, has_hamburger)
+    } else {
+        0.0
+    };
+    let volume_w = if show_volume {
+        volume_section_width(show_sfx)
+    } else {
+        0.0
+    };
+    let cluster = mode_w + volume_w + transport_section_width();
+    // Approx inter-section gaps for the compact content row
+    // [metadata | transports | (divider) | volume | kebab]; a heuristic kept at 3
+    // to match the original threshold tuning (not a per-element exact count).
+    let gaps = 3.0 * MAIN_ROW_INNER_GAP;
+    // Heuristic edge inset — a proxy for the conventional padding, NOT the real
+    // mini outer_padding ({ right: SECTION_BUTTON_GAP, ..ZERO }); kept at the
+    // original 12/6 values so the tuned hide threshold doesn't shift.
+    let horizontal_padding = if theme::is_rounded_for_player() {
+        2.0 * 12.0
+    } else {
+        2.0 * 6.0
+    };
+    MINI_PLAYER_MIN_METADATA_WIDTH + cluster + gaps + horizontal_padding
+}
 
-/// Whether the mini-player left-of-transport section should render
-/// for the given window width AND the active `TrackInfoDisplay`.
+/// Whether the mini-player left-of-cluster section should render for the active
+/// `TrackInfoDisplay`, window width, and layout. Hidden when the metadata + the
+/// current right cluster no longer fit (see [`mini_player_min_width`]).
 #[inline]
-pub(crate) fn show_mini_player_section(width: f32) -> bool {
+pub(crate) fn show_mini_player_section(width: f32, layout: PlayerBarLayout) -> bool {
     use nokkvi_data::types::player_settings::TrackInfoDisplay;
-    theme::track_info_display() == TrackInfoDisplay::MiniPlayer && width >= MINI_PLAYER_HIDE_BELOW
+    theme::track_info_display() == TrackInfoDisplay::MiniPlayer
+        && width >= mini_player_min_width(width, layout)
 }
 
 /// Volume change per scroll line (e.g. mouse wheel notch)
@@ -167,11 +201,13 @@ fn base_player_bar_height() -> f32 {
     BASE_PLAYER_BAR_HEIGHT
 }
 
-/// Dynamic player bar height: base 72 px, plus the chrome above and below
-/// the main row when `TrackInfoDisplay::PlayerBar` is active. MiniPlayer
-/// mode keeps the base height — the stacked transports + progress column
-/// is sized to fit by shrinking transport buttons and trimming the row's
-/// vertical padding.
+/// Dynamic player bar height. `PlayerBar` strip mode adds the strip chrome
+/// above/below the base row. `MiniPlayer` mode is TALLER than the base bar
+/// ([`MINI_PLAYER_BAR_HEIGHT`] = 78) — the capsule seek scrub is its own row
+/// (framed by 1 px separators) above the artwork-sized content row. This is
+/// regime-independent: both the wide three-section and the compact layouts are
+/// horizontal-only variations of the same 78 px bar. Every other mode uses the
+/// base 72 px.
 ///
 /// When the strip is on, the rendered widget tree is:
 /// `column![top_separator(1), main_row(base), strip(STRIP_HEIGHT_WITH_SEPARATOR)]`.
@@ -179,9 +215,12 @@ fn base_player_bar_height() -> f32 {
 /// 1 px separator-above, so the chrome math here must add 1 more px for
 /// the player-bar's own top separator.
 pub(crate) fn player_bar_height() -> f32 {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
     let base = base_player_bar_height();
     if crate::theme::show_player_bar_strip() {
         base + 1.0 + INFO_STRIP_WITH_SEPARATOR
+    } else if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
+        MINI_PLAYER_BAR_HEIGHT
     } else {
         base
     }
@@ -376,13 +415,41 @@ pub(crate) const CULL_ENTER_WIDTHS: [f32; 7] = [
     670.0,  // Repeat
 ];
 
+// Interlock: `CULL_ORDER` and `CULL_ENTER_WIDTHS` are coupled purely by index
+// (CULL_ORDER[i] culls at CULL_ENTER_WIDTHS[i]). Adding a mode to one array but
+// not the other would silently desync the wide-regime cull (caps at the shorter
+// len) from the compact force-fold — fail the build instead.
+const _: () = assert!(CULL_ORDER.len() == CULL_ENTER_WIDTHS.len());
+
 pub(crate) const CULL_HYSTERESIS_PX: f32 = 40.0;
 
-/// Width below which the transport row collapses from 5 buttons to 3 (prev /
-/// play-or-pause toggle / next). Independent of mode culling — tight bars
-/// benefit from collapsing transports even with a few modes still inline.
-pub(crate) const TRANSPORT_COLLAPSE_ENTER: f32 = 870.0;
-pub(crate) const TRANSPORT_COLLAPSE_EXIT: f32 = 910.0;
+/// Width thresholds for the MiniPlayer three-section content row — a roomier
+/// layout (metadata left, transports CENTERED, modes + volume right) where the
+/// mode toggles are EXPANDED and width-cull into the kebab one-by-one exactly
+/// like the normal bar (the wide regime passes the width-driven `kebab_mode_count`
+/// straight through — see [`effective_player_bar_layout`]). Below the band the bar
+/// falls back to the compact single-cluster row (every mode in one permanent
+/// kebab — the original MiniPlayer look) only when the window is genuinely tight.
+///
+/// The band sits BELOW the mode-cull range (`CULL_ENTER_WIDTHS`, 670..1070) on
+/// purpose: that way the whole one-mode-at-a-time cull sequence happens WHILE the
+/// transports stay centered, instead of the regime only existing above the cull
+/// band (which would defeat the point of expanding the modes). The compact flip
+/// is the floor where centered transports + a metadata slice + the (by now mostly
+/// culled) right cluster stop sitting comfortably.
+///
+/// Hysteretic: flip to three-section only once width clears the higher `EXIT`,
+/// fall back to compact once width drops below the lower `ENTER`, holding the
+/// regime across the band so drag-resize doesn't thrash the whole layout.
+pub(crate) const MINI_THREE_SECTION_ENTER: f32 = 720.0;
+pub(crate) const MINI_THREE_SECTION_EXIT: f32 = 770.0;
+
+// Interlocks (compile-time desync guards): the band is a sane enter/exit pair,
+// and sits below the first cull threshold so the mode toggles cull one-by-one
+// WITHIN the centered three-section regime rather than the regime only existing
+// above the cull range.
+const _: () = assert!(MINI_THREE_SECTION_ENTER < MINI_THREE_SECTION_EXIT);
+const _: () = assert!(MINI_THREE_SECTION_EXIT < CULL_ENTER_WIDTHS[0]);
 
 /// Snapshot of how the player bar should currently lay out, derived from the
 /// window width with hysteresis applied per-mode. Replaces the previous
@@ -394,9 +461,17 @@ pub struct PlayerBarLayout {
     /// entries of [`CULL_ORDER`] are inside the menu; the rest render inline.
     /// `0` means the kebab itself is hidden.
     pub kebab_mode_count: u8,
-    /// `true` when the bar is narrow enough that transports collapse to 3
-    /// (prev / play-or-pause / next).
-    pub transports_collapsed: bool,
+    /// `true` when the window is wide enough for the MiniPlayer three-section
+    /// content row (metadata | centered transports | modes + volume). Width-only
+    /// and hysteretic (see [`update_three_section`]); mode-agnostic, so
+    /// [`compute_layout`] never reads `track_info_display`. Consumed only by the
+    /// MiniPlayer render path: [`effective_player_bar_layout`] reads it to decide
+    /// whether to pass the width-driven `kebab_mode_count` through (wide, modes
+    /// expand/cull like the normal bar) or force every mode into one kebab
+    /// (compact), and the render arm reads it to pick the three-section vs compact
+    /// subtree. NOT an input to `player_bar_height()` — the bar is 78 px in both
+    /// regimes (a horizontal-only change), so chrome math stays regime-blind.
+    pub wide_for_three_section: bool,
 }
 
 impl PlayerBarLayout {
@@ -408,13 +483,12 @@ impl PlayerBarLayout {
 }
 
 /// Recompute the layout for a new window width given the previous layout
-/// (for hysteresis). Each mode has its own enter/exit threshold pair, and
-/// the transport collapse has its own threshold pair independent of mode
-/// culling.
+/// (for hysteresis). Each mode has its own enter/exit threshold pair, and the
+/// three-section regime has its own threshold pair, all width-driven.
 pub(crate) fn compute_layout(width: f32, prev: PlayerBarLayout) -> PlayerBarLayout {
     PlayerBarLayout {
         kebab_mode_count: update_kebab_count(width, prev.kebab_mode_count),
-        transports_collapsed: update_transport_collapse(width, prev.transports_collapsed),
+        wide_for_three_section: update_three_section(width, prev.wide_for_three_section),
     }
 }
 
@@ -446,14 +520,44 @@ fn update_kebab_count(width: f32, prev_count: u8) -> u8 {
     count
 }
 
-fn update_transport_collapse(width: f32, prev: bool) -> bool {
+/// Hysteretic width gate for the MiniPlayer three-section content row: flip ON
+/// (three-section) only once width clears the higher `EXIT`, and hold until width
+/// drops below the lower `ENTER`, so the layout doesn't thrash across the band
+/// during drag-resize.
+fn update_three_section(width: f32, prev: bool) -> bool {
     if prev {
-        // Already collapsed — stay collapsed until width clears the exit
-        // threshold (hysteresis margin above the enter threshold).
-        width < TRANSPORT_COLLAPSE_EXIT
+        // Already three-section — stay until width drops below the drop point.
+        width >= MINI_THREE_SECTION_ENTER
     } else {
-        // Expanded — collapse when width drops below the enter threshold.
-        width < TRANSPORT_COLLAPSE_ENTER
+        // Compact — flip to three-section only once width clears the entry point.
+        width >= MINI_THREE_SECTION_EXIT
+    }
+}
+
+/// Resolve the layout actually used for rendering from the width-driven base
+/// layout produced by [`compute_layout`]. Width culling owns
+/// `Nokkvi.player_bar_layout` for every mode. `MiniPlayer` keys off the
+/// width-driven `wide_for_three_section` regime flag: in the WIDE regime the
+/// mode toggles expand and cull individually (pass the width-driven
+/// `kebab_mode_count` through, exactly like the normal bar); in the COMPACT
+/// regime every mode is folded into one permanent kebab (the Gelly compact bar).
+/// The regime flag itself is width-driven + hysteretic and is passed through
+/// untouched — the render arm depends on its true value to pick the subtree.
+/// Applied at the view-data construction site so `compute_layout` stays
+/// width-only and mode-agnostic (and is not clobbered every resize).
+pub(crate) fn effective_player_bar_layout(base: PlayerBarLayout) -> PlayerBarLayout {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
+        PlayerBarLayout {
+            kebab_mode_count: if base.wide_for_three_section {
+                base.kebab_mode_count
+            } else {
+                CULL_ORDER.len() as u8
+            },
+            wide_for_three_section: base.wide_for_three_section,
+        }
+    } else {
+        base
     }
 }
 
@@ -487,6 +591,14 @@ pub(crate) struct PlayerBarViewData {
     pub track_title: String,
     pub track_artist: String,
     pub track_album: String,
+    /// Codec / sample-rate / bitrate for the current song, threaded from
+    /// playback state (same source as the track info strip). The `MiniPlayer`
+    /// capsule scrub tucks these into its time end-caps —
+    /// `3:40 · FLAC 44.1kHz` (left) and `1411kbps · 8:00` (right) — for parity
+    /// with the other strip modes. Gated on `strip_show_format_info()`.
+    pub format_suffix: String,
+    pub sample_rate: u32,
+    pub bitrate: u32,
     pub radio_name: Option<String>,
     /// Album artwork for the currently playing song. Populated by
     /// `app_view.rs` from the artwork LRU (large preferred, falls back
@@ -505,7 +617,6 @@ pub(crate) struct PlayerBarViewData {
 pub enum PlayerBarMessage {
     Play,
     Pause,
-    Stop,
     NextTrack,
     PrevTrack,
     Seek(f32),
@@ -632,28 +743,46 @@ fn fixed_centered<'a, M: 'a>(child: Element<'a, M>, width: f32, height: f32) -> 
         .into()
 }
 
-/// Active transport-button side length. Shrinks to
-/// [`MINI_PLAYER_TRANSPORT_SIZE`] while the MiniPlayer track-info display
-/// is selected so the stacked transports + progress column fits the
-/// existing 72 px bar without bumping bar height.
+/// Wrap a section child in a fixed-width, full-height, vertically-centered
+/// container with the given horizontal alignment. The non-mini strip / normal
+/// arms each build their `[transports | modes | volume]` triplet from this, so
+/// the width-flex pattern lives in one place. A free fn (not a closure) so each
+/// arm can call it with its own moved widgets without unifying borrow lifetimes.
+fn fixed_section<'a>(
+    child: impl Into<Element<'a, PlayerBarMessage>>,
+    width: f32,
+    align_x: Alignment,
+) -> iced::widget::Container<'a, PlayerBarMessage> {
+    container(child)
+        .width(Length::Fixed(width))
+        .height(Length::Fill)
+        .align_x(align_x)
+        .center_y(Length::Fill)
+}
+
+/// A 1 px `theme::border()`-colored hairline (used for the player-bar top
+/// separator, the MiniPlayer capsule scrub separators, and the compact-cluster
+/// vertical divider). Single home for the shared fill style.
+fn hairline(width: Length, height: Length) -> iced::widget::Container<'static, PlayerBarMessage> {
+    container(iced::widget::Space::new())
+        .width(width)
+        .height(height)
+        .style(|_: &Theme| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        })
+}
+
+/// Active transport-button side length — a constant 40 px in every display
+/// mode (MiniPlayer keeps native sizes in its single-row right cluster).
 #[inline]
 pub(crate) fn transport_button_size() -> f32 {
-    use nokkvi_data::types::player_settings::TrackInfoDisplay;
-    if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
-        MINI_PLAYER_TRANSPORT_SIZE
-    } else {
-        TRANSPORT_SIZE
-    }
+    TRANSPORT_SIZE
 }
 
 #[inline]
 fn transport_icon_size() -> f32 {
-    use nokkvi_data::types::player_settings::TrackInfoDisplay;
-    if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
-        MINI_PLAYER_TRANSPORT_ICON_SIZE
-    } else {
-        20.0
-    }
+    20.0
 }
 
 /// Helper function to create a flat transport icon button (prev / play / pause
@@ -756,12 +885,50 @@ fn mode_toggle_button<'a>(
     .into()
 }
 
+/// Compose the `MiniPlayer` capsule scrub's two end-cap labels, tucking the
+/// codec / sample-rate / bitrate inside the elapsed / duration for parity with
+/// the other strip modes. With `show_format` on and codec metadata present:
+///   left  = `"{elapsed} · {CODEC kHz}"`  e.g. `"3:40 · FLAC 44.1kHz"`
+///   right = `"{kbps} · {duration}"`       e.g. `"1411kbps · 8:00"`
+/// Each [`CapLabel`] keeps the bare time separate from the full string so the
+/// renderer can draw the codec / bitrate dimmer than the time. When format
+/// display is off, the suffix is empty, or there's no bitrate, the affected cap
+/// falls back to time-only (fully opaque). Pure (takes `show_format` as an
+/// argument rather than reading the theme atomic) so it stays unit-testable.
+fn capsule_scrub_labels(
+    elapsed: &str,
+    duration: &str,
+    format_suffix: &str,
+    sample_rate_khz: f32,
+    bitrate_kbps: u32,
+    show_format: bool,
+) -> (CapLabel, CapLabel) {
+    let bare = || (CapLabel::time_only(elapsed), CapLabel::time_only(duration));
+    if !show_format {
+        return bare();
+    }
+    match super::format_info::format_audio_info_split(format_suffix, sample_rate_khz, bitrate_kbps)
+    {
+        Some((codec, Some(kbps))) => (
+            CapLabel::new(format!("{elapsed} · {codec}"), elapsed),
+            CapLabel::new(format!("{kbps} · {duration}"), duration),
+        ),
+        Some((codec, None)) => (
+            CapLabel::new(format!("{elapsed} · {codec}"), elapsed),
+            CapLabel::time_only(duration),
+        ),
+        None => bare(),
+    }
+}
+
 /// Build the left-of-transport artwork + 3-line metadata column rendered
 /// in `TrackInfoDisplay::MiniPlayer` mode.
 ///
-/// Layout: [56 px artwork] [8 px gap] [180 px text column with
-/// `title` / `artist` / `album` stacked vertically]. Each text line is a
-/// marquee that scrolls when its content overflows the column width.
+/// Layout: [56 px artwork] [8 px gap] [flexible text column with
+/// `title` / `artist` / `album` stacked vertically]. The text column is
+/// `Length::Fill`, so it expands into the available width and each line
+/// ellipsizes (trailing ellipsis, `Wrapping::None` — no marquee scroll) when
+/// its content overflows that width.
 ///
 /// In radio mode the three slots carry `station name` / `ICY title` / `ICY artist`
 /// (mapped by `app_view.rs`); the artwork slot falls back to a tinted
@@ -829,16 +996,22 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
                 .into()
         };
 
+    // MiniPlayer metadata lines truncate with a trailing ellipsis (no marquee
+    // scroll) — each line fills the column width and ellipsizes when it
+    // overflows.
     let make_line =
         |value: String, color: Color, bold: bool| -> Element<'static, PlayerBarMessage> {
             let weight = if bold { Weight::Bold } else { Weight::Medium };
-            super::marquee_text::marquee_text(value)
+            text(value)
                 .size(12.0)
                 .font(Font {
                     weight,
                     ..theme::ui_font()
                 })
                 .color(color)
+                .width(Length::Fill)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .ellipsis(iced::widget::text::Ellipsis::End)
                 .into()
         };
 
@@ -877,16 +1050,20 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
         false,
     );
 
+    // Elapsed / duration is shown in the capsule scrub's time end-caps (not in
+    // the metadata), so the text column is just title / artist / album.
     let text_column = container(
         column![title_line, artist_line, album_line]
             .spacing(2)
-            .width(Length::Fixed(MINI_PLAYER_TEXT_WIDTH)),
+            .width(Length::Fill),
     )
+    .width(Length::Fill)
     .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
     .align_y(Alignment::Center);
 
     let inner = row![artwork, text_column]
         .spacing(MINI_PLAYER_INNER_GAP)
+        .width(Length::Fill)
         .align_y(Alignment::Center);
 
     mouse_area(inner)
@@ -931,11 +1108,11 @@ pub(crate) fn player_bar<'a>(
         false,
     );
 
-    let player_controls: Element<'_, PlayerBarMessage> = if data.layout.transports_collapsed {
-        // Collapsed transports: prev / play-or-pause toggle / next.
-        // The button side length is fixed for the current mode (40 px standard,
-        // 28 px MiniPlayer) so the middle button's hit target stays in place
-        // when the glyph swaps between play and pause.
+    // Modern 3-button transport in every layout: prev / play-or-pause toggle /
+    // next. The middle button is a fixed 40 px so its hit target stays put when
+    // the glyph swaps between play and pause. (Stop has no inline button — it
+    // stays reachable via MPRIS media keys and the `nokkvi stop` CLI/IPC verb.)
+    let player_controls: Element<'_, PlayerBarMessage> = {
         let middle_active = playback_playing || playback_paused;
         let (middle_icon, middle_message) = if playback_playing {
             ("assets/icons/pause.svg", PlayerBarMessage::Pause)
@@ -954,46 +1131,6 @@ pub(crate) fn player_bar<'a>(
                 middle_message,
                 middle_icon_color,
                 middle_active
-            ),
-            next_button,
-        ]
-        .spacing(4)
-        .into()
-    } else {
-        let play_icon_color = if playback_playing {
-            theme::bg0_hard()
-        } else {
-            theme::fg0()
-        };
-        let pause_icon_color = if playback_paused {
-            theme::bg0_hard()
-        } else {
-            theme::fg0()
-        };
-        let stop_icon_color = if controls_active {
-            theme::fg0()
-        } else {
-            theme::fg4()
-        };
-        row![
-            prev_button,
-            player_control_button(
-                "assets/icons/play.svg",
-                PlayerBarMessage::Play,
-                play_icon_color,
-                playback_playing,
-            ),
-            player_control_button(
-                "assets/icons/pause.svg",
-                PlayerBarMessage::Pause,
-                pause_icon_color,
-                playback_paused,
-            ),
-            player_control_button(
-                "assets/icons/stop.svg",
-                PlayerBarMessage::Stop,
-                stop_icon_color,
-                false,
             ),
             next_button,
         ]
@@ -1021,24 +1158,20 @@ pub(crate) fn player_bar<'a>(
         )
     };
 
+    // The inline progress row (with time end-caps + drag handle) used by every
+    // mode EXCEPT MiniPlayer. MiniPlayer instead floats a bare seek scrub as a
+    // top-edge overlay (built in the assembly below). Radio is non-seekable, so
+    // it hides the handle and disables interaction.
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    let is_mini_player_mode = theme::track_info_display() == TrackInfoDisplay::MiniPlayer;
+
     let custom_progress_bar =
         widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
             .is_playing(data.playback_playing && !data.playback_paused)
             .hide_handle(data.is_radio)
+            .interactive(!data.is_radio)
             .width(Length::Fill)
             .height(24.0);
-
-    // MiniPlayer mode stacks the transports above the progress scrub inside a
-    // single Length::Fill column. The progress row trims to a compact 24 px
-    // height there so 28 (transports) + 4 (gap) + 24 (progress) sits inside
-    // the existing 72 px bar with the slimmer rounded-mode padding.
-    use nokkvi_data::types::player_settings::TrackInfoDisplay;
-    let is_mini_player_mode = theme::track_info_display() == TrackInfoDisplay::MiniPlayer;
-    let progress_row_height = if is_mini_player_mode {
-        MINI_PLAYER_PROGRESS_ROW_HEIGHT
-    } else {
-        CONTROL_ROW_HEIGHT
-    };
 
     let progress_row = row![
         text(pos_str.clone())
@@ -1058,7 +1191,7 @@ pub(crate) fn player_bar<'a>(
     ]
     .spacing(8)
     .align_y(Alignment::Center)
-    .height(Length::Fixed(progress_row_height))
+    .height(Length::Fixed(CONTROL_ROW_HEIGHT))
     .width(Length::Fill);
 
     // Mode toggle buttons with SVG icons
@@ -1269,26 +1402,24 @@ pub(crate) fn player_bar<'a>(
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
         let hamburger_open = data.hamburger_open;
-        mode_toggles_row = mode_toggles_row.push(Element::from(
-            HoverOverlay::new(
-                HamburgerMenu::new(
-                    |action| match action {
-                        MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
-                        MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
-                        MenuAction::About => PlayerBarMessage::About,
-                        MenuAction::Quit => PlayerBarMessage::Quit,
-                    },
-                    |open| {
-                        PlayerBarMessage::SetOpenMenu(
-                            open.then_some(crate::app_message::OpenMenu::Hamburger),
-                        )
-                    },
-                    hamburger_open,
-                    is_light,
+        let hamburger = HamburgerMenu::new(
+            |action| match action {
+                MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
+                MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
+                MenuAction::About => PlayerBarMessage::About,
+                MenuAction::Quit => PlayerBarMessage::Quit,
+            },
+            |open| {
+                PlayerBarMessage::SetOpenMenu(
+                    open.then_some(crate::app_message::OpenMenu::Hamburger),
                 )
-                .player_bar_style(),
-            )
-            .border_radius(theme::ui_radius_sm_player()),
+            },
+            hamburger_open,
+            is_light,
+        )
+        .player_bar_style();
+        mode_toggles_row = mode_toggles_row.push(Element::from(
+            HoverOverlay::new(hamburger).border_radius(theme::ui_radius_sm_player()),
         ));
     }
 
@@ -1359,95 +1490,207 @@ pub(crate) fn player_bar<'a>(
     // =========================================================================
 
     let base_height = base_player_bar_height();
-    let outer_padding = if theme::is_rounded_for_player() {
-        if is_mini_player_mode {
-            MINI_PLAYER_ROUNDED_PADDING
-        } else {
-            [10, 12]
+    // MiniPlayer runs its CONTENT ROW nearly flush to the window edges (the
+    // capsule scrub + separators live outside this padding, in the outer column,
+    // so they stay full-width edge-to-edge). The artwork sits hard against the
+    // left edge; a small right gap (= the inter-button gap) keeps the rightmost
+    // control (volume) off the window edge. The other display modes keep their
+    // conventional symmetric inset (rounded floats content inward to clear the
+    // corners; flat keeps a small margin).
+    let outer_padding: iced::Padding = if is_mini_player_mode {
+        iced::Padding {
+            right: SECTION_BUTTON_GAP,
+            ..iced::Padding::ZERO
         }
+    } else if theme::is_rounded_for_player() {
+        iced::Padding::from([10u16, 12u16])
     } else {
-        [0, 6]
+        iced::Padding::from([0u16, 6u16])
     };
 
-    // Wrap each non-progress section in a Length::Fixed container sized for
-    // its *currently-visible* widgets, so the progress track flexes into the
-    // rest of the row. Sections still shift at cull / SFX-gate boundaries —
-    // those breakpoints already carry hysteresis, so the shift is a single
-    // user-visible event tied to a window-size change. Transport content
-    // sits flush-left (anchors `prev` to the bar's left edge); modes and
-    // volume content sit flush-right (anchors the kebab/hamburger and music
-    // slider to the bar's right edge).
+    // The non-mini single-row arms wrap each section in a Length::Fixed
+    // container so the progress track flexes into the remainder; those wrappers
+    // are built inside each arm below. MiniPlayer instead consumes the raw
+    // `mode_toggles`, `player_controls`, and `volume_control` widgets directly —
+    // the is_mini_player_mode arm below builds either the three-section row
+    // [metadata | centered transports | modes+volume] or the compact
+    // single-cluster row from them (no Length::Fixed section wrappers).
     let has_hamburger = crate::theme::is_none_nav();
-    let mode_toggles = container(mode_toggles)
-        .width(Length::Fixed(mode_section_width(
-            data.layout,
-            has_hamburger,
-        )))
-        .height(Length::Fill)
-        .align_x(Alignment::End)
-        .center_y(Length::Fill);
-    let volume_control = container(volume_control)
-        .width(Length::Fixed(volume_section_width(show_sfx_slider)))
-        .height(Length::Fill)
-        .align_x(Alignment::End)
-        .center_y(Length::Fill);
-
-    // Progress-track section (artwork + 3-line metadata column) — only
-    // present when the user has picked `TrackInfoDisplay::MiniPlayer`
-    // AND the window is wide enough that adding the section doesn't crush
-    // the progress bar.
-    let mini_player_visible = show_mini_player_section(data.window_width);
-    let mini_player_element = mini_player_visible.then(|| {
-        container(mini_player_section(data))
-            .width(Length::Fixed(MINI_PLAYER_SECTION_WIDTH))
-            .height(Length::Fill)
-            .align_x(Alignment::Start)
-            .center_y(Length::Fill)
-    });
 
     let mut main_row = iced::widget::Row::new()
         .spacing(MAIN_ROW_INNER_GAP)
         .padding(outer_padding)
         .align_y(Alignment::Center);
-    if let Some(section) = mini_player_element {
-        main_row = main_row.push(section);
-    }
-    if is_mini_player_mode {
-        // MiniPlayer mode: transports sit centered above the scrub inside a
-        // single Length::Fill column, so the transports no longer claim
-        // their own fixed-width section of the main row. Combined with the
-        // smaller 28 px transport buttons that fit the existing bar height,
-        // that lets MINI_PLAYER_HIDE_BELOW drop well under the previous
-        // 760 px threshold.
-        let transports_centered = container(player_controls)
-            .width(Length::Fill)
-            .align_x(Alignment::Center);
-        let stacked = iced::widget::Column::new()
-            .push(transports_centered)
-            .push(progress_row)
-            .spacing(MINI_PLAYER_STACK_SPACING)
-            .width(Length::Fill);
-        main_row = main_row.push(stacked);
-    } else {
-        let transports_section = container(player_controls)
-            .width(Length::Fixed(transport_section_width(
-                data.layout.transports_collapsed,
-            )))
-            .height(Length::Fill)
-            .align_x(Alignment::Start)
-            .center_y(Length::Fill);
-        main_row = main_row.push(transports_section).push(progress_row);
-    }
-    let main_row = main_row.push(mode_toggles).push(volume_control);
 
-    let main_content: Element<'_, PlayerBarMessage> = if let Some(strip) = info_strip {
-        // --- TRACK DISPLAY MODE ---
+    // Pre-compute the non-mini section widths; the wrappers themselves are
+    // built inside the strip / normal arms (a shared closure can't unify the
+    // borrowed widget lifetimes, and the MiniPlayer arm needs the raw widgets).
+    let transport_section_w = transport_section_width();
+    let mode_section_w = mode_section_width(data.layout, has_hamburger);
+    let volume_section_w = volume_section_width(show_sfx_slider);
+
+    let main_content: Element<'_, PlayerBarMessage> = if is_mini_player_mode {
+        // --- MINIPLAYER MODE ---
+        // A capsule seek scrub rides the top (full-width filled progress bar with
+        // color-aware elapsed/duration + dimmed codec/bitrate end-caps, no handle
+        // — click/drag still seeks), framed by 1 px separators, directly above a
+        // content row whose SHAPE depends on the width-driven regime flag
+        // `data.layout.wide_for_three_section`:
+        //   WIDE    — three-section [ metadata (Fill, Start) | transports
+        //             (CENTER) | modes + volume (Fill, End) ] with the modes
+        //             EXPANDED and width-culling individually like the normal bar.
+        //   COMPACT — the single trailing cluster [ metadata (or Space) |
+        //             transports | divider | volume | kebab ] with every mode
+        //             folded into one kebab (the Gelly compact bar).
+        // Both subtrees feed the SAME outer column so the capsule's drag state +
+        // seek tooltip survive a mid-drag regime flip. The capsule's end-caps
+        // tuck the codec + bitrate inside (e.g. `3:40 · FLAC 44.1kHz` /
+        // `1411kbps · 8:00`) for parity with the other strip modes — see
+        // `capsule_scrub_labels`.
+        let (cap_left, cap_right) = capsule_scrub_labels(
+            &pos_str,
+            &dur_str,
+            &data.format_suffix,
+            data.sample_rate as f32 / 1000.0,
+            data.bitrate,
+            theme::strip_show_format_info(),
+        );
+        let capscrub =
+            widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
+                .is_playing(data.playback_playing && !data.playback_paused)
+                // filled (capsule) mode is inherently handle-less; no need to
+                // also pass hide_handle. Radio is non-seekable.
+                .filled(true)
+                .time_labels(cap_left, cap_right)
+                .interactive(!data.is_radio)
+                .width(Length::Fill)
+                .height(CAPSULE_SCRUB_HEIGHT);
+
+        // Transports are shared by both regimes: a raw container with NO width
+        // wrapper so it sizes to its content. In the WIDE regime the two equal
+        // Fill siblings on either side center it; in COMPACT it leads the cluster.
+        let transports_section = container(player_controls)
+            .height(Length::Fill)
+            .center_y(Length::Fill);
+
+        if data.layout.wide_for_three_section {
+            // --- WIDE three-section row ---
+            // Metadata always renders here: even at the >= 770 px entry width its
+            // Fill half (~315 px) dwarfs MINI_PLAYER_MIN_METADATA_WIDTH (114), so
+            // it never needs the compact regime's `show_mini_player_section` gate
+            // (which would risk a Fill-half collapse that lurches the centered
+            // transports).
+            main_row = main_row.push(
+                container(mini_player_section(data))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(Alignment::Start)
+                    .center_y(Length::Fill),
+            );
+            main_row = main_row.push(transports_section);
+            let show_modes = theme::mini_player_show_modes();
+            let show_volume = theme::mini_player_show_volume();
+            if show_modes || show_volume {
+                // Right cluster: modes then volume (volume pinned far right,
+                // mirroring normal mode), each shown per its own setting. The
+                // wrapper MUST be Length::Fill, NOT Length::Fixed — the two equal
+                // Fill siblings are what center the transports; a Fixed wrapper
+                // would shift the center as modes cull. No divider here (the
+                // centered Fill gaps are the seam).
+                let mut cluster = iced::widget::Row::new()
+                    .spacing(MAIN_ROW_INNER_GAP)
+                    .align_y(Alignment::Center);
+                if show_modes {
+                    cluster = cluster.push(mode_toggles);
+                }
+                if show_volume {
+                    cluster = cluster.push(volume_control);
+                }
+                main_row = main_row.push(
+                    container(cluster)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(Alignment::End)
+                        .center_y(Length::Fill),
+                );
+            } else {
+                // Both controls hidden: a Fill placeholder holds the right half so
+                // the lone metadata Fill doesn't shove the transports off-center.
+                main_row = main_row.push(iced::widget::Space::new().width(Length::Fill));
+            }
+        } else {
+            // --- COMPACT single-cluster row (the current MiniPlayer look) ---
+            let divider = container(hairline(
+                Length::Fixed(1.0),
+                Length::Fixed(MINI_DIVIDER_HEIGHT),
+            ))
+            .height(Length::Fill)
+            .center_y(Length::Fill);
+            let volume_section = container(volume_control)
+                .height(Length::Fill)
+                .center_y(Length::Fill);
+
+            // Metadata shows only when it + the right cluster fit (each line
+            // ellipsizes; below this it's replaced by a Fill spacer). Computed
+            // here in the compact branch only — the wide regime renders metadata
+            // unconditionally.
+            let mini_player_visible = show_mini_player_section(data.window_width, data.layout);
+            if mini_player_visible {
+                main_row = main_row.push(
+                    container(mini_player_section(data))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(Alignment::Start)
+                        .center_y(Length::Fill),
+                );
+            } else {
+                main_row = main_row.push(iced::widget::Space::new().width(Length::Fill));
+            }
+            main_row = main_row.push(transports_section);
+            // The mode menu and volume each show per their own setting. Order is
+            // [divider | kebab | volume] so the volume control is the rightmost
+            // control in BOTH regimes (matches the wide [modes | volume] cluster),
+            // instead of swapping past the kebab when the layout collapses. The
+            // divider shows only when at least one trailing control is visible.
+            let show_modes = theme::mini_player_show_modes();
+            let show_volume = theme::mini_player_show_volume();
+            if show_modes || show_volume {
+                main_row = main_row.push(divider);
+                if show_modes {
+                    main_row = main_row.push(mode_toggles);
+                }
+                if show_volume {
+                    main_row = main_row.push(volume_section);
+                }
+            }
+        }
+        main_row = main_row.height(Length::Fill);
+
+        // 1 px separator lines framing the capsule scrub top and bottom, in the
+        // app's divider color — matching the separator language elsewhere.
+        let scrub_separator = || hairline(Length::Fill, Length::Fixed(SCRUB_SEPARATOR_HEIGHT));
+
+        column![scrub_separator(), capscrub, scrub_separator(), main_row]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if let Some(strip) = info_strip {
+        // --- TRACK DISPLAY (PlayerBar strip) MODE ---
         // Main row on top, info strip below (separator built into the
         // strip). `player_bar_height()` reserves
         // `base + 1 + STRIP_HEIGHT_WITH_SEPARATOR`, the outer column
         // consumes the leading 1 px for `top_separator`, and the strip
         // accounts for its own separator-above — so this row gets the
         // bare `base_height`.
+        let transports_section =
+            fixed_section(player_controls, transport_section_w, Alignment::Start);
+        let mode_toggles = fixed_section(mode_toggles, mode_section_w, Alignment::End);
+        let volume_control = fixed_section(volume_control, volume_section_w, Alignment::End);
+        main_row = main_row
+            .push(transports_section)
+            .push(progress_row)
+            .push(mode_toggles)
+            .push(volume_control);
         column![
             container(main_row)
                 .width(Length::Fill)
@@ -1458,32 +1701,44 @@ pub(crate) fn player_bar<'a>(
         .into()
     } else {
         // --- NORMAL MODE ---
-        main_row.into()
+        let transports_section =
+            fixed_section(player_controls, transport_section_w, Alignment::Start);
+        let mode_toggles = fixed_section(mode_toggles, mode_section_w, Alignment::End);
+        let volume_control = fixed_section(volume_control, volume_section_w, Alignment::End);
+        main_row
+            .push(transports_section)
+            .push(progress_row)
+            .push(mode_toggles)
+            .push(volume_control)
+            .into()
     };
 
-    // Top separator: flat 1 px `theme::border()` line. Acts as the chrome
-    // divider between the page content above and the player bar.
-    let top_separator: Element<'_, PlayerBarMessage> = container(iced::widget::Space::new())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(|_: &Theme| container::Style {
-            background: Some(theme::border().into()),
-            ..Default::default()
-        })
-        .into();
-
-    // Container with `bg0_hard()` background, top separator, and dynamic height.
-    // Wrapped in mouse_area so scrolling anywhere on the player bar adjusts
-    // volume.
-    let bar = container(column![
-        top_separator,
+    // Bar body. Non-mini modes draw a 1 px top separator (the chrome divider
+    // between the page content and the bar) over the centered content row.
+    // MiniPlayer drops the separator — its capsule scrub already caps the top
+    // edge — and lets its `column![capscrub, content_row]` fill the bar.
+    let bar_body: Element<'_, PlayerBarMessage> = if is_mini_player_mode {
         container(main_content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .center_y(Length::Fill)
-            .style(theme::container_bg0_hard),
-    ])
-    .height(Length::Fixed(player_bar_height()));
+            .style(theme::container_bg0_hard)
+            .into()
+    } else {
+        let top_separator: Element<'_, PlayerBarMessage> =
+            hairline(Length::Fill, Length::Fixed(1.0)).into();
+        column![
+            top_separator,
+            container(main_content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_y(Length::Fill)
+                .style(theme::container_bg0_hard),
+        ]
+        .into()
+    };
+
+    // Wrapped in a mouse_area so scrolling anywhere on the bar adjusts volume.
+    let bar = container(bar_body).height(Length::Fixed(player_bar_height()));
 
     mouse_area(bar)
         .on_scroll(|delta| {
@@ -1535,6 +1790,198 @@ mod player_bar_height_tests {
         assert!(
             (got - expected).abs() < f32::EPSILON,
             "strip-on height drifted: got {got}, expected {expected}",
+        );
+    }
+}
+
+#[cfg(test)]
+mod mini_player_layout_tests {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+
+    use super::{
+        CULL_ORDER, MINI_PLAYER_BAR_HEIGHT, PlayerBarLayout, effective_player_bar_layout,
+        mini_player_min_width, player_bar_height, show_mini_player_section,
+    };
+    use crate::theme::{THEME_MODE_LOCK, set_track_info_display, track_info_display};
+
+    fn layout(kebab: u8) -> PlayerBarLayout {
+        layout_w(kebab, false)
+    }
+
+    fn layout_w(kebab: u8, wide: bool) -> PlayerBarLayout {
+        PlayerBarLayout {
+            kebab_mode_count: kebab,
+            wide_for_three_section: wide,
+        }
+    }
+
+    /// `player_bar_height()` returns the MiniPlayer capsule bar height in
+    /// MiniPlayer mode and the base height otherwise. The capsule scrub is a
+    /// real layout row, so MiniPlayer is TALLER than the base bar — the chrome /
+    /// slot-list / visualizer math keys off this, so the difference must hold.
+    #[test]
+    fn player_bar_height_is_capsule_height_in_mini_player() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+
+        set_track_info_display(TrackInfoDisplay::MiniPlayer);
+        let mini_h = player_bar_height();
+        set_track_info_display(TrackInfoDisplay::Off);
+        let base_h = player_bar_height();
+
+        set_track_info_display(saved);
+
+        assert_eq!(mini_h, MINI_PLAYER_BAR_HEIGHT);
+        assert!(
+            mini_h > base_h,
+            "MiniPlayer capsule bar {mini_h} should be taller than base {base_h}",
+        );
+    }
+
+    /// COMPACT MiniPlayer regime (wide_for_three_section = false): every mode is
+    /// folded into one permanent kebab. Non-MiniPlayer modes pass through.
+    #[test]
+    fn effective_forces_seven_in_compact_mini() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+
+        set_track_info_display(TrackInfoDisplay::MiniPlayer);
+        let compact = effective_player_bar_layout(layout_w(0, false));
+
+        set_track_info_display(TrackInfoDisplay::PlayerBar);
+        let other = effective_player_bar_layout(layout_w(3, false));
+
+        set_track_info_display(saved);
+
+        assert_eq!(
+            compact.kebab_mode_count,
+            CULL_ORDER.len() as u8,
+            "compact MiniPlayer must fold every mode into the kebab",
+        );
+        assert_eq!(
+            other,
+            layout_w(3, false),
+            "non-MiniPlayer modes pass the layout through unchanged",
+        );
+    }
+
+    /// WIDE MiniPlayer regime (wide_for_three_section = true): the width-driven
+    /// kebab_mode_count passes THROUGH (modes expand / cull like the normal bar),
+    /// NOT force-folded to seven.
+    #[test]
+    fn effective_passes_kebab_through_in_wide_mini() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+
+        set_track_info_display(TrackInfoDisplay::MiniPlayer);
+        let all_inline = effective_player_bar_layout(layout_w(0, true));
+        let some_culled = effective_player_bar_layout(layout_w(2, true));
+
+        set_track_info_display(saved);
+
+        assert_eq!(
+            all_inline.kebab_mode_count, 0,
+            "wide MiniPlayer keeps all modes inline when width-culling says 0",
+        );
+        assert_eq!(
+            some_culled.kebab_mode_count, 2,
+            "wide MiniPlayer passes the width-driven kebab count through, not force-7",
+        );
+    }
+
+    /// `effective_player_bar_layout` passes the regime flag through unchanged in
+    /// BOTH regimes — the render arm depends on its true value to pick the
+    /// subtree, so clobbering it would desync the layout from the modes.
+    #[test]
+    fn effective_preserves_wide_flag() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+
+        set_track_info_display(TrackInfoDisplay::MiniPlayer);
+        let wide = effective_player_bar_layout(layout_w(0, true));
+        let compact = effective_player_bar_layout(layout_w(0, false));
+
+        set_track_info_display(saved);
+
+        assert!(wide.wide_for_three_section);
+        assert!(!compact.wide_for_three_section);
+    }
+
+    /// Non-MiniPlayer modes ignore the regime flag entirely — they pass the base
+    /// layout through verbatim regardless of `wide_for_three_section`.
+    #[test]
+    fn non_mini_modes_ignore_wide_flag() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+
+        for mode in [
+            TrackInfoDisplay::Off,
+            TrackInfoDisplay::PlayerBar,
+            TrackInfoDisplay::TopBar,
+        ] {
+            set_track_info_display(mode);
+            assert_eq!(
+                effective_player_bar_layout(layout_w(3, true)),
+                layout_w(3, true),
+                "{mode:?} must pass the layout through unchanged (wide)",
+            );
+            assert_eq!(
+                effective_player_bar_layout(layout_w(3, false)),
+                layout_w(3, false),
+                "{mode:?} must pass the layout through unchanged (compact)",
+            );
+        }
+
+        set_track_info_display(saved);
+    }
+
+    /// The metadata section shows at generous widths and hides only when it can
+    /// no longer fit beside the cluster; it never renders outside MiniPlayer.
+    #[test]
+    fn show_section_tracks_mode_and_width() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+
+        set_track_info_display(TrackInfoDisplay::MiniPlayer);
+        let wide = show_mini_player_section(4000.0, layout(7));
+        let narrow = show_mini_player_section(120.0, layout(7));
+
+        set_track_info_display(TrackInfoDisplay::Off);
+        let off = show_mini_player_section(4000.0, layout(7));
+
+        set_track_info_display(saved);
+
+        assert!(wide, "metadata should show when there is ample width");
+        assert!(
+            !narrow,
+            "metadata should hide when too narrow for the cluster",
+        );
+        assert!(!off, "metadata only renders in MiniPlayer mode");
+    }
+
+    /// Hiding the volume / mode controls shrinks the compact-regime metadata-hide
+    /// threshold, so metadata stays visible at narrower widths when the cluster
+    /// it has to coexist with is smaller.
+    #[test]
+    fn min_width_shrinks_when_controls_hidden() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved_v = crate::theme::mini_player_show_volume();
+        let saved_m = crate::theme::mini_player_show_modes();
+
+        crate::theme::set_mini_player_show_volume(true);
+        crate::theme::set_mini_player_show_modes(true);
+        let both = mini_player_min_width(500.0, layout(0));
+
+        crate::theme::set_mini_player_show_volume(false);
+        crate::theme::set_mini_player_show_modes(false);
+        let neither = mini_player_min_width(500.0, layout(0));
+
+        crate::theme::set_mini_player_show_volume(saved_v);
+        crate::theme::set_mini_player_show_modes(saved_m);
+
+        assert!(
+            neither < both,
+            "hiding controls should lower the metadata-hide threshold ({neither} !< {both})",
         );
     }
 }
@@ -1602,27 +2049,21 @@ mod section_width_tests {
         mode_section_width, transport_section_width, volume_section_width,
     };
 
-    fn layout(kebab: u8, transports_collapsed: bool) -> PlayerBarLayout {
+    fn layout(kebab: u8) -> PlayerBarLayout {
         PlayerBarLayout {
             kebab_mode_count: kebab,
-            transports_collapsed,
+            wide_for_three_section: false,
         }
     }
 
     #[test]
-    fn transport_width_tracks_collapsed_state() {
-        // 5 buttons × 40 + 4 gaps × 4 = 216 (uncollapsed)
+    fn transport_width_is_the_three_button_set() {
+        // Always the modern 3-button set: 3 × 40 + 2 gaps × 4 = 128.
         assert_eq!(
-            transport_section_width(false),
-            5.0 * TRANSPORT_SIZE + 4.0 * SECTION_BUTTON_GAP
-        );
-        assert_eq!(transport_section_width(false), 216.0);
-        // 3 buttons × 40 + 2 gaps × 4 = 128 (collapsed)
-        assert_eq!(
-            transport_section_width(true),
+            transport_section_width(),
             3.0 * TRANSPORT_SIZE + 2.0 * SECTION_BUTTON_GAP
         );
-        assert_eq!(transport_section_width(true), 128.0);
+        assert_eq!(transport_section_width(), 128.0);
     }
 
     #[test]
@@ -1632,21 +2073,21 @@ mod section_width_tests {
         let total_modes = CULL_ORDER.len() as f32;
 
         // All inline (kebab_count=0): 7 buttons + 6 gaps, no kebab.
-        let all_inline = mode_section_width(layout(0, false), false);
+        let all_inline = mode_section_width(layout(0), false);
         assert_eq!(
             all_inline,
             total_modes * mode_btn_w + (total_modes - 1.0) * SECTION_BUTTON_GAP
         );
 
         // Some culled (kebab_count=5): 2 inline + kebab + 2 gaps.
-        let some_culled = mode_section_width(layout(5, false), false);
+        let some_culled = mode_section_width(layout(5), false);
         assert_eq!(
             some_culled,
             2.0 * mode_btn_w + chrome_w + 2.0 * SECTION_BUTTON_GAP
         );
 
         // Hamburger adds one more button + gap.
-        let with_hamburger = mode_section_width(layout(5, false), true);
+        let with_hamburger = mode_section_width(layout(5), true);
         assert_eq!(with_hamburger, some_culled + chrome_w + SECTION_BUTTON_GAP);
     }
 
@@ -1678,18 +2119,22 @@ mod section_width_tests {
 #[cfg(test)]
 mod layout_tests {
     use super::{
-        CULL_ENTER_WIDTHS, CULL_HYSTERESIS_PX, ModeId, PlayerBarLayout, TRANSPORT_COLLAPSE_ENTER,
-        TRANSPORT_COLLAPSE_EXIT, compute_layout,
+        CULL_ENTER_WIDTHS, CULL_HYSTERESIS_PX, CULL_ORDER, MINI_THREE_SECTION_ENTER,
+        MINI_THREE_SECTION_EXIT, ModeId, PlayerBarLayout, compute_layout,
     };
 
     fn empty() -> PlayerBarLayout {
         PlayerBarLayout::default()
     }
 
-    fn layout(count: u8, transports: bool) -> PlayerBarLayout {
+    fn layout(count: u8) -> PlayerBarLayout {
+        layout3(count, false)
+    }
+
+    fn layout3(count: u8, wide: bool) -> PlayerBarLayout {
         PlayerBarLayout {
             kebab_mode_count: count,
-            transports_collapsed: transports,
+            wide_for_three_section: wide,
         }
     }
 
@@ -1700,7 +2145,6 @@ mod layout_tests {
         // Far above any threshold — no culling.
         let result = compute_layout(1200.0, empty());
         assert_eq!(result.kebab_mode_count, 0);
-        assert!(!result.transports_collapsed);
     }
 
     #[test]
@@ -1746,7 +2190,7 @@ mod layout_tests {
         // Visualizer was culled at < threshold[0]; pops out only once width
         // reaches threshold[0] + hysteresis. One pixel inside the band, the
         // count stays at 1.
-        let prev = layout(1, false);
+        let prev = layout(1);
         let inside_band = CULL_ENTER_WIDTHS[0] + CULL_HYSTERESIS_PX - 1.0;
         assert_eq!(compute_layout(inside_band, prev).kebab_mode_count, 1);
     }
@@ -1755,7 +2199,7 @@ mod layout_tests {
     fn culled_mode_pops_inline_at_exit_threshold() {
         // Width hits threshold[0] + hysteresis exactly → visualizer pops back
         // inline.
-        let prev = layout(1, false);
+        let prev = layout(1);
         let exit = CULL_ENTER_WIDTHS[0] + CULL_HYSTERESIS_PX;
         assert_eq!(compute_layout(exit, prev).kebab_mode_count, 0);
     }
@@ -1769,7 +2213,7 @@ mod layout_tests {
             let exit = threshold + CULL_HYSTERESIS_PX;
 
             // Inside the band — count stays.
-            let prev = layout(count_before, false);
+            let prev = layout(count_before);
             assert_eq!(
                 compute_layout(exit - 1.0, prev).kebab_mode_count,
                 count_before,
@@ -1793,59 +2237,120 @@ mod layout_tests {
     fn jump_from_wide_to_very_narrow_culls_all_modes_at_once() {
         let result = compute_layout(100.0, empty());
         assert_eq!(result.kebab_mode_count, CULL_ENTER_WIDTHS.len() as u8);
-        assert!(result.transports_collapsed);
     }
 
     #[test]
     fn jump_from_narrow_to_wide_pops_all_modes_back_inline() {
-        let prev = layout(7, true);
+        let prev = layout(7);
         let result = compute_layout(1200.0, prev);
         assert_eq!(result.kebab_mode_count, 0);
-        assert!(!result.transports_collapsed);
     }
 
-    // ---- transport collapse ----
+    // ---- three-section regime (MiniPlayer wide vs compact) ----
 
     #[test]
-    fn transport_collapses_just_below_enter_threshold() {
-        let result = compute_layout(TRANSPORT_COLLAPSE_ENTER - 1.0, empty());
-        assert!(result.transports_collapsed);
-    }
-
-    #[test]
-    fn transport_does_not_collapse_at_exact_enter_threshold() {
-        // Strictly less-than is the trigger; exactly-720 leaves transports
-        // expanded.
-        let result = compute_layout(TRANSPORT_COLLAPSE_ENTER, empty());
-        assert!(!result.transports_collapsed);
-    }
-
-    #[test]
-    fn transport_collapse_holds_inside_hysteresis_band() {
-        let prev = layout(0, true);
-        let result = compute_layout(TRANSPORT_COLLAPSE_EXIT - 1.0, prev);
-        assert!(result.transports_collapsed);
+    fn three_section_enters_only_at_exit_threshold() {
+        // From compact (wide=false): flip ON only once width clears the higher
+        // EXIT entry point; one pixel below stays compact.
+        assert!(
+            compute_layout(MINI_THREE_SECTION_EXIT, empty()).wide_for_three_section,
+            "should enter three-section at >= EXIT",
+        );
+        assert!(
+            !compute_layout(MINI_THREE_SECTION_EXIT - 1.0, empty()).wide_for_three_section,
+            "must NOT enter three-section just below EXIT",
+        );
     }
 
     #[test]
-    fn transport_expands_at_exit_threshold() {
-        let prev = layout(0, true);
-        let result = compute_layout(TRANSPORT_COLLAPSE_EXIT, prev);
-        assert!(!result.transports_collapsed);
+    fn three_section_holds_inside_hysteresis_band() {
+        // From three-section (wide=true): hold across the band, fall back only
+        // below the lower ENTER drop point. Asymmetric, mirroring transport
+        // collapse — flip ON at the higher EXIT, OFF at the lower ENTER.
+        let wide_prev = layout3(0, true);
+        assert!(
+            compute_layout(MINI_THREE_SECTION_ENTER, wide_prev).wide_for_three_section,
+            "should stay three-section at the ENTER drop point",
+        );
+        let mid = (MINI_THREE_SECTION_ENTER + MINI_THREE_SECTION_EXIT) / 2.0;
+        assert!(
+            compute_layout(mid, wide_prev).wide_for_three_section,
+            "should hold three-section inside the hysteresis band",
+        );
+        assert!(
+            !compute_layout(MINI_THREE_SECTION_ENTER - 1.0, wide_prev).wide_for_three_section,
+            "should fall back to compact below ENTER",
+        );
     }
 
     #[test]
-    fn transport_collapse_independent_of_mode_culling() {
-        // Pick a width that's below the transport-collapse enter threshold
-        // AND below the EQ threshold (so EQ is in the kebab) but above the
-        // Consume threshold (so Consume is still inline). That leaves the
-        // first 4 modes (Visualizer/Crossfade/SFX/EQ) folded — proving the
-        // two systems run independently of each other.
-        let width = (TRANSPORT_COLLAPSE_ENTER - 1.0).min(CULL_ENTER_WIDTHS[3] - 1.0);
-        debug_assert!(width >= CULL_ENTER_WIDTHS[4]);
-        let result = compute_layout(width, empty());
-        assert_eq!(result.kebab_mode_count, 4);
-        assert!(result.transports_collapsed);
+    fn three_section_culls_modes_within_the_regime() {
+        // The whole point: the three-section band sits below the cull range, so
+        // modes fold into the kebab one-by-one WHILE the transports stay centered
+        // (rather than the regime only existing above the cull band). A mid-band
+        // width is still three-section AND has a partial kebab.
+        let mid = compute_layout(900.0, empty());
+        assert!(
+            mid.wide_for_three_section,
+            "900px is inside the three-section regime",
+        );
+        assert!(
+            mid.kebab_mode_count > 0 && mid.kebab_mode_count < CULL_ORDER.len() as u8,
+            "modes cull one-by-one within the centered three-section layout",
+        );
+    }
+
+    #[test]
+    fn three_section_flag_independent_of_kebab() {
+        // Far above the cull range: three-section with every mode inline (the
+        // roomy look).
+        let wide = compute_layout(1300.0, empty());
+        assert!(wide.wide_for_three_section);
+        assert_eq!(wide.kebab_mode_count, 0);
+
+        // Below the band: compact (the floor where centered stops fitting).
+        let narrow = compute_layout(MINI_THREE_SECTION_ENTER - 1.0, empty());
+        assert!(!narrow.wide_for_three_section);
+    }
+
+    // ---- cull-table drift guards ----
+
+    #[test]
+    fn cull_order_contains_every_mode_exactly_once() {
+        // Complements the CULL_ORDER.len() == CULL_ENTER_WIDTHS.len() const-assert:
+        // catches a mode being dropped/duplicated within CULL_ORDER (which keeps
+        // the length but leaves some mode inline-only, never culling).
+        let all = [
+            ModeId::Visualizer,
+            ModeId::Crossfade,
+            ModeId::Sfx,
+            ModeId::Eq,
+            ModeId::Consume,
+            ModeId::Shuffle,
+            ModeId::Repeat,
+        ];
+        for m in all {
+            assert_eq!(
+                CULL_ORDER.iter().filter(|&&x| x == m).count(),
+                1,
+                "{m:?} must appear in CULL_ORDER exactly once",
+            );
+        }
+        assert_eq!(CULL_ORDER.len(), all.len(), "CULL_ORDER length drifted");
+    }
+
+    #[test]
+    fn cull_enter_widths_strictly_decreasing() {
+        // The one-mode-at-a-time cull (update_kebab_count) relies on the
+        // thresholds decreasing monotonically.
+        for w in CULL_ENTER_WIDTHS.windows(2) {
+            assert!(
+                w[0] > w[1],
+                "CULL_ENTER_WIDTHS must strictly decrease: {} !> {}",
+                w[0],
+                w[1],
+            );
+        }
     }
 
     // ---- is_in_kebab ----
@@ -1868,7 +2373,7 @@ mod layout_tests {
 
     #[test]
     fn is_in_kebab_first_culled_is_visualizer() {
-        let l = layout(1, false);
+        let l = layout(1);
         assert!(l.is_in_kebab(ModeId::Visualizer));
         assert!(!l.is_in_kebab(ModeId::Crossfade));
         assert!(!l.is_in_kebab(ModeId::Repeat));
@@ -1876,7 +2381,7 @@ mod layout_tests {
 
     #[test]
     fn is_in_kebab_all_modes_at_full_count() {
-        let l = layout(7, true);
+        let l = layout(7);
         for mode in [
             ModeId::Visualizer,
             ModeId::Crossfade,
@@ -1896,7 +2401,8 @@ mod mode_descriptor_tests {
     use nokkvi_data::types::player_settings::VisualizationMode;
 
     use super::{
-        CULL_ORDER, ModeId, PlayerBarLayout, PlayerBarMessage, PlayerBarViewData, mode_descriptor,
+        CULL_ORDER, ModeId, PlayerBarLayout, PlayerBarMessage, PlayerBarViewData,
+        capsule_scrub_labels, mode_descriptor,
     };
 
     /// Baseline view data with every mode toggled off / neutral. Individual
@@ -1925,11 +2431,69 @@ mod mode_descriptor_tests {
             track_title: String::new(),
             track_artist: String::new(),
             track_album: String::new(),
+            format_suffix: String::new(),
+            sample_rate: 0,
+            bitrate: 0,
             radio_name: None,
             artwork_handle: None,
             hamburger_open: false,
             player_modes_open: false,
         }
+    }
+
+    /// Capsule end-caps tuck codec + bitrate around the time for strip-mode
+    /// parity: `3:40 · FLAC 44.1kHz` (left) and `1411kbps · 8:00` (right). The
+    /// bare time is kept separate so it can render brighter than the metadata.
+    #[test]
+    fn capsule_labels_full_codec_and_bitrate() {
+        let (left, right) = capsule_scrub_labels("3:40", "8:00", "flac", 44.1, 1411, true);
+        assert_eq!(left.full, "3:40 · FLAC 44.1kHz");
+        assert_eq!(left.time, "3:40");
+        assert_eq!(right.full, "1411kbps · 8:00");
+        assert_eq!(right.time, "8:00");
+    }
+
+    /// No bitrate → the right cap is time-only (`full == time`); the left cap
+    /// still carries the codec + sample rate over a separate bare time.
+    #[test]
+    fn capsule_labels_no_bitrate_keeps_bare_duration() {
+        let (left, right) = capsule_scrub_labels("0:05", "5:00", "flac", 96.0, 0, true);
+        assert_eq!(left.full, "0:05 · FLAC 96.0kHz");
+        assert_eq!(left.time, "0:05");
+        assert_eq!(right.full, "5:00");
+        assert_eq!(right.time, "5:00");
+    }
+
+    /// Radio-style stream (no sample rate, `--:--` duration) — the codec drops
+    /// its kHz and the bitrate still tucks against the placeholder duration.
+    #[test]
+    fn capsule_labels_no_sample_rate_radio_duration() {
+        let (left, right) = capsule_scrub_labels("0:30", "--:--", "mp3", 0.0, 320, true);
+        assert_eq!(left.full, "0:30 · MP3");
+        assert_eq!(left.time, "0:30");
+        assert_eq!(right.full, "320kbps · --:--");
+        assert_eq!(right.time, "--:--");
+    }
+
+    /// Empty codec suffix → both caps fall back to time-only (no stray ` · `).
+    #[test]
+    fn capsule_labels_empty_suffix_falls_back_to_time() {
+        let (left, right) = capsule_scrub_labels("3:40", "8:00", "", 44.1, 1411, true);
+        assert_eq!(left.full, "3:40");
+        assert_eq!(left.time, "3:40");
+        assert_eq!(right.full, "8:00");
+        assert_eq!(right.time, "8:00");
+    }
+
+    /// Format display off → time-only caps even when full metadata is present
+    /// (honors the shared `strip_show_format_info()` toggle).
+    #[test]
+    fn capsule_labels_format_off_is_bare_time() {
+        let (left, right) = capsule_scrub_labels("3:40", "8:00", "flac", 44.1, 1411, false);
+        assert_eq!(left.full, "3:40");
+        assert_eq!(left.time, "3:40");
+        assert_eq!(right.full, "8:00");
+        assert_eq!(right.time, "8:00");
     }
 
     /// Repeat is the most state-rich icon mode: its icon, tooltip, and kebab

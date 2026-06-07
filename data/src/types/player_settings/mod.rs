@@ -84,6 +84,12 @@ pub struct LivePlayerSettings {
     pub queue_show_default_playlist: bool,
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     pub horizontal_volume: bool,
+    /// Whether the mini-player bar shows the volume slider (default: true).
+    /// Only affects `TrackInfoDisplay::MiniPlayer`.
+    pub mini_player_show_volume: bool,
+    /// Whether the mini-player bar shows the modes menu (default: true).
+    /// Only affects `TrackInfoDisplay::MiniPlayer`.
+    pub mini_player_show_modes: bool,
     /// Font family override. Empty = system default sans-serif.
     pub font_family: String,
     /// Volume normalization mode (Off / AGC / ReplayGain-track / ReplayGain-album)

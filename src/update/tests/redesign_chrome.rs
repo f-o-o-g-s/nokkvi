@@ -68,6 +68,10 @@ fn expected_chrome(tid: TrackInfoDisplay, layout: NavLayout) -> f32 {
     let player = if tid == TrackInfoDisplay::PlayerBar {
         // Base + 1 px top separator + strip-with-its-own-separator.
         72.0 + 1.0 + STRIP_HEIGHT_WITH_SEPARATOR
+    } else if tid == TrackInfoDisplay::MiniPlayer {
+        // MiniPlayer is the capsule layout: 1px separator + capsule scrub (20) +
+        // 1px separator + artwork content row (56) = 78 — taller than the base.
+        78.0
     } else {
         72.0
     };

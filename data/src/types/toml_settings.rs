@@ -170,6 +170,8 @@ pub struct TomlSettings {
     pub opacity_gradient: bool,
     pub slot_text_links: bool,
     pub horizontal_volume: bool,
+    pub mini_player_show_volume: bool,
+    pub mini_player_show_modes: bool,
     /// Font family override. Empty = system default sans-serif.
     #[serde(default)]
     pub font_family: String,
@@ -368,6 +370,8 @@ impl Default for TomlSettings {
             opacity_gradient: false,
             slot_text_links: true,
             horizontal_volume: false,
+            mini_player_show_volume: true,
+            mini_player_show_modes: true,
             font_family: String::new(),
             strip_show_title: true,
             strip_show_artist: true,

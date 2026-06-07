@@ -111,6 +111,14 @@ pub struct PersistedPlayerSettings {
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     #[serde(default)]
     pub horizontal_volume: bool,
+    /// Whether the mini-player bar shows the volume slider (default: true).
+    /// Only affects `TrackInfoDisplay::MiniPlayer`.
+    #[serde(default = "default_true")]
+    pub mini_player_show_volume: bool,
+    /// Whether the mini-player bar shows the modes menu (default: true).
+    /// Only affects `TrackInfoDisplay::MiniPlayer`.
+    #[serde(default = "default_true")]
+    pub mini_player_show_modes: bool,
     /// Font family override (default: empty = system default sans-serif)
     #[serde(default)]
     pub font_family: String,
@@ -521,6 +529,8 @@ impl Default for PersistedPlayerSettings {
             quick_add_to_playlist: false,
             queue_show_default_playlist: false,
             horizontal_volume: false,
+            mini_player_show_volume: true,
+            mini_player_show_modes: true,
             font_family: String::new(),
             volume_normalization: VolumeNormalizationMode::default(),
             normalization_level: NormalizationLevel::default(),

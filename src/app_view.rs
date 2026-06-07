@@ -463,7 +463,14 @@ impl Nokkvi {
             crossfade_enabled: self.engine.crossfade_enabled,
             visualization_mode: self.engine.visualization_mode,
             window_width: self.window.width,
-            layout: self.player_bar_layout,
+            // MiniPlayer remaps per the width-driven regime: the wide
+            // three-section layout passes the mode-cull count through (modes
+            // expand + cull individually like the normal bar), while the compact
+            // layout folds every mode into one permanent kebab. Every other mode
+            // uses the raw width-driven layout. `compute_layout` still owns
+            // `self.player_bar_layout` — `effective_player_bar_layout` is a
+            // render-only override.
+            layout: crate::widgets::player_bar::effective_player_bar_layout(self.player_bar_layout),
             is_light_mode: crate::theme::is_light_mode(),
             // For radio playback the station name lives on `radio_name` and
             // ICY values fill the title/artist slots — empty when no ICY has
@@ -485,6 +492,11 @@ impl Nokkvi {
                 self.playback.album.clone()
             },
             radio_name: radio_name.map(|s| s.to_string()),
+            // Codec / sample-rate / bitrate for the MiniPlayer capsule end-caps
+            // (same playback source the track info strip reads).
+            format_suffix: self.playback.format_suffix.clone(),
+            sample_rate: self.playback.sample_rate,
+            bitrate: self.playback.bitrate,
             artwork_handle: mini_player_artwork,
             hamburger_open: matches!(
                 self.open_menu,
@@ -678,11 +690,17 @@ impl Nokkvi {
                 right_col = right_col.push(
                     widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
                 );
+                // Fill the window height so the player bar sits flush at the
+                // window's bottom edge (no gap below it).
+                let right_col = right_col.height(Length::Fill);
 
-                outer = outer.push(iced::widget::row![
-                    widgets::side_nav_bar(side_data).map(map_nav_bar_message),
-                    right_col,
-                ]);
+                outer = outer.push(
+                    iced::widget::row![
+                        widgets::side_nav_bar(side_data).map(map_nav_bar_message),
+                        right_col,
+                    ]
+                    .height(Length::Fill),
+                );
             } else {
                 // None mode: no sidebar — strip (if any), content, player
                 // bar all span the full window width.
@@ -695,7 +713,8 @@ impl Nokkvi {
                 );
             }
 
-            outer.into()
+            // Fill the window height so the player bar sits flush at the bottom.
+            outer.height(Length::Fill).into()
         } else {
             // Top-nav layout — always wrap in `Stack` with the same column
             // shape underneath, even when elevation is off. Switching the
@@ -749,7 +768,9 @@ impl Nokkvi {
             base_col = base_col.push(self.main_content(is_elevated));
             base_col = base_col
                 .push(widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar));
-            let base = base_col;
+            // Fill the window so `main_content` (Length::Fill) expands and pins
+            // the player bar flush to the window's bottom edge (no gap below it).
+            let base = base_col.height(Length::Fill);
 
             let nav_overlay = column![
                 container(self.navigation_bar(nav_visual_width))

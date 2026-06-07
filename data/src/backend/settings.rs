@@ -210,6 +210,8 @@ impl SettingsService {
     delegate_setter!(set_quick_add_to_playlist, bool);
     delegate_setter!(set_queue_show_default_playlist, bool);
     delegate_setter!(set_horizontal_volume, bool);
+    delegate_setter!(set_mini_player_show_volume, bool);
+    delegate_setter!(set_mini_player_show_modes, bool);
     delegate_setter!(set_font_family, String);
 
     // -- Track info strip toggles --

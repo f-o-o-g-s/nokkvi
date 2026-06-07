@@ -117,6 +117,22 @@ define_settings! {
                 read_field: |d| d.horizontal_volume,
             },
         },
+        MiniPlayerShowVolume {
+            key: "general.mini_player_show_volume",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_mini_player_show_volume(v),
+            toml_apply: |ts, p| p.mini_player_show_volume = ts.mini_player_show_volume,
+            read: |src, out| out.mini_player_show_volume = src.mini_player_show_volume,
+            write: |ps, ts| ts.mini_player_show_volume = ps.mini_player_show_volume,
+        },
+        MiniPlayerShowModes {
+            key: "general.mini_player_show_modes",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_mini_player_show_modes(v),
+            toml_apply: |ts, p| p.mini_player_show_modes = ts.mini_player_show_modes,
+            read: |src, out| out.mini_player_show_modes = src.mini_player_show_modes,
+            write: |ps, ts| ts.mini_player_show_modes = ps.mini_player_show_modes,
+        },
         // --- Views ---
         SlotTextLinks {
             key: "general.slot_text_links",
@@ -395,6 +411,8 @@ mod tests {
             track_info_display: "Off".into(),
             slot_row_height: "Default".into(),
             horizontal_volume: false,
+            mini_player_show_volume: true,
+            mini_player_show_modes: true,
             slot_text_links: true,
             font_family: "".into(),
             strip_show_title: true,
@@ -418,8 +436,9 @@ mod tests {
 
     /// 13 entries get ui_meta — 5 Layout + 1 Views + 4 Metadata Strip + 3
     /// Artwork Column (mode dropdown + auto-max-pct slider + vertical-height
-    /// slider). The 8 ToggleSet sub-keys (`strip_show_*`, `*_artwork_overlay`)
-    /// and the conditional `artwork_column_stretch_fit` stay hand-written.
+    /// slider). The mini-player show-volume/show-modes toggles and the 8
+    /// ToggleSet sub-keys (`strip_show_*`, `*_artwork_overlay`) plus the
+    /// conditional `artwork_column_stretch_fit` stay hand-written.
     #[test]
     fn build_interface_tab_settings_items_emits_thirteen_rows() {
         let data = default_interface_data();
@@ -580,7 +599,7 @@ mod tests {
         assert!(keys.contains(&"general.playlists_artwork_overlay"));
         assert!(keys.contains(&"general.artwork_auto_max_pct"));
         assert!(keys.contains(&"general.artwork_vertical_height_pct"));
-        assert_eq!(keys.len(), 22);
+        assert_eq!(keys.len(), 24);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated
