@@ -10,15 +10,21 @@ All notable changes to this project will be documented in this file.
 - New `nav-up`, `nav-down`, `enter`, and `selection` CLI commands drive and inspect the focused list — move the selection, activate the centered item, or read it.
 - New `nokkvi add-to-queue` command enqueues the focused list item (the Shift+A hotkey) and reports what it added.
 - New `nokkvi remove-from-queue` command removes the centered queue song (the Ctrl+D hotkey) and reports what it removed.
+- MiniPlayer mode gains a "Visible Controls" setting to hide its volume slider and mode menu independently.
 
 ### Changed
 
 - The `nokkvi` command-line verbs now print a JSON result instead of nothing, so toggles like `nokkvi consume` confirm their new state in the shell.
 - `nokkvi rate` and `nokkvi love` now show an in-window toast confirming the change, like the in-app rating and star hotkeys.
+- MiniPlayer mode is redesigned with a full-width progress bar across the top, showing elapsed and total time alongside the track's format and bitrate.
+- On wider windows, MiniPlayer mode now centers the transport controls, with metadata on the left and volume and mode controls on the right.
+- The player bar now uses a 3-button transport set (previous / play-pause / next) in every layout.
 
 ### Fixed
 
 ### Removed
+
+- The dedicated Stop button has been removed from the player bar; Stop is still available via media keys and the `nokkvi stop` command.
 
 ## v0.6.10 — 2026-06-06
 
