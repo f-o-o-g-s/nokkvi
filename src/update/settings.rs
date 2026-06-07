@@ -53,6 +53,12 @@ impl Nokkvi {
             track_info_display: crate::theme::track_info_display().as_label().into(),
             slot_row_height: crate::theme::slot_row_height_variant().as_label().into(),
             horizontal_volume: crate::theme::is_horizontal_volume(),
+            autohide_toolbar: crate::theme::is_autohide_toolbar(),
+            autohide_toolbar_height: i64::from(crate::theme::autohide_toolbar_height_px()),
+            autohide_toolbar_grip: crate::theme::is_autohide_toolbar_grip(),
+            autohide_collapsed_appearance: crate::theme::autohide_collapsed_appearance()
+                .as_label()
+                .into(),
             mini_player_show_volume: crate::theme::mini_player_show_volume(),
             mini_player_show_modes: crate::theme::mini_player_show_modes(),
             slot_text_links: crate::theme::is_slot_text_links(),

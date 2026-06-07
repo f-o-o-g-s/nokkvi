@@ -204,7 +204,10 @@ impl AlbumsPage {
                         | SlotListPageMessage::SortModeSelected(_)
                         | SlotListPageMessage::ToggleSortOrder
                         | SlotListPageMessage::HoverEnterSlot(_)
-                        | SlotListPageMessage::HoverExitSlot(_) => {
+                        | SlotListPageMessage::HoverExitSlot(_)
+                        | SlotListPageMessage::ToolbarHoverEnter
+                        | SlotListPageMessage::ToolbarHoverExit
+                        | SlotListPageMessage::ToolbarDropdownToggled(_) => {
                             (Task::none(), AlbumsAction::None)
                         }
                     }

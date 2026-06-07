@@ -1,7 +1,7 @@
 //! Chrome-math regression tests for the redesign branch's new
 //! `TrackInfoDisplay` × `NavLayout` matrix.
 //!
-//! `chrome_height_with_header()` (`src/widgets/slot_list.rs`) is the single
+//! `chrome_height_with_header(false)` (`src/widgets/slot_list.rs`) is the single
 //! source of truth driving the slot-count math in every page view. Six of
 //! its fan-outs depend on the active strip mode and nav layout, and an
 //! off-by-one in any of them silently drops a partial slot at the bottom
@@ -105,7 +105,7 @@ fn chrome_matrix_flat_mode_pins_every_combination() {
         for mode in modes {
             set_nav_layout(layout);
             set_track_info_display(mode);
-            let got = chrome_height_with_header();
+            let got = chrome_height_with_header(false);
             let expected = expected_chrome(mode, layout);
             assert!(
                 (got - expected).abs() < f32::EPSILON,
@@ -128,10 +128,10 @@ fn chrome_matrix_rounded_mode_swaps_nav_height_only() {
     set_track_info_display(TrackInfoDisplay::Off);
 
     set_rounded_mode(RoundedMode::On);
-    let rounded = chrome_height_with_header();
+    let rounded = chrome_height_with_header(false);
 
     set_rounded_mode(RoundedMode::Off);
-    let flat = chrome_height_with_header();
+    let flat = chrome_height_with_header(false);
 
     assert!(
         (rounded - flat - 12.0).abs() < f32::EPSILON,
@@ -142,7 +142,7 @@ fn chrome_matrix_rounded_mode_swaps_nav_height_only() {
     // nav bar (and the rest of the UI) flat. Chrome height must match
     // the fully-flat baseline, not the fully-rounded one.
     set_rounded_mode(RoundedMode::PlayerOnly);
-    let player_only = chrome_height_with_header();
+    let player_only = chrome_height_with_header(false);
     assert!(
         (player_only - flat).abs() < f32::EPSILON,
         "PlayerOnly must leave nav-bar height flat: got {player_only}, expected {flat}",
@@ -189,9 +189,9 @@ fn top_bar_under_strip_only_adds_height_in_top_nav() {
 
     set_nav_layout(NavLayout::Top);
     set_track_info_display(TrackInfoDisplay::Off);
-    let top_off = chrome_height_with_header();
+    let top_off = chrome_height_with_header(false);
     set_track_info_display(TrackInfoDisplay::TopBarUnder);
-    let top_under = chrome_height_with_header();
+    let top_under = chrome_height_with_header(false);
     assert!(
         (top_under - top_off - STRIP_HEIGHT_WITH_SEPARATOR).abs() < f32::EPSILON,
         "TopBarUnder in top-nav must add STRIP_HEIGHT_WITH_SEPARATOR; got delta {}",
@@ -200,9 +200,9 @@ fn top_bar_under_strip_only_adds_height_in_top_nav() {
 
     set_nav_layout(NavLayout::Side);
     set_track_info_display(TrackInfoDisplay::TopBar);
-    let side_top_bar = chrome_height_with_header();
+    let side_top_bar = chrome_height_with_header(false);
     set_track_info_display(TrackInfoDisplay::TopBarUnder);
-    let side_top_under = chrome_height_with_header();
+    let side_top_under = chrome_height_with_header(false);
     assert!(
         (side_top_bar - side_top_under).abs() < f32::EPSILON,
         "TopBar and TopBarUnder must have identical chrome in side-nav (both render above content)",

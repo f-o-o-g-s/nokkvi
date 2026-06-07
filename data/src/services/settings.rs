@@ -384,6 +384,29 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_autohide_toolbar(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.autohide_toolbar = enabled;
+        self.save()
+    }
+
+    pub fn set_autohide_toolbar_height(&mut self, px: u32) -> Result<()> {
+        self.settings.player.autohide_toolbar_height = px.clamp(4, 24);
+        self.save()
+    }
+
+    pub fn set_autohide_toolbar_grip(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.autohide_toolbar_grip = enabled;
+        self.save()
+    }
+
+    pub fn set_autohide_collapsed_appearance(
+        &mut self,
+        mode: crate::types::player_settings::CollapsedAppearance,
+    ) -> Result<()> {
+        self.settings.player.autohide_collapsed_appearance = mode;
+        self.save()
+    }
+
     pub fn set_mini_player_show_volume(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.mini_player_show_volume = enabled;
         self.save()
@@ -1193,6 +1216,11 @@ mod sentinel_roundtrip_tests {
             quick_add_to_playlist: true,       // default false
             queue_show_default_playlist: true, // default false
             horizontal_volume: true,           // default false
+            autohide_toolbar: true,            // default false
+            autohide_toolbar_height: 12,       // default 6
+            autohide_toolbar_grip: false,      // default true
+            autohide_collapsed_appearance:
+                crate::types::player_settings::CollapsedAppearance::CountStrip, // default Hairline
             mini_player_show_volume: false,    // default true
             mini_player_show_modes: false,     // default true
             font_family: "Sentinel Mono".to_string(),
@@ -1409,6 +1437,16 @@ mod sentinel_roundtrip_tests {
             ui_ps2.queue_show_default_playlist
         );
         assert_eq!(ui_ps1.horizontal_volume, ui_ps2.horizontal_volume);
+        assert_eq!(ui_ps1.autohide_toolbar, ui_ps2.autohide_toolbar);
+        assert_eq!(
+            ui_ps1.autohide_toolbar_height,
+            ui_ps2.autohide_toolbar_height
+        );
+        assert_eq!(ui_ps1.autohide_toolbar_grip, ui_ps2.autohide_toolbar_grip);
+        assert_eq!(
+            ui_ps1.autohide_collapsed_appearance,
+            ui_ps2.autohide_collapsed_appearance
+        );
         assert_eq!(
             ui_ps1.mini_player_show_volume,
             ui_ps2.mini_player_show_volume

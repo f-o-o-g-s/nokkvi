@@ -91,6 +91,12 @@ impl Nokkvi {
             return Task::none();
         }
 
+        // Selecting "Roulette" from the sort dropdown closes it via the
+        // overlay's on_select (not on_close), so drop the toolbar reveal-lock.
+        if let Some(page) = self.view_page_mut(view) {
+            page.common_mut().set_toolbar_dropdown_open(false);
+        }
+
         // Block plays during playlist edit mode the same way every other
         // play handler does. Skip `enter_new_playback_context()` here — the
         // per-view settle dispatch (`roulette_settle_play`) routes through

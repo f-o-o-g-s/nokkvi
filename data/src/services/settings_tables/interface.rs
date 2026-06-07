@@ -15,8 +15,9 @@ use crate::{
         player_settings::{
             ARTWORK_AUTO_MAX_PCT_DEFAULT, ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN,
             ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
-            ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkStretchFit, NavDisplayMode,
-            NavLayout, SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
+            ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkStretchFit,
+            CollapsedAppearance, NavDisplayMode, NavLayout, SlotRowHeight, StripClickAction,
+            StripSeparator, TrackInfoDisplay,
         },
         setting_def::Tab,
         settings_data::InterfaceSettingsData,
@@ -115,6 +116,77 @@ define_settings! {
                 subtitle: Some("Stack volume sliders horizontally in the player bar"),
                 default: false,
                 read_field: |d| d.horizontal_volume,
+            },
+        },
+        AutohideToolbar {
+            key: "general.autohide_toolbar",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_autohide_toolbar(v),
+            toml_apply: |ts, p| p.autohide_toolbar = ts.autohide_toolbar,
+            read: |src, out| out.autohide_toolbar = src.autohide_toolbar,
+            write: |ps, ts| ts.autohide_toolbar = ps.autohide_toolbar,
+            ui_meta: {
+                label: "Auto-hide Toolbar",
+                category: "Slot List",
+                subtitle: Some(
+                    "Collapse the sort & search bar to a thin line until you hover it or use a sort/search shortcut",
+                ),
+                default: false,
+                read_field: |d| d.autohide_toolbar,
+            },
+        },
+        AutohideToolbarHeight {
+            key: "general.autohide_toolbar_height",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_autohide_toolbar_height(v as u32),
+            toml_apply: |ts, p| p.autohide_toolbar_height = ts.autohide_toolbar_height,
+            read: |src, out| out.autohide_toolbar_height = src.autohide_toolbar_height,
+            write: |ps, ts| ts.autohide_toolbar_height = ps.autohide_toolbar_height,
+            ui_meta: {
+                label: "Toolbar Hidden Height",
+                category: "Slot List",
+                subtitle: Some("Height of the collapsed toolbar's hover strip"),
+                default: 6_i64,
+                min: 4_i64,
+                max: 24_i64,
+                step: 1_i64,
+                unit: "px",
+                read_field: |d| d.autohide_toolbar_height,
+            },
+        },
+        AutohideToolbarGrip {
+            key: "general.autohide_toolbar_grip",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_autohide_toolbar_grip(v),
+            toml_apply: |ts, p| p.autohide_toolbar_grip = ts.autohide_toolbar_grip,
+            read: |src, out| out.autohide_toolbar_grip = src.autohide_toolbar_grip,
+            write: |ps, ts| ts.autohide_toolbar_grip = ps.autohide_toolbar_grip,
+            ui_meta: {
+                label: "Toolbar Grip Indicator",
+                category: "Slot List",
+                subtitle: Some(
+                    "Show a centered accent bar on the collapsed toolbar as a hover hint",
+                ),
+                default: true,
+                read_field: |d| d.autohide_toolbar_grip,
+            },
+        },
+        AutohideCollapsedAppearance {
+            key: "general.autohide_collapsed_appearance",
+            value_type: Enum,
+            setter: |mgr, v: String| {
+                mgr.set_autohide_collapsed_appearance(CollapsedAppearance::from_label(&v))
+            },
+            toml_apply: |ts, p| p.autohide_collapsed_appearance = ts.autohide_collapsed_appearance,
+            read: |src, out| out.autohide_collapsed_appearance = src.autohide_collapsed_appearance,
+            write: |ps, ts| ts.autohide_collapsed_appearance = ps.autohide_collapsed_appearance,
+            ui_meta: {
+                label: "Collapsed Appearance",
+                category: "Slot List",
+                subtitle: Some("What stays on screen while the bar is hidden"),
+                default: "Hairline",
+                options: &["Hairline", "Hidden", "Count strip"],
+                read_field: |d| d.autohide_collapsed_appearance.as_ref(),
             },
         },
         MiniPlayerShowVolume {
@@ -411,6 +483,10 @@ mod tests {
             track_info_display: "Off".into(),
             slot_row_height: "Default".into(),
             horizontal_volume: false,
+            autohide_toolbar: false,
+            autohide_toolbar_height: 6,
+            autohide_toolbar_grip: true,
+            autohide_collapsed_appearance: "Hairline".into(),
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             slot_text_links: true,
@@ -434,16 +510,17 @@ mod tests {
         }
     }
 
-    /// 13 entries get ui_meta — 5 Layout + 1 Views + 4 Metadata Strip + 3
-    /// Artwork Column (mode dropdown + auto-max-pct slider + vertical-height
-    /// slider). The mini-player show-volume/show-modes toggles and the 8
-    /// ToggleSet sub-keys (`strip_show_*`, `*_artwork_overlay`) plus the
-    /// conditional `artwork_column_stretch_fit` stay hand-written.
+    /// 17 entries get ui_meta — 5 Layout + 4 Slot List (autohide toggle +
+    /// collapsed-appearance + hidden-height + grip) + 1 Views + 4 Metadata
+    /// Strip + 3 Artwork Column (mode dropdown + auto-max-pct slider +
+    /// vertical-height slider). The mini-player show-volume/show-modes toggles
+    /// and the 8 ToggleSet sub-keys (`strip_show_*`, `*_artwork_overlay`) plus
+    /// the conditional `artwork_column_stretch_fit` stay hand-written.
     #[test]
-    fn build_interface_tab_settings_items_emits_thirteen_rows() {
+    fn build_interface_tab_settings_items_emits_seventeen_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 13);
+        assert_eq!(entries.len(), 17);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -583,6 +660,16 @@ mod tests {
     }
 
     #[test]
+    fn apply_toml_interface_copies_autohide_toolbar() {
+        let mut ts = TomlSettings::default();
+        ts.autohide_toolbar = true;
+        let mut p = PersistedPlayerSettings::default();
+        assert!(!p.autohide_toolbar);
+        apply_toml_interface_tab(&ts, &mut p);
+        assert!(p.autohide_toolbar);
+    }
+
+    #[test]
     fn tab_interface_contains_recognizes_declared_keys() {
         assert!(tab_interface_contains("general.nav_layout"));
         assert!(tab_interface_contains("general.strip_show_title"));
@@ -599,7 +686,11 @@ mod tests {
         assert!(keys.contains(&"general.playlists_artwork_overlay"));
         assert!(keys.contains(&"general.artwork_auto_max_pct"));
         assert!(keys.contains(&"general.artwork_vertical_height_pct"));
-        assert_eq!(keys.len(), 24);
+        assert!(keys.contains(&"general.autohide_toolbar"));
+        assert!(keys.contains(&"general.autohide_toolbar_height"));
+        assert!(keys.contains(&"general.autohide_toolbar_grip"));
+        assert!(keys.contains(&"general.autohide_collapsed_appearance"));
+        assert_eq!(keys.len(), 28);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated

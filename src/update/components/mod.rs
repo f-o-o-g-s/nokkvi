@@ -1420,6 +1420,11 @@ impl Nokkvi {
         self.similar_songs_generation = 0;
         self.active_playlist_info = None;
         self.queue_page.playlist_strip_expanded = false;
+        // A sort dropdown / hover lock set at logout or session-expiry would
+        // otherwise survive into the next session: the pick_list / header
+        // mouse_area unmount on the Login-screen swap, so their on_close /
+        // on_exit can't fire to clear the flag.
+        self.clear_all_toolbar_reveal_locks();
         self.playlist_editor = None;
         self.server_version = None;
         self.last_queue_current_index = None;

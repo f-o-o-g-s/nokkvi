@@ -20,10 +20,11 @@ use crate::{
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior,
-            LibraryPageSize, LivePlayerSettings, NavDisplayMode, NavLayout, NormalizationLevel,
-            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
-            TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
+            EnterBehavior, LibraryPageSize, LivePlayerSettings, NavDisplayMode, NavLayout,
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
+            StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
+            VolumeNormalizationMode,
         },
         queue_sort_mode::QueueSortMode,
         sort_mode::SortMode,
@@ -210,6 +211,10 @@ impl SettingsService {
     delegate_setter!(set_quick_add_to_playlist, bool);
     delegate_setter!(set_queue_show_default_playlist, bool);
     delegate_setter!(set_horizontal_volume, bool);
+    delegate_setter!(set_autohide_toolbar, bool);
+    delegate_setter!(set_autohide_toolbar_height, u32);
+    delegate_setter!(set_autohide_toolbar_grip, bool);
+    delegate_setter!(set_autohide_collapsed_appearance, CollapsedAppearance);
     delegate_setter!(set_mini_player_show_volume, bool);
     delegate_setter!(set_mini_player_show_modes, bool);
     delegate_setter!(set_font_family, String);

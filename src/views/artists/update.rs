@@ -172,7 +172,12 @@ impl ArtistsPage {
                     | SlotListPageMessage::SortModeSelected(_)
                     | SlotListPageMessage::ToggleSortOrder
                     | SlotListPageMessage::HoverEnterSlot(_)
-                    | SlotListPageMessage::HoverExitSlot(_) => (Task::none(), ArtistsAction::None),
+                    | SlotListPageMessage::HoverExitSlot(_)
+                    | SlotListPageMessage::ToolbarHoverEnter
+                    | SlotListPageMessage::ToolbarHoverExit
+                    | SlotListPageMessage::ToolbarDropdownToggled(_) => {
+                        (Task::none(), ArtistsAction::None)
+                    }
                 },
 
                 // Routed up to root in `handle_artists` before this match runs;

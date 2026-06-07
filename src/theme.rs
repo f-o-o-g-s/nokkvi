@@ -91,6 +91,14 @@ struct UiModeFlags {
     slot_text_links: AtomicBool,
     /// Whether volume sliders are displayed horizontally in the player bar
     horizontal_volume: AtomicBool,
+    /// Whether the view-header toolbar auto-hides to a thin line until hovered
+    autohide_toolbar: AtomicBool,
+    /// Collapsed auto-hide toolbar height in px (user-configurable)
+    autohide_toolbar_height: AtomicU8,
+    /// Whether the collapsed auto-hide toolbar shows a centered accent grip bar
+    autohide_toolbar_grip: AtomicBool,
+    /// What the collapsed auto-hide toolbar shows (Hairline / Hidden / Count strip)
+    autohide_collapsed_appearance: AtomicU8,
     /// Whether the mini-player bar shows the volume slider (mini-player mode only)
     mini_player_show_volume: AtomicBool,
     /// Whether the mini-player bar shows the mode toggles / kebab menu
@@ -152,6 +160,10 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     opacity_gradient: AtomicBool::new(true),
     slot_text_links: AtomicBool::new(true),
     horizontal_volume: AtomicBool::new(false),
+    autohide_toolbar: AtomicBool::new(false),
+    autohide_toolbar_height: AtomicU8::new(6),
+    autohide_toolbar_grip: AtomicBool::new(true),
+    autohide_collapsed_appearance: AtomicU8::new(0), // Hairline
     mini_player_show_volume: AtomicBool::new(true),
     mini_player_show_modes: AtomicBool::new(true),
     strip_show_title: AtomicBool::new(true),
@@ -845,6 +857,73 @@ pub(crate) fn is_horizontal_volume() -> bool {
 pub(crate) fn set_horizontal_volume(enabled: bool) {
     UI_MODE.horizontal_volume.store(enabled, Ordering::Relaxed);
     debug!(" Horizontal volume changed: horizontal_volume={}", enabled);
+}
+
+/// Returns true if the view-header toolbar auto-hides until hovered / shortcut
+#[inline]
+pub(crate) fn is_autohide_toolbar() -> bool {
+    UI_MODE.autohide_toolbar.load(Ordering::Relaxed)
+}
+
+/// Set view-header toolbar auto-hide mode (call when user toggles the setting)
+#[inline]
+pub(crate) fn set_autohide_toolbar(enabled: bool) {
+    UI_MODE.autohide_toolbar.store(enabled, Ordering::Relaxed);
+    debug!(" Autohide toolbar changed: autohide_toolbar={}", enabled);
+}
+
+/// Collapsed auto-hide toolbar height in px (user-configurable).
+#[inline]
+pub(crate) fn autohide_toolbar_height_px() -> u8 {
+    UI_MODE.autohide_toolbar_height.load(Ordering::Relaxed)
+}
+
+/// Set the collapsed auto-hide toolbar height in px.
+#[inline]
+pub(crate) fn set_autohide_toolbar_height_px(px: u8) {
+    UI_MODE.autohide_toolbar_height.store(px, Ordering::Relaxed);
+}
+
+/// Returns true if the collapsed auto-hide toolbar shows its accent grip bar.
+#[inline]
+pub(crate) fn is_autohide_toolbar_grip() -> bool {
+    UI_MODE.autohide_toolbar_grip.load(Ordering::Relaxed)
+}
+
+/// Set whether the collapsed auto-hide toolbar shows its accent grip bar.
+#[inline]
+pub(crate) fn set_autohide_toolbar_grip(enabled: bool) {
+    UI_MODE
+        .autohide_toolbar_grip
+        .store(enabled, Ordering::Relaxed);
+}
+
+use nokkvi_data::types::player_settings::CollapsedAppearance;
+
+atomic_u8_enum! {
+    CollapsedAppearance {
+        0 => Hairline,
+        1 => Hidden,
+        2 => CountStrip,
+    } default Hairline
+}
+
+/// What the collapsed auto-hide toolbar shows (Hairline / Hidden / Count strip).
+#[inline]
+pub(crate) fn autohide_collapsed_appearance() -> CollapsedAppearance {
+    CollapsedAppearance::from_u8(
+        UI_MODE
+            .autohide_collapsed_appearance
+            .load(Ordering::Relaxed),
+    )
+}
+
+/// Set the collapsed auto-hide toolbar appearance.
+#[inline]
+pub(crate) fn set_autohide_collapsed_appearance(mode: CollapsedAppearance) {
+    UI_MODE
+        .autohide_collapsed_appearance
+        .store(mode.to_u8(), Ordering::Relaxed);
 }
 
 /// Returns true if the mini-player bar shows the volume slider (mini-player

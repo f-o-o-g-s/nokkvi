@@ -293,6 +293,18 @@ macro_rules! impl_expansion_update {
                 }
                 Ok((Task::none(), $action_none))
             }
+            $slot_list_wrap(crate::widgets::SlotListPageMessage::ToolbarHoverEnter) => {
+                $self.common.set_toolbar_hovered(true);
+                Ok((Task::none(), $action_none))
+            }
+            $slot_list_wrap(crate::widgets::SlotListPageMessage::ToolbarHoverExit) => {
+                $self.common.set_toolbar_hovered(false);
+                Ok((Task::none(), $action_none))
+            }
+            $slot_list_wrap(crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(open)) => {
+                $self.common.set_toolbar_dropdown_open(open);
+                Ok((Task::none(), $action_none))
+            }
             other => Err(other)
         }
     }};

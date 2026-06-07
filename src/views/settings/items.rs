@@ -374,8 +374,8 @@ mod tests {
         );
         assert_eq!(
             count_items(&entries),
-            16,
-            "Expected 16 items (... + show_labels, field_separator, artwork_column_mode, auto_max_pct, vertical_height_pct); stretched mode adds the fit knob"
+            17,
+            "Expected 17 items (... + autohide_toolbar, show_labels, field_separator, artwork_column_mode, auto_max_pct, vertical_height_pct); stretched mode adds the fit knob"
         );
     }
 
@@ -387,7 +387,7 @@ mod tests {
             ..Default::default()
         };
         let entries = build_interface_items(&data);
-        assert_eq!(count_items(&entries), 17);
+        assert_eq!(count_items(&entries), 18);
     }
 
     #[test]

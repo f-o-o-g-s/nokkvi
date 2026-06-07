@@ -1466,6 +1466,18 @@ impl Nokkvi {
         // Apply horizontal volume mode from persisted settings
         crate::theme::set_horizontal_volume(settings.horizontal_volume);
 
+        // Apply view-header toolbar auto-hide mode from persisted settings
+        crate::theme::set_autohide_toolbar(settings.autohide_toolbar);
+        // Clamp on load too: a hand-edited config.toml could hold an
+        // out-of-range value that would wrap on the u8 cast (e.g. 256 → 0,
+        // an invisible/unhittable strip). The setter clamps on write; this
+        // guards the read path.
+        crate::theme::set_autohide_toolbar_height_px(
+            settings.autohide_toolbar_height.clamp(4, 24) as u8
+        );
+        crate::theme::set_autohide_toolbar_grip(settings.autohide_toolbar_grip);
+        crate::theme::set_autohide_collapsed_appearance(settings.autohide_collapsed_appearance);
+
         // Apply mini-player per-control visibility from persisted settings
         crate::theme::set_mini_player_show_volume(settings.mini_player_show_volume);
         crate::theme::set_mini_player_show_modes(settings.mini_player_show_modes);

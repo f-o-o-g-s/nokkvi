@@ -14,6 +14,17 @@ pub struct SlotListPageState {
     pub sort_ascending: bool,
     pub search_input_focused: bool,
     pub active_filter: Option<nokkvi_data::types::filter::LibraryFilter>,
+    /// Auto-hide toolbar: cursor is currently over the toolbar's reveal zone.
+    pub toolbar_hovered: bool,
+    /// Auto-hide toolbar: stays revealed until this instant. Set by
+    /// header-interacting hotkeys (sort cycle/toggle, focus search,
+    /// center-on-playing); checked at render time against `Instant::now()`.
+    pub toolbar_reveal_until: Option<std::time::Instant>,
+    /// Auto-hide toolbar: the sort dropdown (pick_list) is currently open, so
+    /// the toolbar stays revealed even though the cursor has moved off it into
+    /// the dropdown menu. Set via the pick_list's on_open / on_close; cleared
+    /// on selection (which closes the menu without firing on_close).
+    pub toolbar_dropdown_open: bool,
 }
 
 impl SlotListPageState {
@@ -26,6 +37,9 @@ impl SlotListPageState {
             sort_ascending: default_sort_ascending,
             search_input_focused: false,
             active_filter: None,
+            toolbar_hovered: false,
+            toolbar_reveal_until: None,
+            toolbar_dropdown_open: false,
         }
     }
 
@@ -83,6 +97,18 @@ pub enum SlotListPageMessage {
     /// move-between-adjacent-slots sequence (slot N exit + slot M enter,
     /// either order) lands on `Some(M)` regardless of dispatch order.
     HoverExitSlot(HoveredSlot),
+    /// Cursor entered the auto-hide toolbar's reveal zone (the view-header
+    /// hover strip). Sets `toolbar_hovered` so the toolbar expands.
+    ToolbarHoverEnter,
+    /// Cursor left the auto-hide toolbar's reveal zone. Clears
+    /// `toolbar_hovered`; the toolbar collapses unless another reveal
+    /// condition holds (search active, hotkey reveal window still open).
+    ToolbarHoverExit,
+    /// The toolbar's sort dropdown (pick_list) opened (`true`) or closed via a
+    /// click outside / on the trigger (`false`). Keeps the toolbar revealed
+    /// while the dropdown menu is open. Published by the pick_list's
+    /// on_open / on_close.
+    ToolbarDropdownToggled(bool),
 }
 
 ///
@@ -323,6 +349,9 @@ impl SlotListPageState {
     /// Handle sort mode selection
     pub fn handle_sort_mode_selected(&mut self, sort_mode: SortMode) -> SlotListPageAction {
         self.current_sort_mode = sort_mode;
+        // Selecting an option closes the dropdown (the overlay fires on_select,
+        // not on_close), so drop the reveal-lock here.
+        self.toolbar_dropdown_open = false;
         SlotListPageAction::SortModeChanged(sort_mode)
     }
 
@@ -347,6 +376,73 @@ impl SlotListPageState {
     /// Handle search focus change
     pub fn handle_search_focused(&mut self, focused: bool) {
         self.search_input_focused = focused;
+    }
+
+    /// How long the auto-hide toolbar stays revealed after a
+    /// header-interacting hotkey fires (sort cycle/toggle, focus search,
+    /// center-on-playing).
+    pub const TOOLBAR_REVEAL_DURATION: std::time::Duration = std::time::Duration::from_millis(2500);
+
+    /// Set whether the cursor is over the auto-hide toolbar's reveal zone.
+    pub fn set_toolbar_hovered(&mut self, hovered: bool) {
+        self.toolbar_hovered = hovered;
+    }
+
+    /// Set whether the toolbar's sort dropdown is open (keeps the toolbar
+    /// revealed while the cursor is in the open dropdown menu, off the header).
+    pub fn set_toolbar_dropdown_open(&mut self, open: bool) {
+        self.toolbar_dropdown_open = open;
+    }
+
+    /// Clear the transient reveal-locks that hold the auto-hide toolbar open.
+    ///
+    /// `toolbar_hovered` and `toolbar_dropdown_open` are normally cleared by the
+    /// header's `mouse_area` `on_exit` / `pick_list` `on_close` — events that
+    /// can only fire while the header is still mounted. When the header unmounts
+    /// with a flag set (main-view switch, browsing-panel close, session reset),
+    /// that event never fires and the flag strands `true`, leaving the toolbar
+    /// stuck revealed. Call this on those unmount edges. Search state is left
+    /// intact — an active filter legitimately keeps the toolbar revealed.
+    pub fn reset_reveal_locks(&mut self) {
+        self.toolbar_hovered = false;
+        self.toolbar_dropdown_open = false;
+        self.toolbar_reveal_until = None;
+    }
+
+    /// Reveal the auto-hide toolbar for [`Self::TOOLBAR_REVEAL_DURATION`].
+    /// Called by header-interacting hotkeys so a keyboard-driven sort/search
+    /// change surfaces the toolbar even when the cursor isn't on it.
+    pub fn reveal_toolbar(&mut self) {
+        self.toolbar_reveal_until = Some(std::time::Instant::now() + Self::TOOLBAR_REVEAL_DURATION);
+    }
+
+    /// Whether the auto-hide toolbar should currently render expanded.
+    ///
+    /// Always expanded when `autohide_enabled` is false. When enabled, it
+    /// expands while the cursor is over it, while a search query or search
+    /// focus is active (so a live filter is never hidden), or while a hotkey
+    /// reveal window is still open.
+    pub fn toolbar_revealed(&self, autohide_enabled: bool) -> bool {
+        if !autohide_enabled {
+            return true;
+        }
+        self.toolbar_hovered
+            || self.toolbar_dropdown_open
+            || self.search_input_focused
+            || !self.search_query.is_empty()
+            || self
+                .toolbar_reveal_until
+                .is_some_and(|until| std::time::Instant::now() < until)
+    }
+
+    /// Whether the auto-hide toolbar should render collapsed: enabled, not
+    /// revealed, and no header dropdown holding it open. The sort dropdown is
+    /// already folded into [`Self::toolbar_revealed`] via `toolbar_dropdown_open`;
+    /// `column_dropdown_open` is the view's columns-cog dropdown state (pass
+    /// `false` for views without a columns picker, e.g. Radios). Centralizes
+    /// the collapse rule so the ~6 slot-list views can't drift.
+    pub fn toolbar_collapsed(&self, autohide_enabled: bool, column_dropdown_open: bool) -> bool {
+        !self.toolbar_revealed(autohide_enabled) && !column_dropdown_open
     }
 
     /// Unified dispatch for non-expansion views (Songs, Queue, Radios, Similar).
@@ -404,6 +500,18 @@ impl SlotListPageState {
                 if self.slot_list.hovered_slot == Some(h) {
                     self.slot_list.hovered_slot = None;
                 }
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ToolbarHoverEnter => {
+                self.set_toolbar_hovered(true);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ToolbarHoverExit => {
+                self.set_toolbar_hovered(false);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ToolbarDropdownToggled(open) => {
+                self.set_toolbar_dropdown_open(open);
                 SlotListPageAction::None
             }
         }

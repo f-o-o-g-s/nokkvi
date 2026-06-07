@@ -52,7 +52,10 @@ impl Nokkvi {
             slot_list::{SlotListConfig, chrome_height_with_header},
         };
 
-        let standard_chrome = chrome_height_with_header();
+        // Use the full-header footprint: the operations that read this stored
+        // slot_count (expansion landing, center-on-playing) all fire the toolbar
+        // reveal hotkeys, so the toolbar is expanded when they run.
+        let standard_chrome = chrome_height_with_header(false);
         let layout = BaseSlotListLayoutConfig {
             window_width: self.content_pane_width(),
             window_height: self.window.height,

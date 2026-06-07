@@ -1,10 +1,12 @@
 //! Interface tab setting entries — navigation, lists, player bar, font, and
 //! metadata strip.
 //!
-//! 13 flat rows come from `define_settings!` via
-//! `build_interface_tab_settings_items` (2 Navigation + 2 Slot List + 1
+//! 16 flat rows come from `define_settings!` via
+//! `build_interface_tab_settings_items` (2 Navigation + 5 Slot List + 1
 //! Player Bar + 5 Metadata Strip + 3 Artwork Column: mode dropdown,
-//! `artwork_auto_max_pct` slider, `artwork_vertical_height_pct` slider).
+//! `artwork_auto_max_pct` slider, `artwork_vertical_height_pct` slider). The
+//! two auto-hide sub-controls (`autohide_toolbar_height` / `_grip`) are
+//! inserted beneath the Auto-hide Toolbar toggle only while it's enabled.
 //! A MiniPlayer-only "Visible Controls" ToggleSet (`__toggle_mini_player_controls`
 //! → the data-only `general.mini_player_show_volume` / `general.mini_player_show_modes`
 //! settings) is hand-inserted beneath the Player Bar row only when
@@ -57,6 +59,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         },
         macro_rows.take("general.slot_row_height"),
         macro_rows.take("general.slot_text_links"),
+        macro_rows.take("general.autohide_toolbar"),
         // --- Player Bar ---
         SettingsEntry::Header {
             label: "Player Bar",
@@ -217,6 +220,35 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         ));
     }
 
+    // Auto-hide toolbar sub-controls render directly beneath the toggle and
+    // only while it's enabled. The "Collapsed appearance" picker always shows;
+    // the height + grip refinements apply only to the Hairline appearance.
+    if data.autohide_toolbar {
+        use nokkvi_data::types::player_settings::CollapsedAppearance;
+        let insert_at = items
+            .iter()
+            .position(|e| {
+                matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == "general.autohide_toolbar")
+            })
+            .map_or(items.len(), |pos| pos + 1);
+        items.insert(
+            insert_at,
+            macro_rows.take("general.autohide_collapsed_appearance"),
+        );
+        if CollapsedAppearance::from_label(data.autohide_collapsed_appearance.as_ref())
+            == CollapsedAppearance::Hairline
+        {
+            items.insert(
+                insert_at + 1,
+                macro_rows.take("general.autohide_toolbar_height"),
+            );
+            items.insert(
+                insert_at + 2,
+                macro_rows.take("general.autohide_toolbar_grip"),
+            );
+        }
+    }
+
     items
 }
 
@@ -268,6 +300,59 @@ mod tests {
             assert!(
                 key_pos(&items, "__toggle_mini_player_controls").is_none(),
                 "{mode:?}: no Visible Controls ToggleSet outside MiniPlayer",
+            );
+        }
+    }
+
+    /// Auto-hide sub-controls render beneath the toggle only while enabled, and
+    /// the height + grip refinements appear only for the Hairline appearance.
+    #[test]
+    fn autohide_subcontrols_track_toggle_and_appearance() {
+        // Disabled (default): no sub-controls at all.
+        let off = build_interface_items(&InterfaceSettingsData::default());
+        assert!(key_pos(&off, "general.autohide_collapsed_appearance").is_none());
+        assert!(key_pos(&off, "general.autohide_toolbar_height").is_none());
+        assert!(key_pos(&off, "general.autohide_toolbar_grip").is_none());
+
+        // Hairline: appearance, then height, then grip directly after the toggle.
+        let hairline = build_interface_items(&InterfaceSettingsData {
+            autohide_toolbar: true,
+            autohide_collapsed_appearance: "Hairline".into(),
+            ..Default::default()
+        });
+        let toggle = key_pos(&hairline, "general.autohide_toolbar").expect("toggle present");
+        assert_eq!(
+            key_pos(&hairline, "general.autohide_collapsed_appearance"),
+            Some(toggle + 1),
+            "appearance picker directly after the toggle"
+        );
+        assert_eq!(
+            key_pos(&hairline, "general.autohide_toolbar_height"),
+            Some(toggle + 2),
+        );
+        assert_eq!(
+            key_pos(&hairline, "general.autohide_toolbar_grip"),
+            Some(toggle + 3),
+        );
+
+        // Hidden / Count strip: appearance picker shows, but no height/grip.
+        for mode in ["Hidden", "Count strip"] {
+            let items = build_interface_items(&InterfaceSettingsData {
+                autohide_toolbar: true,
+                autohide_collapsed_appearance: mode.into(),
+                ..Default::default()
+            });
+            assert!(
+                key_pos(&items, "general.autohide_collapsed_appearance").is_some(),
+                "{mode}: appearance picker present"
+            );
+            assert!(
+                key_pos(&items, "general.autohide_toolbar_height").is_none(),
+                "{mode}: no height refinement"
+            );
+            assert!(
+                key_pos(&items, "general.autohide_toolbar_grip").is_none(),
+                "{mode}: no grip refinement"
             );
         }
     }

@@ -3,10 +3,11 @@ use serde::{Deserialize, Serialize};
 use crate::types::{
     hotkey_config::HotkeyConfig,
     player_settings::{
-        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
-        NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-        SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
-        VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
+        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
+        EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
+        RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
+        TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+        deserialize_rounded_mode_with_bool_compat,
     },
     queue::{QueueSortPreferences, SortPreferences},
     queue_sort_mode::QueueSortMode,
@@ -111,6 +112,19 @@ pub struct PersistedPlayerSettings {
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     #[serde(default)]
     pub horizontal_volume: bool,
+    /// Whether the view-header toolbar auto-hides to a thin line until hovered
+    /// or a sort/search shortcut is used (default: false)
+    #[serde(default)]
+    pub autohide_toolbar: bool,
+    /// Collapsed auto-hide toolbar height in px (default: 6)
+    #[serde(default = "default_autohide_toolbar_height")]
+    pub autohide_toolbar_height: u32,
+    /// Whether the collapsed auto-hide toolbar shows a centered accent grip bar (default: true)
+    #[serde(default = "default_true")]
+    pub autohide_toolbar_grip: bool,
+    /// What the collapsed auto-hide toolbar shows (default: Hairline)
+    #[serde(default)]
+    pub autohide_collapsed_appearance: CollapsedAppearance,
     /// Whether the mini-player bar shows the volume slider (default: true).
     /// Only affects `TrackInfoDisplay::MiniPlayer`.
     #[serde(default = "default_true")]
@@ -492,6 +506,9 @@ fn default_opacity_gradient() -> bool {
 fn default_crossfade_duration_secs() -> u32 {
     7
 }
+fn default_autohide_toolbar_height() -> u32 {
+    6
+}
 fn default_true() -> bool {
     true
 }
@@ -529,6 +546,10 @@ impl Default for PersistedPlayerSettings {
             quick_add_to_playlist: false,
             queue_show_default_playlist: false,
             horizontal_volume: false,
+            autohide_toolbar: false,
+            autohide_toolbar_height: default_autohide_toolbar_height(),
+            autohide_toolbar_grip: true,
+            autohide_collapsed_appearance: CollapsedAppearance::default(),
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             font_family: String::new(),

@@ -211,6 +211,13 @@ impl RadiosPage {
     pub fn view<'a>(&'a self, data: RadiosViewData<'a>) -> Element<'a, RadiosMessage> {
         // Only Name sort mode is meaningful for radio stations — no date, artist,
         // or album metadata to sort on.
+        // Auto-hide toolbar: collapse to a hairline when enabled and not
+        // currently revealed (hover / active search / hotkey window).
+        let autohide = crate::theme::is_autohide_toolbar();
+        // Radios has no columns picker, so the sort dropdown (folded into
+        // `toolbar_revealed`) is the only reveal-lock — pass `false`.
+        let toolbar_collapsed = self.common.toolbar_collapsed(autohide, false);
+
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
             view_options: &[SortMode::Name],
@@ -240,6 +247,21 @@ impl RadiosPage {
                 HeaderButton::Add("Add Station", RadiosMessage::AddRadioStation),
             ],
             on_roulette: Some(RadiosMessage::Roulette),
+            collapsed: toolbar_collapsed,
+            on_hover_enter: autohide.then_some(RadiosMessage::SlotList(
+                SlotListPageMessage::ToolbarHoverEnter,
+            )),
+            on_hover_exit: autohide.then_some(RadiosMessage::SlotList(
+                SlotListPageMessage::ToolbarHoverExit,
+            )),
+            on_dropdown_open: autohide.then_some(RadiosMessage::SlotList(
+                SlotListPageMessage::ToolbarDropdownToggled(true),
+            )),
+            on_dropdown_close: autohide.then_some(RadiosMessage::SlotList(
+                SlotListPageMessage::ToolbarDropdownToggled(false),
+            )),
+            // Radio stations have no duration — count only.
+            total_duration_secs: None,
         });
 
         use crate::widgets::slot_list::{
@@ -247,7 +269,7 @@ impl RadiosPage {
             slot_list_text_column, slot_list_view_with_scroll,
         };
 
-        let slot_list_chrome = chrome_height_with_header();
+        let slot_list_chrome = chrome_height_with_header(toolbar_collapsed);
 
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
         let layout_config = BaseSlotListLayoutConfig {

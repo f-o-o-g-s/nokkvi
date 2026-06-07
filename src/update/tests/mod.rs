@@ -20,6 +20,7 @@ pub(super) static SSE_SLOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::n
 
 mod artwork;
 mod artwork_drag;
+mod autohide_toolbar;
 mod boat;
 mod components;
 mod cross_pane_drag;

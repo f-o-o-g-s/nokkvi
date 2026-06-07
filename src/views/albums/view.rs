@@ -59,6 +59,13 @@ impl AlbumsPage {
             )
             .into();
 
+        // Auto-hide toolbar: collapse to a hairline when enabled and not
+        // currently revealed (hover / active search / hotkey window).
+        let autohide = crate::theme::is_autohide_toolbar();
+        let toolbar_collapsed = self
+            .common
+            .toolbar_collapsed(autohide, data.overlay.column_dropdown_open);
+
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
             view_options: crate::views::sort_api::sort_modes_for_view(crate::View::Albums),
@@ -97,6 +104,23 @@ impl AlbumsPage {
             } else {
                 Some(AlbumsMessage::Roulette)
             },
+            collapsed: toolbar_collapsed,
+            on_hover_enter: autohide.then_some({
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ToolbarHoverEnter)
+            }),
+            on_hover_exit: autohide.then_some({
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ToolbarHoverExit)
+            }),
+            on_dropdown_open: autohide.then_some(AlbumsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(true),
+            )),
+            on_dropdown_close: autohide.then_some(AlbumsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(false),
+            )),
+            total_duration_secs: {
+                let secs: f64 = data.albums.iter().filter_map(|a| a.duration).sum();
+                (secs > 0.0).then_some(secs as u64)
+            },
         });
 
         // Compose with the tri-state "select all" header bar when the
@@ -120,7 +144,8 @@ impl AlbumsPage {
         };
 
         let select_header_visible = self.column_visibility.select;
-        let slot_list_chrome = chrome_height_with_select_header(select_header_visible);
+        let slot_list_chrome =
+            chrome_height_with_select_header(toolbar_collapsed, select_header_visible);
 
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus

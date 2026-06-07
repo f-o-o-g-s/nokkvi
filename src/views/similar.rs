@@ -327,6 +327,14 @@ impl SimilarPage {
             // No sort/refresh/center/add buttons; only the columns-cog dropdown.
             buttons: vec![HeaderButton::Trailing(column_dropdown)],
             on_roulette: None, // Similar lives only in the browsing panel — no roulette
+            // Similar's header is a static "Similar to: …" context label with no
+            // sort/search controls and no hotkey to bring it back — never collapse it.
+            collapsed: false,
+            on_hover_enter: None,
+            on_hover_exit: None,
+            on_dropdown_open: None,
+            on_dropdown_close: None,
+            total_duration_secs: None,
         });
 
         // Compose with the tri-state "select all" header bar when the
@@ -344,7 +352,7 @@ impl SimilarPage {
         };
 
         let select_header_visible = self.column_visibility.select;
-        let slot_list_chrome = chrome_height_with_select_header(select_header_visible);
+        let slot_list_chrome = chrome_height_with_select_header(false, select_header_visible);
 
         // Layout config
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;

@@ -46,7 +46,7 @@ const EDIT_BAR_H: f32 = 60.0;
 /// strip, but *not* the view header) plus the edit bar (`EDIT_BAR_H`) and its
 /// 1 px separator, plus the select-all band when the multi-select column is on.
 ///
-/// Using `chrome_height_with_header()` here would count the 51 px
+/// Using `chrome_height_with_header(false)` here would count the 51 px
 /// `view_header_chrome()` for a header the editor never draws, under-budgeting
 /// the `Length::Fill` slot rect and leaving a blank, placeholder-less band at
 /// the bottom of the list.
@@ -492,7 +492,7 @@ mod tests {
 
     /// Regression: the editor's edit bar renders *in place of* the view header,
     /// so its slot-list chrome must NOT include `view_header_chrome()`. When it
-    /// did (via `chrome_height_with_header()`), the `Length::Fill` slot rect was
+    /// did (via `chrome_height_with_header(false)`), the `Length::Fill` slot rect was
     /// over-reserved by 51 px and the bottom of the list rendered a blank,
     /// placeholder-less band. Pins the editor chrome to exactly
     /// `view_header_chrome()` below the old (buggy) formula.
@@ -509,7 +509,7 @@ mod tests {
         // the same global nav/strip state (mirrors the player_bar tests).
         let _guard = THEME_MODE_LOCK.lock();
 
-        let with_phantom_header = chrome_height_with_header() + EDIT_BAR_H + 1.0;
+        let with_phantom_header = chrome_height_with_header(false) + EDIT_BAR_H + 1.0;
         let editor = editor_chrome_height(false);
         assert!(
             (with_phantom_header - editor - view_header_chrome()).abs() < 0.01,

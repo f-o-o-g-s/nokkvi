@@ -552,6 +552,25 @@ pub(crate) fn view_header_chrome() -> f32 {
     super::view_header::HEADER_HEIGHT + super::view_header::HEADER_BOTTOM_SEPARATOR
 }
 
+/// Chrome footprint of the *collapsed* auto-hide toolbar, per the chosen
+/// [`CollapsedAppearance`]: the configurable Hairline sliver + separator, the
+/// thin invisible Hidden catch-zone (no separator), or the Count strip +
+/// separator. Used in place of [`view_header_chrome`] when a view's toolbar is
+/// hidden, so the slot list reclaims the freed height as extra rows.
+pub(crate) fn collapsed_view_header_chrome() -> f32 {
+    use nokkvi_data::types::player_settings::CollapsedAppearance;
+
+    use super::view_header::{COUNT_STRIP_HEIGHT, HEADER_BOTTOM_SEPARATOR, HIDDEN_CATCH_HEIGHT};
+    match crate::theme::autohide_collapsed_appearance() {
+        CollapsedAppearance::Hairline => {
+            f32::from(crate::theme::autohide_toolbar_height_px()) + HEADER_BOTTOM_SEPARATOR
+        }
+        // No separator — the list reads as reclaiming the entire top.
+        CollapsedAppearance::Hidden => HIDDEN_CATCH_HEIGHT,
+        CollapsedAppearance::CountStrip => COUNT_STRIP_HEIGHT + HEADER_BOTTOM_SEPARATOR,
+    }
+}
+
 /// Height of the browsing panel tab bar.
 pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
 
@@ -568,17 +587,19 @@ use super::player_bar::player_bar_height;
 ///
 /// The slot list runs flush to the player bar, so no bottom pad is subtracted
 /// from the slot-count math in `with_dynamic_slots`.
-pub(crate) fn chrome_height_with_header() -> f32 {
+pub(crate) fn chrome_height_with_header(collapsed_header: bool) -> f32 {
+    let header_chrome = if collapsed_header {
+        collapsed_view_header_chrome()
+    } else {
+        view_header_chrome()
+    };
     if crate::theme::is_top_nav() {
         let top_bar_under_strip = if crate::theme::show_top_bar_under_strip() {
             super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
         } else {
             0.0
         };
-        crate::theme::nav_bar_height()
-            + player_bar_height()
-            + view_header_chrome()
-            + top_bar_under_strip
+        crate::theme::nav_bar_height() + player_bar_height() + header_chrome + top_bar_under_strip
     } else {
         // Side or None mode: no top nav bar, but TopBar / TopBarUnder add height
         let top_bar_strip = if crate::theme::show_top_bar_strip() {
@@ -586,7 +607,7 @@ pub(crate) fn chrome_height_with_header() -> f32 {
         } else {
             0.0
         };
-        player_bar_height() + view_header_chrome() + top_bar_strip
+        player_bar_height() + header_chrome + top_bar_strip
     }
 }
 
@@ -600,7 +621,9 @@ pub(crate) fn chrome_height_with_header() -> f32 {
 /// 51 px and leaves a blank, placeholder-less band at the bottom of the list.
 #[inline]
 pub(crate) fn chrome_height_without_view_header() -> f32 {
-    chrome_height_with_header() - view_header_chrome()
+    // The view header is fully replaced here, so the collapsed/expanded
+    // distinction is irrelevant — subtract the full footprint either way.
+    chrome_height_with_header(false) - view_header_chrome()
 }
 
 /// Configuration for slot list rendering
@@ -623,7 +646,7 @@ impl Default for SlotListConfig {
             slot_count: 9,
             center_slot: 4,
             window_height: 800.0,
-            chrome_height: chrome_height_with_header(),
+            chrome_height: chrome_height_with_header(false),
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
         }
@@ -1394,8 +1417,11 @@ pub(crate) fn compose_header_with_select<'a, Message: Clone + 'a>(
 /// Chrome height with optional select-header bar. Each view consults this
 /// instead of [`chrome_height_with_header`] when its select column may be
 /// active, so slot-count math accounts for the extra 24 px above the slots.
-pub(crate) fn chrome_height_with_select_header(select_header_visible: bool) -> f32 {
-    chrome_height_with_header()
+pub(crate) fn chrome_height_with_select_header(
+    collapsed_header: bool,
+    select_header_visible: bool,
+) -> f32 {
+    chrome_height_with_header(collapsed_header)
         + if select_header_visible {
             SELECT_HEADER_HEIGHT
         } else {

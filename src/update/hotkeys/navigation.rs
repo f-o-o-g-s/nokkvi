@@ -117,11 +117,24 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Reveal the current view's auto-hide toolbar (pane-aware). Called by
+    /// header-interacting hotkeys (sort cycle/toggle, focus search,
+    /// center-on-playing) so a keyboard-driven change surfaces the toolbar
+    /// even when the cursor isn't on it. No-op on views without a slot-list
+    /// page (e.g. Settings).
+    pub(crate) fn reveal_current_toolbar(&mut self) {
+        if let Some(page) = self.current_view_page_mut() {
+            page.common_mut().reveal_toolbar();
+        }
+    }
+
     pub(crate) fn handle_cycle_sort_mode(&mut self, forward: bool) -> Task<Message> {
         // Play backspace navigation sound for combobox cycling (settings handles its own SFX)
         if self.current_view != View::Settings {
             self.sfx_engine.play(audio::SfxType::Backspace);
         }
+        // Surface the auto-hide toolbar for the keyboard-driven sort change.
+        self.reveal_current_toolbar();
 
         use widgets::view_header::SortMode;
 
@@ -182,6 +195,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_center_on_playing(&mut self) -> Task<Message> {
         trace!(" CenterOnPlaying hotkey pressed on {:?}", self.current_view);
+        // Surface the auto-hide toolbar (its center-on-playing button lives there).
+        self.reveal_current_toolbar();
 
         // Get the current song ID from scrobble state (already tracked)
         let song_id = match self.scrobble.current_song_id.as_deref() {
@@ -357,6 +372,10 @@ impl Nokkvi {
 
     pub(crate) fn handle_focus_search(&mut self) -> Task<Message> {
         trace!(" FocusSearch (/) hotkey pressed - focusing search field");
+        // Surface the auto-hide toolbar so the search field exists to receive
+        // focus (the focus operation below targets a widget that only renders
+        // while the toolbar is revealed). No-op for Settings (its own search).
+        self.reveal_current_toolbar();
 
         // Settings has its own search — must be checked before current_view_page_mut()
         // which would incorrectly route to the browsing panel's page when it's open
@@ -383,6 +402,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_toggle_sort_order(&mut self) -> Task<Message> {
         self.sfx_engine.play(audio::SfxType::Backspace);
+        // Surface the auto-hide toolbar for the keyboard-driven sort change.
+        self.reveal_current_toolbar();
         if let Some(page) = self.current_view_page() {
             let ascending = page.common().sort_ascending;
             debug!(

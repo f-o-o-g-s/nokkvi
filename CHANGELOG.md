@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - New `nokkvi add-to-queue` command enqueues the focused list item (the Shift+A hotkey) and reports what it added.
 - New `nokkvi remove-from-queue` command removes the centered queue song (the Ctrl+D hotkey) and reports what it removed.
 - MiniPlayer mode gains a "Visible Controls" setting to hide its volume slider and mode menu independently.
+- New "Auto-hide Toolbar" setting (Interface, Slot List section) collapses the sort and search bar until you hover it or use a sort or search shortcut, giving the list more room. A "Collapsed appearance" option chooses what stays on screen while it's hidden: a thin hairline (adjustable height, with an optional centered accent grip bar), nothing at all (a flick to the top edge or a shortcut brings it back), or a slim strip showing the current sort, item count, and total duration.
 
 ### Changed
 

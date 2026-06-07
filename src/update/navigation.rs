@@ -171,10 +171,37 @@ impl Nokkvi {
         stop_task
     }
 
+    /// Clear the auto-hide toolbar reveal-locks on every slot-list page.
+    ///
+    /// Called on unmount edges where a page's header leaves the widget tree with
+    /// a reveal-lock still set — chiefly a main-view switch (the outgoing view's
+    /// header `mouse_area` / sort `pick_list` unmount, so `on_exit` / `on_close`
+    /// can't fire to clear `toolbar_hovered` / `toolbar_dropdown_open`) and
+    /// session reset. Clearing every page is idempotent and drift-proof: only
+    /// the rendered view reads its own flags, and a genuinely-hovered mounted
+    /// header re-fires `on_enter` on the next cursor event. Search state is left
+    /// intact (an active filter legitimately keeps the toolbar revealed).
+    pub(crate) fn clear_all_toolbar_reveal_locks(&mut self) {
+        self.albums_page.common.reset_reveal_locks();
+        self.artists_page.common.reset_reveal_locks();
+        self.genres_page.common.reset_reveal_locks();
+        self.playlists_page.common.reset_reveal_locks();
+        self.queue_page.common.reset_reveal_locks();
+        self.songs_page.common.reset_reveal_locks();
+        self.radios_page.common.reset_reveal_locks();
+        self.similar_page.common.reset_reveal_locks();
+    }
+
     pub(crate) fn handle_switch_view(&mut self, view: View) -> Task<Message> {
         // Close any open overlay menu — its anchor (cursor position, trigger
         // bounds) is tied to the previous view's layout.
         self.open_menu = None;
+
+        // The outgoing view's header mouse_area / sort pick_list unmount on the
+        // switch, so their on_exit / on_close can't fire to clear a set
+        // reveal-lock — a keyboard-driven switch would otherwise leave the
+        // toolbar stuck revealed on return. Mirrors clear_browsing_panel_reveal_locks.
+        self.clear_all_toolbar_reveal_locks();
 
         // Cancel any in-progress roulette when leaving its host view —
         // continuing the spin on a different view's slot list would scroll

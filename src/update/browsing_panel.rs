@@ -89,6 +89,22 @@ impl Nokkvi {
         }
     }
 
+    /// Clear the auto-hide toolbar reveal-locks on every page the browsing panel
+    /// can host (`BrowsingView::ALL`). The panel and its `pick_list`s / hover
+    /// `mouse_area`s unmount when it closes, so an open dropdown's `on_close` or
+    /// a pending hover `on_exit` can't fire — leaving `toolbar_dropdown_open` /
+    /// `toolbar_hovered` stranded `true` (toolbar stuck revealed) until the next
+    /// header interaction. Mirrors the `playlist_strip_expanded` reset on the
+    /// same close edge. The queue pane stays mounted, so its flags are left
+    /// untouched.
+    fn clear_browsing_panel_reveal_locks(&mut self) {
+        self.songs_page.common.reset_reveal_locks();
+        self.albums_page.common.reset_reveal_locks();
+        self.artists_page.common.reset_reveal_locks();
+        self.genres_page.common.reset_reveal_locks();
+        self.similar_page.common.reset_reveal_locks();
+    }
+
     /// Toggle the browsing panel on/off while on Queue view.
     ///
     /// When in playlist edit mode, the panel cannot be closed (use Discard/Save).
@@ -110,6 +126,7 @@ impl Nokkvi {
             info!(" [BROWSE] Closing browsing panel");
             self.browsing_panel = None;
             self.pane_focus = PaneFocus::Queue;
+            self.clear_browsing_panel_reveal_locks();
             Task::none()
         } else {
             info!(" [BROWSE] Opening browsing panel");
@@ -248,6 +265,7 @@ impl Nokkvi {
         self.playlist_editor = None;
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;
+        self.clear_browsing_panel_reveal_locks();
         // Symmetric to the enter edge: the queue banner re-mounts here with no
         // cursor over it, so clear any expansion stranded during the session
         // (its hover `on_exit` could not fire while the banner was unmounted).

@@ -144,6 +144,13 @@ impl QueuePage {
             )
             .into();
 
+        // Auto-hide toolbar: collapse to a hairline when enabled and not
+        // currently revealed (hover / active search / hotkey window).
+        let autohide = crate::theme::is_autohide_toolbar();
+        let toolbar_collapsed = self
+            .common
+            .toolbar_collapsed(autohide, data.overlay.column_dropdown_open);
+
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.queue_sort_mode,
             view_options: QUEUE_VIEW_OPTIONS,
@@ -182,6 +189,25 @@ impl QueuePage {
                 btns
             },
             on_roulette: Some(QueueMessage::Roulette),
+            collapsed: toolbar_collapsed,
+            on_hover_enter: autohide.then_some({
+                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ToolbarHoverEnter)
+            }),
+            on_hover_exit: autohide.then_some({
+                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ToolbarHoverExit)
+            }),
+            on_dropdown_open: autohide.then_some(QueueMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(true),
+            )),
+            on_dropdown_close: autohide.then_some(QueueMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(false),
+            )),
+            total_duration_secs: Some(
+                data.queue_songs
+                    .iter()
+                    .map(|s| u64::from(s.duration_seconds))
+                    .sum(),
+            ),
         });
 
         // Build final header: regular header + optional "Playing From" banner.
@@ -493,9 +519,9 @@ impl QueuePage {
             } else {
                 PLAYLIST_STRIP_COMPACT_H
             };
-            chrome_height_with_header() + strip + 1.0
+            chrome_height_with_header(toolbar_collapsed) + strip + 1.0
         } else {
-            chrome_height_with_select_header(select_header_visible)
+            chrome_height_with_select_header(toolbar_collapsed, select_header_visible)
         };
         let chrome_height = if select_header_visible && data.playlist_context_info.is_some() {
             chrome_height + crate::widgets::slot_list::SELECT_HEADER_HEIGHT

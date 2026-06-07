@@ -44,6 +44,27 @@ define_labeled_enum! {
     }
 }
 
+define_labeled_enum! {
+    /// What the auto-hide toolbar shows while collapsed (the bar is hidden).
+    ///
+    /// Serializes to snake_case strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum CollapsedAppearance {
+        /// A thin `bg0_hard` sliver (height configurable) with an optional
+        /// centered accent grip bar. Hover the sliver to reveal the toolbar.
+        #[default]
+        Hairline { label: "Hairline", wire: "hairline" },
+        /// Nothing visible — the list reclaims the space. A thin invisible
+        /// catch-zone at the very top still lets a mouse flick reveal it; the
+        /// sort/search/center hotkeys reveal it too.
+        Hidden { label: "Hidden", wire: "hidden" },
+        /// A slim strip echoing the current sort + item count, but without the
+        /// interactive controls. Hover to reveal the full toolbar.
+        CountStrip { label: "Count strip", wire: "count_strip" },
+    }
+}
+
 impl SlotRowHeight {
     /// Target pixel height for this density level.
     pub fn to_pixels(self) -> u8 {
@@ -107,5 +128,22 @@ mod tests {
     #[test]
     fn enter_behavior_display_append_and_play() {
         assert_eq!(EnterBehavior::AppendAndPlay.to_string(), "append_and_play");
+    }
+
+    #[test]
+    fn collapsed_appearance_label_roundtrip_and_default() {
+        for m in [
+            CollapsedAppearance::Hairline,
+            CollapsedAppearance::Hidden,
+            CollapsedAppearance::CountStrip,
+        ] {
+            assert_eq!(CollapsedAppearance::from_label(m.as_label()), m);
+        }
+        assert_eq!(
+            CollapsedAppearance::default(),
+            CollapsedAppearance::Hairline
+        );
+        // The picker options + items_interface gating depend on this exact label.
+        assert_eq!(CollapsedAppearance::CountStrip.as_label(), "Count strip");
     }
 }

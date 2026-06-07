@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::{
     audio::eq::CustomEqPreset,
     types::player_settings::{
-        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
-        NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-        SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
-        VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
+        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
+        EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
+        RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TrackInfoDisplay,
+        VisualizationMode, VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
     },
 };
 
@@ -170,6 +170,16 @@ pub struct TomlSettings {
     pub opacity_gradient: bool,
     pub slot_text_links: bool,
     pub horizontal_volume: bool,
+    /// Whether the view-header toolbar auto-hides to a thin line until hovered
+    /// or a sort/search shortcut is used (default false).
+    #[serde(default)]
+    pub autohide_toolbar: bool,
+    /// Collapsed auto-hide toolbar height in px (default 6).
+    pub autohide_toolbar_height: u32,
+    /// Whether the collapsed auto-hide toolbar shows a centered accent grip bar (default true).
+    pub autohide_toolbar_grip: bool,
+    /// What the collapsed auto-hide toolbar shows (default Hairline).
+    pub autohide_collapsed_appearance: CollapsedAppearance,
     pub mini_player_show_volume: bool,
     pub mini_player_show_modes: bool,
     /// Font family override. Empty = system default sans-serif.
@@ -370,6 +380,10 @@ impl Default for TomlSettings {
             opacity_gradient: false,
             slot_text_links: true,
             horizontal_volume: false,
+            autohide_toolbar: false,
+            autohide_toolbar_height: 6,
+            autohide_toolbar_grip: true,
+            autohide_collapsed_appearance: CollapsedAppearance::default(),
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             font_family: String::new(),
