@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.7.1 — 2026-06-07
+
+### Added
+
 - Settings search maps synonyms, so terms like "loudness", "systray", or "dark mode" jump to the matching setting.
 - Hotkey settings are searchable by their key binding: type "ctrl" or "space" to find the shortcuts bound to them.
 
@@ -16,8 +26,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - High-sample-rate tracks (96 kHz and up) no longer stutter or repeatedly pause mid-playback.
-
-### Removed
 
 ## v0.7.0 — 2026-06-07
 
