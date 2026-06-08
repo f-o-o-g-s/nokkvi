@@ -14,6 +14,7 @@ use iced::{
     font::{Font, Weight},
     widget::{Space, button, column, container, mouse_area, row, stack, svg, text},
 };
+use nokkvi_data::utils::fuzzy;
 
 use super::{
     BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_SEARCH_INPUT_ID, SettingsMessage,
@@ -421,6 +422,13 @@ impl SettingsPage {
         let sections = compute_section_index(entries);
         let mut section_cursor = 0;
 
+        // Lowercase the active query once; per-row highlight ranges are derived
+        // from it with the same fuzzy matcher the search ranking uses. Trimmed to
+        // match the ranking path so a stray leading/trailing space neither breaks
+        // matching nor highlights a literal space.
+        let query_trimmed = self.search_query.trim();
+        let query_lower = (!query_trimmed.is_empty()).then(|| query_trimmed.to_lowercase());
+
         let mut col = column![].width(Length::Fill);
         for (idx, entry) in entries.iter().enumerate() {
             let row_element: Element<'a, SettingsMessage> = match entry {
@@ -437,6 +445,11 @@ impl SettingsPage {
                     } else {
                         None
                     };
+                    let match_spans = query_lower.as_deref().and_then(|q| {
+                        fuzzy::fuzzy_match(&item.label, q)
+                            .filter(|m| fuzzy::is_strong(m, q))
+                            .map(|m| m.ranges)
+                    });
                     render_detail_row(
                         item,
                         idx,
@@ -450,6 +463,7 @@ impl SettingsPage {
                         },
                         toggle_cursor,
                         conflict_text,
+                        match_spans.as_deref(),
                     )
                 }
             };

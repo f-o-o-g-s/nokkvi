@@ -6,7 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Settings search maps synonyms, so terms like "loudness", "systray", or "dark mode" jump to the matching setting.
+- Hotkey settings are searchable by their key binding: type "ctrl" or "space" to find the shortcuts bound to them.
+
 ### Changed
+
+- Settings search is now fuzzy and typo-tolerant, ranks results by relevance, and highlights matched characters.
 
 ### Fixed
 

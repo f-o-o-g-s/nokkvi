@@ -2,7 +2,9 @@
 
 pub mod artwork_url;
 pub mod formatters;
+pub mod fuzzy;
 pub mod paths;
 pub mod scale;
 pub mod search;
+pub mod setting_keywords;
 pub mod url_redaction;

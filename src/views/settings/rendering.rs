@@ -7,7 +7,7 @@
 use iced::{
     Alignment, Border, Color, Element, Length, Padding,
     font::{Font, Weight},
-    widget::{Space, button, column, container, row, svg, text, text::Wrapping, text_input},
+    widget::{Row, Space, button, column, container, row, svg, text, text::Wrapping, text_input},
 };
 
 use super::{
@@ -53,6 +53,66 @@ pub(crate) fn item_needs_enter_hint(item: &SettingItem) -> bool {
         item.value,
         SettingValue::Hotkey(_) | SettingValue::HexColor(_) | SettingValue::ColorArray(_)
     ) || item.needs_enter_hint
+}
+
+/// Build the label element for a settings row, highlighting the
+/// search-matched characters (`spans`, computed from the live query while a
+/// search is active) in the accent color. With no spans this returns a single
+/// `text` widget identical to normal browsing — so highlighting never affects
+/// the unsearched detail pane.
+fn highlighted_label<'a>(
+    item: &SettingItem,
+    spans: Option<&[(usize, usize)]>,
+    size: f32,
+    weight: Weight,
+    base_color: Color,
+) -> Element<'a, SettingsMessage> {
+    let seg = |s: String, color: Color, w: Weight| {
+        text(s)
+            .size(size)
+            .font(Font {
+                weight: w,
+                ..theme::ui_font()
+            })
+            .color(color)
+            .wrapping(Wrapping::None)
+    };
+
+    let label = &item.label;
+    let spans = match spans {
+        Some(spans) if !spans.is_empty() => spans,
+        _ => return seg(label.clone(), base_color, weight).into(),
+    };
+
+    let highlight = theme::accent_bright();
+    let mut segments: Vec<Element<'a, SettingsMessage>> = Vec::new();
+    let mut cursor = 0usize;
+    // `spans` are coalesced, sorted, non-overlapping byte ranges from the fuzzy
+    // matcher; the boundary guards defend against any malformed input.
+    for &(start, end) in spans {
+        if start >= end
+            || end > label.len()
+            || !label.is_char_boundary(start)
+            || !label.is_char_boundary(end)
+        {
+            continue;
+        }
+        if cursor < start {
+            segments.push(seg(label[cursor..start].to_string(), base_color, weight).into());
+        }
+        segments.push(seg(label[start..end].to_string(), highlight, Weight::Bold).into());
+        cursor = end;
+    }
+    if cursor < label.len() {
+        segments.push(seg(label[cursor..].to_string(), base_color, weight).into());
+    }
+    if segments.is_empty() {
+        return seg(label.clone(), base_color, weight).into();
+    }
+    Row::with_children(segments)
+        .spacing(0)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 /// Transparent button style — no background, no border. Used for clickable
@@ -1132,6 +1192,7 @@ pub(crate) fn render_detail_row<'a>(
     hex_input: &str,
     toggle_cursor: Option<usize>,
     conflict_text: Option<&str>,
+    match_spans: Option<&[(usize, usize)]>,
 ) -> Element<'a, SettingsMessage> {
     let label_size = 13.0;
     let help_size = 11.0;
@@ -1173,14 +1234,7 @@ pub(crate) fn render_detail_row<'a>(
         glow_seed: None,
     };
 
-    let label_text = text(item.label.clone())
-        .size(label_size)
-        .font(Font {
-            weight: label_weight,
-            ..theme::ui_font()
-        })
-        .color(label_color)
-        .wrapping(Wrapping::None);
+    let label_text = highlighted_label(item, match_spans, label_size, label_weight, label_color);
 
     let label_row: Element<'a, SettingsMessage> = if let Some(icon_path) = item.label_icon {
         let icon_color = label_color;
@@ -1195,7 +1249,7 @@ pub(crate) fn render_detail_row<'a>(
             .align_y(Alignment::Center)
             .into()
     } else {
-        label_text.into()
+        label_text
     };
 
     let mut label_col = column![label_row].spacing(2);
