@@ -15,6 +15,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- High-sample-rate tracks (96 kHz and up) no longer stutter or repeatedly pause mid-playback.
+
 ### Removed
 
 ## v0.7.0 — 2026-06-07
