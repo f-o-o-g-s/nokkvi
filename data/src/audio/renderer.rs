@@ -91,45 +91,55 @@ fn crossfade_progress(elapsed_ms: u64, paused_accum_ms: u64, duration_ms: u64) -
     }
 }
 
-/// Decode-loop backpressure floor: the primary decode loop stops filling the
-/// decoded ring once it holds `BASE_HIGH * SAMPLES_PER_BUFFER_UNIT` (= 96_000)
-/// interleaved samples (engine.rs `compute_watermarks`) — a FIXED count,
-/// independent of sample rate. Derived from the engine constants directly so it
-/// cannot silently drift if either is retuned. The rebuffer thresholds below
-/// must stay within it.
-const DECODE_BACKPRESSURE_FLOOR_SAMPLES: usize =
-    super::engine::BASE_HIGH * super::engine::SAMPLES_PER_BUFFER_UNIT;
+/// Rebuffer resume target, in MILLISECONDS of audio: how much decoded audio to
+/// refill (output paused) before resuming after a mid-track underrun. Mirrors
+/// mpv `cache-pause-wait` / MPD `buffer_before_play` (both ~1s). Scaled by the
+/// stream's `frame_rate` at use so the target is a constant DURATION at every
+/// sample rate — a fixed sample count shrank it to ~0.4s at 96k. MUST stay below
+/// the decode-loop cushion (`engine::CUSHION_MS`): during a rebuffer the output
+/// is paused and the decode loop fills the ring only up to that cushion, so a
+/// resume target above it could never be reached (the original issue-9 hang).
+const REBUFFER_RESUME_MS: u64 = 800;
 
-/// Resume-target ceiling: a safe margin below the backpressure floor. During a
-/// rebuffer the output is paused, so the decode loop fills the ring right up to
-/// that floor and no further — a resume target ABOVE it (a hi-res `frame_rate`,
-/// above 48 kHz stereo) could therefore never be reached, and the rebuffer would
-/// enter and hang until `MAX_REBUFFER_TICKS` (issue #9 hi-res unit mismatch).
-/// 4/5 leaves margin below the floor for decode-packet overshoot and timing.
-const REBUFFER_RESUME_CEILING_SAMPLES: usize = DECODE_BACKPRESSURE_FLOOR_SAMPLES * 4 / 5;
+/// Rebuffer entry watermark, in MILLISECONDS of audio: enter pause-and-rebuffer
+/// when the decoded ring drains below this much audio mid-track on a FINITE
+/// stream (issue #9). MUST stay strictly below the decode-loop backpressure
+/// RELEASE point (`engine::CUSHION_MS / engine::BACKPRESSURE_RELEASE_DIVISOR`):
+/// the loop stops decoding while the ring sits above that release point, so a
+/// rebuffer that pauses the output above it freezes the ring in the backpressure
+/// band and hangs until `MAX_REBUFFER_TICKS` — the issue-9 hi-res deadlock.
+/// Below the release point the decode loop is actively refilling, so the pause
+/// genuinely accumulates toward the resume target.
+const REBUFFER_ENTER_MS: u64 = 200;
 
-// Load-bearing invariant: the resume target must stay below the backpressure
-// floor, or a hi-res rebuffer could never refill enough to exit. Enforced at
-// compile time so a future retuning of the ceiling ratio can't reintroduce the
-// hang (mirrors engine.rs's `PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT` guard).
-const _: () = assert!(REBUFFER_RESUME_CEILING_SAMPLES < DECODE_BACKPRESSURE_FLOOR_SAMPLES);
+// Load-bearing invariants, enforced at compile time (mirrors engine.rs's
+// `PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT`). The first is THE fix for the
+// issue-9 hi-res rebuffer deadlock: entry stays strictly below the decode-loop
+// backpressure release at EVERY sample rate — which holds iff it holds for the
+// durations, since both thresholds scale by the same `frame_rate`. The second
+// keeps the resume target reachable below the paused-refill cushion; the third
+// keeps a clean enter→resume hysteresis gap.
+const _: () = assert!(
+    REBUFFER_ENTER_MS * super::engine::BACKPRESSURE_RELEASE_DIVISOR < super::engine::CUSHION_MS
+);
+const _: () = assert!(REBUFFER_RESUME_MS < super::engine::CUSHION_MS);
+const _: () = assert!(REBUFFER_ENTER_MS < REBUFFER_RESUME_MS);
 
-/// Rebuffer resume target: how much decoded audio to refill before resuming —
-/// ~0.87s at 44.1k stereo, less at hi-res — clamped to the decode loop's
-/// backpressure floor so the ring can always reach it (in the spirit of mpv
-/// `cache-pause-wait` / MPD `buffer_before_play`, both ~1s). Without the clamp a
-/// hi-res stream's full-second target exceeds the floor and the rebuffer could
-/// never refill to it to exit (issue #9).
-fn rebuffer_resume_samples(frame_rate: u32) -> usize {
-    (frame_rate as usize).min(REBUFFER_RESUME_CEILING_SAMPLES)
+/// Convert a per-stream duration (ms) to an interleaved-sample count at the
+/// stream's `frame_rate` (`sample_rate * channels`). The rebuffer thresholds are
+/// duration-based so they hold a constant TIME budget at any sample rate.
+fn samples_for_ms(frame_rate: u32, ms: u64) -> usize {
+    ((frame_rate as u64 * ms) / 1000) as usize
 }
 
-/// Rebuffer low watermark: enter pause-and-rebuffer when the decoded ring drains
-/// below ~0.2s of audio mid-track on a FINITE stream (issue #9), but always at
-/// most half the resume target so enter/resume keep a clean hysteresis gap even
-/// when `resume` is clamped on hi-res. `frame_rate` is `sample_rate * channels`.
+/// Rebuffer resume target in samples (see [`REBUFFER_RESUME_MS`]).
+fn rebuffer_resume_samples(frame_rate: u32) -> usize {
+    samples_for_ms(frame_rate, REBUFFER_RESUME_MS)
+}
+
+/// Rebuffer entry watermark in samples (see [`REBUFFER_ENTER_MS`]).
 fn rebuffer_low_samples(frame_rate: u32) -> usize {
-    ((frame_rate / 5) as usize).min(rebuffer_resume_samples(frame_rate) / 2)
+    samples_for_ms(frame_rate, REBUFFER_ENTER_MS)
 }
 
 /// Safety valve: if a finite stream stays drained this many render ticks (~10s at
@@ -1528,10 +1538,12 @@ mod tests {
     const FR: u32 = 44_100 * 2; // 44.1k stereo frame rate
     const FR_S: usize = FR as usize; // same, as a sample count for the buffer arg
     const HR_FR: u32 = 96_000 * 2; // 96k stereo frame rate (hi-res) = 192_000
-    // Decode-loop backpressure cap: engine.rs `BASE_HIGH(120) *
-    // SAMPLES_PER_BUFFER_UNIT(800)`. The most the decoded ring ever holds,
-    // independent of sample rate — so a hi-res `frame_rate` exceeds it.
-    const BACKPRESSURE_CAP: usize = 96_000;
+    // Decode-loop backpressure cushion (engine `compute_watermarks` high) at the
+    // hi-res frame rate — now time-based (~CUSHION_MS of audio), so it scales
+    // with the sample rate instead of a fixed 96_000 samples. The most the
+    // decoded ring ever holds at 96k stereo.
+    const HR_BACKPRESSURE_CAP: usize =
+        ((HR_FR as u64) * crate::audio::engine::CUSHION_MS / 1000) as usize;
 
     #[test]
     fn rebuffer_does_not_enter_before_primed() {
@@ -1710,28 +1722,28 @@ mod tests {
 
     #[test]
     fn rebuffer_functions_on_hi_res_within_backpressure_cap() {
-        // The decode loop caps the decoded ring at ~96_000 samples regardless of
-        // sample rate, so on hi-res (96k stereo, frame_rate 192_000) the resume
-        // target MUST stay reachable under that cap. Otherwise the ring can never
+        // The decode loop fills the ring to a TIME-based cushion (~CUSHION_MS of
+        // audio), so on hi-res (96k stereo, frame_rate 192_000) the resume target
+        // MUST stay reachable under that cushion. Otherwise the ring can never
         // reach `resume`, so it never primes / never exits and hangs until
         // MAX_REBUFFER_TICKS (issue #9 hi-res unit mismatch).
         let (mut reb, mut primed, mut ticks) = (false, false, 0);
-        // Ring filled to the backpressure cap (the most it can ever hold) → must
-        // prime even at hi-res.
+        // Ring filled to the backpressure cushion (the most it can ever hold) →
+        // must prime even at hi-res.
         rebuffer_action(
             true,
             false,
             true,
             false,
             HR_FR,
-            BACKPRESSURE_CAP,
+            HR_BACKPRESSURE_CAP,
             &mut reb,
             &mut primed,
             &mut ticks,
         );
         assert!(
             primed,
-            "hi-res must prime once the ring reaches the backpressure cap"
+            "hi-res must prime once the ring reaches the backpressure cushion"
         );
         // Drain below low mid-track → enter rebuffer.
         let a = rebuffer_action(
@@ -1746,14 +1758,14 @@ mod tests {
             &mut ticks,
         );
         assert_eq!(a, RebufferAction::Enter);
-        // Refill to the cap (the most the ring can hold) → must EXIT, not hang.
+        // Refill to the cushion (the most the ring can hold) → must EXIT, not hang.
         let a = rebuffer_action(
             true,
             false,
             true,
             false,
             HR_FR,
-            BACKPRESSURE_CAP,
+            HR_BACKPRESSURE_CAP,
             &mut reb,
             &mut primed,
             &mut ticks,
@@ -1761,9 +1773,39 @@ mod tests {
         assert_eq!(
             a,
             RebufferAction::Exit,
-            "hi-res rebuffer must resume within the backpressure cap, not hang"
+            "hi-res rebuffer must resume within the backpressure cushion, not hang"
         );
         assert!(!reb);
+    }
+
+    /// REGRESSION (issue-9 hi-res rebuffer deadlock): the rebuffer must ENTER the
+    /// pause strictly below the decode loop's backpressure-RELEASE point. The
+    /// decode loop stops decoding while the ring sits above that release point
+    /// (its hysteresis latch stays set), so a rebuffer that pauses the output
+    /// above it freezes the ring inside the backpressure band — the decode loop
+    /// never refills, and the pause hangs until MAX_REBUFFER_TICKS (~10 s). At
+    /// 96 k stereo the old fixed-sample entry watermark (38_400) sat ABOVE the
+    /// fixed release point (32_000); this asserts the entry is below release at
+    /// every sample rate (the now-time-based thresholds make it hold universally).
+    #[test]
+    fn rebuffer_entry_stays_below_decode_backpressure_release() {
+        // Decode-loop release point = compute_watermarks low = cushion/3, scaled.
+        let release = |fr: u32| {
+            (fr as u64 * crate::audio::engine::CUSHION_MS
+                / (1000 * crate::audio::engine::BACKPRESSURE_RELEASE_DIVISOR)) as usize
+        };
+        assert!(
+            rebuffer_low_samples(FR) < release(FR),
+            "44.1k: rebuffer entry {} must be below decode release {}",
+            rebuffer_low_samples(FR),
+            release(FR),
+        );
+        assert!(
+            rebuffer_low_samples(HR_FR) < release(HR_FR),
+            "96k: rebuffer entry {} must be below decode release {} (issue-9 deadlock)",
+            rebuffer_low_samples(HR_FR),
+            release(HR_FR),
+        );
     }
 
     /// The extracted `reset_rebuffer_latch` helper must zero all three latch

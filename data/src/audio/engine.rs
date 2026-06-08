@@ -126,27 +126,16 @@ impl GaplessSlot {
 
 /// Calculate buffer size for one decode chunk (~100ms of audio).
 ///
-/// Returns bytes for 100ms of the given format, clamped to [4096, 16384],
-/// or 8192 if the format is not yet known.
+/// Returns bytes for 100ms of the given format, clamped to [4096, 65_536], or
+/// 8192 if the format is not yet known. The upper bound holds a full ~100ms at
+/// up to ~170k stereo; the old 16_384 ceiling capped hi-res at ~43ms/iteration
+/// (96k stereo), forcing the decode loop to run >2x more iterations to keep pace.
 fn decode_buffer_size(format: &AudioFormat) -> usize {
     if format.is_valid() {
-        format.bytes_for_duration(100).clamp(4096, 16384)
+        format.bytes_for_duration(100).clamp(4096, 65_536)
     } else {
         8192
     }
-}
-
-/// Samples-per-100ms approximation used for buffer-unit conversion. Paired
-/// with `compute_watermarks`'s `BUFFER_MS = 100` — if either is tuned, both
-/// must follow. `pub(crate)` so the renderer's rebuffer thresholds can derive
-/// the backpressure floor from this exact constant instead of hand-copying it.
-pub(crate) const SAMPLES_PER_BUFFER_UNIT: usize = 800;
-
-/// Convert a raw sample count into the "buffer unit" scale used by
-/// `compute_watermarks`. Both the primary and crossfade decode loops use
-/// this to normalize ring-buffer fullness against the watermark thresholds.
-fn samples_to_buffer_units(samples: usize) -> usize {
-    samples / SAMPLES_PER_BUFFER_UNIT
 }
 
 /// Buffers to fill before starting playback. `play` cold-starts the decoder
@@ -161,31 +150,53 @@ const SEEK_PREBUFFER_COUNT: usize = 10;
 // convention so a future tuning can't silently invert the relationship.
 const _: () = assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
 
-/// Base decoded-ring cushion floor, in high-watermark buffer units: `BASE_HIGH *
-/// SAMPLES_PER_BUFFER_UNIT(800) / 88200 ≈ 1.1s` at 44.1k stereo. It is the
-/// minimum `high_watermark` `compute_watermarks` returns (crossfade only raises
-/// it), so `BASE_HIGH * SAMPLES_PER_BUFFER_UNIT` is the fixed-sample backpressure
-/// floor the renderer's rebuffer thresholds must stay under (see
-/// `rebuffer_resume_samples` in renderer.rs). Safe to exceed the crossfade lead
-/// because the inline gapless swap is gated on the crossfade (see
-/// `should_attempt_gapless_swap`), so a large decode_lead no longer wins the
-/// gapless-vs-crossfade race. `pub(crate)` so the renderer can derive that floor.
-pub(crate) const BASE_HIGH: usize = 120;
+/// Target decoded-ring cushion, in MILLISECONDS of audio — the decode-loop
+/// backpressure HIGH watermark. The loop fills the ring to ~this much decoded
+/// audio, then idles until it drains to the release point
+/// (`CUSHION_MS / BACKPRESSURE_RELEASE_DIVISOR`). Expressed in TIME and scaled by
+/// the stream's `frame_rate` (`compute_watermarks`) so the cushion holds a
+/// constant ~1.1s at EVERY sample rate. The old fixed-sample floor
+/// (`BASE_HIGH(120) * 800` = 96_000 samples) silently shrank to ~0.5s at 96k,
+/// which — paired with the renderer's rebuffer entry watermark — caused the
+/// issue-9 hi-res pause-and-rebuffer deadlock. ~1.1s mirrors mpv cache /
+/// MPD `buffer_before_play` / GStreamer queue2. `pub(crate)` so the renderer
+/// derives matching, also-time-based rebuffer thresholds.
+pub(crate) const CUSHION_MS: u64 = 1100;
 
-/// Compute backpressure watermarks scaled by crossfade duration.
-///
-/// Returns `(high_watermark, low_watermark)` — the thresholds at which the
-/// decode loop pauses/resumes fetching. Shared by both the primary and
-/// crossfade decode loops.
-fn compute_watermarks(crossfade_ms: u64) -> (usize, usize) {
-    const BUFFER_MS: u64 = 100;
-    let cf_buffers = if crossfade_ms > 0 {
-        (crossfade_ms / BUFFER_MS) as usize + 10 // crossfade duration + margin
+/// The decode loop releases backpressure (resumes decoding) once the ring drains
+/// to `CUSHION_MS / BACKPRESSURE_RELEASE_DIVISOR` of audio. `pub(crate)` so the
+/// renderer can assert at compile time that its rebuffer entry watermark stays
+/// strictly below this release point at every sample rate (the load-bearing
+/// interlock that keeps the issue-9 hi-res deadlock from returning).
+pub(crate) const BACKPRESSURE_RELEASE_DIVISOR: u64 = 3;
+
+/// Legacy base cushion in buffer units (the old `BASE_HIGH`). Retained ONLY to
+/// reproduce the historical crossfade-cushion crossover (~11s) now that the
+/// cushion is time-based: one legacy unit == `CUSHION_MS / CUSHION_BASE_UNITS`.
+const CUSHION_BASE_UNITS: u64 = 120;
+
+/// Compute backpressure watermarks `(high, low)` in interleaved SAMPLES, scaled
+/// to the stream's `frame_rate` (`sample_rate * channels`) so the cushion is a
+/// constant TIME at any rate. Shared by the primary and crossfade decode loops.
+/// `frame_rate == 0` (format not yet known) yields a non-triggering `high` so the
+/// loop never backpressures before the first decoded buffer establishes the rate.
+fn compute_watermarks(frame_rate: u32, crossfade_ms: u64) -> (usize, usize) {
+    if frame_rate == 0 {
+        return (usize::MAX, 0);
+    }
+    // Cushion in TIME. Base ~CUSHION_MS; for long crossfades grow it so the
+    // outgoing stream keeps a fade-length decode lead — a faithful time port of
+    // the legacy `max(BASE_HIGH, crossfade_ms/100 + 10)` buffer-unit formula
+    // (crossover near ~11s), so realistic crossfades are unchanged.
+    let crossfade_cushion_ms = if crossfade_ms > 0 {
+        (crossfade_ms / 100 + 10) * CUSHION_MS / CUSHION_BASE_UNITS
     } else {
         0
     };
-    let high = BASE_HIGH.max(cf_buffers);
-    (high, high / 3)
+    let cushion_ms = CUSHION_MS.max(crossfade_cushion_ms);
+    let high = ((frame_rate as u64 * cushion_ms) / 1000) as usize;
+    let low = high / BACKPRESSURE_RELEASE_DIVISOR as usize;
+    (high, low)
 }
 
 /// The inline gapless swap stands down when a crossfade is armed OR active, so
@@ -681,6 +692,10 @@ impl CustomAudioEngine {
         tokio::spawn(async move {
             let mut loop_count = 0;
             let mut backpressure_active = false;
+            // Cached stream frame_rate (sample_rate * channels), captured after
+            // each decode so the backpressure watermarks — computed before the
+            // decoder lock — stay time-based. 0 until the first decoded buffer.
+            let mut frame_rate: u32 = 0;
             let mut stream_type_checked = false;
             let mut stream_is_infinite_cached = false;
             let mut radio_music_jitter_filled = false;
@@ -714,15 +729,14 @@ impl CustomAudioEngine {
                 // BACKPRESSURE CHECK: If ring buffer is full, wait for it to drain
                 let buffer_count = {
                     let renderer_guard = renderer.lock();
-                    // Normalize raw sample count to ~100 ms "buffer units"
-                    // so we can compare against the watermark thresholds.
-                    samples_to_buffer_units(renderer_guard.buffer_count())
+                    renderer_guard.buffer_count() // interleaved samples in the ring
                 }; // renderer lock dropped here, before any .await
 
-                // Dynamic watermarks: scale with crossfade duration so the
-                // buffer can hold enough audio for a full fade-out.
+                // Time-based watermarks: scale with the stream's frame_rate so the
+                // cushion is a constant duration at every sample rate, and grow
+                // with crossfade duration so the buffer can hold a full fade-out.
                 let cf_ms = crossfade_duration_shared.load(Ordering::Relaxed);
-                let (high_watermark, low_watermark) = compute_watermarks(cf_ms);
+                let (high_watermark, low_watermark) = compute_watermarks(frame_rate, cf_ms);
 
                 // CRITICAL FIX: NEVER apply backpressure to Infinite Streams (Internet Radio)!
                 // Radio streams send data precisely at 1x speed. If we apply backpressure by sleeping
@@ -775,6 +789,12 @@ impl CustomAudioEngine {
                 }
 
                 let buffer_size = decode_buffer_size(decoder_guard.format());
+                // Cache the stream frame_rate for the next iteration's (pre-lock)
+                // backpressure watermark computation.
+                frame_rate = {
+                    let fmt = decoder_guard.format();
+                    fmt.sample_rate() * fmt.channel_count()
+                };
 
                 // Decode buffer - this is where HTTP I/O happens
                 // CRITICAL: Use block_in_place to prevent blocking the async runtime!
@@ -1667,6 +1687,9 @@ impl CustomAudioEngine {
             // watermarks with crossfade duration so the ring buffer can hold enough
             // audio for the full fade-in ramp.
             let mut backpressure_active = false;
+            // Cached incoming-stream frame_rate for the time-based watermarks
+            // (see the primary loop). 0 until the first decoded buffer.
+            let mut frame_rate: u32 = 0;
 
             loop {
                 // Check if crossfade is still active by checking if decoder still exists
@@ -1679,14 +1702,14 @@ impl CustomAudioEngine {
                     break;
                 }
 
-                // Backpressure check — normalize to buffer units (same as primary loop)
+                // Backpressure check — time-based watermarks (same as primary loop)
                 let buffer_count = {
                     let renderer_guard = renderer.lock();
-                    samples_to_buffer_units(renderer_guard.crossfade_buffer_count())
+                    renderer_guard.crossfade_buffer_count() // interleaved samples
                 };
 
                 let cf_ms = crossfade_duration_shared.load(Ordering::Relaxed);
-                let (high_watermark, low_watermark) = compute_watermarks(cf_ms);
+                let (high_watermark, low_watermark) = compute_watermarks(frame_rate, cf_ms);
 
                 if buffer_count >= high_watermark {
                     if !backpressure_active {
@@ -1723,6 +1746,10 @@ impl CustomAudioEngine {
                 }
 
                 let buffer_size = decode_buffer_size(dec.format());
+                frame_rate = {
+                    let fmt = dec.format();
+                    fmt.sample_rate() * fmt.channel_count()
+                };
 
                 let buffer = tokio::task::block_in_place(|| dec.read_buffer(buffer_size));
                 drop(decoder_guard);
@@ -2606,15 +2633,25 @@ mod tests {
     // Group M Lane 1 — module-level constants + LiveStringSlot newtype
     // =========================================================================
 
-    /// Pin the samples→buffer-units divisor at 800. A future tuning of
-    /// `BUFFER_MS` in `compute_watermarks` would surface here if it forgets
-    /// to scale `SAMPLES_PER_BUFFER_UNIT` alongside it.
+    /// `compute_watermarks` is time-based: the cushion (high) holds a constant
+    /// ~`CUSHION_MS` of audio at any sample rate and the release (low) is
+    /// `high / BACKPRESSURE_RELEASE_DIVISOR`. A 96k stream therefore gets ~2.18x
+    /// the SAMPLES of a 44.1k stream for the same DURATION — the property whose
+    /// absence (a fixed 96_000-sample cushion = ~0.5s at 96k) drove the issue-9
+    /// hi-res rebuffer deadlock. `frame_rate == 0` must never backpressure.
     #[test]
-    fn samples_to_buffer_units_div_by_800() {
-        assert_eq!(samples_to_buffer_units(800), 1);
-        assert_eq!(samples_to_buffer_units(0), 0);
-        assert_eq!(samples_to_buffer_units(1599), 1);
-        assert_eq!(samples_to_buffer_units(1600), 2);
+    fn compute_watermarks_hold_constant_time_across_rates() {
+        let (high_44, low_44) = compute_watermarks(44_100 * 2, 0);
+        assert_eq!(high_44, (88_200u64 * CUSHION_MS / 1000) as usize);
+        assert_eq!(low_44, high_44 / BACKPRESSURE_RELEASE_DIVISOR as usize);
+
+        let (high_96, _) = compute_watermarks(96_000 * 2, 0);
+        assert_eq!(high_96, (192_000u64 * CUSHION_MS / 1000) as usize);
+        // Same ~1.1s of audio → proportionally more samples at the higher rate.
+        assert!(high_96 > high_44);
+
+        // Unknown format → a non-triggering high so the loop never backpressures.
+        assert_eq!(compute_watermarks(0, 0), (usize::MAX, 0));
     }
 
     /// Pins the gate invariant that REPLACES the old `phantom_unreachable` test:
