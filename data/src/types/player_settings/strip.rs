@@ -69,8 +69,7 @@ define_labeled_enum! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
     pub enum StripSeparator {
-        /// Middle dot · (default — matches historical hardcoded join)
-        #[default]
+        /// Middle dot · (matches the historical hardcoded join)
         Dot { label: "Dot ·", wire: "dot" },
         /// Bullet •
         Bullet { label: "Bullet •", wire: "bullet" },
@@ -78,7 +77,10 @@ define_labeled_enum! {
         Pipe { label: "Pipe |", wire: "pipe" },
         /// Em dash —
         EmDash { label: "Em dash —", wire: "em_dash" },
-        /// Slash /
+        /// Slash / (default — aligns the enum default with the shipped
+        /// struct/persisted default chosen in the first-launch-UX retune;
+        /// keeps an absent `strip_separator` key reading back as Slash)
+        #[default]
         Slash { label: "Slash /", wire: "slash" },
         /// Box-drawing vertical bar │ (matches the strip's bookend dividers)
         Bar { label: "Bar │", wire: "bar" },
@@ -103,6 +105,17 @@ impl StripSeparator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shipped default separator is Slash — every struct/persisted default
+    /// (`TomlSettings::default()`, `PersistedPlayerSettings::default()`) uses it.
+    /// Aligning the enum `#[default]` to Slash makes `StripSeparator::default()`
+    /// agree with the on-disk default, so an absent `strip_separator` key (e.g.
+    /// after a sparse-config strip) reads back as Slash instead of silently
+    /// flipping to Dot.
+    #[test]
+    fn strip_separator_default_is_slash() {
+        assert_eq!(StripSeparator::default(), StripSeparator::Slash);
+    }
 
     /// Pin the `#[serde(alias = "progress_track")]` migration path.
     ///

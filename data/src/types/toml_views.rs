@@ -105,6 +105,18 @@ impl TomlViewPreferences {
 mod tests {
     use super::*;
 
+    /// Sparse-config round-trip safety (mirror of the `[settings]` guard): an
+    /// empty `[views]` table must deserialize to `TomlViewPreferences::default()`,
+    /// so stripping default-valued sort keys never drifts a view's sort or order.
+    #[test]
+    fn empty_table_deserializes_to_struct_default() {
+        let empty: TomlViewPreferences = toml::from_str("").expect("deserialize empty [views]");
+        let from_empty = toml::to_string_pretty(&empty).expect("serialize empty-derived");
+        let from_default =
+            toml::to_string_pretty(&TomlViewPreferences::default()).expect("serialize default");
+        assert_eq!(from_empty, from_default);
+    }
+
     #[test]
     fn toml_roundtrip() {
         let prefs = TomlViewPreferences::default();

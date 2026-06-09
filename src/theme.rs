@@ -173,7 +173,7 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     strip_merged_mode: AtomicBool::new(false),
     strip_click_action: AtomicU8::new(0), // GoToQueue
     strip_show_labels: AtomicBool::new(true),
-    strip_separator: AtomicU8::new(0), // Dot
+    strip_separator: AtomicU8::new(4), // Slash (default)
     albums_artwork_overlay: AtomicBool::new(true),
     artists_artwork_overlay: AtomicBool::new(true),
     songs_artwork_overlay: AtomicBool::new(true),
@@ -984,7 +984,7 @@ atomic_u8_enum! {
         3 => EmDash,
         4 => Slash,
         5 => Bar,
-    } default Dot
+    } default Slash
 }
 
 /// Returns true if the title field is visible in the track info strip
@@ -2494,6 +2494,9 @@ mod tests {
         assert_eq!(TrackInfoDisplay::from_u8(99), TrackInfoDisplay::Off);
         // Also verify a byte just past the highest known variant (4) falls back.
         assert_eq!(TrackInfoDisplay::from_u8(5), TrackInfoDisplay::Off);
+        // StripSeparator default is Slash (byte 4); unknown bytes fall back to it.
+        assert_eq!(StripSeparator::from_u8(255), StripSeparator::Slash);
+        assert_eq!(StripSeparator::from_u8(6), StripSeparator::Slash);
     }
 
     /// `ArtworkColumnMode`'s integer encoding has `Never` sitting at byte 3,

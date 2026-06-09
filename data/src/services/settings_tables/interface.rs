@@ -334,7 +334,7 @@ define_settings! {
                 label: "Field Separator",
                 category: "Metadata Strip",
                 subtitle: Some("Character used to join fields in merged mode"),
-                default: "Dot ·",
+                default: "Slash /",
                 options: &[
                     "Dot ·",
                     "Bullet •",
@@ -497,7 +497,7 @@ mod tests {
             strip_show_format_info: true,
             strip_merged_mode: false,
             strip_show_labels: true,
-            strip_separator: "Dot ·".into(),
+            strip_separator: "Slash /".into(),
             strip_click_action: "Go to Queue".into(),
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
@@ -524,6 +524,30 @@ mod tests {
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
+    }
+
+    /// The Field Separator row's `ui_meta.default` must equal the shipped
+    /// `StripSeparator::default()` label, so "Restore Default" is a correct
+    /// no-op on a fresh install. Pins the 6b179e4 default retune: the literal
+    /// silently lagged at "Dot ·" while the real default moved to Slash. (A
+    /// full per-tab ui_meta-vs-persisted parity guard like Playback's would
+    /// close the whole drift class but also surfaces pre-existing intentional
+    /// design-vs-persisted splits, so that is left as a follow-up.)
+    #[test]
+    fn strip_separator_ui_meta_default_matches_enum_default() {
+        use crate::types::player_settings::StripSeparator;
+        let item = build_interface_tab_settings_items(&default_interface_data())
+            .into_iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(it) if it.key == "general.strip_separator" => Some(it),
+                _ => None,
+            })
+            .expect("Field Separator row present");
+        assert_eq!(
+            item.default.display(),
+            StripSeparator::default().as_label(),
+            "ui_meta default for general.strip_separator must equal StripSeparator::default()'s label",
+        );
     }
 
     #[test]

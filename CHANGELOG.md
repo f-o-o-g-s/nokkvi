@@ -6,9 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Turning off Verbose Config now trims config.toml down to only your non-default settings and view sorts.
+
 ### Changed
 
 ### Fixed
+
+- Restoring the metadata strip's Field Separator to its default now gives Slash, not a middle dot.
 
 ### Removed
 

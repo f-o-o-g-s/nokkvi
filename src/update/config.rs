@@ -24,7 +24,13 @@ impl Nokkvi {
         crate::theme::set_light_mode(new_state);
         debug!(" Light mode set to: {}", new_state);
         // Persist to config.toml — the config file watcher will pick this up
-        // and ThemeConfigReloaded will read the correct value
+        // and ThemeConfigReloaded will read the correct value.
+        //
+        // This surgical single-key write bypasses the verbose-aware settings
+        // writer, so with verbose_config off a default `light_mode = false` can
+        // briefly linger in the otherwise-sparse [settings] section until the
+        // next full settings save prunes it. Correctness-neutral — an absent
+        // key and an explicit `false` deserialize identically.
         if let Err(e) =
             crate::config_writer::ConfigKey::app_scalar("settings.light_mode".to_string()).write(
                 &crate::views::settings::items::SettingValue::Bool(new_state),

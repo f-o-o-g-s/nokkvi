@@ -173,7 +173,7 @@ impl SettingsManager {
     /// Write [settings] section to config.toml from current internal state.
     fn write_settings_toml(&self) -> Result<()> {
         let ts = TomlSettings::from_player_settings(&self.get_player_settings());
-        write_toml_settings(&ts)
+        write_toml_settings(&ts, self.is_verbose_config())
     }
 
     /// Write [hotkeys] section to config.toml from current internal state.
@@ -184,7 +184,7 @@ impl SettingsManager {
     /// Write [views] section to config.toml from current internal state.
     fn write_views_toml(&self) -> Result<()> {
         let tv = TomlViewPreferences::from_all_view_prefs(&self.get_view_preferences());
-        write_toml_views(&tv)
+        write_toml_views(&tv, self.is_verbose_config())
     }
 
     /// Write all three TOML sections at once (used during migration).
@@ -1241,7 +1241,7 @@ mod sentinel_roundtrip_tests {
             strip_merged_mode: true,       // default false
             strip_click_action: StripClickAction::CopyTrackInfo, // default GoToQueue
             strip_show_labels: false,      // default true
-            strip_separator: StripSeparator::Slash, // default Dot
+            strip_separator: StripSeparator::Dot, // default Slash
 
             // EQ
             eq_enabled: true, // default false

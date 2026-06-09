@@ -94,8 +94,11 @@ pub fn read_toml_views() -> Result<Option<TomlViewPreferences>> {
 // =============================================================================
 
 /// Write the `[settings]` section to config.toml, preserving all other content.
-pub fn write_toml_settings(settings: &TomlSettings) -> Result<()> {
-    write_section("settings", &toml::Value::try_from(settings)?)
+///
+/// When `verbose` is false, only non-default keys are written (plus the
+/// `verbose_config` anchor); when true, every field is written.
+pub fn write_toml_settings(settings: &TomlSettings, verbose: bool) -> Result<()> {
+    write_section("settings", &settings_value(settings, verbose)?)
 }
 
 /// Write the `[hotkeys]` section to config.toml, preserving all other content.
@@ -106,8 +109,66 @@ pub fn write_toml_hotkeys(hotkeys: &HotkeyConfig, verbose: bool) -> Result<()> {
 }
 
 /// Write the `[views]` section to config.toml, preserving all other content.
-pub fn write_toml_views(views: &TomlViewPreferences) -> Result<()> {
-    write_section("views", &toml::Value::try_from(views)?)
+///
+/// When `verbose` is false, only non-default sort keys are written; when true,
+/// every field is written.
+pub fn write_toml_views(views: &TomlViewPreferences, verbose: bool) -> Result<()> {
+    write_section("views", &views_value(views, verbose)?)
+}
+
+/// Serialize `[settings]` to a TOML value, pruning default-valued keys when
+/// `verbose` is false. `verbose_config` is always retained as a section anchor:
+/// a fully-default `[settings]` would otherwise strip to nothing, drop the
+/// section, and re-trigger the full-dump migration (the `has_toml` gate in
+/// `SettingsManager::new`) on next launch.
+fn settings_value(settings: &TomlSettings, verbose: bool) -> Result<toml::Value> {
+    let full = toml::Value::try_from(settings)?;
+    if verbose {
+        return Ok(full);
+    }
+    let defaults = toml::Value::try_from(TomlSettings::default())?;
+    Ok(prune_default_keys(full, &defaults, &["verbose_config"]))
+}
+
+/// Serialize `[views]` to a TOML value, pruning default-valued keys when
+/// `verbose` is false. No anchor is needed — the migration gate keys on
+/// `[settings]`, so an all-default (empty) `[views]` reads back as the default
+/// without re-triggering anything.
+fn views_value(views: &TomlViewPreferences, verbose: bool) -> Result<toml::Value> {
+    let full = toml::Value::try_from(views)?;
+    if verbose {
+        return Ok(full);
+    }
+    let defaults = toml::Value::try_from(TomlViewPreferences::default())?;
+    Ok(prune_default_keys(full, &defaults, &[]))
+}
+
+/// Remove every top-level key whose value equals the same key in `defaults`,
+/// except keys listed in `keep`. `full` and `defaults` must be produced by the
+/// same serializer so float rounding etc. compares equal.
+///
+/// Round-trip safety (an omitted key reads back as its struct default) is
+/// pinned by the `empty_table_deserializes_to_struct_default` guards on
+/// `TomlSettings` / `TomlViewPreferences`.
+fn prune_default_keys(full: toml::Value, defaults: &toml::Value, keep: &[&str]) -> toml::Value {
+    let toml::Value::Table(mut table) = full else {
+        return full;
+    };
+    if let Some(defaults) = defaults.as_table() {
+        let mut to_remove: Vec<String> = Vec::new();
+        for (key, value) in &table {
+            if keep.contains(&key.as_str()) {
+                continue;
+            }
+            if defaults.get(key.as_str()) == Some(value) {
+                to_remove.push(key.clone());
+            }
+        }
+        for key in to_remove {
+            table.remove(key.as_str());
+        }
+    }
+    toml::Value::Table(table)
 }
 
 /// Replace a single top-level section in config.toml using `toml_edit`.
@@ -180,13 +241,13 @@ pub fn write_all_toml_sections(
         Ok(())
     };
 
-    insert_section(&mut doc, "settings", &toml::Value::try_from(settings)?)?;
+    insert_section(&mut doc, "settings", &settings_value(settings, verbose)?)?;
     insert_section(
         &mut doc,
         "hotkeys",
         &toml::Value::try_from(hotkeys.to_toml_map(verbose))?,
     )?;
-    insert_section(&mut doc, "views", &toml::Value::try_from(views)?)?;
+    insert_section(&mut doc, "views", &views_value(views, verbose)?)?;
 
     debug!(" [TOML I/O] Wrote [settings], [hotkeys], [views] to config.toml");
 
@@ -195,6 +256,98 @@ pub fn write_all_toml_sections(
 
 #[cfg(test)]
 mod tests {
+
+    // -- Sparse-config (verbose-off) pruning --------------------------------
+    //
+    // These exercise the pure `settings_value` / `views_value` helpers (no I/O)
+    // that the `verbose` flag routes through. The companion round-trip exactness
+    // guard lives in `toml_settings::tests::empty_table_deserializes_to_struct_default`.
+
+    #[test]
+    fn sparse_default_settings_keeps_only_verbose_config_anchor() {
+        use crate::types::toml_settings::TomlSettings;
+        let v = super::settings_value(&TomlSettings::default(), false).expect("settings_value");
+        let tbl = v.as_table().expect("table");
+        assert_eq!(
+            tbl.len(),
+            1,
+            "all-default [settings] must prune to just the verbose_config anchor, got: {tbl:?}"
+        );
+        assert!(
+            tbl.contains_key("verbose_config"),
+            "anchor must be retained"
+        );
+    }
+
+    #[test]
+    fn verbose_settings_keeps_every_key() {
+        use crate::types::toml_settings::TomlSettings;
+        let full = super::settings_value(&TomlSettings::default(), true).expect("verbose");
+        assert!(
+            full.as_table().expect("table").len() > 50,
+            "verbose must keep the full settings table (no pruning)"
+        );
+    }
+
+    #[test]
+    fn sparse_settings_roundtrip_preserves_nondefault_and_restores_default() {
+        use crate::types::{player_settings::StripSeparator, toml_settings::TomlSettings};
+        let s = TomlSettings {
+            crossfade_duration_secs: 10,          // default 7
+            light_mode: true,                     // default false
+            queue_show_album: false,              // default true
+            strip_separator: StripSeparator::Dot, // default Slash
+            ..TomlSettings::default()
+        };
+        let sparse = super::settings_value(&s, false).expect("sparse");
+        let tbl = sparse.as_table().expect("table");
+        assert!(
+            tbl.contains_key("crossfade_duration_secs"),
+            "non-default kept"
+        );
+        assert!(tbl.contains_key("strip_separator"), "non-default kept");
+        assert!(tbl.contains_key("verbose_config"), "anchor kept");
+        assert!(!tbl.contains_key("auto_follow_playing"), "default pruned");
+        assert!(!tbl.contains_key("scrobble_threshold"), "default pruned");
+
+        // The sparse table must deserialize back to exactly `s` (non-defaults
+        // preserved, omitted keys restored to their struct defaults).
+        let back: TomlSettings = sparse.try_into().expect("deserialize sparse");
+        assert_eq!(
+            toml::to_string_pretty(&back).unwrap(),
+            toml::to_string_pretty(&s).unwrap(),
+            "sparse round-trip must preserve non-defaults and restore defaults exactly"
+        );
+    }
+
+    #[test]
+    fn sparse_views_default_strips_empty_and_nondefault_roundtrips() {
+        use crate::types::toml_views::TomlViewPreferences;
+        // All-default views prune to an empty table (no anchor — the migration
+        // gate keys on [settings], so an empty [views] reads back as default).
+        let empty = super::views_value(&TomlViewPreferences::default(), false).expect("views");
+        assert!(
+            empty.as_table().expect("table").is_empty(),
+            "all-default [views] must prune to nothing"
+        );
+
+        // A non-default sort survives and round-trips.
+        let v = TomlViewPreferences {
+            queue_sort: "rating".to_string(), // default "album"
+            queue_ascending: false,           // default true
+            ..TomlViewPreferences::default()
+        };
+        let sparse = super::views_value(&v, false).expect("views");
+        let tbl = sparse.as_table().expect("table");
+        assert!(tbl.contains_key("queue_sort"));
+        assert!(tbl.contains_key("queue_ascending"));
+        assert!(!tbl.contains_key("albums_sort"), "default sort pruned");
+        let back: TomlViewPreferences = sparse.try_into().expect("deserialize");
+        assert_eq!(
+            toml::to_string_pretty(&back).unwrap(),
+            toml::to_string_pretty(&v).unwrap(),
+        );
+    }
 
     #[test]
     fn test_hotkeys_parsing() {

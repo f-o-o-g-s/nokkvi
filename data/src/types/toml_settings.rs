@@ -511,6 +511,29 @@ impl TomlSettings {
 mod tests {
     use super::*;
 
+    /// Sparse-config round-trip safety: a `[settings]` table with every
+    /// default-valued key stripped out must read back as exactly
+    /// `TomlSettings::default()`. Equivalent to: an empty table deserializes to
+    /// the struct default. If any field's serde fill default (a field-level
+    /// `#[serde(default)]` or the container default) diverges from the struct
+    /// `Default` impl, this fails — that field would silently drift when the
+    /// sparse writer omits it. (This guard caught `strip_separator` flipping
+    /// Slash → Dot.)
+    #[test]
+    fn empty_table_deserializes_to_struct_default() {
+        let empty: TomlSettings = toml::from_str("").expect("deserialize empty [settings]");
+        // TomlSettings has no PartialEq (f32 + Vec<CustomEqPreset>), so compare
+        // the serialized forms — identical bytes ⇔ identical field values.
+        let from_empty = toml::to_string_pretty(&empty).expect("serialize empty-derived");
+        let from_default =
+            toml::to_string_pretty(&TomlSettings::default()).expect("serialize default");
+        assert_eq!(
+            from_empty, from_default,
+            "an absent [settings] key must fill from the struct default; a mismatch \
+             means that field silently drifts when sparse-stripped"
+        );
+    }
+
     #[test]
     fn toml_roundtrip() {
         let settings = TomlSettings::default();
