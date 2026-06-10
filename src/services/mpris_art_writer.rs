@@ -183,50 +183,10 @@ pub(crate) async fn sweep_dead_pid_files() {
 /// Pure-ish core: tests pass a scratch dir so the suite stays parallel-safe
 /// without touching the real `$XDG_CACHE_HOME`.
 async fn sweep_dead_pid_files_in(dir: &Path) {
-    let mut entries = match tokio::fs::read_dir(dir).await {
-        Ok(e) => e,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
-        Err(err) => {
-            warn!(
-                target: "nokkvi::mpris::art",
-                path = %dir.display(), %err, "failed to enumerate mpris art cache dir for sweep"
-            );
-            return;
-        }
-    };
-
-    loop {
-        match entries.next_entry().await {
-            Ok(Some(entry)) => {
-                let name = entry.file_name();
-                let Some(name_str) = name.to_str() else {
-                    continue;
-                };
-                let Some(pid) = parse_pid_from_filename(name_str) else {
-                    continue;
-                };
-                if pid_is_alive(pid) {
-                    continue;
-                }
-                if let Err(err) = tokio::fs::remove_file(entry.path()).await
-                    && err.kind() != std::io::ErrorKind::NotFound
-                {
-                    warn!(
-                        target: "nokkvi::mpris::art",
-                        path = %entry.path().display(), %err, "failed to sweep dead-pid mpris art cache file"
-                    );
-                }
-            }
-            Ok(None) => break,
-            Err(err) => {
-                warn!(
-                    target: "nokkvi::mpris::art",
-                    path = %dir.display(), %err, "error iterating mpris art cache dir during sweep"
-                );
-                break;
-            }
-        }
-    }
+    sweep_dir_where(dir, "dead-pid-sweep", |name| {
+        parse_pid_from_filename(name).is_some_and(|pid| !pid_is_alive(pid))
+    })
+    .await;
 }
 
 /// Extract the `<pid>` portion from either filename shape:
@@ -248,6 +208,55 @@ fn parse_pid_from_filename(name: &str) -> Option<u32> {
 /// procfs directly rather than pulling `nix` or `libc` into the UI crate.
 fn pid_is_alive(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Shared directory-sweep skeleton for the two cache cleanups
+/// (`sweep_dead_pid_files_in` / `clear_inner`): enumerate `dir`, remove every
+/// entry whose filename satisfies `should_remove`, tolerate a missing
+/// directory and already-deleted files, and warn (never fail) on anything
+/// else. `op` tags the warn lines with the calling sweep.
+async fn sweep_dir_where(dir: &Path, op: &'static str, should_remove: impl Fn(&str) -> bool) {
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(e) => e,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) => {
+            warn!(
+                target: "nokkvi::mpris::art",
+                path = %dir.display(), %err, op, "failed to enumerate mpris art cache dir"
+            );
+            return;
+        }
+    };
+
+    loop {
+        match entries.next_entry().await {
+            Ok(Some(entry)) => {
+                let name = entry.file_name();
+                let Some(name_str) = name.to_str() else {
+                    continue;
+                };
+                if !should_remove(name_str) {
+                    continue;
+                }
+                if let Err(err) = tokio::fs::remove_file(entry.path()).await
+                    && err.kind() != std::io::ErrorKind::NotFound
+                {
+                    warn!(
+                        target: "nokkvi::mpris::art",
+                        path = %entry.path().display(), %err, op, "failed to remove mpris art cache file"
+                    );
+                }
+            }
+            Ok(None) => break,
+            Err(err) => {
+                warn!(
+                    target: "nokkvi::mpris::art",
+                    path = %dir.display(), %err, op, "error iterating mpris art cache dir"
+                );
+                break;
+            }
+        }
+    }
 }
 
 /// Pure-ish core: tests pass their own `ArtCacheState` and `cache_dir`. Keeps
@@ -352,48 +361,10 @@ async fn clear_inner(state: &mut ArtCacheState, cache_dir: Option<&Path>) {
     let Some(dir) = cache_dir else { return };
     let pid = std::process::id();
     let prefix = format!("mpris-art-{pid}-");
-
-    let mut entries = match tokio::fs::read_dir(dir).await {
-        Ok(e) => e,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
-        Err(err) => {
-            warn!(
-                target: "nokkvi::mpris::art",
-                path = %dir.display(), %err, "failed to enumerate mpris art cache dir"
-            );
-            return;
-        }
-    };
-
-    loop {
-        match entries.next_entry().await {
-            Ok(Some(entry)) => {
-                let name = entry.file_name();
-                let Some(name_str) = name.to_str() else {
-                    continue;
-                };
-                if !name_str.starts_with(&prefix) || !name_str.ends_with(".jpg") {
-                    continue;
-                }
-                if let Err(err) = tokio::fs::remove_file(entry.path()).await
-                    && err.kind() != std::io::ErrorKind::NotFound
-                {
-                    warn!(
-                        target: "nokkvi::mpris::art",
-                        path = %entry.path().display(), %err, "failed to remove mpris art cache file"
-                    );
-                }
-            }
-            Ok(None) => break,
-            Err(err) => {
-                warn!(
-                    target: "nokkvi::mpris::art",
-                    path = %dir.display(), %err, "error iterating mpris art cache dir"
-                );
-                break;
-            }
-        }
-    }
+    sweep_dir_where(dir, "clear", |name| {
+        name.starts_with(&prefix) && name.ends_with(".jpg")
+    })
+    .await;
 }
 
 fn path_to_file_uri(p: &Path) -> String {
