@@ -470,6 +470,50 @@ where
     .into()
 }
 
+/// Wrap a now-playing strip with the strip context menu (Go to Queue/Album/
+/// Artist, Copy Track Info, Love/Unlove, Find Similar, Top Songs, optional
+/// Show in File Manager).
+///
+/// Shared by the three strip placements (player-bar strip, top strip,
+/// merged nav-bar strip), which differ only in their message type. Radio
+/// playback gets NO context menu: `is_radio` returns the bare strip, exactly
+/// preserving each placement's conditional widget-tree shape.
+///
+/// `on_action` / `on_set_open_menu` are fn pointers on purpose — all call
+/// sites pass bare tuple-variant constructors (`*Message::StripContextAction`
+/// / `*Message::SetOpenMenu`); loosen to `impl Fn + Clone` only if a future
+/// caller needs captures.
+pub(crate) fn wrap_strip_context_menu<'a, Message: Clone + 'a>(
+    base: impl Into<Element<'a, Message>>,
+    is_radio: bool,
+    has_local_path: bool,
+    is_starred: bool,
+    open_state: (bool, Option<Point>),
+    on_action: fn(StripContextEntry) -> Message,
+    on_set_open_menu: fn(Option<crate::app_message::OpenMenu>) -> Message,
+) -> Element<'a, Message> {
+    let base = base.into();
+    if is_radio {
+        return base;
+    }
+    let (is_open, position) = open_state;
+    context_menu(
+        base,
+        strip_entries(has_local_path),
+        move |entry, length| strip_entry_view(entry, length, is_starred, on_action),
+        is_open,
+        position,
+        move |position| match position {
+            Some(p) => on_set_open_menu(Some(crate::app_message::OpenMenu::Context {
+                id: crate::app_message::ContextMenuId::Strip,
+                position: p,
+            })),
+            None => on_set_open_menu(None),
+        },
+    )
+    .into()
+}
+
 // ============================================================================
 // Widget
 // ============================================================================

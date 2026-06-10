@@ -49,7 +49,7 @@ Custom `iced::advanced` seekable widget. Track + handle rendered in separate `wi
 | Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale + external `flash_at()`. Default radius = `ui_border_radius()` |
 | Track Info Strip | `track_info_strip.rs` | Now-playing metadata. `build_now_playing_segments` returns `Vec<String>` (title / artist / album fragments + separators) that the merged-mode marquee concats |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
-| Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry` |
+| Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry`. Wrap helpers: `wrap_library_row` / `wrap_similar_row` (slot rows), `wrap_strip_context_menu` (the three now-playing strip placements — player-bar, top strip, merged nav-bar; takes `StripContextAction` / `SetOpenMenu` variant constructors as fn pointers, returns the bare strip when radio is active) |
 | Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown, generic over `Key` (controlled via `OpenMenu::CheckboxDropdown`) |
 | Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum |
 | About Modal | `about_modal.rs` | Metadata + diagnostics, theme-adaptive logo, Ko-fi tip link |

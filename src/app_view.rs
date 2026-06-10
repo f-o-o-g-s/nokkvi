@@ -536,37 +536,15 @@ impl Nokkvi {
         // Wrap player bar strip in context menu for right-click actions (if not radio)
         let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
             player_strip.map(|strip| {
-                if radio_name.is_some() {
-                    strip
-                } else {
-                    let has_local_path = !self.settings.local_music_path.is_empty();
-                    let is_starred = self.is_current_track_starred();
-                    let (strip_open, strip_position) = strip_context_state(&self.open_menu);
-                    widgets::context_menu::context_menu(
-                        strip,
-                        widgets::context_menu::strip_entries(has_local_path),
-                        move |entry, length| {
-                            widgets::context_menu::strip_entry_view(
-                                entry,
-                                length,
-                                is_starred,
-                                widgets::PlayerBarMessage::StripContextAction,
-                            )
-                        },
-                        strip_open,
-                        strip_position,
-                        |position| match position {
-                            Some(p) => widgets::PlayerBarMessage::SetOpenMenu(Some(
-                                crate::app_message::OpenMenu::Context {
-                                    id: crate::app_message::ContextMenuId::Strip,
-                                    position: p,
-                                },
-                            )),
-                            None => widgets::PlayerBarMessage::SetOpenMenu(None),
-                        },
-                    )
-                    .into()
-                }
+                widgets::context_menu::wrap_strip_context_menu(
+                    strip,
+                    radio_name.is_some(),
+                    !self.settings.local_music_path.is_empty(),
+                    self.is_current_track_starred(),
+                    strip_context_state(&self.open_menu),
+                    widgets::PlayerBarMessage::StripContextAction,
+                    widgets::PlayerBarMessage::SetOpenMenu,
+                )
             });
 
         // Base layout:
@@ -608,37 +586,15 @@ impl Nokkvi {
                     Some(Message::StripClicked),
                 )
             };
-            let wrapped: Element<'_, Message> = if radio_name.is_some() {
-                strip
-            } else {
-                let has_local_path = !self.settings.local_music_path.is_empty();
-                let is_starred = self.is_current_track_starred();
-                let (strip_open, strip_position) = strip_context_state(&self.open_menu);
-                widgets::context_menu::context_menu(
-                    strip,
-                    widgets::context_menu::strip_entries(has_local_path),
-                    move |entry, length| {
-                        widgets::context_menu::strip_entry_view(
-                            entry,
-                            length,
-                            is_starred,
-                            Message::StripContextAction,
-                        )
-                    },
-                    strip_open,
-                    strip_position,
-                    |position| match position {
-                        Some(p) => {
-                            Message::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                                id: crate::app_message::ContextMenuId::Strip,
-                                position: p,
-                            }))
-                        }
-                        None => Message::SetOpenMenu(None),
-                    },
-                )
-                .into()
-            };
+            let wrapped: Element<'_, Message> = widgets::context_menu::wrap_strip_context_menu(
+                strip,
+                radio_name.is_some(),
+                !self.settings.local_music_path.is_empty(),
+                self.is_current_track_starred(),
+                strip_context_state(&self.open_menu),
+                Message::StripContextAction,
+                Message::SetOpenMenu,
+            );
             if with_separator_above {
                 Some(wrapped)
             } else {

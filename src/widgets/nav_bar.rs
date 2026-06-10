@@ -926,38 +926,16 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 .height(Length::Fill)
                 .center_y(Length::Fill);
 
-            let wrapped: Element<'static, NavBarMessage> = if data.radio_name.is_some() {
-                clickable.into()
-            } else {
-                let has_local_path = !data.local_music_path.is_empty();
-                let is_starred = data.is_current_starred;
-                let strip_context_open = data.strip_context_open;
-                let strip_context_position = data.strip_context_position;
-                super::context_menu::context_menu(
+            let wrapped: Element<'static, NavBarMessage> =
+                super::context_menu::wrap_strip_context_menu(
                     clickable,
-                    super::context_menu::strip_entries(has_local_path),
-                    move |entry, length| {
-                        super::context_menu::strip_entry_view(
-                            entry,
-                            length,
-                            is_starred,
-                            NavBarMessage::StripContextAction,
-                        )
-                    },
-                    strip_context_open,
-                    strip_context_position,
-                    |position| match position {
-                        Some(p) => NavBarMessage::SetOpenMenu(Some(
-                            crate::app_message::OpenMenu::Context {
-                                id: crate::app_message::ContextMenuId::Strip,
-                                position: p,
-                            },
-                        )),
-                        None => NavBarMessage::SetOpenMenu(None),
-                    },
-                )
-                .into()
-            };
+                    data.radio_name.is_some(),
+                    !data.local_music_path.is_empty(),
+                    data.is_current_starred,
+                    (data.strip_context_open, data.strip_context_position),
+                    NavBarMessage::StripContextAction,
+                    NavBarMessage::SetOpenMenu,
+                );
             wrapped
         };
 
