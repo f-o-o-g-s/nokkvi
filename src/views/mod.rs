@@ -355,20 +355,21 @@ pub(crate) const RADIOS_SEARCH_ID: &str = "radios_search_input";
 /// Generate a paired `{Name}Column` enum and `{Name}ColumnVisibility` struct
 /// from a single declaration.
 ///
-/// Each entry has the form `Variant: field_name = default_value`. The macro
-/// emits the enum variant, the bool struct field, the `Default` impl entry,
-/// and the `get` / `set` match arms in lockstep, so adding or renaming a
-/// column is a one-site edit.
+/// Each entry has the form `Variant("Label"): field_name = default_value`.
+/// The macro emits the enum variant, the dropdown label, the bool struct
+/// field, the `Default` impl entry, and the `get` / `set` match arms in
+/// lockstep, so adding or renaming a column is a one-site edit. Declaration
+/// order is also the columns-cog dropdown order (via `dropdown_entries`).
 ///
 /// # Usage
 /// ```ignore
 /// define_view_columns! {
 ///     GenresColumn => GenresColumnVisibility {
-///         Select: select = false,
-///         Index: index = true,
-///         Thumbnail: thumbnail = true,
-///         AlbumCount: albumcount = true,
-///         SongCount: songcount = true,
+///         Select("Select"): select = false,
+///         Index("Index"): index = true,
+///         Thumbnail("Thumbnail"): thumbnail = true,
+///         AlbumCount("Album count"): albumcount = true,
+///         SongCount("Song count"): songcount = true,
 ///     }
 /// }
 /// ```
@@ -385,11 +386,11 @@ macro_rules! define_view_columns {
     // round-trip tests.
     (
         $col_enum:ident => $vis_struct:ident {
-            $( $variant:ident : $field:ident = $default:expr => $setter:ident @ $settings_field:ident ),* $(,)?
+            $( $variant:ident ( $label:literal ) : $field:ident = $default:expr => $setter:ident @ $settings_field:ident ),* $(,)?
         }
     ) => {
         $crate::views::define_view_columns!(
-            $col_enum => $vis_struct { $( $variant : $field = $default ),* }
+            $col_enum => $vis_struct { $( $variant ( $label ) : $field = $default ),* }
         );
 
         impl nokkvi_data::services::settings::ColumnPersist for $col_enum {
@@ -424,7 +425,7 @@ macro_rules! define_view_columns {
     // Emits only the column enum, visibility struct, Default, get, and set.
     (
         $col_enum:ident => $vis_struct:ident {
-            $( $variant:ident : $field:ident = $default:expr ),* $(,)?
+            $( $variant:ident ( $label:literal ) : $field:ident = $default:expr ),* $(,)?
         }
     ) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -467,6 +468,15 @@ macro_rules! define_view_columns {
                 let new_value = !self.get(col);
                 self.set(col, new_value);
                 new_value
+            }
+
+            /// Build the columns-cog dropdown items for this view.
+            ///
+            /// Declaration order == dropdown order, and the labels come from
+            /// the same per-column declaration as the enum/field pair, so the
+            /// dropdown can never drift from the column definition.
+            pub fn dropdown_entries(&self) -> Vec<($col_enum, &'static str, bool)> {
+                vec![ $( ($col_enum::$variant, $label, self.$field) ),* ]
             }
         }
     };
@@ -655,9 +665,9 @@ mod tests {
 
     define_view_columns! {
         TestColumn => TestColumnVisibility {
-            Foo: foo = false,
-            Bar: bar = true,
-            BazQux: bazqux = true,
+            Foo("Foo"): foo = false,
+            Bar("Bar"): bar = true,
+            BazQux("Baz Qux"): bazqux = true,
         }
     }
 
@@ -686,6 +696,21 @@ mod tests {
         assert!(!v.bar);
         v.set(TestColumn::BazQux, false);
         assert!(!v.bazqux);
+    }
+
+    #[test]
+    fn dropdown_entries_matches_declaration() {
+        // Declaration order == dropdown order, labels verbatim, checked state
+        // mirrors the current visibility fields.
+        let v = TestColumnVisibility::default();
+        assert_eq!(
+            v.dropdown_entries(),
+            vec![
+                (TestColumn::Foo, "Foo", false),
+                (TestColumn::Bar, "Bar", true),
+                (TestColumn::BazQux, "Baz Qux", true),
+            ]
+        );
     }
 
     #[derive(Debug, Clone)]

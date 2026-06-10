@@ -23,33 +23,7 @@ impl GenresPage {
         let column_dropdown: Element<'a, GenresMessage> =
             crate::widgets::checkbox_dropdown::view_columns_dropdown(
                 crate::View::Genres,
-                vec![
-                    (
-                        super::GenresColumn::Select,
-                        "Select",
-                        self.column_visibility.select,
-                    ),
-                    (
-                        super::GenresColumn::Index,
-                        "Index",
-                        self.column_visibility.index,
-                    ),
-                    (
-                        super::GenresColumn::Thumbnail,
-                        "Thumbnail",
-                        self.column_visibility.thumbnail,
-                    ),
-                    (
-                        super::GenresColumn::AlbumCount,
-                        "Album count",
-                        self.column_visibility.albumcount,
-                    ),
-                    (
-                        super::GenresColumn::SongCount,
-                        "Song count",
-                        self.column_visibility.songcount,
-                    ),
-                ],
+                self.column_visibility.dropdown_entries(),
                 GenresMessage::ToggleColumnVisible,
                 GenresMessage::SetOpenMenu,
                 data.overlay.column_dropdown_open,

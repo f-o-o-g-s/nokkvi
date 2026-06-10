@@ -29,12 +29,12 @@ pub struct SimilarPage {
 // Select is opt-in like everywhere else in the app; all others default on to match the historical layout.
 super::define_view_columns! {
     SimilarColumn => SimilarColumnVisibility {
-        Select: select = false => set_similar_show_select @ similar_show_select,
-        Index: index = true => set_similar_show_index @ similar_show_index,
-        Thumbnail: thumbnail = true => set_similar_show_thumbnail @ similar_show_thumbnail,
-        Album: album = true => set_similar_show_album @ similar_show_album,
-        Duration: duration = true => set_similar_show_duration @ similar_show_duration,
-        Love: love = true => set_similar_show_love @ similar_show_love,
+        Select("Select"): select = false => set_similar_show_select @ similar_show_select,
+        Index("Index"): index = true => set_similar_show_index @ similar_show_index,
+        Thumbnail("Thumbnail"): thumbnail = true => set_similar_show_thumbnail @ similar_show_thumbnail,
+        Album("Album"): album = true => set_similar_show_album @ similar_show_album,
+        Duration("Duration"): duration = true => set_similar_show_duration @ similar_show_duration,
+        Love("Love"): love = true => set_similar_show_love @ similar_show_love,
     }
 }
 
@@ -285,26 +285,7 @@ impl SimilarPage {
         // `Similar` member to disambiguate against.
         let column_dropdown: Element<'a, SimilarMessage> =
             crate::widgets::checkbox_dropdown::similar_columns_dropdown(
-                vec![
-                    (
-                        SimilarColumn::Select,
-                        "Select",
-                        self.column_visibility.select,
-                    ),
-                    (SimilarColumn::Index, "Index", self.column_visibility.index),
-                    (
-                        SimilarColumn::Thumbnail,
-                        "Thumbnail",
-                        self.column_visibility.thumbnail,
-                    ),
-                    (SimilarColumn::Album, "Album", self.column_visibility.album),
-                    (
-                        SimilarColumn::Duration,
-                        "Duration",
-                        self.column_visibility.duration,
-                    ),
-                    (SimilarColumn::Love, "Love", self.column_visibility.love),
-                ],
+                self.column_visibility.dropdown_entries(),
                 SimilarMessage::ToggleColumnVisible,
                 SimilarMessage::SetOpenMenu,
                 data.overlay.column_dropdown_open,

@@ -47,14 +47,14 @@ pub struct ArtistsPage {
 // discovery affordance for multi-selection.
 super::define_view_columns! {
     ArtistsColumn => ArtistsColumnVisibility {
-        Select: select = false => set_artists_show_select @ artists_show_select,
-        Index: index = true => set_artists_show_index @ artists_show_index,
-        Thumbnail: thumbnail = true => set_artists_show_thumbnail @ artists_show_thumbnail,
-        Stars: stars = true => set_artists_show_stars @ artists_show_stars,
-        AlbumCount: albumcount = true => set_artists_show_albumcount @ artists_show_albumcount,
-        SongCount: songcount = true => set_artists_show_songcount @ artists_show_songcount,
-        Plays: plays = true => set_artists_show_plays @ artists_show_plays,
-        Love: love = true => set_artists_show_love @ artists_show_love,
+        Select("Select"): select = false => set_artists_show_select @ artists_show_select,
+        Index("Index"): index = true => set_artists_show_index @ artists_show_index,
+        Thumbnail("Thumbnail"): thumbnail = true => set_artists_show_thumbnail @ artists_show_thumbnail,
+        Stars("Stars"): stars = true => set_artists_show_stars @ artists_show_stars,
+        AlbumCount("Album Count"): albumcount = true => set_artists_show_albumcount @ artists_show_albumcount,
+        SongCount("Song Count"): songcount = true => set_artists_show_songcount @ artists_show_songcount,
+        Plays("Plays"): plays = true => set_artists_show_plays @ artists_show_plays,
+        Love("Love"): love = true => set_artists_show_love @ artists_show_love,
     }
 }
 

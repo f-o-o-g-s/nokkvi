@@ -53,20 +53,20 @@ pub struct QueuePage {
     pub playlist_strip_expanded: bool,
 }
 
-// Toggleable queue columns. `Stars`, `Album`, `Duration`, `Love`, and `Plays`
-// are user-toggleable from the columns dropdown; the index/title/artwork
-// columns stay always-on.
+// Toggleable queue columns, in columns-dropdown order (declaration order ==
+// dropdown order via `dropdown_entries`). The title/artist/artwork columns
+// stay always-on.
 super::define_view_columns! {
     QueueColumn => QueueColumnVisibility {
-        Select: select = false => set_queue_show_select @ queue_show_select,
-        Index: index = true => set_queue_show_index @ queue_show_index,
-        Thumbnail: thumbnail = true => set_queue_show_thumbnail @ queue_show_thumbnail,
-        Stars: stars = true => set_queue_show_stars @ queue_show_stars,
-        Album: album = true => set_queue_show_album @ queue_show_album,
-        Duration: duration = true => set_queue_show_duration @ queue_show_duration,
-        Love: love = true => set_queue_show_love @ queue_show_love,
-        Plays: plays = false => set_queue_show_plays @ queue_show_plays,
-        Genre: genre = false => set_queue_show_genre @ queue_show_genre,
+        Select("Select"): select = false => set_queue_show_select @ queue_show_select,
+        Index("Index"): index = true => set_queue_show_index @ queue_show_index,
+        Thumbnail("Thumbnail"): thumbnail = true => set_queue_show_thumbnail @ queue_show_thumbnail,
+        Stars("Stars"): stars = true => set_queue_show_stars @ queue_show_stars,
+        Album("Album"): album = true => set_queue_show_album @ queue_show_album,
+        Genre("Genre"): genre = false => set_queue_show_genre @ queue_show_genre,
+        Duration("Duration"): duration = true => set_queue_show_duration @ queue_show_duration,
+        Love("Love"): love = true => set_queue_show_love @ queue_show_love,
+        Plays("Plays"): plays = false => set_queue_show_plays @ queue_show_plays,
     }
 }
 

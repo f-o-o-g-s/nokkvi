@@ -757,6 +757,53 @@ fn column_macro_covers_expected_field_count() {
     );
 }
 
+#[test]
+fn queue_and_songs_dropdown_order_is_pinned() {
+    // Characterization pin: `dropdown_entries()` order == macro declaration
+    // order, and for Queue/Songs the user-visible dropdown has always rendered
+    // Genre right after Album (the pre-`dropdown_entries` hand-written vec!s).
+    // A declaration reorder in queue/mod.rs or songs/mod.rs shows up here.
+    let queue_labels: Vec<&'static str> = crate::views::queue::QueueColumnVisibility::default()
+        .dropdown_entries()
+        .into_iter()
+        .map(|(_, label, _)| label)
+        .collect();
+    assert_eq!(
+        queue_labels,
+        [
+            "Select",
+            "Index",
+            "Thumbnail",
+            "Stars",
+            "Album",
+            "Genre",
+            "Duration",
+            "Love",
+            "Plays",
+        ]
+    );
+
+    let songs_labels: Vec<&'static str> = crate::views::songs::SongsColumnVisibility::default()
+        .dropdown_entries()
+        .into_iter()
+        .map(|(_, label, _)| label)
+        .collect();
+    assert_eq!(
+        songs_labels,
+        [
+            "Select",
+            "Index",
+            "Thumbnail",
+            "Stars",
+            "Album",
+            "Genre",
+            "Duration",
+            "Plays",
+            "Love",
+        ]
+    );
+}
+
 // ============================================================================
 // Restore-defaults sentinel routing (Tier 0 #0.2)
 // ============================================================================

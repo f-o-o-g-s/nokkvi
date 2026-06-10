@@ -17,9 +17,7 @@ use nokkvi_data::{
     utils::formatters,
 };
 
-use super::{
-    super::expansion::SlotListEntry, AlbumsColumn, AlbumsMessage, AlbumsPage, AlbumsViewData,
-};
+use super::{super::expansion::SlotListEntry, AlbumsMessage, AlbumsPage, AlbumsViewData};
 use crate::widgets::{
     self,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
@@ -31,27 +29,7 @@ impl AlbumsPage {
         let column_dropdown: Element<'a, AlbumsMessage> =
             crate::widgets::checkbox_dropdown::view_columns_dropdown(
                 crate::View::Albums,
-                vec![
-                    (
-                        AlbumsColumn::Select,
-                        "Select",
-                        self.column_visibility.select,
-                    ),
-                    (AlbumsColumn::Index, "Index", self.column_visibility.index),
-                    (
-                        AlbumsColumn::Thumbnail,
-                        "Thumbnail",
-                        self.column_visibility.thumbnail,
-                    ),
-                    (AlbumsColumn::Stars, "Stars", self.column_visibility.stars),
-                    (
-                        AlbumsColumn::SongCount,
-                        "Song Count",
-                        self.column_visibility.songcount,
-                    ),
-                    (AlbumsColumn::Plays, "Plays", self.column_visibility.plays),
-                    (AlbumsColumn::Love, "Love", self.column_visibility.love),
-                ],
+                self.column_visibility.dropdown_entries(),
                 AlbumsMessage::ToggleColumnVisible,
                 AlbumsMessage::SetOpenMenu,
                 data.overlay.column_dropdown_open,

@@ -13,9 +13,7 @@ use iced::{
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
 
-use super::{
-    super::expansion::SlotListEntry, ArtistsColumn, ArtistsMessage, ArtistsPage, ArtistsViewData,
-};
+use super::{super::expansion::SlotListEntry, ArtistsMessage, ArtistsPage, ArtistsViewData};
 use crate::widgets::{
     self,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
@@ -28,32 +26,7 @@ impl ArtistsPage {
         let column_dropdown: Element<'a, ArtistsMessage> =
             crate::widgets::checkbox_dropdown::view_columns_dropdown(
                 crate::View::Artists,
-                vec![
-                    (
-                        ArtistsColumn::Select,
-                        "Select",
-                        self.column_visibility.select,
-                    ),
-                    (ArtistsColumn::Index, "Index", self.column_visibility.index),
-                    (
-                        ArtistsColumn::Thumbnail,
-                        "Thumbnail",
-                        self.column_visibility.thumbnail,
-                    ),
-                    (ArtistsColumn::Stars, "Stars", self.column_visibility.stars),
-                    (
-                        ArtistsColumn::AlbumCount,
-                        "Album Count",
-                        self.column_visibility.albumcount,
-                    ),
-                    (
-                        ArtistsColumn::SongCount,
-                        "Song Count",
-                        self.column_visibility.songcount,
-                    ),
-                    (ArtistsColumn::Plays, "Plays", self.column_visibility.plays),
-                    (ArtistsColumn::Love, "Love", self.column_visibility.love),
-                ],
+                self.column_visibility.dropdown_entries(),
                 ArtistsMessage::ToggleColumnVisible,
                 ArtistsMessage::SetOpenMenu,
                 data.overlay.column_dropdown_open,

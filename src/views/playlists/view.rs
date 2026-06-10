@@ -15,8 +15,8 @@ use nokkvi_data::{
 };
 
 use super::{
-    super::expansion::SlotListEntry, PlaylistContextEntry, PlaylistsColumn, PlaylistsMessage,
-    PlaylistsPage, PlaylistsViewData,
+    super::expansion::SlotListEntry, PlaylistContextEntry, PlaylistsMessage, PlaylistsPage,
+    PlaylistsViewData,
 };
 use crate::widgets::{
     self,
@@ -109,38 +109,7 @@ impl PlaylistsPage {
         let column_dropdown: Element<'a, PlaylistsMessage> =
             crate::widgets::checkbox_dropdown::view_columns_dropdown(
                 crate::View::Playlists,
-                vec![
-                    (
-                        PlaylistsColumn::Select,
-                        "Select",
-                        self.column_visibility.select,
-                    ),
-                    (
-                        PlaylistsColumn::Index,
-                        "Index",
-                        self.column_visibility.index,
-                    ),
-                    (
-                        PlaylistsColumn::Thumbnail,
-                        "Thumbnail",
-                        self.column_visibility.thumbnail,
-                    ),
-                    (
-                        PlaylistsColumn::SongCount,
-                        "Song count",
-                        self.column_visibility.songcount,
-                    ),
-                    (
-                        PlaylistsColumn::Duration,
-                        "Duration",
-                        self.column_visibility.duration,
-                    ),
-                    (
-                        PlaylistsColumn::UpdatedAt,
-                        "Updated at",
-                        self.column_visibility.updatedat,
-                    ),
-                ],
+                self.column_visibility.dropdown_entries(),
                 PlaylistsMessage::ToggleColumnVisible,
                 PlaylistsMessage::SetOpenMenu,
                 data.overlay.column_dropdown_open,

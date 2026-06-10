@@ -11,7 +11,7 @@ use iced::{
 };
 use nokkvi_data::utils::formatters;
 
-use super::{SongsColumn, SongsMessage, SongsPage, SongsViewData};
+use super::{SongsMessage, SongsPage, SongsViewData};
 use crate::widgets::{
     self,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
@@ -23,25 +23,7 @@ impl SongsPage {
         let column_dropdown: Element<'a, SongsMessage> =
             crate::widgets::checkbox_dropdown::view_columns_dropdown(
                 crate::View::Songs,
-                vec![
-                    (SongsColumn::Select, "Select", self.column_visibility.select),
-                    (SongsColumn::Index, "Index", self.column_visibility.index),
-                    (
-                        SongsColumn::Thumbnail,
-                        "Thumbnail",
-                        self.column_visibility.thumbnail,
-                    ),
-                    (SongsColumn::Stars, "Stars", self.column_visibility.stars),
-                    (SongsColumn::Album, "Album", self.column_visibility.album),
-                    (SongsColumn::Genre, "Genre", self.column_visibility.genre),
-                    (
-                        SongsColumn::Duration,
-                        "Duration",
-                        self.column_visibility.duration,
-                    ),
-                    (SongsColumn::Plays, "Plays", self.column_visibility.plays),
-                    (SongsColumn::Love, "Love", self.column_visibility.love),
-                ],
+                self.column_visibility.dropdown_entries(),
                 SongsMessage::ToggleColumnVisible,
                 SongsMessage::SetOpenMenu,
                 data.overlay.column_dropdown_open,
