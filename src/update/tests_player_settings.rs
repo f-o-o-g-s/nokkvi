@@ -117,6 +117,10 @@ fn nokkvi_default_overrides_match_persisted_defaults() {
 
 #[test]
 fn handle_player_settings_loaded_replaces_settings_substruct() {
+    // The handler mirrors every process-global theme atomic (and re-reads
+    // light_mode from the real config), so serialize with the other
+    // theme-mutating test families.
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
 
     // Construct non-default values for each of the 18 mirror fields. The

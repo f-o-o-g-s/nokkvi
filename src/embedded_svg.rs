@@ -415,11 +415,11 @@ mod tests {
     /// structure rather than color identity because under the default Svalbard
     /// theme `border_color` equals the master's outline `#111817` in both modes
     /// — a color-equality check would pass on a dead recolor. Holds
-    /// `TEST_THEME_LOCK` so no concurrent test flips the mode between the `viz`
+    /// `THEME_MODE_LOCK` so no concurrent test flips the mode between the `viz`
     /// read and the boat build.
     #[test]
     fn themed_boat_svg_recolors_and_scales_group_stroke() {
-        let _guard = crate::theme::TEST_THEME_LOCK.lock();
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let viz = crate::theme::get_visualizer_colors_dark();
         let logo = themed_logo_svg();
         let boat = themed_boat_svg(0.0, false, false);
@@ -599,11 +599,11 @@ mod tests {
     /// fix for light mode inverting the body to dark ink). It still maps each
     /// role to the theme's dark-palette accessor at its path count, keeps the
     /// fixed outline, and leaves no uppercase hex. Serialized via
-    /// `TEST_THEME_LOCK` (pokes the light-mode atomic).
+    /// `THEME_MODE_LOCK` (pokes the light-mode atomic).
     #[test]
     fn themed_logo_svg_is_mode_stable_and_maps_roles() {
         use crate::theme;
-        let _guard = theme::TEST_THEME_LOCK.lock();
+        let _guard = theme::THEME_MODE_LOCK.lock();
         let was_light = theme::is_light_mode();
 
         theme::set_light_mode(false);
@@ -688,7 +688,7 @@ mod tests {
     /// boat and its anchor stay mode-stable together.
     #[test]
     fn themed_anchor_svg_uses_theme_stroke() {
-        let _guard = crate::theme::TEST_THEME_LOCK.lock();
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
         let viz = crate::theme::get_visualizer_colors_dark();
         let out = themed_anchor_svg();
         assert!(

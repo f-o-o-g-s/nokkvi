@@ -14,8 +14,8 @@
 /// its `slot_is_set()` assertion. Holding this lock for the full duration of
 /// each such test forces them to run one at a time. `unwrap_or_else(|e|
 /// e.into_inner())` recovers a poisoned lock so a panic in one test does not
-/// cascade into the others. Mirrors the `OVERLAY_TEST_LOCK` pattern in
-/// `settings.rs` for the albums-artwork-overlay atomic.
+/// cascade into the others. Tests that flip the process-global THEME atomics
+/// use the crate-wide `crate::theme::THEME_MODE_LOCK` for the same reason.
 pub(super) static SSE_SLOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 mod artwork;

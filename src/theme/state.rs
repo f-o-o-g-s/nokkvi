@@ -55,14 +55,6 @@ pub(crate) fn theme_generation() -> u64 {
     THEME_GENERATION.load(Ordering::Relaxed)
 }
 
-/// Crate-wide serialization guard for tests that poke the global light-mode
-/// atomic (`set_light_mode`). `cargo test` runs multi-threaded, so any two
-/// tests that flip the active palette must not interleave — the boat handle
-/// cache tests and the themed-SVG tests both lock this. `parking_lot::Mutex`
-/// is used so a panic in one test poisons nothing and the group keeps running.
-#[cfg(test)]
-pub(crate) static TEST_THEME_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-
 /// Reload theme from theme file (hot-reload support).
 /// Call this when the theme file or `theme` key in config.toml changes.
 pub(crate) fn reload_theme() {
@@ -168,10 +160,14 @@ pub(crate) fn set_light_mode(enabled: bool) {
     debug!(" Theme mode changed: light_mode={}", enabled);
 }
 
-/// Sequential guard shared across the workspace's tests that flip globals
-/// like `set_light_mode` or mutate the `UI_MODE` atomics. `parking_lot`
-/// avoids std-lock poisoning if one test panics. Exposed `pub(crate)`
-/// (test-only) so chrome-math regression tests in `widgets::*` can pin
-/// the same atomics under the same lock.
+/// Crate-wide serialization guard for tests that flip process-global theme
+/// state: `set_light_mode`, the `UI_MODE` atomics (rounded mode, nav layout,
+/// track-info display, artwork column, ...), and the handler paths that
+/// persist them. The SINGLE lock for every such test family — chrome-math
+/// (`update::tests::redesign_chrome`), player-bar strip, themed-SVG + boat
+/// handle-cache, artwork-column layout, slot-count resync, the
+/// player-settings-loaded mirror tests, and the update-handler light-mode
+/// tests all take this same guard, so no two can interleave. `parking_lot`
+/// avoids std-lock poisoning if one test panics.
 #[cfg(test)]
 pub(crate) static THEME_MODE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());

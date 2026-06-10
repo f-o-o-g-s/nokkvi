@@ -930,18 +930,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, MutexGuard};
 
     use super::*;
 
     /// All tests in this module mutate the global theme atomics for artwork
-    /// column mode/fit/width_pct. Acquire this lock at the start of each test
-    /// so they don't race when `cargo test` runs in parallel.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock_atomics() -> MutexGuard<'static, ()> {
-        // Allow poisoned mutexes — a panicking test shouldn't break siblings.
-        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    /// column mode/fit/width_pct. Acquire the crate-wide theme lock at the
+    /// start of each test so they serialize against every other test family
+    /// that touches the same atomics (`theme::tests`, the settings handler
+    /// tests, the slot-count resync tests).
+    fn lock_atomics() -> parking_lot::MutexGuard<'static, ()> {
+        crate::theme::THEME_MODE_LOCK.lock()
     }
 
     fn cfg(w: f32, h: f32, show: bool) -> BaseSlotListLayoutConfig {

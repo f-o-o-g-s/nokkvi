@@ -515,9 +515,7 @@ fn picker_nav_key_passes_through_when_picker_open() {
 
 #[test]
 fn toggle_light_mode_persists_to_settings_key() {
-    let _guard = LIGHT_MODE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     // Ensure a known baseline (atomic is global, so set it explicitly)
     crate::theme::set_light_mode(false);
     let mut app = test_app();
@@ -530,6 +528,12 @@ fn toggle_light_mode_persists_to_settings_key() {
         crate::theme::is_light_mode(),
         "ToggleLightMode should flip the in-memory theme atomic from false to true"
     );
+
+    // Toggle back so neither the global atomic nor the on-disk
+    // `settings.light_mode` key is left at true for later tests — the
+    // player-settings-loaded handler re-reads that file into the atomic at
+    // arbitrary points in the run.
+    let _ = app.update(crate::app_message::Message::ToggleLightMode);
 }
 
 #[test]
@@ -1051,20 +1055,16 @@ fn should_auto_login_reflects_stored_session_at_construction() {
 /// `with_dynamic_slots` calculation, and `handle_player_settings_loaded`
 /// calls it after the artwork-mode atomic flips.
 mod slot_count_resync {
-    use std::sync::{Mutex, MutexGuard};
 
     use nokkvi_data::types::player_settings::{ArtworkColumnMode, ArtworkStretchFit};
 
     use crate::{test_helpers::test_app, theme};
 
-    // Shared lock with the other test modules that mutate theme atomics —
-    // a stray `set_artwork_column_mode` in a sibling test must not race
-    // against our reads here. The lock itself is local, but every test
-    // that reads `theme::artwork_column_mode()` takes it.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock_atomics() -> MutexGuard<'static, ()> {
-        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    // Crate-wide theme lock — a stray `set_artwork_column_mode` in a
+    // sibling test must not race against our reads here, so serialize with
+    // every other family that mutates the theme atomics.
+    fn lock_atomics() -> parking_lot::MutexGuard<'static, ()> {
+        crate::theme::THEME_MODE_LOCK.lock()
     }
 
     fn reset_atomics() {

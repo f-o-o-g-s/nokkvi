@@ -31,14 +31,6 @@ pub(crate) fn test_app() -> Nokkvi {
     Nokkvi::default()
 }
 
-/// Serializes tests that toggle the process-global light-mode atomic
-/// (`crate::theme::set_light_mode` / `Message::ToggleLightMode`). Without
-/// this, two parallel tests can interleave between one test's baseline set
-/// and its toggle-under-test. Callers recover a poisoned lock via
-/// `unwrap_or_else(|e| e.into_inner())` so a panic in one test does not
-/// cascade.
-pub(crate) static LIGHT_MODE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 /// Create a `QueueSongUIViewData` with the given fields, defaulting the rest.
 pub(crate) fn make_queue_song(
     id: &str,

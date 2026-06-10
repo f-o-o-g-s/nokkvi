@@ -106,6 +106,7 @@ fn side_effect_load_artists_does_not_push_a_toast() {
 
 #[test]
 fn side_effect_set_light_mode_atomic_does_not_push_a_toast() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     // The legacy `general.light_mode` arm only flipped the theme atomic and
     // wrote `config.toml`; it never surfaced a toast. The audit warns
     // against asserting on the process-global theme atomic in tests, so we
@@ -121,9 +122,10 @@ fn side_effect_set_light_mode_atomic_does_not_push_a_toast() {
         "SetLightModeAtomic must not push a toast; it only flips the atomic + config.toml"
     );
 
-    // Restore the global atomic so this test does not bleed state into the
-    // shared theme module that other tests in this binary may depend on.
-    crate::theme::set_light_mode(prior_state);
+    // Restore via the same side effect so BOTH the global atomic and the
+    // `settings.light_mode` key it wrote to config.toml return to their
+    // prior values — a bare set_light_mode would leave the file inverted.
+    let _ = app.dispatch_settings_side_effect(SettingsSideEffect::SetLightModeAtomic(prior_state));
 }
 
 #[test]
@@ -173,17 +175,9 @@ fn side_effect_write_verbose_config_disable_emits_success_toast() {
 // Artwork overlay theme-atomic tests (B5)
 // ============================================================================
 
-/// Serializes the two tests that read-modify-restore the process-global
-/// `albums_artwork_overlay` atomic. Both flip the same shared static, so under
-/// parallel execution they race (one test's restore clobbers the other's
-/// assertion). Holding this lock for the full duration of each test forces them
-/// to run one at a time. `unwrap_or_else(|e| e.into_inner())` recovers a
-/// poisoned lock so a panic in one test does not cascade into the other.
-static OVERLAY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[test]
 fn player_settings_loaded_albums_artwork_overlay_false_clears_atomic() {
-    let _guard = OVERLAY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
     let prior = crate::theme::albums_artwork_overlay();
 
@@ -203,7 +197,7 @@ fn player_settings_loaded_albums_artwork_overlay_false_clears_atomic() {
 
 #[test]
 fn player_settings_loaded_albums_artwork_overlay_true_sets_atomic() {
-    let _guard = OVERLAY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     // Force the atomic to false first so the test is self-contained regardless
     // of the initial global state (avoids false-pass when it's already true).
     crate::theme::set_albums_artwork_overlay(false);
@@ -225,6 +219,7 @@ fn player_settings_loaded_albums_artwork_overlay_true_sets_atomic() {
 
 #[test]
 fn player_settings_loaded_artists_artwork_overlay_flips_atomic() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
     let prior = crate::theme::artists_artwork_overlay();
 
@@ -239,6 +234,7 @@ fn player_settings_loaded_artists_artwork_overlay_flips_atomic() {
 
 #[test]
 fn player_settings_loaded_songs_artwork_overlay_flips_atomic() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
     let prior = crate::theme::songs_artwork_overlay();
 
@@ -253,6 +249,7 @@ fn player_settings_loaded_songs_artwork_overlay_flips_atomic() {
 
 #[test]
 fn player_settings_loaded_playlists_artwork_overlay_flips_atomic() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
     let prior = crate::theme::playlists_artwork_overlay();
 
@@ -300,7 +297,7 @@ fn player_settings_loaded_mirrors_all_theme_atomics() {
     // Serialize against the 5 artwork-overlay tests: this sweep sets the same
     // process-global `*_artwork_overlay` atomics (plus ~22 others), so without
     // the shared lock one test's restore could clobber another's assertion.
-    let _guard = OVERLAY_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
 
     // --- Snapshot every mutated atomic so nothing bleeds into other tests. ---
     let prior_rounded_mode = crate::theme::rounded_mode();
@@ -574,6 +571,7 @@ fn player_settings_loaded_mirrors_all_theme_atomics() {
 
 #[test]
 fn player_settings_loaded_restores_all_column_visibility() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
 
     // Every one of the 50 column `*_show_*` fields, set to an alternating
@@ -1029,6 +1027,7 @@ fn handle_restore_defaults_bg_with_cached_entries_returns_non_empty_group() {
 
 #[test]
 fn player_settings_loaded_restores_full_active_playlist_context() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     // Session restore must rebuild a COMPLETE banner context from persisted
     // settings — not a degraded `minimal` one. Regression guard: a restored
     // public playlist previously showed as "Private" with no duration/updated.
@@ -1062,6 +1061,7 @@ fn player_settings_loaded_restores_full_active_playlist_context() {
 
 #[test]
 fn player_settings_loaded_without_active_playlist_clears_context() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
     app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
         "stale".into(),
@@ -1209,9 +1209,7 @@ fn visualizer_config_changed_refreshes_entries_when_settings_visible() {
 
 #[test]
 fn toggle_light_mode_marks_settings_dirty_when_not_on_settings() {
-    let _guard = LIGHT_MODE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let prior = crate::theme::is_light_mode();
     let mut app = test_app();
     assert_ne!(
@@ -1236,9 +1234,7 @@ fn toggle_light_mode_marks_settings_dirty_when_not_on_settings() {
 
 #[test]
 fn light_mode_write_rebuilds_cached_entries_against_new_atomic() {
-    let _guard = LIGHT_MODE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let prior_atomic = crate::theme::is_light_mode();
     let prior_config = crate::theme_config::load_light_mode_from_config();
 

@@ -13,10 +13,10 @@ use super::{
 // --- handle caching --------------------------------------------------------
 /// Sequential guard for tests that poke `theme::set_light_mode` (a global
 /// atomic), so they don't interleave. Aliased to the crate-wide
-/// `theme::TEST_THEME_LOCK` so these boat handle-cache tests also serialize
+/// `theme::THEME_MODE_LOCK` so these boat handle-cache tests also serialize
 /// against the themed-SVG tests in `embedded_svg.rs` — both groups mutate the
 /// same global palette state.
-use crate::theme::TEST_THEME_LOCK as THEME_MUTATION_LOCK;
+use crate::theme::THEME_MODE_LOCK as THEME_MUTATION_LOCK;
 
 /// Theme-change invalidation: a `theme_generation()` advance must drop the
 /// cached handle so the next build picks up new colors. The boat is now
