@@ -155,6 +155,21 @@ fn decode_base64url(input: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Body-read policy for [`ApiClient::execute`], chosen per HTTP verb.
+///
+/// `Required` (GET/POST/PUT): callers parse the body, so a failed read is a
+/// hard error. `Tolerant` (DELETE): callers discard the body — the old
+/// per-verb delete applied the status policy without ever reading the body
+/// on 401/2xx and only best-effort-read it (`unwrap_or_default`) for the
+/// error message — so a failed read degrades to an empty string and the
+/// status alone decides the outcome. A `Required` DELETE would mask the
+/// 401 → `Unauthorized` downcast and turn a successful delete into an error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BodyPolicy {
+    Required,
+    Tolerant,
+}
+
 /// Current wall-clock time as unix seconds. Saturates to 0 on a time-travel
 /// system clock (pre-epoch) — same fallback as redb / serde defaults.
 fn unix_now() -> i64 {
@@ -316,6 +331,16 @@ impl ApiClient {
         }
     }
 
+    /// Resolve a body-read result against the verb's [`BodyPolicy`]. Pure
+    /// (no I/O) so the required/tolerant split is unit-testable without an
+    /// HTTP server.
+    fn resolve_body(policy: BodyPolicy, read: Result<String>) -> Result<String> {
+        match policy {
+            BodyPolicy::Required => read.context("Failed to read response body"),
+            BodyPolicy::Tolerant => Ok(read.unwrap_or_default()),
+        }
+    }
+
     /// Send a built request and run the shared response pipeline: intercept
     /// the refreshed JWT on EVERY response (including 401/5xx — JWT rotation
     /// must not stop on error-heavy sessions), snapshot the `X-Total-Count`
@@ -325,6 +350,7 @@ impl ApiClient {
         &self,
         request: reqwest::RequestBuilder,
         ctx: &str,
+        body_policy: BodyPolicy,
     ) -> Result<(String, Option<u32>)> {
         let response = request
             .send()
@@ -343,10 +369,7 @@ impl ApiClient {
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u32>().ok());
 
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
+        let body = Self::resolve_body(body_policy, response.text().await.map_err(Into::into))?;
 
         Ok((Self::finish_status(status, body, ctx)?, total_count))
     }
@@ -371,7 +394,12 @@ impl ApiClient {
         params: &[(&str, &str)],
     ) -> Result<(String, Option<u32>)> {
         let request = self.build_request(Method::GET, endpoint, params)?;
-        self.execute(request, &format!("API GET {endpoint}")).await
+        self.execute(
+            request,
+            &format!("API GET {endpoint}"),
+            BodyPolicy::Required,
+        )
+        .await
     }
 
     /// Make a POST request with a JSON body to the Navidrome REST API
@@ -384,7 +412,11 @@ impl ApiClient {
             .build_request(Method::POST, endpoint, &[])?
             .json(json_body);
         let (body, _total_count) = self
-            .execute(request, &format!("API POST {endpoint}"))
+            .execute(
+                request,
+                &format!("API POST {endpoint}"),
+                BodyPolicy::Required,
+            )
             .await?;
         Ok(body)
     }
@@ -399,7 +431,11 @@ impl ApiClient {
             .build_request(Method::PUT, endpoint, &[])?
             .json(json_body);
         let (body, _total_count) = self
-            .execute(request, &format!("API PUT {endpoint}"))
+            .execute(
+                request,
+                &format!("API PUT {endpoint}"),
+                BodyPolicy::Required,
+            )
             .await?;
         Ok(body)
     }
@@ -419,11 +455,18 @@ impl ApiClient {
         *self.persisted_exp.lock()
     }
 
-    /// Make a DELETE request to the Navidrome REST API
+    /// Make a DELETE request to the Navidrome REST API. The body is
+    /// discarded, so it's read under [`BodyPolicy::Tolerant`] — a failed
+    /// body read must not turn a successful delete into an error nor mask
+    /// the 401 → `Unauthorized` downcast.
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
         let request = self.build_request(Method::DELETE, endpoint, &[])?;
-        self.execute(request, &format!("API DELETE {endpoint}"))
-            .await?;
+        self.execute(
+            request,
+            &format!("API DELETE {endpoint}"),
+            BodyPolicy::Tolerant,
+        )
+        .await?;
         Ok(())
     }
 }
@@ -813,6 +856,59 @@ mod tests {
         assert!(msg.contains("API GET /api/song"), "missing ctx in: {msg}");
         assert!(msg.contains("500"), "missing status in: {msg}");
         assert!(msg.contains("server boom"), "missing body in: {msg}");
+    }
+
+    #[test]
+    fn resolve_body_tolerant_swallows_read_failure() {
+        // DELETE's policy: a failed body read degrades to an empty string so
+        // the status policy alone decides the outcome (2xx stays Ok, 401
+        // stays Unauthorized) — never an error in its own right.
+        let body = ApiClient::resolve_body(BodyPolicy::Tolerant, Err(anyhow!("connection reset")))
+            .expect("tolerant policy must not propagate a body-read failure");
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn resolve_body_required_propagates_read_failure() {
+        let err = ApiClient::resolve_body(BodyPolicy::Required, Err(anyhow!("connection reset")))
+            .expect_err("required policy must propagate a body-read failure");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Failed to read response body"),
+            "missing context in: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_body_passes_through_successful_reads() {
+        for policy in [BodyPolicy::Required, BodyPolicy::Tolerant] {
+            let body = ApiClient::resolve_body(policy, Ok("payload".to_string()))
+                .expect("successful reads pass through under either policy");
+            assert_eq!(body, "payload");
+        }
+    }
+
+    /// With the tolerant (empty) body, `finish_status` reproduces the old
+    /// per-verb DELETE error arm exactly: ctx + status, empty body tail.
+    /// (2xx → Ok and 401 → Unauthorized with an empty body are covered by
+    /// `finish_status_success_returns_body` /
+    /// `finish_status_401_downcasts_to_unauthorized` above.)
+    #[test]
+    fn finish_status_with_empty_body_keeps_delete_error_shape() {
+        let err = ApiClient::finish_status(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            String::new(),
+            "API DELETE /api/playlist/1",
+        )
+        .expect_err("5xx must produce an error");
+
+        assert!(err.downcast_ref::<NokkviError>().is_none());
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("API DELETE /api/playlist/1"),
+            "missing ctx in: {msg}"
+        );
+        assert!(msg.contains("500"), "missing status in: {msg}");
     }
 
     #[test]
