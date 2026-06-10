@@ -230,11 +230,7 @@ pub(crate) fn view_header<
             CollapsedAppearance::CountStrip => {
                 let arrow = if sort_ascending { "↑" } else { "↓" };
                 let label = format!("{current_view} {arrow}");
-                let count = if filtered_count > 0 && filtered_count < total_count {
-                    format!("{filtered_count} of {total_count} {item_type}")
-                } else {
-                    format!("{total_count} {item_type}")
-                };
+                let count = count_label(filtered_count, total_count, item_type);
                 // Append a total-duration stat ("12 songs · 47m") when the view
                 // supplies one (song / album / playlist lists).
                 let count = match total_duration_secs {
@@ -483,11 +479,7 @@ pub(crate) fn view_header<
         None
     };
 
-    let count_text = if filtered_count > 0 && filtered_count < total_count {
-        format!("{filtered_count} of {total_count} {item_type}")
-    } else {
-        format!("{total_count} {item_type}")
-    };
+    let count_text = count_label(filtered_count, total_count, item_type);
 
     let count_cell: Element<'a, Message> = container(
         text(count_text)
@@ -609,6 +601,17 @@ fn collapsed_separator<'a, Message: 'a>() -> Element<'a, Message> {
         .into()
 }
 
+/// Item-count label shared by the full header and the CountStrip collapsed
+/// appearance: `"{filtered} of {total} {item_type}"` while a search narrows
+/// the list, plain `"{total} {item_type}"` otherwise.
+fn count_label(filtered: usize, total: usize, item_type: &str) -> String {
+    if filtered > 0 && filtered < total {
+        format!("{filtered} of {total} {item_type}")
+    } else {
+        format!("{total} {item_type}")
+    }
+}
+
 /// Compact total-duration label for the count strip: `47m`, `4h 53m`, or
 /// `3d 4h` for very large sets (whole-library song views).
 fn format_total_duration(secs: u64) -> String {
@@ -721,6 +724,16 @@ pub(crate) fn header_icon_cell<'a, Message: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_label_formats() {
+        // No search active: plain total.
+        assert_eq!(count_label(0, 100, "albums"), "100 albums");
+        // Search matches everything: still the plain total.
+        assert_eq!(count_label(100, 100, "albums"), "100 albums");
+        // Search narrows the list: "M of N".
+        assert_eq!(count_label(12, 100, "albums"), "12 of 100 albums");
+    }
 
     #[test]
     fn format_total_duration_tiers() {
