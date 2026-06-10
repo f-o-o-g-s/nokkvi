@@ -41,7 +41,6 @@ pub(crate) enum DragState {
 pub enum DragEvent {
     Picked { index: usize },
     Dropped { index: usize, target_index: usize },
-    Canceled { index: usize },
 }
 
 #[allow(missing_debug_implementations)]

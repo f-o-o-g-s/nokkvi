@@ -243,22 +243,11 @@ impl SlotListView {
         )
     }
 
-    /// Calculate which item index should be displayed in a given slot
-    /// Slot 4 is the center (for 9-slot layout), slots 0-3 are above, slots 5-8 are below
-    pub fn get_slot_item_index(&self, slot_index: usize, total_items: usize) -> Option<usize> {
-        self.get_slot_item_index_with_center(slot_index, total_items, 4)
-    }
-
     /// Calculate opacity for a slot based on distance from a dynamic center
     pub fn calculate_slot_opacity_with_center(slot_index: usize, center_slot: usize) -> f32 {
         let distance = (slot_index as i32 - center_slot as i32).abs();
         let opacity = 1.0 - (distance as f32 * 0.2);
         opacity.max(0.2)
-    }
-
-    /// Calculate opacity for a slot based on distance from center (assumes center at slot 4)
-    pub fn calculate_slot_opacity(slot_index: usize) -> f32 {
-        Self::calculate_slot_opacity_with_center(slot_index, 4)
     }
 
     /// Move viewport up (decrease offset, clamped at 0).
@@ -504,22 +493,23 @@ mod tests {
     #[test]
     fn test_clamped_indexing() {
         let sl = SlotListView::new();
+        let center = sl.slot_count / 2;
 
         // Test with 5 items, offset at 0 (9-slot layout, center=4)
-        assert_eq!(sl.get_slot_item_index(0, 5), None); // slot 0 = offset-4 = -4 -> out of range
-        assert_eq!(sl.get_slot_item_index(4, 5), Some(0)); // center slot = current offset
-        assert_eq!(sl.get_slot_item_index(8, 5), Some(4)); // slot 8 = offset+4 = 4 -> valid
-        assert_eq!(sl.get_slot_item_index(3, 5), None); // slot 3 = offset-1 = -1 -> out of range
-        assert_eq!(sl.get_slot_item_index(5, 5), Some(1)); // slot 5 = offset+1 = 1 -> valid
+        assert_eq!(sl.get_slot_item_index_with_center(0, 5, center), None); // slot 0 = offset-4 = -4 -> out of range
+        assert_eq!(sl.get_slot_item_index_with_center(4, 5, center), Some(0)); // center slot = current offset
+        assert_eq!(sl.get_slot_item_index_with_center(8, 5, center), Some(4)); // slot 8 = offset+4 = 4 -> valid
+        assert_eq!(sl.get_slot_item_index_with_center(3, 5, center), None); // slot 3 = offset-1 = -1 -> out of range
+        assert_eq!(sl.get_slot_item_index_with_center(5, 5, center), Some(1)); // slot 5 = offset+1 = 1 -> valid
     }
 
     #[test]
     fn test_opacity_gradient() {
         // Test with default 9-slot layout (center at 4)
-        assert_eq!(SlotListView::calculate_slot_opacity(4), 1.0); // center
-        assert_eq!(SlotListView::calculate_slot_opacity(3), 0.8); // one away
-        assert_eq!(SlotListView::calculate_slot_opacity(5), 0.8); // one away
-        assert_eq!(SlotListView::calculate_slot_opacity(0), 0.2); // four away (clamped)
+        assert_eq!(SlotListView::calculate_slot_opacity_with_center(4, 4), 1.0); // center
+        assert_eq!(SlotListView::calculate_slot_opacity_with_center(3, 4), 0.8); // one away
+        assert_eq!(SlotListView::calculate_slot_opacity_with_center(5, 4), 0.8); // one away
+        assert_eq!(SlotListView::calculate_slot_opacity_with_center(0, 4), 0.2); // four away (clamped)
     }
 
     #[test]

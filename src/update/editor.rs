@@ -170,9 +170,6 @@ impl Nokkvi {
                 }
                 Task::none()
             }
-            // A cancelled drag leaves the buffer untouched (matches the queue's
-            // catch-all no-op for non-drop events).
-            DragEvent::Canceled { .. } => Task::none(),
         }
     }
 
