@@ -711,6 +711,16 @@ impl Nokkvi {
                 {
                     tracing::warn!(" [SETTINGS] Failed to write light_mode to config.toml: {e}");
                 }
+                // `handle_player_settings_loaded` already rebuilt the cached
+                // entries this frame — but against the OLD atomic (it re-reads
+                // config.toml from BEFORE the write above), consuming the
+                // dirty flag. Rebuild here against the just-flipped atomic so
+                // the Mode row and the `dark.`/`light.` palette key prefixes
+                // track the new mode — same pattern as the chrome-menu path
+                // (`handle_toggle_light_mode`). The config write is
+                // watcher-suppressed, so no reload fixes this up later.
+                self.settings_page.config_dirty = true;
+                self.refresh_settings_entries_if_dirty();
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
             SettingsSideEffect::Toast { level, message } => {

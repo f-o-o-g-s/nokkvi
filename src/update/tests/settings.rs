@@ -1233,3 +1233,64 @@ fn toggle_light_mode_marks_settings_dirty_when_not_on_settings() {
     let _ = app.update(crate::app_message::Message::ToggleLightMode);
     assert_eq!(crate::theme::is_light_mode(), prior);
 }
+
+#[test]
+fn light_mode_write_rebuilds_cached_entries_against_new_atomic() {
+    let _guard = LIGHT_MODE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let prior_atomic = crate::theme::is_light_mode();
+    let prior_config = crate::theme_config::load_light_mode_from_config();
+
+    // Baseline: Dark in both the atomic and config.toml so the Theme-tab
+    // entries are built (and later re-read) from a known mode. The start
+    // view was applied long before the user reached Settings — without
+    // this, `handle_player_settings_loaded` would yank `current_view` back
+    // to the start view mid-test.
+    let mut app = test_app();
+    app.start_view_applied = true;
+    let _ = app.dispatch_settings_side_effect(SettingsSideEffect::SetLightModeAtomic(false));
+    app.settings_page.active_category = crate::views::settings::SettingsTab::Theme;
+    let _ = app.handle_switch_view(crate::View::Settings);
+    match cached_setting_value(&app, "general.light_mode") {
+        crate::views::settings::items::SettingValue::Enum { val, .. } => {
+            assert_eq!(val, "Dark", "baseline Mode row must show Dark");
+        }
+        other => panic!("general.light_mode must be an Enum entry, got {other:?}"),
+    }
+
+    // Replicate the synchronous order inside `handle_settings_general` for a
+    // Theme-tab `general.light_mode = Light` write: the dispatch table's
+    // setter is a no-op, `handle_player_settings_loaded` runs FIRST (it
+    // re-reads the still-Dark config.toml into the atomic and rebuilds the
+    // cached entries), and only THEN does the `SetLightModeAtomic` side
+    // effect flip the atomic + persist config.toml.
+    let p = app.settings.clone();
+    let _ = app.handle_player_settings_loaded(p);
+    let _ = app.dispatch_settings_side_effect(SettingsSideEffect::SetLightModeAtomic(true));
+
+    match cached_setting_value(&app, "general.light_mode") {
+        crate::views::settings::items::SettingValue::Enum { val, .. } => {
+            assert_eq!(
+                val, "Light",
+                "the cached Mode row must reflect the just-flipped light-mode atomic"
+            );
+        }
+        other => panic!("general.light_mode must be an Enum entry, got {other:?}"),
+    }
+    // Stale entries also bake the wrong palette prefix into every theme
+    // color row, silently routing color edits to the previous mode's
+    // [dark]/[light] section.
+    assert!(
+        app.settings_page.cached_entries.iter().any(|e| matches!(
+            e,
+            crate::views::settings::items::SettingsEntry::Item(item)
+                if item.key.starts_with("light.")
+        )),
+        "theme color rows must carry the new mode's `light.` key prefix"
+    );
+
+    // Restore both the persisted config value and the global atomic.
+    let _ = app.dispatch_settings_side_effect(SettingsSideEffect::SetLightModeAtomic(prior_config));
+    crate::theme::set_light_mode(prior_atomic);
+}
