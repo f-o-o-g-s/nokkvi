@@ -40,21 +40,12 @@ impl From<Playlist> for PlaylistUIViewData {
 }
 
 impl From<&Playlist> for PlaylistUIViewData {
+    /// Delegates to the by-value impl (the single source of truth for this
+    /// projection) at the cost of cloning the whole source `Playlist`,
+    /// including fields the projection drops (`size`, `owner_id`,
+    /// `created_at`).
     fn from(playlist: &Playlist) -> Self {
-        let searchable_lower =
-            crate::utils::search::build_searchable_lower(&[&playlist.name, &playlist.comment]);
-        Self {
-            id: playlist.id.clone(),
-            name: playlist.name.clone(),
-            comment: playlist.comment.clone(),
-            duration: playlist.duration,
-            song_count: playlist.song_count,
-            owner_name: playlist.owner_name.clone(),
-            public: playlist.public,
-            updated_at: playlist.updated_at.clone(),
-            artwork_album_ids: Vec::new(),
-            searchable_lower,
-        }
+        Self::from(playlist.clone())
     }
 }
 
@@ -71,5 +62,43 @@ impl crate::types::collage_artwork::CollageArtworkItem for PlaylistUIViewData {
 
     fn artwork_album_ids(&self) -> &[String] {
         &self.artwork_album_ids
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins the by-ref impl as a pure delegation to the by-value impl —
+    /// the two projections must stay field-identical.
+    #[test]
+    fn from_ref_matches_from_value() {
+        let playlist = Playlist {
+            id: "pl-1".to_owned(),
+            name: "Road Trip".to_owned(),
+            comment: "windows down".to_owned(),
+            duration: 5421.5,
+            size: 123_456_789,
+            song_count: 31,
+            owner_name: "foogs".to_owned(),
+            owner_id: "user-9".to_owned(),
+            public: true,
+            created_at: "2026-01-02T03:04:05Z".to_owned(),
+            updated_at: "2026-06-07T08:09:10Z".to_owned(),
+        };
+
+        let by_ref = PlaylistUIViewData::from(&playlist);
+        let by_value = PlaylistUIViewData::from(playlist.clone());
+
+        assert_eq!(by_ref.id, by_value.id);
+        assert_eq!(by_ref.name, by_value.name);
+        assert_eq!(by_ref.comment, by_value.comment);
+        assert_eq!(by_ref.duration, by_value.duration);
+        assert_eq!(by_ref.song_count, by_value.song_count);
+        assert_eq!(by_ref.owner_name, by_value.owner_name);
+        assert_eq!(by_ref.public, by_value.public);
+        assert_eq!(by_ref.updated_at, by_value.updated_at);
+        assert_eq!(by_ref.artwork_album_ids, by_value.artwork_album_ids);
+        assert_eq!(by_ref.searchable_lower, by_value.searchable_lower);
     }
 }
