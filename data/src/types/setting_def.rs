@@ -576,11 +576,11 @@ macro_rules! define_settings_build_item_arm {
 /// crate's test module asserts the column counts match so a column added on
 /// one side without the other surfaces as a test failure.
 ///
-/// All declared fields must be `bool` on `TomlSettings`,
-/// `PersistedPlayerSettings`, and `LivePlayerSettings` — i.e. the
-/// per-view-column toggles. The macro relies on identical field names across
-/// all three types, which is the case today for every `<view>_show_<column>`
-/// field.
+/// All declared fields must be `bool` fields on the canonical
+/// [`ViewColumns`][crate::types::view_columns::ViewColumns] struct, which
+/// `TomlSettings`, `PersistedPlayerSettings`, and `LivePlayerSettings` each
+/// embed as a `view_columns` member (serde-flattened on the two wire-format
+/// structs so every `<view>_show_<column>` key stays flat on disk).
 ///
 /// # Example
 ///
@@ -618,7 +618,7 @@ macro_rules! define_view_column_toml_helpers {
             p: &mut $crate::types::settings::PersistedPlayerSettings,
         ) {
             $(
-                p.$field = ts.$field;
+                p.view_columns.$field = ts.view_columns.$field;
             )*
         }
 
@@ -631,7 +631,7 @@ macro_rules! define_view_column_toml_helpers {
             out: &mut $crate::types::player_settings::LivePlayerSettings,
         ) {
             $(
-                out.$field = src.$field;
+                out.view_columns.$field = src.view_columns.$field;
             )*
         }
 
@@ -644,7 +644,7 @@ macro_rules! define_view_column_toml_helpers {
             ts: &mut $crate::types::toml_settings::TomlSettings,
         ) {
             $(
-                ts.$field = ps.$field;
+                ts.view_columns.$field = ps.view_columns.$field;
             )*
         }
     };

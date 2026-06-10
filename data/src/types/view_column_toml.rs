@@ -15,9 +15,10 @@
 //! bottom of this file assert that adding a column on one side without the
 //! other surfaces as a test failure rather than a silent drop.
 //!
-//! Field naming is mechanical: `<view>_show_<column>`. Every TOML field, every
-//! redb-backed `PersistedPlayerSettings` field, and every UI-facing
-//! `LivePlayerSettings` field share the same name.
+//! Field naming is mechanical: `<view>_show_<column>`. All three structs
+//! embed the canonical [`ViewColumns`][crate::types::view_columns::ViewColumns]
+//! struct as a `view_columns` member (serde-flattened on the two wire-format
+//! structs), so the helpers copy `*.view_columns.<field>` across.
 //!
 //! `queue_show_genre` and `songs_show_genre` are declared here even though
 //! they are currently missing from the hand-written `apply_toml_settings_to_internal`
@@ -164,65 +165,73 @@ pub(crate) const VIEW_COLUMN_COUNTS: &[(&str, usize)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{settings::PersistedPlayerSettings, toml_settings::TomlSettings};
+    use crate::types::{
+        settings::PersistedPlayerSettings, toml_settings::TomlSettings, view_columns::ViewColumns,
+    };
 
     /// Round-trip Bool: set TOML→ apply → set internal → dump → confirm UI
     /// receives the flipped value for every declared Albums column.
     #[test]
     fn albums_columns_round_trip_through_apply_then_dump() {
         let ts = TomlSettings {
-            albums_show_select: true,
-            albums_show_index: false,
-            albums_show_thumbnail: false,
-            albums_show_stars: true,
-            albums_show_songcount: false,
-            albums_show_plays: true,
-            albums_show_love: false,
+            view_columns: ViewColumns {
+                albums_show_select: true,
+                albums_show_index: false,
+                albums_show_thumbnail: false,
+                albums_show_stars: true,
+                albums_show_songcount: false,
+                albums_show_plays: true,
+                albums_show_love: false,
+                ..ViewColumns::default()
+            },
             ..TomlSettings::default()
         };
         let mut p = PersistedPlayerSettings::default();
         apply_toml_albums_columns(&ts, &mut p);
-        assert!(p.albums_show_select);
-        assert!(!p.albums_show_index);
-        assert!(!p.albums_show_thumbnail);
-        assert!(p.albums_show_stars);
-        assert!(!p.albums_show_songcount);
-        assert!(p.albums_show_plays);
-        assert!(!p.albums_show_love);
+        assert!(p.view_columns.albums_show_select);
+        assert!(!p.view_columns.albums_show_index);
+        assert!(!p.view_columns.albums_show_thumbnail);
+        assert!(p.view_columns.albums_show_stars);
+        assert!(!p.view_columns.albums_show_songcount);
+        assert!(p.view_columns.albums_show_plays);
+        assert!(!p.view_columns.albums_show_love);
 
         let mut out = crate::types::player_settings::LivePlayerSettings::default();
         dump_albums_columns_to_player(&p, &mut out);
-        assert!(out.albums_show_select);
-        assert!(!out.albums_show_index);
-        assert!(!out.albums_show_thumbnail);
-        assert!(out.albums_show_stars);
-        assert!(!out.albums_show_songcount);
-        assert!(out.albums_show_plays);
-        assert!(!out.albums_show_love);
+        assert!(out.view_columns.albums_show_select);
+        assert!(!out.view_columns.albums_show_index);
+        assert!(!out.view_columns.albums_show_thumbnail);
+        assert!(out.view_columns.albums_show_stars);
+        assert!(!out.view_columns.albums_show_songcount);
+        assert!(out.view_columns.albums_show_plays);
+        assert!(!out.view_columns.albums_show_love);
     }
 
     /// Write direction: UI→ TOML for every declared Albums column.
     #[test]
     fn albums_columns_write_back_to_toml() {
         let ps = crate::types::player_settings::LivePlayerSettings {
-            albums_show_select: true,
-            albums_show_index: false,
-            albums_show_thumbnail: false,
-            albums_show_stars: true,
-            albums_show_songcount: false,
-            albums_show_plays: true,
-            albums_show_love: false,
+            view_columns: ViewColumns {
+                albums_show_select: true,
+                albums_show_index: false,
+                albums_show_thumbnail: false,
+                albums_show_stars: true,
+                albums_show_songcount: false,
+                albums_show_plays: true,
+                albums_show_love: false,
+                ..ViewColumns::default()
+            },
             ..Default::default()
         };
         let mut ts = TomlSettings::default();
         write_albums_columns_to_toml(&ps, &mut ts);
-        assert!(ts.albums_show_select);
-        assert!(!ts.albums_show_index);
-        assert!(!ts.albums_show_thumbnail);
-        assert!(ts.albums_show_stars);
-        assert!(!ts.albums_show_songcount);
-        assert!(ts.albums_show_plays);
-        assert!(!ts.albums_show_love);
+        assert!(ts.view_columns.albums_show_select);
+        assert!(!ts.view_columns.albums_show_index);
+        assert!(!ts.view_columns.albums_show_thumbnail);
+        assert!(ts.view_columns.albums_show_stars);
+        assert!(!ts.view_columns.albums_show_songcount);
+        assert!(ts.view_columns.albums_show_plays);
+        assert!(!ts.view_columns.albums_show_love);
     }
 
     /// The two genre columns that today fall on the floor in the hand-written
@@ -232,19 +241,22 @@ mod tests {
     #[test]
     fn queue_and_songs_genre_columns_apply_correctly_via_macro_helpers() {
         let ts = TomlSettings {
-            queue_show_genre: true,
-            songs_show_genre: true,
+            view_columns: ViewColumns {
+                queue_show_genre: true,
+                songs_show_genre: true,
+                ..ViewColumns::default()
+            },
             ..TomlSettings::default()
         };
         let mut p = PersistedPlayerSettings::default();
         apply_toml_queue_columns(&ts, &mut p);
         apply_toml_songs_columns(&ts, &mut p);
         assert!(
-            p.queue_show_genre,
+            p.view_columns.queue_show_genre,
             "queue_show_genre must propagate through the macro-emitted apply"
         );
         assert!(
-            p.songs_show_genre,
+            p.view_columns.songs_show_genre,
             "songs_show_genre must propagate through the macro-emitted apply"
         );
     }
@@ -254,35 +266,41 @@ mod tests {
     #[test]
     fn genres_columns_round_trip() {
         let ts = TomlSettings {
-            genres_show_select: true,
-            genres_show_index: false,
-            genres_show_thumbnail: false,
-            genres_show_albumcount: false,
-            genres_show_songcount: false,
+            view_columns: ViewColumns {
+                genres_show_select: true,
+                genres_show_index: false,
+                genres_show_thumbnail: false,
+                genres_show_albumcount: false,
+                genres_show_songcount: false,
+                ..ViewColumns::default()
+            },
             ..TomlSettings::default()
         };
         let mut p = PersistedPlayerSettings::default();
         apply_toml_genres_columns(&ts, &mut p);
-        assert!(p.genres_show_select);
-        assert!(!p.genres_show_index);
+        assert!(p.view_columns.genres_show_select);
+        assert!(!p.view_columns.genres_show_index);
 
         let mut out = crate::types::player_settings::LivePlayerSettings::default();
         dump_genres_columns_to_player(&p, &mut out);
-        assert!(out.genres_show_select);
-        assert!(!out.genres_show_index);
+        assert!(out.view_columns.genres_show_select);
+        assert!(!out.view_columns.genres_show_index);
 
         let ps = crate::types::player_settings::LivePlayerSettings {
-            genres_show_select: false,
-            genres_show_index: true,
-            genres_show_thumbnail: true,
-            genres_show_albumcount: true,
-            genres_show_songcount: true,
+            view_columns: ViewColumns {
+                genres_show_select: false,
+                genres_show_index: true,
+                genres_show_thumbnail: true,
+                genres_show_albumcount: true,
+                genres_show_songcount: true,
+                ..ViewColumns::default()
+            },
             ..Default::default()
         };
         let mut ts2 = TomlSettings::default();
         write_genres_columns_to_toml(&ps, &mut ts2);
-        assert!(!ts2.genres_show_select);
-        assert!(ts2.genres_show_index);
+        assert!(!ts2.view_columns.genres_show_select);
+        assert!(ts2.view_columns.genres_show_index);
     }
 
     /// Parity sanity-check: each declared view in `VIEW_COLUMN_COUNTS` has

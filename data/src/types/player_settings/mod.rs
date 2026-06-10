@@ -169,91 +169,12 @@ pub struct LivePlayerSettings {
     /// Whether to suppress the toast notification shown on Navidrome library-refresh
     /// events. Default false (toasts shown).
     pub suppress_library_refresh_toasts: bool,
-    /// Whether the queue's stars rating column is visible (subject to a
-    /// separate responsive width gate — see queue.rs).
-    pub queue_show_stars: bool,
-    /// Whether the queue's album column is visible.
-    pub queue_show_album: bool,
-    /// Whether the queue's duration column is visible.
-    pub queue_show_duration: bool,
-    /// Whether the queue's love (heart) column is visible.
-    pub queue_show_love: bool,
-    /// Whether the queue's plays column is visible (default: false).
-    /// Auto-shown when sort = MostPlayed regardless of this toggle.
-    pub queue_show_plays: bool,
-    /// Whether the queue's leading row-index column is visible.
-    pub queue_show_index: bool,
-    /// Whether the queue's leading thumbnail column is visible.
-    pub queue_show_thumbnail: bool,
-    /// Whether the queue's genre is shown stacked under the album in the
-    /// album column slot. Auto-shown when sort = Genre regardless of this
-    /// toggle. Falls into the album slot at album-size font when the album
-    /// column is hidden.
-    pub queue_show_genre: bool,
-    /// Whether the queue's leading multi-select checkbox column is visible.
-    pub queue_show_select: bool,
-
-    // -- Albums view column toggles --
-    pub albums_show_stars: bool,
-    pub albums_show_songcount: bool,
-    pub albums_show_plays: bool,
-    pub albums_show_love: bool,
-    pub albums_show_index: bool,
-    pub albums_show_thumbnail: bool,
-    /// Whether the albums view's leading multi-select checkbox column is visible.
-    pub albums_show_select: bool,
-
-    // -- Songs view column toggles --
-    pub songs_show_stars: bool,
-    pub songs_show_album: bool,
-    pub songs_show_duration: bool,
-    pub songs_show_plays: bool,
-    pub songs_show_love: bool,
-    pub songs_show_index: bool,
-    pub songs_show_thumbnail: bool,
-    /// Genre stacked under album in the album column slot. Auto-shown when
-    /// sort = Genre regardless of this toggle. Replaces the album slot at
-    /// album-size font when the album column is hidden.
-    pub songs_show_genre: bool,
-    /// Whether the songs view's leading multi-select checkbox column is visible.
-    pub songs_show_select: bool,
-
-    // -- Artists view column toggles --
-    pub artists_show_stars: bool,
-    pub artists_show_albumcount: bool,
-    pub artists_show_songcount: bool,
-    pub artists_show_plays: bool,
-    pub artists_show_love: bool,
-    pub artists_show_index: bool,
-    pub artists_show_thumbnail: bool,
-    /// Whether the artists view's leading multi-select checkbox column is visible.
-    pub artists_show_select: bool,
-
-    // -- Genres view column toggles --
-    pub genres_show_index: bool,
-    pub genres_show_thumbnail: bool,
-    pub genres_show_albumcount: bool,
-    pub genres_show_songcount: bool,
-    /// Whether the genres view's leading multi-select checkbox column is visible.
-    pub genres_show_select: bool,
-
-    // -- Playlists view column toggles --
-    pub playlists_show_index: bool,
-    pub playlists_show_thumbnail: bool,
-    pub playlists_show_songcount: bool,
-    pub playlists_show_duration: bool,
-    pub playlists_show_updatedat: bool,
-    /// Whether the playlists view's leading multi-select checkbox column is visible.
-    pub playlists_show_select: bool,
-
-    // -- Similar view column toggles --
-    pub similar_show_index: bool,
-    pub similar_show_thumbnail: bool,
-    pub similar_show_album: bool,
-    pub similar_show_duration: bool,
-    pub similar_show_love: bool,
-    /// Whether the similar view's leading multi-select checkbox column is visible.
-    pub similar_show_select: bool,
+    /// Per-view column-visibility toggles — the canonical
+    /// [`ViewColumns`][crate::types::view_columns::ViewColumns] struct shared
+    /// with `PersistedPlayerSettings` and `TomlSettings`. Its hand-written
+    /// `Default` carries the real shipped column defaults, so this struct's
+    /// derived `Default` no longer zeroes the columns.
+    pub view_columns: crate::types::view_columns::ViewColumns,
 
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.

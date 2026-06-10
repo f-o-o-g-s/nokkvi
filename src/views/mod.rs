@@ -379,7 +379,8 @@ macro_rules! define_view_columns {
     // `=> $setter` maps each variant to its `SettingsManager` method name and
     // emits `impl ColumnPersist` so `Nokkvi::persist_column_visibility` can
     // dispatch without per-view boilerplate. `@ $settings_field` names the
-    // matching `LivePlayerSettings` bool field so the macro can also emit the
+    // matching `ViewColumns` bool field (read via `settings.view_columns`)
+    // so the macro can also emit the
     // READ path (`restore_from`) in lockstep with the WRITE path — there is no
     // `paste` dep to derive the field by stripping `set_` from `$setter`, so the
     // field name is passed explicitly and verified by the persist→restore
@@ -417,7 +418,7 @@ macro_rules! define_view_columns {
             pub fn restore_from(
                 settings: &nokkvi_data::types::player_settings::LivePlayerSettings,
             ) -> Self {
-                Self { $( $field: settings.$settings_field ),* }
+                Self { $( $field: settings.view_columns.$settings_field ),* }
             }
         }
     };

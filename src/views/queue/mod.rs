@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn queue_column_visibility_restore_from_reads_settings() {
-        use nokkvi_data::types::player_settings::LivePlayerSettings;
+        use nokkvi_data::types::{player_settings::LivePlayerSettings, view_columns::ViewColumns};
 
         // Alternating true/false by declaration order so every ADJACENT pair of
         // fields differs. `restore_from` must map each `LivePlayerSettings` field
@@ -340,27 +340,30 @@ mod tests {
         // (the realistic drift — duplicating a neighbor) would read a value that
         // differs from the expected one and trip the matching assert below.
         let settings = LivePlayerSettings {
-            queue_show_select: true,
-            queue_show_index: false,
-            queue_show_thumbnail: true,
-            queue_show_stars: false,
-            queue_show_album: true,
-            queue_show_duration: false,
-            queue_show_love: true,
-            queue_show_plays: false,
-            queue_show_genre: true,
+            view_columns: ViewColumns {
+                queue_show_select: true,
+                queue_show_index: false,
+                queue_show_thumbnail: true,
+                queue_show_stars: false,
+                queue_show_album: true,
+                queue_show_duration: false,
+                queue_show_love: true,
+                queue_show_plays: false,
+                queue_show_genre: true,
+                ..ViewColumns::default()
+            },
             ..Default::default()
         };
 
         let v = QueueColumnVisibility::restore_from(&settings);
-        assert_eq!(v.select, settings.queue_show_select);
-        assert_eq!(v.index, settings.queue_show_index);
-        assert_eq!(v.thumbnail, settings.queue_show_thumbnail);
-        assert_eq!(v.stars, settings.queue_show_stars);
-        assert_eq!(v.album, settings.queue_show_album);
-        assert_eq!(v.duration, settings.queue_show_duration);
-        assert_eq!(v.love, settings.queue_show_love);
-        assert_eq!(v.plays, settings.queue_show_plays);
-        assert_eq!(v.genre, settings.queue_show_genre);
+        assert_eq!(v.select, settings.view_columns.queue_show_select);
+        assert_eq!(v.index, settings.view_columns.queue_show_index);
+        assert_eq!(v.thumbnail, settings.view_columns.queue_show_thumbnail);
+        assert_eq!(v.stars, settings.view_columns.queue_show_stars);
+        assert_eq!(v.album, settings.view_columns.queue_show_album);
+        assert_eq!(v.duration, settings.view_columns.queue_show_duration);
+        assert_eq!(v.love, settings.view_columns.queue_show_love);
+        assert_eq!(v.plays, settings.view_columns.queue_show_plays);
+        assert_eq!(v.genre, settings.view_columns.queue_show_genre);
     }
 }

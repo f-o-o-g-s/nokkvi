@@ -291,11 +291,16 @@ mod tests {
 
     #[test]
     fn sparse_settings_roundtrip_preserves_nondefault_and_restores_default() {
-        use crate::types::{player_settings::StripSeparator, toml_settings::TomlSettings};
+        use crate::types::{
+            player_settings::StripSeparator, toml_settings::TomlSettings, view_columns::ViewColumns,
+        };
         let s = TomlSettings {
-            crossfade_duration_secs: 10,          // default 7
-            light_mode: true,                     // default false
-            queue_show_album: false,              // default true
+            crossfade_duration_secs: 10, // default 7
+            light_mode: true,            // default false
+            view_columns: ViewColumns {
+                queue_show_album: false, // default true
+                ..ViewColumns::default()
+            },
             strip_separator: StripSeparator::Dot, // default Slash
             ..TomlSettings::default()
         };

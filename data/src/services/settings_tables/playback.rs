@@ -294,36 +294,36 @@ define_settings! {
         // setters and apply lines exist — declaring them here moves the
         // apply-side assignments under the macro's compile-time check.
         QueueShowStars {
-            key: "general.queue_show_stars",
+            key: "general.view_columns.queue_show_stars",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_queue_show_stars(v),
-            toml_apply: |ts, p| p.queue_show_stars = ts.queue_show_stars,
-            read: |src, out| out.queue_show_stars = src.queue_show_stars,
-            write: |ps, ts| ts.queue_show_stars = ps.queue_show_stars,
+            toml_apply: |ts, p| p.view_columns.queue_show_stars = ts.view_columns.queue_show_stars,
+            read: |src, out| out.view_columns.queue_show_stars = src.view_columns.queue_show_stars,
+            write: |ps, ts| ts.view_columns.queue_show_stars = ps.view_columns.queue_show_stars,
         },
         QueueShowAlbum {
-            key: "general.queue_show_album",
+            key: "general.view_columns.queue_show_album",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_queue_show_album(v),
-            toml_apply: |ts, p| p.queue_show_album = ts.queue_show_album,
-            read: |src, out| out.queue_show_album = src.queue_show_album,
-            write: |ps, ts| ts.queue_show_album = ps.queue_show_album,
+            toml_apply: |ts, p| p.view_columns.queue_show_album = ts.view_columns.queue_show_album,
+            read: |src, out| out.view_columns.queue_show_album = src.view_columns.queue_show_album,
+            write: |ps, ts| ts.view_columns.queue_show_album = ps.view_columns.queue_show_album,
         },
         QueueShowDuration {
-            key: "general.queue_show_duration",
+            key: "general.view_columns.queue_show_duration",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_queue_show_duration(v),
-            toml_apply: |ts, p| p.queue_show_duration = ts.queue_show_duration,
-            read: |src, out| out.queue_show_duration = src.queue_show_duration,
-            write: |ps, ts| ts.queue_show_duration = ps.queue_show_duration,
+            toml_apply: |ts, p| p.view_columns.queue_show_duration = ts.view_columns.queue_show_duration,
+            read: |src, out| out.view_columns.queue_show_duration = src.view_columns.queue_show_duration,
+            write: |ps, ts| ts.view_columns.queue_show_duration = ps.view_columns.queue_show_duration,
         },
         QueueShowLove {
-            key: "general.queue_show_love",
+            key: "general.view_columns.queue_show_love",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_queue_show_love(v),
-            toml_apply: |ts, p| p.queue_show_love = ts.queue_show_love,
-            read: |src, out| out.queue_show_love = src.queue_show_love,
-            write: |ps, ts| ts.queue_show_love = ps.queue_show_love,
+            toml_apply: |ts, p| p.view_columns.queue_show_love = ts.view_columns.queue_show_love,
+            read: |src, out| out.view_columns.queue_show_love = src.view_columns.queue_show_love,
+            write: |ps, ts| ts.view_columns.queue_show_love = ps.view_columns.queue_show_love,
         },
 
         // -- Theme tab top scalars (Bool) ------------------------------------
@@ -441,7 +441,9 @@ mod tests {
         assert!(tab_playback_contains("general.scrobble_threshold"));
         assert!(tab_playback_contains("general.opacity_gradient"));
         assert!(tab_playback_contains("general.rounded_mode"));
-        assert!(tab_playback_contains("general.queue_show_stars"));
+        assert!(tab_playback_contains(
+            "general.view_columns.queue_show_stars"
+        ));
         assert!(!tab_playback_contains("general.light_mode"));
         assert!(!tab_playback_contains("general.stable_viewport"));
     }
@@ -593,7 +595,7 @@ mod tests {
         ts.normalization_level = NormalizationLevel::Loud;
         ts.opacity_gradient = false;
         ts.rounded_mode = RoundedMode::On;
-        ts.queue_show_stars = false;
+        ts.view_columns.queue_show_stars = false;
 
         let mut p = PersistedPlayerSettings::default();
         apply_toml_playback_tab(&ts, &mut p);
@@ -609,7 +611,7 @@ mod tests {
         assert_eq!(p.normalization_level, NormalizationLevel::Loud);
         assert!(!p.opacity_gradient);
         assert_eq!(p.rounded_mode, RoundedMode::On);
-        assert!(!p.queue_show_stars);
+        assert!(!p.view_columns.queue_show_stars);
     }
 
     /// Read-side: `dump_playback_tab_player_settings` mirrors migrated fields
@@ -629,7 +631,7 @@ mod tests {
         src.normalization_level = NormalizationLevel::Loud;
         src.opacity_gradient = false;
         src.rounded_mode = RoundedMode::On;
-        src.queue_show_stars = false;
+        src.view_columns.queue_show_stars = false;
         src.scrobble_threshold = 0.75;
 
         dump_playback_tab_player_settings(&src, &mut ui);
@@ -645,7 +647,7 @@ mod tests {
         assert_eq!(ui.normalization_level, NormalizationLevel::Loud);
         assert!(!ui.opacity_gradient);
         assert_eq!(ui.rounded_mode, RoundedMode::On);
-        assert!(!ui.queue_show_stars);
+        assert!(!ui.view_columns.queue_show_stars);
         assert!((ui.scrobble_threshold - 0.75_f32).abs() < f32::EPSILON);
     }
 
@@ -669,10 +671,10 @@ mod tests {
         ps.normalization_level = NormalizationLevel::Loud;
         ps.opacity_gradient = false;
         ps.rounded_mode = RoundedMode::On;
-        ps.queue_show_stars = false;
-        ps.queue_show_album = false;
-        ps.queue_show_duration = false;
-        ps.queue_show_love = false;
+        ps.view_columns.queue_show_stars = false;
+        ps.view_columns.queue_show_album = false;
+        ps.view_columns.queue_show_duration = false;
+        ps.view_columns.queue_show_love = false;
         ps.scrobble_threshold = 0.75;
         ps.quick_add_to_playlist = true;
         ps.queue_show_default_playlist = true;
@@ -695,10 +697,10 @@ mod tests {
         assert_eq!(ts.normalization_level, NormalizationLevel::Loud);
         assert!(!ts.opacity_gradient);
         assert_eq!(ts.rounded_mode, RoundedMode::On);
-        assert!(!ts.queue_show_stars);
-        assert!(!ts.queue_show_album);
-        assert!(!ts.queue_show_duration);
-        assert!(!ts.queue_show_love);
+        assert!(!ts.view_columns.queue_show_stars);
+        assert!(!ts.view_columns.queue_show_album);
+        assert!(!ts.view_columns.queue_show_duration);
+        assert!(!ts.view_columns.queue_show_love);
         assert!((ts.scrobble_threshold - 0.75).abs() < f32::EPSILON);
         assert!(ts.quick_add_to_playlist);
         assert!(ts.queue_show_default_playlist);

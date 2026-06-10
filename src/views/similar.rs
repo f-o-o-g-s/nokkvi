@@ -814,27 +814,30 @@ mod tests {
 
     #[test]
     fn similar_column_visibility_restore_from_reads_settings() {
-        use nokkvi_data::types::player_settings::LivePlayerSettings;
+        use nokkvi_data::types::{player_settings::LivePlayerSettings, view_columns::ViewColumns};
 
         // Mirror of the queue round-trip test for the smallest WITH-setter
         // invocation. Alternating true/false by declaration order so adjacent
         // fields differ — pins the `@ settings_field` token mapping for Similar.
         let settings = LivePlayerSettings {
-            similar_show_select: true,
-            similar_show_index: false,
-            similar_show_thumbnail: true,
-            similar_show_album: false,
-            similar_show_duration: true,
-            similar_show_love: false,
+            view_columns: ViewColumns {
+                similar_show_select: true,
+                similar_show_index: false,
+                similar_show_thumbnail: true,
+                similar_show_album: false,
+                similar_show_duration: true,
+                similar_show_love: false,
+                ..ViewColumns::default()
+            },
             ..Default::default()
         };
 
         let v = SimilarColumnVisibility::restore_from(&settings);
-        assert_eq!(v.select, settings.similar_show_select);
-        assert_eq!(v.index, settings.similar_show_index);
-        assert_eq!(v.thumbnail, settings.similar_show_thumbnail);
-        assert_eq!(v.album, settings.similar_show_album);
-        assert_eq!(v.duration, settings.similar_show_duration);
-        assert_eq!(v.love, settings.similar_show_love);
+        assert_eq!(v.select, settings.view_columns.similar_show_select);
+        assert_eq!(v.index, settings.view_columns.similar_show_index);
+        assert_eq!(v.thumbnail, settings.view_columns.similar_show_thumbnail);
+        assert_eq!(v.album, settings.view_columns.similar_show_album);
+        assert_eq!(v.duration, settings.view_columns.similar_show_duration);
+        assert_eq!(v.love, settings.view_columns.similar_show_love);
     }
 }

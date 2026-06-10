@@ -41,6 +41,7 @@ pub mod toast;
 pub mod toml_settings;
 pub mod toml_views;
 pub mod view_column_toml;
+pub mod view_columns;
 pub mod view_preferences;
 
 pub use accessors::{HasId, Named};

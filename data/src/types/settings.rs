@@ -14,6 +14,7 @@ use crate::{
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
         sort_mode::SortMode,
+        view_columns::ViewColumns,
     },
 };
 
@@ -232,176 +233,13 @@ pub struct PersistedPlayerSettings {
     /// emits a library-refresh event (default: true = toasts suppressed).
     #[serde(default)]
     pub suppress_library_refresh_toasts: bool,
-    /// Whether the queue's stars rating column is visible (default: true).
-    /// Subject to a separate responsive width gate — see queue.rs.
-    #[serde(default = "default_true")]
-    pub queue_show_stars: bool,
-    /// Whether the queue's album column is visible (default: true).
-    #[serde(default = "default_true")]
-    pub queue_show_album: bool,
-    /// Whether the queue's duration column is visible (default: true).
-    #[serde(default = "default_true")]
-    pub queue_show_duration: bool,
-    /// Whether the queue's love (heart) column is visible (default: true).
-    #[serde(default = "default_true")]
-    pub queue_show_love: bool,
-    /// Whether the queue's plays column is visible (default: false).
-    /// When sort = MostPlayed, the column auto-shows regardless of this toggle.
-    #[serde(default)]
-    pub queue_show_plays: bool,
-    /// Whether the queue's leading row-index column is visible (default: true).
-    #[serde(default = "default_true")]
-    pub queue_show_index: bool,
-    /// Whether the queue's leading thumbnail column is visible (default: true).
-    #[serde(default = "default_true")]
-    pub queue_show_thumbnail: bool,
-    /// Whether the queue's genre is shown stacked under the album in the
-    /// album column slot (default: false). When sort = Genre, the genre
-    /// auto-shows regardless of this toggle. When the album column is
-    /// hidden, the genre takes its slot at album-size font.
-    #[serde(default)]
-    pub queue_show_genre: bool,
-    /// Leading multi-select checkbox column (default: false).
-    #[serde(default)]
-    pub queue_show_select: bool,
-
-    // -- Albums view column toggles --
-    /// Stars column. Auto-shows when sort = Rating regardless of toggle.
-    #[serde(default)]
-    pub albums_show_stars: bool,
-    /// Song count column.
-    #[serde(default = "default_true")]
-    pub albums_show_songcount: bool,
-    /// Plays column. Auto-shows when sort = MostPlayed regardless of toggle.
-    #[serde(default)]
-    pub albums_show_plays: bool,
-    /// Heart (favorite) column.
-    #[serde(default = "default_true")]
-    pub albums_show_love: bool,
-    /// Leading row-index column.
-    #[serde(default = "default_true")]
-    pub albums_show_index: bool,
-    /// Leading thumbnail column.
-    #[serde(default = "default_true")]
-    pub albums_show_thumbnail: bool,
-    /// Leading multi-select checkbox column (default: false).
-    #[serde(default)]
-    pub albums_show_select: bool,
-
-    // -- Songs view column toggles --
-    /// Stars column. Auto-shows when sort = Rating regardless of toggle.
-    #[serde(default)]
-    pub songs_show_stars: bool,
-    /// Album column.
-    #[serde(default = "default_true")]
-    pub songs_show_album: bool,
-    /// Duration column.
-    #[serde(default = "default_true")]
-    pub songs_show_duration: bool,
-    /// Plays column. Auto-shows when sort = MostPlayed regardless of toggle.
-    #[serde(default)]
-    pub songs_show_plays: bool,
-    /// Heart (favorite) column.
-    #[serde(default = "default_true")]
-    pub songs_show_love: bool,
-    /// Leading row-index column.
-    #[serde(default = "default_true")]
-    pub songs_show_index: bool,
-    /// Leading thumbnail column.
-    #[serde(default = "default_true")]
-    pub songs_show_thumbnail: bool,
-    /// Genre stacked under album in the album column slot. Auto-shows when
-    /// sort = Genre regardless of toggle. Replaces the album slot at
-    /// album-size font when the album column is hidden.
-    #[serde(default)]
-    pub songs_show_genre: bool,
-    /// Leading multi-select checkbox column (default: false).
-    #[serde(default)]
-    pub songs_show_select: bool,
-
-    // -- Artists view column toggles --
-    /// Stars column. Auto-shows when sort = Rating regardless of toggle.
-    #[serde(default = "default_true")]
-    pub artists_show_stars: bool,
-    /// Album count column.
-    #[serde(default = "default_true")]
-    pub artists_show_albumcount: bool,
-    /// Song count column.
-    #[serde(default = "default_true")]
-    pub artists_show_songcount: bool,
-    /// Plays column. Auto-shows when sort = MostPlayed regardless of toggle.
-    #[serde(default = "default_true")]
-    pub artists_show_plays: bool,
-    /// Heart (favorite) column.
-    #[serde(default = "default_true")]
-    pub artists_show_love: bool,
-    /// Leading row-index column.
-    #[serde(default = "default_true")]
-    pub artists_show_index: bool,
-    /// Leading thumbnail column.
-    #[serde(default = "default_true")]
-    pub artists_show_thumbnail: bool,
-    /// Leading multi-select checkbox column (default: false).
-    #[serde(default)]
-    pub artists_show_select: bool,
-
-    // -- Genres view column toggles --
-    /// Leading row-index column.
-    #[serde(default = "default_true")]
-    pub genres_show_index: bool,
-    /// Thumbnail column on parent genre rows; also drives whether nested
-    /// child album rows in the genre→album expansion render their artwork.
-    #[serde(default = "default_true")]
-    pub genres_show_thumbnail: bool,
-    /// Album-count column.
-    #[serde(default = "default_true")]
-    pub genres_show_albumcount: bool,
-    /// Song-count column.
-    #[serde(default = "default_true")]
-    pub genres_show_songcount: bool,
-    /// Leading multi-select checkbox column (default: false).
-    #[serde(default)]
-    pub genres_show_select: bool,
-
-    // -- Playlists view column toggles --
-    /// Leading row-index column.
-    #[serde(default = "default_true")]
-    pub playlists_show_index: bool,
-    /// Leading thumbnail column.
-    #[serde(default = "default_true")]
-    pub playlists_show_thumbnail: bool,
-    /// Song-count column. Auto-shows when sort = SongCount regardless of toggle.
-    #[serde(default)]
-    pub playlists_show_songcount: bool,
-    /// Duration column. Auto-shows when sort = Duration regardless of toggle.
-    #[serde(default)]
-    pub playlists_show_duration: bool,
-    /// Updated-at column. Auto-shows when sort = UpdatedAt regardless of toggle.
-    #[serde(default)]
-    pub playlists_show_updatedat: bool,
-    /// Leading multi-select checkbox column (default: false).
-    #[serde(default)]
-    pub playlists_show_select: bool,
-
-    // -- Similar view column toggles (Find Similar / Top Songs results) --
-    /// Leading row-index column.
-    #[serde(default = "default_true")]
-    pub similar_show_index: bool,
-    /// Leading thumbnail column.
-    #[serde(default = "default_true")]
-    pub similar_show_thumbnail: bool,
-    /// Album column.
-    #[serde(default = "default_true")]
-    pub similar_show_album: bool,
-    /// Duration column.
-    #[serde(default = "default_true")]
-    pub similar_show_duration: bool,
-    /// Heart (favorite) column.
-    #[serde(default = "default_true")]
-    pub similar_show_love: bool,
-    /// Leading multi-select checkbox column (default: false).
-    #[serde(default)]
-    pub similar_show_select: bool,
+    /// Per-view column-visibility toggles — flattened so every
+    /// `<view>_show_<col>` key stays a TOP-LEVEL key on the persisted JSON
+    /// wire (pinned by `persisted_column_keys_stay_flat_on_the_json_wire`).
+    /// Missing keys fill from `ViewColumns::default()` — the single source
+    /// of truth for the shipped column defaults.
+    #[serde(flatten)]
+    pub view_columns: ViewColumns,
 
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
@@ -585,56 +423,7 @@ impl Default for PersistedPlayerSettings {
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: default_true(),
             suppress_library_refresh_toasts: true,
-            queue_show_stars: true,
-            queue_show_album: true,
-            queue_show_duration: true,
-            queue_show_love: true,
-            queue_show_plays: false,
-            queue_show_index: true,
-            queue_show_thumbnail: true,
-            queue_show_genre: false,
-            queue_show_select: false,
-            albums_show_stars: false,
-            albums_show_songcount: true,
-            albums_show_plays: false,
-            albums_show_love: true,
-            albums_show_index: true,
-            albums_show_thumbnail: true,
-            albums_show_select: false,
-            songs_show_stars: false,
-            songs_show_album: true,
-            songs_show_duration: true,
-            songs_show_plays: false,
-            songs_show_love: true,
-            songs_show_index: true,
-            songs_show_thumbnail: true,
-            songs_show_genre: false,
-            songs_show_select: false,
-            artists_show_stars: true,
-            artists_show_albumcount: true,
-            artists_show_songcount: true,
-            artists_show_plays: true,
-            artists_show_love: true,
-            artists_show_index: true,
-            artists_show_thumbnail: true,
-            artists_show_select: false,
-            genres_show_index: true,
-            genres_show_thumbnail: true,
-            genres_show_albumcount: true,
-            genres_show_songcount: true,
-            genres_show_select: false,
-            playlists_show_index: true,
-            playlists_show_thumbnail: true,
-            playlists_show_songcount: false,
-            playlists_show_duration: false,
-            playlists_show_updatedat: false,
-            playlists_show_select: false,
-            similar_show_index: true,
-            similar_show_thumbnail: true,
-            similar_show_album: true,
-            similar_show_duration: true,
-            similar_show_love: true,
-            similar_show_select: false,
+            view_columns: ViewColumns::default(),
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,

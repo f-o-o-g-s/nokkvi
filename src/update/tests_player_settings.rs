@@ -25,9 +25,10 @@ use crate::test_helpers::*;
 fn nokkvi_default_preserves_pre_substruct_field_values() {
     // Pins the pre-consolidation default values for the 18 mirror fields.
     //
-    // `LivePlayerSettings` derives `Default`, which would zero every field
-    // (scrobbling_enabled=false, scrobble_threshold=0.0, start_view="",
-    // stable_viewport=false, auto_follow_playing=false). Before the
+    // `LivePlayerSettings` derives `Default`, which zeroes every scalar
+    // field (scrobbling_enabled=false, scrobble_threshold=0.0, start_view="",
+    // stable_viewport=false, auto_follow_playing=false; the nested
+    // view_columns carries real defaults via ViewColumns). Before the
     // substruct refactor these five were hand-defaulted to non-zero
     // values on `Nokkvi`. `Nokkvi::default()` now restores them via
     // struct-update syntax; this test prevents that restoration from

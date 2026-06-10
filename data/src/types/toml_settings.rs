@@ -8,11 +8,14 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
     audio::eq::{CustomEqPreset, EQ_BAND_COUNT},
-    types::player_settings::{
-        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
-        EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
-        RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TrackInfoDisplay,
-        VisualizationMode, VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
+    types::{
+        player_settings::{
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
+            EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
+            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TrackInfoDisplay,
+            VisualizationMode, VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
+        },
+        view_columns::ViewColumns,
     },
 };
 
@@ -33,97 +36,13 @@ pub struct TomlSettings {
     pub artwork_resolution: ArtworkResolution,
     pub show_album_artists_only: bool,
     pub suppress_library_refresh_toasts: bool,
-    pub queue_show_stars: bool,
-    pub queue_show_album: bool,
-    pub queue_show_duration: bool,
-    pub queue_show_love: bool,
-    #[serde(default)]
-    pub queue_show_plays: bool,
-    #[serde(default = "default_true")]
-    pub queue_show_index: bool,
-    #[serde(default = "default_true")]
-    pub queue_show_thumbnail: bool,
-    #[serde(default)]
-    pub queue_show_genre: bool,
-    #[serde(default)]
-    pub queue_show_select: bool,
-
-    pub albums_show_stars: bool,
-    pub albums_show_songcount: bool,
-    pub albums_show_plays: bool,
-    pub albums_show_love: bool,
-    #[serde(default = "default_true")]
-    pub albums_show_index: bool,
-    #[serde(default = "default_true")]
-    pub albums_show_thumbnail: bool,
-    #[serde(default)]
-    pub albums_show_select: bool,
-
-    pub songs_show_stars: bool,
-    pub songs_show_album: bool,
-    pub songs_show_duration: bool,
-    pub songs_show_plays: bool,
-    pub songs_show_love: bool,
-    #[serde(default = "default_true")]
-    pub songs_show_index: bool,
-    #[serde(default = "default_true")]
-    pub songs_show_thumbnail: bool,
-    #[serde(default)]
-    pub songs_show_genre: bool,
-    #[serde(default)]
-    pub songs_show_select: bool,
-
-    pub artists_show_stars: bool,
-    pub artists_show_albumcount: bool,
-    pub artists_show_songcount: bool,
-    pub artists_show_plays: bool,
-    pub artists_show_love: bool,
-    #[serde(default = "default_true")]
-    pub artists_show_index: bool,
-    #[serde(default = "default_true")]
-    pub artists_show_thumbnail: bool,
-    #[serde(default)]
-    pub artists_show_select: bool,
-
-    // -- Genres view column toggles --
-    #[serde(default = "default_true")]
-    pub genres_show_index: bool,
-    #[serde(default = "default_true")]
-    pub genres_show_thumbnail: bool,
-    #[serde(default = "default_true")]
-    pub genres_show_albumcount: bool,
-    #[serde(default = "default_true")]
-    pub genres_show_songcount: bool,
-    #[serde(default)]
-    pub genres_show_select: bool,
-
-    // -- Playlists view column toggles --
-    #[serde(default = "default_true")]
-    pub playlists_show_index: bool,
-    #[serde(default = "default_true")]
-    pub playlists_show_thumbnail: bool,
-    #[serde(default)]
-    pub playlists_show_songcount: bool,
-    #[serde(default)]
-    pub playlists_show_duration: bool,
-    #[serde(default)]
-    pub playlists_show_updatedat: bool,
-    #[serde(default)]
-    pub playlists_show_select: bool,
-
-    // -- Similar view column toggles (Find Similar / Top Songs results) --
-    #[serde(default = "default_true")]
-    pub similar_show_index: bool,
-    #[serde(default = "default_true")]
-    pub similar_show_thumbnail: bool,
-    #[serde(default = "default_true")]
-    pub similar_show_album: bool,
-    #[serde(default = "default_true")]
-    pub similar_show_duration: bool,
-    #[serde(default = "default_true")]
-    pub similar_show_love: bool,
-    #[serde(default)]
-    pub similar_show_select: bool,
+    /// Per-view column-visibility toggles — flattened so every
+    /// `<view>_show_<col>` key stays a TOP-LEVEL `[settings]` key (pinned by
+    /// `toml_column_keys_stay_flat_on_the_toml_wire`). Missing keys fill from
+    /// `ViewColumns::default()` — the single source of truth for the shipped
+    /// column defaults.
+    #[serde(flatten)]
+    pub view_columns: ViewColumns,
 
     // -- Per-view artwork text overlay toggles --
     pub albums_artwork_overlay: bool,
@@ -310,56 +229,7 @@ impl Default for TomlSettings {
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: true,
             suppress_library_refresh_toasts: true,
-            queue_show_stars: true,
-            queue_show_album: true,
-            queue_show_duration: true,
-            queue_show_love: true,
-            queue_show_plays: false,
-            queue_show_index: true,
-            queue_show_thumbnail: true,
-            queue_show_genre: false,
-            queue_show_select: false,
-            albums_show_stars: false,
-            albums_show_songcount: true,
-            albums_show_plays: false,
-            albums_show_love: true,
-            albums_show_index: true,
-            albums_show_thumbnail: true,
-            albums_show_select: false,
-            songs_show_stars: false,
-            songs_show_album: true,
-            songs_show_duration: true,
-            songs_show_plays: false,
-            songs_show_love: true,
-            songs_show_index: true,
-            songs_show_thumbnail: true,
-            songs_show_genre: false,
-            songs_show_select: false,
-            artists_show_stars: true,
-            artists_show_albumcount: true,
-            artists_show_songcount: true,
-            artists_show_plays: true,
-            artists_show_love: true,
-            artists_show_index: true,
-            artists_show_thumbnail: true,
-            artists_show_select: false,
-            genres_show_index: true,
-            genres_show_thumbnail: true,
-            genres_show_albumcount: true,
-            genres_show_songcount: true,
-            genres_show_select: false,
-            playlists_show_index: true,
-            playlists_show_thumbnail: true,
-            playlists_show_songcount: false,
-            playlists_show_duration: false,
-            playlists_show_updatedat: false,
-            playlists_show_select: false,
-            similar_show_index: true,
-            similar_show_thumbnail: true,
-            similar_show_album: true,
-            similar_show_duration: true,
-            similar_show_love: true,
-            similar_show_select: false,
+            view_columns: ViewColumns::default(),
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
@@ -582,91 +452,100 @@ mod tests {
     #[test]
     fn toml_roundtrip_queue_column_visibility() {
         let settings = TomlSettings {
-            queue_show_stars: false,
-            queue_show_album: true,
-            queue_show_duration: false,
-            queue_show_love: false,
-            queue_show_plays: true,
+            view_columns: ViewColumns {
+                queue_show_stars: false,
+                queue_show_album: true,
+                queue_show_duration: false,
+                queue_show_love: false,
+                queue_show_plays: true,
+                ..ViewColumns::default()
+            },
             ..TomlSettings::default()
         };
 
         let toml_str = toml::to_string_pretty(&settings).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
-        assert!(!parsed.queue_show_stars);
-        assert!(parsed.queue_show_album);
-        assert!(!parsed.queue_show_duration);
-        assert!(!parsed.queue_show_love);
-        assert!(parsed.queue_show_plays);
+        assert!(!parsed.view_columns.queue_show_stars);
+        assert!(parsed.view_columns.queue_show_album);
+        assert!(!parsed.view_columns.queue_show_duration);
+        assert!(!parsed.view_columns.queue_show_love);
+        assert!(parsed.view_columns.queue_show_plays);
     }
 
     #[test]
     fn toml_queue_show_plays_default_is_off() {
         let settings = TomlSettings::default();
-        assert!(!settings.queue_show_plays);
+        assert!(!settings.view_columns.queue_show_plays);
     }
 
     #[test]
     fn toml_show_genre_defaults_are_off() {
         let s = TomlSettings::default();
-        assert!(!s.queue_show_genre);
-        assert!(!s.songs_show_genre);
+        assert!(!s.view_columns.queue_show_genre);
+        assert!(!s.view_columns.songs_show_genre);
     }
 
     #[test]
     fn toml_show_genre_roundtrips() {
         let s = TomlSettings {
-            queue_show_genre: true,
-            songs_show_genre: true,
+            view_columns: ViewColumns {
+                queue_show_genre: true,
+                songs_show_genre: true,
+                ..ViewColumns::default()
+            },
             ..TomlSettings::default()
         };
         let toml_str = toml::to_string_pretty(&s).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
-        assert!(parsed.queue_show_genre);
-        assert!(parsed.songs_show_genre);
+        assert!(parsed.view_columns.queue_show_genre);
+        assert!(parsed.view_columns.songs_show_genre);
     }
 
     #[test]
     fn toml_view_column_defaults_preserve_today_behavior() {
         let s = TomlSettings::default();
         // Albums: stars + plays opt-in (today only show on their sort modes).
-        assert!(!s.albums_show_stars);
-        assert!(s.albums_show_songcount);
-        assert!(!s.albums_show_plays);
-        assert!(s.albums_show_love);
+        assert!(!s.view_columns.albums_show_stars);
+        assert!(s.view_columns.albums_show_songcount);
+        assert!(!s.view_columns.albums_show_plays);
+        assert!(s.view_columns.albums_show_love);
         // Songs: same opt-in pattern.
-        assert!(!s.songs_show_stars);
-        assert!(s.songs_show_album);
-        assert!(s.songs_show_duration);
-        assert!(!s.songs_show_plays);
-        assert!(s.songs_show_love);
+        assert!(!s.view_columns.songs_show_stars);
+        assert!(s.view_columns.songs_show_album);
+        assert!(s.view_columns.songs_show_duration);
+        assert!(!s.view_columns.songs_show_plays);
+        assert!(s.view_columns.songs_show_love);
         // Artists: everything on (today's permanent layout).
-        assert!(s.artists_show_stars);
-        assert!(s.artists_show_albumcount);
-        assert!(s.artists_show_songcount);
-        assert!(s.artists_show_plays);
-        assert!(s.artists_show_love);
+        assert!(s.view_columns.artists_show_stars);
+        assert!(s.view_columns.artists_show_albumcount);
+        assert!(s.view_columns.artists_show_songcount);
+        assert!(s.view_columns.artists_show_plays);
+        assert!(s.view_columns.artists_show_love);
     }
 
     #[test]
     fn toml_roundtrip_view_column_visibility() {
         let s = TomlSettings {
-            albums_show_stars: true,
-            albums_show_plays: true,
-            songs_show_stars: true,
-            songs_show_album: false,
-            artists_show_plays: false,
-            artists_show_love: false,
+            view_columns: ViewColumns {
+                albums_show_stars: true,
+                albums_show_plays: true,
+                songs_show_stars: true,
+                songs_show_album: false,
+                artists_show_plays: false,
+                artists_show_love: false,
+                ..ViewColumns::default()
+            },
             ..TomlSettings::default()
         };
 
         let toml_str = toml::to_string_pretty(&s).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
-        assert!(parsed.albums_show_stars);
-        assert!(parsed.albums_show_plays);
-        assert!(parsed.songs_show_stars);
-        assert!(!parsed.songs_show_album);
-        assert!(!parsed.artists_show_plays);
-        assert!(!parsed.artists_show_love);
+        assert!(parsed.view_columns.albums_show_stars);
+        assert!(parsed.view_columns.albums_show_plays);
+        assert!(parsed.view_columns.songs_show_stars);
+        assert!(!parsed.view_columns.songs_show_album);
+        assert!(!parsed.view_columns.artists_show_plays);
+        assert!(!parsed.view_columns.artists_show_love);
     }
 
     /// True for the 50 per-view column-visibility keys (`<view>_show_<col>`).

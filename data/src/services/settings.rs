@@ -553,252 +553,252 @@ impl SettingsManager {
     }
 
     pub fn set_queue_show_stars(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_stars = enabled;
+        self.settings.player.view_columns.queue_show_stars = enabled;
         self.save()
     }
 
     pub fn set_queue_show_album(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_album = enabled;
+        self.settings.player.view_columns.queue_show_album = enabled;
         self.save()
     }
 
     pub fn set_queue_show_duration(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_duration = enabled;
+        self.settings.player.view_columns.queue_show_duration = enabled;
         self.save()
     }
 
     pub fn set_queue_show_love(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_love = enabled;
+        self.settings.player.view_columns.queue_show_love = enabled;
         self.save()
     }
 
     pub fn set_queue_show_plays(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_plays = enabled;
+        self.settings.player.view_columns.queue_show_plays = enabled;
         self.save()
     }
 
     pub fn set_queue_show_index(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_index = enabled;
+        self.settings.player.view_columns.queue_show_index = enabled;
         self.save()
     }
 
     pub fn set_queue_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_thumbnail = enabled;
+        self.settings.player.view_columns.queue_show_thumbnail = enabled;
         self.save()
     }
 
     pub fn set_queue_show_genre(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_genre = enabled;
+        self.settings.player.view_columns.queue_show_genre = enabled;
         self.save()
     }
 
     pub fn set_queue_show_select(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.queue_show_select = enabled;
+        self.settings.player.view_columns.queue_show_select = enabled;
         self.save()
     }
 
     pub fn set_albums_show_stars(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.albums_show_stars = enabled;
+        self.settings.player.view_columns.albums_show_stars = enabled;
         self.save()
     }
 
     pub fn set_albums_show_songcount(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.albums_show_songcount = enabled;
+        self.settings.player.view_columns.albums_show_songcount = enabled;
         self.save()
     }
 
     pub fn set_albums_show_plays(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.albums_show_plays = enabled;
+        self.settings.player.view_columns.albums_show_plays = enabled;
         self.save()
     }
 
     pub fn set_albums_show_love(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.albums_show_love = enabled;
+        self.settings.player.view_columns.albums_show_love = enabled;
         self.save()
     }
 
     pub fn set_albums_show_index(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.albums_show_index = enabled;
+        self.settings.player.view_columns.albums_show_index = enabled;
         self.save()
     }
 
     pub fn set_albums_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.albums_show_thumbnail = enabled;
+        self.settings.player.view_columns.albums_show_thumbnail = enabled;
         self.save()
     }
 
     pub fn set_albums_show_select(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.albums_show_select = enabled;
+        self.settings.player.view_columns.albums_show_select = enabled;
         self.save()
     }
 
     pub fn set_songs_show_stars(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_stars = enabled;
+        self.settings.player.view_columns.songs_show_stars = enabled;
         self.save()
     }
 
     pub fn set_songs_show_album(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_album = enabled;
+        self.settings.player.view_columns.songs_show_album = enabled;
         self.save()
     }
 
     pub fn set_songs_show_duration(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_duration = enabled;
+        self.settings.player.view_columns.songs_show_duration = enabled;
         self.save()
     }
 
     pub fn set_songs_show_plays(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_plays = enabled;
+        self.settings.player.view_columns.songs_show_plays = enabled;
         self.save()
     }
 
     pub fn set_songs_show_love(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_love = enabled;
+        self.settings.player.view_columns.songs_show_love = enabled;
         self.save()
     }
 
     pub fn set_songs_show_index(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_index = enabled;
+        self.settings.player.view_columns.songs_show_index = enabled;
         self.save()
     }
 
     pub fn set_songs_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_thumbnail = enabled;
+        self.settings.player.view_columns.songs_show_thumbnail = enabled;
         self.save()
     }
 
     pub fn set_songs_show_genre(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_genre = enabled;
+        self.settings.player.view_columns.songs_show_genre = enabled;
         self.save()
     }
 
     pub fn set_songs_show_select(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.songs_show_select = enabled;
+        self.settings.player.view_columns.songs_show_select = enabled;
         self.save()
     }
 
     pub fn set_artists_show_stars(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_stars = enabled;
+        self.settings.player.view_columns.artists_show_stars = enabled;
         self.save()
     }
 
     pub fn set_artists_show_albumcount(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_albumcount = enabled;
+        self.settings.player.view_columns.artists_show_albumcount = enabled;
         self.save()
     }
 
     pub fn set_artists_show_songcount(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_songcount = enabled;
+        self.settings.player.view_columns.artists_show_songcount = enabled;
         self.save()
     }
 
     pub fn set_artists_show_plays(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_plays = enabled;
+        self.settings.player.view_columns.artists_show_plays = enabled;
         self.save()
     }
 
     pub fn set_artists_show_love(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_love = enabled;
+        self.settings.player.view_columns.artists_show_love = enabled;
         self.save()
     }
 
     pub fn set_artists_show_index(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_index = enabled;
+        self.settings.player.view_columns.artists_show_index = enabled;
         self.save()
     }
 
     pub fn set_artists_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_thumbnail = enabled;
+        self.settings.player.view_columns.artists_show_thumbnail = enabled;
         self.save()
     }
 
     pub fn set_artists_show_select(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.artists_show_select = enabled;
+        self.settings.player.view_columns.artists_show_select = enabled;
         self.save()
     }
 
     pub fn set_genres_show_index(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.genres_show_index = enabled;
+        self.settings.player.view_columns.genres_show_index = enabled;
         self.save()
     }
 
     pub fn set_genres_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.genres_show_thumbnail = enabled;
+        self.settings.player.view_columns.genres_show_thumbnail = enabled;
         self.save()
     }
 
     pub fn set_genres_show_albumcount(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.genres_show_albumcount = enabled;
+        self.settings.player.view_columns.genres_show_albumcount = enabled;
         self.save()
     }
 
     pub fn set_genres_show_songcount(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.genres_show_songcount = enabled;
+        self.settings.player.view_columns.genres_show_songcount = enabled;
         self.save()
     }
 
     pub fn set_genres_show_select(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.genres_show_select = enabled;
+        self.settings.player.view_columns.genres_show_select = enabled;
         self.save()
     }
 
     pub fn set_playlists_show_index(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.playlists_show_index = enabled;
+        self.settings.player.view_columns.playlists_show_index = enabled;
         self.save()
     }
 
     pub fn set_playlists_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.playlists_show_thumbnail = enabled;
+        self.settings.player.view_columns.playlists_show_thumbnail = enabled;
         self.save()
     }
 
     pub fn set_playlists_show_songcount(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.playlists_show_songcount = enabled;
+        self.settings.player.view_columns.playlists_show_songcount = enabled;
         self.save()
     }
 
     pub fn set_playlists_show_duration(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.playlists_show_duration = enabled;
+        self.settings.player.view_columns.playlists_show_duration = enabled;
         self.save()
     }
 
     pub fn set_playlists_show_updatedat(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.playlists_show_updatedat = enabled;
+        self.settings.player.view_columns.playlists_show_updatedat = enabled;
         self.save()
     }
 
     pub fn set_playlists_show_select(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.playlists_show_select = enabled;
+        self.settings.player.view_columns.playlists_show_select = enabled;
         self.save()
     }
 
     pub fn set_similar_show_index(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.similar_show_index = enabled;
+        self.settings.player.view_columns.similar_show_index = enabled;
         self.save()
     }
 
     pub fn set_similar_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.similar_show_thumbnail = enabled;
+        self.settings.player.view_columns.similar_show_thumbnail = enabled;
         self.save()
     }
 
     pub fn set_similar_show_album(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.similar_show_album = enabled;
+        self.settings.player.view_columns.similar_show_album = enabled;
         self.save()
     }
 
     pub fn set_similar_show_duration(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.similar_show_duration = enabled;
+        self.settings.player.view_columns.similar_show_duration = enabled;
         self.save()
     }
 
     pub fn set_similar_show_love(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.similar_show_love = enabled;
+        self.settings.player.view_columns.similar_show_love = enabled;
         self.save()
     }
 
     pub fn set_similar_show_select(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.similar_show_select = enabled;
+        self.settings.player.view_columns.similar_show_select = enabled;
         self.save()
     }
 
@@ -1258,69 +1258,74 @@ mod sentinel_roundtrip_tests {
             show_album_artists_only: false,                  // default true
             suppress_library_refresh_toasts: true,           // default false
 
-            // Queue columns
-            queue_show_stars: false,     // default true
-            queue_show_album: false,     // default true
-            queue_show_duration: false,  // default true
-            queue_show_love: false,      // default true
-            queue_show_plays: true,      // default false
-            queue_show_index: false,     // default true
-            queue_show_thumbnail: false, // default true
-            queue_show_genre: true,      // default false
-            queue_show_select: true,     // default false
+            // Per-view columns — nested exhaustive literal (no
+            // `..Default::default()`) so a new column added to `ViewColumns`
+            // surfaces here as a missing-initializer compile error too.
+            view_columns: crate::types::view_columns::ViewColumns {
+                // Queue columns
+                queue_show_stars: false,     // default true
+                queue_show_album: false,     // default true
+                queue_show_duration: false,  // default true
+                queue_show_love: false,      // default true
+                queue_show_plays: true,      // default false
+                queue_show_index: false,     // default true
+                queue_show_thumbnail: false, // default true
+                queue_show_genre: true,      // default false
+                queue_show_select: true,     // default false
 
-            // Albums columns
-            albums_show_stars: true,      // default false
-            albums_show_songcount: false, // default true
-            albums_show_plays: true,      // default false
-            albums_show_love: false,      // default true
-            albums_show_index: false,     // default true
-            albums_show_thumbnail: false, // default true
-            albums_show_select: true,     // default false
+                // Albums columns
+                albums_show_stars: true,      // default false
+                albums_show_songcount: false, // default true
+                albums_show_plays: true,      // default false
+                albums_show_love: false,      // default true
+                albums_show_index: false,     // default true
+                albums_show_thumbnail: false, // default true
+                albums_show_select: true,     // default false
 
-            // Songs columns
-            songs_show_stars: true,      // default false
-            songs_show_album: false,     // default true
-            songs_show_duration: false,  // default true
-            songs_show_plays: true,      // default false
-            songs_show_love: false,      // default true
-            songs_show_index: false,     // default true
-            songs_show_thumbnail: false, // default true
-            songs_show_genre: true,      // default false
-            songs_show_select: true,     // default false
+                // Songs columns
+                songs_show_stars: true,      // default false
+                songs_show_album: false,     // default true
+                songs_show_duration: false,  // default true
+                songs_show_plays: true,      // default false
+                songs_show_love: false,      // default true
+                songs_show_index: false,     // default true
+                songs_show_thumbnail: false, // default true
+                songs_show_genre: true,      // default false
+                songs_show_select: true,     // default false
 
-            // Artists columns
-            artists_show_stars: false,      // default true
-            artists_show_albumcount: false, // default true
-            artists_show_songcount: false,  // default true
-            artists_show_plays: false,      // default true
-            artists_show_love: false,       // default true
-            artists_show_index: false,      // default true
-            artists_show_thumbnail: false,  // default true
-            artists_show_select: true,      // default false
+                // Artists columns
+                artists_show_stars: false,      // default true
+                artists_show_albumcount: false, // default true
+                artists_show_songcount: false,  // default true
+                artists_show_plays: false,      // default true
+                artists_show_love: false,       // default true
+                artists_show_index: false,      // default true
+                artists_show_thumbnail: false,  // default true
+                artists_show_select: true,      // default false
 
-            // Genres columns
-            genres_show_index: false,      // default true
-            genres_show_thumbnail: false,  // default true
-            genres_show_albumcount: false, // default true
-            genres_show_songcount: false,  // default true
-            genres_show_select: true,      // default false
+                // Genres columns
+                genres_show_index: false,      // default true
+                genres_show_thumbnail: false,  // default true
+                genres_show_albumcount: false, // default true
+                genres_show_songcount: false,  // default true
+                genres_show_select: true,      // default false
 
-            // Playlists columns
-            playlists_show_index: false,     // default true
-            playlists_show_thumbnail: false, // default true
-            playlists_show_songcount: true,  // default false
-            playlists_show_duration: true,   // default false
-            playlists_show_updatedat: true,  // default false
-            playlists_show_select: true,     // default false
+                // Playlists columns
+                playlists_show_index: false,     // default true
+                playlists_show_thumbnail: false, // default true
+                playlists_show_songcount: true,  // default false
+                playlists_show_duration: true,   // default false
+                playlists_show_updatedat: true,  // default false
+                playlists_show_select: true,     // default false
 
-            // Similar columns
-            similar_show_index: false,     // default true
-            similar_show_thumbnail: false, // default true
-            similar_show_album: false,     // default true
-            similar_show_duration: false,  // default true
-            similar_show_love: false,      // default true
-            similar_show_select: true,     // default false
+                // Similar columns
+                similar_show_index: false,     // default true
+                similar_show_thumbnail: false, // default true
+                similar_show_album: false,     // default true
+                similar_show_duration: false,  // default true
+                similar_show_love: false,      // default true
+                similar_show_select: true,     // default false
+            },
 
             // Per-view artwork overlay
             albums_artwork_overlay: false,    // default true
@@ -1532,13 +1537,34 @@ mod sentinel_roundtrip_tests {
         );
 
         // Queue columns
-        assert_eq!(ui_ps1.queue_show_stars, ui_ps2.queue_show_stars);
-        assert_eq!(ui_ps1.queue_show_album, ui_ps2.queue_show_album);
-        assert_eq!(ui_ps1.queue_show_duration, ui_ps2.queue_show_duration);
-        assert_eq!(ui_ps1.queue_show_love, ui_ps2.queue_show_love);
-        assert_eq!(ui_ps1.queue_show_plays, ui_ps2.queue_show_plays);
-        assert_eq!(ui_ps1.queue_show_index, ui_ps2.queue_show_index);
-        assert_eq!(ui_ps1.queue_show_thumbnail, ui_ps2.queue_show_thumbnail);
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_stars,
+            ui_ps2.view_columns.queue_show_stars
+        );
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_album,
+            ui_ps2.view_columns.queue_show_album
+        );
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_duration,
+            ui_ps2.view_columns.queue_show_duration
+        );
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_love,
+            ui_ps2.view_columns.queue_show_love
+        );
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_plays,
+            ui_ps2.view_columns.queue_show_plays
+        );
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_index,
+            ui_ps2.view_columns.queue_show_index
+        );
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_thumbnail,
+            ui_ps2.view_columns.queue_show_thumbnail
+        );
         // queue_show_genre was silently dropped on apply prior to commit 5
         // (the field ships in TomlSettings with serde wiring but was missing
         // from both the hand-written apply body and every per-tab macro
@@ -1547,32 +1573,77 @@ mod sentinel_roundtrip_tests {
         // is the fold-in: it now requires a real round-trip rather than
         // pinning the buggy default-snap-back behavior.
         assert!(
-            ui_ps1.queue_show_genre,
+            ui_ps1.view_columns.queue_show_genre,
             "sentinel sets queue_show_genre=true"
         );
         assert_eq!(
-            ui_ps1.queue_show_genre, ui_ps2.queue_show_genre,
+            ui_ps1.view_columns.queue_show_genre, ui_ps2.view_columns.queue_show_genre,
             "queue_show_genre must round-trip through TOML→internal apply",
         );
-        assert_eq!(ui_ps1.queue_show_select, ui_ps2.queue_show_select);
+        assert_eq!(
+            ui_ps1.view_columns.queue_show_select,
+            ui_ps2.view_columns.queue_show_select
+        );
 
         // Albums columns
-        assert_eq!(ui_ps1.albums_show_stars, ui_ps2.albums_show_stars);
-        assert_eq!(ui_ps1.albums_show_songcount, ui_ps2.albums_show_songcount);
-        assert_eq!(ui_ps1.albums_show_plays, ui_ps2.albums_show_plays);
-        assert_eq!(ui_ps1.albums_show_love, ui_ps2.albums_show_love);
-        assert_eq!(ui_ps1.albums_show_index, ui_ps2.albums_show_index);
-        assert_eq!(ui_ps1.albums_show_thumbnail, ui_ps2.albums_show_thumbnail);
-        assert_eq!(ui_ps1.albums_show_select, ui_ps2.albums_show_select);
+        assert_eq!(
+            ui_ps1.view_columns.albums_show_stars,
+            ui_ps2.view_columns.albums_show_stars
+        );
+        assert_eq!(
+            ui_ps1.view_columns.albums_show_songcount,
+            ui_ps2.view_columns.albums_show_songcount
+        );
+        assert_eq!(
+            ui_ps1.view_columns.albums_show_plays,
+            ui_ps2.view_columns.albums_show_plays
+        );
+        assert_eq!(
+            ui_ps1.view_columns.albums_show_love,
+            ui_ps2.view_columns.albums_show_love
+        );
+        assert_eq!(
+            ui_ps1.view_columns.albums_show_index,
+            ui_ps2.view_columns.albums_show_index
+        );
+        assert_eq!(
+            ui_ps1.view_columns.albums_show_thumbnail,
+            ui_ps2.view_columns.albums_show_thumbnail
+        );
+        assert_eq!(
+            ui_ps1.view_columns.albums_show_select,
+            ui_ps2.view_columns.albums_show_select
+        );
 
         // Songs columns
-        assert_eq!(ui_ps1.songs_show_stars, ui_ps2.songs_show_stars);
-        assert_eq!(ui_ps1.songs_show_album, ui_ps2.songs_show_album);
-        assert_eq!(ui_ps1.songs_show_duration, ui_ps2.songs_show_duration);
-        assert_eq!(ui_ps1.songs_show_plays, ui_ps2.songs_show_plays);
-        assert_eq!(ui_ps1.songs_show_love, ui_ps2.songs_show_love);
-        assert_eq!(ui_ps1.songs_show_index, ui_ps2.songs_show_index);
-        assert_eq!(ui_ps1.songs_show_thumbnail, ui_ps2.songs_show_thumbnail);
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_stars,
+            ui_ps2.view_columns.songs_show_stars
+        );
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_album,
+            ui_ps2.view_columns.songs_show_album
+        );
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_duration,
+            ui_ps2.view_columns.songs_show_duration
+        );
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_plays,
+            ui_ps2.view_columns.songs_show_plays
+        );
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_love,
+            ui_ps2.view_columns.songs_show_love
+        );
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_index,
+            ui_ps2.view_columns.songs_show_index
+        );
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_thumbnail,
+            ui_ps2.view_columns.songs_show_thumbnail
+        );
         // songs_show_genre was silently dropped on apply prior to commit 5
         // (same shape as queue_show_genre — the field ships in TomlSettings
         // with serde wiring but was missing from both the hand-written apply
@@ -1580,62 +1651,125 @@ mod sentinel_roundtrip_tests {
         // picks it up through the songs-columns helpers. Fold-in: real
         // round-trip assertion instead of the buggy-default pin.
         assert!(
-            ui_ps1.songs_show_genre,
+            ui_ps1.view_columns.songs_show_genre,
             "sentinel sets songs_show_genre=true"
         );
         assert_eq!(
-            ui_ps1.songs_show_genre, ui_ps2.songs_show_genre,
+            ui_ps1.view_columns.songs_show_genre, ui_ps2.view_columns.songs_show_genre,
             "songs_show_genre must round-trip through TOML→internal apply",
         );
-        assert_eq!(ui_ps1.songs_show_select, ui_ps2.songs_show_select);
+        assert_eq!(
+            ui_ps1.view_columns.songs_show_select,
+            ui_ps2.view_columns.songs_show_select
+        );
 
         // Artists columns
-        assert_eq!(ui_ps1.artists_show_stars, ui_ps2.artists_show_stars);
         assert_eq!(
-            ui_ps1.artists_show_albumcount,
-            ui_ps2.artists_show_albumcount
+            ui_ps1.view_columns.artists_show_stars,
+            ui_ps2.view_columns.artists_show_stars
         );
-        assert_eq!(ui_ps1.artists_show_songcount, ui_ps2.artists_show_songcount);
-        assert_eq!(ui_ps1.artists_show_plays, ui_ps2.artists_show_plays);
-        assert_eq!(ui_ps1.artists_show_love, ui_ps2.artists_show_love);
-        assert_eq!(ui_ps1.artists_show_index, ui_ps2.artists_show_index);
-        assert_eq!(ui_ps1.artists_show_thumbnail, ui_ps2.artists_show_thumbnail);
-        assert_eq!(ui_ps1.artists_show_select, ui_ps2.artists_show_select);
+        assert_eq!(
+            ui_ps1.view_columns.artists_show_albumcount,
+            ui_ps2.view_columns.artists_show_albumcount
+        );
+        assert_eq!(
+            ui_ps1.view_columns.artists_show_songcount,
+            ui_ps2.view_columns.artists_show_songcount
+        );
+        assert_eq!(
+            ui_ps1.view_columns.artists_show_plays,
+            ui_ps2.view_columns.artists_show_plays
+        );
+        assert_eq!(
+            ui_ps1.view_columns.artists_show_love,
+            ui_ps2.view_columns.artists_show_love
+        );
+        assert_eq!(
+            ui_ps1.view_columns.artists_show_index,
+            ui_ps2.view_columns.artists_show_index
+        );
+        assert_eq!(
+            ui_ps1.view_columns.artists_show_thumbnail,
+            ui_ps2.view_columns.artists_show_thumbnail
+        );
+        assert_eq!(
+            ui_ps1.view_columns.artists_show_select,
+            ui_ps2.view_columns.artists_show_select
+        );
 
         // Genres columns
-        assert_eq!(ui_ps1.genres_show_index, ui_ps2.genres_show_index);
-        assert_eq!(ui_ps1.genres_show_thumbnail, ui_ps2.genres_show_thumbnail);
-        assert_eq!(ui_ps1.genres_show_albumcount, ui_ps2.genres_show_albumcount);
-        assert_eq!(ui_ps1.genres_show_songcount, ui_ps2.genres_show_songcount);
-        assert_eq!(ui_ps1.genres_show_select, ui_ps2.genres_show_select);
+        assert_eq!(
+            ui_ps1.view_columns.genres_show_index,
+            ui_ps2.view_columns.genres_show_index
+        );
+        assert_eq!(
+            ui_ps1.view_columns.genres_show_thumbnail,
+            ui_ps2.view_columns.genres_show_thumbnail
+        );
+        assert_eq!(
+            ui_ps1.view_columns.genres_show_albumcount,
+            ui_ps2.view_columns.genres_show_albumcount
+        );
+        assert_eq!(
+            ui_ps1.view_columns.genres_show_songcount,
+            ui_ps2.view_columns.genres_show_songcount
+        );
+        assert_eq!(
+            ui_ps1.view_columns.genres_show_select,
+            ui_ps2.view_columns.genres_show_select
+        );
 
         // Playlists columns
-        assert_eq!(ui_ps1.playlists_show_index, ui_ps2.playlists_show_index);
         assert_eq!(
-            ui_ps1.playlists_show_thumbnail,
-            ui_ps2.playlists_show_thumbnail
+            ui_ps1.view_columns.playlists_show_index,
+            ui_ps2.view_columns.playlists_show_index
         );
         assert_eq!(
-            ui_ps1.playlists_show_songcount,
-            ui_ps2.playlists_show_songcount
+            ui_ps1.view_columns.playlists_show_thumbnail,
+            ui_ps2.view_columns.playlists_show_thumbnail
         );
         assert_eq!(
-            ui_ps1.playlists_show_duration,
-            ui_ps2.playlists_show_duration
+            ui_ps1.view_columns.playlists_show_songcount,
+            ui_ps2.view_columns.playlists_show_songcount
         );
         assert_eq!(
-            ui_ps1.playlists_show_updatedat,
-            ui_ps2.playlists_show_updatedat
+            ui_ps1.view_columns.playlists_show_duration,
+            ui_ps2.view_columns.playlists_show_duration
         );
-        assert_eq!(ui_ps1.playlists_show_select, ui_ps2.playlists_show_select);
+        assert_eq!(
+            ui_ps1.view_columns.playlists_show_updatedat,
+            ui_ps2.view_columns.playlists_show_updatedat
+        );
+        assert_eq!(
+            ui_ps1.view_columns.playlists_show_select,
+            ui_ps2.view_columns.playlists_show_select
+        );
 
         // Similar columns
-        assert_eq!(ui_ps1.similar_show_index, ui_ps2.similar_show_index);
-        assert_eq!(ui_ps1.similar_show_thumbnail, ui_ps2.similar_show_thumbnail);
-        assert_eq!(ui_ps1.similar_show_album, ui_ps2.similar_show_album);
-        assert_eq!(ui_ps1.similar_show_duration, ui_ps2.similar_show_duration);
-        assert_eq!(ui_ps1.similar_show_love, ui_ps2.similar_show_love);
-        assert_eq!(ui_ps1.similar_show_select, ui_ps2.similar_show_select);
+        assert_eq!(
+            ui_ps1.view_columns.similar_show_index,
+            ui_ps2.view_columns.similar_show_index
+        );
+        assert_eq!(
+            ui_ps1.view_columns.similar_show_thumbnail,
+            ui_ps2.view_columns.similar_show_thumbnail
+        );
+        assert_eq!(
+            ui_ps1.view_columns.similar_show_album,
+            ui_ps2.view_columns.similar_show_album
+        );
+        assert_eq!(
+            ui_ps1.view_columns.similar_show_duration,
+            ui_ps2.view_columns.similar_show_duration
+        );
+        assert_eq!(
+            ui_ps1.view_columns.similar_show_love,
+            ui_ps2.view_columns.similar_show_love
+        );
+        assert_eq!(
+            ui_ps1.view_columns.similar_show_select,
+            ui_ps2.view_columns.similar_show_select
+        );
 
         // Per-view artwork overlay
         assert_eq!(ui_ps1.albums_artwork_overlay, ui_ps2.albums_artwork_overlay);
@@ -1955,7 +2089,7 @@ name = "sentinel preset"
             "custom_eq_presets[0].name"
         );
         assert_eq!(
-            lhs.queue_show_genre, rhs.queue_show_genre,
+            lhs.view_columns.queue_show_genre, rhs.view_columns.queue_show_genre,
             "queue_show_genre (the silent-drop sentinel)"
         );
         assert_eq!(lhs.artwork_column_mode, rhs.artwork_column_mode);
@@ -1985,7 +2119,7 @@ name = "sentinel preset"
         persisted.start_view = "Albums".to_string();
         persisted.nav_display_mode = NavDisplayMode::IconsOnly;
         persisted.crossfade_duration_secs = 11;
-        persisted.queue_show_select = true;
+        persisted.view_columns.queue_show_select = true;
 
         let (sm, _tmp) = make_test_manager_with_player(persisted);
         let live = sm.get_player_settings();
@@ -2004,7 +2138,7 @@ name = "sentinel preset"
             "Playback tab read: closure must copy crossfade_duration_secs"
         );
         assert!(
-            live.queue_show_select,
+            live.view_columns.queue_show_select,
             "Queue view-column dump must copy queue_show_select"
         );
     }
