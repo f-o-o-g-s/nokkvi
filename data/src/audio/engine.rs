@@ -8,7 +8,10 @@ use parking_lot::Mutex as PlMutex;
 use tracing::{debug, error, trace, warn};
 
 use crate::{
-    audio::{AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration},
+    audio::{
+        AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration,
+        format::samples_for_duration,
+    },
     utils::url_redaction::redact_subsonic_url,
 };
 
@@ -194,7 +197,7 @@ fn compute_watermarks(frame_rate: u32, crossfade_ms: u64) -> (usize, usize) {
         0
     };
     let cushion_ms = CUSHION_MS.max(crossfade_cushion_ms);
-    let high = ((frame_rate as u64 * cushion_ms) / 1000) as usize;
+    let high = samples_for_duration(frame_rate, cushion_ms);
     let low = high / BACKPRESSURE_RELEASE_DIVISOR as usize;
     (high, low)
 }
@@ -791,10 +794,7 @@ impl CustomAudioEngine {
                 let buffer_size = decode_buffer_size(decoder_guard.format());
                 // Cache the stream frame_rate for the next iteration's (pre-lock)
                 // backpressure watermark computation.
-                frame_rate = {
-                    let fmt = decoder_guard.format();
-                    fmt.sample_rate() * fmt.channel_count()
-                };
+                frame_rate = decoder_guard.format().frame_rate();
 
                 // Decode buffer - this is where HTTP I/O happens
                 // CRITICAL: Use block_in_place to prevent blocking the async runtime!
@@ -1746,10 +1746,7 @@ impl CustomAudioEngine {
                 }
 
                 let buffer_size = decode_buffer_size(dec.format());
-                frame_rate = {
-                    let fmt = dec.format();
-                    fmt.sample_rate() * fmt.channel_count()
-                };
+                frame_rate = dec.format().frame_rate();
 
                 let buffer = tokio::task::block_in_place(|| dec.read_buffer(buffer_size));
                 drop(decoder_guard);

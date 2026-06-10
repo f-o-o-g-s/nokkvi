@@ -19,6 +19,7 @@ use tracing::{debug, trace, warn};
 use crate::{
     audio::{
         AudioFormat, NormalizationConfig, NormalizationContext, SourceGeneration,
+        format::samples_for_duration,
         resolve_normalization,
         rodio_output::{ActiveStream, RodioOutput},
         streaming_source::SharedVisualizerCallback,
@@ -125,21 +126,14 @@ const _: () = assert!(
 const _: () = assert!(REBUFFER_RESUME_MS < super::engine::CUSHION_MS);
 const _: () = assert!(REBUFFER_ENTER_MS < REBUFFER_RESUME_MS);
 
-/// Convert a per-stream duration (ms) to an interleaved-sample count at the
-/// stream's `frame_rate` (`sample_rate * channels`). The rebuffer thresholds are
-/// duration-based so they hold a constant TIME budget at any sample rate.
-fn samples_for_ms(frame_rate: u32, ms: u64) -> usize {
-    ((frame_rate as u64 * ms) / 1000) as usize
-}
-
 /// Rebuffer resume target in samples (see [`REBUFFER_RESUME_MS`]).
 fn rebuffer_resume_samples(frame_rate: u32) -> usize {
-    samples_for_ms(frame_rate, REBUFFER_RESUME_MS)
+    samples_for_duration(frame_rate, REBUFFER_RESUME_MS)
 }
 
 /// Rebuffer entry watermark in samples (see [`REBUFFER_ENTER_MS`]).
 fn rebuffer_low_samples(frame_rate: u32) -> usize {
-    samples_for_ms(frame_rate, REBUFFER_ENTER_MS)
+    samples_for_duration(frame_rate, REBUFFER_ENTER_MS)
 }
 
 /// Safety valve: if a finite stream stays drained this many render ticks (~10s at
@@ -1400,7 +1394,7 @@ impl AudioRenderer {
         // try_pop().unwrap_or(0.0) silence in StreamingSource stays as the xrun
         // backstop only. Runs AFTER the crossfade trigger (never fights a fade)
         // and BEFORE the completion gate (never pauses a finishing track). ----
-        let frame_rate = self.format.sample_rate() * self.format.channel_count();
+        let frame_rate = self.format.frame_rate();
         let is_infinite = self.stream_is_infinite.load(Ordering::Acquire);
         let eof = self.decoder_eof.load(Ordering::Acquire);
         let cf_idle = matches!(self.crossfade_state, CrossfadeState::Idle);
