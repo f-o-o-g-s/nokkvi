@@ -376,12 +376,14 @@ where
             if show_love_column {
                 content_row = content_row.push(
                     container({
-                        use crate::widgets::slot_list::slot_list_favorite_icon;
+                        use crate::widgets::slot_list::{
+                            FavoriteIconKind, slot_list_favorite_icon,
+                        };
                         slot_list_favorite_icon(
                             starred,
                             style,
                             icon_size,
-                            "heart",
+                            FavoriteIconKind::Heart,
                             Some(on_event(SongListRowEvent::ToggleLove(ctx.item_index))),
                         )
                     })

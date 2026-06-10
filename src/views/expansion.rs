@@ -413,8 +413,9 @@ use nokkvi_data::utils::formatters;
 use crate::widgets::{
     SlotListPageMessage,
     slot_list::{
-        SLOT_LIST_SLOT_PADDING, SlotListRowContext, child_slot_button, slot_list_favorite_icon,
-        slot_list_labeled_index_column, slot_list_metadata_column, slot_list_text,
+        FavoriteIconKind, SLOT_LIST_SLOT_PADDING, SlotListRowContext, child_slot_button,
+        slot_list_favorite_icon, slot_list_labeled_index_column, slot_list_metadata_column,
+        slot_list_text,
     },
 };
 
@@ -496,7 +497,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
             song.is_starred,
             style,
             star_size,
-            "heart",
+            FavoriteIconKind::Heart,
             on_star_click,
         ))
         .width(Length::FillPortion(5))
@@ -638,7 +639,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
                 album.is_starred,
                 style,
                 star_size,
-                "heart",
+                FavoriteIconKind::Heart,
                 on_star_click,
             ))
             .width(Length::FillPortion(5))

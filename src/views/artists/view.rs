@@ -567,13 +567,13 @@ impl ArtistsPage {
 
         // Heart (Love) column.
         if show_love {
-            use crate::widgets::slot_list::slot_list_favorite_icon;
+            use crate::widgets::slot_list::{FavoriteIconKind, slot_list_favorite_icon};
             content_row = content_row.push(
                 container(slot_list_favorite_icon(
                     is_starred,
                     style,
                     star_size,
-                    "heart",
+                    FavoriteIconKind::Heart,
                     Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
                 ))
                 .width(Length::FillPortion(LOVE_PORTION))

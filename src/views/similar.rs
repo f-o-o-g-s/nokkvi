@@ -510,12 +510,14 @@ impl SimilarPage {
                 if column_visibility.love {
                     content_row = content_row.push(
                         container({
-                            use crate::widgets::slot_list::slot_list_favorite_icon;
+                            use crate::widgets::slot_list::{
+                                FavoriteIconKind, slot_list_favorite_icon,
+                            };
                             slot_list_favorite_icon(
                                 is_starred,
                                 style,
                                 star_size,
-                                "heart",
+                                FavoriteIconKind::Heart,
                                 Some(SimilarMessage::ClickToggleStar(ctx.item_index)),
                             )
                         })

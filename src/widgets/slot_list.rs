@@ -1778,7 +1778,42 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
     }
 }
 
-/// Render a favorite icon (heart or star) for a slot-list row.
+/// Which glyph family `slot_list_favorite_icon` renders.
+///
+/// Every current caller uses `Heart` (the love column); `Star` keeps the
+/// star-glyph recipe available for future single-star favorite columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FavoriteIconKind {
+    Heart,
+    Star,
+}
+
+// Liveness anchor: every production caller currently passes `Heart`, so
+// without this `Star` would trip dead_code under `-D warnings` (pattern
+// matching alone does not count as a use). A `const _` construction keeps
+// the variant — and its exhaustive-match arms — compiling until a real
+// caller arrives.
+const _: FavoriteIconKind = FavoriteIconKind::Star;
+
+impl FavoriteIconKind {
+    /// `(filled, outline)` SVG asset paths for this glyph family.
+    fn icon_paths(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Heart => ("assets/icons/heart-filled.svg", "assets/icons/heart.svg"),
+            Self::Star => ("assets/icons/star-filled.svg", "assets/icons/star.svg"),
+        }
+    }
+
+    /// Brand fill color used when the item is starred.
+    fn fill_color(self) -> Color {
+        match self {
+            Self::Heart => theme::danger_bright(),
+            Self::Star => theme::star_bright(),
+        }
+    }
+}
+
+/// Render a favorite icon for a slot-list row.
 ///
 /// Both color and opacity are derived from `style` so the icon stays in
 /// lockstep with the row's text — empty outlines take the row's forced-legible
@@ -1791,31 +1826,23 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
 /// * `is_starred` - Whether the item is starred/favorited
 /// * `style` - Resolved slot style (drives color + opacity adaptation)
 /// * `icon_size` - Size of the icon in pixels
-/// * `icon_type` - "heart" for songs/queue, "star" for albums
+/// * `kind` - Glyph family (`FavoriteIconKind::Heart` / `Star`)
 /// * `on_click` - Optional message to emit when clicked (toggles starred state)
 pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
     is_starred: bool,
     style: SlotListSlotStyle,
     icon_size: f32,
-    icon_type: &'a str,
+    kind: FavoriteIconKind,
     on_click: Option<Message>,
 ) -> Element<'a, Message> {
     use iced::widget::svg;
 
-    let (filled_icon, empty_icon) = match icon_type {
-        "heart" => ("assets/icons/heart-filled.svg", "assets/icons/heart.svg"),
-        "star" => ("assets/icons/star-filled.svg", "assets/icons/star.svg"),
-        _ => ("assets/icons/heart-filled.svg", "assets/icons/heart.svg"),
-    };
+    let (filled_icon, empty_icon) = kind.icon_paths();
 
     let svg_opacity = style.text_color.a;
 
     let svg_element: Element<'a, Message> = if is_starred {
-        let fill_color = match icon_type {
-            "heart" => theme::danger_bright(),
-            "star" => theme::star_bright(),
-            _ => theme::danger_bright(),
-        };
+        let fill_color = kind.fill_color();
         outlined_svg_icon(
             filled_icon,
             empty_icon,
@@ -2061,6 +2088,18 @@ fn make_slot_button<'a, M: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn favorite_icon_kind_paths_are_paired() {
+        assert_eq!(
+            FavoriteIconKind::Heart.icon_paths(),
+            ("assets/icons/heart-filled.svg", "assets/icons/heart.svg")
+        );
+        assert_eq!(
+            FavoriteIconKind::Star.icon_paths(),
+            ("assets/icons/star-filled.svg", "assets/icons/star.svg")
+        );
+    }
 
     #[test]
     fn star_row_intrinsic_width_sums_stars_and_gaps() {
