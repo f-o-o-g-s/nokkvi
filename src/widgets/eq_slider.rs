@@ -15,6 +15,8 @@ use iced::{
     mouse, touch,
 };
 
+use crate::widgets::slider_drag::{self, Axis, SliderDragState};
+
 const SLIDER_WIDTH: f32 = 20.0;
 const SLIDER_HEIGHT: f32 = 180.0;
 const HANDLE_SIZE: f32 = 14.0;
@@ -25,9 +27,7 @@ const RANGE_DB: f32 = MAX_DB - MIN_DB;
 /// State for eq slider interaction
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct State {
-    is_dragging: bool,
-    drag_gain: f32, // Visual drag position (-15.0 to +15.0)
-    last_published_gain: f32,
+    drag: SliderDragState,
 }
 
 pub struct EqSlider<'a, Message> {
@@ -51,16 +51,14 @@ impl<'a, Message> EqSlider<'a, Message> {
     }
 
     fn locate(&self, cursor_pos: f32, bounds: Rectangle) -> f32 {
-        let effective_height = bounds.height - HANDLE_SIZE;
-        if effective_height <= 0.0 {
-            return self.gain;
-        }
-        let relative_y = cursor_pos - bounds.y - HANDLE_SIZE / 2.0;
-        let pct = (relative_y / effective_height).clamp(0.0, 1.0);
-        let val = MAX_DB - (pct * RANGE_DB);
-
-        // Snap to exactly 0.0 if within +/- 0.5 dB
-        if val.abs() < 0.5 { 0.0 } else { val }
+        slider_drag::project_fraction(cursor_pos, bounds, HANDLE_SIZE, Axis::Vertical).map_or(
+            self.gain,
+            |pct| {
+                let val = MAX_DB - (pct * RANGE_DB);
+                // Snap to exactly 0.0 if within +/- 0.5 dB
+                if val.abs() < 0.5 { 0.0 } else { val }
+            },
+        )
     }
 }
 
@@ -107,37 +105,32 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 if let Some(cursor_position) = cursor.position_over(bounds) {
                     let new_gain = self.locate(cursor_position.y, bounds);
-                    state.is_dragging = true;
-                    state.drag_gain = new_gain;
-                    state.last_published_gain = new_gain;
-                    shell.publish((self.on_change)(new_gain));
+                    shell.publish((self.on_change)(state.drag.press(new_gain)));
                     shell.capture_event();
                     shell.request_redraw();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
-                if state.is_dragging =>
+                if state.drag.is_dragging() =>
             {
-                if (state.drag_gain - state.last_published_gain).abs() > 0.01 {
-                    shell.publish((self.on_change)(state.drag_gain));
-                    state.last_published_gain = state.drag_gain;
+                // Trailing publish when the visual value drifted past the
+                // last published one. NO capture/redraw on release — only
+                // the settings slider does that.
+                if let Some(trailing) = state.drag.release(0.01) {
+                    shell.publish((self.on_change)(trailing));
                 }
-                state.is_dragging = false;
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
-                if state.is_dragging
+                if state.drag.is_dragging()
                     && let Some(pos) = cursor.position()
                 {
                     let new_gain = self.locate(pos.y, bounds);
-                    state.drag_gain = new_gain;
-
-                    let delta = (new_gain - state.last_published_gain).abs();
-                    if delta >= 0.1 {
-                        // Only publish visible changes (e.g. 0.1 dB steps)
-                        state.last_published_gain = new_gain;
-                        shell.publish((self.on_change)(new_gain));
+                    // Only publish visible changes (e.g. 0.1 dB steps); the
+                    // visual drag position still updates on every move.
+                    if let Some(value) = state.drag.drag(new_gain, 0.1) {
+                        shell.publish((self.on_change)(value));
                     }
                     shell.capture_event();
                     shell.request_redraw();
@@ -174,11 +167,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
         let bounds = layout.bounds();
         let border_width = 1.0;
 
-        let gain = if state.is_dragging {
-            state.drag_gain
-        } else {
-            self.gain
-        };
+        let gain = state.drag.display_value(self.gain);
 
         // Flat redesign: 1 px border() track, flat accent fill on the
         // handle. Handle picks up `pill` shape in rounded mode so the EQ
@@ -260,13 +249,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
-        if state.is_dragging {
-            mouse::Interaction::Grabbing
-        } else if cursor.is_over(layout.bounds()) {
-            mouse::Interaction::Grab
-        } else {
-            mouse::Interaction::default()
-        }
+        slider_drag::grab_interaction(state.drag.is_dragging(), cursor.is_over(layout.bounds()))
     }
 }
 

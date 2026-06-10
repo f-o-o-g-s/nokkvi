@@ -31,6 +31,7 @@ pub(crate) mod search_bar;
 pub(crate) mod settings_slider;
 pub(crate) mod side_nav_bar;
 pub(crate) mod sizes;
+pub(crate) mod slider_drag;
 pub(crate) mod slot_list;
 pub(crate) mod slot_list_page;
 pub(crate) mod track_info_strip;

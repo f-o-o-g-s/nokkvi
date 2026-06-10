@@ -26,6 +26,8 @@ use iced::{
     mouse, touch,
 };
 
+use crate::widgets::slider_drag::{self, Axis, SliderDragState};
+
 /// Visible track thickness — matches `progress_bar::TRACK_THICKNESS`.
 const TRACK_THICKNESS: f32 = 6.0;
 /// Handle edge length — matches `progress_bar::HANDLE_SIZE`. Square in flat
@@ -34,7 +36,7 @@ const HANDLE_SIZE: f32 = 14.0;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct State {
-    is_dragging: bool,
+    drag: SliderDragState,
 }
 
 /// Draggable settings slider. Emits a fraction in `[0.0, 1.0]`.
@@ -87,12 +89,8 @@ impl<'a, Message> SettingsSlider<'a, Message> {
 
     /// Project a screen X to a fraction within the widget's drag track.
     fn fraction_at(&self, cursor_x: f32, bounds: Rectangle) -> f32 {
-        let effective_width = bounds.width - HANDLE_SIZE;
-        if effective_width <= 0.0 {
-            return 0.0;
-        }
-        let relative_x = cursor_x - bounds.x - HANDLE_SIZE / 2.0;
-        (relative_x / effective_width).clamp(0.0, 1.0)
+        slider_drag::project_fraction(cursor_x, bounds, HANDLE_SIZE, Axis::Horizontal)
+            .unwrap_or(0.0)
     }
 }
 
@@ -142,28 +140,33 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 if let Some(cursor_position) = cursor.position_over(bounds) {
-                    state.is_dragging = true;
                     let frac = self.fraction_at(cursor_position.x, bounds);
-                    shell.publish((self.on_change)(frac));
+                    shell.publish((self.on_change)(state.drag.press(frac)));
                     shell.capture_event();
                     shell.request_redraw();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
-                if state.is_dragging =>
+                if state.drag.is_dragging() =>
             {
-                state.is_dragging = false;
+                // Every move already published (0.0 threshold), so the
+                // trailing release never re-publishes. Unlike the volume/EQ
+                // sliders, settings captures + redraws on release.
+                let _ = state.drag.release(0.0);
                 shell.capture_event();
                 shell.request_redraw();
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
-                if state.is_dragging
+                if state.drag.is_dragging()
                     && let Some(Point { x, .. }) = cursor.position()
                 {
                     let frac = self.fraction_at(x, bounds);
-                    shell.publish((self.on_change)(frac));
+                    // 0.0 threshold → publish every move (no throttle).
+                    if let Some(value) = state.drag.drag(frac, 0.0) {
+                        shell.publish((self.on_change)(value));
+                    }
                     shell.capture_event();
                     shell.request_redraw();
                 }
@@ -269,13 +272,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for SettingsSlider<'
             return mouse::Interaction::default();
         }
         let state = tree.state.downcast_ref::<State>();
-        if state.is_dragging {
-            mouse::Interaction::Grabbing
-        } else if cursor.is_over(layout.bounds()) {
-            mouse::Interaction::Grab
-        } else {
-            mouse::Interaction::default()
-        }
+        slider_drag::grab_interaction(state.drag.is_dragging(), cursor.is_over(layout.bounds()))
     }
 }
 

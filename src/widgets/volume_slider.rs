@@ -20,6 +20,8 @@ use iced::{
     mouse, touch,
 };
 
+use crate::widgets::slider_drag::{self, Axis, SliderDragState};
+
 // ───────────────────────── dimensions ─────────────────────────
 // Vertical: single 8 px bar, 44 px tall (matches mode-button height). The
 // player bar renders music + sfx volume as two side-by-side sliders, each
@@ -61,9 +63,7 @@ impl SliderVariant {
 /// State for volume slider interaction
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct State {
-    is_dragging: bool,
-    drag_volume: f32, // Visual drag position (0.0-1.0) - only used during dragging
-    last_published_volume: f32, // Last volume value actually sent to audio system
+    drag: SliderDragState,
 }
 
 /// Custom volume slider with flat styling (vertical stereo bars or horizontal track)
@@ -157,21 +157,19 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     /// Horizontal: left = 0.0, right = 1.0
     fn locate(&self, cursor_pos: f32, bounds: Rectangle) -> f32 {
         if self.horizontal {
-            let effective_width = bounds.width - HORIZONTAL_HANDLE_SIZE;
-            if effective_width <= 0.0 {
-                return self.volume;
-            }
-            let relative_x = cursor_pos - bounds.x - HORIZONTAL_HANDLE_SIZE / 2.0;
-            (relative_x / effective_width).clamp(0.0, 1.0)
+            slider_drag::project_fraction(
+                cursor_pos,
+                bounds,
+                HORIZONTAL_HANDLE_SIZE,
+                Axis::Horizontal,
+            )
+            .unwrap_or(self.volume)
         } else {
             // Vertical: full bar height maps 0..1 (no handle inset — the fill
-            // is a level meter, not a draggable handle).
-            if bounds.height <= 0.0 {
-                return self.volume;
-            }
-            let relative_y = cursor_pos - bounds.y;
-            // Invert: top=0 becomes volume=1.0, bottom=height becomes volume=0.0
-            1.0 - (relative_y / bounds.height).clamp(0.0, 1.0)
+            // is a level meter, not a draggable handle). Invert: top=0
+            // becomes volume=1.0, bottom=height becomes volume=0.0.
+            slider_drag::project_fraction(cursor_pos, bounds, 0.0, Axis::Vertical)
+                .map_or(self.volume, |fraction| 1.0 - fraction)
         }
     }
 }
@@ -224,50 +222,43 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
                         cursor_position.y
                     };
                     let new_volume = self.locate(coord, bounds);
-                    state.is_dragging = true;
-                    state.drag_volume = new_volume;
-                    state.last_published_volume = new_volume;
                     // Publish immediately on click for real-time feedback
-                    shell.publish((self.on_change)(new_volume));
+                    shell.publish((self.on_change)(state.drag.press(new_volume)));
                     shell.capture_event();
                     shell.request_redraw();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
-                if state.is_dragging =>
+                if state.drag.is_dragging() =>
             {
                 // Publish final value (if it drifted from the last 2%-threshold
                 // value) so consumers without an on_release callback still see
-                // the trailing edge.
-                if (state.drag_volume - state.last_published_volume).abs() > 0.001 {
-                    shell.publish((self.on_change)(state.drag_volume));
-                    state.last_published_volume = state.drag_volume;
+                // the trailing edge. NO capture/redraw on release — only the
+                // settings slider does that.
+                if let Some(trailing) = state.drag.release(0.001) {
+                    shell.publish((self.on_change)(trailing));
                 }
                 // Emit the dedicated release signal — consumers use this to
                 // bypass any throttle on `on_change` and guarantee the final
                 // value reaches disk.
                 if let Some(ref on_release) = self.on_release {
-                    shell.publish(on_release(state.drag_volume));
+                    shell.publish(on_release(state.drag.current()));
                 }
-                state.is_dragging = false;
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
-                if state.is_dragging
+                if state.drag.is_dragging()
                     && let Some(pos) = cursor.position()
                 {
                     let coord = if self.horizontal { pos.x } else { pos.y };
-                    // Update visual position always for smooth feedback
                     let new_volume = self.locate(coord, bounds);
-                    state.drag_volume = new_volume;
 
                     // THROTTLE: Only publish to audio system if change is significant (>= 2%)
                     // This prevents flooding the audio pipeline during fast dragging
-                    let delta = (new_volume - state.last_published_volume).abs();
-                    if delta >= VOLUME_THROTTLE_THRESHOLD {
-                        state.last_published_volume = new_volume;
-                        shell.publish((self.on_change)(new_volume));
+                    // (the visual drag position still updates on every move).
+                    if let Some(value) = state.drag.drag(new_volume, VOLUME_THROTTLE_THRESHOLD) {
+                        shell.publish((self.on_change)(value));
                     }
 
                     shell.capture_event();
@@ -312,12 +303,9 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
 
-        // Calculate level - use drag_volume when dragging for smooth visual feedback
-        let volume = if state.is_dragging {
-            state.drag_volume
-        } else {
-            self.volume
-        };
+        // Calculate level - use the drag position when dragging for smooth
+        // visual feedback
+        let volume = state.drag.display_value(self.volume);
 
         let accent = self.variant.accent_color();
         let border = crate::theme::border();
@@ -339,14 +327,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
-
-        if state.is_dragging {
-            mouse::Interaction::Grabbing
-        } else if cursor.is_over(layout.bounds()) {
-            mouse::Interaction::Grab
-        } else {
-            mouse::Interaction::default()
-        }
+        slider_drag::grab_interaction(state.drag.is_dragging(), cursor.is_over(layout.bounds()))
     }
 }
 
