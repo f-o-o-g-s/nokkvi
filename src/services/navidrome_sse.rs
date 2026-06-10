@@ -183,8 +183,17 @@ fn next_backoff(prev: Duration, connection_uptime: Duration) -> (Option<Duration
     if connection_uptime >= SSE_HEALTHY_UPTIME {
         (None, SSE_BACKOFF_FLOOR)
     } else {
-        (Some(prev), std::cmp::min(prev * 2, SSE_BACKOFF_CAP))
+        (Some(prev), escalate_backoff(prev))
     }
+}
+
+/// Double the reconnect backoff, saturating at `SSE_BACKOFF_CAP`.
+///
+/// The single escalation policy shared by all three reconnect paths: the
+/// non-2xx response path, the request-error path, and the `next_backoff`
+/// flap arm.
+fn escalate_backoff(prev: Duration) -> Duration {
+    std::cmp::min(prev * 2, SSE_BACKOFF_CAP)
 }
 
 /// Start the SSE subscription loop
@@ -196,7 +205,7 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
             .build()
             .unwrap_or_default();
 
-        let mut backoff = Duration::from_secs(2);
+        let mut backoff = SSE_BACKOFF_FLOOR;
 
         loop {
             // 1. Get connection info. The synchronous parking_lot guard is
@@ -237,7 +246,7 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                             response.text().await.unwrap_or_default()
                         );
                         tokio::time::sleep(backoff).await;
-                        backoff = std::cmp::min(backoff * 2, Duration::from_secs(30));
+                        backoff = escalate_backoff(backoff);
                         continue;
                     }
 
@@ -382,7 +391,7 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                 Err(e) => {
                     error!(" [SSE] Request failed: {}", e);
                     tokio::time::sleep(backoff).await;
-                    backoff = std::cmp::min(backoff * 2, Duration::from_secs(30));
+                    backoff = escalate_backoff(backoff);
                 }
             }
         }
@@ -590,5 +599,14 @@ mod tests {
             next_backoff(Duration::from_secs(16), Duration::from_secs(120)),
             (None, Duration::from_secs(2)),
         );
+    }
+
+    /// The shared escalation helper doubles the backoff and saturates at the
+    /// cap — guards every reconnect path against a half-applied const edit.
+    #[test]
+    fn escalate_backoff_doubles_then_saturates_at_cap() {
+        assert_eq!(escalate_backoff(SSE_BACKOFF_FLOOR), Duration::from_secs(4));
+        assert_eq!(escalate_backoff(Duration::from_secs(16)), SSE_BACKOFF_CAP);
+        assert_eq!(escalate_backoff(SSE_BACKOFF_CAP), SSE_BACKOFF_CAP);
     }
 }
