@@ -61,6 +61,21 @@ fn play_count_increment_propagates_to_expansion_children() {
 }
 
 #[test]
+fn play_count_increment_propagates_to_similar_songs() {
+    let mut app = test_app();
+    let mut song: nokkvi_data::types::song::Song = make_song("s1", "Song A", "Artist").into();
+    song.play_count = Some(2);
+    app.similar_songs = Some(crate::state::SimilarSongsState {
+        songs: vec![song],
+        label: "Similar".to_string(),
+        loading: false,
+    });
+
+    let _ = app.handle_song_play_count_incremented("s1".to_string());
+    assert_eq!(app.similar_songs.unwrap().songs[0].play_count, Some(3));
+}
+
+#[test]
 fn play_count_increment_no_match_is_noop() {
     let mut app = test_app();
     let mut song = make_queue_song("s1", "Song 1", "Artist", "Album");

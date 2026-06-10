@@ -6,6 +6,48 @@ use tracing::{debug, error};
 
 use crate::{Nokkvi, View, app_message::Message, views::expansion::SlotListEntry};
 
+/// Run `$body` once against every in-memory collection that can hold the
+/// affected song, binding `$items` to the collection's mutable slice and
+/// `$label` to its debug-log entity label. The canonical set lives in one
+/// place so the three song-propagation handlers (starred / rating / play
+/// count) cannot silently miss a collection: library songs, queue songs,
+/// similar results, and the albums/playlists expansion children.
+///
+/// A macro rather than a closure because the element types are heterogeneous
+/// (`SongUIViewData` / `QueueSongUIViewData` / `Song`) — each `$body`
+/// instantiation type-checks independently against the generic data-crate
+/// list helpers, which all three element types implement via
+/// `Starable` / `Ratable` / `PlayCountable`.
+macro_rules! for_each_song_collection {
+    ($self:ident, |$items:ident, $label:ident| $body:expr) => {{
+        {
+            let $items = &mut $self.library.songs[..];
+            let $label = "song";
+            $body
+        }
+        {
+            let $items = &mut $self.library.queue_songs[..];
+            let $label = "queue song";
+            $body
+        }
+        if let Some(similar) = &mut $self.similar_songs {
+            let $items = &mut similar.songs[..];
+            let $label = "similar";
+            $body
+        }
+        {
+            let $items = &mut $self.albums_page.expansion.children[..];
+            let $label = "album track";
+            $body
+        }
+        {
+            let $items = &mut $self.playlists_page.expansion.children[..];
+            let $label = "playlist track";
+            $body
+        }
+    }};
+}
+
 /// Info about the currently centered item in the slot list, used by star/rating hotkeys.
 pub(in crate::update) struct CenterItemInfo {
     pub id: String,
@@ -171,46 +213,15 @@ impl Nokkvi {
             "🔄 Updating starred status for song {} to {}",
             song_id, new_starred_status
         );
-        // Update all lists that may contain this song
-        nokkvi_data::backend::update_starred_in_list(
-            &mut self.library.songs,
-            &song_id,
-            new_starred_status,
-            "songs",
-        );
-        nokkvi_data::backend::update_starred_in_list(
-            &mut self.library.queue_songs,
-            &song_id,
-            new_starred_status,
-            "queue",
-        );
-        if let Some(similar) = &mut self.similar_songs {
+        // Update all collections that may contain this song
+        for_each_song_collection!(self, |items, label| {
             nokkvi_data::backend::update_starred_in_list(
-                &mut similar.songs,
+                items,
                 &song_id,
                 new_starred_status,
-                "similar",
+                label,
             );
-        }
-        // Update expanded children in any view that shows tracks
-        if let Some(track) = self
-            .albums_page
-            .expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.is_starred = new_starred_status;
-        }
-        if let Some(track) = self
-            .playlists_page
-            .expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.is_starred = new_starred_status;
-        }
+        });
 
         let mut tasks: Vec<Task<Message>> = Vec::new();
 
@@ -385,45 +396,9 @@ impl Nokkvi {
         } else {
             Some(new_rating)
         };
-        nokkvi_data::backend::update_rating_in_list(
-            &mut self.library.queue_songs,
-            &song_id,
-            rating_opt,
-            "queue song",
-        );
-        nokkvi_data::backend::update_rating_in_list(
-            &mut self.library.songs,
-            &song_id,
-            rating_opt,
-            "song",
-        );
-        if let Some(similar) = &mut self.similar_songs {
-            nokkvi_data::backend::update_rating_in_list(
-                &mut similar.songs,
-                &song_id,
-                rating_opt,
-                "similar",
-            );
-        }
-        // Also update expanded tracks in all views that show songs
-        if let Some(track) = self
-            .albums_page
-            .expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.rating = rating_opt;
-        }
-        if let Some(track) = self
-            .playlists_page
-            .expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.rating = rating_opt;
-        }
+        for_each_song_collection!(self, |items, label| {
+            nokkvi_data::backend::update_rating_in_list(items, &song_id, rating_opt, label);
+        });
         // Persist to queue storage
         let sid = song_id.clone();
         self.shell_task(
@@ -442,33 +417,9 @@ impl Nokkvi {
     /// UI mirrors what Navidrome just incremented server-side.
     pub(crate) fn handle_song_play_count_incremented(&mut self, song_id: String) -> Task<Message> {
         debug!("🔁 Bumping play count for song {}", song_id);
-        nokkvi_data::backend::increment_play_count_in_list(
-            &mut self.library.queue_songs,
-            &song_id,
-            "queue song",
-        );
-        nokkvi_data::backend::increment_play_count_in_list(
-            &mut self.library.songs,
-            &song_id,
-            "song",
-        );
-        if let Some(similar) = &mut self.similar_songs {
-            nokkvi_data::backend::increment_play_count_in_list(
-                &mut similar.songs,
-                &song_id,
-                "similar",
-            );
-        }
-        nokkvi_data::backend::increment_play_count_in_list(
-            &mut self.albums_page.expansion.children,
-            &song_id,
-            "album track",
-        );
-        nokkvi_data::backend::increment_play_count_in_list(
-            &mut self.playlists_page.expansion.children,
-            &song_id,
-            "playlist track",
-        );
+        for_each_song_collection!(self, |items, label| {
+            nokkvi_data::backend::increment_play_count_in_list(items, &song_id, label);
+        });
 
         let sid = song_id.clone();
         self.shell_task(
