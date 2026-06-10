@@ -1581,13 +1581,10 @@ impl Nokkvi {
                 };
                 self.playlists_page.view(view_data).map(Message::Playlists)
             }
-            View::Settings => {
-                let settings_data = self.build_settings_view_data();
-
-                self.settings_page
-                    .view(settings_data)
-                    .map(Message::Settings)
-            }
+            View::Settings => self
+                .settings_page
+                .view(self.window.width, self.window.height)
+                .map(Message::Settings),
             View::Radios => {
                 let filtered_stations = self.filter_radio_stations();
                 let view_data = views::RadiosViewData {

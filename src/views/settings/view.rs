@@ -18,7 +18,7 @@ use nokkvi_data::utils::fuzzy;
 
 use super::{
     BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_SEARCH_INPUT_ID, SettingsMessage,
-    SettingsPage, SettingsTab, SettingsViewData,
+    SettingsPage, SettingsTab,
     items::SettingsEntry,
     rendering::{render_detail_header, render_detail_row, transparent_button_style},
 };
@@ -53,30 +53,24 @@ impl SettingsPage {
     /// Right: detail pane for the active category, OR an in-place sub-list
     ///        (color array editor) when one is open.
     /// Font picker still overlays as a modal stack on top of everything.
-    pub(crate) fn view(&self, data: SettingsViewData) -> Element<'_, SettingsMessage> {
+    ///
+    /// Takes only the two window dimensions — the entry list comes from
+    /// `cached_entries`, which the update path rebuilds on every mutation
+    /// (tab switch, search, config writes, hot-reloads, view entry) via
+    /// `refresh_entries` / `Nokkvi::refresh_settings_entries_if_dirty`.
+    pub(crate) fn view(
+        &self,
+        window_width: f32,
+        window_height: f32,
+    ) -> Element<'_, SettingsMessage> {
         let font = theme::ui_font();
-        let window_height = data.window_height;
-        let is_narrow = data.window_width < NARROW_BREAKPOINT_WIDTH;
+        let is_narrow = window_width < NARROW_BREAKPOINT_WIDTH;
 
-        // Detail-pane entries: either the optimistically-edited cache or a
-        // fresh rebuild from live config so hot-reloads land. Sub-lists
-        // bypass this entirely (they render their own slot list).
-        let built_entries;
-        let entries: &[SettingsEntry] = if (self.editing_index.is_some()
-            || self.sub_list.is_some()
-            || self.font_sub_list.is_some()
-            || !self.search_query.is_empty())
-            && !self.cached_entries.is_empty()
-        {
-            &self.cached_entries
-        } else {
-            built_entries = if self.search_query.is_empty() {
-                Self::build_category_sections(self.active_category, &data)
-            } else {
-                Self::search_all_entries(&data, &self.search_query)
-            };
-            &built_entries
-        };
+        // Detail-pane entries render straight from the update-maintained
+        // cache. An empty cache with an active search is the legitimate
+        // "No settings match" empty state. Sub-lists bypass this entirely
+        // (they render their own slot list).
+        let entries: &[SettingsEntry] = &self.cached_entries;
 
         let right_pane = if let Some(sub) = &self.sub_list {
             self.render_sub_list(sub, window_height, font)
@@ -88,7 +82,7 @@ impl SettingsPage {
         // Narrow: horizontal category strip + search header above the
         //         detail pane, both stacked vertically.
         let base: Element<'_, SettingsMessage> = if is_narrow {
-            let strip = self.render_narrow_strip(data.window_width);
+            let strip = self.render_narrow_strip(window_width);
             let search_bar = self.render_narrow_search_header();
             column![search_bar, strip, right_pane]
                 .width(Length::Fill)

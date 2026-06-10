@@ -501,8 +501,6 @@ pub(crate) struct SettingsViewData {
     pub visualizer_config: VisualizerConfig,
     pub theme_file: ThemeFile,
     pub active_theme_stem: String,
-    pub window_height: f32,
-    pub window_width: f32,
     pub hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig,
     pub is_light_mode: bool,
     pub rounded_mode: nokkvi_data::types::player_settings::RoundedMode,
@@ -552,7 +550,9 @@ pub struct SettingsPage {
     pub(crate) slot_list: SlotListView,
     /// Index of the entry currently being edited (None = browse mode)
     pub(crate) editing_index: Option<usize>,
-    /// Cached entries rebuilt each frame — used by update() for value editing
+    /// Cached entries the view renders verbatim — rebuilt in the update path
+    /// (`refresh_entries` / `Nokkvi::refresh_settings_entries_if_dirty`) on
+    /// tab switch, search, config writes, hot-reloads, and view entry
     pub(crate) cached_entries: Vec<SettingsEntry>,
     /// Sub-list state for color array editing (None = main settings slot list)
     pub(crate) sub_list: Option<SubListState>,

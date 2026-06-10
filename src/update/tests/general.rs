@@ -515,6 +515,9 @@ fn picker_nav_key_passes_through_when_picker_open() {
 
 #[test]
 fn toggle_light_mode_persists_to_settings_key() {
+    let _guard = LIGHT_MODE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // Ensure a known baseline (atomic is global, so set it explicitly)
     crate::theme::set_light_mode(false);
     let mut app = test_app();

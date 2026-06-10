@@ -1079,3 +1079,157 @@ fn player_settings_loaded_without_active_playlist_clears_context() {
         "no persisted active playlist must clear the banner context"
     );
 }
+
+// ============================================================================
+// Update-path entry-cache rebuilds (settings-view-rebuild-purity-2)
+//
+// The settings VIEW renders `cached_entries` verbatim — the old per-frame
+// rebuild fallback is gone, so every mutation path must repopulate the
+// cache through the update handlers. These tests pin each trigger:
+// view entry, Escape + re-entry, the chrome crossfade toggle, visualizer
+// hot-reload, and the chrome light-mode toggle's dirty mark.
+// ============================================================================
+
+/// Read the live `SettingValue` of a cached settings entry by key.
+fn cached_setting_value<'a>(
+    app: &'a crate::Nokkvi,
+    key: &str,
+) -> &'a crate::views::settings::items::SettingValue {
+    app.settings_page
+        .cached_entries
+        .iter()
+        .find_map(|e| match e {
+            crate::views::settings::items::SettingsEntry::Item(item)
+                if item.key.as_ref() == key =>
+            {
+                Some(&item.value)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no cached settings entry for key {key}"))
+}
+
+#[test]
+fn switch_view_to_settings_populates_cached_entries() {
+    let mut app = test_app();
+    assert!(
+        app.settings_page.cached_entries.is_empty(),
+        "fresh app starts with an empty entry cache"
+    );
+
+    let _ = app.handle_switch_view(crate::View::Settings);
+
+    assert!(
+        !app.settings_page.cached_entries.is_empty(),
+        "entering Settings must populate cached_entries"
+    );
+    assert!(
+        !app.settings_page.config_dirty,
+        "the on-entry refresh must clear the dirty flag"
+    );
+}
+
+#[test]
+fn escape_then_reenter_repopulates_entries() {
+    let mut app = test_app();
+    let _ = app.handle_switch_view(crate::View::Settings);
+    assert!(!app.settings_page.cached_entries.is_empty());
+
+    // Top-level Escape exits Settings and clears the cache.
+    let _ = app.handle_settings(crate::views::SettingsMessage::Escape);
+    assert_eq!(
+        app.current_view,
+        crate::View::Queue,
+        "Escape exits to the pre-settings view"
+    );
+    assert!(
+        app.settings_page.cached_entries.is_empty(),
+        "top-level Escape clears the entry cache"
+    );
+
+    // Re-entry must repopulate even with a clean dirty flag — this pins the
+    // `cached_entries.is_empty()` half of the refresh gate.
+    let _ = app.handle_switch_view(crate::View::Settings);
+    assert!(
+        !app.settings_page.cached_entries.is_empty(),
+        "re-entering Settings must repopulate cached_entries"
+    );
+}
+
+#[test]
+fn toggle_crossfade_refreshes_cached_playback_entry_when_settings_visible() {
+    let mut app = test_app();
+    app.settings_page.active_category = crate::views::settings::SettingsTab::Playback;
+    let _ = app.handle_switch_view(crate::View::Settings);
+
+    let crate::views::settings::items::SettingValue::Bool(initial) =
+        *cached_setting_value(&app, "general.crossfade_enabled")
+    else {
+        panic!("crossfade_enabled must be a Bool entry");
+    };
+
+    // Player-bar mode menu toggle, dispatched while Settings is open.
+    let _ = app.update(crate::app_message::Message::Playback(
+        crate::app_message::PlaybackMessage::ToggleCrossfade,
+    ));
+
+    let crate::views::settings::items::SettingValue::Bool(after) =
+        *cached_setting_value(&app, "general.crossfade_enabled")
+    else {
+        panic!("crossfade_enabled must be a Bool entry");
+    };
+    assert_eq!(
+        after, !initial,
+        "the cached crossfade row must reflect the toggled engine flag"
+    );
+}
+
+#[test]
+fn visualizer_config_changed_refreshes_entries_when_settings_visible() {
+    let mut app = test_app();
+    app.settings_page.active_category = crate::views::settings::SettingsTab::Visualizer;
+    let _ = app.handle_switch_view(crate::View::Settings);
+
+    let config = crate::visualizer_config::VisualizerConfig {
+        noise_reduction: 0.33,
+        ..Default::default()
+    };
+    let _ = app.update(crate::app_message::Message::VisualizerConfigChanged(config));
+
+    match cached_setting_value(&app, crate::visualizer_config::keys::NOISE_REDUCTION) {
+        crate::views::settings::items::SettingValue::Float { val, .. } => {
+            assert!(
+                (val - 0.33).abs() < 1e-9,
+                "cached noise_reduction must show the hot-reloaded value, got {val}"
+            );
+        }
+        other => panic!("noise_reduction must be a Float entry, got {other:?}"),
+    }
+}
+
+#[test]
+fn toggle_light_mode_marks_settings_dirty_when_not_on_settings() {
+    let _guard = LIGHT_MODE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let prior = crate::theme::is_light_mode();
+    let mut app = test_app();
+    assert_ne!(
+        app.current_view,
+        crate::View::Settings,
+        "this test exercises the off-Settings dirty mark"
+    );
+    app.settings_page.config_dirty = false;
+
+    let _ = app.update(crate::app_message::Message::ToggleLightMode);
+
+    assert!(
+        app.settings_page.config_dirty,
+        "chrome light-mode toggle must mark the settings entry cache dirty"
+    );
+
+    // Toggle back so both the atomic and the persisted config.toml value
+    // return to their prior state.
+    let _ = app.update(crate::app_message::Message::ToggleLightMode);
+    assert_eq!(crate::theme::is_light_mode(), prior);
+}

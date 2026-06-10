@@ -110,8 +110,6 @@ impl Nokkvi {
             visualizer_config: viz_config,
             theme_file,
             active_theme_stem,
-            window_height: self.window.height,
-            window_width: self.window.width,
             hotkey_config: self.hotkey_config.clone(),
             is_light_mode: crate::theme::is_light_mode(),
             rounded_mode: crate::theme::rounded_mode(),
@@ -129,6 +127,12 @@ impl Nokkvi {
             if let Some(ref vis) = self.visualizer {
                 vis.apply_config();
             }
+            // Refresh now in case this reload arrived outside the
+            // `handle_settings` flow (e.g. the reset-visualizer confirmation
+            // dialog) — entries are rebuilt in update, not per frame.
+            // Idempotent for in-`handle_settings` callers (the tail refresh
+            // sees a cleared dirty flag).
+            self.refresh_settings_entries_if_dirty();
         }
     }
 
@@ -390,15 +394,22 @@ impl Nokkvi {
         self.detail_pane_scroll_task()
     }
 
-    /// Rebuild the settings page's cached entries when `config_dirty` is set.
+    /// Rebuild the settings page's cached entries when the Settings view is
+    /// showing and `config_dirty` is set (or the cache is empty).
     ///
-    /// The settings view caches its entry list for navigation; mutations
-    /// outside the `SettingsAction` flow (e.g. the default-playlist picker
-    /// committing a new value via `Message::DefaultPlaylistPicker`) need an
-    /// explicit nudge so the badge text reflects the new state without
-    /// waiting for the next settings interaction.
+    /// The settings VIEW renders `cached_entries` verbatim — entries are
+    /// rebuilt here in the update path, never per frame. Every mutation of
+    /// settings-visible state must either run inside `handle_settings`
+    /// (covered by its tail call) or mark `config_dirty` and call this
+    /// helper (e.g. the default-playlist picker, the chrome light-mode /
+    /// crossfade toggles, hot-reload handlers). Off-Settings callers
+    /// cheaply no-op — the dirty flag survives until `handle_switch_view`
+    /// refreshes on entry.
     pub(crate) fn refresh_settings_entries_if_dirty(&mut self) {
-        if self.settings_page.config_dirty {
+        if self.current_view != crate::View::Settings {
+            return;
+        }
+        if self.settings_page.config_dirty || self.settings_page.cached_entries.is_empty() {
             let new_data = self.build_settings_view_data();
             self.settings_page.refresh_entries(&new_data);
             self.settings_page.config_dirty = false;

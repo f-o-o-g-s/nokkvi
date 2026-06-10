@@ -286,6 +286,11 @@ impl Nokkvi {
                 if key == "general.local_music_path" {
                     self.settings.local_music_path = new_value.clone();
                     tracing::info!(" [SETTINGS] Local music path set to: {new_value:?}");
+                    // The dialog commits outside `handle_settings`, so the
+                    // cached "Local Music Path" row needs an explicit
+                    // refresh (the user is sitting on Settings here).
+                    self.settings_page.config_dirty = true;
+                    self.refresh_settings_entries_if_dirty();
                     self.shell_fire_and_forget_task(
                         move |shell| async move {
                             shell.settings().set_local_music_path(new_value).await

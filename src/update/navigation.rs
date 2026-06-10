@@ -279,7 +279,15 @@ impl Nokkvi {
                 Task::done(Message::LoadRadioStations)
             }
             View::Queue => Task::done(Message::LoadQueue), // Always reload queue to reflect changes
-            View::Settings => Task::none(),                // Settings don't need data loading
+            View::Settings => {
+                // Entries are rebuilt in update (not per frame), so entering
+                // the view must populate the cache: first entry, re-entry
+                // after Escape cleared it, or a dirty mark set while away
+                // (current_view is already View::Settings here, so the
+                // refresh gate passes).
+                self.refresh_settings_entries_if_dirty();
+                Task::none()
+            }
             View::PlaylistEditor => Task::none(), // Buffer already populated by the enter flow
             // Data already loaded — re-prefetch artwork for the current slot_count
             // in case the window was resized since the data was first loaded.

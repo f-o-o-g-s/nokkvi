@@ -1173,6 +1173,11 @@ impl Nokkvi {
             engine.set_crossfade_enabled(enabled);
             Ok(())
         });
+        // The Playback tab's crossfade row mirrors this engine flag — the
+        // toggle is reachable from the player-bar mode menu while Settings
+        // is open, so refresh the cached entries (no-op off-Settings).
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
         Task::none()
     }
 
@@ -1538,6 +1543,15 @@ impl Nokkvi {
         self.shell_spawn("apply_volume", move |shell| async move {
             shell.set_volume(vol).await
         });
+
+        // Settings-visible state changed wholesale above (self.settings, the
+        // engine mirrors, the theme atomics) — refresh the cached entries
+        // when the Settings view is showing. This also fixes the
+        // settings-TOML reload chain ordering: HotkeyConfigUpdated used to
+        // refresh BEFORE this handler mutated the state it renders. One
+        // rebuild per general-setting write; idempotent (dirty clears).
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
 
         Task::batch([start_view_task, crossfade_task, active_playlist_cover_task])
     }

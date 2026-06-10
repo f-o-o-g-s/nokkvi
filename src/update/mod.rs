@@ -593,6 +593,12 @@ impl Nokkvi {
                 });
             }
         }
+        // The Interface tab mirrors this atomic as a settings row
+        // (`general.artwork_vertical_height_pct`); the drag happens in a
+        // library view, so a dirty mark is enough — the entry refreshes on
+        // the next Settings entry. (`artwork_column_width_pct` has no
+        // settings row, so `handle_artwork_column_drag` stays unmarked.)
+        self.settings_page.config_dirty = true;
         Task::none()
     }
 }

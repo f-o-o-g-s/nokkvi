@@ -11,7 +11,7 @@ use iced::Task;
 use tracing::debug;
 
 use crate::{
-    Nokkvi, View,
+    Nokkvi,
     app_message::{Message, PlaybackMessage},
 };
 
@@ -39,6 +39,12 @@ impl Nokkvi {
         {
             tracing::warn!(" Failed to write light_mode to config.toml: {e}");
         }
+        // The Theme tab's Mode row mirrors the light-mode atomic — this
+        // toggle is reachable from the chrome menus while Settings is open,
+        // so refresh the cached entries (no-op off-Settings; the dirty flag
+        // then covers the next entry).
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
         // Force UI refresh
         Task::done(Message::Playback(PlaybackMessage::Tick))
     }
@@ -60,8 +66,11 @@ impl Nokkvi {
         if let Some(ref vis) = self.visualizer {
             vis.apply_config();
         }
-        // Mark settings dirty so entries show updated values
+        // Mark settings dirty and refresh immediately when the Settings view
+        // is showing — hot-reloads while sitting on the Visualizer tab must
+        // land without waiting for the next settings interaction.
         self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
         Task::none()
     }
 
@@ -80,11 +89,7 @@ impl Nokkvi {
         }
         // Force UI refresh so all widgets pick up new colors
         self.settings_page.config_dirty = true;
-        if self.current_view == View::Settings {
-            let new_data = self.build_settings_view_data();
-            self.settings_page.refresh_entries(&new_data);
-            self.settings_page.config_dirty = false;
-        }
+        self.refresh_settings_entries_if_dirty();
         Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
     }
 
@@ -154,14 +159,9 @@ impl Nokkvi {
         // binding instead of the previously cached combo string. Without
         // this, a successful rebind keeps showing the old key on screen
         // even though `config.toml` and `self.hotkey_config` both have the
-        // new value, because the per-frame nav fast path never rebuilds
-        // `cached_entries`.
+        // new value, because the view renders `cached_entries` verbatim.
         self.settings_page.config_dirty = true;
-        if self.current_view == View::Settings {
-            let new_data = self.build_settings_view_data();
-            self.settings_page.refresh_entries(&new_data);
-            self.settings_page.config_dirty = false;
-        }
+        self.refresh_settings_entries_if_dirty();
         Task::none()
     }
 }
