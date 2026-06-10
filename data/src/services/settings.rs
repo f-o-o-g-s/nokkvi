@@ -1189,7 +1189,7 @@ mod sentinel_roundtrip_tests {
             sfx_volume: 0.3142,
             sound_effects_enabled: false,                 // default true
             visualization_mode: VisualizationMode::Lines, // default Bars
-            light_mode: true, // default false; UI-PS lacks this field — written as false
+            light_mode: true, // default false; UI-PS lacks this field — excluded from the round-trip
             scrobbling_enabled: false, // default true
             scrobble_threshold: 0.8123, // default 0.50
 
@@ -1367,7 +1367,10 @@ mod sentinel_roundtrip_tests {
         let ui_ps1 = sm.get_player_settings();
 
         // UI → TOML → bytes → TOML.
-        let ts1 = TomlSettings::from_player_settings(&ui_ps1);
+        // The seedable `_with_existing(.., None)` variant keeps the round-trip
+        // hermetic: the no-arg entry point reads `[settings].light_mode` off
+        // the real on-disk config (see the light_mode no-leak test below).
+        let ts1 = TomlSettings::from_player_settings_with_existing(&ui_ps1, None);
         let serialized = toml::to_string(&ts1).expect("serialize TomlSettings");
         let ts2: TomlSettings = toml::from_str(&serialized).expect("deserialize TomlSettings");
 
