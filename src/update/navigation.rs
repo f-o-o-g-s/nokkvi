@@ -37,7 +37,7 @@ pub(crate) fn pending_expand_timeout_task(pending: crate::state::PendingExpand) 
 /// `entity_id()` covers the "same variant + same id" contract without an
 /// N×N pairing match.
 fn pending_expand_timeout_toast(app: &mut Nokkvi, expected: &crate::state::PendingExpand) {
-    let id_matches = app.pending_expand.as_ref().is_some_and(|active| {
+    let id_matches = app.pending_expand.target.as_ref().is_some_and(|active| {
         std::mem::discriminant(active) == std::mem::discriminant(expected)
             && active.entity_id() == expected.entity_id()
     });
@@ -59,7 +59,7 @@ fn pending_expand_timeout_toast(app: &mut Nokkvi, expected: &crate::state::Pendi
 /// page-state field the reset hits; songs additionally skip
 /// `expansion.clear()` because songs aren't expandable.
 ///
-/// Always resets `pending_expand_center_only = false`. CenterOnPlaying
+/// Always resets `pending_expand.center_only = false`. CenterOnPlaying
 /// callers re-arm the flag *after* this returns — keep that order.
 pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::PendingExpand) {
     match &pending {
@@ -100,8 +100,8 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
             app.library.songs.clear();
         }
     }
-    app.pending_expand_center_only = false;
-    app.pending_expand = Some(pending);
+    app.pending_expand.center_only = false;
+    app.pending_expand.target = Some(pending);
 }
 
 impl Nokkvi {
@@ -245,7 +245,7 @@ impl Nokkvi {
         // per-kind logic — top-pane chains host on Albums/Artists/Genres,
         // browsing-pane chains all host on Queue (the panel is destroyed
         // when leaving Queue).
-        if let Some(host_view) = self.pending_expand.as_ref().map(|p| p.host_view())
+        if let Some(host_view) = self.pending_expand.target.as_ref().map(|p| p.host_view())
             && view != host_view
         {
             self.cancel_pending_expand();
@@ -253,7 +253,7 @@ impl Nokkvi {
         // The top-pin can outlive the target by the brief window between
         // try_resolve_*  consuming the target and TracksLoaded/AlbumsLoaded
         // re-pinning. Drop it on the same navigate-away condition.
-        if let Some(pin) = self.pending_top_pin.as_ref() {
+        if let Some(pin) = self.pending_expand.top_pin.as_ref() {
             let host_view = match pin {
                 crate::state::PendingTopPin::Album(_) => View::Albums,
                 crate::state::PendingTopPin::Artist(_) => View::Artists,
@@ -261,7 +261,7 @@ impl Nokkvi {
             };
             let in_browsing_pane = self.browsing_panel.is_some() && view == View::Queue;
             if view != host_view && !in_browsing_pane {
-                self.pending_top_pin = None;
+                self.pending_expand.top_pin = None;
             }
         }
         // Play view select SFX for tab/hotkey switching
@@ -717,9 +717,7 @@ impl Nokkvi {
     /// the brief window between `try_resolve` and the corresponding
     /// `set_children`, so unconditional pin clearing is correct here.
     pub(crate) fn cancel_pending_expand(&mut self) {
-        self.pending_expand = None;
-        self.pending_top_pin = None;
-        self.pending_expand_center_only = false;
+        self.pending_expand = crate::state::PendingExpandState::default();
     }
 
     /// Genre-side mirror of `handle_navigate_and_expand_album`. The find
@@ -842,7 +840,7 @@ impl Nokkvi {
 
     /// Song-side mirror of `try_resolve_pending_expand_album`. Songs aren't
     /// expandable, so this always centers and never dispatches a
-    /// `FocusAndExpand` — `pending_expand_center_only` is implicit here.
+    /// `FocusAndExpand` — `pending_expand.center_only` is implicit here.
     /// `SongSpec::focus_and_expand` returns `None`, which the generic body
     /// treats as effective-center-only (no top pin, viewport_offset = idx).
     pub(crate) fn try_resolve_pending_expand_song(&mut self) -> Option<Task<Message>> {
@@ -862,7 +860,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         let load = pending.load_message();
         self.prime_expand(pending.clone());
-        self.pending_expand_center_only = true;
+        self.pending_expand.center_only = true;
         Task::batch([Task::done(load), pending_expand_timeout_task(pending)])
     }
 

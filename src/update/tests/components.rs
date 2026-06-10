@@ -214,7 +214,7 @@ fn redirect_play_invokes_add_when_no_pending_insert() {
     // Browsing panel open, no drag-drop position → append branch.
     let mut app = test_app();
     app.browsing_panel = Some(crate::views::BrowsingPanel::new());
-    app.pending_queue_insert_position = None;
+    app.cross_pane_drag.pending_queue_insert_position = None;
 
     let mut add_fired = false;
     let mut insert_fired = false;
@@ -315,7 +315,7 @@ fn redirect_play_invokes_insert_and_consumes_position() {
     // the position is consumed via `take()` so the next play sees None.
     let mut app = test_app();
     app.browsing_panel = Some(crate::views::BrowsingPanel::new());
-    app.pending_queue_insert_position = Some(3);
+    app.cross_pane_drag.pending_queue_insert_position = Some(3);
 
     let mut add_fired = false;
     let mut received_pos: Option<usize> = None;
@@ -338,7 +338,7 @@ fn redirect_play_invokes_insert_and_consumes_position() {
         "insert closure receives the position"
     );
     assert!(
-        app.pending_queue_insert_position.is_none(),
+        app.cross_pane_drag.pending_queue_insert_position.is_none(),
         "pending_queue_insert_position must be consumed via take()"
     );
 }

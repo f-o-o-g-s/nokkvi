@@ -220,9 +220,9 @@ impl ResolveSpec for SongSpec {
     }
 
     /// Songs aren't expandable. Returning `None` here makes the generic body
-    /// behave as if `pending_expand_center_only` were set: viewport_offset is
-    /// `idx` directly (not `idx + center_slot`), `pending_top_pin` stays
-    /// untouched, and only the prefetch task is returned.
+    /// behave as if `pending_expand.center_only` were set: viewport_offset is
+    /// `idx` directly (not `idx + center_slot`), `pending_expand.top_pin`
+    /// stays untouched, and only the prefetch task is returned.
     fn focus_and_expand(_idx: usize) -> Option<Message> {
         None
     }
@@ -250,7 +250,7 @@ impl Nokkvi {
     pub(crate) fn try_resolve_pending_expand_with<S: ResolveSpec>(
         &mut self,
     ) -> Option<Task<Message>> {
-        let target_id = S::target_id(self.pending_expand.as_ref()?)?;
+        let target_id = S::target_id(self.pending_expand.target.as_ref()?)?;
 
         let found = S::library(&self.library)
             .iter()
@@ -261,7 +261,7 @@ impl Nokkvi {
 
         let label = S::label();
         if let Some((idx, resolved_id)) = found {
-            let center_only = self.pending_expand_center_only;
+            let center_only = self.pending_expand.center_only;
             let focus_msg = S::focus_and_expand(idx);
             // Effective center-only: the explicit flag, OR the spec doesn't
             // dispatch a FocusAndExpand at all (Song). In either case we
@@ -278,8 +278,8 @@ impl Nokkvi {
                     "scrolling + dispatching FocusAndExpand"
                 }
             );
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
+            self.pending_expand.target = None;
+            self.pending_expand.center_only = false;
             let total = S::library(&self.library).len();
             let page = S::page_mut(self);
             // Click chain pins to slot 0 (so the expanded children fill the
@@ -312,7 +312,7 @@ impl Nokkvi {
                     // `set_children` when children land — the per-view
                     // post-hook (TracksLoaded / AlbumsLoaded) re-runs
                     // set_selected for this id.
-                    self.pending_top_pin = S::pin(resolved_id);
+                    self.pending_expand.top_pin = S::pin(resolved_id);
                     Task::batch([prefetch_task, Task::done(focus_msg)])
                 }
                 _ => prefetch_task,
@@ -333,8 +333,8 @@ impl Nokkvi {
                 label, target_id
             );
             self.toast_warn(format!("{label} not found in library"));
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
+            self.pending_expand.target = None;
+            self.pending_expand.center_only = false;
             return Some(Task::none());
         }
 
@@ -354,8 +354,8 @@ impl Nokkvi {
             label, target_id
         );
         self.toast_warn(format!("{label} not found in library"));
-        self.pending_expand = None;
-        self.pending_expand_center_only = false;
+        self.pending_expand.target = None;
+        self.pending_expand.center_only = false;
         Some(Task::none())
     }
 }

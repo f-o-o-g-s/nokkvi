@@ -22,7 +22,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Shift+click range**: clears existing selection first, then adds the range from `anchor_index` to clicked offset.
 - **Context menu batch**: `evaluate_context_menu()` checks if the clicked index is in the selection; if not, resets selection to just that item.
 - **Always `clear_multi_selection()` after batch ops** — prevents stale selections.
-- **Cross-pane drag batch**: `cross_pane_drag_selection_count` is snapshotted at press time; decoupled from subsequent selection changes.
+- **Cross-pane drag batch**: `cross_pane_drag.selection_count` (on the `CrossPaneDragUi` cluster) is snapshotted at press time; decoupled from subsequent selection changes.
 - **Keyboard scroll clears selection**: `handle_navigate_up/down` clears `selected_offset` to prevent stale highlights.
 
 ## Optimistic UI & Race Conditions
@@ -78,7 +78,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **MPRIS multi-instance bus name**: nokkvi suffixes its bus name with `instance{pid}` (per the MPRIS spec) so two running instances don't silently fight over `org.mpris.MediaPlayer2.nokkvi` — without the suffix the loser of the race ends up with no MPRIS at all and nothing logs it. Don't drop the suffix.
 - **CenterOnPlaying (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path.
 - **Expansion sort state**: when expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`. Shift+Enter on Artists/Genres collapses the outer expansion.
-- **Pending find-and-expand chain**: at most one `Nokkvi.pending_expand` runs at a time. Starting a new chain (or any user-driven view change matching `PendingExpand::host_view()`) supersedes the previous one. `PendingTopPin` re-pins the highlight after `set_children` lands.
+- **Pending find-and-expand chain**: at most one `Nokkvi.pending_expand.target` (on the `PendingExpandState` cluster) runs at a time. Starting a new chain (or any user-driven view change matching `PendingExpand::host_view()`) supersedes the previous one. `PendingTopPin` re-pins the highlight after `set_children` lands.
 - **Expansion artwork retry**: artwork fetches dispatched from inline expansions retry on transient failure and reject empty-bytes responses, so a flaky first request doesn't leave a permanent empty cell.
 - **Playlist edit guard**: `guard_play_action()` at the top of every play handler.
 - **Chrome height**: must account for every visible header bar. Update constants in `widgets/slot_list.rs` when chrome changes.

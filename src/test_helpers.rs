@@ -254,22 +254,22 @@ pub(crate) fn pending_song(id: &str) -> crate::state::PendingExpand {
 
 /// Arm `pending_expand` for an Album target (top-pane, not browsing).
 pub(crate) fn arm_pending_album(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(pending_album(id));
+    app.pending_expand.target = Some(pending_album(id));
 }
 
 /// Arm `pending_expand` for an Artist target (top-pane, not browsing).
 pub(crate) fn arm_pending_artist(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(pending_artist(id));
+    app.pending_expand.target = Some(pending_artist(id));
 }
 
 /// Arm `pending_expand` for a Genre target (top-pane, not browsing).
 pub(crate) fn arm_pending_genre(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(pending_genre(id));
+    app.pending_expand.target = Some(pending_genre(id));
 }
 
 /// Arm `pending_expand` for a Song target (top-pane, not browsing).
 pub(crate) fn arm_pending_song(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(pending_song(id));
+    app.pending_expand.target = Some(pending_song(id));
 }
 
 /// `n` indexed artists with ids `ar0..ar{n-1}` and names `Artist 0..Artist {n-1}`.

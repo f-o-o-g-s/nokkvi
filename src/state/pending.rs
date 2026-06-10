@@ -27,8 +27,8 @@ pub enum PendingExpand {
     /// Songs aren't expandable, so this variant exists solely to support the
     /// CenterOnPlaying (Shift+C) fallback in the Songs view: clear search,
     /// paginate forward until the playing track appears, and center on it
-    /// without dispatching a FocusAndExpand. The `pending_expand_center_only`
-    /// flag is implicit for this variant.
+    /// without dispatching a FocusAndExpand. The
+    /// `PendingExpandState::center_only` flag is implicit for this variant.
     Song {
         song_id: String,
         for_browsing_pane: bool,
@@ -190,4 +190,30 @@ pub enum PendingTopPin {
     Album(String),
     Artist(String),
     Genre(String),
+}
+
+/// Find-and-expand chain cluster: the in-flight target plus its two
+/// satellites. Groups the three formerly-loose `Nokkvi` fields so the chain
+/// arms / resolves / cancels through one substruct.
+#[derive(Debug, Clone, Default)]
+pub struct PendingExpandState {
+    /// In-flight find-and-expand target — at most one chain runs at a time
+    /// across album / artist / genre / song. Set by the matching
+    /// `handle_navigate_and_expand_*` (click-driven) or by the
+    /// `handle_center_on_playing` fallback (Shift+C), and consumed by the
+    /// matching `try_resolve_pending_expand_*` after the load resolves
+    /// (paginated for album/artist/song, single-shot for genre).
+    pub target: Option<PendingExpand>,
+    /// When `true`, the active `target` chain was started by CenterOnPlaying
+    /// (Shift+C): `try_resolve_pending_expand_*` should CENTER the target on
+    /// the viewport (not pin it to slot 0) and skip the `FocusAndExpand`
+    /// dispatch so the row stays collapsed. Cleared alongside `target` in
+    /// `cancel_pending_expand` and in each `try_resolve_*` once the target
+    /// is resolved.
+    pub center_only: bool,
+    /// Re-pin the highlight onto the find-chain target after `set_children`
+    /// runs. Set by `try_resolve_pending_expand_*` once the target is
+    /// found; consumed by the matching children-loaded handler
+    /// (`TracksLoaded` for albums, `AlbumsLoaded` for artists).
+    pub top_pin: Option<PendingTopPin>,
 }

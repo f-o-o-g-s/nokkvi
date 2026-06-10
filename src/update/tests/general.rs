@@ -685,12 +685,12 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     ));
     app.server_version = Some("0.61.1".into());
     app.last_queue_current_index = Some(3);
-    app.pending_expand = Some(pending_album("a1"));
-    app.pending_expand_center_only = true;
+    app.pending_expand.target = Some(pending_album("a1"));
+    app.pending_expand.center_only = true;
 
     app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
-    app.cross_pane_drag_selection_count = 5;
-    app.pending_queue_insert_position = Some(2);
+    app.cross_pane_drag.selection_count = 5;
+    app.cross_pane_drag.pending_queue_insert_position = Some(2);
     app.start_view_applied = true;
     app.suppress_next_auto_center = true;
 }
@@ -728,19 +728,19 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.server_version.is_none());
     assert!(app.last_queue_current_index.is_none());
     assert!(app.active_progress.is_empty());
-    assert!(app.pending_expand.is_none());
-    assert!(!app.pending_expand_center_only);
-    assert!(app.pending_top_pin.is_none());
+    assert!(app.pending_expand.target.is_none());
+    assert!(!app.pending_expand.center_only);
+    assert!(app.pending_expand.top_pin.is_none());
     assert!(app.roulette.is_none());
 
     // Transient UI work tied to prior session
     assert!(app.open_menu.is_none(), "open_menu cleared (drift bug fix)");
     assert!(app.browsing_panel.is_none());
-    assert!(app.cross_pane_drag.is_none());
-    assert!(app.cross_pane_drag_press_origin.is_none());
-    assert!(app.cross_pane_drag_pressed_item.is_none());
-    assert_eq!(app.cross_pane_drag_selection_count, 1);
-    assert!(app.pending_queue_insert_position.is_none());
+    assert!(app.cross_pane_drag.active.is_none());
+    assert!(app.cross_pane_drag.press_origin.is_none());
+    assert!(app.cross_pane_drag.pressed_item.is_none());
+    assert_eq!(app.cross_pane_drag.selection_count, 1);
+    assert!(app.cross_pane_drag.pending_queue_insert_position.is_none());
     assert!(!app.start_view_applied);
     assert!(!app.suppress_next_auto_center);
 }
@@ -841,7 +841,10 @@ fn logout_and_session_expired_reach_identical_state() {
         similar_songs_generation,
         server_version,
         last_queue_current_index,
-        pending_expand_center_only,
+    );
+    assert_eq!(
+        via_logout.pending_expand.center_only, via_session_expired.pending_expand.center_only,
+        "field `pending_expand.center_only` diverges between logout and session-expired",
     );
     assert!(via_logout.library.albums.is_empty() && via_session_expired.library.albums.is_empty());
     assert!(
@@ -856,30 +859,46 @@ fn logout_and_session_expired_reach_identical_state() {
     assert!(
         via_logout.active_progress.is_empty() && via_session_expired.active_progress.is_empty()
     );
-    assert!(via_logout.pending_expand.is_none() && via_session_expired.pending_expand.is_none());
-    assert!(via_logout.pending_top_pin.is_none() && via_session_expired.pending_top_pin.is_none());
+    assert!(
+        via_logout.pending_expand.target.is_none()
+            && via_session_expired.pending_expand.target.is_none()
+    );
+    assert!(
+        via_logout.pending_expand.top_pin.is_none()
+            && via_session_expired.pending_expand.top_pin.is_none()
+    );
     assert!(via_logout.roulette.is_none() && via_session_expired.roulette.is_none());
 
     // Transient UI work
-    assert_eq_fields!(
-        cross_pane_drag_selection_count,
-        start_view_applied,
-        suppress_next_auto_center,
+    assert_eq_fields!(start_view_applied, suppress_next_auto_center);
+    assert_eq!(
+        via_logout.cross_pane_drag.selection_count,
+        via_session_expired.cross_pane_drag.selection_count,
+        "field `cross_pane_drag.selection_count` diverges between logout and session-expired",
     );
     assert!(via_logout.open_menu.is_none() && via_session_expired.open_menu.is_none());
     assert!(via_logout.browsing_panel.is_none() && via_session_expired.browsing_panel.is_none());
-    assert!(via_logout.cross_pane_drag.is_none() && via_session_expired.cross_pane_drag.is_none());
     assert!(
-        via_logout.cross_pane_drag_press_origin.is_none()
-            && via_session_expired.cross_pane_drag_press_origin.is_none()
+        via_logout.cross_pane_drag.active.is_none()
+            && via_session_expired.cross_pane_drag.active.is_none()
     );
     assert!(
-        via_logout.cross_pane_drag_pressed_item.is_none()
-            && via_session_expired.cross_pane_drag_pressed_item.is_none()
+        via_logout.cross_pane_drag.press_origin.is_none()
+            && via_session_expired.cross_pane_drag.press_origin.is_none()
     );
     assert!(
-        via_logout.pending_queue_insert_position.is_none()
-            && via_session_expired.pending_queue_insert_position.is_none()
+        via_logout.cross_pane_drag.pressed_item.is_none()
+            && via_session_expired.cross_pane_drag.pressed_item.is_none()
+    );
+    assert!(
+        via_logout
+            .cross_pane_drag
+            .pending_queue_insert_position
+            .is_none()
+            && via_session_expired
+                .cross_pane_drag
+                .pending_queue_insert_position
+                .is_none()
     );
 
     // Caller-specific difference: session-expired pushes a toast, logout

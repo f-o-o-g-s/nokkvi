@@ -975,7 +975,7 @@ fn library_changed_skips_reload_during_cross_pane_drag() {
 
     let mut app = test_app();
     seed_songs(&mut app, songs_indexed(3));
-    app.cross_pane_drag = Some(CrossPaneDragState {
+    app.cross_pane_drag.active = Some(CrossPaneDragState {
         origin: iced::Point::ORIGIN,
         cursor: iced::Point::ORIGIN,
         center_index: None,
@@ -989,7 +989,7 @@ fn library_changed_skips_reload_during_cross_pane_drag() {
         "reload must be skipped while a cross-pane drag is in progress"
     );
     assert!(
-        app.cross_pane_drag.is_some(),
+        app.cross_pane_drag.active.is_some(),
         "the guard must not disturb the active drag"
     );
     assert!(
@@ -1006,7 +1006,7 @@ fn library_changed_reloads_when_idle() {
     let mut app = test_app();
     seed_songs(&mut app, songs_indexed(3));
     assert!(app.playlist_editor.is_none());
-    assert!(app.cross_pane_drag.is_none());
+    assert!(app.cross_pane_drag.active.is_none());
 
     let _ = app.handle_library_changed(wildcard_change());
 

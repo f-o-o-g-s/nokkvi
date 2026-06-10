@@ -976,7 +976,7 @@ impl Nokkvi {
         I: FnOnce(&mut Self, usize) -> Task<Message>,
     {
         self.browsing_panel.as_ref()?;
-        if let Some(pos) = self.pending_queue_insert_position.take() {
+        if let Some(pos) = self.cross_pane_drag.pending_queue_insert_position.take() {
             return Some(insert_task(self, pos));
         }
         Some(add_task(self))
@@ -984,14 +984,15 @@ impl Nokkvi {
 
     /// Enqueue a batch, inserting at a drag-drop position when one is pending.
     ///
-    /// Takes `pending_queue_insert_position` via `take()` — the position is consumed
-    /// even when the insert path is not taken, so callers must not pre-take it.
+    /// Takes `cross_pane_drag.pending_queue_insert_position` via `take()` — the
+    /// position is consumed even when the insert path is not taken, so callers
+    /// must not pre-take it.
     pub(crate) fn add_or_insert_batch_to_queue_task(
         &mut self,
         payload: nokkvi_data::types::batch::BatchPayload,
     ) -> Task<Message> {
         let len = payload.items.len();
-        if let Some(pos) = self.pending_queue_insert_position.take() {
+        if let Some(pos) = self.cross_pane_drag.pending_queue_insert_position.take() {
             // While a playlist edit session is active the drop target is the
             // editor's LEFT pane, so resolve the dragged item(s) into editor
             // view-data rows and splice them into the editor buffer at the drop
@@ -1383,10 +1384,9 @@ impl Nokkvi {
     /// - **Server-specific data pointing at gone IDs**: library, artwork,
     ///   similar_songs(+generation), active_playlist_info, playlist_editor,
     ///   server_version, last_queue_current_index, active_progress,
-    ///   pending_expand(+center_only +top_pin), roulette.
+    ///   pending_expand (whole `PendingExpandState`), roulette.
     /// - **Transient UI work tied to the prior session**: open_menu,
-    ///   browsing_panel, cross_pane_drag(+press_origin +pressed_item
-    ///   +selection_count), pending_queue_insert_position,
+    ///   browsing_panel, cross_pane_drag (whole `CrossPaneDragUi`),
     ///   start_view_applied, suppress_next_auto_center.
     ///
     /// Side-effect calls (not field resets):
@@ -1498,9 +1498,7 @@ impl Nokkvi {
         self.server_version = None;
         self.last_queue_current_index = None;
         self.active_progress = Vec::new();
-        self.pending_expand = None;
-        self.pending_expand_center_only = false;
-        self.pending_top_pin = None;
+        self.pending_expand = crate::state::PendingExpandState::default();
         self.roulette = None;
 
         // Transient UI work tied to the prior session — including any
@@ -1517,11 +1515,7 @@ impl Nokkvi {
 
         self.open_menu = None;
         self.browsing_panel = None;
-        self.cross_pane_drag = None;
-        self.cross_pane_drag_press_origin = None;
-        self.cross_pane_drag_pressed_item = None;
-        self.cross_pane_drag_selection_count = 1;
-        self.pending_queue_insert_position = None;
+        self.cross_pane_drag = crate::state::CrossPaneDragUi::default();
         self.start_view_applied = false;
         self.suppress_next_auto_center = false;
         self.pending_mode_commits = 0;

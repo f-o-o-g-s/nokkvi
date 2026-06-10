@@ -237,24 +237,9 @@ pub struct Nokkvi {
     pub active_playlist_info: Option<crate::state::ActivePlaylistContext>,
     pub browsing_panel: Option<views::BrowsingPanel>,
     pub pane_focus: crate::state::PaneFocus,
-    /// Active cross-pane drag from browsing panel to queue (None when idle)
-    pub cross_pane_drag: Option<crate::state::CrossPaneDragState>,
-    /// Last known cursor position (tracked via event subscription when panel is open)
-    pub last_cursor_position: iced::Point,
-    /// Press origin for cross-pane drag threshold detection (cleared on release)
-    pub cross_pane_drag_press_origin: Option<iced::Point>,
-    /// Center item index snapshotted at press time (before drag activation).
-    /// Captured right after the button's SlotListSetOffset processes (widget
-    /// messages run before subscription messages in Iced), so selected_offset
-    /// is guaranteed accurate. Immune to auto-follow or viewport mutations.
-    pub cross_pane_drag_pressed_item: Option<usize>,
-    /// Snapshotted selection count at press time. 1 = single item, >1 = batch.
-    pub cross_pane_drag_selection_count: usize,
-    /// Pending queue insertion position for cross-pane drag drop.
-    /// Set by `handle_cross_pane_drag_released` before dispatching the
-    /// `AddCenterToQueue` message; consumed by the update handler to
-    /// insert at position instead of appending.
-    pub pending_queue_insert_position: Option<usize>,
+    /// Cross-pane drag cluster: active drag + press tracking + pending drop
+    /// position (per-field docs on `CrossPaneDragUi`).
+    pub cross_pane_drag: crate::state::CrossPaneDragUi,
 
     // -------------------------------------------------------------------------
     // Audio Visualizer
@@ -319,25 +304,9 @@ pub struct Nokkvi {
     /// mode flags with a stale backend snapshot (the snapshot may predate the
     /// commit). Mirrors the `suppress_next_auto_center` idiom.
     pub pending_mode_commits: u32,
-    /// In-flight find-and-expand target — at most one chain runs at a time
-    /// across album / artist / genre / song. Set by the matching
-    /// `handle_navigate_and_expand_*` (click-driven) or by the
-    /// `handle_center_on_playing` fallback (Shift+C), and consumed by the
-    /// matching `try_resolve_pending_expand_*` after the load resolves
-    /// (paginated for album/artist/song, single-shot for genre).
-    pub pending_expand: Option<crate::state::PendingExpand>,
-    /// When `true`, the active `pending_expand` chain was started by
-    /// CenterOnPlaying (Shift+C): `try_resolve_pending_expand_*` should
-    /// CENTER the target on the viewport (not pin it to slot 0) and skip
-    /// the `FocusAndExpand` dispatch so the row stays collapsed. Cleared
-    /// alongside `pending_expand` in `cancel_pending_expand` and in each
-    /// `try_resolve_*` once the target is resolved.
-    pub pending_expand_center_only: bool,
-    /// Re-pin the highlight onto the find-chain target after `set_children`
-    /// runs. Set by `try_resolve_pending_expand_*` once the target is
-    /// found; consumed by the matching children-loaded handler
-    /// (`TracksLoaded` for albums, `AlbumsLoaded` for artists).
-    pub pending_top_pin: Option<crate::state::PendingTopPin>,
+    /// Find-and-expand chain cluster: in-flight target + center-only flag +
+    /// post-load top pin (per-field docs on `PendingExpandState`).
+    pub pending_expand: crate::state::PendingExpandState,
     /// Extracted backend server version (e.g. from Navidrome)
     pub server_version: Option<String>,
 
@@ -427,9 +396,7 @@ impl Default for Nokkvi {
             start_view_applied: false,
             suppress_next_auto_center: false,
             pending_mode_commits: 0,
-            pending_expand: None,
-            pending_expand_center_only: false,
-            pending_top_pin: None,
+            pending_expand: crate::state::PendingExpandState::default(),
             server_version: None,
             // Consolidated state structs with defaults
             active_playback: crate::state::ActivePlayback::default(),
@@ -449,12 +416,7 @@ impl Default for Nokkvi {
             active_playlist_info: None,
             browsing_panel: None,
             pane_focus: crate::state::PaneFocus::Queue,
-            cross_pane_drag: None,
-            last_cursor_position: iced::Point::ORIGIN,
-            cross_pane_drag_press_origin: None,
-            cross_pane_drag_pressed_item: None,
-            cross_pane_drag_selection_count: 1,
-            pending_queue_insert_position: None,
+            cross_pane_drag: crate::state::CrossPaneDragUi::default(),
             visualizer: None,
             visualizer_config: crate::visualizer_config::create_shared_config(),
             boat: crate::widgets::boat::BoatState::default(),

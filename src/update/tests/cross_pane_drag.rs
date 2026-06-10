@@ -458,7 +458,7 @@ fn cross_pane_drag_released_into_unmatchable_filtered_queue_surfaces_toast() {
     open_browsing_panel(&mut app, views::BrowsingView::Songs);
 
     // Active drag in flight.
-    app.cross_pane_drag = Some(crate::state::CrossPaneDragState {
+    app.cross_pane_drag.active = Some(crate::state::CrossPaneDragState {
         origin: iced::Point::new(0.0, 0.0),
         cursor: iced::Point::new(0.0, 0.0),
         center_index: Some(0),
@@ -475,7 +475,7 @@ fn cross_pane_drag_released_into_unmatchable_filtered_queue_surfaces_toast() {
     let _ = app.handle_cross_pane_drag_released();
 
     assert!(
-        app.pending_queue_insert_position.is_none(),
+        app.cross_pane_drag.pending_queue_insert_position.is_none(),
         "an unresolvable drop must NOT set a pending insert position"
     );
     assert!(
@@ -510,13 +510,13 @@ fn press_resolves_from_browser_hovered_item_index() {
     let _ = app.handle_cross_pane_drag_pressed();
 
     assert_eq!(
-        app.cross_pane_drag_pressed_item,
+        app.cross_pane_drag.pressed_item,
         Some(0),
         "press over visual slot 0 must resolve to item 0 — the rendered \
          widget tree IS the source of truth"
     );
     assert!(
-        app.cross_pane_drag_press_origin.is_some(),
+        app.cross_pane_drag.press_origin.is_some(),
         "press origin must be recorded so the threshold check in \
          handle_cross_pane_drag_moved can activate the drag"
     );
@@ -537,7 +537,7 @@ fn press_resolves_from_browser_hovered_item_at_high_offset() {
     app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 7, 1_340));
 
     let _ = app.handle_cross_pane_drag_pressed();
-    assert_eq!(app.cross_pane_drag_pressed_item, Some(1_340));
+    assert_eq!(app.cross_pane_drag.pressed_item, Some(1_340));
 }
 
 #[test]
@@ -554,8 +554,8 @@ fn press_no_op_when_no_browser_slot_hovered() {
     app.songs_page.common.slot_list.hovered_slot = None;
 
     let _ = app.handle_cross_pane_drag_pressed();
-    assert_eq!(app.cross_pane_drag_pressed_item, None);
-    assert_eq!(app.cross_pane_drag_press_origin, None);
+    assert_eq!(app.cross_pane_drag.pressed_item, None);
+    assert_eq!(app.cross_pane_drag.press_origin, None);
 }
 
 #[test]
@@ -576,8 +576,8 @@ fn press_no_op_on_empty_trailing_slot() {
     });
 
     let _ = app.handle_cross_pane_drag_pressed();
-    assert_eq!(app.cross_pane_drag_pressed_item, None);
-    assert_eq!(app.cross_pane_drag_press_origin, None);
+    assert_eq!(app.cross_pane_drag.pressed_item, None);
+    assert_eq!(app.cross_pane_drag.press_origin, None);
 }
 
 #[test]
@@ -589,8 +589,8 @@ fn press_no_op_when_browsing_panel_closed() {
     app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 2, 2));
 
     let _ = app.handle_cross_pane_drag_pressed();
-    assert_eq!(app.cross_pane_drag_pressed_item, None);
-    assert_eq!(app.cross_pane_drag_press_origin, None);
+    assert_eq!(app.cross_pane_drag.pressed_item, None);
+    assert_eq!(app.cross_pane_drag.press_origin, None);
 }
 
 #[test]
@@ -612,7 +612,7 @@ fn press_reads_from_active_browser_view_not_a_different_one() {
 
     let _ = app.handle_cross_pane_drag_pressed();
     assert_eq!(
-        app.cross_pane_drag_pressed_item, None,
+        app.cross_pane_drag.pressed_item, None,
         "press must consult ONLY the active browser view's hover state \
          — a stale hover on an inactive tab must not arm the drag"
     );
@@ -633,11 +633,11 @@ fn press_no_op_with_ctrl_or_shift_modifier() {
 
     app.window.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
     let _ = app.handle_cross_pane_drag_pressed();
-    assert_eq!(app.cross_pane_drag_pressed_item, None);
+    assert_eq!(app.cross_pane_drag.pressed_item, None);
 
     app.window.keyboard_modifiers = iced::keyboard::Modifiers::SHIFT;
     let _ = app.handle_cross_pane_drag_pressed();
-    assert_eq!(app.cross_pane_drag_pressed_item, None);
+    assert_eq!(app.cross_pane_drag.pressed_item, None);
 }
 
 // --- Editor drop-target resolution (empty-playlist drop bug) ---------------

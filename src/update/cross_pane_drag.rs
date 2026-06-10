@@ -87,8 +87,8 @@ impl Nokkvi {
             Some(HoveredSlot::Empty { .. }) | None => return Task::none(),
         };
 
-        self.cross_pane_drag_press_origin = Some(self.last_cursor_position);
-        self.cross_pane_drag_pressed_item = Some(pressed_index);
+        self.cross_pane_drag.press_origin = Some(self.cross_pane_drag.last_cursor_position);
+        self.cross_pane_drag.pressed_item = Some(pressed_index);
 
         // Selection mutation is deferred to `handle_cross_pane_drag_moved`
         // once the drag threshold is exceeded. Mutating on press would
@@ -109,11 +109,11 @@ impl Nokkvi {
 
     /// Cursor moved while tracking — check threshold and update drag position.
     pub(crate) fn handle_cross_pane_drag_moved(&mut self, position: iced::Point) -> Task<Message> {
-        self.last_cursor_position = position;
+        self.cross_pane_drag.last_cursor_position = position;
 
         // If we have a press origin but no active drag, check threshold
-        if let Some(origin) = self.cross_pane_drag_press_origin {
-            if self.cross_pane_drag.is_none() {
+        if let Some(origin) = self.cross_pane_drag.press_origin {
+            if self.cross_pane_drag.active.is_none() {
                 let dx = position.x - origin.x;
                 let dy = position.y - origin.y;
                 let distance = (dx * dx + dy * dy).sqrt();
@@ -136,7 +136,7 @@ impl Nokkvi {
                     // evaluate_context_menu semantics).
                     let selection_count = if let (Some(panel), Some(pressed_index)) = (
                         self.browsing_panel.as_ref().map(|p| p.active_view),
-                        self.cross_pane_drag_pressed_item,
+                        self.cross_pane_drag.pressed_item,
                     ) {
                         let common: &mut crate::widgets::SlotListPageState = match panel {
                             views::BrowsingView::Albums => &mut self.albums_page.common,
@@ -156,16 +156,16 @@ impl Nokkvi {
                     } else {
                         1
                     };
-                    self.cross_pane_drag_selection_count = selection_count;
+                    self.cross_pane_drag.selection_count = selection_count;
 
-                    self.cross_pane_drag = Some(CrossPaneDragState {
+                    self.cross_pane_drag.active = Some(CrossPaneDragState {
                         origin,
                         cursor: position,
-                        center_index: self.cross_pane_drag_pressed_item,
+                        center_index: self.cross_pane_drag.pressed_item,
                         selection_count,
                     });
                 }
-            } else if let Some(drag) = self.cross_pane_drag.as_mut() {
+            } else if let Some(drag) = self.cross_pane_drag.active.as_mut() {
                 // Active drag — drop target is read structurally from the
                 // queue's hover state at render / release time, so the only
                 // mutation here is to track the cursor for the floating
@@ -180,11 +180,9 @@ impl Nokkvi {
     /// Mouse released — check if drop is over queue pane, trigger add-to-queue at drop position.
     pub(crate) fn handle_cross_pane_drag_released(&mut self) -> Task<Message> {
         // Clear press state regardless
-        self.cross_pane_drag_press_origin = None;
-        self.cross_pane_drag_pressed_item = None;
-        self.cross_pane_drag_selection_count = 1;
+        self.cross_pane_drag.clear_press_tracking();
 
-        let drag = match self.cross_pane_drag.take() {
+        let drag = match self.cross_pane_drag.active.take() {
             Some(d) => d,
             None => return Task::none(), // No active drag
         };
@@ -225,7 +223,7 @@ impl Nokkvi {
         };
 
         // Store the target position for the update handler to consume
-        self.pending_queue_insert_position = Some(insert_index);
+        self.cross_pane_drag.pending_queue_insert_position = Some(insert_index);
 
         debug!(" [DRAG] Drop target index: {insert_index}");
 
@@ -281,20 +279,22 @@ impl Nokkvi {
 
         // Dispatch the existing AddCenterToQueue message for the browsing panel's active view.
         // This reuses all existing add-to-queue logic (song resolution, backend calls, etc.)
-        // The update handler will check `pending_queue_insert_position` to decide whether
-        // to insert at position or append.
+        // The update handler will check `cross_pane_drag.pending_queue_insert_position`
+        // to decide whether to insert at position or append.
         self.dispatch_browser_add_to_queue()
     }
 
     /// Cancel active drag (Escape key, etc.)
+    ///
+    /// Intentionally NOT a full `CrossPaneDragUi::default()` reset:
+    /// `pending_queue_insert_position` is left alone so a drop that already
+    /// dispatched `AddCenterToQueue` can still consume its position.
     pub(crate) fn handle_cross_pane_drag_cancel(&mut self) -> Task<Message> {
-        if self.cross_pane_drag.is_some() {
+        if self.cross_pane_drag.active.is_some() {
             debug!(" [DRAG] Cross-pane drag cancelled by user");
         }
-        self.cross_pane_drag = None;
-        self.cross_pane_drag_press_origin = None;
-        self.cross_pane_drag_pressed_item = None;
-        self.cross_pane_drag_selection_count = 1;
+        self.cross_pane_drag.active = None;
+        self.cross_pane_drag.clear_press_tracking();
         Task::none()
     }
 
@@ -342,7 +342,7 @@ impl Nokkvi {
             }
         };
 
-        let Some(drag) = self.cross_pane_drag.as_ref() else {
+        let Some(drag) = self.cross_pane_drag.active.as_ref() else {
             return iced::widget::text("Drag to queue")
                 .color(crate::theme::fg0())
                 .into();

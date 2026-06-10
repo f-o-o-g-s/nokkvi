@@ -363,12 +363,12 @@ fn click_navigate_and_expand_album_keeps_center_only_off_for_top_pin_layout() {
     // at the center slot instead of slot 0). This ensures the two chains
     // share state cleanly.
     let mut app = test_app();
-    app.pending_expand_center_only = true; // simulate a stale flag
+    app.pending_expand.center_only = true; // simulate a stale flag
 
     let _ = app.handle_navigate_and_expand_album("a1".to_string());
 
     assert!(
-        !app.pending_expand_center_only,
+        !app.pending_expand.center_only,
         "starting a click-driven find chain must reset center_only — \
          otherwise the click would get the Shift+C layout"
     );

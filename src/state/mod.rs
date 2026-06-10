@@ -13,15 +13,17 @@
 //! 1. `#[derive(Default)]` — preferred when every field has a `Default`
 //!    impl that produces the value the holder should start at. Used by
 //!    `EngineState`, `ScrobbleState`, `PlaybackModes`, `LibraryData`,
-//!    `LibraryCounts`, `ToastState`, `PaneFocus`, `ActivePlayback`.
+//!    `LibraryCounts`, `ToastState`, `PaneFocus`, `ActivePlayback`,
+//!    `PendingExpandState`.
 //!
 //! 2. Hand-written `impl Default` — when the holder has a sensible empty
 //!    starting state but some field defaults aren't what the holder wants
-//!    (e.g. `SfxState::volume = 0.68`, `WindowState::width = 1200.0`, or
-//!    a string field that should start as `"Not Playing"`). Reach for this
-//!    over `new()` when no constructor arguments are needed; reserve `new()`
-//!    for shapes that genuinely need parameters or `NonZeroUsize` capacities
-//!    that `#[derive]` can't express.
+//!    (e.g. `SfxState::volume = 0.68`, `WindowState::width = 1200.0`,
+//!    `CrossPaneDragUi::selection_count = 1`, or a string field that should
+//!    start as `"Not Playing"`). Reach for this over `new()` when no
+//!    constructor arguments are needed; reserve `new()` for shapes that
+//!    genuinely need parameters or `NonZeroUsize` capacities that
+//!    `#[derive]` can't express.
 //!
 //! 3. Neither — for types whose existence on the parent always implies a
 //!    populated value (e.g. `StoredSession`, `ActivePlaylistContext`,

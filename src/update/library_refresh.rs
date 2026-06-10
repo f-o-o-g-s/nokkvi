@@ -23,7 +23,7 @@ impl Nokkvi {
         // that survive, so the next post-gesture SSE event (or the manual
         // Refresh button) reconciles the library. Placed before the toast
         // below so no misleading "Library refreshed" message fires either.
-        if self.playlist_editor.is_some() || self.cross_pane_drag.is_some() {
+        if self.playlist_editor.is_some() || self.cross_pane_drag.active.is_some() {
             tracing::debug!(
                 " [SSE] LibraryChanged received during active edit/drag; skipping reload"
             );

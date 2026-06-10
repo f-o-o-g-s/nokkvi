@@ -182,7 +182,7 @@ macro_rules! find_chain_scenarios_full {
                 assert!(app.$page.common.active_filter.is_none());
                 assert!(app.$page.common.search_query.is_empty());
                 assert!(!app.$page.common.search_input_focused);
-                match &app.pending_expand {
+                match &app.pending_expand.target {
                     Some($pending_var {
                         $pfield,
                         for_browsing_pane,
@@ -213,7 +213,7 @@ macro_rules! find_chain_scenarios_full {
 
                 let _ = app.$browser("a1".to_string());
 
-                match &app.pending_expand {
+                match &app.pending_expand.target {
                     Some($pending_var {
                         for_browsing_pane, ..
                     }) => {
@@ -230,7 +230,7 @@ macro_rules! find_chain_scenarios_full {
 
                 let _ = app.handle_switch_view(View::Songs);
 
-                assert!(app.pending_expand.is_none());
+                assert!(app.pending_expand.target.is_none());
             }
 
             #[test]
@@ -241,7 +241,7 @@ macro_rules! find_chain_scenarios_full {
                 let _ = app.handle_switch_view($view);
 
                 assert!(
-                    app.pending_expand.is_some(),
+                    app.pending_expand.target.is_some(),
                     "switching to the entity's own view should not cancel the in-flight find chain",
                 );
             }
@@ -259,7 +259,7 @@ macro_rules! find_chain_scenarios_full {
                     },
                 );
 
-                assert!(app.pending_expand.is_none());
+                assert!(app.pending_expand.target.is_none());
             }
 
             #[test]
@@ -272,7 +272,7 @@ macro_rules! find_chain_scenarios_full {
 
                 assert!(task.is_some(), "found target should produce a task");
                 assert!(
-                    app.pending_expand.is_none(),
+                    app.pending_expand.target.is_none(),
                     "target should be taken once dispatched",
                 );
                 // For a 3-item library with default slot_count=9 (center_slot=4),
@@ -317,7 +317,7 @@ macro_rules! find_chain_scenarios_full {
 
                 assert!(task.is_some(), "fully-loaded miss should produce a task");
                 assert!(
-                    app.pending_expand.is_none(),
+                    app.pending_expand.target.is_none(),
                     "target should be cleared when known-not-in-library",
                 );
             }
@@ -333,7 +333,7 @@ macro_rules! find_chain_scenarios_full {
 
                 assert!(task.is_none(), "should wait while a page is in flight");
                 assert!(
-                    app.pending_expand.is_some(),
+                    app.pending_expand.target.is_some(),
                     "target preserved while loading",
                 );
             }
@@ -349,7 +349,7 @@ macro_rules! find_chain_scenarios_full {
 
                 assert!(task.is_some(), "should dispatch next-page load");
                 assert!(
-                    app.pending_expand.is_some(),
+                    app.pending_expand.target.is_some(),
                     "target preserved while still hunting",
                 );
             }
@@ -383,7 +383,7 @@ macro_rules! find_chain_scenarios_full {
             #[test]
             fn pending_timeout_does_not_toast_when_target_already_resolved() {
                 let mut app = test_app();
-                assert!(app.pending_expand.is_none());
+                assert!(app.pending_expand.target.is_none());
 
                 let _ = app.handle_pending_expand_timeout($pending_factory("a1"));
 
@@ -424,7 +424,7 @@ macro_rules! find_chain_scenarios_full {
 
                 let _ = app.$resolve();
 
-                match app.pending_top_pin.as_ref() {
+                match app.pending_expand.top_pin.as_ref() {
                     Some($pin_var(id)) => assert_eq!(id, $expected_pin_in_3),
                     other => panic!("expected pending_top_pin set to target, got {other:?}"),
                 }
@@ -438,7 +438,7 @@ macro_rules! find_chain_scenarios_full {
                     .common
                     .slot_list
                     .set_selected($idx_in_3, app.library.$lib.len());
-                app.pending_top_pin = Some($pin_var($expected_pin_in_3.to_string()));
+                app.pending_expand.top_pin = Some($pin_var($expected_pin_in_3.to_string()));
 
                 let _ =
                     app.$handle_view($children_msg($expected_pin_in_3.to_string(), $children_arg));
@@ -449,7 +449,7 @@ macro_rules! find_chain_scenarios_full {
                     "highlight must follow the target after expansion completes",
                 );
                 assert!(
-                    app.pending_top_pin.is_none(),
+                    app.pending_expand.top_pin.is_none(),
                     "pin should be consumed once applied",
                 );
             }
@@ -520,7 +520,7 @@ macro_rules! find_chain_scenarios_single_shot {
                 assert!(app.$page.common.active_filter.is_none());
                 assert!(app.$page.common.search_query.is_empty());
                 assert!(!app.$page.common.search_input_focused);
-                match &app.pending_expand {
+                match &app.pending_expand.target {
                     Some($pending_var {
                         $pfield,
                         for_browsing_pane,
@@ -550,7 +550,7 @@ macro_rules! find_chain_scenarios_single_shot {
 
                 let _ = app.$browser("Rock".to_string());
 
-                match &app.pending_expand {
+                match &app.pending_expand.target {
                     Some($pending_var {
                         for_browsing_pane, ..
                     }) => {
@@ -567,7 +567,7 @@ macro_rules! find_chain_scenarios_single_shot {
 
                 let _ = app.handle_switch_view(View::Songs);
 
-                assert!(app.pending_expand.is_none());
+                assert!(app.pending_expand.target.is_none());
             }
 
             #[test]
@@ -578,7 +578,7 @@ macro_rules! find_chain_scenarios_single_shot {
                 let _ = app.handle_switch_view($view);
 
                 assert!(
-                    app.pending_expand.is_some(),
+                    app.pending_expand.target.is_some(),
                     "switching to the entity's own view should not cancel the in-flight find chain",
                 );
             }
@@ -596,7 +596,7 @@ macro_rules! find_chain_scenarios_single_shot {
                     },
                 );
 
-                assert!(app.pending_expand.is_none());
+                assert!(app.pending_expand.target.is_none());
             }
 
             #[test]
@@ -609,14 +609,14 @@ macro_rules! find_chain_scenarios_single_shot {
 
                 assert!(task.is_some(), "found target should produce a task");
                 assert!(
-                    app.pending_expand.is_none(),
+                    app.pending_expand.target.is_none(),
                     "target should be taken once dispatched",
                 );
                 assert_eq!(app.$page.common.slot_list.viewport_offset, 2);
                 assert_eq!(app.$page.common.slot_list.selected_offset, Some($idx_in_3),);
                 // Top-pin assertion folded in (genre's _sets_top_pin_ test was
                 // never separated from _finds_loaded_).
-                match app.pending_top_pin.as_ref() {
+                match app.pending_expand.top_pin.as_ref() {
                     Some($pin_var(id)) => assert_eq!(id, $expected_pin_in_3),
                     other => panic!("expected pending_top_pin set to target, got {other:?}"),
                 }
@@ -652,7 +652,7 @@ macro_rules! find_chain_scenarios_single_shot {
                 let task = app.$resolve();
 
                 assert!(task.is_none(), "should wait while load is in flight");
-                assert!(app.pending_expand.is_some());
+                assert!(app.pending_expand.target.is_some());
             }
 
             #[test]
@@ -682,13 +682,13 @@ macro_rules! find_chain_scenarios_single_shot {
                     .common
                     .slot_list
                     .set_selected($idx_in_3, app.library.$lib.len());
-                app.pending_top_pin = Some($pin_var($expected_pin_in_3.to_string()));
+                app.pending_expand.top_pin = Some($pin_var($expected_pin_in_3.to_string()));
 
                 let _ =
                     app.$handle_view($children_msg($expected_pin_in_3.to_string(), $children_arg));
 
                 assert_eq!(app.$page.common.slot_list.selected_offset, Some($idx_in_3),);
-                assert!(app.pending_top_pin.is_none());
+                assert!(app.pending_expand.top_pin.is_none());
             }
         }
     };

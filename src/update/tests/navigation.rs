@@ -455,7 +455,7 @@ fn tracks_loaded_for_unrelated_album_does_not_re_pin() {
             make_album("a3", "Album Three", "Artist"),
         ],
     );
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+    app.pending_expand.top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
 
     let _ = app.handle_albums(crate::views::AlbumsMessage::TracksLoaded(
         "a3".to_string(),
@@ -464,7 +464,7 @@ fn tracks_loaded_for_unrelated_album_does_not_re_pin() {
 
     assert!(
         matches!(
-            app.pending_top_pin,
+            app.pending_expand.top_pin,
             Some(crate::state::PendingTopPin::Album(ref id)) if id == "a2"
         ),
         "pin must not be consumed by an unrelated TracksLoaded"
@@ -474,14 +474,14 @@ fn tracks_loaded_for_unrelated_album_does_not_re_pin() {
 #[test]
 fn pending_top_pin_cleared_on_search_in_albums() {
     let mut app = test_app();
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
+    app.pending_expand.top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
 
     let _ = app.handle_albums(crate::views::AlbumsMessage::SearchQueryChanged(
         "foo".to_string(),
     ));
 
     assert!(
-        app.pending_top_pin.is_none(),
+        app.pending_expand.top_pin.is_none(),
         "user-driven search supersedes the find chain — pin should clear"
     );
 }
@@ -489,17 +489,17 @@ fn pending_top_pin_cleared_on_search_in_albums() {
 #[test]
 fn pending_top_pin_cleared_on_switch_view_away() {
     let mut app = test_app();
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
+    app.pending_expand.top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
 
     let _ = app.handle_switch_view(View::Songs);
 
-    assert!(app.pending_top_pin.is_none());
+    assert!(app.pending_expand.top_pin.is_none());
 }
 
 #[test]
 fn pending_top_pin_cleared_on_navigate_and_filter() {
     let mut app = test_app();
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Artist("ar1".to_string()));
+    app.pending_expand.top_pin = Some(crate::state::PendingTopPin::Artist("ar1".to_string()));
 
     let _ = app.handle_navigate_and_filter(
         View::Songs,
@@ -509,7 +509,7 @@ fn pending_top_pin_cleared_on_navigate_and_filter() {
         },
     );
 
-    assert!(app.pending_top_pin.is_none());
+    assert!(app.pending_expand.top_pin.is_none());
 }
 
 // ============================================================================
@@ -550,11 +550,11 @@ fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
     // what downstream `GenresMessage::AlbumsLoaded(genre_id, _)` will carry.
     assert!(
         matches!(
-            app.pending_top_pin,
+            app.pending_expand.top_pin,
             Some(crate::state::PendingTopPin::Genre(ref id)) if id == "uuid-blackmetal-456"
         ),
         "found-path must set pending_top_pin to the resolved internal id (got {:?})",
-        app.pending_top_pin
+        app.pending_expand.top_pin
     );
     assert!(
         app.toast.toasts.is_empty(),
@@ -575,7 +575,7 @@ fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
 
     assert!(task.is_some(), "missing target should produce a task");
     assert!(
-        app.pending_expand.is_none(),
+        app.pending_expand.target.is_none(),
         "target should be cleared when known-not-in-library"
     );
 }
@@ -1045,15 +1045,15 @@ fn start_center_on_playing_album_chain_clears_search_and_arms_center_only() {
     );
     assert!(
         matches!(
-            app.pending_expand,
+            app.pending_expand.target,
             Some(crate::state::PendingExpand::Album { ref album_id, for_browsing_pane: false })
                 if album_id == "a42"
         ),
         "expected PendingExpand::Album {{ a42, top-pane }}, got {:?}",
-        app.pending_expand
+        app.pending_expand.target
     );
     assert!(
-        app.pending_expand_center_only,
+        app.pending_expand.center_only,
         "Shift+C chain must arm center-only mode so try_resolve skips FocusAndExpand"
     );
 }
@@ -1071,14 +1071,14 @@ fn start_center_on_playing_song_chain_installs_song_target() {
     assert!(app.songs_page.common.search_query.is_empty());
     assert!(
         matches!(
-            app.pending_expand,
+            app.pending_expand.target,
             Some(crate::state::PendingExpand::Song { ref song_id, for_browsing_pane: false })
                 if song_id == "s99"
         ),
         "expected PendingExpand::Song {{ s99 }}, got {:?}",
-        app.pending_expand
+        app.pending_expand.target
     );
-    assert!(app.pending_expand_center_only);
+    assert!(app.pending_expand.center_only);
 }
 
 #[test]
@@ -1098,11 +1098,11 @@ fn start_center_on_playing_chain_installs_artist_target() {
         "buffer must be reset so pagination restarts from offset 0",
     );
     assert!(matches!(
-        app.pending_expand,
+        app.pending_expand.target,
         Some(crate::state::PendingExpand::Artist { ref artist_id, for_browsing_pane: false })
             if artist_id == "ar7"
     ));
-    assert!(app.pending_expand_center_only);
+    assert!(app.pending_expand.center_only);
 }
 
 #[test]
@@ -1119,18 +1119,18 @@ fn start_center_on_playing_chain_installs_genre_target() {
     assert!(app.genres_page.common.search_query.is_empty());
     assert!(app.library.genres.is_empty());
     assert!(matches!(
-        app.pending_expand,
+        app.pending_expand.target,
         Some(crate::state::PendingExpand::Genre { ref genre_id, for_browsing_pane: false })
             if genre_id == "Rock"
     ));
-    assert!(app.pending_expand_center_only);
+    assert!(app.pending_expand.center_only);
 }
 
 #[test]
 fn try_resolve_pending_expand_album_center_only_centers_without_top_pin() {
     let mut app = test_app();
     arm_pending_album(&mut app, "a320");
-    app.pending_expand_center_only = true;
+    app.pending_expand.center_only = true;
     seed_albums(&mut app, albums_indexed(1343));
 
     let task = app.try_resolve_pending_expand_album();
@@ -1143,12 +1143,12 @@ fn try_resolve_pending_expand_album_center_only_centers_without_top_pin() {
     );
     assert_eq!(app.albums_page.common.slot_list.selected_offset, Some(320));
     assert!(
-        app.pending_top_pin.is_none(),
+        app.pending_expand.top_pin.is_none(),
         "center-only mode must NOT set pending_top_pin — there's no FocusAndExpand \
          re-render to survive, and a stray pin would interfere with later clicks"
     );
     assert!(
-        !app.pending_expand_center_only,
+        !app.pending_expand.center_only,
         "flag must be cleared once the target resolves so the next chain starts clean"
     );
 }
@@ -1157,14 +1157,14 @@ fn try_resolve_pending_expand_album_center_only_centers_without_top_pin() {
 fn try_resolve_pending_expand_song_centers_target() {
     let mut app = test_app();
     arm_pending_song(&mut app, "s50");
-    app.pending_expand_center_only = true;
+    app.pending_expand.center_only = true;
     seed_songs(&mut app, songs_indexed(200));
 
     let task = app.try_resolve_pending_expand_song();
     assert!(task.is_some(), "found song should produce a task");
 
-    assert!(app.pending_expand.is_none());
-    assert!(!app.pending_expand_center_only);
+    assert!(app.pending_expand.target.is_none());
+    assert!(!app.pending_expand.center_only);
     assert_eq!(
         app.songs_page.common.slot_list.viewport_offset, 50,
         "song must land at the center slot"
@@ -1176,7 +1176,7 @@ fn try_resolve_pending_expand_song_centers_target() {
 fn try_resolve_pending_expand_song_force_loads_when_idle_and_more_remain() {
     let mut app = test_app();
     arm_pending_song(&mut app, "s999");
-    app.pending_expand_center_only = true;
+    app.pending_expand.center_only = true;
     // 1 loaded of 100 known total, idle → should request next page
     app.library
         .songs
@@ -1186,36 +1186,36 @@ fn try_resolve_pending_expand_song_force_loads_when_idle_and_more_remain() {
 
     assert!(task.is_some(), "idle + more pages should kick a force-load");
     assert!(
-        app.pending_expand.is_some(),
+        app.pending_expand.target.is_some(),
         "target must persist across the force-load — the next page-loaded handler will retry"
     );
-    assert!(app.pending_expand_center_only);
+    assert!(app.pending_expand.center_only);
 }
 
 #[test]
 fn try_resolve_pending_expand_song_clears_when_fully_loaded_and_missing() {
     let mut app = test_app();
     arm_pending_song(&mut app, "missing");
-    app.pending_expand_center_only = true;
+    app.pending_expand.center_only = true;
     seed_songs(&mut app, vec![make_song("s1", "Song One", "Artist")]);
 
     let task = app.try_resolve_pending_expand_song();
 
     assert!(task.is_some());
-    assert!(app.pending_expand.is_none());
-    assert!(!app.pending_expand_center_only);
+    assert!(app.pending_expand.target.is_none());
+    assert!(!app.pending_expand.center_only);
 }
 
 #[test]
 fn cancel_pending_expand_also_clears_center_only_flag() {
     let mut app = test_app();
     arm_pending_album(&mut app, "a1");
-    app.pending_expand_center_only = true;
+    app.pending_expand.center_only = true;
 
     app.cancel_pending_expand();
 
-    assert!(app.pending_expand.is_none());
-    assert!(!app.pending_expand_center_only);
+    assert!(app.pending_expand.target.is_none());
+    assert!(!app.pending_expand.center_only);
 }
 
 // ============================================================================

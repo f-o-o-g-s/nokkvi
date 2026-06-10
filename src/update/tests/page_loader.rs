@@ -230,7 +230,7 @@ fn prefetch_and_maybe_load_next_page_skips_load_page_when_fully_loaded() {
 fn pin_after_load_clears_pin_on_match() {
     let mut app = test_app();
     seed_albums(&mut app, albums_indexed(3));
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+    app.pending_expand.top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
 
     app.pin_after_load(
         "a2",
@@ -245,7 +245,7 @@ fn pin_after_load_clears_pin_on_match() {
     );
 
     assert!(
-        app.pending_top_pin.is_none(),
+        app.pending_expand.top_pin.is_none(),
         "matching pin must be consumed after the pin fn runs"
     );
 }
@@ -255,7 +255,7 @@ fn pin_after_load_preserves_pin_on_kind_mismatch() {
     // Pin is an Album but the matches_pin closure looks for Genre — no fire.
     let mut app = test_app();
     seed_albums(&mut app, albums_indexed(3));
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+    app.pending_expand.top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
 
     let mut pin_called = false;
     app.pin_after_load(
@@ -270,7 +270,7 @@ fn pin_after_load_preserves_pin_on_kind_mismatch() {
 
     assert!(!pin_called, "pin fn must not run when kinds disagree");
     assert!(
-        app.pending_top_pin.is_some(),
+        app.pending_expand.top_pin.is_some(),
         "pin must NOT be cleared on kind mismatch"
     );
 }
@@ -281,7 +281,7 @@ fn pin_after_load_preserves_pin_on_position_miss() {
     // a subsequent load with the same id can still resolve it.
     let mut app = test_app();
     seed_albums(&mut app, albums_indexed(3)); // a0..a2
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("missing".to_string()));
+    app.pending_expand.top_pin = Some(crate::state::PendingTopPin::Album("missing".to_string()));
 
     let mut pin_called = false;
     app.pin_after_load(
@@ -295,7 +295,7 @@ fn pin_after_load_preserves_pin_on_position_miss() {
 
     assert!(!pin_called, "pin fn must not run on position miss");
     assert!(
-        app.pending_top_pin.is_some(),
+        app.pending_expand.top_pin.is_some(),
         "pin must survive a position miss so the next load can resolve it"
     );
 }
@@ -304,7 +304,7 @@ fn pin_after_load_preserves_pin_on_position_miss() {
 fn pin_after_load_no_op_when_no_pin_set() {
     let mut app = test_app();
     seed_albums(&mut app, albums_indexed(3));
-    assert!(app.pending_top_pin.is_none(), "precondition: no pin");
+    assert!(app.pending_expand.top_pin.is_none(), "precondition: no pin");
 
     let mut pin_called = false;
     app.pin_after_load(

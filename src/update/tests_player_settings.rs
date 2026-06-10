@@ -217,17 +217,17 @@ fn ui_runtime_flags_stay_loose_on_nokkvi() {
     // a 1500-LOC update handler.
     let _: bool = app.start_view_applied;
     let _: bool = app.suppress_next_auto_center;
-    let _: bool = app.pending_expand_center_only;
-    let _: &Option<crate::state::PendingExpand> = &app.pending_expand;
-    let _: &Option<crate::state::PendingTopPin> = &app.pending_top_pin;
+    let _: bool = app.pending_expand.center_only;
+    let _: &Option<crate::state::PendingExpand> = &app.pending_expand.target;
+    let _: &Option<crate::state::PendingTopPin> = &app.pending_expand.top_pin;
     let _: &Option<String> = &app.server_version;
 
     // Spot-check the defaults so the test does work beyond field access.
     assert!(!app.start_view_applied);
     assert!(!app.suppress_next_auto_center);
-    assert!(!app.pending_expand_center_only);
-    assert!(app.pending_expand.is_none());
-    assert!(app.pending_top_pin.is_none());
+    assert!(!app.pending_expand.center_only);
+    assert!(app.pending_expand.target.is_none());
+    assert!(app.pending_expand.top_pin.is_none());
     assert!(app.server_version.is_none());
 }
 

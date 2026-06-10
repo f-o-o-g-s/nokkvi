@@ -36,7 +36,7 @@ impl Nokkvi {
         }
 
         // Cancel active cross-pane drag first
-        if self.cross_pane_drag.is_some() || self.cross_pane_drag_press_origin.is_some() {
+        if self.cross_pane_drag.active.is_some() || self.cross_pane_drag.press_origin.is_some() {
             return self.handle_cross_pane_drag_cancel();
         }
 

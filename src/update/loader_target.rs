@@ -592,13 +592,13 @@ impl Nokkvi {
     /// The page's `update` clears `selected_offset` when it calls
     /// `set_children`, which would lose the find-chain's intended highlight
     /// position. This helper:
-    /// 1. Checks `pending_top_pin` matches the supplied `loaded_id` and
-    ///    `expected_kind`.
+    /// 1. Checks `pending_expand.top_pin` matches the supplied `loaded_id`
+    ///    and `expected_kind`.
     /// 2. Looks up the entity index in `library` via `find_position`.
     /// 3. Computes the post-expansion flat-list length via `flattened_len`.
     /// 4. Calls `slot_list.pin_selected(idx, total)` to restore the
     ///    highlight.
-    /// 5. Clears `pending_top_pin` so a later, unrelated load doesn't
+    /// 5. Clears `pending_expand.top_pin` so a later, unrelated load doesn't
     ///    re-fire the pin.
     ///
     /// The three callers (Albums, Artists, Genres) differ only in their
@@ -615,7 +615,7 @@ impl Nokkvi {
         F2: FnOnce(&Self, &str) -> Option<usize>,
         F3: FnOnce(&mut Self, usize),
     {
-        let Some(pin_state) = &self.pending_top_pin else {
+        let Some(pin_state) = &self.pending_expand.top_pin else {
             return;
         };
         if !matches_pin(pin_state, loaded_id) {
@@ -625,7 +625,7 @@ impl Nokkvi {
             return;
         };
         pin(self, idx);
-        self.pending_top_pin = None;
+        self.pending_expand.top_pin = None;
     }
 
     /// Shared "prefetch viewport mini artwork + chain a page-load if scrolling

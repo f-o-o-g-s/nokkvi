@@ -955,7 +955,7 @@ impl Nokkvi {
 
         // Add floating drag indicator during cross-pane drag — renders a copy
         // of the centered browsing slot at the cursor position.
-        if let Some(ref drag) = self.cross_pane_drag {
+        if let Some(ref drag) = self.cross_pane_drag.active {
             let slot_element = self.render_drag_slot();
 
             // Position the slot near the cursor. Use a width that matches
@@ -998,7 +998,7 @@ impl Nokkvi {
     /// `None` if no drag is active or the cursor is not over any queue
     /// slot. Read by [`crate::views::QueueViewData::drop_indicator_slot`].
     fn cross_pane_drop_indicator_slot(&self) -> Option<usize> {
-        self.cross_pane_drag.as_ref()?;
+        self.cross_pane_drag.active.as_ref()?;
         // While editing, the LEFT pane is the playlist editor, so the drop
         // indicator tracks the editor's own hovered slot (its slot-list state
         // is independent of the live queue's). Otherwise read the queue pane.
@@ -1377,7 +1377,7 @@ impl Nokkvi {
             let queue_container = container(queue_pane)
                 .width(Length::FillPortion(QUEUE_PANE_PORTION))
                 .height(Length::Fill)
-                .style(if self.cross_pane_drag.is_some() {
+                .style(if self.cross_pane_drag.active.is_some() {
                     // Drop target highlight during active drag
                     let accent = crate::theme::accent_bright();
                     Box::new(move |_theme: &iced::Theme| container::Style {
