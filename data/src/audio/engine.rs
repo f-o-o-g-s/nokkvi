@@ -178,6 +178,10 @@ pub(crate) const BACKPRESSURE_RELEASE_DIVISOR: u64 = 3;
 /// cushion is time-based: one legacy unit == `CUSHION_MS / CUSHION_BASE_UNITS`.
 const CUSHION_BASE_UNITS: u64 = 120;
 
+/// Radio jitter prebuffer: keep output paused after (re)connect until about
+/// this much audio is buffered.
+const RADIO_JITTER_PREBUFFER_MS: u64 = 5000;
+
 /// Compute backpressure watermarks `(high, low)` in interleaved SAMPLES, scaled
 /// to the stream's `frame_rate` (`sample_rate * channels`) so the cushion is a
 /// constant TIME at any rate. Shared by the primary and crossfade decode loops.
@@ -867,7 +871,9 @@ impl CustomAudioEngine {
                     // underruns produce natural silence via try_pop().unwrap_or(0.0).
                     if is_infinite && !radio_music_jitter_filled {
                         let buffered_samples = renderer.lock().buffer_count();
-                        if buffered_samples < 441_000 {
+                        let jitter_target =
+                            samples_for_duration(frame_rate, RADIO_JITTER_PREBUFFER_MS);
+                        if buffered_samples < jitter_target {
                             // Enforce pause continuously until full. This prevents front-end
                             // UI events (like `engine.play()`) from unpausing prematurely.
                             renderer.lock().pause();
@@ -887,8 +893,9 @@ impl CustomAudioEngine {
                         drop(guard);
                         // Emit only on anomaly — silent ticks are noise.
                         if ur_count > 0 || empty_buffer_count > 0 {
-                            let sec_rem = buffered as f32 / 88_200.0;
-                            let peak_ms = ur_peak as f32 / 88.2;
+                            let frame_rate_f = frame_rate.max(1) as f32;
+                            let sec_rem = buffered as f32 / frame_rate_f;
+                            let peak_ms = ur_peak as f32 * 1000.0 / frame_rate_f;
                             tracing::debug!(
                                 "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | EmptyBufs: {} | HW: {} LW: {}",
                                 buffered,
