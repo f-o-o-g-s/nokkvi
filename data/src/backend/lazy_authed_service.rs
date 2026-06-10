@@ -87,9 +87,21 @@ impl<A: Send + Sync + 'static> LazyAuthedService<A> {
         }
     }
 
-    /// Borrow the attached `AuthGateway`, if any. Required by the few
-    /// call sites that build an ad-hoc API service from a fresh client
-    /// snapshot (e.g. `AlbumsService::load_album_songs`).
+    /// Construct a fresh (uncached) API service of an independent type
+    /// `T` from the attached gateway, via
+    /// [`AuthGateway::build_native_api`]. Used by call sites that need
+    /// an ad-hoc service alongside the cached `A` (e.g.
+    /// `AlbumsService::load_album_songs` building a `SongsApiService`).
+    /// Errors with "Not authenticated" pre-`with_auth` or pre-login.
+    pub async fn build_authed<T>(&self, factory: ServiceFactory<T>) -> Result<T> {
+        self.auth()
+            .ok_or_else(|| anyhow!("Not authenticated"))?
+            .build_native_api(factory)
+            .await
+    }
+
+    /// Borrow the attached `AuthGateway`, if any. Call sites that only
+    /// need an ad-hoc API service should prefer [`Self::build_authed`].
     pub fn auth(&self) -> Option<&AuthGateway> {
         self.auth_gateway.get()
     }
@@ -102,6 +114,7 @@ mod tests {
     /// Stand-in API service for the cache-pointer identity check. The
     /// inner `marker` lets us prove the second `get()` returns the same
     /// cached instance (pointer equality on the `&TestApi` borrow).
+    #[derive(Debug)]
     struct TestApi {
         marker: u64,
     }
@@ -193,5 +206,63 @@ mod tests {
 
         // auth() exposes the attached gateway.
         assert!(svc.auth().is_some(), "auth() returns Some after with_auth");
+    }
+
+    /// `build_authed` before `with_auth` errors with "Not authenticated" —
+    /// the unified pre-login message for ad-hoc native-API construction.
+    #[tokio::test]
+    async fn build_authed_without_auth_errors_not_authenticated() {
+        let svc: LazyAuthedService<TestApi> = LazyAuthedService::new(TEST_FACTORY);
+        let err = svc
+            .build_authed(TEST_FACTORY)
+            .await
+            .expect_err("build_authed must error pre-with_auth");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "expected 'Not authenticated' in error, got: {err}"
+        );
+    }
+
+    /// `build_authed` after a resumed session constructs a fresh instance
+    /// per call and never touches the cached-service cell — it is one-shot,
+    /// not cached.
+    #[tokio::test]
+    async fn build_authed_after_resume_session_constructs_fresh_instance() {
+        let gateway = AuthGateway::new().expect("auth gateway");
+        gateway
+            .resume_session(
+                "http://localhost:4533".to_string(),
+                "alice".to_string(),
+                "jwt-test".to_string(),
+                "u=alice&s=salt&t=token".to_string(),
+            )
+            .await
+            .expect("resume session");
+
+        let svc = LazyAuthedService::<TestApi>::new(TEST_FACTORY).with_auth(gateway);
+
+        let built = svc.build_authed(TEST_FACTORY).await.expect("build_authed");
+        assert_eq!(built.marker, 42);
+
+        // build_authed is one-shot: the cached-service cell stays empty.
+        assert!(
+            svc.service.get().is_none(),
+            "build_authed must not populate the cached-service cell"
+        );
+    }
+
+    /// Direct `AuthGateway::build_native_api` pre-auth (no resumed session
+    /// ⇒ no client) errors with "Not authenticated".
+    #[tokio::test]
+    async fn build_native_api_without_client_errors_not_authenticated() {
+        let gateway = AuthGateway::new().expect("auth gateway");
+        let err = gateway
+            .build_native_api(TEST_FACTORY)
+            .await
+            .expect_err("build_native_api must error without a client");
+        assert!(
+            err.to_string().contains("Not authenticated"),
+            "expected 'Not authenticated' in error, got: {err}"
+        );
     }
 }

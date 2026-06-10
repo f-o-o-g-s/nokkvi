@@ -207,18 +207,10 @@ impl ArtistsService {
         // First load the artist's albums
         let albums = self.load_artist_albums(artist_id).await?;
 
-        // Get auth for songs service
-        let auth = self
+        let songs_service = self
             .inner
-            .auth()
-            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-
-        let client = auth
-            .get_client()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No API client"))?;
-
-        let songs_service = crate::services::api::songs::SongsApiService::new(client);
+            .build_authed(crate::services::api::songs::SongsApiService::new)
+            .await?;
 
         // Load songs from all albums
         let mut all_songs = Vec::new();

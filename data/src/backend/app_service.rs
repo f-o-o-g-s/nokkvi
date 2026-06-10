@@ -709,12 +709,7 @@ macro_rules! native_api_factory {
         $(
             /// Construct an authenticated Native-API service. Use `.await?` in `shell_task` closures.
             pub async fn $method(&self) -> anyhow::Result<$ty> {
-                let client = self
-                    .auth_gateway
-                    .get_client()
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-                Ok(<$ty>::new(client))
+                self.auth_gateway.build_native_api(<$ty>::new).await
             }
         )+
     };

@@ -97,6 +97,23 @@ impl AuthGateway {
         auth_service.get_client().cloned()
     }
 
+    /// THE single native-API construction path: snapshot a fresh
+    /// authenticated client and build a service from it via `factory`
+    /// (pass the service's `new` constructor, e.g.
+    /// `SongsApiService::new`). Errors with "Not authenticated" when no
+    /// client is available yet (pre-login).
+    ///
+    /// Builds a fresh instance per call — no caching. For the cached
+    /// per-service wrapper, see
+    /// [`crate::backend::lazy_authed_service::LazyAuthedService::get`].
+    pub async fn build_native_api<T>(&self, factory: fn(ApiClient) -> T) -> Result<T> {
+        let client = self
+            .get_client()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
+        Ok(factory(client))
+    }
+
     /// Fetches the server version dynamically using the Subsonic /rest/ping endpoint
     pub async fn fetch_server_version(&self) -> Result<String> {
         let auth_service = self.auth_service.lock().await;

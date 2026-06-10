@@ -470,18 +470,10 @@ impl AlbumsService {
     /// Load all songs for an album
     /// Returns Vec<Song> for adding to queue
     pub async fn load_album_songs(&self, album_id: &str) -> Result<Vec<crate::types::song::Song>> {
-        let auth = self
+        let songs_service = self
             .inner
-            .auth()
-            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-
-        let client = auth
-            .get_client()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("No API client"))?;
-
-        let songs_service = crate::services::api::songs::SongsApiService::new(client);
-
+            .build_authed(crate::services::api::songs::SongsApiService::new)
+            .await?;
         songs_service.load_album_songs(album_id).await
     }
 }
