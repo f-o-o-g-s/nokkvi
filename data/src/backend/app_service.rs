@@ -408,10 +408,7 @@ impl AppService {
     ///
     /// This is the playlist editor's load path: the editor owns an independent
     /// in-memory buffer, so editing a playlist never disturbs what the user is
-    /// hearing. Rows use the shared projection
-    /// ([`crate::backend::queue::build_queue_song_ui_view_data`]) so they match
-    /// live-queue rows exactly; `entry_id`s are assigned by buffer position
-    /// (the editor has no `QueueManager` to hand them out).
+    /// hearing.
     pub async fn resolve_playlist_for_editor(
         &self,
         playlist_id: &str,
@@ -420,27 +417,12 @@ impl AppService {
             .library_orchestrator()
             .resolve_playlist(playlist_id)
             .await?;
-        let (server_url, subsonic_credential) = self.auth_gateway.server_config().await;
-        let rows = songs
-            .iter()
-            .enumerate()
-            .map(|(index, song)| {
-                crate::backend::queue::build_queue_song_ui_view_data(
-                    song,
-                    index,
-                    index as u64,
-                    &server_url,
-                    &subsonic_credential,
-                )
-            })
-            .collect();
-        Ok(rows)
+        Ok(self.project_songs_for_editor(&songs).await)
     }
 
     /// Resolve a `BatchPayload` (e.g. a cross-pane drag from the browsing
     /// panel) into editor view-data rows WITHOUT touching the queue, audio
-    /// engine, or redb. Mirrors [`Self::resolve_playlist_for_editor`]'s
-    /// projection so dragged rows match buffer rows exactly.
+    /// engine, or redb.
     ///
     /// The caller assigns final `entry_id`s when splicing the rows into the
     /// editor buffer (they must not collide with existing buffer ids); the
@@ -451,8 +433,21 @@ impl AppService {
         batch: crate::types::batch::BatchPayload,
     ) -> Result<Vec<crate::backend::queue::QueueSongUIViewData>> {
         let songs = self.library_orchestrator().resolve_batch(batch).await?;
+        Ok(self.project_songs_for_editor(&songs).await)
+    }
+
+    /// Shared projection tail for the editor resolvers above. Rows use the
+    /// shared projection
+    /// ([`crate::backend::queue::build_queue_song_ui_view_data`]) so they
+    /// match live-queue rows exactly; `entry_id`s/`track_number`s are
+    /// positional placeholders (the editor has no `QueueManager` to hand
+    /// them out — callers re-assign on splice).
+    async fn project_songs_for_editor(
+        &self,
+        songs: &[crate::types::song::Song],
+    ) -> Vec<crate::backend::queue::QueueSongUIViewData> {
         let (server_url, subsonic_credential) = self.auth_gateway.server_config().await;
-        let rows = songs
+        songs
             .iter()
             .enumerate()
             .map(|(index, song)| {
@@ -464,8 +459,7 @@ impl AppService {
                     &subsonic_credential,
                 )
             })
-            .collect();
-        Ok(rows)
+            .collect()
     }
 
     /// Play a pre-loaded list of songs, starting at a specific index.
