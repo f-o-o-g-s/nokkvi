@@ -177,40 +177,17 @@ impl Nokkvi {
             views::PlaylistsAction::ExpandPlaylist(playlist_id) => {
                 // Load tracks for the playlist and send them back to the view
                 let id = playlist_id.clone();
-                return self.shell_task(
+                return self.expand_load_children_task(
                     move |shell| async move {
                         let playlists_service = shell.playlists_api().await?;
                         playlists_service.load_playlist_songs(&id).await
                     },
-                    move |result| match result {
-                        Ok(songs) => {
-                            let tracks: Vec<nokkvi_data::backend::songs::SongUIViewData> =
-                                songs.into_iter().map(|s| s.into()).collect();
-                            Message::Playlists(PlaylistsMessage::TracksLoaded(
-                                playlist_id.clone(),
-                                tracks,
-                            ))
-                        }
-                        Err(e) => {
-                            if e.downcast_ref::<nokkvi_data::types::error::NokkviError>()
-                                .is_some_and(|err| {
-                                    matches!(
-                                        err,
-                                        nokkvi_data::types::error::NokkviError::Unauthorized
-                                    )
-                                })
-                            {
-                                return Message::SessionExpired;
-                            }
-                            tracing::error!(" Failed to load playlist tracks: {}", e);
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to load playlist tracks: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
+                    move |songs: Vec<nokkvi_data::types::song::Song>| {
+                        let tracks: Vec<nokkvi_data::backend::songs::SongUIViewData> =
+                            songs.into_iter().map(Into::into).collect();
+                        Message::Playlists(PlaylistsMessage::TracksLoaded(playlist_id, tracks))
                     },
+                    "load playlist tracks",
                 );
             }
             views::PlaylistsAction::PlayPlaylistFromTrack(playlist_id, track_idx) => {

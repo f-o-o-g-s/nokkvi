@@ -277,7 +277,7 @@ impl Nokkvi {
                 // Mirror the Albums fix and kick the fetch from here.
                 let collage_task = self.handle_load_genre_collage(genre_id);
 
-                let albums_task = self.shell_task(
+                let albums_task = self.expand_load_children_task(
                     move |shell| async move {
                         let genres_service = shell.genres_api().await?;
                         let albums: Vec<nokkvi_data::types::album::Album> =
@@ -294,37 +294,10 @@ impl Nokkvi {
                                 )
                             })
                             .collect();
-                        Ok((gid, ui_albums))
+                        Ok(ui_albums)
                     },
-                    move |result: Result<
-                        (String, Vec<nokkvi_data::backend::albums::AlbumUIViewData>),
-                        anyhow::Error,
-                    >| {
-                        match result {
-                            Ok((genre_id, albums)) => {
-                                Message::Genres(GenresMessage::AlbumsLoaded(genre_id, albums))
-                            }
-                            Err(e) => {
-                                if e.downcast_ref::<nokkvi_data::types::error::NokkviError>()
-                                    .is_some_and(|err| {
-                                        matches!(
-                                            err,
-                                            nokkvi_data::types::error::NokkviError::Unauthorized
-                                        )
-                                    })
-                                {
-                                    return Message::SessionExpired;
-                                }
-                                tracing::error!(" Failed to load genre albums: {}", e);
-                                Message::Toast(crate::app_message::ToastMessage::Push(
-                                    nokkvi_data::types::toast::Toast::new(
-                                        format!("Failed to load genre albums: {e}"),
-                                        nokkvi_data::types::toast::ToastLevel::Error,
-                                    ),
-                                ))
-                            }
-                        }
-                    },
+                    move |albums| Message::Genres(GenresMessage::AlbumsLoaded(gid, albums)),
+                    "load genre albums",
                 );
 
                 return Task::batch([collage_task, albums_task]);

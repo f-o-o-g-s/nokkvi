@@ -442,6 +442,43 @@ impl Nokkvi {
         })
     }
 
+    /// Load expansion children on the shell (album tracks, artist albums,
+    /// genre albums, playlist tracks), mapping success through
+    /// `into_loaded_msg` and failure through the shared session-expired
+    /// check and error-toast tail. The four `Expand*` handler arms route
+    /// through here so the Ok→`*Loaded` / Err→(`SessionExpired` | `error!`
+    /// and toast) shape lives at one site.
+    ///
+    /// Per-view artwork/collage side tasks stay at the call sites (they differ
+    /// per view and need `&mut self` before the closures capture).
+    pub(crate) fn expand_load_children_task<F, Fut, C>(
+        &self,
+        load_fn: F,
+        into_loaded_msg: impl FnOnce(C) -> Message + Send + 'static,
+        error_ctx: &'static str,
+    ) -> Task<Message>
+    where
+        F: FnOnce(nokkvi_data::backend::app_service::AppService) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<C, anyhow::Error>> + Send,
+        C: Send + 'static,
+    {
+        self.shell_task(load_fn, move |result| match result {
+            Ok(children) => into_loaded_msg(children),
+            Err(e) => {
+                if let Some(msg) = session_expired_message(&e) {
+                    return msg;
+                }
+                error!(" Failed to {}: {}", error_ctx, e);
+                Message::Toast(crate::app_message::ToastMessage::Push(
+                    nokkvi_data::types::toast::Toast::new(
+                        format!("Failed to {error_ctx}: {e}"),
+                        nokkvi_data::types::toast::ToastLevel::Error,
+                    ),
+                ))
+            }
+        })
+    }
+
     /// Execute an async action on the shell, showing a success toast and reloading
     /// the queue on success. Used for add-to-queue operations from expanded views.
     pub(crate) fn shell_fire_and_forget_task<F, Fut>(

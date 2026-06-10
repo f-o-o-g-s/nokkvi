@@ -490,37 +490,17 @@ impl Nokkvi {
                 // Standard navigation triggers this automatically, but FocusAndExpand skips standard focus.
                 let artwork_task = self.handle_load_large_artwork(id.clone());
 
-                let tracks_task = self.shell_task(
+                let tracks_task = self.expand_load_children_task(
                     move |shell| async move {
                         let albums_vm = shell.albums().clone();
                         albums_vm.load_album_songs(&id).await
                     },
-                    move |result| match result {
-                        Ok(songs) => {
-                            let tracks: Vec<nokkvi_data::backend::songs::SongUIViewData> =
-                                songs.into_iter().map(|s| s.into()).collect();
-                            Message::Albums(AlbumsMessage::TracksLoaded(album_id.clone(), tracks))
-                        }
-                        Err(e) => {
-                            if e.downcast_ref::<nokkvi_data::types::error::NokkviError>()
-                                .is_some_and(|err| {
-                                    matches!(
-                                        err,
-                                        nokkvi_data::types::error::NokkviError::Unauthorized
-                                    )
-                                })
-                            {
-                                return Message::SessionExpired;
-                            }
-                            tracing::error!(" Failed to load album tracks: {}", e);
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to load album tracks: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
+                    move |songs: Vec<nokkvi_data::types::song::Song>| {
+                        let tracks: Vec<nokkvi_data::backend::songs::SongUIViewData> =
+                            songs.into_iter().map(Into::into).collect();
+                        Message::Albums(AlbumsMessage::TracksLoaded(album_id, tracks))
                     },
+                    "load album tracks",
                 );
 
                 return Task::batch([artwork_task, tracks_task]);

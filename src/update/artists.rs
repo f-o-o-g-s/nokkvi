@@ -371,7 +371,7 @@ impl Nokkvi {
                 // Mirror the Albums fix and kick the fetch from here.
                 let artwork_task = self.handle_load_artist_large_artwork(id.clone());
 
-                let albums_task = self.shell_task(
+                let albums_task = self.expand_load_children_task(
                     move |shell| async move {
                         let artists_vm = shell.artists().clone();
                         let albums_vm = shell.albums().clone();
@@ -387,36 +387,8 @@ impl Nokkvi {
                             .collect();
                         Ok(ui_albums)
                     },
-                    move |result: Result<
-                        Vec<nokkvi_data::backend::albums::AlbumUIViewData>,
-                        anyhow::Error,
-                    >| {
-                        match result {
-                            Ok(albums) => Message::Artists(ArtistsMessage::AlbumsLoaded(
-                                artist_id.clone(),
-                                albums,
-                            )),
-                            Err(e) => {
-                                if e.downcast_ref::<nokkvi_data::types::error::NokkviError>()
-                                    .is_some_and(|err| {
-                                        matches!(
-                                            err,
-                                            nokkvi_data::types::error::NokkviError::Unauthorized
-                                        )
-                                    })
-                                {
-                                    return Message::SessionExpired;
-                                }
-                                tracing::error!(" Failed to load artist albums: {}", e);
-                                Message::Toast(crate::app_message::ToastMessage::Push(
-                                    nokkvi_data::types::toast::Toast::new(
-                                        format!("Failed to load artist albums: {e}"),
-                                        nokkvi_data::types::toast::ToastLevel::Error,
-                                    ),
-                                ))
-                            }
-                        }
-                    },
+                    move |albums| Message::Artists(ArtistsMessage::AlbumsLoaded(artist_id, albums)),
+                    "load artist albums",
                 );
 
                 return Task::batch([artwork_task, albums_task]);
