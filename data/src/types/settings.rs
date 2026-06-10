@@ -758,6 +758,94 @@ mod tests {
         assert!(parsed.replay_gain_prevent_clipping);
     }
 
+    /// True for the 50 per-view column-visibility keys (`<view>_show_<col>`).
+    /// `queue_show_default_playlist` (the header chip) is NOT a column; the
+    /// `strip_show_*` / `mini_player_show_*` / `*_artwork_overlay` toggles
+    /// don't carry a view prefix and never match.
+    fn is_view_column_key(key: &str) -> bool {
+        const VIEW_PREFIXES: [&str; 7] = [
+            "albums_show_",
+            "artists_show_",
+            "genres_show_",
+            "playlists_show_",
+            "similar_show_",
+            "songs_show_",
+            "queue_show_",
+        ];
+        key != "queue_show_default_playlist" && VIEW_PREFIXES.iter().any(|p| key.starts_with(p))
+    }
+
+    /// Wire-format pin: every per-view column toggle serializes as a
+    /// TOP-LEVEL `<view>_show_<col>` key on the persisted JSON object —
+    /// never nested under a `view_columns` map. Older redb rows store the
+    /// flat shape; a nested shape would silently re-default every column on
+    /// load. The ViewColumns composition must preserve this via
+    /// `#[serde(flatten)]` — this test is intentionally written without any
+    /// struct-field access so it survives that refactor byte-for-byte.
+    #[test]
+    fn persisted_column_keys_stay_flat_on_the_json_wire() {
+        let v = serde_json::to_value(PersistedPlayerSettings::default()).expect("serialize");
+        let obj = v.as_object().expect("JSON object");
+
+        assert!(
+            !obj.contains_key("view_columns"),
+            "column toggles must flatten to top-level keys, not nest under view_columns"
+        );
+        let column_keys: Vec<&str> = obj
+            .keys()
+            .map(String::as_str)
+            .filter(|k| is_view_column_key(k))
+            .collect();
+        assert_eq!(
+            column_keys.len(),
+            50,
+            "expected the 50 per-view column keys at the top level, got {column_keys:?}"
+        );
+    }
+
+    /// Wire-format pin (read direction): a flat top-level column key in a
+    /// pre-refactor redb row must land on the matching toggle. Asserted via
+    /// re-serialization (no struct-field access) so the test survives the
+    /// ViewColumns composition unchanged.
+    #[test]
+    fn persisted_column_keys_deserialize_from_flat_json() {
+        // albums_show_stars defaults to false — the flat key must flip it.
+        let parsed: PersistedPlayerSettings =
+            serde_json::from_str(r#"{"albums_show_stars": true}"#).expect("deserialize");
+        let v = serde_json::to_value(parsed).expect("serialize");
+        assert_eq!(
+            v.get("albums_show_stars"),
+            Some(&serde_json::Value::Bool(true)),
+            "flat albums_show_stars key must land on the toggle"
+        );
+    }
+
+    /// Wire-format pin (defaults): the serde fill value for a MISSING column
+    /// key must equal the struct `Default` for every column toggle. Sparse
+    /// redb rows written before a column existed must read back as the
+    /// shipped default — if the two ever diverge, an upgrade silently flips
+    /// columns for existing users.
+    #[test]
+    fn persisted_missing_column_keys_fill_from_struct_defaults() {
+        let filled: PersistedPlayerSettings = serde_json::from_str("{}").expect("deserialize");
+        let filled = serde_json::to_value(filled).expect("serialize filled");
+        let defaults =
+            serde_json::to_value(PersistedPlayerSettings::default()).expect("serialize defaults");
+
+        let mut checked = 0_usize;
+        for (key, default_value) in defaults.as_object().expect("object") {
+            if is_view_column_key(key) {
+                assert_eq!(
+                    filled.get(key),
+                    Some(default_value),
+                    "serde fill for missing `{key}` diverges from the struct default"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 50, "expected to check all 50 column keys");
+    }
+
     #[test]
     fn live_first_launch_overrides_agree_with_persisted_defaults() {
         // `Nokkvi::default()` (src/main.rs) derives `LivePlayerSettings` (all-zero)

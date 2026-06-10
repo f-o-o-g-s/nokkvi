@@ -669,6 +669,86 @@ mod tests {
         assert!(!parsed.artists_show_love);
     }
 
+    /// True for the 50 per-view column-visibility keys (`<view>_show_<col>`).
+    /// `queue_show_default_playlist` (the header chip) is NOT a column; the
+    /// `strip_show_*` / `mini_player_show_*` / `*_artwork_overlay` toggles
+    /// don't carry a view prefix and never match.
+    fn is_view_column_key(key: &str) -> bool {
+        const VIEW_PREFIXES: [&str; 7] = [
+            "albums_show_",
+            "artists_show_",
+            "genres_show_",
+            "playlists_show_",
+            "similar_show_",
+            "songs_show_",
+            "queue_show_",
+        ];
+        key != "queue_show_default_playlist" && VIEW_PREFIXES.iter().any(|p| key.starts_with(p))
+    }
+
+    /// Wire-format pin: every per-view column toggle serializes as a
+    /// TOP-LEVEL `<view>_show_<col>` key inside `[settings]` — never as a
+    /// nested `view_columns` table. Existing config.toml files store the
+    /// flat shape, and the sparse writer (`toml_settings_io::settings_value`)
+    /// prunes against this exact key set. The ViewColumns composition must
+    /// preserve it via `#[serde(flatten)]` — this test is intentionally
+    /// written without any struct-field access so it survives that refactor
+    /// byte-for-byte.
+    #[test]
+    fn toml_column_keys_stay_flat_on_the_toml_wire() {
+        let toml_str = toml::to_string_pretty(&TomlSettings::default()).expect("serialize");
+        assert!(
+            toml_str.contains("albums_show_stars = "),
+            "albums_show_stars must serialize as a flat key, got:\n{toml_str}"
+        );
+        assert!(
+            !toml_str.contains("[view_columns]") && !toml_str.contains("view_columns."),
+            "column toggles must not nest under a view_columns table, got:\n{toml_str}"
+        );
+
+        // The sparse writer prunes the toml::Value table form — the 50
+        // column keys must stay top-level there too, or pruning would stop
+        // seeing them and verbose/sparse round-trips would drift.
+        let v = toml::Value::try_from(TomlSettings::default()).expect("to toml::Value");
+        let table = v.as_table().expect("table");
+        assert!(
+            !table.contains_key("view_columns"),
+            "no nested view_columns key in the toml::Value form"
+        );
+        let column_keys: Vec<&str> = table
+            .keys()
+            .map(String::as_str)
+            .filter(|k| is_view_column_key(k))
+            .collect();
+        assert_eq!(
+            column_keys.len(),
+            50,
+            "expected the 50 per-view column keys at the top level, got {column_keys:?}"
+        );
+    }
+
+    /// Wire-format pin (read direction): a flat top-level column key in an
+    /// existing config.toml must land on the matching toggle. Asserted via
+    /// re-serialization (no struct-field access) so the test survives the
+    /// ViewColumns composition unchanged.
+    #[test]
+    fn toml_column_keys_deserialize_from_flat_keys() {
+        // albums_show_stars defaults to false — the flat key must flip it.
+        let parsed: TomlSettings = toml::from_str("albums_show_stars = true").expect("deserialize");
+        let v = toml::Value::try_from(parsed).expect("to toml::Value");
+        assert_eq!(
+            v.get("albums_show_stars"),
+            Some(&toml::Value::Boolean(true)),
+            "flat albums_show_stars key must land on the toggle"
+        );
+        // A neighboring default-true column stays at its default.
+        assert_eq!(
+            v.get("albums_show_love"),
+            Some(&toml::Value::Boolean(true)),
+            "unrelated columns keep their serde-fill defaults"
+        );
+    }
+
     #[test]
     fn toml_strip_merged_mode_default_is_on() {
         let settings = TomlSettings::default();
