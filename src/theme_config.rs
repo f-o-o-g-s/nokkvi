@@ -230,7 +230,6 @@ mod tests {
                 level1: "#040404".to_string(),
                 level2: "#050505".to_string(),
                 level3: "#060606".to_string(),
-                level4: "#070707".to_string(),
             },
             foreground: ForegroundConfig {
                 bright: "#080808".to_string(),
@@ -238,7 +237,6 @@ mod tests {
                 level2: "#0a0a0a".to_string(),
                 level3: "#0b0b0b".to_string(),
                 level4: "#0c0c0c".to_string(),
-                gray: "#0d0d0d".to_string(),
             },
             accent: AccentConfig {
                 primary: "#0e0e0e".to_string(),
@@ -279,7 +277,6 @@ mod tests {
                 level1: String::new(),
                 level2: String::new(),
                 level3: String::new(),
-                level4: String::new(),
             },
             foreground: ForegroundConfig {
                 bright: String::new(),
@@ -287,7 +284,6 @@ mod tests {
                 level2: String::new(),
                 level3: String::new(),
                 level4: String::new(),
-                gray: String::new(),
             },
             accent: AccentConfig {
                 primary: String::new(),

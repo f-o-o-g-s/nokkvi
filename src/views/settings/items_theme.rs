@@ -15,9 +15,11 @@ use super::{
 /// entries list.
 ///
 /// Expands to: a section header, a restore-defaults sentinel row, and one
-/// `hex_color` row per `$field`. The field list is bound at compile time to
-/// the struct fields of `$palette.$section` — adding a new field to the
-/// underlying palette struct without picking it up here is a compile error.
+/// `hex_color` row per `$field`. Each listed field is bound at compile time
+/// to a struct field of `$palette.$section` — a stale entry (field renamed
+/// or removed from the palette struct) is a compile error. The reverse is
+/// NOT enforced: adding a new palette field without listing it here is
+/// silent, so fan new fields out to this list explicitly.
 ///
 /// `$icon` is the section icon, `$header_label` the header text (also reused
 /// as the row category), `$sentinel` the typed `SentinelKind` for the
@@ -276,7 +278,7 @@ pub(crate) fn build_theme_items(
         "Background Colors",
         SentinelKind::RestoreBg,
         "BG",
-        [hard, default, soft, level1, level2, level3, level4]
+        [hard, default, soft, level1, level2, level3]
     );
 
     // ── Foreground Colors ────────────────────────────────────────────
@@ -291,7 +293,7 @@ pub(crate) fn build_theme_items(
         "Foreground Colors",
         SentinelKind::RestoreFg,
         "FG",
-        [bright, level1, level2, level3, level4, gray]
+        [bright, level1, level2, level3, level4]
     );
 
     // ── Accent Colors ────────────────────────────────────────────────
@@ -445,7 +447,7 @@ mod tests {
             }
             SettingsEntry::Header { .. } => panic!("expected sentinel row at index 1"),
         }
-        // 7 hex-color field rows follow, in the macro-declared order
+        // 6 hex-color field rows follow, in the macro-declared order
         let expected: Vec<String> = [
             "background.hard",
             "background.default",
@@ -453,7 +455,6 @@ mod tests {
             "background.level1",
             "background.level2",
             "background.level3",
-            "background.level4",
         ]
         .iter()
         .map(|suffix| format!("{prefix}.{suffix}"))
@@ -471,19 +472,25 @@ mod tests {
         let prefix = palette_prefix_from(&entries);
 
         let fg = section_slice(&entries, "Foreground Colors");
+        // `foreground.level4` IS consumed (resolved as fg4) and must stay in
+        // the editor — only the dead `foreground.gray` row was removed.
         let expected_fg: Vec<String> = [
             "foreground.bright",
             "foreground.level1",
             "foreground.level2",
             "foreground.level3",
             "foreground.level4",
-            "foreground.gray",
         ]
         .iter()
         .map(|s| format!("{prefix}.{s}"))
         .collect();
         let expected_fg_refs: Vec<&str> = expected_fg.iter().map(String::as_str).collect();
-        assert_eq!(extract_keys(&fg[2..]), expected_fg_refs);
+        let fg_keys = extract_keys(&fg[2..]);
+        assert_eq!(fg_keys, expected_fg_refs);
+        assert!(
+            fg_keys.contains(&format!("{prefix}.foreground.level4").as_str()),
+            "the consumed foreground.level4 row must survive dead-field removal"
+        );
 
         let accent = section_slice(&entries, "Accent Colors");
         let expected_accent: Vec<String> =

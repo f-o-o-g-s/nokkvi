@@ -138,7 +138,7 @@ Adjacent enum macros: `define_labeled_enum!` (`data/src/types/labeled_enum.rs`) 
 ## Theme System
 
 - `ThemeFile`: `name`, `dark: ThemePalette`, `light: ThemePalette`
-- `ThemePalette`: `BackgroundConfig` (7 levels), `ForegroundConfig` (5 + gray), `AccentConfig`, four `SemanticColorConfig` (danger / success / warning / star), `VisualizerColors`
+- `ThemePalette`: `BackgroundConfig` (6 levels), `ForegroundConfig` (5 levels), `AccentConfig`, four `SemanticColorConfig` (danger / success / warning / star), `VisualizerColors`
 - `config.toml` stores `theme = "name"` — points to `~/.config/nokkvi/themes/{name}.toml`
 - Font is a **global setting** (`font_family` in `LivePlayerSettings` / `TomlSettings`), decoupled from `ThemeFile`
 

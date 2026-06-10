@@ -132,7 +132,6 @@ impl ThemePalette {
                 level1: "#ebebed".to_string(),
                 level2: "#deddda".to_string(),
                 level3: "#c0bfbc".to_string(),
-                level4: "#9a9996".to_string(),
             },
             foreground: ForegroundConfig {
                 bright: "#000000".to_string(),
@@ -140,7 +139,6 @@ impl ThemePalette {
                 level2: "#3d3846".to_string(),
                 level3: "#5e5c64".to_string(),
                 level4: "#77767b".to_string(),
-                gray: "#9a9996".to_string(),
             },
             accent: AccentConfig {
                 primary: "#3584e4".to_string(),
@@ -175,7 +173,13 @@ impl ThemePalette {
 // Color group structs
 // ============================================================================
 
-/// Background colors (7 levels from darkest to lightest).
+/// Background colors (6 levels from darkest to lightest).
+///
+/// `background.level4` was removed once nothing consumed it (it never
+/// reached `ResolvedTheme`). Legacy TOMLs that still carry the line keep
+/// deserializing (serde's default behavior ignores unknown fields); the
+/// line is simply dropped on re-save — full removal, unlike the
+/// parsed-for-round-trip `star.base` precedent.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct BackgroundConfig {
@@ -191,8 +195,6 @@ pub struct BackgroundConfig {
     pub level2: String,
     /// Background level 3
     pub level3: String,
-    /// Background level 4
-    pub level4: String,
 }
 
 impl Default for BackgroundConfig {
@@ -204,12 +206,18 @@ impl Default for BackgroundConfig {
             level1: "#2e2e32".to_string(),
             level2: "#36363a".to_string(),
             level3: "#3d3846".to_string(),
-            level4: "#5e5c64".to_string(),
         }
     }
 }
 
-/// Foreground colors (5 levels + gray).
+/// Foreground colors (5 levels).
+///
+/// `foreground.gray` was removed once nothing consumed it (it never reached
+/// `ResolvedTheme`). Legacy TOMLs that still carry the line keep
+/// deserializing (serde's default behavior ignores unknown fields); the
+/// line is simply dropped on re-save — full removal, unlike the
+/// parsed-for-round-trip `star.base` precedent. `foreground.level4` IS
+/// consumed (resolved as `fg4`) and must stay.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ForegroundConfig {
@@ -223,8 +231,6 @@ pub struct ForegroundConfig {
     pub level3: String,
     /// Level 4 foreground
     pub level4: String,
-    /// Gray
-    pub gray: String,
 }
 
 impl Default for ForegroundConfig {
@@ -235,7 +241,6 @@ impl Default for ForegroundConfig {
             level2: "#deddda".to_string(),
             level3: "#c0bfbc".to_string(),
             level4: "#9a9996".to_string(),
-            gray: "#77767b".to_string(),
         }
     }
 }

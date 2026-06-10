@@ -10,7 +10,6 @@ soft = "#2e2e32"
 level1 = "#2e2e32"
 level2 = "#36363a"
 level3 = "#3d3846"
-level4 = "#5e5c64"
 
 [dark.foreground]
 bright = "#ffffff"
@@ -18,7 +17,6 @@ level1 = "#f6f5f4"
 level2 = "#deddda"
 level3 = "#c0bfbc"
 level4 = "#9a9996"
-gray = "#77767b"
 
 [dark.accent]
 primary = "#3584e4"
@@ -60,7 +58,6 @@ soft = "#ebebed"
 level1 = "#ebebed"
 level2 = "#deddda"
 level3 = "#c0bfbc"
-level4 = "#9a9996"
 
 [light.foreground]
 bright = "#000000"
@@ -68,7 +65,6 @@ level1 = "#241f31"
 level2 = "#3d3846"
 level3 = "#5e5c64"
 level4 = "#77767b"
-gray = "#9a9996"
 
 [light.accent]
 primary = "#3584e4"
