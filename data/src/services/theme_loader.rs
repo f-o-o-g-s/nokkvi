@@ -380,11 +380,118 @@ pub fn write_theme_name_to_config(name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{collections::BTreeSet, fs};
 
     use tempfile::TempDir;
 
     use super::*;
+
+    /// Palette keys a bundled theme MAY omit. This list must contain ONLY the
+    /// three dead round-trip keys (per mode): `accent.now_playing`,
+    /// `accent.selected`, and `star.base` are parsed for round-trip
+    /// compatibility but never resolved into the UI crate's `ResolvedTheme`
+    /// (the slot highlights are derived from the accent tokens; only
+    /// `star.bright` is consumed). Putting a CONSUMED key here would recreate
+    /// the silent fan-out hole `all_builtin_themes_define_every_palette_key`
+    /// exists to close — a theme omitting it would quietly inherit the serde
+    /// default instead of failing this test.
+    const INTENTIONAL_INHERIT_ALLOWLIST: &[&str] = &[
+        "dark.accent.now_playing",
+        "dark.accent.selected",
+        "dark.star.base",
+        "light.accent.now_playing",
+        "light.accent.selected",
+        "light.star.base",
+    ];
+
+    /// Recursively record the dotted path of every non-table leaf in `value`.
+    /// Arrays and floats are leaves (`visualizer.bar_gradient_colors`,
+    /// `visualizer.border_opacity`) — presence is checked type-agnostically,
+    /// so no float comparisons are involved.
+    fn collect_leaf_paths(value: &toml::Value, prefix: &str, out: &mut BTreeSet<String>) {
+        if let toml::Value::Table(table) = value {
+            for (key, child) in table {
+                let path = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                collect_leaf_paths(child, &path, out);
+            }
+        } else {
+            out.insert(prefix.to_string());
+        }
+    }
+
+    /// Every bundled theme must define every key the `ThemeFile` schema
+    /// serializes (minus the documented dead-key allowlist).
+    ///
+    /// Why: every struct level carries `#[serde(default)]`, so a theme that
+    /// omits a consumed key parses fine and silently inherits the
+    /// GNOME-blue/Adwaita defaults — zero signal at load time. This pins the
+    /// fan-out: adding a field to `ThemePalette` (or any nested config)
+    /// extends the requirement automatically because the required set is
+    /// DERIVED from the serialized schema, never hand-listed. NOTE: that
+    /// derivation assumes serialization emits every field — a future
+    /// `#[serde(skip_serializing_if)]` on a palette field would silently
+    /// remove it from the requirement.
+    #[test]
+    fn all_builtin_themes_define_every_palette_key() {
+        let serialized = ThemeFile::default()
+            .save()
+            .expect("ThemeFile::default() must serialize");
+        let schema: toml::Value =
+            toml::from_str(&serialized).expect("serialized schema must reparse as raw TOML");
+        let mut required = BTreeSet::new();
+        collect_leaf_paths(&schema, "", &mut required);
+        for allowed in INTENTIONAL_INHERIT_ALLOWLIST {
+            assert!(
+                required.remove(*allowed),
+                "allowlist entry '{allowed}' is not in the serialized schema — \
+                 stale allowlist (was the field removed from ThemePalette?)"
+            );
+        }
+
+        for builtin in BUILTIN_THEMES {
+            // Parse as RAW toml::Value — loading through ThemeFile would fill
+            // serde defaults and mask exactly the omissions we hunt.
+            let raw: toml::Value = toml::from_str(builtin.content).unwrap_or_else(|e| {
+                panic!(
+                    "built-in theme '{}' must parse as raw TOML: {e}",
+                    builtin.stem
+                )
+            });
+            let mut actual = BTreeSet::new();
+            collect_leaf_paths(&raw, "", &mut actual);
+
+            let missing: Vec<&String> = required.difference(&actual).collect();
+            assert!(
+                missing.is_empty(),
+                "built-in theme '{}' is missing required palette keys (absent keys \
+                 silently inherit the serde defaults instead of the theme's look): {missing:?}",
+                builtin.stem
+            );
+        }
+    }
+
+    /// Companion drift guard: a `.toml` file added to `themes/` without an
+    /// `include_str!` entry in `BUILTIN_THEMES` would never be seeded or
+    /// discovered as built-in — and the completeness test above would never
+    /// see it. Pin the directory count to the registry length.
+    #[test]
+    fn bundled_theme_dir_matches_builtin_registry() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../themes");
+        let count = fs::read_dir(dir)
+            .expect("themes/ directory must exist at the workspace root")
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("toml"))
+            .count();
+        assert_eq!(
+            count,
+            BUILTIN_THEMES.len(),
+            "themes/*.toml count must match the BUILTIN_THEMES include_str! registry"
+        );
+    }
 
     /// Override themes dir for test isolation.
     fn seed_to_temp() -> (TempDir, Vec<ThemeInfo>) {
