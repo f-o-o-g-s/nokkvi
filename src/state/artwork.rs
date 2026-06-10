@@ -15,15 +15,19 @@ use super::snapshotted_lru::SnapshottedLru;
 
 /// Maximum entries in the large artwork LRU cache.
 /// Each 500px image handle is ~80KB, so 200 entries ≈ 16MB cap.
-const LARGE_ARTWORK_CACHE_CAPACITY: usize = 200;
+const LARGE_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(200).expect("capacity must be > 0");
 /// Capacity for the mini-artwork (`album_art`) LRU. Sized roughly 6× a typical
 /// 80px slot list viewport so recently-visited slot regions stay warm but
 /// memory stays bounded as the user scrolls a large library.
-const MINI_ARTWORK_CACHE_CAPACITY: usize = 512;
+const MINI_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(512).expect("capacity must be > 0");
 /// Capacity for the per-target collage mini LRU (genre or playlist).
-const COLLAGE_MINI_CACHE_CAPACITY: usize = 100;
+const COLLAGE_MINI_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(100).expect("capacity must be > 0");
 /// Capacity for the per-target collage tile LRU (genre or playlist).
-const COLLAGE_ARTWORK_CACHE_CAPACITY: usize = 100;
+const COLLAGE_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(100).expect("capacity must be > 0");
 
 /// Per-target collage artwork cache (genre or playlist).
 ///
@@ -43,12 +47,8 @@ pub struct CollageArtworkCache {
 impl CollageArtworkCache {
     pub fn new() -> Self {
         Self {
-            mini: SnapshottedLru::new(
-                NonZeroUsize::new(COLLAGE_MINI_CACHE_CAPACITY).expect("capacity must be > 0"),
-            ),
-            collage: SnapshottedLru::new(
-                NonZeroUsize::new(COLLAGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
-            ),
+            mini: SnapshottedLru::new(COLLAGE_MINI_CACHE_CAPACITY),
+            collage: SnapshottedLru::new(COLLAGE_ARTWORK_CACHE_CAPACITY),
             pending: HashSet::new(),
         }
     }
@@ -99,13 +99,9 @@ pub struct ArtworkState {
 impl Default for ArtworkState {
     fn default() -> Self {
         Self {
-            album_art: SnapshottedLru::new(
-                NonZeroUsize::new(MINI_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
-            ),
+            album_art: SnapshottedLru::new(MINI_ARTWORK_CACHE_CAPACITY),
             album_art_versions: HashMap::new(),
-            large_artwork: SnapshottedLru::new(
-                NonZeroUsize::new(LARGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
-            ),
+            large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
             genre: CollageArtworkCache::new(),
             playlist: CollageArtworkCache::new(),
             loading_large_artwork: None,
