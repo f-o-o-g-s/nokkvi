@@ -81,6 +81,12 @@ impl Nokkvi {
                                 song.album_id.clone(),
                             ))));
                         }
+
+                        // Warm the "Playing From" strip's 2×2 quad tiles (the
+                        // first ≤4 distinct albums of the full queue) — the
+                        // restored viewport may sit far past the queue head,
+                        // so the visible-row prefetch above can miss them.
+                        tasks.extend(self.strip_quad_prefetch_tasks());
                     }
                 }
 

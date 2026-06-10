@@ -54,6 +54,11 @@ pub struct PlaylistsViewData<'a> {
     pub playlists: &'a [PlaylistUIViewData],
     pub playlist_artwork: &'a HashMap<String, image::Handle>,
     pub playlist_collage_artwork: &'a HashMap<String, Vec<image::Handle>>,
+    /// Album-id-keyed 80px thumbnail snapshot (`artwork.album_art`). Slot
+    /// rows resolve their 2×2 quad tiles from it via each playlist's
+    /// `artwork_album_ids`, falling back to the single `playlist_artwork`
+    /// mini while tiles are still cold.
+    pub album_art: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,

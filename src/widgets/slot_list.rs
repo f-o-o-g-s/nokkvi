@@ -1473,6 +1473,49 @@ pub(crate) fn slot_list_artwork_column<'a, Message: 'a>(
         .into()
 }
 
+/// Render a 2×2 quad artwork column for a slot list slot.
+///
+/// Same chassis as [`slot_list_artwork_column`] (fixed square, `bg2`
+/// backdrop, center/highlight opacity rules) with the single image swapped
+/// for a [`quad_artwork_grid`](crate::widgets::base_slot_list_layout::quad_artwork_grid).
+/// Used by playlist rows whose first ≤4 distinct album tiles are all cached;
+/// callers fall back to the single-mini column otherwise so the column never
+/// renders a half-filled grid.
+pub(crate) fn slot_list_artwork_quad_column<'a, Message: 'a>(
+    tile_handles: &[&iced::widget::image::Handle],
+    artwork_size: f32,
+    is_center: bool,
+    is_highlighted: bool,
+    opacity: f32,
+) -> Element<'a, Message> {
+    let effective_opacity = if is_center || is_highlighted {
+        1.0
+    } else {
+        opacity
+    };
+
+    let grid = crate::widgets::base_slot_list_layout::quad_artwork_grid(
+        tile_handles,
+        artwork_size,
+        effective_opacity,
+    );
+
+    container(grid)
+        .width(Length::Fixed(artwork_size))
+        .height(Length::Fixed(artwork_size))
+        .style(move |_theme| container::Style {
+            background: Some(
+                Color {
+                    a: effective_opacity,
+                    ..theme::bg2()
+                }
+                .into(),
+            ),
+            ..Default::default()
+        })
+        .into()
+}
+
 /// Render a text column with title and subtitle for a slot list slot
 ///
 /// Two-line text column for slot list rows (title + subtitle).

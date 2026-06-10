@@ -3,6 +3,87 @@
 use crate::test_helpers::*;
 
 // ============================================================================
+// "Playing From" strip quad cover (app_view.rs)
+// ============================================================================
+
+fn blank_handle() -> iced::widget::image::Handle {
+    iced::widget::image::Handle::from_bytes(Vec::<u8>::new())
+}
+
+/// Activate a playlist context and load a queue whose first rows span the
+/// given albums (one song per album, `make_queue_song` keys album ids as
+/// `album_<song id>`).
+fn app_with_active_playlist_queue(song_ids: &[&str]) -> crate::Nokkvi {
+    let mut app = test_app();
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "pl-1".to_string(),
+        "Mix".to_string(),
+        String::new(),
+    ));
+    app.library.queue_songs = song_ids
+        .iter()
+        .map(|id| make_queue_song(id, "Title", "Artist", "Album"))
+        .collect();
+    app
+}
+
+#[test]
+fn strip_quad_none_without_active_playlist() {
+    let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3", "s4"]);
+    for s in &["s1", "s2", "s3", "s4"] {
+        app.artwork
+            .album_art
+            .put(format!("album_{s}"), blank_handle());
+    }
+    app.active_playlist_info = None;
+
+    assert!(app.active_playlist_strip_quad().is_none());
+}
+
+#[test]
+fn strip_quad_resolves_first_four_distinct_queue_albums() {
+    let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3", "s4", "s5"]);
+    // A repeated album in the leading rows must not consume a quad slot.
+    app.library.queue_songs[1].album_id = "album_s1".to_string();
+    for s in &["s1", "s3", "s4", "s5"] {
+        app.artwork
+            .album_art
+            .put(format!("album_{s}"), blank_handle());
+    }
+    // The quad reads the UNFILTERED queue — an active search that matches
+    // nothing must not blank the strip cover.
+    app.queue_page.common.search_query = "no-match".to_string();
+
+    let tiles = app
+        .active_playlist_strip_quad()
+        .expect("4 distinct cached albums resolve");
+    assert_eq!(tiles.len(), 4);
+}
+
+#[test]
+fn strip_quad_none_when_queue_spans_one_album() {
+    let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3"]);
+    for song in app.library.queue_songs.iter_mut() {
+        song.album_id = "album_s1".to_string();
+    }
+    app.artwork
+        .album_art
+        .put("album_s1".to_string(), blank_handle());
+
+    assert!(app.active_playlist_strip_quad().is_none());
+}
+
+#[test]
+fn strip_quad_none_while_any_tile_cold() {
+    let mut app = app_with_active_playlist_queue(&["s1", "s2"]);
+    app.artwork
+        .album_art
+        .put("album_s1".to_string(), blank_handle());
+
+    assert!(app.active_playlist_strip_quad().is_none());
+}
+
+// ============================================================================
 // Queue Sorting (main.rs)
 // ============================================================================
 

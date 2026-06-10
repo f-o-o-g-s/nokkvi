@@ -620,6 +620,74 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
     .into()
 }
 
+/// Create a 2×2 quad artwork grid at a fixed edge size.
+///
+/// Small-thumbnail sibling of [`collage_artwork_panel`] for playlist slot
+/// rows and the queue's "Playing From" strip cover: the same seamless
+/// zero-spacing grid with the same modulo wrap when fewer than 4 distinct
+/// tiles exist (2 tiles → AB/AB, 3 → ABC/A). Handles are cloned into the
+/// tree eagerly (the edge is known, so no `responsive` indirection), which
+/// also lets callers pass short-lived borrows of the `album_art` snapshot.
+///
+/// `opacity` is applied per tile — slot rows forward their non-center fade,
+/// the strip passes 1.0. Callers resolve tiles via
+/// `services::collage_artwork::resolve_quad_handles` (≥2 tiles); an empty
+/// slice degrades to the same blank `artwork_outer_bg` square the collage
+/// panel renders.
+pub(crate) fn quad_artwork_grid<'a, Message: 'a>(
+    tile_handles: &[&iced::widget::image::Handle],
+    edge: f32,
+    opacity: f32,
+) -> Element<'a, Message> {
+    use iced::widget::{column as col, container, image, row as irow, text};
+
+    if tile_handles.is_empty() {
+        return container(text(""))
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+            .style(|_theme| container::Style {
+                background: Some(artwork_outer_bg().into()),
+                ..Default::default()
+            })
+            .into();
+    }
+
+    let num = tile_handles.len();
+    let cell_size = edge / 2.0;
+
+    let mut rows_vec: Vec<Element<'a, Message>> = Vec::new();
+    for row_idx in 0..2 {
+        let mut cells: Vec<Element<'a, Message>> = Vec::new();
+        for col_idx in 0..2 {
+            let h = tile_handles[(row_idx * 2 + col_idx) % num];
+            cells.push(
+                container(
+                    image(h.clone())
+                        .content_fit(ContentFit::Cover)
+                        .width(Length::Fixed(cell_size))
+                        .height(Length::Fixed(cell_size))
+                        .opacity(opacity),
+                )
+                .width(Length::Fixed(cell_size))
+                .height(Length::Fixed(cell_size))
+                .into(),
+            );
+        }
+        rows_vec.push(
+            irow(cells)
+                .spacing(0.0)
+                .height(Length::Fixed(cell_size))
+                .into(),
+        );
+    }
+
+    col(rows_vec)
+        .spacing(0.0)
+        .width(Length::Fixed(edge))
+        .height(Length::Fixed(edge))
+        .into()
+}
+
 /// Create standard base slot list layout with header, slot list content, and optional artwork
 pub(crate) fn base_slot_list_layout<'a, Message: 'a>(
     config: &BaseSlotListLayoutConfig,

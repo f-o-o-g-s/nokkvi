@@ -41,7 +41,7 @@ mod artwork_prefetch;
 pub(super) use artwork_prefetch::should_refetch;
 pub(super) use artwork_prefetch::{
     expansion_album_artwork_tasks, expansion_child_album_ids, passive_artwork_version,
-    prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+    prefetch_album_artwork_tasks, prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,
 };
 
 /// Map an `anyhow::Error` chain to [`Message::SessionExpired`] when its

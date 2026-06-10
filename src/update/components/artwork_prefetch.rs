@@ -202,6 +202,70 @@ where
         .collect()
 }
 
+/// Generate 80px quad-tile prefetch tasks for a slot list viewport.
+///
+/// Variant of [`prefetch_album_artwork_tasks`] for rows that render a 2×2
+/// quad of album covers (playlists): each viewport item contributes its first
+/// `QUAD_TILE_COUNT` distinct `artwork_album_ids` instead of a single id.
+/// Tiles are fetched by bare album id at `THUMBNAIL_SIZE` — the same
+/// album-id-keyed URL shape the queue's song minis use — and land via
+/// `ArtworkMessage::Loaded` in the shared `album_art` LRU, so tiles warmed by
+/// any other surface are reused for free. Quad surfaces are PASSIVE (the id
+/// list carries no album-coherent `updated_at`), so the version slot is a
+/// constant `None`: id-only dedup, exactly like the queue/song-mini paths.
+///
+/// Items whose `artwork_album_ids` are still unresolved contribute nothing;
+/// the `CollageAlbumIdsLoaded` / `CollageLoaded` handlers re-dispatch this
+/// prefetch once ids land.
+pub(crate) fn prefetch_quad_album_artwork_tasks<T, F>(
+    slot_list: &SlotListView,
+    items: &[T],
+    cached_ids: &HashSet<&String>,
+    versions: &HashMap<String, Option<String>>,
+    albums_vm: AlbumsService,
+    extract_album_ids: F,
+) -> Vec<Task<Message>>
+where
+    F: Fn(&T) -> &[String],
+{
+    use crate::services::collage_artwork::QUAD_TILE_COUNT;
+
+    let total = items.len();
+    if total == 0 {
+        return Vec::new();
+    }
+
+    let mut already_queued: HashSet<String> = HashSet::new();
+    let mut tasks: Vec<Task<Message>> = Vec::new();
+
+    for idx in slot_list.prefetch_indices(total) {
+        let Some(item) = items.get(idx) else { continue };
+        for id in extract_album_ids(item).iter().take(QUAD_TILE_COUNT) {
+            if id.is_empty()
+                || already_queued.contains(id)
+                || !should_refetch(cached_ids, versions, id, &None)
+            {
+                continue;
+            }
+            already_queued.insert(id.clone());
+            let vm = albums_vm.clone();
+            let id = id.clone();
+            tasks.push(Task::perform(
+                async move {
+                    let bytes = vm
+                        .fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), None)
+                        .await
+                        .ok();
+                    (id, bytes.map(image::Handle::from_bytes))
+                },
+                |(id, handle)| Message::Artwork(ArtworkMessage::Loaded(id, None, handle)),
+            ));
+        }
+    }
+
+    tasks
+}
+
 /// Fan-out 80px album artwork fetches for albums newly delivered into a
 /// view's expansion children (Artists→Album, Genres→Album). Skips ids
 /// already in the cache; each surviving id dispatches an

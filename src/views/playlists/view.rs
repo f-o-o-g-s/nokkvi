@@ -227,6 +227,7 @@ impl PlaylistsPage {
         let playlists = data.playlists; // Borrow slice to extend lifetime
         let playlist_artwork = data.playlist_artwork;
         let playlist_collage_artwork = data.playlist_collage_artwork;
+        let album_art = data.album_art;
         let open_menu_for_rows = data.overlay.open_menu;
 
         // Build flattened list (playlists + injected tracks when expanded)
@@ -250,6 +251,7 @@ impl PlaylistsPage {
                         playlist,
                         &ctx,
                         playlist_artwork,
+                        album_art,
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
@@ -410,6 +412,7 @@ impl PlaylistsPage {
         playlist: &PlaylistUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         playlist_artwork: &'a HashMap<String, image::Handle>,
+        album_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, PlaylistsMessage> {
@@ -470,13 +473,30 @@ impl PlaylistsPage {
             ));
         }
         if self.column_visibility.thumbnail {
-            columns.push(slot_list_artwork_column(
-                playlist_artwork.get(&playlist.id),
-                artwork_size,
-                ctx.is_center,
-                false,
-                ctx.opacity,
-            ));
+            // 2×2 quad of the playlist's first distinct album covers; while
+            // any tile is still cold (or the playlist spans ≤1 album) the
+            // column keeps the single first-album mini, mirroring the large
+            // panel's mini→collage upgrade.
+            let quad_tiles = crate::services::collage_artwork::resolve_quad_handles(
+                &playlist.artwork_album_ids,
+                album_art,
+            );
+            columns.push(match quad_tiles {
+                Some(tiles) => crate::widgets::slot_list::slot_list_artwork_quad_column(
+                    &tiles,
+                    artwork_size,
+                    ctx.is_center,
+                    false,
+                    ctx.opacity,
+                ),
+                None => slot_list_artwork_column(
+                    playlist_artwork.get(&playlist.id),
+                    artwork_size,
+                    ctx.is_center,
+                    false,
+                    ctx.opacity,
+                ),
+            });
         }
         columns.push({
             let click_title = Some(PlaylistsMessage::PlaylistContextAction(

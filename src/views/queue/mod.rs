@@ -101,6 +101,11 @@ pub struct QueueViewData<'a> {
     /// first tile, falling back to the mini cover). `None` when no playlist is
     /// active or its artwork isn't cached yet — the strip omits the cover.
     pub playlist_cover: Option<&'a iced::widget::image::Handle>,
+    /// 2×2 quad tiles for the strip thumbnail: the first ≤4 distinct album
+    /// covers of the unfiltered queue, present only when every tile is warm
+    /// in the 80px `album_art` cache and the queue spans ≥2 distinct albums.
+    /// Preferred over `playlist_cover` when `Some`.
+    pub playlist_quad: Option<Vec<&'a iced::widget::image::Handle>>,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
     /// `open_menu` reference). See `super::OverlayMenuViewData`.
     pub overlay: super::OverlayMenuViewData<'a>,

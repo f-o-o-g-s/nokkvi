@@ -67,6 +67,76 @@ impl Nokkvi {
         )
     }
 
+    /// Viewport-window 80px prefetch for the playlist rows' 2×2 quad tiles.
+    ///
+    /// Dispatched alongside the collage mini/tile loads on every
+    /// `PlaylistsAction::LoadArtwork`, and re-dispatched when album ids land
+    /// late (`CollageAlbumIdsLoaded` / `CollageLoaded`) because the initial
+    /// `LoadArtwork(0)` after a list load runs before the bulk id prefetch
+    /// returns. Fully dedup-gated against `album_art`, so repeat dispatches
+    /// are free once the viewport is warm.
+    pub(crate) fn playlists_quad_prefetch_tasks(&self) -> Vec<Task<Message>> {
+        use std::collections::HashSet;
+
+        use super::components::prefetch_quad_album_artwork_tasks;
+
+        let Some(shell) = &self.app_service else {
+            return Vec::new();
+        };
+        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        prefetch_quad_album_artwork_tasks(
+            &self.playlists_page.common.slot_list,
+            &self.library.playlists,
+            &cached,
+            &self.artwork.album_art_versions,
+            shell.albums().clone(),
+            |p| p.artwork_album_ids.as_slice(),
+        )
+    }
+
+    /// 80px prefetch for the queue strip's 2×2 quad tiles: the first ≤4
+    /// distinct albums of the FULL queue. Runs from `handle_queue_loaded` —
+    /// the restored viewport may sit far past the head of the queue, so the
+    /// regular visible-row prefetch can miss exactly these albums. No-op
+    /// when no playlist context is active or every tile is already warm.
+    pub(crate) fn strip_quad_prefetch_tasks(&self) -> Vec<Task<Message>> {
+        use std::collections::HashSet;
+
+        use super::components::expansion_album_artwork_tasks;
+        use crate::services::collage_artwork::first_distinct_album_ids;
+
+        if self.active_playlist_info.is_none() {
+            return Vec::new();
+        }
+        let Some(shell) = &self.app_service else {
+            return Vec::new();
+        };
+
+        let quad_ids =
+            first_distinct_album_ids(self.library.queue_songs.iter().map(|s| s.album_id.as_str()));
+        // Reuse each contributing song's pre-built 80px URL (album-id keyed,
+        // `build_song_artwork_url`) so the bytes land under the same cache
+        // key the strip resolves.
+        let triples: Vec<(String, Option<String>, String)> = quad_ids
+            .iter()
+            .filter_map(|id| {
+                self.library
+                    .queue_songs
+                    .iter()
+                    .find(|s| s.album_id == *id)
+                    .map(|s| (s.album_id.clone(), None, s.artwork_url.clone()))
+            })
+            .collect();
+
+        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        expansion_album_artwork_tasks(
+            &cached,
+            &self.artwork.album_art_versions,
+            shell.albums().clone(),
+            triples,
+        )
+    }
+
     /// Unified collage artwork loader for both genres and playlists.
     ///
     /// # Parameters
@@ -391,6 +461,12 @@ impl Nokkvi {
 
         if !album_ids.is_empty() {
             self.set_collage_item_album_ids(target, &item_id, album_ids);
+            // A centered playlist may have just resolved its ids for the
+            // first time — warm its row's quad tiles without waiting for the
+            // next scroll-driven `LoadArtwork`.
+            if matches!(target, CollageTarget::Playlist) {
+                return Task::batch(self.playlists_quad_prefetch_tasks());
+            }
         }
         Task::none()
     }
@@ -405,6 +481,12 @@ impl Nokkvi {
     ) -> Task<Message> {
         for (item_id, album_ids) in results {
             self.set_collage_item_album_ids(target, &item_id, album_ids);
+        }
+        // The bulk id prefetch lands AFTER the post-load `LoadArtwork(0)`
+        // pass, which therefore saw only empty id lists — re-dispatch the
+        // viewport quad prefetch now that rows know their albums.
+        if matches!(target, CollageTarget::Playlist) {
+            return Task::batch(self.playlists_quad_prefetch_tasks());
         }
         Task::none()
     }

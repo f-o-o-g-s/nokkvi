@@ -25,6 +25,55 @@ use crate::{app_message::Message, widgets::SlotListView};
 /// - `tasks`: Network fetch tasks to execute
 pub(crate) type LoadArtworkResult = (Vec<String>, Vec<Task<Message>>);
 
+/// Number of tiles in the small 2×2 quad thumbnail (playlist slot rows and
+/// the queue's "Playing From" strip cover).
+pub(crate) const QUAD_TILE_COUNT: usize = 4;
+
+/// Resolve the 80px tile handles for a 2×2 quad thumbnail.
+///
+/// `distinct_album_ids` must already be deduplicated (playlist
+/// `artwork_album_ids` are unique by construction; queue-derived ids go
+/// through [`first_distinct_album_ids`]). The first `QUAD_TILE_COUNT` ids are
+/// looked up in the album-id-keyed 80px `album_art` snapshot.
+///
+/// Returns `None` when fewer than 2 distinct ids exist (single-album surfaces
+/// keep their current single-cover look, mirroring the large panel's
+/// ≤1-album gating) or when any tile handle is still missing (callers fall
+/// back to the single mini until the prefetch lands — the same atomic
+/// mini→collage upgrade the large panel does, avoiding half-filled grids).
+pub(crate) fn resolve_quad_handles<'a, S: AsRef<str>>(
+    distinct_album_ids: &[S],
+    album_art: &'a HashMap<String, image::Handle>,
+) -> Option<Vec<&'a image::Handle>> {
+    if distinct_album_ids.len() < 2 {
+        return None;
+    }
+    distinct_album_ids
+        .iter()
+        .take(QUAD_TILE_COUNT)
+        .map(|id| album_art.get(id.as_ref()))
+        .collect()
+}
+
+/// First `QUAD_TILE_COUNT` distinct, non-empty album ids in iteration order.
+///
+/// Used to derive the queue banner's quad tiles from the unfiltered queue
+/// songs (queue order == playlist track order at enqueue time, matching the
+/// "first albums of the playlist" the slot rows show).
+pub(crate) fn first_distinct_album_ids<'a>(ids: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    let mut out: Vec<&'a str> = Vec::new();
+    for id in ids {
+        if id.is_empty() || out.contains(&id) {
+            continue;
+        }
+        out.push(id);
+        if out.len() == QUAD_TILE_COUNT {
+            break;
+        }
+    }
+    out
+}
+
 /// Trait for items that display collage artwork (genres, playlists)
 /// Re-exported from data crate for use in GUI service code
 pub(crate) use nokkvi_data::types::collage_artwork::CollageArtworkItem;
@@ -270,6 +319,70 @@ mod tests {
 
         assert!(pending_inserts.is_empty());
         assert!(tasks.is_empty());
+    }
+
+    fn handle() -> image::Handle {
+        image::Handle::from_bytes(Vec::<u8>::new())
+    }
+
+    fn art_map(ids: &[&str]) -> HashMap<String, image::Handle> {
+        ids.iter().map(|id| (id.to_string(), handle())).collect()
+    }
+
+    /// Fewer than 2 distinct album ids → no quad; the surface keeps its
+    /// single-cover look (mirrors the large panel's ≤1-album gating).
+    #[test]
+    fn resolve_quad_handles_requires_two_distinct_ids() {
+        let art = art_map(&["a1"]);
+        assert!(resolve_quad_handles::<String>(&[], &art).is_none());
+        assert!(resolve_quad_handles(&["a1".to_string()], &art).is_none());
+    }
+
+    /// 2–4 distinct cached ids resolve to that many tiles, in id order; the
+    /// renderer's modulo wrap fills the remaining cells.
+    #[test]
+    fn resolve_quad_handles_returns_all_cached_tiles_in_order() {
+        let art = art_map(&["a1", "a2", "a3"]);
+        let ids = ["a1".to_string(), "a2".to_string()];
+        let tiles = resolve_quad_handles(&ids, &art).expect("2 cached ids resolve");
+        assert_eq!(tiles.len(), 2);
+
+        let ids3 = ["a1".to_string(), "a2".to_string(), "a3".to_string()];
+        let tiles3 = resolve_quad_handles(&ids3, &art).expect("3 cached ids resolve");
+        assert_eq!(tiles3.len(), 3);
+    }
+
+    /// More than 4 ids: only the first QUAD_TILE_COUNT are used, so a missing
+    /// handle beyond the fourth id must not block the quad.
+    #[test]
+    fn resolve_quad_handles_uses_first_four_ids_only() {
+        let art = art_map(&["a1", "a2", "a3", "a4"]);
+        let ids: Vec<String> = ["a1", "a2", "a3", "a4", "a5-uncached"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let tiles = resolve_quad_handles(&ids, &art).expect("first 4 cached");
+        assert_eq!(tiles.len(), QUAD_TILE_COUNT);
+    }
+
+    /// Any missing tile among the first ≤4 → None (atomic upgrade: callers
+    /// fall back to the single mini rather than render a half-filled grid).
+    #[test]
+    fn resolve_quad_handles_none_when_any_tile_uncached() {
+        let art = art_map(&["a1", "a3"]);
+        let ids = ["a1".to_string(), "a2".to_string(), "a3".to_string()];
+        assert!(resolve_quad_handles(&ids, &art).is_none());
+    }
+
+    /// Dedup preserves first-seen order, skips empty ids, caps at
+    /// QUAD_TILE_COUNT.
+    #[test]
+    fn first_distinct_album_ids_dedups_in_order_and_caps() {
+        let ids = ["a1", "a2", "a1", "", "a3", "a2", "a4", "a5"];
+        assert_eq!(
+            first_distinct_album_ids(ids.into_iter()),
+            vec!["a1", "a2", "a3", "a4"]
+        );
     }
 
     /// Items already pending or fully cached skip the network — no pending

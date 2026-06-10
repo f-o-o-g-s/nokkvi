@@ -1025,6 +1025,22 @@ impl Nokkvi {
             .or_else(|| self.artwork.playlist.mini.snapshot.get(&ctx.id))
     }
 
+    /// Resolve the active playlist's strip cover as a 2×2 quad: the first ≤4
+    /// distinct album ids of the UNFILTERED queue (queue order == playlist
+    /// track order at enqueue time), each tile served by the album-id-keyed
+    /// 80px `album_art` cache. `None` when no playlist is active, the queue
+    /// spans fewer than 2 distinct albums, or any tile is still cold — the
+    /// strip then falls back to the single [`Self::active_playlist_strip_cover`]
+    /// exactly as before.
+    pub(crate) fn active_playlist_strip_quad(&self) -> Option<Vec<&iced::widget::image::Handle>> {
+        use crate::services::collage_artwork::{first_distinct_album_ids, resolve_quad_handles};
+
+        self.active_playlist_info.as_ref()?;
+        let ids =
+            first_distinct_album_ids(self.library.queue_songs.iter().map(|s| s.album_id.as_str()));
+        resolve_quad_handles(&ids, &self.artwork.album_art.snapshot)
+    }
+
     // -------------------------------------------------------------------------
     // Per-view ViewData builders
     //
@@ -1207,6 +1223,7 @@ impl Nokkvi {
             playlist_context_info: self.active_playlist_info.clone(),
             playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
             playlist_cover: self.active_playlist_strip_cover(),
+            playlist_quad: self.active_playlist_strip_quad(),
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -1565,6 +1582,7 @@ impl Nokkvi {
                     playlists: &self.library.playlists,
                     playlist_artwork: &self.artwork.playlist.mini.snapshot,
                     playlist_collage_artwork: &self.artwork.playlist.collage.snapshot,
+                    album_art: &self.artwork.album_art.snapshot,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,

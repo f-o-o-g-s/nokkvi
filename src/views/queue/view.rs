@@ -289,7 +289,10 @@ impl QueuePage {
             let edit_btn = icon_btn("assets/icons/pencil-line.svg", QueueMessage::EditPlaylist);
 
             // Compact row. The cover is pushed only when its handle is cached so
-            // an absent cover leaves no phantom leading gap.
+            // an absent cover leaves no phantom leading gap. A 2×2 quad of the
+            // queue's first distinct album covers is preferred — it reads as
+            // "a playlist", not "the song playing now" — with the single
+            // first-album cover as the warm-up fallback.
             let mut compact = Row::new()
                 .spacing(10)
                 .align_y(Alignment::Center)
@@ -300,7 +303,16 @@ impl QueuePage {
                     bottom: 0.0,
                     left: 11.0,
                 });
-            if let Some(handle) = data.playlist_cover {
+            if let Some(tiles) = &data.playlist_quad {
+                compact = compact.push(
+                    container(crate::widgets::base_slot_list_layout::quad_artwork_grid(
+                        tiles, 34.0, 1.0,
+                    ))
+                    .width(Length::Fixed(34.0))
+                    .height(Length::Fixed(34.0))
+                    .clip(true),
+                );
+            } else if let Some(handle) = data.playlist_cover {
                 compact = compact.push(
                     container(
                         iced::widget::image(handle.clone())
