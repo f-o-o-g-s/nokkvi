@@ -127,11 +127,16 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     ]);
 
     // The timing controls only matter once the reminder is enabled; the
-    // percentage knob is further gated to the percentage trigger.
+    // percentage knob is further gated to the percentage trigger. The two
+    // rows are taken unconditionally and pushed conditionally so `finish()`
+    // can assert full consumption regardless of data — rows not pushed just
+    // drop, emitting the same UI as before.
+    let trigger_row = macro_rows.take("general.rating_reminder_trigger");
+    let percent_row = macro_rows.take("general.rating_reminder_percent");
     if data.rating_reminder_enabled {
-        items.push(macro_rows.take("general.rating_reminder_trigger"));
+        items.push(trigger_row);
         if data.rating_reminder_trigger.as_ref() == "Percentage Played" {
-            items.push(macro_rows.take("general.rating_reminder_percent"));
+            items.push(percent_row);
         }
     }
 
@@ -163,5 +168,6 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         macro_rows.take("general.queue_show_default_playlist"),
     ]);
 
+    macro_rows.finish();
     items
 }

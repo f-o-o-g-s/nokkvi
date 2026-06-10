@@ -42,7 +42,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
     // below is decoupled from the macro entry order in `define_settings!`.
     let mut macro_rows = MacroRows::new(build_general_tab_settings_items(data));
 
-    vec![
+    let items = vec![
         // --- Library ---
         SettingsEntry::Header {
             label: "Library",
@@ -116,5 +116,8 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             "",
             LOGOUT,
         ),
-    ]
+    ];
+
+    macro_rows.finish();
+    items
 }

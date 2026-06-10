@@ -11,7 +11,7 @@ globs: src/views/settings/**,src/update/settings.rs
 views/settings/
 ├── mod.rs              — State, Message, Action, update; `SettingsTab` enum (6 variants), `route_write` helper
 ├── entries.rs          — Entry building / filtering / cross-tab search
-├── items.rs            — Re-exports `SettingValue` / `SettingMeta` / `SettingItem` / `SettingsEntry` from the data crate, plus the `MacroRows::{new, take}` helper used by the per-tab builders. Construct `SettingMeta` via `SettingMeta::new(key, label, category).with_subtitle(...)`
+├── items.rs            — Re-exports `SettingValue` / `SettingMeta` / `SettingItem` / `SettingsEntry` from the data crate, plus the `MacroRows::{new, take, finish}` helper used by the per-tab builders. Every builder ends with `macro_rows.finish()` (debug-panics naming any un-taken key; warns in release); conditional rows follow the take-unconditionally-push-conditionally convention so consumption is data-independent. Construct `SettingMeta` via `SettingMeta::new(key, label, category).with_subtitle(...)`
 ├── items_general.rs    — Library, Display, Behavior, Window & Tray, Advanced, Account
 ├── items_interface.rs  — Navigation, Slot List, Player Bar, Font, Metadata Strip, Artwork Overlays, Artwork Column
 ├── items_playback.rs   — Transitions, Volume Normalization, Scrobbling, Rating Reminder, Playlists

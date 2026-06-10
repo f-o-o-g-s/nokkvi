@@ -51,6 +51,43 @@ impl MacroRows {
             .unwrap_or_else(|| panic!("missing macro row for {key}"));
         self.rows.remove(pos)
     }
+
+    /// Assert that every macro-emitted row was consumed, naming any leftovers.
+    ///
+    /// Call as the last statement before returning `items` from each
+    /// `build_<tab>_items` builder. A leftover row means a `take()` was
+    /// forgotten — without this guard the row would silently vanish from the
+    /// UI. For rows that should render conditionally, the convention is
+    /// take-unconditionally-then-push-conditionally (unused rows just drop),
+    /// so consumption stays data-independent and the per-tab structure tests
+    /// exercise every key on every branch.
+    ///
+    /// Panics in debug builds (so tests fail naming the key); release builds
+    /// log a warning and render without the leftover rows — mirroring the
+    /// panic-in-debug / warn-in-release precedent used elsewhere.
+    pub(crate) fn finish(self) {
+        let leftovers: Vec<&str> = self
+            .rows
+            .iter()
+            .filter_map(|e| match e {
+                SettingsEntry::Item(it) => Some(it.key.as_ref()),
+                SettingsEntry::Header { .. } => None,
+            })
+            .collect();
+        if leftovers.is_empty() {
+            return;
+        }
+        if cfg!(debug_assertions) {
+            panic!(
+                "unconsumed macro rows (take() them, or take unconditionally and push \
+                 conditionally): {leftovers:?}"
+            );
+        }
+        tracing::warn!(
+            ?leftovers,
+            "unconsumed macro rows — rendering the settings tab without them"
+        );
+    }
 }
 
 // ============================================================================
@@ -147,6 +184,22 @@ mod tests {
         let mut macro_rows = MacroRows::new(vec![bool_item("a")]);
         let _ = macro_rows.take("a");
         let _ = macro_rows.take("a");
+    }
+
+    #[test]
+    #[should_panic(expected = "unconsumed macro rows")]
+    fn macro_rows_finish_panics_on_leftover_keys() {
+        let mut macro_rows = MacroRows::new(vec![bool_item("a"), bool_item("forgotten")]);
+        let _ = macro_rows.take("a");
+        macro_rows.finish();
+    }
+
+    #[test]
+    fn macro_rows_finish_is_quiet_when_fully_consumed() {
+        let mut macro_rows = MacroRows::new(vec![bool_item("a"), bool_item("b")]);
+        let _ = macro_rows.take("a");
+        let _ = macro_rows.take("b");
+        macro_rows.finish();
     }
 
     #[test]

@@ -223,6 +223,12 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
     // Auto-hide toolbar sub-controls render directly beneath the toggle and
     // only while it's enabled. The "Collapsed appearance" picker always shows;
     // the height + grip refinements apply only to the Hairline appearance.
+    // The three rows are taken unconditionally and pushed conditionally so
+    // `finish()` can assert full consumption regardless of data — rows not
+    // pushed just drop, emitting the same UI as before.
+    let appearance_row = macro_rows.take("general.autohide_collapsed_appearance");
+    let height_row = macro_rows.take("general.autohide_toolbar_height");
+    let grip_row = macro_rows.take("general.autohide_toolbar_grip");
     if data.autohide_toolbar {
         use nokkvi_data::types::player_settings::CollapsedAppearance;
         let insert_at = items
@@ -231,24 +237,16 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
                 matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == "general.autohide_toolbar")
             })
             .map_or(items.len(), |pos| pos + 1);
-        items.insert(
-            insert_at,
-            macro_rows.take("general.autohide_collapsed_appearance"),
-        );
+        items.insert(insert_at, appearance_row);
         if CollapsedAppearance::from_label(data.autohide_collapsed_appearance.as_ref())
             == CollapsedAppearance::Hairline
         {
-            items.insert(
-                insert_at + 1,
-                macro_rows.take("general.autohide_toolbar_height"),
-            );
-            items.insert(
-                insert_at + 2,
-                macro_rows.take("general.autohide_toolbar_grip"),
-            );
+            items.insert(insert_at + 1, height_row);
+            items.insert(insert_at + 2, grip_row);
         }
     }
 
+    macro_rows.finish();
     items
 }
 
