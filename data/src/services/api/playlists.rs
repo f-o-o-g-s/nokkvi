@@ -15,15 +15,10 @@ use crate::{
     types::playlist::Playlist,
 };
 
-/// Subsonic API response for getPlaylist (with songs)
+/// Inner payload of the Subsonic `getPlaylist` envelope
+/// ([`subsonic::SubsonicEnvelope`]).
 #[derive(Debug, serde::Deserialize)]
-struct SubsonicPlaylistResponse {
-    #[serde(rename = "subsonic-response")]
-    subsonic_response: SubsonicResponseInner,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct SubsonicResponseInner {
+struct PlaylistInner {
     playlist: Option<SubsonicPlaylistWithSongs>,
 }
 
@@ -213,28 +208,20 @@ impl PlaylistsApiService {
     /// Load album IDs from a playlist (for artwork collage)
     /// Returns up to 9 unique album IDs
     pub async fn load_playlist_albums(&self, playlist_id: &str) -> Result<Vec<String>> {
-        let response = subsonic::subsonic_post(
+        let inner: PlaylistInner = subsonic::subsonic_get_envelope(
             &self.client.http_client(),
             &self.server_url,
             "getPlaylist",
             &self.subsonic_credential,
             &[("id", playlist_id)],
+            "Subsonic playlist",
         )
-        .await
-        .context("Failed to fetch playlist for album IDs")?;
-
-        let body = response
-            .text()
-            .await
-            .context("Failed to read Subsonic response")?;
-
-        let parsed: SubsonicPlaylistResponse = serde_json::from_str(&body)
-            .with_context(|| "Failed to parse Subsonic playlist response".to_string())?;
+        .await?;
 
         let mut album_ids = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        if let Some(playlist) = parsed.subsonic_response.playlist
+        if let Some(playlist) = inner.playlist
             && let Some(entry_value) = playlist.entry
         {
             // Subsonic returns a single object instead of a one-element

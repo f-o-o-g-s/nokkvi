@@ -77,6 +77,8 @@ AppService (orchestrator)
 
 `services/api/` per-domain modules: `albums.rs`, `artists.rs`, `songs.rs`, `genres.rs`, `libraries.rs`, `playlists.rs`, `radios.rs`, `similar.rs`, `rating.rs`, `star.rs`, `subsonic.rs`, `client.rs`, plus shared helpers `pagination.rs`, `parse.rs`, `sort.rs`.
 
+`subsonic.rs` owns the shared Subsonic plumbing: `subsonic_post` / `subsonic_post_ok` (form-POST + status policy), `SubsonicEnvelope<T>` + `subsonic_get_envelope(...)` (the single `{"subsonic-response": ...}` declaration — typed list endpoints fetch through this helper and keep only a file-private inner struct per endpoint), and `deserialize_one_or_many` (single-object-vs-array quirk). Keep default serde on all wire structs (no `deny_unknown_fields`) — additive Navidrome fields must stay no-ops.
+
 ## Queue System
 
 `SongPool` (HashMap) + `Queue` ordering (`song_ids` + `order` array + `current_order`). Modules: `services/queue/{mod, navigation, order, write_guard}.rs`.

@@ -3,21 +3,13 @@
 //! Provides algorithmic song recommendations via Navidrome's Subsonic-compatible API.
 //! Requires Last.fm or ListenBrainz to be configured on the server.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tracing::debug;
 
-use crate::{
-    services::api::{client::ApiClient, parse},
-    types::song::Song,
-};
+use crate::{services::api::client::ApiClient, types::song::Song};
 
-/// Subsonic response wrapper for `getSimilarSongs2`
-#[derive(Debug, serde::Deserialize)]
-struct SubsonicSimilarResponse {
-    #[serde(rename = "subsonic-response")]
-    subsonic_response: SimilarResponseInner,
-}
-
+/// Inner payload of the Subsonic `getSimilarSongs2` envelope
+/// ([`crate::services::api::subsonic::SubsonicEnvelope`]).
 #[derive(Debug, serde::Deserialize)]
 struct SimilarResponseInner {
     #[serde(rename = "similarSongs2")]
@@ -29,13 +21,8 @@ struct SimilarSongs2 {
     song: Option<Vec<Song>>,
 }
 
-/// Subsonic response wrapper for `getTopSongs`
-#[derive(Debug, serde::Deserialize)]
-struct SubsonicTopSongsResponse {
-    #[serde(rename = "subsonic-response")]
-    subsonic_response: TopSongsResponseInner,
-}
-
+/// Inner payload of the Subsonic `getTopSongs` envelope
+/// ([`crate::services::api::subsonic::SubsonicEnvelope`]).
 #[derive(Debug, serde::Deserialize)]
 struct TopSongsResponseInner {
     #[serde(rename = "topSongs")]
@@ -70,26 +57,17 @@ impl SimilarApiService {
     /// or ListenBrainz for recommendations.
     pub async fn get_similar_songs(&self, id: &str, count: u32) -> Result<Vec<Song>> {
         let count_str = count.to_string();
-        let response = crate::services::api::subsonic::subsonic_post(
+        let inner: SimilarResponseInner = crate::services::api::subsonic::subsonic_get_envelope(
             &self.client.http_client(),
             &self.server_url,
             "getSimilarSongs2",
             &self.subsonic_credential,
             &[("id", id), ("count", &count_str)],
+            "getSimilarSongs2",
         )
-        .await
-        .context("Failed to fetch similar songs from Subsonic API")?;
+        .await?;
 
-        let body = response
-            .text()
-            .await
-            .context("Failed to read getSimilarSongs2 response")?;
-
-        let parsed: SubsonicSimilarResponse =
-            parse::parse_json_with_preview(&body, "getSimilarSongs2 response")?;
-
-        let songs = parsed
-            .subsonic_response
+        let songs = inner
             .similar_songs2
             .and_then(|s| s.song)
             .unwrap_or_default();
@@ -104,29 +82,17 @@ impl SimilarApiService {
     /// Uses Navidrome's `getTopSongs` endpoint.
     pub async fn get_top_songs(&self, artist_name: &str, count: u32) -> Result<Vec<Song>> {
         let count_str = count.to_string();
-        let response = crate::services::api::subsonic::subsonic_post(
+        let inner: TopSongsResponseInner = crate::services::api::subsonic::subsonic_get_envelope(
             &self.client.http_client(),
             &self.server_url,
             "getTopSongs",
             &self.subsonic_credential,
             &[("artist", artist_name), ("count", &count_str)],
+            "getTopSongs",
         )
-        .await
-        .context("Failed to fetch top songs from Subsonic API")?;
+        .await?;
 
-        let body = response
-            .text()
-            .await
-            .context("Failed to read getTopSongs response")?;
-
-        let parsed: SubsonicTopSongsResponse =
-            parse::parse_json_with_preview(&body, "getTopSongs response")?;
-
-        let songs = parsed
-            .subsonic_response
-            .top_songs
-            .and_then(|s| s.song)
-            .unwrap_or_default();
+        let songs = inner.top_songs.and_then(|s| s.song).unwrap_or_default();
 
         debug!(
             "🎵 getTopSongs: {} results for artist='{}'",
@@ -141,6 +107,7 @@ impl SimilarApiService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::api::subsonic::SubsonicEnvelope;
 
     /// Verify `getSimilarSongs2` JSON parses correctly.
     #[test]
@@ -172,14 +139,9 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicSimilarResponse =
+        let parsed: SubsonicEnvelope<SimilarResponseInner> =
             serde_json::from_str(json).expect("should parse similar songs response");
-        let songs = parsed
-            .subsonic_response
-            .similar_songs2
-            .unwrap()
-            .song
-            .unwrap();
+        let songs = parsed.response.similar_songs2.unwrap().song.unwrap();
         assert_eq!(songs.len(), 2);
         assert_eq!(songs[0].id, "s1");
         assert_eq!(songs[0].path, ""); // omitted → default
@@ -197,10 +159,10 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicSimilarResponse =
+        let parsed: SubsonicEnvelope<SimilarResponseInner> =
             serde_json::from_str(json).expect("should parse empty response");
         let songs = parsed
-            .subsonic_response
+            .response
             .similar_songs2
             .and_then(|s| s.song)
             .unwrap_or_default();
@@ -228,9 +190,9 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicTopSongsResponse =
+        let parsed: SubsonicEnvelope<TopSongsResponseInner> =
             serde_json::from_str(json).expect("should parse top songs response");
-        let songs = parsed.subsonic_response.top_songs.unwrap().song.unwrap();
+        let songs = parsed.response.top_songs.unwrap().song.unwrap();
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].title, "Everything In Its Right Place");
     }
@@ -245,10 +207,10 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicTopSongsResponse =
+        let parsed: SubsonicEnvelope<TopSongsResponseInner> =
             serde_json::from_str(json).expect("should parse response without topSongs");
         let songs = parsed
-            .subsonic_response
+            .response
             .top_songs
             .and_then(|s| s.song)
             .unwrap_or_default();

@@ -12,15 +12,10 @@ use crate::{
     types::genre::Genre,
 };
 
-/// Subsonic API response for getGenres
+/// Inner payload of the Subsonic `getGenres` envelope
+/// ([`crate::services::api::subsonic::SubsonicEnvelope`]).
 #[derive(Debug, serde::Deserialize)]
-struct SubsonicGenresResponse {
-    #[serde(rename = "subsonic-response")]
-    subsonic_response: SubsonicResponseInner,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct SubsonicResponseInner {
+struct GenresInner {
     genres: Option<SubsonicGenres>,
 }
 
@@ -212,27 +207,19 @@ impl GenresApiService {
 
     /// Fetch genres from Subsonic API (for counts)
     async fn fetch_subsonic_genres(&self) -> Result<Vec<(String, u32, u32)>> {
-        let response = crate::services::api::subsonic::subsonic_post(
+        let inner: GenresInner = crate::services::api::subsonic::subsonic_get_envelope(
             &self.client.http_client(),
             &self.server_url,
             "getGenres",
             &self.subsonic_credential,
             &[],
+            "Subsonic genres",
         )
-        .await
-        .context("Failed to fetch genres from Subsonic API")?;
-
-        let body = response
-            .text()
-            .await
-            .context("Failed to read Subsonic response")?;
-
-        let parsed: SubsonicGenresResponse =
-            parse::parse_json_with_preview(&body, "Subsonic genres response")?;
+        .await?;
 
         let mut genres = Vec::new();
 
-        if let Some(genres_obj) = parsed.subsonic_response.genres
+        if let Some(genres_obj) = inner.genres
             && let Some(genre_value) = genres_obj.genre
         {
             // Subsonic returns a single object instead of a one-element array;

@@ -53,15 +53,10 @@ use crate::{
     types::library::Library,
 };
 
-/// Subsonic envelope for `getMusicFolders`.
+/// Inner payload of the Subsonic `getMusicFolders` envelope
+/// ([`subsonic::SubsonicEnvelope`]).
 #[derive(Debug, serde::Deserialize)]
-struct SubsonicMusicFoldersResponse {
-    #[serde(rename = "subsonic-response")]
-    subsonic_response: MusicFoldersResponseInner,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MusicFoldersResponseInner {
+struct MusicFoldersInner {
     #[serde(rename = "musicFolders")]
     music_folders: Option<MusicFoldersList>,
 }
@@ -168,26 +163,17 @@ impl LibrariesApiService {
     /// Fall back to Subsonic `getMusicFolders`. Returns the id+name
     /// list without per-library counts.
     async fn load_via_subsonic(&self) -> Result<Vec<Library>> {
-        let response = subsonic::subsonic_post(
+        let inner: MusicFoldersInner = subsonic::subsonic_get_envelope(
             &self.client.http_client(),
             &self.server_url,
             "getMusicFolders",
             &self.subsonic_credential,
             &[],
+            "Subsonic getMusicFolders",
         )
-        .await
-        .context("Failed to fetch music folders from Subsonic API")?;
+        .await?;
 
-        let body = response
-            .text()
-            .await
-            .context("Failed to read Subsonic getMusicFolders response")?;
-
-        let parsed: SubsonicMusicFoldersResponse =
-            parse::parse_json_with_preview(&body, "Subsonic getMusicFolders response")?;
-
-        let entries = parsed
-            .subsonic_response
+        let entries = inner
             .music_folders
             .and_then(|list| list.music_folder)
             .unwrap_or_default();
@@ -226,9 +212,10 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicMusicFoldersResponse = serde_json::from_str(body).unwrap();
+        let parsed: subsonic::SubsonicEnvelope<MusicFoldersInner> =
+            serde_json::from_str(body).unwrap();
         let libraries: Vec<Library> = parsed
-            .subsonic_response
+            .response
             .music_folders
             .and_then(|list| list.music_folder)
             .unwrap_or_default()
@@ -255,9 +242,10 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicMusicFoldersResponse = serde_json::from_str(body).unwrap();
+        let parsed: subsonic::SubsonicEnvelope<MusicFoldersInner> =
+            serde_json::from_str(body).unwrap();
         let entries = parsed
-            .subsonic_response
+            .response
             .music_folders
             .and_then(|list| list.music_folder)
             .unwrap_or_default();
@@ -289,10 +277,10 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicMusicFoldersResponse =
+        let parsed: subsonic::SubsonicEnvelope<MusicFoldersInner> =
             serde_json::from_str(body).expect("extra fields must not cause parse failure");
         let entries = parsed
-            .subsonic_response
+            .response
             .music_folders
             .and_then(|list| list.music_folder)
             .unwrap_or_default();
@@ -351,9 +339,10 @@ mod tests {
             }
         }"#;
 
-        let parsed: SubsonicMusicFoldersResponse = serde_json::from_str(body).unwrap();
+        let parsed: subsonic::SubsonicEnvelope<MusicFoldersInner> =
+            serde_json::from_str(body).unwrap();
         let entries = parsed
-            .subsonic_response
+            .response
             .music_folders
             .and_then(|list| list.music_folder)
             .unwrap_or_default();

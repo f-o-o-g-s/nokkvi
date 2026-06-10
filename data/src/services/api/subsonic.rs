@@ -8,7 +8,19 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use crate::types::error::NokkviError;
+use crate::{services::api::parse, types::error::NokkviError};
+
+/// Generic wrapper for the Subsonic `{"subsonic-response": ...}` envelope.
+///
+/// Every Subsonic endpoint wraps its payload in the same outer object; the
+/// per-endpoint inner shape goes in `T` (declared file-private next to its
+/// service). `pub(crate)` so modules outside `services::api` (e.g.
+/// `services::auth`) can parse the envelope too.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct SubsonicEnvelope<T> {
+    #[serde(rename = "subsonic-response")]
+    pub(crate) response: T,
+}
 
 /// Send a POST request to a Subsonic REST API endpoint.
 ///
@@ -118,6 +130,42 @@ fn check_subsonic_response_status(
     Ok(())
 }
 
+/// POST to a Subsonic endpoint and parse the enveloped JSON payload.
+///
+/// Shared fetch pipeline for the typed list endpoints (getGenres,
+/// getMusicFolders, getInternetRadioStations, getSimilarSongs2, getTopSongs,
+/// getPlaylist): send via [`subsonic_post`], read the body, parse a
+/// [`SubsonicEnvelope<T>`] with the UTF-8-safe preview parser, and return the
+/// inner payload. `label` names the response in every error context
+/// (`Failed to fetch {label}` / `Failed to read {label} response` /
+/// `Failed to parse {label}: <preview>`).
+pub(crate) async fn subsonic_get_envelope<T: serde::de::DeserializeOwned>(
+    http_client: &Arc<reqwest::Client>,
+    server_url: &str,
+    endpoint: &str,
+    subsonic_credential: &str,
+    extra_params: &[(&str, &str)],
+    label: &str,
+) -> Result<T> {
+    let response = subsonic_post(
+        http_client,
+        server_url,
+        endpoint,
+        subsonic_credential,
+        extra_params,
+    )
+    .await
+    .with_context(|| format!("Failed to fetch {label}"))?;
+
+    let body = response
+        .text()
+        .await
+        .with_context(|| format!("Failed to read {label} response"))?;
+
+    let envelope: SubsonicEnvelope<T> = parse::parse_json_with_preview(&body, label)?;
+    Ok(envelope.response)
+}
+
 /// Coerce a Subsonic JSON field that may be either a single object or an
 /// array into a `Vec<T>`.
 ///
@@ -158,6 +206,23 @@ mod tests {
 
     use super::*;
     use crate::types::error::NokkviError;
+
+    /// The generic envelope must parse a canonical `{"subsonic-response":
+    /// ...}` body and reject a body missing the key — this is the single
+    /// declaration every typed list endpoint now flows through.
+    #[test]
+    fn subsonic_envelope_parses_canonical_body_and_rejects_missing_key() {
+        let body = r#"{"subsonic-response":{"status":"ok","version":"1.8.0"}}"#;
+        let envelope: SubsonicEnvelope<serde_json::Value> =
+            serde_json::from_str(body).expect("canonical envelope must parse");
+        assert_eq!(envelope.response["status"], "ok");
+
+        let missing = r#"{"status":"ok","version":"1.8.0"}"#;
+        assert!(
+            serde_json::from_str::<SubsonicEnvelope<serde_json::Value>>(missing).is_err(),
+            "body without the subsonic-response key must fail to parse"
+        );
+    }
 
     #[test]
     fn test_build_subsonic_url() {

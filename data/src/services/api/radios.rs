@@ -6,23 +6,15 @@
 //! NOTE from Claude: Built this ahead of Gemini's Phase 4 to unblock
 //! the data crate work. Follows the exact GenresApiService pattern.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tracing::debug;
 
-use crate::{
-    services::api::{client::ApiClient, parse},
-    types::radio_station::RadioStation,
-};
+use crate::{services::api::client::ApiClient, types::radio_station::RadioStation};
 
-/// Subsonic API response for getInternetRadioStations
+/// Inner payload of the Subsonic `getInternetRadioStations` envelope
+/// ([`crate::services::api::subsonic::SubsonicEnvelope`]).
 #[derive(Debug, serde::Deserialize)]
-struct SubsonicRadiosResponse {
-    #[serde(rename = "subsonic-response")]
-    subsonic_response: SubsonicResponseInner,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct SubsonicResponseInner {
+struct RadiosInner {
     #[serde(rename = "internetRadioStations")]
     internet_radio_stations: Option<SubsonicRadioStations>,
 }
@@ -57,27 +49,19 @@ impl RadiosApiService {
     ///
     /// Returns a flat list — the Subsonic API has no pagination for radio stations.
     pub async fn load_radio_stations(&self) -> Result<Vec<RadioStation>> {
-        let response = crate::services::api::subsonic::subsonic_post(
+        let inner: RadiosInner = crate::services::api::subsonic::subsonic_get_envelope(
             &self.client.http_client(),
             &self.server_url,
             "getInternetRadioStations",
             &self.subsonic_credential,
             &[],
+            "radio stations",
         )
-        .await
-        .context("Failed to fetch internet radio stations")?;
-
-        let body = response
-            .text()
-            .await
-            .context("Failed to read radio stations response")?;
-
-        let parsed: SubsonicRadiosResponse =
-            parse::parse_json_with_preview(&body, "radio stations JSON")?;
+        .await?;
 
         let mut stations = Vec::new();
 
-        if let Some(radio_obj) = parsed.subsonic_response.internet_radio_stations
+        if let Some(radio_obj) = inner.internet_radio_stations
             && let Some(station_value) = radio_obj.internet_radio_station
         {
             // Subsonic can return a single object or an array (JSON quirk);
