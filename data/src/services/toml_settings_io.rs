@@ -4,7 +4,10 @@
 //! for surgical section replacement that preserves comments and formatting
 //! in other sections.
 
+use std::path::Path;
+
 use anyhow::{Context, Result};
+use toml_edit::{DocumentMut, Item};
 use tracing::debug;
 
 use crate::{
@@ -18,9 +21,9 @@ use crate::{
 // Readers
 // =============================================================================
 
-/// Read the `[settings]` section from config.toml.
-/// Returns `None` if the file or section doesn't exist.
-pub fn read_toml_settings() -> Result<Option<TomlSettings>> {
+/// Read one top-level section from config.toml and deserialize it into `T`.
+/// Returns `Ok(None)` when the file or the section doesn't exist.
+fn read_section<T: serde::de::DeserializeOwned>(section: &str) -> Result<Option<T>> {
     let config_path = get_config_path().context("Failed to get config path")?;
     if !config_path.exists() {
         return Ok(None);
@@ -29,64 +32,34 @@ pub fn read_toml_settings() -> Result<Option<TomlSettings>> {
     let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
     let doc: toml::Value = toml::from_str(&content).context("Failed to parse config.toml")?;
 
-    match doc.get("settings") {
-        Some(section) => {
-            let settings: TomlSettings = section
-                .clone()
+    doc.get(section)
+        .map(|s| {
+            s.clone()
                 .try_into()
-                .context("Failed to deserialize [settings] section")?;
-            Ok(Some(settings))
-        }
-        None => Ok(None),
-    }
+                .with_context(|| format!("Failed to deserialize [{section}] section"))
+        })
+        .transpose()
+}
+
+/// Read the `[settings]` section from config.toml.
+/// Returns `None` if the file or section doesn't exist.
+pub fn read_toml_settings() -> Result<Option<TomlSettings>> {
+    read_section::<TomlSettings>("settings")
 }
 
 /// Read the `[hotkeys]` section from config.toml.
 /// Returns `None` if the file or section doesn't exist.
 pub fn read_toml_hotkeys() -> Result<Option<HotkeyConfig>> {
-    let config_path = get_config_path().context("Failed to get config path")?;
-    if !config_path.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
-    let doc: toml::Value = toml::from_str(&content).context("Failed to parse config.toml")?;
-
-    match doc.get("hotkeys") {
-        Some(section) => {
-            let map: std::collections::BTreeMap<String, String> = section
-                .clone()
-                .try_into()
-                .context("Failed to deserialize [hotkeys] section")?;
-            Ok(Some(
-                crate::types::hotkey_config::HotkeyConfig::from_toml_map(&map),
-            ))
-        }
-        None => Ok(None),
-    }
+    Ok(
+        read_section::<std::collections::BTreeMap<String, String>>("hotkeys")?
+            .map(|map| HotkeyConfig::from_toml_map(&map)),
+    )
 }
 
 /// Read the `[views]` section from config.toml.
 /// Returns `None` if the file or section doesn't exist.
 pub fn read_toml_views() -> Result<Option<TomlViewPreferences>> {
-    let config_path = get_config_path().context("Failed to get config path")?;
-    if !config_path.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
-    let doc: toml::Value = toml::from_str(&content).context("Failed to parse config.toml")?;
-
-    match doc.get("views") {
-        Some(section) => {
-            let views: TomlViewPreferences = section
-                .clone()
-                .try_into()
-                .context("Failed to deserialize [views] section")?;
-            Ok(Some(views))
-        }
-        None => Ok(None),
-    }
+    read_section::<TomlViewPreferences>("views")
 }
 
 // =============================================================================
@@ -171,39 +144,42 @@ fn prune_default_keys(full: toml::Value, defaults: &toml::Value, keep: &[&str]) 
     toml::Value::Table(table)
 }
 
+/// Read config.toml (or start from an empty document when the file doesn't
+/// exist yet) and parse it as a `toml_edit` document for surgical edits.
+fn load_config_doc(config_path: &Path) -> Result<DocumentMut> {
+    let content = if config_path.exists() {
+        std::fs::read_to_string(config_path).context("Failed to read config.toml")?
+    } else {
+        String::new()
+    };
+    content
+        .parse::<DocumentMut>()
+        .context("Failed to parse config.toml as TOML")
+}
+
+/// Serialize `value` to a TOML string, re-parse it as a `toml_edit` table (so
+/// we get properly formatted table entries), and insert it into `doc` as the
+/// top-level section `name`, replacing any existing section.
+fn insert_section(doc: &mut DocumentMut, name: &str, value: &toml::Value) -> Result<()> {
+    let section_toml =
+        toml::to_string_pretty(value).with_context(|| format!("Failed to serialize [{name}]"))?;
+    let section_doc: DocumentMut = section_toml
+        .parse::<DocumentMut>()
+        .with_context(|| format!("Failed to re-parse [{name}] as toml_edit"))?;
+    doc.insert(name, Item::Table(section_doc.as_table().clone()));
+    Ok(())
+}
+
 /// Replace a single top-level section in config.toml using `toml_edit`.
 ///
 /// Routes through the shared `write_atomic` helper for the temp + rename and
 /// watcher-suppress contract. Preserves comments, formatting, and ordering
 /// in all other sections.
 fn write_section(section_name: &str, value: &toml::Value) -> Result<()> {
-    use toml_edit::{DocumentMut, Item};
-
     let config_path = get_config_path().context("Failed to get config path")?;
+    let mut doc = load_config_doc(&config_path)?;
 
-    let content = if config_path.exists() {
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?
-    } else {
-        String::new()
-    };
-
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .context("Failed to parse config.toml as TOML")?;
-
-    // Serialize the value to a TOML string, then re-parse as a toml_edit document
-    // so we get properly formatted table entries.
-    let section_toml = toml::to_string_pretty(value)
-        .with_context(|| format!("Failed to serialize [{section_name}]"))?;
-
-    // Parse the serialized section as a toml_edit table
-    let section_doc: DocumentMut = section_toml
-        .parse::<DocumentMut>()
-        .with_context(|| format!("Failed to re-parse [{section_name}] as toml_edit"))?;
-
-    // Replace the section in the main document
-    let section_table = section_doc.as_table().clone();
-    doc.insert(section_name, Item::Table(section_table));
+    insert_section(&mut doc, section_name, value)?;
 
     debug!(" [TOML I/O] Updated [{section_name}] in config.toml");
 
@@ -216,30 +192,8 @@ pub fn write_all_toml_sections(
     views: &TomlViewPreferences,
     verbose: bool,
 ) -> Result<()> {
-    use toml_edit::{DocumentMut, Item};
-
     let config_path = get_config_path().context("Failed to get config path")?;
-
-    let content = if config_path.exists() {
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?
-    } else {
-        String::new()
-    };
-
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .context("Failed to parse config.toml as TOML")?;
-
-    // Helper: serialize → re-parse → insert
-    let insert_section = |doc: &mut DocumentMut, name: &str, value: &toml::Value| -> Result<()> {
-        let toml_str = toml::to_string_pretty(value)
-            .with_context(|| format!("Failed to serialize [{name}]"))?;
-        let section_doc: DocumentMut = toml_str
-            .parse::<DocumentMut>()
-            .with_context(|| format!("Failed to re-parse [{name}]"))?;
-        doc.insert(name, Item::Table(section_doc.as_table().clone()));
-        Ok(())
-    };
+    let mut doc = load_config_doc(&config_path)?;
 
     insert_section(&mut doc, "settings", &settings_value(settings, verbose)?)?;
     insert_section(
