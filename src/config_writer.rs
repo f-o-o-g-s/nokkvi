@@ -94,6 +94,58 @@ fn debug_assert_theme_path(key: &str) {
     );
 }
 
+// =============================================================================
+// Read-edit-write skeleton
+//
+// Two deliberately separate entry points — do NOT unify the missing-file
+// policy: config.toml writers start from an empty document (the write creates
+// the file), while theme writers must error on a missing file (silently
+// creating one would mask a broken `theme = "name"` pointer). Path resolution
+// stays AT THE CALL SITE (`get_config_path()` vs `get_active_theme_path()`)
+// so config-vs-theme routing remains visible at every caller.
+// =============================================================================
+
+/// Shared core: parse `content` as a `toml_edit` document, apply `f`, and
+/// write the result back atomically (temp + rename + watcher suppression via
+/// `write_atomic`).
+fn edit_parsed_doc(
+    path: &std::path::Path,
+    content: &str,
+    f: impl FnOnce(&mut DocumentMut) -> Result<()>,
+) -> Result<()> {
+    let mut doc: DocumentMut = content
+        .parse::<DocumentMut>()
+        .with_context(|| format!("Failed to parse {} as TOML", path.display()))?;
+    f(&mut doc)?;
+    write_atomic(path, &doc.to_string())
+}
+
+/// Read-edit-write for config.toml targets: a missing file starts from an
+/// empty document.
+fn edit_toml_doc(
+    path: &std::path::Path,
+    f: impl FnOnce(&mut DocumentMut) -> Result<()>,
+) -> Result<()> {
+    let content = if path.exists() {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?
+    } else {
+        String::new()
+    };
+    edit_parsed_doc(path, &content, f)
+}
+
+/// Read-edit-write for targets that must already exist (the active theme
+/// file): a missing file propagates as an error, never silently created.
+fn edit_existing_toml_doc(
+    path: &std::path::Path,
+    f: impl FnOnce(&mut DocumentMut) -> Result<()>,
+) -> Result<()> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    edit_parsed_doc(path, &content, f)
+}
+
 /// Update a single value in config.toml, preserving all other content.
 ///
 /// # Arguments
@@ -109,26 +161,11 @@ pub(crate) fn update_config_value(
 ) -> Result<()> {
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
-
-    // Read existing config (or start fresh if it doesn't exist)
-    let content = if config_path.exists() {
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?
-    } else {
-        String::new()
-    };
-
-    // Parse into editable document
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .context("Failed to parse config.toml as TOML")?;
-
-    // Navigate to the correct table and set the value
-    set_dotted_value(&mut doc, toml_key, value, comment)?;
-
-    debug!(" [CONFIG WRITER] Updated {toml_key} in config.toml");
-
-    // Write atomically: temp file → rename
-    write_atomic(&config_path, &doc.to_string())
+    edit_toml_doc(&config_path, |doc| {
+        set_dotted_value(doc, toml_key, value, comment)?;
+        debug!(" [CONFIG WRITER] Updated {toml_key} in config.toml");
+        Ok(())
+    })
 }
 
 /// Update a single value in the active theme file, preserving all other content.
@@ -137,19 +174,11 @@ pub(crate) fn update_config_value(
 /// `~/.config/nokkvi/themes/{name}.toml`, and edits in-place.
 pub(crate) fn update_theme_value(toml_key: &str, value: &SettingValue) -> Result<()> {
     let theme_path = get_active_theme_path()?;
-
-    let content =
-        std::fs::read_to_string(&theme_path).context("Failed to read active theme file")?;
-
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .context("Failed to parse theme file as TOML")?;
-
-    set_dotted_value(&mut doc, toml_key, value, None)?;
-
-    debug!(" [CONFIG WRITER] Updated {toml_key} in theme file");
-
-    write_atomic(&theme_path, &doc.to_string())
+    edit_existing_toml_doc(&theme_path, |doc| {
+        set_dotted_value(doc, toml_key, value, None)?;
+        debug!(" [CONFIG WRITER] Updated {toml_key} in theme file");
+        Ok(())
+    })
 }
 
 /// Update a color in a color array at a specific index inside the active theme file.
@@ -159,32 +188,23 @@ pub(crate) fn update_theme_color_array_entry(
     hex_color: &str,
 ) -> Result<()> {
     let theme_path = get_active_theme_path()?;
+    edit_existing_toml_doc(&theme_path, |doc| {
+        let parts: Vec<&str> = toml_key.split('.').collect();
+        let item = navigate_to_item_mut(doc, &parts)?;
 
-    let content =
-        std::fs::read_to_string(&theme_path).context("Failed to read active theme file")?;
-
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .context("Failed to parse theme file as TOML")?;
-
-    let parts: Vec<&str> = toml_key.split('.').collect();
-    let item = navigate_to_item_mut(&mut doc, &parts)?;
-
-    if let Some(arr) = item.as_array_mut() {
-        if index < arr.len() {
-            arr.replace(index, hex_color);
-            debug!(" [CONFIG WRITER] Updated {toml_key}[{index}] = {hex_color} in theme file");
-        } else {
+        let Some(arr) = item.as_array_mut() else {
+            anyhow::bail!("{toml_key} is not an array");
+        };
+        if index >= arr.len() {
             anyhow::bail!(
                 "Index {index} out of bounds for array {toml_key} (len={})",
                 arr.len()
             );
         }
-    } else {
-        anyhow::bail!("{toml_key} is not an array");
-    }
-
-    write_atomic(&theme_path, &doc.to_string())
+        arr.replace(index, hex_color);
+        debug!(" [CONFIG WRITER] Updated {toml_key}[{index}] = {hex_color} in theme file");
+        Ok(())
+    })
 }
 
 /// Resolve the filesystem path to the active theme file.
@@ -307,52 +327,43 @@ pub(crate) fn reset_visualizer_defaults_preserving_colors() -> Result<()> {
 
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
+    edit_toml_doc(&config_path, |doc| {
+        // Build a default [visualizer] table, then strip color sub-tables
+        // so the user's existing dark/light color palettes are preserved.
+        let mut default_doc: DocumentMut = format!("[visualizer]\n{toml_str}")
+            .parse()
+            .context("Failed to parse default visualizer TOML")?;
 
-    let content = if config_path.exists() {
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?
-    } else {
-        String::new()
-    };
-
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .context("Failed to parse config.toml as TOML")?;
-
-    // Build a default [visualizer] table, then strip color sub-tables
-    // so the user's existing dark/light color palettes are preserved.
-    let mut default_doc: DocumentMut = format!("[visualizer]\n{toml_str}")
-        .parse()
-        .context("Failed to parse default visualizer TOML")?;
-
-    if let Some(viz) = default_doc.get_mut("visualizer") {
-        for section in ["bars", "lines"] {
-            if let Some(s) = viz.get_mut(section)
-                && let Some(tbl) = s.as_table_like_mut()
-            {
-                tbl.remove("dark");
-                tbl.remove("light");
+        if let Some(viz) = default_doc.get_mut("visualizer") {
+            for section in ["bars", "lines"] {
+                if let Some(s) = viz.get_mut(section)
+                    && let Some(tbl) = s.as_table_like_mut()
+                {
+                    tbl.remove("dark");
+                    tbl.remove("light");
+                }
             }
         }
-    }
 
-    // Merge default values into existing doc, preserving colors.
-    if let Some(default_viz) = default_doc.get("visualizer")
-        && let Some(default_tbl) = default_viz.as_table()
-    {
-        // Ensure [visualizer] exists in the user's config
-        if doc.get("visualizer").is_none() {
-            doc.insert("visualizer", Item::Table(toml_edit::Table::new()));
-        }
-        if let Some(user_viz) = doc.get_mut("visualizer")
-            && let Some(user_tbl) = user_viz.as_table_like_mut()
+        // Merge default values into existing doc, preserving colors.
+        if let Some(default_viz) = default_doc.get("visualizer")
+            && let Some(default_tbl) = default_viz.as_table()
         {
-            for (key, value) in default_tbl.iter() {
-                user_tbl.insert(key, value.clone());
+            // Ensure [visualizer] exists in the user's config
+            if doc.get("visualizer").is_none() {
+                doc.insert("visualizer", Item::Table(toml_edit::Table::new()));
+            }
+            if let Some(user_viz) = doc.get_mut("visualizer")
+                && let Some(user_tbl) = user_viz.as_table_like_mut()
+            {
+                for (key, value) in default_tbl.iter() {
+                    user_tbl.insert(key, value.clone());
+                }
             }
         }
-    }
 
-    write_atomic(&config_path, &doc.to_string())
+        Ok(())
+    })
 }
 
 /// Write full `[visualizer]` section to config.toml,
@@ -366,28 +377,19 @@ pub(crate) fn write_full_visualizer(
 ) -> Result<()> {
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
+    edit_toml_doc(&config_path, |doc| {
+        // Serialize full visualizer config with current values
+        let viz_toml = toml::to_string_pretty(visualizer_config)
+            .context("Failed to serialize VisualizerConfig")?;
+        let viz_doc: DocumentMut = viz_toml
+            .parse::<DocumentMut>()
+            .context("Failed to re-parse [visualizer] as toml_edit")?;
 
-    let content = if config_path.exists() {
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?
-    } else {
-        String::new()
-    };
+        doc.insert("visualizer", Item::Table(viz_doc.as_table().clone()));
 
-    let mut doc: DocumentMut = content
-        .parse::<DocumentMut>()
-        .context("Failed to parse config.toml as TOML")?;
-
-    // Serialize full visualizer config with current values
-    let viz_toml = toml::to_string_pretty(visualizer_config)
-        .context("Failed to serialize VisualizerConfig")?;
-    let viz_doc: DocumentMut = viz_toml
-        .parse::<DocumentMut>()
-        .context("Failed to re-parse [visualizer] as toml_edit")?;
-
-    doc.insert("visualizer", Item::Table(viz_doc.as_table().clone()));
-
-    debug!(" [CONFIG WRITER] Wrote full [visualizer] (verbose mode)");
-    write_atomic(&config_path, &doc.to_string())
+        debug!(" [CONFIG WRITER] Wrote full [visualizer] (verbose mode)");
+        Ok(())
+    })
 }
 
 /// Strip `[visualizer]` section back to sparse mode by removing
@@ -398,21 +400,28 @@ pub(crate) fn strip_to_sparse() -> Result<()> {
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
 
+    // A missing config.toml is a no-op — routing through `edit_toml_doc`
+    // would create an empty config.toml on a fresh install.
     if !config_path.exists() {
         return Ok(());
     }
 
-    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
-    let new_content = strip_to_sparse_content(&content)?;
-
-    write_atomic(&config_path, &new_content)
+    edit_existing_toml_doc(&config_path, strip_to_sparse_doc)
 }
 
+/// Thin parse wrapper over [`strip_to_sparse_doc`], kept for content-level
+/// testing (e.g. corrupted-config input) — production routes through
+/// `edit_existing_toml_doc` above.
+#[cfg(test)]
 fn strip_to_sparse_content(content: &str) -> Result<String> {
     let mut doc: DocumentMut = content
         .parse::<DocumentMut>()
         .context("Failed to parse config.toml as TOML")?;
+    strip_to_sparse_doc(&mut doc)?;
+    Ok(doc.to_string())
+}
 
+fn strip_to_sparse_doc(doc: &mut DocumentMut) -> Result<()> {
     // Build default reference for visualizer (no theme — theme is separate files)
     let default_viz = crate::visualizer_config::VisualizerConfig::default();
 
@@ -424,7 +433,7 @@ fn strip_to_sparse_content(content: &str) -> Result<String> {
         .context("Failed to parse default visualizer")?;
 
     // Strip matching keys from [visualizer]
-    strip_matching_keys(&mut doc, "visualizer", viz_default_doc.as_table());
+    strip_matching_keys(doc, "visualizer", viz_default_doc.as_table());
 
     // Remove any leftover [theme] TABLE section from pre-refactor configs.
     // The new architecture uses `theme = "name"` (a string key), NOT a [theme] table.
@@ -438,7 +447,7 @@ fn strip_to_sparse_content(content: &str) -> Result<String> {
     }
 
     debug!(" [CONFIG WRITER] Stripped [visualizer] to sparse (verbose off)");
-    Ok(doc.to_string())
+    Ok(())
 }
 
 /// Recursively remove keys from a section in `doc` that match the `defaults` table.
