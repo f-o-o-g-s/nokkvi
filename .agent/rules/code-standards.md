@@ -40,7 +40,7 @@ trigger: always_on
 - **Search**: fire queries immediately on text change (no debounce).
 - **Visualizer FFT thread**: `try_lock()` only. Only the main render thread may use `lock()`.
 - **Play actions**: call `guard_play_action()` at the top of every play handler (split-view + playlist-edit conflict guard).
-- **Border radii**: use `ui_border_radius()` from `theme.rs`, not hardcoded values. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
+- **Border radii**: use `ui_border_radius()` from `src/theme/radius.rs`, not hardcoded values. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
 - **Single-active overlay menus**: hamburger / kebab / checkbox-dropdown / context menus bubble `Message::SetOpenMenu(...)` to root rather than owning local `is_open` state.
 
 ## Dependencies

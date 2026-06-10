@@ -5,7 +5,7 @@ globs: src/widgets/**
 
 # Widgets
 
-## Global Theme State (`src/theme.rs`)
+## Global Theme State (`src/theme/` — `state.rs`, `ui_mode.rs`, `radius.rs`, `colors.rs`, `font.rs`, `style.rs`; all re-exported as `theme::X` from `mod.rs`)
 
 - **`DUAL_THEME` (`ArcSwap<ResolvedDualTheme>`)**: lock-free color reads (~12 ns/call). Color accessors do an atomic Arc clone — safe from any thread, including the visualizer.
 - **`rounded_mode` (AtomicU8)** → `RoundedMode` enum: `Off` / `On` / `PlayerOnly` (tri-state, not a bool). `rounded_mode()` reads it; `is_rounded_mode()` is true only for `On`; `set_rounded_mode(RoundedMode)` stores it. `ui_border_radius()` → 6.0 or 0.0 (gated on `is_rounded_mode()`), while `ui_border_radius_player()` also rounds for `PlayerOnly` so the player chrome stays soft when the rest of the UI is flat. ALWAYS use these helpers instead of hardcoded radii.
