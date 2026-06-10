@@ -1155,6 +1155,74 @@ fn unchecked_box_outline() -> iced::Color {
     }
 }
 
+/// Shared box visual for the per-row select checkbox and the tri-state
+/// "select all" header box — the two MUST stay visually identical so they
+/// read as the same family.
+///
+/// Flat redesign treatment: unchecked sits transparent with the muted
+/// `unchecked_box_outline()`; checked fills with `theme::accent_bright()` and
+/// matches the row's selected-state colors. The per-row box lives in its own
+/// left column (sibling of the filled row content in
+/// `wrap_with_select_column`), so it is always backed by the plain slot-list
+/// shell bg — never an accent highlight fill — while the header box sits over
+/// the `bg0_soft` strip; the translucent outline composites correctly over
+/// both. Keep it that way or the unchecked outline needs to become
+/// fill-aware.
+///
+/// Colors are evaluated here (at view-build time) and captured by the style
+/// closure; only `ui_radius_xs()` stays inside the closure so the radius
+/// tracks the live rounded-mode toggle. `glyph` receives the resolved glyph
+/// color (`bg0_hard` on the accent fill, `fg0` otherwise).
+fn checkbox_box_visual<'a, Message: 'a>(
+    checked: bool,
+    glyph: impl FnOnce(iced::Color) -> Element<'a, Message>,
+) -> iced::widget::Container<'a, Message> {
+    use iced::Alignment;
+
+    let bg_color = if checked {
+        theme::accent_bright()
+    } else {
+        iced::Color::TRANSPARENT
+    };
+    let border_color = if checked {
+        theme::accent_bright()
+    } else {
+        unchecked_box_outline()
+    };
+    let glyph_color = if checked {
+        theme::bg0_hard()
+    } else {
+        theme::fg0()
+    };
+
+    container(glyph(glyph_color))
+        .width(Length::Fixed(CHECKBOX_SIZE))
+        .height(Length::Fixed(CHECKBOX_SIZE))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_| container::Style {
+            background: Some(bg_color.into()),
+            border: iced::Border {
+                color: border_color,
+                width: 1.0,
+                radius: theme::ui_radius_xs(),
+            },
+            ..Default::default()
+        })
+}
+
+/// The 14×14 check.svg glyph shared by the checked per-row box and the
+/// header's `All` state, tinted with the resolved glyph color.
+fn select_check_glyph<'a, Message: 'a>(color: iced::Color) -> Element<'a, Message> {
+    use iced::widget::svg;
+
+    crate::embedded_svg::svg_widget("assets/icons/check.svg")
+        .width(Length::Fixed(14.0))
+        .height(Length::Fixed(14.0))
+        .style(move |_, _| svg::Style { color: Some(color) })
+        .into()
+}
+
 /// Render the leading multi-select checkbox column for a slot list row.
 ///
 /// Built from a `mouse_area`-wrapped custom 16×16 box (matching the
@@ -1172,61 +1240,21 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
 ) -> Element<'a, Message> {
     use iced::{
         Alignment,
-        widget::{Space, mouse_area, svg},
+        widget::{Space, mouse_area},
     };
 
-    // Flat redesign: unchecked sits transparent inside the row with a muted
-    // `theme::fg2()` outline (see `unchecked_box_outline`); checked fills with
-    // `theme::accent_bright()` and matches the row's selected-state colors. The
-    // box lives in its own left column (sibling of the filled row content in
-    // `wrap_with_select_column`), so it is always backed by the plain slot-list
-    // shell bg, never an accent highlight fill; keep it that way or the
-    // unchecked outline needs to become fill-aware.
-    let bg_color = if is_checked {
-        theme::accent_bright()
-    } else {
-        iced::Color::TRANSPARENT
-    };
-    let border_color = if is_checked {
-        theme::accent_bright()
-    } else {
-        unchecked_box_outline()
-    };
-    let glyph_color = if is_checked {
-        theme::bg0_hard()
-    } else {
-        theme::fg0()
-    };
-
-    let glyph: Element<'a, Message> = if is_checked {
-        crate::embedded_svg::svg_widget("assets/icons/check.svg")
-            .width(Length::Fixed(14.0))
-            .height(Length::Fixed(14.0))
-            .style(move |_, _| svg::Style {
-                color: Some(glyph_color),
-            })
-            .into()
-    } else {
-        Space::new()
-            .width(Length::Fixed(0.0))
-            .height(Length::Fixed(0.0))
-            .into()
-    };
-
-    let box_visual = container(glyph)
-        .width(Length::Fixed(CHECKBOX_SIZE))
-        .height(Length::Fixed(CHECKBOX_SIZE))
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .style(move |_| container::Style {
-            background: Some(bg_color.into()),
-            border: iced::Border {
-                color: border_color,
-                width: 1.0,
-                radius: theme::ui_radius_xs(),
-            },
-            ..Default::default()
-        });
+    // Visual recipe shared with the tri-state header box — see
+    // `checkbox_box_visual` for the flat-treatment / outline rationale.
+    let box_visual = checkbox_box_visual(is_checked, |glyph_color| {
+        if is_checked {
+            select_check_glyph(glyph_color)
+        } else {
+            Space::new()
+                .width(Length::Fixed(0.0))
+                .height(Length::Fixed(0.0))
+                .into()
+        }
+    });
 
     // Centre the visible 16×16 box inside a column-wide hit area, then
     // wrap that whole area in `mouse_area` so the click target covers the
@@ -1310,40 +1338,17 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     use iced::{
         Alignment, Length,
-        widget::{Space, container, mouse_area, row, svg},
+        widget::{Space, container, mouse_area, row},
     };
 
     use crate::widgets::slot_list_page::SelectAllState;
 
-    let visually_checked = state.is_checked_visual();
-    // Mirrors `slot_list_select_checkbox` flat treatment so the header
-    // checkbox reads as the same family as the per-row boxes: transparent fill
-    // + the muted `unchecked_box_outline()` when not visually checked, over the
-    // `bg0_soft` header strip.
-    let bg_color = if visually_checked {
-        theme::accent_bright()
-    } else {
-        iced::Color::TRANSPARENT
-    };
-    let border_color = if visually_checked {
-        theme::accent_bright()
-    } else {
-        unchecked_box_outline()
-    };
-    let glyph_color = if visually_checked {
-        theme::bg0_hard()
-    } else {
-        theme::fg0()
-    };
-
-    let inner: Element<'a, Message> = match state {
-        SelectAllState::All => crate::embedded_svg::svg_widget("assets/icons/check.svg")
-            .width(Length::Fixed(14.0))
-            .height(Length::Fixed(14.0))
-            .style(move |_, _| svg::Style {
-                color: Some(glyph_color),
-            })
-            .into(),
+    // Visual recipe shared with the per-row checkbox via
+    // `checkbox_box_visual`, so the header reads as the same family as the
+    // per-row boxes. `Some` and `All` both render as "checked"; the glyph
+    // (dash vs check) distinguishes them.
+    let box_visual = checkbox_box_visual(state.is_checked_visual(), |glyph_color| match state {
+        SelectAllState::All => select_check_glyph(glyph_color),
         SelectAllState::Some => container(Space::new())
             .width(Length::Fixed(10.0))
             .height(Length::Fixed(2.0))
@@ -1356,22 +1361,7 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
             .width(Length::Fixed(0.0))
             .height(Length::Fixed(0.0))
             .into(),
-    };
-
-    let box_visual = container(inner)
-        .width(Length::Fixed(CHECKBOX_SIZE))
-        .height(Length::Fixed(CHECKBOX_SIZE))
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .style(move |_| container::Style {
-            background: Some(bg_color.into()),
-            border: iced::Border {
-                color: border_color,
-                width: 1.0,
-                radius: theme::ui_radius_xs(),
-            },
-            ..Default::default()
-        });
+    });
 
     let cb_cell = mouse_area(box_visual)
         .on_press(on_toggle)
@@ -1452,14 +1442,22 @@ pub(crate) fn slot_list_artwork_column<'a, Message: 'a>(
         opacity
     };
 
-    if let Some(handle) = artwork_handle {
-        container(
-            image(handle.clone())
-                .content_fit(iced::ContentFit::Cover)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .opacity(effective_opacity),
-        )
+    let inner: Element<'a, Message> = if let Some(handle) = artwork_handle {
+        image(handle.clone())
+            .content_fit(iced::ContentFit::Cover)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .opacity(effective_opacity)
+            .into()
+    } else {
+        // Empty-state child stays a `text("")` (not `Space`) — an empty text
+        // node and a Space have different intrinsic layout in some
+        // containers, and the placeholder must keep pixel parity with the
+        // artwork branch's chassis.
+        iced::widget::text("").into()
+    };
+
+    container(inner)
         .width(Length::Fixed(artwork_size))
         .height(Length::Fixed(artwork_size))
         .style(move |_theme| container::Style {
@@ -1473,22 +1471,6 @@ pub(crate) fn slot_list_artwork_column<'a, Message: 'a>(
             ..Default::default()
         })
         .into()
-    } else {
-        container(iced::widget::text(""))
-            .width(Length::Fixed(artwork_size))
-            .height(Length::Fixed(artwork_size))
-            .style(move |_theme| container::Style {
-                background: Some(
-                    Color {
-                        a: effective_opacity,
-                        ..theme::bg2()
-                    }
-                    .into(),
-                ),
-                ..Default::default()
-            })
-            .into()
-    }
 }
 
 /// Render a text column with title and subtitle for a slot list slot
@@ -2088,6 +2070,28 @@ fn make_slot_button<'a, M: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn select_checkbox_produces_element_in_both_states() {
+        // Compile + panic guard for the shared box-visual recipe.
+        for checked in [false, true] {
+            let _el: Element<'_, String> =
+                slot_list_select_checkbox(checked, 0, |i| format!("toggle {i}"));
+        }
+    }
+
+    #[test]
+    fn select_header_produces_element_across_tri_state() {
+        use crate::widgets::slot_list_page::SelectAllState;
+
+        for state in [
+            SelectAllState::None,
+            SelectAllState::Some,
+            SelectAllState::All,
+        ] {
+            let _el: Element<'_, String> = slot_list_select_header(state, "select all".to_string());
+        }
+    }
 
     #[test]
     fn favorite_icon_kind_paths_are_paired() {
