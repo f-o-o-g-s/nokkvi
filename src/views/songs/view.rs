@@ -376,7 +376,7 @@ impl SongsPage {
                     content_row = content_row.push(slot_list_metadata_column(
                         extra_value,
                         None,
-                        m.title_size,
+                        metadata_size,
                         style,
                         DYNAMIC_PORTION,
                     ));

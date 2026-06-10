@@ -509,7 +509,7 @@ impl AlbumsPage {
             content_row = content_row.push(slot_list_metadata_column(
                 extra_value,
                 click_msg,
-                m.title_size,
+                m.metadata_size,
                 style,
                 DYNAMIC_PORTION,
             ));

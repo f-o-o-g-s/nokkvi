@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Restoring the metadata strip's Field Separator to its default now gives Slash, not a middle dot.
+- Album and song lists no longer draw the date, year, duration, or genre sort column larger than the rest of the row.
 
 ### Removed
 
