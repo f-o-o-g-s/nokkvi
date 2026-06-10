@@ -1993,18 +1993,22 @@ name = "sentinel preset"
         assert_eq!(ts1.custom_eq_presets[0].name, "sentinel preset");
     }
 
-    /// Pin the current `light_mode` write-as-false asymmetry: `TomlSettings::
-    /// from_player_settings` takes UI-facing `LivePlayerSettings`, which has no
-    /// `light_mode` field. The function therefore always emits
-    /// `light_mode = false` regardless of the internal redb-backed value.
-    /// The on-disk truth is maintained separately by the `SetLightModeAtomic`
-    /// side-effect handler in the UI crate, which writes `settings.light_mode`
-    /// via `update_config_value` (a targeted toml_edit write that doesn't go
-    /// through `from_player_settings`).
+    /// The UI-facing `LivePlayerSettings` carries no `light_mode` field (it
+    /// lives on a theme atomic + `config.toml`, not on `LivePlayerSettings`),
+    /// so an internal redb-backed `light_mode = true` must NOT leak through
+    /// the `LivePlayerSettings -> TomlSettings` conversion.
     ///
-    /// This test pins the current behavior. If a future refactor closes the
-    /// asymmetry (e.g. by routing through internal-PS instead of UI-PS), this
-    /// test should be updated to assert the new behavior.
+    /// We assert that through `from_player_settings_with_existing(.., None)`:
+    /// with no on-disk override, `light_mode` stays at its
+    /// `TomlSettings::default()` value (`false`) even though the source redb
+    /// value was `true`. The `_with_existing` variant is used DELIBERATELY —
+    /// the no-arg `from_player_settings` reads `[settings].light_mode` off the
+    /// real `config.toml` (`read_toml_settings`) to preserve it across
+    /// whole-section writes, so calling it from a test makes the assertion
+    /// depend on the shared on-disk config and flake under parallel
+    /// `cargo test` (it reads whatever a sibling test last wrote there). The
+    /// on-disk truth is owned by the `SetLightModeAtomic` side-effect handler
+    /// in the UI crate (a targeted `update_config_value` write).
     #[test]
     fn from_player_settings_writes_light_mode_false_regardless_of_internal_value() {
         let mut internal = PersistedPlayerSettings::default();
@@ -2012,10 +2016,10 @@ name = "sentinel preset"
 
         let (sm, _tmp) = make_test_manager_with_player(internal);
         let ui_ps = sm.get_player_settings();
-        let ts = TomlSettings::from_player_settings(&ui_ps);
+        let ts = TomlSettings::from_player_settings_with_existing(&ui_ps, None);
         assert!(
             !ts.light_mode,
-            "from_player_settings hard-codes light_mode = false (UI-PS lacks the field)"
+            "internal redb light_mode=true must not leak through UI-PS (no on-disk override)"
         );
     }
 
