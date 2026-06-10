@@ -20,15 +20,18 @@ use iced::{
         Layout, Shell, Widget, layout, overlay, renderer,
         widget::{self, tree},
     },
-    keyboard, mouse, touch,
+    mouse, touch,
     widget::{button, column, container, row, text},
 };
 
 use crate::{
     theme,
-    widgets::menu_constants::{
-        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
-        visible_menu_layout,
+    widgets::{
+        menu_constants::{
+            MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
+            visible_menu_layout,
+        },
+        menu_dismiss,
     },
 };
 
@@ -831,34 +834,15 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         let menu_layout = visible_menu_layout(layout);
         let cursor_over = cursor.position_over(menu_layout.bounds());
 
-        // Escape key → close
-        if matches!(
+        // Escape / outside-press dismissal — see `widgets::menu_dismiss` for
+        // the capture semantics (outside presses deliberately stay
+        // uncaptured). A press with no cursor position counts as outside.
+        if menu_dismiss::handle_dismiss(
             event,
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                ..
-            })
+            shell,
+            || menu_dismiss::press_began(event) && cursor_over.is_none(),
+            || (self.on_open_change)(None),
         ) {
-            shell.publish((self.on_open_change)(None));
-            shell.capture_event();
-            shell.request_redraw();
-            return;
-        }
-
-        // Click outside menu → emit close. Do NOT capture: a different menu's
-        // trigger may be under the cursor, and iced dispatches overlays
-        // before the widget tree, so the trigger's open emit arrives later
-        // and wins (the parent's `SetOpenMenu` handler simply replaces the
-        // value). For a click in genuinely empty space, only the close
-        // emits, and the menu disappears next frame.
-        if matches!(
-            event,
-            Event::Mouse(mouse::Event::ButtonPressed(_))
-                | Event::Touch(touch::Event::FingerPressed { .. })
-        ) && cursor_over.is_none()
-        {
-            shell.publish((self.on_open_change)(None));
-            shell.request_redraw();
             return;
         }
 

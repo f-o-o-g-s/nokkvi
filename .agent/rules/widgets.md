@@ -17,6 +17,8 @@ globs: src/widgets/**
 
 Hamburger, player-bar kebab, view-header `checkbox_dropdown`, right-click context menus, and the nav-bar library-filter popover are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `CheckboxDropdownSimilar { trigger_bounds }` (browsing-panel-only Similar columns dropdown — has no matching `View` variant), `Context { id, position }`, `LibrarySelector { trigger_bounds }` (multi-library filter popover anchored under the nav-bar trigger). Auto-closes on `SwitchView` and `WindowResized`.
 
+Dismissal goes through `widgets::menu_dismiss::handle_dismiss()`: Escape closes with the event captured; an outside press closes **without** capturing, so the press still reaches a different menu's trigger in the widget tree (the trigger's open emit arrives after the close in iced's overlays-before-widget-tree dispatch order and wins — the click-to-switch UX). Each overlay supplies its own outside-press predicate (`press_began()` + bounds test for hamburger/kebab/context; `checkbox_dropdown` matches mouse presses only and exempts its trigger rect) — those predicate differences are historical behavior, keep them per-site.
+
 ## Menu Shadow Halo (`menu_constants.rs`)
 
 Every custom `overlay::Overlay` impl that draws a `MENU_SHADOW`-bearing quad must inflate its `layout::Node` so the halo survives Iced's per-overlay `with_layer(layout.bounds(), …)` scissor (`core/src/overlay/nested.rs`). Use the helpers in `widgets::menu_constants`:
@@ -73,6 +75,7 @@ Custom `iced::advanced` seekable widget. Track + handle rendered in separate `wi
 | Badge Pip | `badge_pip.rs` | Tiny "active-state" pip drawn in the top-right of an icon button. Shared between the kebab `player_modes_menu` and `library_filter_trigger` |
 | Boat | `boat.rs` (+ `boat_physics.rs` / `boat_tests.rs`) | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes |
 | Menu Chrome | `menu_chrome.rs` | Shared overlay-menu vocabulary: `fill()`, `border()`, `container_style()` accessors consumed by the four overlay menus (hamburger / player_modes / checkbox_dropdown / context_menu) so the `bg1 + border + ui_radius_md + MENU_SHADOW` recipe lives at one site |
+| Menu Dismiss | `menu_dismiss.rs` | Shared overlay-menu dismissal: `handle_dismiss()` (Escape closes + captures; outside press closes WITHOUT capturing — the click-to-switch invariant lives + is unit-pinned here) and `press_began()`; each overlay passes its own outside-press predicate |
 | Modal Button | `modal_button.rs` | `modal_icon_button(icon, size, on_press)` — the shared `mouse_area(HoverOverlay(container(svg)))` chassis used by About / Info modal headers |
 | Pill Segmented Button | `pill_segmented_button.rs` | Horizontal chip group used by Settings Bool / Enum / ToggleSet widgets. Flat 1 px outline + `theme::bg0()` fill in flat mode; `ui_radius_pill()` corners in rounded mode; selected chip uses `accent_bright()` fill |
 

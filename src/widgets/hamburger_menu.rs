@@ -16,14 +16,17 @@ use iced::{
         svg::{Handle, Svg as SvgData},
         widget::{self, Widget},
     },
-    keyboard, mouse, touch,
+    mouse, touch,
 };
 
 use crate::{
     theme,
-    widgets::menu_constants::{
-        MENU_HAMBURGER_WIDTH as MENU_WIDTH, MENU_ITEM_HEIGHT, MENU_PADDING, MENU_SHADOW,
-        MENU_TEXT_SIZE, inflate_for_shadow, visible_menu_bounds,
+    widgets::{
+        menu_constants::{
+            MENU_HAMBURGER_WIDTH as MENU_WIDTH, MENU_ITEM_HEIGHT, MENU_PADDING, MENU_SHADOW,
+            MENU_TEXT_SIZE, inflate_for_shadow, visible_menu_bounds,
+        },
+        menu_dismiss,
     },
 };
 
@@ -349,61 +352,53 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
     ) {
         let bounds = visible_menu_bounds(layout.bounds());
 
+        // Escape / outside-press dismissal — see `widgets::menu_dismiss` for
+        // the capture semantics (outside presses deliberately stay
+        // uncaptured). A press with no cursor position is a no-op here.
+        if menu_dismiss::handle_dismiss(
+            event,
+            shell,
+            || {
+                menu_dismiss::press_began(event)
+                    && cursor.position().is_some_and(|p| !bounds.contains(p))
+            },
+            || (self.on_open_change)(false),
+        ) {
+            return;
+        }
+
         match event {
-            // Escape key → close
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                ..
-            }) => {
-                shell.publish((self.on_open_change)(false));
-                shell.capture_event();
-                shell.request_redraw();
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(_))
+            // Determine which menu item was clicked. Item-clicks fire on
+            // left/touch press; ignore right/middle inside the menu so they
+            // don't act like selections.
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
-                if let Some(cursor_pos) = cursor.position() {
-                    if !bounds.contains(cursor_pos) {
-                        // Click outside menu -> emit close. Do NOT capture so
-                        // the click can also reach a different menu's trigger
-                        // (the trigger's emit will arrive AFTER this close in
-                        // iced's dispatch order — overlays update before the
-                        // widget tree — and therefore wins, achieving the
-                        // "click another menu's trigger to switch" UX.
-                        shell.publish((self.on_open_change)(false));
-                        shell.request_redraw();
-                        return;
-                    }
+                let Some(cursor_pos) = cursor.position() else {
+                    return;
+                };
+                // Defensive: outside presses already returned above.
+                if !bounds.contains(cursor_pos) {
+                    return;
+                }
+                // Account for 1px separator before SEPARATOR_INDEX
+                let mut relative_y = cursor_pos.y - bounds.y - MENU_PADDING;
+                if relative_y < 0.0 {
+                    return;
+                }
+                // Items after separator are shifted down by 1px
+                let sep_y = MENU_ITEM_HEIGHT * SEPARATOR_INDEX as f32;
+                if relative_y >= sep_y {
+                    relative_y -= 1.0; // subtract separator height
+                }
+                let item_index = (relative_y / MENU_ITEM_HEIGHT) as usize;
 
-                    // Determine which menu item was clicked. Item-clicks fire
-                    // on left/touch press; ignore right/middle inside the menu
-                    // so they don't act like selections.
-                    if !matches!(
-                        event,
-                        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-                            | Event::Touch(touch::Event::FingerPressed { .. })
-                    ) {
-                        return;
-                    }
-                    // Account for 1px separator before SEPARATOR_INDEX
-                    let mut relative_y = cursor_pos.y - bounds.y - MENU_PADDING;
-                    if relative_y < 0.0 {
-                        return;
-                    }
-                    // Items after separator are shifted down by 1px
-                    let sep_y = MENU_ITEM_HEIGHT * SEPARATOR_INDEX as f32;
-                    if relative_y >= sep_y {
-                        relative_y -= 1.0; // subtract separator height
-                    }
-                    let item_index = (relative_y / MENU_ITEM_HEIGHT) as usize;
+                let action = MENU_ITEMS.get(item_index).copied();
 
-                    let action = MENU_ITEMS.get(item_index).copied();
-
-                    if let Some(action) = action {
-                        shell.publish((self.on_action)(action));
-                        shell.publish((self.on_open_change)(false));
-                        shell.capture_event();
-                        shell.request_redraw();
-                    }
+                if let Some(action) = action {
+                    shell.publish((self.on_action)(action));
+                    shell.publish((self.on_open_change)(false));
+                    shell.capture_event();
+                    shell.request_redraw();
                 }
             }
             _ => {}

@@ -41,14 +41,17 @@ use iced::{
         Layout, Shell, Widget, layout, overlay, renderer,
         widget::{self, tree},
     },
-    keyboard, mouse,
+    mouse,
     widget::{column, container, mouse_area, row, svg, text, tooltip},
 };
 
 use crate::{
     theme,
-    widgets::menu_constants::{
-        MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child, visible_menu_layout,
+    widgets::{
+        menu_constants::{
+            MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child, visible_menu_layout,
+        },
+        menu_dismiss,
     },
 };
 
@@ -835,38 +838,28 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
-        // Escape → close.
-        if matches!(
+        // Escape / outside-press dismissal — see `widgets::menu_dismiss` for
+        // the capture semantics (outside presses deliberately stay
+        // uncaptured). Mouse presses only — historical; the trigger rect
+        // counts as inside because the trigger's own Widget::update toggles
+        // when clicked, so we leave that case alone.
+        if menu_dismiss::handle_dismiss(
             event,
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                ..
-            })
+            shell,
+            || {
+                matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)))
+                    && cursor
+                        .position_over(visible_menu_layout(layout).bounds())
+                        .is_none()
+                    && cursor.position_over(self.trigger_bounds).is_none()
+            },
+            || (self.on_open_change)(None),
         ) {
-            shell.publish((self.on_open_change)(None));
-            shell.capture_event();
-            shell.request_redraw();
             return;
         }
 
         let menu_layout = visible_menu_layout(layout);
         let menu_bounds = menu_layout.bounds();
-        let cursor_over_menu = cursor.position_over(menu_bounds).is_some();
-        let cursor_over_trigger = cursor.position_over(self.trigger_bounds).is_some();
-
-        // Click outside the menu AND outside the trigger → emit close. The
-        // trigger's own Widget::update toggles when clicked, so we leave that
-        // case alone. Do NOT capture: if the click is also on a different
-        // menu's trigger, iced dispatches overlays before the widget tree, so
-        // that trigger's open emit arrives later and wins.
-        if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)))
-            && !cursor_over_menu
-            && !cursor_over_trigger
-        {
-            shell.publish((self.on_open_change)(None));
-            shell.request_redraw();
-            return;
-        }
 
         // Forward to menu content so item mouse_areas fire on_press.
         // Stays open on item click — the user can flip several toggles in

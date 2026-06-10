@@ -18,6 +18,7 @@ pub(crate) mod link_text;
 pub(crate) mod marquee_text;
 pub(crate) mod menu_chrome;
 pub(crate) mod menu_constants;
+pub(crate) mod menu_dismiss;
 pub(crate) mod metadata_pill;
 pub(crate) mod modal_button;
 pub(crate) mod nav_bar;

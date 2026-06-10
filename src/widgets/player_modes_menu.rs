@@ -28,7 +28,7 @@ use iced::{
         svg::{Handle, Svg as SvgData},
         widget::{self, Widget},
     },
-    keyboard, mouse, touch,
+    mouse, touch,
 };
 
 use crate::{
@@ -38,6 +38,7 @@ use crate::{
             MENU_ITEM_HEIGHT, MENU_PADDING, MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_SHADOW,
             MENU_TEXT_SIZE, inflate_for_shadow, visible_menu_bounds,
         },
+        menu_dismiss,
         sizes::TOOLBAR_BUTTON_SIZE as TRIGGER_BUTTON_SIZE,
     },
 };
@@ -388,37 +389,30 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
     ) {
         let bounds = visible_menu_bounds(layout.bounds());
 
+        // Escape / outside-press dismissal — see `widgets::menu_dismiss` for
+        // the capture semantics (outside presses deliberately stay
+        // uncaptured). A press with no cursor position is a no-op here.
+        if menu_dismiss::handle_dismiss(
+            event,
+            shell,
+            || {
+                menu_dismiss::press_began(event)
+                    && cursor.position().is_some_and(|p| !bounds.contains(p))
+            },
+            || (self.on_open_change)(false),
+        ) {
+            return;
+        }
+
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key: keyboard::Key::Named(keyboard::key::Named::Escape),
-                ..
-            }) => {
-                shell.publish((self.on_open_change)(false));
-                shell.capture_event();
-                shell.request_redraw();
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(_))
+            // Item-clicks fire on left/touch press only.
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 let Some(cursor_pos) = cursor.position() else {
                     return;
                 };
-
+                // Defensive: outside presses already returned above.
                 if !bounds.contains(cursor_pos) {
-                    // Click outside menu → emit close. Do NOT capture so the
-                    // click can also reach a different menu's trigger; iced
-                    // dispatches overlays before the widget tree, so the
-                    // trigger's open emit arrives later and wins.
-                    shell.publish((self.on_open_change)(false));
-                    shell.request_redraw();
-                    return;
-                }
-
-                // Item-clicks fire on left/touch press only.
-                if !matches!(
-                    event,
-                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-                        | Event::Touch(touch::Event::FingerPressed { .. })
-                ) {
                     return;
                 }
 
