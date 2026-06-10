@@ -82,354 +82,126 @@ pub(crate) fn dispatch_view_chrome<M: HasViewChrome>(
 
 // ─── Trait implementations ───────────────────────────────────────────────────
 
-impl HasViewChrome for AlbumsMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    fn is_roulette(&self) -> bool {
-        matches!(self, Self::Roulette)
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
-        matches!(self, Self::CollapseExpansion | Self::ExpandCenter)
-    }
-
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnVerticalDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-}
-
-impl HasViewChrome for ArtistsMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    fn is_roulette(&self) -> bool {
-        matches!(self, Self::Roulette)
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
-        matches!(self, Self::CollapseExpansion | Self::ExpandCenter)
-    }
-
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnVerticalDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-}
-
-impl HasViewChrome for SongsMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    fn is_roulette(&self) -> bool {
-        matches!(self, Self::Roulette)
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
+/// Generate a `HasViewChrome` impl for a per-view message enum.
+///
+/// `extract_set_open_menu` and `is_nav_action` are byte-identical across all
+/// eight view-message types (every enum carries `SetOpenMenu(Option<OpenMenu>)`
+/// and `SlotList(SlotListPageMessage)`); the three flags encode the per-view
+/// variation axes:
+/// - `roulette`: `yes` ⇒ `Self::Roulette` starts a roulette spin; `no` for
+///   enums without the variant (Similar — results are ephemeral, no roulette
+///   over the result list).
+/// - `expand`: `yes` ⇒ `Self::CollapseExpansion | Self::ExpandCenter` trigger
+///   the expand SFX (the four expansion views); `no` for the rest.
+/// - `drag`: `yes` ⇒ extract `Self::ArtworkColumnDrag` /
+///   `Self::ArtworkColumnVerticalDrag`; `no` for views without an artwork
+///   pane (Radios). The trait methods still exist on those views so
+///   `dispatch_view_chrome` can stay generic.
+///
+/// A flag typo cannot drift silently: `yes` on an enum missing the variant is
+/// a hard compile error.
+macro_rules! impl_view_chrome {
+    (@roulette yes, $self:ident) => {
+        matches!($self, Self::Roulette)
+    };
+    (@roulette no, $self:ident) => {
         false
-    }
-
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnVerticalDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-}
-
-impl HasViewChrome for GenresMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    fn is_roulette(&self) -> bool {
-        matches!(self, Self::Roulette)
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
-        matches!(self, Self::CollapseExpansion | Self::ExpandCenter)
-    }
-
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnVerticalDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-}
-
-impl HasViewChrome for PlaylistsMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    fn is_roulette(&self) -> bool {
-        matches!(self, Self::Roulette)
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
-        matches!(self, Self::CollapseExpansion | Self::ExpandCenter)
-    }
-
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnVerticalDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-}
-
-impl HasViewChrome for QueueMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    fn is_roulette(&self) -> bool {
-        matches!(self, Self::Roulette)
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
+    };
+    (@expand yes, $self:ident) => {
+        matches!($self, Self::CollapseExpansion | Self::ExpandCenter)
+    };
+    (@expand no, $self:ident) => {
         false
-    }
-
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnVerticalDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-}
-
-impl HasViewChrome for RadiosMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    fn is_roulette(&self) -> bool {
-        matches!(self, Self::Roulette)
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
-        false
-    }
-
-    // Radios has no artwork pane / drag handle, so both extractors are
-    // permanently `None`. The trait method exists for uniformity with the
-    // other views so `dispatch_view_chrome` can stay generic.
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
+    };
+    (@drag yes, $self:ident, $variant:ident) => {
+        if let Self::$variant(ev) = $self { Some(ev) } else { None }
+    };
+    (@drag no, $self:ident, $variant:ident) => {
         None
-    }
+    };
+    ($ty:ty { roulette: $roulette:tt, expand: $expand:tt, drag: $drag:tt }) => {
+        impl HasViewChrome for $ty {
+            fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
+                if let Self::SetOpenMenu(next) = self {
+                    Some(next.clone())
+                } else {
+                    None
+                }
+            }
 
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        None
-    }
+            fn is_roulette(&self) -> bool {
+                impl_view_chrome!(@roulette $roulette, self)
+            }
+
+            fn is_nav_action(&self) -> bool {
+                matches!(
+                    self,
+                    Self::SlotList(
+                        crate::widgets::SlotListPageMessage::NavigateUp
+                            | crate::widgets::SlotListPageMessage::NavigateDown
+                    )
+                )
+            }
+
+            fn is_expand_action(&self) -> bool {
+                impl_view_chrome!(@expand $expand, self)
+            }
+
+            fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
+                impl_view_chrome!(@drag $drag, self, ArtworkColumnDrag)
+            }
+
+            fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
+                impl_view_chrome!(@drag $drag, self, ArtworkColumnVerticalDrag)
+            }
+        }
+    };
 }
 
-impl HasViewChrome for SimilarMessage {
-    fn extract_set_open_menu(&self) -> Option<Option<OpenMenu>> {
-        if let Self::SetOpenMenu(next) = self {
-            Some(next.clone())
-        } else {
-            None
-        }
-    }
-
-    // SimilarMessage has no `Roulette` variant (results are ephemeral, no
-    // roulette over the result list); the chrome arm is permanently false.
-    fn is_roulette(&self) -> bool {
-        false
-    }
-
-    fn is_nav_action(&self) -> bool {
-        matches!(
-            self,
-            Self::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp
-                    | crate::widgets::SlotListPageMessage::NavigateDown
-            )
-        )
-    }
-
-    fn is_expand_action(&self) -> bool {
-        false
-    }
-
-    fn extract_artwork_column_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    fn extract_artwork_vertical_drag(&self) -> Option<&DragEvent> {
-        if let Self::ArtworkColumnVerticalDrag(ev) = self {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-}
+impl_view_chrome!(AlbumsMessage {
+    roulette: yes,
+    expand: yes,
+    drag: yes
+});
+impl_view_chrome!(ArtistsMessage {
+    roulette: yes,
+    expand: yes,
+    drag: yes
+});
+impl_view_chrome!(SongsMessage {
+    roulette: yes,
+    expand: no,
+    drag: yes
+});
+impl_view_chrome!(GenresMessage {
+    roulette: yes,
+    expand: yes,
+    drag: yes
+});
+impl_view_chrome!(PlaylistsMessage {
+    roulette: yes,
+    expand: yes,
+    drag: yes
+});
+impl_view_chrome!(QueueMessage {
+    roulette: yes,
+    expand: no,
+    drag: yes
+});
+// Radios has no artwork pane / drag handle, so both extractors are
+// permanently `None`.
+impl_view_chrome!(RadiosMessage {
+    roulette: yes,
+    expand: no,
+    drag: no
+});
+// SimilarMessage has no `Roulette` variant (results are ephemeral, no
+// roulette over the result list); the chrome arm is permanently false.
+impl_view_chrome!(SimilarMessage {
+    roulette: no,
+    expand: no,
+    drag: yes
+});
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -600,5 +372,53 @@ mod tests {
         let msg = RadiosMessage::Roulette;
         assert_eq!(msg.extract_artwork_column_drag(), None);
         assert_eq!(msg.extract_artwork_vertical_drag(), None);
+    }
+
+    // ── Variation-axis guards (roulette / expand / nav / set-open-menu) ──
+
+    #[test]
+    fn albums_roulette_variant_is_roulette() {
+        assert!(AlbumsMessage::Roulette.is_roulette());
+    }
+
+    #[test]
+    fn similar_is_roulette_permanently_false() {
+        // SimilarMessage has no `Roulette` variant; the chrome arm is
+        // permanently false.
+        assert!(!SimilarMessage::NoOp.is_roulette());
+    }
+
+    #[test]
+    fn expansion_views_flag_expand_actions() {
+        assert!(AlbumsMessage::CollapseExpansion.is_expand_action());
+        assert!(AlbumsMessage::ExpandCenter.is_expand_action());
+        assert!(ArtistsMessage::CollapseExpansion.is_expand_action());
+        assert!(GenresMessage::ExpandCenter.is_expand_action());
+        assert!(PlaylistsMessage::CollapseExpansion.is_expand_action());
+    }
+
+    #[test]
+    fn non_expansion_views_never_flag_expand_actions() {
+        assert!(!SongsMessage::Roulette.is_expand_action());
+        assert!(!QueueMessage::Roulette.is_expand_action());
+        assert!(!RadiosMessage::Roulette.is_expand_action());
+        assert!(!SimilarMessage::NoOp.is_expand_action());
+    }
+
+    #[test]
+    fn nav_action_tracks_slot_list_navigation() {
+        use crate::widgets::SlotListPageMessage;
+        assert!(AlbumsMessage::SlotList(SlotListPageMessage::NavigateUp).is_nav_action());
+        assert!(AlbumsMessage::SlotList(SlotListPageMessage::NavigateDown).is_nav_action());
+        assert!(!AlbumsMessage::Roulette.is_nav_action());
+    }
+
+    #[test]
+    fn set_open_menu_extracts_inner_payload() {
+        assert_eq!(
+            AlbumsMessage::SetOpenMenu(None).extract_set_open_menu(),
+            Some(None)
+        );
+        assert_eq!(AlbumsMessage::Roulette.extract_set_open_menu(), None);
     }
 }
