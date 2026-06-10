@@ -1076,15 +1076,6 @@ impl AudioRenderer {
         }
     }
 
-    /// Check available space in the crossfade stream.
-    pub fn crossfade_available_space(&self) -> usize {
-        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
-            stream.available_space()
-        } else {
-            0
-        }
-    }
-
     /// Whether a crossfade is currently in progress.
     pub fn is_crossfade_active(&self) -> bool {
         matches!(self.crossfade_state, CrossfadeState::Active { .. })
@@ -1250,24 +1241,6 @@ impl AudioRenderer {
     /// Check if crossfade is armed.
     pub fn is_crossfade_armed(&self) -> bool {
         matches!(self.crossfade_state, CrossfadeState::Armed { .. })
-    }
-
-    /// Get the armed crossfade duration, or `0` if not currently armed.
-    pub fn crossfade_armed_duration_ms(&self) -> u64 {
-        match &self.crossfade_state {
-            CrossfadeState::Armed { duration_ms, .. } => *duration_ms,
-            _ => 0,
-        }
-    }
-
-    /// Get the armed crossfade incoming format, or `None` if not currently armed.
-    pub fn crossfade_armed_incoming_format(&self) -> Option<&AudioFormat> {
-        match &self.crossfade_state {
-            CrossfadeState::Armed {
-                incoming_format, ..
-            } => Some(incoming_format),
-            _ => None,
-        }
     }
 
     // =========================================================================

@@ -1324,12 +1324,6 @@ impl CustomAudioEngine {
         );
     }
 
-    /// Load track
-    pub async fn load_track(&mut self, url: &str) {
-        debug!(" AudioEngine: loading track: {}", redact_subsonic_url(url));
-        self.set_source(url.to_string()).await;
-    }
-
     /// Atomic three-step: stash ReplayGain → set source. The caller still
     /// invokes `play()` afterward, but the RG-stash + source-update pair is
     /// uncuttable. Replaces the historical `set_pending_replay_gain` +
