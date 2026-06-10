@@ -8,7 +8,7 @@ use tracing::{debug, warn};
 use crate::{
     services::api::{
         client::ApiClient,
-        pagination, parse,
+        pagination,
         sort::{self, SortDomain},
         subsonic,
     },
@@ -159,36 +159,26 @@ impl PlaylistsApiService {
         &self,
         playlist_id: &str,
     ) -> Result<Vec<crate::types::song::Song>> {
-        let response = subsonic::subsonic_post(
+        let inner: PlaylistInner = subsonic::subsonic_get_envelope(
             &self.client.http_client(),
             &self.server_url,
             "getPlaylist",
             &self.subsonic_credential,
             &[("id", playlist_id)],
+            "Subsonic playlist",
         )
-        .await
-        .context("Failed to fetch playlist songs from Subsonic API")?;
-
-        let body = response
-            .text()
-            .await
-            .context("Failed to read Subsonic response")?;
-
-        let parsed: serde_json::Value =
-            parse::parse_json_with_preview(&body, "Subsonic playlist response")?;
+        .await?;
 
         let mut songs = Vec::new();
 
-        // Navigate to subsonic-response.playlist.entry
-        if let Some(entry_value) = parsed
-            .get("subsonic-response")
-            .and_then(|sr| sr.get("playlist"))
-            .and_then(|pl| pl.get("entry"))
+        // Missing playlist/entry keys yield Ok(empty) — a playlist with
+        // zero entries must not error.
+        if let Some(playlist) = inner.playlist
+            && let Some(entry_value) = playlist.entry
         {
             // Subsonic returns a single object instead of a one-element
             // array; `deserialize_one_or_many` absorbs that quirk.
-            let entries: Vec<serde_json::Value> =
-                subsonic::deserialize_one_or_many(entry_value.clone())?;
+            let entries: Vec<serde_json::Value> = subsonic::deserialize_one_or_many(entry_value)?;
 
             for entry in entries {
                 let song = parse_subsonic_song_entry(entry)?;
@@ -432,6 +422,64 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// The typed envelope navigation shared by `load_playlist_songs` and
+    /// `load_playlist_albums`: envelope → playlist → entry, with the
+    /// one-or-many quirk absorbed by `deserialize_one_or_many`.
+    #[test]
+    fn playlist_envelope_extracts_entries_for_array_and_single_object() {
+        let array_body = r#"{
+            "subsonic-response": {
+                "status": "ok",
+                "playlist": {
+                    "id": "p1",
+                    "name": "Mix",
+                    "entry": [
+                        { "id": "s1", "albumId": "a1" },
+                        { "id": "s2", "albumId": "a2" }
+                    ]
+                }
+            }
+        }"#;
+        let parsed: subsonic::SubsonicEnvelope<PlaylistInner> =
+            serde_json::from_str(array_body).expect("array-entry envelope must parse");
+        let entry = parsed
+            .response
+            .playlist
+            .expect("playlist key present")
+            .entry
+            .expect("entry key present");
+        let entries: Vec<serde_json::Value> =
+            subsonic::deserialize_one_or_many(entry).expect("array fan-out");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["id"], "s1");
+        assert_eq!(entries[1]["albumId"], "a2");
+
+        // Subsonic's XML→JSON bridge collapses a one-element collection
+        // to a bare object — the single-object variant must also extract.
+        let single_body = r#"{
+            "subsonic-response": {
+                "status": "ok",
+                "playlist": {
+                    "id": "p1",
+                    "name": "Mix",
+                    "entry": { "id": "s1", "albumId": "a1" }
+                }
+            }
+        }"#;
+        let parsed: subsonic::SubsonicEnvelope<PlaylistInner> =
+            serde_json::from_str(single_body).expect("single-entry envelope must parse");
+        let entry = parsed
+            .response
+            .playlist
+            .expect("playlist key present")
+            .entry
+            .expect("entry key present");
+        let entries: Vec<serde_json::Value> =
+            subsonic::deserialize_one_or_many(entry).expect("single-object fan-out");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["albumId"], "a1");
+    }
 
     /// Real-shape Subsonic `getPlaylist` entry — uses Subsonic field names
     /// (`track`, `channelCount`, `samplingRate`, `userRating`) which differ

@@ -181,12 +181,23 @@ impl AuthService {
     }
 }
 
+/// Inner payload of the Subsonic ping envelope — only the `serverVersion`
+/// leaf is consulted; everything else (status, error, ...) is ignored by
+/// default serde behavior.
+#[derive(Debug, Deserialize)]
+struct PingInner {
+    #[serde(rename = "serverVersion")]
+    server_version: Option<String>,
+}
+
+/// Total-tolerant version probe: any parse failure or missing key returns
+/// `None`, never an error. A `status == "failed"` ping that still carries
+/// `serverVersion` extracts it (unknown fields are ignored, the leaf is
+/// `Option`).
 pub(crate) fn extract_server_version(json: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(json)
+    serde_json::from_str::<crate::services::api::subsonic::SubsonicEnvelope<PingInner>>(json)
         .ok()
-        .and_then(|parsed| parsed.get("subsonic-response").cloned())
-        .and_then(|sub| sub.get("serverVersion").cloned())
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .and_then(|envelope| envelope.response.server_version)
 }
 
 #[cfg(test)]
