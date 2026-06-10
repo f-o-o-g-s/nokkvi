@@ -63,7 +63,7 @@ For bug fixes and new update handlers:
 
 1. **Red**: write tests in `src/update/tests/` (per-area files: `queue.rs`, `playback.rs`, `navigation.rs`, etc.) or the per-area `tests_player_settings.rs` / `tests_queue_filter.rs` / `tests_star_rating.rs` siblings, using the `test_app()` helper from `src/test_helpers.rs`. Assert against **observable state mutations** (`modes.random`, `modes.consume`, `search_query`) — never side effects requiring `app_service`. Run, confirm fail.
 2. **Green**: minimal implementation to pass.
-3. **Verify**: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo +nightly fmt --all`.
+3. **Verify**: `cargo test --workspace`, `cargo clippy --all-targets -- -D warnings`, `cargo +nightly fmt --all`.
 
 If structural plumbing (new fields, message variants) is needed, complete it first so the tests compile, but make no behavioral changes until the tests are red.
 
@@ -74,7 +74,7 @@ If structural plumbing (new fields, message variants) is needed, complete it fir
 ```bash
 cargo +nightly fmt --all                     # format
 cargo clippy --all-targets -- -D warnings    # lint, zero-warning gate
-cargo test                                   # all tests
+cargo test --workspace                       # all tests (bare `cargo test` runs only the root crate)
 cargo build --release                        # release build
 ```
 
