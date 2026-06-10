@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
-    audio::eq::CustomEqPreset,
+    audio::eq::{CustomEqPreset, EQ_BAND_COUNT},
     types::player_settings::{
         ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
         EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
@@ -239,7 +239,7 @@ pub struct TomlSettings {
     // -- Equalizer --
     pub eq_enabled: bool,
     #[serde(serialize_with = "round_f32_array")]
-    pub eq_gains: [f32; 10],
+    pub eq_gains: [f32; EQ_BAND_COUNT],
     pub custom_eq_presets: Vec<CustomEqPreset>,
 
     // -- System tray --
@@ -412,7 +412,7 @@ impl Default for TomlSettings {
             quick_add_to_playlist: false,
             queue_show_default_playlist: false,
             eq_enabled: false,
-            eq_gains: [0.0; 10],
+            eq_gains: [0.0; EQ_BAND_COUNT],
             custom_eq_presets: Vec::new(),
             show_tray_icon: false,
             close_to_tray: false,
@@ -543,7 +543,7 @@ mod tests {
         assert_eq!(parsed.start_view, "Queue");
         assert_eq!(parsed.crossfade_duration_secs, 7);
         assert!(parsed.scrobbling_enabled);
-        assert_eq!(parsed.eq_gains, [0.0; 10]);
+        assert_eq!(parsed.eq_gains, [0.0; EQ_BAND_COUNT]);
     }
 
     #[test]

@@ -22,6 +22,8 @@ pub use slot_list::*;
 pub use strip::*;
 pub use visualizer::*;
 
+use crate::audio::eq::EQ_BAND_COUNT;
+
 /// Live, UI-facing player settings — the in-memory shape that
 /// `Nokkvi.settings` mirrors and `Message::PlayerSettingsLoaded` carries.
 ///
@@ -153,7 +155,7 @@ pub struct LivePlayerSettings {
     /// Whether the 10-band graphic EQ is enabled (master bypass).
     pub eq_enabled: bool,
     /// Per-band EQ gain values in dB (-12.0 to +12.0). Indexed by band.
-    pub eq_gains: [f32; 10],
+    pub eq_gains: [f32; EQ_BAND_COUNT],
     /// User-created custom EQ presets.
     pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
     /// When true, all settings (including defaults) are written to config.toml.

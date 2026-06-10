@@ -54,7 +54,7 @@ Dual-path: PipeWire native (preferred) or software fallback.
 
 ## Equalizer
 
-- 10-band graphic EQ: `EqState.gains: Arc<[AtomicU32; 10]>`, `EqProcessor` per-stream biquad bank
+- 10-band graphic EQ: `EqState.gains: Arc<[AtomicU32; EQ_BAND_COUNT]>` (`eq.rs::EQ_BAND_COUNT = 10` is the single source of truth for every gain-array width, including the `eq_gains` fields on the settings/types side), `EqProcessor` per-stream biquad bank
 - Bands: 31 Hz–16 kHz (ISO standard center frequencies), ±12 dB clamp. Selecting a preset auto-enables the EQ.
 - Headroom: −1 dB applied only when the max boost > 0 dB.
 

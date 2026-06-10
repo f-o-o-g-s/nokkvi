@@ -202,6 +202,11 @@ const CUSHION_BASE_UNITS: u64 = 120;
 /// this much audio is buffered.
 const RADIO_JITTER_PREBUFFER_MS: u64 = 5000;
 
+/// Default crossfade duration (ms) seeded at construction, before settings
+/// apply. Keeps the shared atomic (decode-loop watermarks) and the plain field
+/// (arm_crossfade) in lockstep.
+const DEFAULT_CROSSFADE_DURATION_MS: u64 = 5000;
+
 /// Compute backpressure watermarks `(high, low)` in interleaved SAMPLES, scaled
 /// to the stream's `frame_rate` (`sample_rate * channels`) so the cushion is a
 /// constant TIME at any rate. Shared by the primary and crossfade decode loops.
@@ -470,10 +475,10 @@ impl CustomAudioEngine {
             source_generation: SourceGeneration::new(),
             decoder_eof: Arc::new(AtomicBool::new(false)),
             stream_is_infinite: Arc::new(AtomicBool::new(false)),
-            crossfade_duration_shared: Arc::new(AtomicU64::new(5000)),
+            crossfade_duration_shared: Arc::new(AtomicU64::new(DEFAULT_CROSSFADE_DURATION_MS)),
             crossfade_phase: CrossfadePhase::Idle,
             crossfade_enabled: false,
-            crossfade_duration_ms: 5000,
+            crossfade_duration_ms: DEFAULT_CROSSFADE_DURATION_MS,
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             live_icy_metadata,
             live_codec_name: LiveStringSlot::new(),

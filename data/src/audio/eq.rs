@@ -10,7 +10,7 @@ use biquad::{Biquad, Coefficients, DirectForm1, ToHertz, Type as FilterType};
 #[derive(Clone, Debug)]
 pub struct EqState {
     /// Per-band gain in dB, encoded via f32::to_bits(). Range: -12.0 to +12.0.
-    pub gains: Arc<[AtomicU32; 10]>,
+    pub gains: Arc<[AtomicU32; EQ_BAND_COUNT]>,
     /// Master bypass toggle.
     pub enabled: Arc<AtomicBool>,
 }
@@ -31,13 +31,13 @@ impl EqState {
 
     /// Set a single band's gain (called from UI thread).
     pub fn set_band_gain(&self, band: usize, gain_db: f32) {
-        if band < 10 {
+        if band < EQ_BAND_COUNT {
             self.gains[band].store(gain_db.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
         }
     }
 
     /// Set all 10 bands at once (for presets).
-    pub fn set_all_gains(&self, gains: &[f32; 10]) {
+    pub fn set_all_gains(&self, gains: &[f32; EQ_BAND_COUNT]) {
         for (i, &g) in gains.iter().enumerate() {
             self.gains[i].store(g.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
         }
@@ -45,7 +45,7 @@ impl EqState {
 
     /// Read a single band's gain (for UI display).
     pub fn get_band_gain(&self, band: usize) -> f32 {
-        if band < 10 {
+        if band < EQ_BAND_COUNT {
             f32::from_bits(self.gains[band].load(Ordering::Relaxed))
         } else {
             0.0
@@ -61,12 +61,17 @@ impl EqState {
     }
 }
 
+/// Number of graphic-EQ bands — single source of truth for every gain-array
+/// width on the audio and settings/types sides. The 10-element `EQ_BANDS_HZ`
+/// literal below compile-pins the value (its declared type uses this const).
+pub const EQ_BAND_COUNT: usize = 10;
+
 /// ISO standard 10-band graphic EQ center frequencies.
 ///
 /// Cross-crate length source of truth: the UI's `BAND_FREQS` label array in
 /// `src/widgets/eq_modal.rs` is pinned to this array by a `const _: ()` assert
 /// and a unit test there, so band count/value changes here force a label review.
-pub const EQ_BANDS_HZ: [f32; 10] = [
+pub const EQ_BANDS_HZ: [f32; EQ_BAND_COUNT] = [
     31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
 ];
 
@@ -80,12 +85,12 @@ const EQ_CHECK_INTERVAL: usize = 1024;
 const HEADROOM_LINEAR: f32 = 0.891_254;
 
 /// Flat EQ preset (all bands at 0 dB).
-pub const PRESET_FLAT: [f32; 10] = [0.0; 10];
+pub const PRESET_FLAT: [f32; EQ_BAND_COUNT] = [0.0; EQ_BAND_COUNT];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EqPreset {
     pub name: &'static str,
-    pub gains: [f32; 10],
+    pub gains: [f32; EQ_BAND_COUNT],
 }
 
 impl std::fmt::Display for EqPreset {
@@ -98,7 +103,7 @@ impl std::fmt::Display for EqPreset {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CustomEqPreset {
     pub name: String,
-    pub gains: [f32; 10],
+    pub gains: [f32; EQ_BAND_COUNT],
 }
 
 impl std::fmt::Display for CustomEqPreset {
@@ -165,9 +170,9 @@ pub const BUILTIN_PRESETS: &[EqPreset] = &[
 /// Per-stream 10-band stereo biquad filter bank.
 pub struct EqProcessor {
     /// [band][channel] — 10 bands × 2 channels = 20 DirectForm1 biquads.
-    filters: [[DirectForm1<f32>; 2]; 10],
+    filters: [[DirectForm1<f32>; 2]; EQ_BAND_COUNT],
     /// Cached gains for dirty-checking.
-    current_gains: [f32; 10],
+    current_gains: [f32; EQ_BAND_COUNT],
     /// Shared state from UI thread.
     state: EqState,
     /// Sample rate for coefficient calculation.
@@ -211,7 +216,7 @@ impl EqProcessor {
             state,
             sample_rate,
             channels,
-            current_gains: [0.0; 10],
+            current_gains: [0.0; EQ_BAND_COUNT],
             channel_idx: 0,
             sample_counter: 0,
             needs_headroom: false,
@@ -239,7 +244,7 @@ impl EqProcessor {
 
         // Cascade through all 10 bands
         let mut s = sample;
-        for band in 0..10 {
+        for band in 0..EQ_BAND_COUNT {
             s = self.filters[band][ch].run(s);
         }
 

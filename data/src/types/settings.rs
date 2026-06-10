@@ -1,17 +1,20 @@
 use serde::{Deserialize, Serialize};
 
-use crate::types::{
-    hotkey_config::HotkeyConfig,
-    player_settings::{
-        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
-        EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
-        RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
-        TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
-        deserialize_rounded_mode_with_bool_compat,
+use crate::{
+    audio::eq::EQ_BAND_COUNT,
+    types::{
+        hotkey_config::HotkeyConfig,
+        player_settings::{
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
+            EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
+            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
+            TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+            deserialize_rounded_mode_with_bool_compat,
+        },
+        queue::{QueueSortPreferences, SortPreferences},
+        queue_sort_mode::QueueSortMode,
+        sort_mode::SortMode,
     },
-    queue::{QueueSortPreferences, SortPreferences},
-    queue_sort_mode::QueueSortMode,
-    sort_mode::SortMode,
 };
 
 /// Player-related settings (volume, visualizer, theme, general)
@@ -209,7 +212,7 @@ pub struct PersistedPlayerSettings {
     pub eq_enabled: bool,
     /// Per-band EQ gain values in dB (-12.0 to +12.0). Indexed by band.
     #[serde(default = "default_eq_gains")]
-    pub eq_gains: [f32; 10],
+    pub eq_gains: [f32; EQ_BAND_COUNT],
     /// User-created custom EQ presets.
     #[serde(default)]
     pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
@@ -472,8 +475,8 @@ fn default_artwork_vertical_height_pct() -> f32 {
     crate::types::player_settings::ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT
 }
 
-fn default_eq_gains() -> [f32; 10] {
-    [0.0; 10]
+fn default_eq_gains() -> [f32; EQ_BAND_COUNT] {
+    [0.0; EQ_BAND_COUNT]
 }
 
 fn default_volume() -> f64 {
