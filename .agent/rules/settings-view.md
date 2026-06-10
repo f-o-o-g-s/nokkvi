@@ -22,6 +22,7 @@ views/settings/
 ├── presets.rs          — Theme discovery + apply
 ├── rendering.rs        — Slot rendering: detail-row chrome, headers, items, colors, hotkey badges, toggle sets
 ├── sentinel.rs         — `SentinelKind` enum for stringly-typed pseudo-keys (restore-all, restore-group, apply-preset). Routes through `route_write` instead of `update_config_value`
+├── test_support.rs     — `#[cfg(test)]`-only helpers (`extract_keys`, `header_labels`, `section_slice`, `palette_prefix_from`, `assert_section_keys`) shared by the items/items_theme test modules. Structure tests pin section headers + per-section ordered KEY lists (failures name the diverging key), keeping at most one coarse item-count backstop per tab
 └── view.rs             — Persistent two-pane layout: 340 px categories sidebar + scrollable detail pane (or narrow-variant horizontal chip strip below `NARROW_BREAKPOINT_WIDTH = 1400 px`)
 ```
 

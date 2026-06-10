@@ -374,58 +374,10 @@ pub(crate) fn build_theme_items(
 mod tests {
     use nokkvi_data::types::theme_file::ThemeFile;
 
-    use super::*;
-
-    fn extract_keys(entries: &[SettingsEntry]) -> Vec<&str> {
-        entries
-            .iter()
-            .filter_map(|e| match e {
-                SettingsEntry::Item(item) => Some(item.key.as_ref()),
-                SettingsEntry::Header { .. } => None,
-            })
-            .collect()
-    }
-
-    /// Locate the slice of entries belonging to a given header (header
-    /// inclusive, up to but excluding the next header).
-    fn section_slice<'a>(entries: &'a [SettingsEntry], header_label: &str) -> &'a [SettingsEntry] {
-        let start = entries
-            .iter()
-            .position(
-                |e| matches!(e, SettingsEntry::Header { label, .. } if *label == header_label),
-            )
-            .unwrap_or_else(|| panic!("missing header {header_label}"));
-        let after = entries[start + 1..]
-            .iter()
-            .position(|e| matches!(e, SettingsEntry::Header { .. }))
-            .map_or(entries.len(), |i| start + 1 + i);
-        &entries[start..after]
-    }
-
-    /// Derive the runtime palette prefix (`"dark"` or `"light"`) from the
-    /// first hex-color row's key. `build_theme_items` reads a global atomic
-    /// (`crate::theme::is_light_mode()`) once per call, so within a single
-    /// call the prefix is stable — but other tests in the suite can flip the
-    /// atomic between runs. Reading the prefix from the resulting entries
-    /// avoids racing with concurrent mutators.
-    fn palette_prefix_from(entries: &[SettingsEntry]) -> &str {
-        entries
-            .iter()
-            .find_map(|e| match e {
-                SettingsEntry::Item(item) => {
-                    let k = item.key.as_ref();
-                    if k.starts_with("dark.") {
-                        Some("dark")
-                    } else if k.starts_with("light.") {
-                        Some("light")
-                    } else {
-                        None
-                    }
-                }
-                SettingsEntry::Header { .. } => None,
-            })
-            .unwrap_or_else(|| panic!("no theme-prefixed row found in entries"))
-    }
+    use super::{
+        super::test_support::{extract_keys, palette_prefix_from, section_slice},
+        *,
+    };
 
     #[test]
     fn push_color_section_emits_header_restore_and_field_rows() {

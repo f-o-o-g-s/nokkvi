@@ -113,7 +113,16 @@ pub(crate) use super::{
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        super::{
+            sentinel::SentinelKind,
+            test_support::{
+                assert_section_keys, extract_keys, header_labels, palette_prefix_from,
+                section_slice,
+            },
+        },
+        *,
+    };
     use crate::visualizer_config::{VisualizerConfig, keys as vkeys};
 
     /// Count real items (excluding headers) in a settings entry list
@@ -122,25 +131,6 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, SettingsEntry::Item(_)))
             .count()
-    }
-
-    /// Count headers in a settings entry list
-    fn count_headers(entries: &[SettingsEntry]) -> usize {
-        entries
-            .iter()
-            .filter(|e| matches!(e, SettingsEntry::Header { .. }))
-            .count()
-    }
-
-    /// Extract all TOML key paths from settings entries
-    fn extract_keys(entries: &[SettingsEntry]) -> Vec<&str> {
-        entries
-            .iter()
-            .filter_map(|e| match e {
-                SettingsEntry::Item(item) => Some(item.key.as_ref()),
-                SettingsEntry::Header { .. } => None,
-            })
-            .collect()
     }
 
     /// Helper: build a 1-row `Vec<SettingsEntry>` containing only a Bool item
@@ -208,40 +198,103 @@ mod tests {
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
         let entries = build_visualizer_items(&config, &theme, "everforest");
 
-        // Verify section headers
         assert_eq!(
-            count_headers(&entries),
-            6,
-            "Expected 6 sections: Frame, Signal, Bars, Bar Colors (Dark), Bar Colors (Light), Lines"
+            header_labels(&entries),
+            vec![
+                "Frame",
+                "Signal",
+                "Bars",
+                "Bar Colors (Dark)",
+                "Bar Colors (Light)",
+                "Lines"
+            ],
+            "Visualizer tab section headers diverge",
         );
 
-        // Verify total item count (catches drift when settings are added/removed)
-        let item_count = count_items(&entries);
-        assert_eq!(
-            item_count, 46,
-            "Expected 46 visualizer settings items (update this if adding settings)"
+        let restore = SentinelKind::RestoreVisualizer.to_key();
+        assert_section_keys(
+            &entries,
+            "Frame",
+            &[restore.as_str(), vkeys::HEIGHT_PERCENT, vkeys::OPACITY],
+        );
+        assert_section_keys(
+            &entries,
+            "Signal",
+            &[
+                vkeys::NOISE_REDUCTION,
+                vkeys::LOWER_CUTOFF_FREQ,
+                vkeys::HIGHER_CUTOFF_FREQ,
+                vkeys::AUTO_SENSITIVITY,
+            ],
+        );
+        assert_section_keys(
+            &entries,
+            "Bars",
+            &[
+                vkeys::WAVES,
+                vkeys::WAVES_SMOOTHING,
+                vkeys::MONSTERCAT,
+                vkeys::BARS_MAX_BARS,
+                vkeys::BARS_BAR_WIDTH_MIN,
+                vkeys::BARS_BAR_WIDTH_MAX,
+                vkeys::BARS_BAR_SPACING,
+                vkeys::BARS_BORDER_WIDTH,
+                vkeys::BARS_LED_BARS,
+                vkeys::BARS_LED_SEGMENT_HEIGHT,
+                vkeys::BARS_GRADIENT_MODE,
+                vkeys::BARS_GRADIENT_ORIENTATION,
+                vkeys::BARS_PEAK_GRADIENT_MODE,
+                vkeys::BARS_PEAK_MODE,
+                vkeys::BARS_PEAK_HOLD_TIME,
+                vkeys::BARS_PEAK_FADE_TIME,
+                vkeys::BARS_PEAK_FALL_SPEED,
+                vkeys::BARS_PEAK_HEIGHT_RATIO,
+                vkeys::BARS_BAR_DEPTH_3D,
+            ],
+        );
+        assert_section_keys(
+            &entries,
+            "Bar Colors (Dark)",
+            &[
+                "dark.visualizer.border_color",
+                "dark.visualizer.border_opacity",
+                "dark.visualizer.led_border_opacity",
+                "dark.visualizer.bar_gradient_colors",
+                "dark.visualizer.peak_gradient_colors",
+            ],
+        );
+        assert_section_keys(
+            &entries,
+            "Bar Colors (Light)",
+            &[
+                "light.visualizer.border_color",
+                "light.visualizer.border_opacity",
+                "light.visualizer.led_border_opacity",
+                "light.visualizer.bar_gradient_colors",
+                "light.visualizer.peak_gradient_colors",
+            ],
+        );
+        assert_section_keys(
+            &entries,
+            "Lines",
+            &[
+                vkeys::LINES_POINT_COUNT,
+                vkeys::LINES_LINE_THICKNESS,
+                vkeys::LINES_OUTLINE_THICKNESS,
+                vkeys::LINES_OUTLINE_OPACITY,
+                vkeys::LINES_ANIMATION_SPEED,
+                vkeys::LINES_GRADIENT_MODE,
+                vkeys::LINES_FILL_OPACITY,
+                vkeys::LINES_MIRROR,
+                vkeys::LINES_STYLE,
+                vkeys::LINES_BOAT,
+            ],
         );
 
-        // Spot-check the border_opacity setting (now per-theme under dark/light)
-        let keys = extract_keys(&entries);
-        assert!(
-            keys.contains(&"dark.visualizer.border_opacity"),
-            "Missing dark border_opacity key"
-        );
-
-        // Verify key paths start with "visualizer." (skip __ sentinel keys)
-        let keys = extract_keys(&entries);
-        for key in &keys {
-            if super::super::sentinel::SentinelKind::from_key(key).is_some() {
-                continue;
-            }
-            assert!(
-                key.starts_with("visualizer.")
-                    || key.starts_with("dark.")
-                    || key.starts_with("light."),
-                "All visualizer keys should start with 'visualizer.', 'dark.', or 'light.', got: {key}"
-            );
-        }
+        // Single coarse backstop: the per-section pins above sum to
+        // 3 + 4 + 19 + 5 + 5 + 10 = 46. Catches an item landing OUTSIDE the
+        // pinned sections (which the section asserts cannot see).
+        assert_eq!(count_items(&entries), 46);
     }
 
     #[test]
@@ -377,16 +430,65 @@ mod tests {
             false,
         );
 
-        // Verify section headers (Chrome Border is its own section so the
-        // 1 px hairline gets a Restore Defaults sentinel like every other
-        // color group).
+        // Chrome Border is its own section so the 1 px hairline gets a
+        // Restore Defaults sentinel like every other color group.
         assert_eq!(
-            count_headers(&entries),
-            8,
-            "Expected 8 theme sections: Mode, Display, Select Theme, Background Colors, Foreground Colors, Accent Colors, Semantic Colors, Chrome Border",
+            header_labels(&entries),
+            vec![
+                "Mode",
+                "Display",
+                "Select Theme",
+                "Background Colors",
+                "Foreground Colors",
+                "Accent Colors",
+                "Semantic Colors",
+                "Chrome Border"
+            ],
+            "Theme tab section headers diverge",
         );
 
-        // Verify we have a reasonable number of items
+        assert_section_keys(&entries, "Mode", &["general.light_mode"]);
+        assert_section_keys(
+            &entries,
+            "Display",
+            &["general.rounded_mode", "general.opacity_gradient"],
+        );
+
+        // Chrome Border: restore sentinel + the single prefix-dependent
+        // border row. `build_theme_items` reads the global light-mode atomic,
+        // so derive the prefix from the entries instead of hardcoding "dark".
+        let prefix = palette_prefix_from(&entries);
+        let restore_border = SentinelKind::RestoreBorder.to_key();
+        let border_key = format!("{prefix}.border");
+        assert_section_keys(
+            &entries,
+            "Chrome Border",
+            &[restore_border.as_str(), border_key.as_str()],
+        );
+
+        // Select Theme stays count-flexible: presets::all_themes() reads the
+        // user themes dir, so the preset row count is machine-dependent. Pin
+        // the restore sentinel first; every following row must be a
+        // __preset_N sentinel.
+        let select_keys = extract_keys(&section_slice(&entries, "Select Theme")[1..]);
+        let restore_theme = SentinelKind::RestoreTheme.to_key();
+        assert_eq!(
+            select_keys.first().copied(),
+            Some(restore_theme.as_str()),
+            "Select Theme must lead with the restore sentinel",
+        );
+        for key in &select_keys[1..] {
+            assert!(
+                matches!(
+                    SentinelKind::from_key(key),
+                    Some(SentinelKind::PresetTheme(_))
+                ),
+                "Select Theme row '{key}' should be a __preset_N sentinel",
+            );
+        }
+
+        // The four color sections are exactly pinned in items_theme.rs's own
+        // tests — keep one coarse backstop here instead of duplicating them.
         let item_count = count_items(&entries);
         assert!(
             item_count >= 24,
@@ -396,73 +498,163 @@ mod tests {
 
     #[test]
     fn general_items_structure() {
-        // Structure-only test — header/item counts are independent of the
-        // string values, so the Default sentinels are fine here. Default
-        // boolean fields are all `false`; that's enough since the General tab
-        // has no conditional rows.
+        // Structure-only test — keys are independent of the string values,
+        // so the Default sentinels are fine here. Default boolean fields are
+        // all `false`; that's enough since the General tab has no
+        // conditional rows.
         let data = GeneralSettingsData::default();
         let entries = build_general_items(&data);
 
         assert_eq!(
-            count_headers(&entries),
-            6,
-            "Expected 6 sections: Library, Display, Behavior, Window & Tray, Advanced, Account"
+            header_labels(&entries),
+            vec![
+                "Library",
+                "Display",
+                "Behavior",
+                "Window & Tray",
+                "Advanced",
+                "Account"
+            ],
+            "General tab section headers diverge",
         );
-        assert_eq!(count_items(&entries), 15, "Expected 15 items");
+
+        let logout = SentinelKind::Logout.to_key();
+        assert_eq!(
+            extract_keys(&entries),
+            vec![
+                "general.library_page_size",
+                "general.artwork_resolution",
+                "general.show_album_artists_only",
+                "general.start_view",
+                "general.suppress_library_refresh_toasts",
+                "general.enter_behavior",
+                "general.stable_viewport",
+                "general.auto_follow_playing",
+                "general.show_tray_icon",
+                "general.close_to_tray",
+                "general.local_music_path",
+                "general.verbose_config",
+                "general.server_url",
+                "general.username",
+                logout.as_str(),
+            ],
+            "General tab item keys diverge (order matters)",
+        );
     }
 
     #[test]
     fn interface_items_structure() {
         use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
-        // `artwork_column_mode = "test-default"` falls through to
-        // `ArtworkColumnMode::Auto` (not stretched), so the conditional
-        // stretch-fit knob is omitted — matching the 16-item baseline.
+        // Defaults fall through every conditional gate: `artwork_column_mode
+        // = "test-default"` resolves to `ArtworkColumnMode::Auto` (not
+        // stretched), `track_info_display` to a non-MiniPlayer mode, and
+        // `autohide_toolbar` is off — so the stretch-fit knob, the Visible
+        // Controls ToggleSet, and the auto-hide sub-controls are all absent
+        // from this baseline. Their gates are pinned by the dedicated tests
+        // below and in items_interface.rs.
         let data = InterfaceSettingsData::default();
         let entries = build_interface_items(&data);
 
         assert_eq!(
-            count_headers(&entries),
-            7,
-            "Expected 7 sections: Navigation, Slot List, Player Bar, Font, Metadata Strip, Artwork Overlays, Artwork Column"
+            header_labels(&entries),
+            vec![
+                "Navigation",
+                "Slot List",
+                "Player Bar",
+                "Font",
+                "Metadata Strip",
+                "Artwork Overlays",
+                "Artwork Column"
+            ],
+            "Interface tab section headers diverge",
         );
+
         assert_eq!(
-            count_items(&entries),
-            17,
-            "Expected 17 items (... + autohide_toolbar, show_labels, field_separator, artwork_column_mode, auto_max_pct, vertical_height_pct); stretched mode adds the fit knob"
+            extract_keys(&entries),
+            vec![
+                "general.nav_layout",
+                "general.nav_display_mode",
+                "general.slot_row_height",
+                "general.slot_text_links",
+                "general.autohide_toolbar",
+                "general.horizontal_volume",
+                "font_family",
+                "general.track_info_display",
+                "__toggle_strip_fields",
+                "general.strip_merged_mode",
+                "general.strip_show_labels",
+                "general.strip_separator",
+                "general.strip_click_action",
+                "__toggle_artwork_overlays",
+                "general.artwork_column_mode",
+                "general.artwork_auto_max_pct",
+                "general.artwork_vertical_height_pct",
+            ],
+            "Interface tab baseline item keys diverge (order matters)",
         );
     }
 
     #[test]
     fn interface_items_artwork_column_stretched_adds_fit_knob() {
         use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
+
+        // Absent at baseline (Auto mode)…
+        let baseline = build_interface_items(&InterfaceSettingsData::default());
+        assert!(
+            !extract_keys(&baseline).contains(&"general.artwork_column_stretch_fit"),
+            "stretch-fit knob must be absent outside stretched modes",
+        );
+
+        // …and appended last in stretched mode.
         let data = InterfaceSettingsData {
             artwork_column_mode: "Always (Stretched)".into(),
             ..Default::default()
         };
-        let entries = build_interface_items(&data);
-        assert_eq!(count_items(&entries), 18);
+        let stretched = build_interface_items(&data);
+        assert_eq!(
+            extract_keys(&stretched).last().copied(),
+            Some("general.artwork_column_stretch_fit"),
+            "stretched mode appends the fit knob as the final row",
+        );
     }
 
     #[test]
     fn playback_items_structure_off_mode() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
         // `volume_normalization = "test-default"` matches neither "AGC" nor
-        // any ReplayGain label, so the conditional knobs are omitted —
-        // matching the 9-item Off baseline.
+        // any ReplayGain label, so the conditional knobs are omitted; the
+        // rating reminder is disabled by default so only its enable toggle
+        // shows (timing rows are gated off).
         let data = PlaybackSettingsData::default();
         let entries = build_playback_items(&data);
 
         assert_eq!(
-            count_headers(&entries),
-            5,
-            "Expected 5 sections: Transitions, Volume Normalization, Scrobbling, Rating Reminder, Playlists"
+            header_labels(&entries),
+            vec![
+                "Transitions",
+                "Volume Normalization",
+                "Scrobbling",
+                "Rating Reminder",
+                "Playlists"
+            ],
+            "Playback tab section headers diverge",
         );
-        // Off mode hides AGC level + RG knobs; rating reminder is disabled by
-        // default so only its enable toggle shows (timing rows are gated off).
+
         assert_eq!(
-            count_items(&entries),
-            10,
-            "Off mode: crossfade_enabled, crossfade_duration, rewind_on_previous, volume_normalization, scrobbling_enabled, scrobble_threshold, rating_reminder_enabled, quick_add_to_playlist, default_playlist_name, queue_show_default_playlist"
+            extract_keys(&entries),
+            vec![
+                "general.crossfade_enabled",
+                "general.crossfade_duration",
+                "general.rewind_on_previous",
+                "general.volume_normalization",
+                "general.scrobbling_enabled",
+                "general.scrobble_threshold",
+                "general.rating_reminder_enabled",
+                "general.quick_add_to_playlist",
+                "general.default_playlist_name",
+                "general.queue_show_default_playlist",
+            ],
+            "Playback tab Off-mode item keys diverge (order matters)",
         );
     }
 
@@ -470,47 +662,75 @@ mod tests {
     fn playback_items_structure_rating_reminder_enabled_shows_timing_rows() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
         // Enabled + percentage trigger surfaces both the timing dropdown and
-        // the percentage knob (+2 over the Off baseline of 10).
-        let data = PlaybackSettingsData {
+        // the percentage knob.
+        let percentage = PlaybackSettingsData {
             rating_reminder_enabled: true,
             rating_reminder_trigger: "Percentage Played".into(),
             ..Default::default()
         };
-        let entries = build_playback_items(&data);
-        assert_eq!(count_items(&entries), 12);
+        assert_section_keys(
+            &build_playback_items(&percentage),
+            "Rating Reminder",
+            &[
+                "general.rating_reminder_enabled",
+                "general.rating_reminder_trigger",
+                "general.rating_reminder_percent",
+            ],
+        );
 
-        // On-scrobble trigger hides the percentage knob (+1 over baseline).
+        // On-scrobble trigger hides the percentage knob.
         let scrobble = PlaybackSettingsData {
             rating_reminder_enabled: true,
             rating_reminder_trigger: "On Scrobble".into(),
             ..Default::default()
         };
-        assert_eq!(count_items(&build_playback_items(&scrobble)), 11);
+        assert_section_keys(
+            &build_playback_items(&scrobble),
+            "Rating Reminder",
+            &[
+                "general.rating_reminder_enabled",
+                "general.rating_reminder_trigger",
+            ],
+        );
     }
 
     #[test]
     fn playback_items_structure_agc_mode_shows_target_level() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        // AGC mode adds the target-level dropdown beneath the mode picker.
         let data = PlaybackSettingsData {
             volume_normalization: "AGC".into(),
             ..Default::default()
         };
-        let entries = build_playback_items(&data);
-        // AGC mode adds the target-level dropdown (10 Off baseline + 1).
-        assert_eq!(count_items(&entries), 11);
+        assert_section_keys(
+            &build_playback_items(&data),
+            "Volume Normalization",
+            &[
+                "general.volume_normalization",
+                "general.normalization_level",
+            ],
+        );
     }
 
     #[test]
     fn playback_items_structure_replay_gain_mode_shows_rg_knobs() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        // RG modes add the four ReplayGain knobs beneath the mode picker.
         let data = PlaybackSettingsData {
             volume_normalization: "ReplayGain (Track)".into(),
             ..Default::default()
         };
-        let entries = build_playback_items(&data);
-        // RG modes add 4 knobs: preamp, fallback_db, fallback_to_agc,
-        // prevent_clipping (10 Off baseline + 4).
-        assert_eq!(count_items(&entries), 14);
+        assert_section_keys(
+            &build_playback_items(&data),
+            "Volume Normalization",
+            &[
+                "general.volume_normalization",
+                "general.replay_gain_preamp_db",
+                "general.replay_gain_fallback_db",
+                "general.replay_gain_fallback_to_agc",
+                "general.replay_gain_prevent_clipping",
+            ],
+        );
     }
 
     /// Find the first `SettingItem` matching `key` and assert it carries the

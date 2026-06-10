@@ -27,6 +27,8 @@ pub(crate) mod presets;
 mod rendering;
 pub(crate) mod sentinel;
 mod sub_lists;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod view;
 
 use items::{ActivateKind, SettingValue, SettingsEntry};
