@@ -69,7 +69,10 @@ impl AuthService {
 
         self.is_authenticating = false;
 
-        if response.status() == 200 {
+        // Snapshot before the success arm's `.json()` consumes the response.
+        let status = response.status();
+
+        if status.is_success() {
             let login_response: LoginResponse = response
                 .json()
                 .await
@@ -94,18 +97,12 @@ impl AuthService {
             self.client = Some(ApiClient::new(base_url, self.token.clone()));
 
             Ok(())
-        } else if response.status() == 401 {
+        } else if status == reqwest::StatusCode::UNAUTHORIZED {
             self.error_message = "Invalid username or password. Please try again.".to_string();
             Err(anyhow::anyhow!(self.error_message.clone()))
-        } else if response.status() == 0 {
-            self.error_message =
-                "Cannot connect to server. Please check your server URL.".to_string();
-            Err(anyhow::anyhow!(self.error_message.clone()))
         } else {
-            self.error_message = format!(
-                "Authentication failed (Status: {}). Please try again.",
-                response.status()
-            );
+            self.error_message =
+                format!("Authentication failed (Status: {status}). Please try again.");
             Err(anyhow::anyhow!(self.error_message.clone()))
         }
     }
