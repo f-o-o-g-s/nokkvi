@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use parking_lot::{Mutex, RwLock};
-use reqwest::Client;
+use reqwest::{Client, Method, StatusCode};
 use tracing::{debug, warn};
 use url::Url;
 
@@ -266,6 +266,91 @@ impl ApiClient {
         }
     }
 
+    /// Build an authenticated request for the Navidrome REST API: join the
+    /// endpoint onto the base URL, append query params, and attach the
+    /// `X-ND-Authorization` bearer header.
+    fn build_request(
+        &self,
+        method: Method,
+        endpoint: &str,
+        params: &[(&str, &str)],
+    ) -> Result<reqwest::RequestBuilder> {
+        let mut url = self
+            .base_url
+            .join(endpoint)
+            .with_context(|| format!("Failed to join endpoint: {endpoint}"))?;
+
+        // Build query string manually to avoid Send issues with query_pairs_mut
+        if !params.is_empty() {
+            let mut query_parts = Vec::new();
+            for (key, value) in params {
+                query_parts.push(format!(
+                    "{}={}",
+                    url::form_urlencoded::byte_serialize(key.as_bytes()).collect::<String>(),
+                    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
+                ));
+            }
+            url.set_query(Some(&query_parts.join("&")));
+        }
+
+        Ok(self
+            .client
+            .request(method, url.as_str())
+            .header("X-ND-Authorization", self.bearer_header()))
+    }
+
+    /// Apply the shared response status policy: 2xx returns the body, 401
+    /// routes to [`NokkviError::Unauthorized`] (the UI's session-expiry
+    /// downcast depends on it), anything else becomes a descriptive error.
+    ///
+    /// Pure (no I/O) so it can be unit-tested without an HTTP server —
+    /// mirrors `check_subsonic_response_status` in
+    /// [`crate::services::api::subsonic`].
+    fn finish_status(status: StatusCode, body: String, ctx: &str) -> Result<String> {
+        if status.is_success() {
+            Ok(body)
+        } else if status == StatusCode::UNAUTHORIZED {
+            Err(NokkviError::Unauthorized.into())
+        } else {
+            Err(anyhow!("{ctx} failed with status {status}: {body}"))
+        }
+    }
+
+    /// Send a built request and run the shared response pipeline: intercept
+    /// the refreshed JWT on EVERY response (including 401/5xx — JWT rotation
+    /// must not stop on error-heavy sessions), snapshot the `X-Total-Count`
+    /// header before the body read consumes the response, then apply the
+    /// status policy.
+    async fn execute(
+        &self,
+        request: reqwest::RequestBuilder,
+        ctx: &str,
+    ) -> Result<(String, Option<u32>)> {
+        let response = request
+            .send()
+            .await
+            .with_context(|| format!("Failed to send {ctx} request"))?;
+
+        // Intercept refreshed JWT from response header
+        self.intercept_token_refresh(&response);
+
+        let status = response.status();
+
+        // Extract X-Total-Count header if present
+        let total_count = response
+            .headers()
+            .get("X-Total-Count")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u32>().ok());
+
+        let body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
+
+        Ok((Self::finish_status(status, body, ctx)?, total_count))
+    }
+
     /// Make a GET request to the Navidrome REST API.
     /// `endpoint`: API path (e.g., "/api/album").
     /// `params`: query parameters as key-value pairs.
@@ -285,58 +370,8 @@ impl ApiClient {
         endpoint: &str,
         params: &[(&str, &str)],
     ) -> Result<(String, Option<u32>)> {
-        let mut url = self
-            .base_url
-            .join(endpoint)
-            .with_context(|| format!("Failed to join endpoint: {endpoint}"))?;
-
-        // Build query string manually to avoid Send issues with query_pairs_mut
-        if !params.is_empty() {
-            let mut query_parts = Vec::new();
-            for (key, value) in params {
-                query_parts.push(format!(
-                    "{}={}",
-                    url::form_urlencoded::byte_serialize(key.as_bytes()).collect::<String>(),
-                    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
-                ));
-            }
-            url.set_query(Some(&query_parts.join("&")));
-        }
-
-        let response = self
-            .client
-            .get(url.as_str())
-            .header("X-ND-Authorization", self.bearer_header())
-            .send()
-            .await
-            .context("Failed to send GET request")?;
-
-        // Intercept refreshed JWT from response header
-        self.intercept_token_refresh(&response);
-
-        let status = response.status();
-
-        // Extract X-Total-Count header if present
-        let total_count = response
-            .headers()
-            .get("X-Total-Count")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u32>().ok());
-
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-
-        if status.is_success() {
-            Ok((body, total_count))
-        } else if status == reqwest::StatusCode::UNAUTHORIZED {
-            Err(NokkviError::Unauthorized.into())
-        } else {
-            Err(anyhow::anyhow!(
-                "API request failed with status {status}: {body}"
-            ))
-        }
+        let request = self.build_request(Method::GET, endpoint, params)?;
+        self.execute(request, &format!("API GET {endpoint}")).await
     }
 
     /// Make a POST request with a JSON body to the Navidrome REST API
@@ -345,37 +380,13 @@ impl ApiClient {
         endpoint: &str,
         json_body: &impl serde::Serialize,
     ) -> Result<String> {
-        let url = self
-            .base_url
-            .join(endpoint)
-            .with_context(|| format!("Failed to join endpoint: {endpoint}"))?;
-
-        let response = self
-            .client
-            .post(url.as_str())
-            .header("X-ND-Authorization", self.bearer_header())
-            .json(json_body)
-            .send()
-            .await
-            .context("Failed to send POST request")?;
-
-        self.intercept_token_refresh(&response);
-
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-
-        if status.is_success() {
-            Ok(body)
-        } else if status == reqwest::StatusCode::UNAUTHORIZED {
-            Err(NokkviError::Unauthorized.into())
-        } else {
-            Err(anyhow::anyhow!(
-                "API POST {endpoint} failed with status {status}: {body}"
-            ))
-        }
+        let request = self
+            .build_request(Method::POST, endpoint, &[])?
+            .json(json_body);
+        let (body, _total_count) = self
+            .execute(request, &format!("API POST {endpoint}"))
+            .await?;
+        Ok(body)
     }
 
     /// Make a PUT request with a JSON body to the Navidrome REST API
@@ -384,37 +395,13 @@ impl ApiClient {
         endpoint: &str,
         json_body: &impl serde::Serialize,
     ) -> Result<String> {
-        let url = self
-            .base_url
-            .join(endpoint)
-            .with_context(|| format!("Failed to join endpoint: {endpoint}"))?;
-
-        let response = self
-            .client
-            .put(url.as_str())
-            .header("X-ND-Authorization", self.bearer_header())
-            .json(json_body)
-            .send()
-            .await
-            .context("Failed to send PUT request")?;
-
-        self.intercept_token_refresh(&response);
-
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-
-        if status.is_success() {
-            Ok(body)
-        } else if status == reqwest::StatusCode::UNAUTHORIZED {
-            Err(NokkviError::Unauthorized.into())
-        } else {
-            Err(anyhow::anyhow!(
-                "API PUT {endpoint} failed with status {status}: {body}"
-            ))
-        }
+        let request = self
+            .build_request(Method::PUT, endpoint, &[])?
+            .json(json_body);
+        let (body, _total_count) = self
+            .execute(request, &format!("API PUT {endpoint}"))
+            .await?;
+        Ok(body)
     }
 
     #[cfg(test)]
@@ -434,32 +421,10 @@ impl ApiClient {
 
     /// Make a DELETE request to the Navidrome REST API
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
-        let url = self
-            .base_url
-            .join(endpoint)
-            .with_context(|| format!("Failed to join endpoint: {endpoint}"))?;
-
-        let response = self
-            .client
-            .delete(url.as_str())
-            .header("X-ND-Authorization", self.bearer_header())
-            .send()
-            .await
-            .context("Failed to send DELETE request")?;
-
-        self.intercept_token_refresh(&response);
-
-        let status = response.status();
-        if status.is_success() {
-            Ok(())
-        } else if status == reqwest::StatusCode::UNAUTHORIZED {
-            Err(NokkviError::Unauthorized.into())
-        } else {
-            let body = response.text().await.unwrap_or_default();
-            Err(anyhow::anyhow!(
-                "API DELETE {endpoint} failed with status {status}: {body}"
-            ))
-        }
+        let request = self.build_request(Method::DELETE, endpoint, &[])?;
+        self.execute(request, &format!("API DELETE {endpoint}"))
+            .await?;
+        Ok(())
     }
 }
 
@@ -804,5 +769,69 @@ mod tests {
         assert_eq!(client.persisted_exp_snapshot(), Some(12345));
         client.set_persisted_exp(None);
         assert_eq!(client.persisted_exp_snapshot(), None);
+    }
+
+    #[test]
+    fn finish_status_success_returns_body() {
+        let body =
+            ApiClient::finish_status(StatusCode::OK, "payload".to_string(), "API GET /api/song")
+                .expect("2xx must return the body");
+        assert_eq!(body, "payload");
+    }
+
+    /// HTTP 401 must downcast to [`NokkviError::Unauthorized`] so the UI's
+    /// session-expiry path (`session_expired_message`) drops to login —
+    /// mirrors `check_subsonic_response_status_routes_401_to_unauthorized`.
+    #[test]
+    fn finish_status_401_downcasts_to_unauthorized() {
+        let err =
+            ApiClient::finish_status(StatusCode::UNAUTHORIZED, String::new(), "API GET /api/song")
+                .expect_err("401 must produce an error");
+
+        let nokkvi_err = err
+            .downcast_ref::<NokkviError>()
+            .expect("401 should downcast to NokkviError");
+        assert!(
+            matches!(nokkvi_err, NokkviError::Unauthorized),
+            "expected NokkviError::Unauthorized, got {nokkvi_err:?}"
+        );
+    }
+
+    #[test]
+    fn finish_status_500_includes_ctx_status_body() {
+        let err = ApiClient::finish_status(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server boom".to_string(),
+            "API GET /api/song",
+        )
+        .expect_err("500 must produce an error");
+
+        // Not a NokkviError — caller's downcast for Unauthorized must miss.
+        assert!(err.downcast_ref::<NokkviError>().is_none());
+
+        let msg = format!("{err}");
+        assert!(msg.contains("API GET /api/song"), "missing ctx in: {msg}");
+        assert!(msg.contains("500"), "missing status in: {msg}");
+        assert!(msg.contains("server boom"), "missing body in: {msg}");
+    }
+
+    #[test]
+    fn build_request_encodes_params_and_sets_auth_header() {
+        let client = make_client("tok");
+        let request = client
+            .build_request(Method::GET, "/api/song", &[("title", "a b"), ("q", "x&y")])
+            .expect("endpoint must join onto the base url")
+            .build()
+            .expect("request must build");
+
+        // byte_serialize encoding: space becomes '+', '&' becomes %26.
+        assert_eq!(request.url().query(), Some("title=a+b&q=x%26y"));
+
+        let auth = request
+            .headers()
+            .get("X-ND-Authorization")
+            .and_then(|v| v.to_str().ok())
+            .expect("auth header must be set");
+        assert!(auth.starts_with("Bearer "), "got: {auth}");
     }
 }
