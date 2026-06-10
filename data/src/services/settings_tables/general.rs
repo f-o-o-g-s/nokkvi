@@ -767,4 +767,70 @@ mod tests {
             "setter must run synchronously even though the TOML write defers to the UI handler"
         );
     }
+
+    /// Parity guard: every General-tab row's `ui_meta.default` must agree with
+    /// the canonical `PersistedPlayerSettings::default()` projected through
+    /// the production `dump_general_tab_player_settings` ->
+    /// `GeneralSettingsData` path (the same projection the live UI builds in
+    /// `update/settings.rs`). Mirrors the Playback guard in `playback.rs`.
+    ///
+    /// Keys in `KNOWN_SPLITS` are pre-existing intentional ui_meta-vs-struct-
+    /// `Default` disagreements awaiting an owner ruling (retune the ui_meta
+    /// literal vs retune the `Default` impl — the latter changes fresh-install
+    /// behavior, the former changes Restore Default). They are pinned with
+    /// `assert_ne!` so each exception self-expires: the moment either side
+    /// moves, the pin fails and the entry must be removed.
+    #[test]
+    fn ui_meta_defaults_match_persisted_player_settings_defaults() {
+        // general.suppress_library_refresh_toasts: ui_meta default is `false`
+        // (matching the serde-fill default for pre-feature redb rows) while
+        // the struct `Default` impl ships `true` (settings.rs).
+        const KNOWN_SPLITS: &[&str] = &["general.suppress_library_refresh_toasts"];
+
+        let p = PersistedPlayerSettings::default();
+        let mut live = crate::types::player_settings::LivePlayerSettings::default();
+        dump_general_tab_player_settings(&p, &mut live);
+
+        // Mirrors the `GeneralSettingsData` construction in the UI crate's
+        // `build_settings_view_data` (src/update/settings.rs). `server_url` /
+        // `username` are read-only login mirrors with no macro rows — empty
+        // strings are fine since the loop only sees macro-emitted items.
+        let data = GeneralSettingsData {
+            server_url: "".into(),
+            username: "".into(),
+            start_view: live.start_view.clone().into(),
+            stable_viewport: live.stable_viewport,
+            auto_follow_playing: live.auto_follow_playing,
+            enter_behavior: live.enter_behavior.as_label().into(),
+            local_music_path: live.local_music_path.clone().into(),
+            verbose_config: live.verbose_config,
+            library_page_size: live.library_page_size.as_label().into(),
+            artwork_resolution: live.artwork_resolution.as_label().into(),
+            show_album_artists_only: live.show_album_artists_only,
+            suppress_library_refresh_toasts: live.suppress_library_refresh_toasts,
+            show_tray_icon: live.show_tray_icon,
+            close_to_tray: live.close_to_tray,
+        };
+
+        for e in build_general_tab_settings_items(&data) {
+            if let SettingsEntry::Item(item) = e {
+                if KNOWN_SPLITS.contains(&item.key.as_ref()) {
+                    assert_ne!(
+                        item.value.display(),
+                        item.default.display(),
+                        "{} is pinned as a known ui_meta-vs-Default split but now agrees — \
+                         remove it from KNOWN_SPLITS",
+                        item.key
+                    );
+                } else {
+                    assert_eq!(
+                        item.value.display(),
+                        item.default.display(),
+                        "ui_meta default for {} disagrees with PersistedPlayerSettings::default()",
+                        item.key
+                    );
+                }
+            }
+        }
+    }
 }

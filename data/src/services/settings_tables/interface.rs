@@ -529,10 +529,11 @@ mod tests {
     /// The Field Separator row's `ui_meta.default` must equal the shipped
     /// `StripSeparator::default()` label, so "Restore Default" is a correct
     /// no-op on a fresh install. Pins the 6b179e4 default retune: the literal
-    /// silently lagged at "Dot ·" while the real default moved to Slash. (A
-    /// full per-tab ui_meta-vs-persisted parity guard like Playback's would
-    /// close the whole drift class but also surfaces pre-existing intentional
-    /// design-vs-persisted splits, so that is left as a follow-up.)
+    /// silently lagged at "Dot ·" while the real default moved to Slash.
+    /// (The full per-tab drift class is covered by
+    /// `ui_meta_defaults_match_persisted_player_settings_defaults` below;
+    /// this pin stays because it asserts label-vs-enum rather than the
+    /// projection path.)
     #[test]
     fn strip_separator_ui_meta_default_matches_enum_default() {
         use crate::types::player_settings::StripSeparator;
@@ -770,5 +771,96 @@ mod tests {
         );
         assert!((ts.artwork_auto_max_pct - 0.55).abs() < f32::EPSILON);
         assert!((ts.artwork_vertical_height_pct - 0.65).abs() < f32::EPSILON);
+    }
+
+    /// Parity guard: every Interface-tab row's `ui_meta.default` must agree
+    /// with the canonical `PersistedPlayerSettings::default()` projected
+    /// through the production `dump_interface_tab_player_settings` ->
+    /// `InterfaceSettingsData` path. The live UI builds this data from the
+    /// `crate::theme` atomics (src/update/settings.rs), but those atomics are
+    /// synced FROM `LivePlayerSettings` on `PlayerSettingsLoaded`, so the
+    /// dump projection here is the same canonical source. Mirrors the
+    /// Playback guard in `playback.rs`.
+    ///
+    /// Keys in `KNOWN_SPLITS` are pre-existing intentional ui_meta-vs-struct-
+    /// `Default` disagreements awaiting an owner ruling (retune the ui_meta
+    /// literal vs retune the `Default` impl — the latter changes fresh-install
+    /// behavior, the former changes Restore Default). They are pinned with
+    /// `assert_ne!` so each exception self-expires: the moment either side
+    /// moves, the pin fails and the entry must be removed.
+    #[test]
+    fn ui_meta_defaults_match_persisted_player_settings_defaults() {
+        const KNOWN_SPLITS: &[&str] = &[
+            // ui_meta "Off" vs `TrackInfoDisplay::PlayerBar` ("Player Bar")
+            // in the struct `Default` impl (settings.rs).
+            "general.track_info_display",
+            // ui_meta "Default" vs `SlotRowHeight::Compact` ("Compact") in
+            // the struct `Default` impl (settings.rs).
+            "general.slot_row_height",
+            // ui_meta `false` (matching the serde-fill default for
+            // pre-feature redb rows) vs `true` in the struct `Default` impl.
+            "general.strip_merged_mode",
+        ];
+
+        let p = PersistedPlayerSettings::default();
+        let mut live = crate::types::player_settings::LivePlayerSettings::default();
+        dump_interface_tab_player_settings(&p, &mut live);
+
+        // Mirrors the `InterfaceSettingsData` construction in the UI crate's
+        // `build_settings_view_data` (src/update/settings.rs), sourced from
+        // `live`. `font_family` has no macro row (it routes through
+        // `Message::ApplyFont`) — its value is never visited by the loop.
+        let data = InterfaceSettingsData {
+            nav_layout: live.nav_layout.as_label().into(),
+            nav_display_mode: live.nav_display_mode.as_label().into(),
+            track_info_display: live.track_info_display.as_label().into(),
+            slot_row_height: live.slot_row_height.as_label().into(),
+            horizontal_volume: live.horizontal_volume,
+            autohide_toolbar: live.autohide_toolbar,
+            autohide_toolbar_height: i64::from(live.autohide_toolbar_height),
+            autohide_toolbar_grip: live.autohide_toolbar_grip,
+            autohide_collapsed_appearance: live.autohide_collapsed_appearance.as_label().into(),
+            mini_player_show_volume: live.mini_player_show_volume,
+            mini_player_show_modes: live.mini_player_show_modes,
+            slot_text_links: live.slot_text_links,
+            font_family: live.font_family.clone().into(),
+            strip_show_title: live.strip_show_title,
+            strip_show_artist: live.strip_show_artist,
+            strip_show_album: live.strip_show_album,
+            strip_show_format_info: live.strip_show_format_info,
+            strip_merged_mode: live.strip_merged_mode,
+            strip_show_labels: live.strip_show_labels,
+            strip_separator: live.strip_separator.as_label().into(),
+            strip_click_action: live.strip_click_action.as_label().into(),
+            albums_artwork_overlay: live.albums_artwork_overlay,
+            artists_artwork_overlay: live.artists_artwork_overlay,
+            songs_artwork_overlay: live.songs_artwork_overlay,
+            playlists_artwork_overlay: live.playlists_artwork_overlay,
+            artwork_column_mode: live.artwork_column_mode.as_label().into(),
+            artwork_column_stretch_fit: live.artwork_column_stretch_fit.as_label().into(),
+            artwork_auto_max_pct: f64::from(live.artwork_auto_max_pct),
+            artwork_vertical_height_pct: f64::from(live.artwork_vertical_height_pct),
+        };
+
+        for e in build_interface_tab_settings_items(&data) {
+            if let SettingsEntry::Item(item) = e {
+                if KNOWN_SPLITS.contains(&item.key.as_ref()) {
+                    assert_ne!(
+                        item.value.display(),
+                        item.default.display(),
+                        "{} is pinned as a known ui_meta-vs-Default split but now agrees — \
+                         remove it from KNOWN_SPLITS",
+                        item.key
+                    );
+                } else {
+                    assert_eq!(
+                        item.value.display(),
+                        item.default.display(),
+                        "ui_meta default for {} disagrees with PersistedPlayerSettings::default()",
+                        item.key
+                    );
+                }
+            }
+        }
     }
 }
