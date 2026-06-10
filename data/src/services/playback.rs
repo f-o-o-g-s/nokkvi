@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{
     audio::engine::CustomAudioEngine,
-    services::queue::{PreviousOutcome, QueueManager},
+    services::queue::{PreviousOutcome, QueueManager, TransitionReason},
     types::{NextTrackResetEffect, song::Song},
 };
 
@@ -23,12 +23,15 @@ pub enum TrackTransitionPlan {
     Stop,
     /// Engine already has the next track ready (gapless or prepared decoder).
     /// Just ensure playback is running.
-    PlayPrepared { song: Song, reason: String },
+    PlayPrepared {
+        song: Song,
+        reason: TransitionReason,
+    },
     /// Need to load a fresh stream URL (path 3).
     LoadFresh {
         stream_url: String,
         song: Song,
-        reason: String,
+        reason: TransitionReason,
     },
 }
 
@@ -256,7 +259,7 @@ impl QueueNavigator {
         engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
-    ) -> Result<Option<(Song, String)>> {
+    ) -> Result<Option<(Song, TransitionReason)>> {
         let plan = self
             .decide_transition(engine, server_url, subsonic_credential)
             .await;
@@ -329,7 +332,7 @@ impl QueueNavigator {
                 drop(queue_manager);
 
                 debug!("▶️ Now Playing: {} - {} (repeat)", song.title, song.artist);
-                let reason = "repeat".to_string();
+                let reason = TransitionReason::Repeat;
                 return if needs_load {
                     let stream_url = crate::utils::artwork_url::build_stream_url(
                         &song.id,
@@ -392,11 +395,10 @@ impl QueueNavigator {
 
         let song = transition.song.clone();
         let reason = if queue_manager.get_queue().shuffle {
-            "shuffle"
+            TransitionReason::Shuffle
         } else {
-            "gapless"
-        }
-        .to_string();
+            TransitionReason::Gapless
+        };
 
         // Record history + consume previous song (via remove_song which
         // properly maintains the order array). The consume removal may
@@ -447,7 +449,7 @@ impl QueueNavigator {
     pub async fn execute_transition(
         plan: TrackTransitionPlan,
         engine: &mut CustomAudioEngine,
-    ) -> Result<Option<(Song, String)>> {
+    ) -> Result<Option<(Song, TransitionReason)>> {
         match plan {
             TrackTransitionPlan::Stop => {
                 engine.stop().await;
@@ -514,7 +516,7 @@ impl QueueNavigator {
         engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
-    ) -> Result<Option<(Song, String)>> {
+    ) -> Result<Option<(Song, TransitionReason)>> {
         let mut queue_manager = self.queue_manager.lock().await;
         let current_index = queue_manager.get_queue().current_index;
         let is_consume = queue_manager.get_queue().consume;
@@ -814,7 +816,7 @@ mod tests {
                 reason,
             } => {
                 assert_eq!(song.id, "b");
-                assert_eq!(reason, "gapless");
+                assert_eq!(reason, TransitionReason::Gapless);
                 assert!(stream_url.starts_with("http://server/rest/stream?id=b"));
             }
             other => panic!("expected LoadFresh, got {other:?}"),
@@ -849,7 +851,7 @@ mod tests {
                 reason,
             } => {
                 assert_eq!(song.id, "a", "repeat-track plays the same song again");
-                assert_eq!(reason, "repeat");
+                assert_eq!(reason, TransitionReason::Repeat);
                 assert!(stream_url.starts_with("http://server/rest/stream?id=a"));
             }
             other => panic!("expected LoadFresh, got {other:?}"),
@@ -882,7 +884,11 @@ mod tests {
         match plan {
             TrackTransitionPlan::LoadFresh { song, reason, .. } => {
                 assert_eq!(song.id, "b", "must advance, not replay 'a'");
-                assert_eq!(reason, "gapless", "fell through to the advance path");
+                assert_eq!(
+                    reason,
+                    TransitionReason::Gapless,
+                    "fell through to the advance path"
+                );
             }
             other => panic!("expected LoadFresh advancing to b, got {other:?}"),
         }

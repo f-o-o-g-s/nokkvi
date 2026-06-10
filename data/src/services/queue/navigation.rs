@@ -8,11 +8,43 @@ use tracing::{debug, trace};
 use super::{HistoryEntry, QueueManager};
 use crate::types::{queue::RepeatMode, song::Song};
 
+/// Why a queue transition selected its next song.
+///
+/// [`Display`](std::fmt::Display) emits the exact legacy log strings
+/// (`"repeat"`, `"shuffle"`, `"next"`, `"repeatQueue"`, `"gapless"`) so the
+/// `Now Playing ... (reason)` log lines stay grep-stable.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TransitionReason {
+    Repeat,
+    Shuffle,
+    Next,
+    RepeatQueue,
+    Gapless,
+}
+
+impl TransitionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TransitionReason::Repeat => "repeat",
+            TransitionReason::Shuffle => "shuffle",
+            TransitionReason::Next => "next",
+            TransitionReason::RepeatQueue => "repeatQueue",
+            TransitionReason::Gapless => "gapless",
+        }
+    }
+}
+
+impl std::fmt::Display for TransitionReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NextSongResult {
     pub song: Song,
     pub index: usize,
-    pub reason: String, // "repeat", "shuffle", "next", "repeatQueue"
+    pub reason: TransitionReason,
 }
 
 /// Result of a transition to the queued song.
@@ -73,8 +105,8 @@ impl<'a> PeekedQueue<'a> {
     pub fn index(&self) -> usize {
         self.info.index
     }
-    pub fn reason(&self) -> &str {
-        &self.info.reason
+    pub fn reason(&self) -> TransitionReason {
+        self.info.reason
     }
     pub fn info(&self) -> &NextSongResult {
         &self.info
@@ -130,7 +162,7 @@ impl QueueManager {
                 return Some(NextSongResult {
                     song: song.clone(),
                     index: idx,
-                    reason: "repeat".to_string(),
+                    reason: TransitionReason::Repeat,
                 });
             }
             return None;
@@ -147,11 +179,10 @@ impl QueueManager {
                         song: song.clone(),
                         index: song_idx,
                         reason: if self.queue.shuffle {
-                            "shuffle"
+                            TransitionReason::Shuffle
                         } else {
-                            "next"
-                        }
-                        .to_string(),
+                            TransitionReason::Next
+                        },
                     });
                 }
             }
@@ -200,13 +231,12 @@ impl QueueManager {
             song: song.clone(),
             index: song_idx,
             reason: if self.queue.shuffle {
-                "shuffle"
+                TransitionReason::Shuffle
             } else if next_order == 0 {
-                "repeatQueue"
+                TransitionReason::RepeatQueue
             } else {
-                "next"
-            }
-            .to_string(),
+                TransitionReason::Next
+            },
         })
     }
 
@@ -309,11 +339,10 @@ impl QueueManager {
             song: transition.song,
             index: transition.new_index,
             reason: if self.queue.shuffle {
-                "shuffle"
+                TransitionReason::Shuffle
             } else {
-                "next"
-            }
-            .to_string(),
+                TransitionReason::Next
+            },
         })
     }
 
@@ -443,6 +472,25 @@ mod tests {
         types::queue::RepeatMode,
     };
 
+    // ── TransitionReason tests ──
+
+    /// Display/as_str must emit the exact legacy strings — the owner greps
+    /// `Now Playing ... (reason)` log lines when verifying shuffle behavior,
+    /// so the wire format of these reasons is a stability contract.
+    #[test]
+    fn transition_reason_emits_exact_legacy_strings() {
+        for (reason, expected) in [
+            (TransitionReason::Repeat, "repeat"),
+            (TransitionReason::Shuffle, "shuffle"),
+            (TransitionReason::Next, "next"),
+            (TransitionReason::RepeatQueue, "repeatQueue"),
+            (TransitionReason::Gapless, "gapless"),
+        ] {
+            assert_eq!(reason.as_str(), expected);
+            assert_eq!(format!("{reason}"), expected);
+        }
+    }
+
     // ── peek_next_song tests ──
 
     #[test]
@@ -476,7 +524,7 @@ mod tests {
         let peeked = qm.peek_next_song().unwrap();
         assert_eq!(peeked.index(), 1);
         assert_eq!(peeked.song().id, "b");
-        assert_eq!(peeked.reason(), "repeat");
+        assert_eq!(peeked.reason(), TransitionReason::Repeat);
     }
 
     #[test]
@@ -497,7 +545,7 @@ mod tests {
         let peeked = qm.peek_next_song().unwrap();
         assert_eq!(peeked.index(), 0);
         assert_eq!(peeked.song().id, "a");
-        assert_eq!(peeked.reason(), "repeatQueue");
+        assert_eq!(peeked.reason(), TransitionReason::RepeatQueue);
     }
 
     #[test]
@@ -582,7 +630,7 @@ mod tests {
         let next = qm.get_next_song().unwrap();
         assert_eq!(next.index, 2);
         assert_eq!(next.song.id, "c");
-        assert_eq!(next.reason, "next");
+        assert_eq!(next.reason, TransitionReason::Next);
 
         // Ensure repeat mode remains active
         assert_eq!(qm.queue.repeat, RepeatMode::Track);
@@ -1240,7 +1288,7 @@ mod tests {
         // peek_next_song with repeat=Track always returns current
         let peeked = qm.peek_next_song().unwrap();
         assert_eq!(peeked.index(), 0);
-        assert_eq!(peeked.reason(), "repeat");
+        assert_eq!(peeked.reason(), TransitionReason::Repeat);
         drop(peeked);
 
         // get_next_song bypasses repeat-track and advances
@@ -1438,7 +1486,7 @@ mod tests {
         assert_eq!(peeked.index(), 1, "should advance to next song, not replay");
         assert_ne!(
             peeked.reason(),
-            "repeat",
+            TransitionReason::Repeat,
             "consume must suppress the repeat-track replay",
         );
     }

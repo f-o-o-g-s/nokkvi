@@ -13,7 +13,8 @@ mod write_guard;
 
 use anyhow::Result;
 pub use navigation::{
-    NextSongResult, PeekedQueue, PreviousOutcome, PreviousSongResult, TransitionResult,
+    NextSongResult, PeekedQueue, PreviousOutcome, PreviousSongResult, TransitionReason,
+    TransitionResult,
 };
 use rand::seq::SliceRandom;
 use tracing::{debug, warn};
