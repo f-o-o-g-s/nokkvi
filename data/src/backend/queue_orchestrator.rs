@@ -12,6 +12,37 @@ use crate::{
     types::song::Song,
 };
 
+/// Where playback starts within the resolved songs for [`QueueVerb::Play`].
+#[derive(Debug, Clone, Copy)]
+pub enum StartPosition {
+    /// Start at the first song.
+    First,
+    /// Start at a specific index. Out-of-range indices are clamped to the
+    /// last song downstream by `PlaybackController::play_songs_from_index`.
+    Index(usize),
+    /// Start at a uniformly random index (roulette picks).
+    Random,
+}
+
+/// Queue-mutation verb selecting which [`QueueOrchestrator`] primitive a
+/// resolved `Vec<Song>` is handed to. Paired with
+/// `crate::types::song_source::SongSource` by `AppService::dispatch`, the
+/// single source-verb entry point behind every public
+/// `play_*` / `add_*` / `insert_*` / `play_next_*` wrapper.
+#[derive(Debug, Clone, Copy)]
+pub enum QueueVerb {
+    /// Replace the queue and start playback at [`StartPosition`].
+    Play(StartPosition),
+    /// Append without changing playback state.
+    Enqueue,
+    /// Append, then jump-play the first newly-appended song.
+    EnqueueAndPlay,
+    /// Insert at an explicit queue position.
+    InsertAt(usize),
+    /// Insert right after the currently playing track.
+    PlayNext,
+}
+
 pub struct QueueOrchestrator<'a> {
     queue: &'a QueueService,
     playback: &'a PlaybackController,

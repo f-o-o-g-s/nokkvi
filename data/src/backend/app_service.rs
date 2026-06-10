@@ -14,12 +14,17 @@ use tracing::{debug, warn};
 use crate::{
     audio::engine::CustomAudioEngine,
     backend::{
-        albums::AlbumsService, artists::ArtistsService, auth::AuthGateway,
-        playback_controller::PlaybackController, queue::QueueService, settings::SettingsService,
+        albums::AlbumsService,
+        artists::ArtistsService,
+        auth::AuthGateway,
+        playback_controller::PlaybackController,
+        queue::QueueService,
+        queue_orchestrator::{QueueVerb, StartPosition},
+        settings::SettingsService,
         songs::SongsService,
     },
     services::{state_storage::ACTIVE_LIBRARY_IDS_KEY, task_manager::TaskManager},
-    types::{library::Library, queue_sort_mode::QueueSortMode},
+    types::{library::Library, queue_sort_mode::QueueSortMode, song_source::SongSource},
 };
 
 /// AppService — Application-level orchestration and state management.
@@ -304,87 +309,131 @@ impl AppService {
     // =========================================================================
     // Intent-Based Orchestration Methods
     //
-    // These methods encapsulate multi-step "play X" workflows.
-    // Handlers should call these instead of defining workflows inline.
+    // Every public entity-verb wrapper (play_* / add_* / insert_* /
+    // play_next_*) is a one-line delegation to `dispatch` below.
+    // Handlers should call the wrappers instead of defining workflows inline.
     // =========================================================================
+
+    /// Single source-verb entry point behind every entity-verb wrapper:
+    /// resolve `source` into songs, apply the one shared empty guard
+    /// (entity-named, toast-surfaced message from
+    /// [`SongSource::empty_error_message`]), then hand the songs to the
+    /// matching [`crate::backend::QueueOrchestrator`] verb.
+    ///
+    /// Never holds the engine lock — `NextTrackResetEffect` discharge stays
+    /// inside the orchestrator verbs.
+    async fn dispatch(&self, source: SongSource, verb: QueueVerb) -> Result<()> {
+        // `resolve` consumes the source — capture the log label and the
+        // empty-resolution message first.
+        let label = source.log_label();
+        let empty_msg = source.empty_error_message();
+        let songs = self.library_orchestrator().resolve(source).await?;
+        if songs.is_empty() {
+            return Err(anyhow::anyhow!(empty_msg));
+        }
+        let count = songs.len();
+        match verb {
+            QueueVerb::Play(position) => {
+                let start = match position {
+                    StartPosition::First => 0,
+                    // `play_songs_from_index` clamps with `.min(len - 1)`,
+                    // identical to the wrappers' former pre-clamps.
+                    StartPosition::Index(index) => index,
+                    // Safe post-guard: `songs` is non-empty.
+                    StartPosition::Random => rand::random_range(0..songs.len()),
+                };
+                self.queue_orchestrator().play(songs, start).await?;
+            }
+            QueueVerb::Enqueue => self.queue_orchestrator().enqueue(songs).await?,
+            QueueVerb::EnqueueAndPlay => {
+                self.queue_orchestrator().enqueue_and_play(songs).await?;
+            }
+            QueueVerb::InsertAt(position) => {
+                self.queue_orchestrator().insert_at(songs, position).await?;
+            }
+            QueueVerb::PlayNext => self.queue_orchestrator().play_next(songs).await?,
+        }
+        debug!(
+            "Queue dispatch: {:?} of {} song(s) from {}",
+            verb, count, label
+        );
+        Ok(())
+    }
 
     /// Play an album by ID.
     ///
     /// Loads all songs in the album, sets queue, and starts playback.
     pub async fn play_album(&self, album_id: &str) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_album(album_id).await?;
-        self.queue_orchestrator().play(songs, 0).await
+        self.dispatch(
+            SongSource::Album(album_id.to_owned()),
+            QueueVerb::Play(StartPosition::First),
+        )
+        .await
     }
 
     /// Play an album starting from a specific track index.
     ///
     /// Loads all songs in the album, sets queue, and starts playback from `track_idx`.
     pub async fn play_album_from_track(&self, album_id: &str, track_idx: usize) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_album(album_id).await?;
-        let start = track_idx.min(songs.len().saturating_sub(1));
-        self.queue_orchestrator().play(songs, start).await
+        self.dispatch(
+            SongSource::Album(album_id.to_owned()),
+            QueueVerb::Play(StartPosition::Index(track_idx)),
+        )
+        .await
     }
 
     /// Play all songs by an artist.
     ///
     /// Loads all songs by this artist, sets queue, and starts playback.
     pub async fn play_artist(&self, artist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_artist(artist_id)
-            .await?;
-        self.queue_orchestrator().play(songs, 0).await
+        self.dispatch(
+            SongSource::Artist(artist_id.to_owned()),
+            QueueVerb::Play(StartPosition::First),
+        )
+        .await
     }
 
     /// Play all songs in a genre.
     ///
     /// Loads all songs in this genre, sets queue, and starts playback.
     pub async fn play_genre(&self, genre_name: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_genre(genre_name)
-            .await?;
-        self.queue_orchestrator().play(songs, 0).await
+        self.dispatch(
+            SongSource::Genre(genre_name.to_owned()),
+            QueueVerb::Play(StartPosition::First),
+        )
+        .await
     }
 
     /// Roulette variant of [`Self::play_genre`]: load all genre songs, then
     /// start playback from a random index. Used by the slot-machine
     /// roulette pick on the Genres view.
     pub async fn play_genre_random(&self, genre_name: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_genre(genre_name)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in genre"));
-        }
-        let start = rand::random_range(0..songs.len());
-        self.queue_orchestrator().play(songs, start).await
+        self.dispatch(
+            SongSource::Genre(genre_name.to_owned()),
+            QueueVerb::Play(StartPosition::Random),
+        )
+        .await
     }
 
     /// Roulette variant of [`Self::play_artist`]: load all artist songs,
     /// then start playback from a random index.
     pub async fn play_artist_random(&self, artist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_artist(artist_id)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found for artist"));
-        }
-        let start = rand::random_range(0..songs.len());
-        self.queue_orchestrator().play(songs, start).await
+        self.dispatch(
+            SongSource::Artist(artist_id.to_owned()),
+            QueueVerb::Play(StartPosition::Random),
+        )
+        .await
     }
 
     /// Play all songs in a playlist.
     ///
     /// Loads all songs in this playlist, sets queue, and starts playback.
     pub async fn play_playlist(&self, playlist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_playlist(playlist_id)
-            .await?;
-        self.queue_orchestrator().play(songs, 0).await
+        self.dispatch(
+            SongSource::Playlist(playlist_id.to_owned()),
+            QueueVerb::Play(StartPosition::First),
+        )
+        .await
     }
 
     /// Play a playlist starting from a specific track index.
@@ -395,12 +444,11 @@ impl AppService {
         playlist_id: &str,
         track_idx: usize,
     ) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_playlist(playlist_id)
-            .await?;
-        let start = track_idx.min(songs.len().saturating_sub(1));
-        self.queue_orchestrator().play(songs, start).await
+        self.dispatch(
+            SongSource::Playlist(playlist_id.to_owned()),
+            QueueVerb::Play(StartPosition::Index(track_idx)),
+        )
+        .await
     }
 
     /// Resolve a playlist's tracks into UI view-data WITHOUT touching the play
@@ -470,7 +518,11 @@ impl AppService {
         songs: Vec<crate::types::song::Song>,
         start_index: usize,
     ) -> Result<()> {
-        self.queue_orchestrator().play(songs, start_index).await
+        self.dispatch(
+            SongSource::Preloaded(songs),
+            QueueVerb::Play(StartPosition::Index(start_index)),
+        )
+        .await
     }
 
     // =========================================================================
@@ -482,54 +534,35 @@ impl AppService {
 
     /// Add an album's songs to the queue (without starting playback).
     pub async fn add_album_to_queue(&self, album_id: &str) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_album(album_id).await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in album"));
-        }
-        self.queue_orchestrator().enqueue(songs).await?;
-        debug!("➕ Added album {} to queue", album_id);
-        Ok(())
+        self.dispatch(SongSource::Album(album_id.to_owned()), QueueVerb::Enqueue)
+            .await
     }
 
     /// Add an artist's songs to the queue (without starting playback).
     pub async fn add_artist_to_queue(&self, artist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_artist(artist_id)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found for artist"));
-        }
-        self.queue_orchestrator().enqueue(songs).await?;
-        debug!("➕ Added artist {} to queue", artist_id);
-        Ok(())
+        self.dispatch(SongSource::Artist(artist_id.to_owned()), QueueVerb::Enqueue)
+            .await
     }
 
     /// Add a single song to the queue (without starting playback).
     pub async fn add_song_to_queue(&self, song: crate::types::song::Song) -> Result<()> {
-        self.queue_orchestrator().enqueue(vec![song]).await?;
-        debug!("➕ Added song to queue");
-        Ok(())
+        self.dispatch(SongSource::Preloaded(vec![song]), QueueVerb::Enqueue)
+            .await
     }
 
     /// Add a single song to the queue and immediately start playing it.
     ///
     /// Used by `EnterBehavior::AppendAndPlay` — preserves existing queue.
     pub async fn add_song_and_play(&self, song: crate::types::song::Song) -> Result<()> {
-        let song_id = song.id.clone();
-        self.queue_orchestrator()
-            .enqueue_and_play(vec![song])
-            .await?;
-        debug!("➕▶ Added song to queue and started playing: {}", song_id);
-        Ok(())
+        self.dispatch(SongSource::Preloaded(vec![song]), QueueVerb::EnqueueAndPlay)
+            .await
     }
 
     /// Add a single song to the queue by ID (loads from album first).
     pub async fn add_song_to_queue_by_id(&self, song_id: &str, album_id: &str) -> Result<()> {
         let songs = self.albums_service.load_album_songs(album_id).await?;
         if let Some(song) = songs.into_iter().find(|s| s.id == song_id) {
-            let effect = self.queue_service.add_songs(vec![song]).await?;
-            effect.apply_to(&self.audio_engine()).await;
+            self.queue_orchestrator().enqueue(vec![song]).await?;
             debug!("➕ Added song {} to queue", song_id);
             Ok(())
         } else {
@@ -541,30 +574,17 @@ impl AppService {
 
     /// Add all songs in a genre to the queue (without starting playback).
     pub async fn add_genre_to_queue(&self, genre_name: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_genre(genre_name)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in genre"));
-        }
-        self.queue_orchestrator().enqueue(songs).await?;
-        debug!("➕ Added genre '{}' to queue", genre_name);
-        Ok(())
+        self.dispatch(SongSource::Genre(genre_name.to_owned()), QueueVerb::Enqueue)
+            .await
     }
 
     /// Add all songs in a playlist to the queue (without starting playback).
     pub async fn add_playlist_to_queue(&self, playlist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_playlist(playlist_id)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in playlist"));
-        }
-        self.queue_orchestrator().enqueue(songs).await?;
-        debug!("➕ Added playlist {} to queue", playlist_id);
-        Ok(())
+        self.dispatch(
+            SongSource::Playlist(playlist_id.to_owned()),
+            QueueVerb::Enqueue,
+        )
+        .await
     }
 
     // =========================================================================
@@ -575,64 +595,38 @@ impl AppService {
 
     /// Append an album's songs to the queue and start playing the first one.
     pub async fn add_album_and_play(&self, album_id: &str) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_album(album_id).await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in album"));
-        }
-        self.queue_orchestrator().enqueue_and_play(songs).await?;
-        debug!("➕▶ Added album {} to queue and started playing", album_id);
-        Ok(())
+        self.dispatch(
+            SongSource::Album(album_id.to_owned()),
+            QueueVerb::EnqueueAndPlay,
+        )
+        .await
     }
 
     /// Append an artist's songs to the queue and start playing the first one.
     pub async fn add_artist_and_play(&self, artist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_artist(artist_id)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found for artist"));
-        }
-        self.queue_orchestrator().enqueue_and_play(songs).await?;
-        debug!(
-            "➕▶ Added artist {} to queue and started playing",
-            artist_id
-        );
-        Ok(())
+        self.dispatch(
+            SongSource::Artist(artist_id.to_owned()),
+            QueueVerb::EnqueueAndPlay,
+        )
+        .await
     }
 
     /// Append a genre's songs to the queue and start playing the first one.
     pub async fn add_genre_and_play(&self, genre_name: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_genre(genre_name)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in genre"));
-        }
-        self.queue_orchestrator().enqueue_and_play(songs).await?;
-        debug!(
-            "➕▶ Added genre '{}' to queue and started playing",
-            genre_name
-        );
-        Ok(())
+        self.dispatch(
+            SongSource::Genre(genre_name.to_owned()),
+            QueueVerb::EnqueueAndPlay,
+        )
+        .await
     }
 
     /// Append a playlist's songs to the queue and start playing the first one.
     pub async fn add_playlist_and_play(&self, playlist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_playlist(playlist_id)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in playlist"));
-        }
-        self.queue_orchestrator().enqueue_and_play(songs).await?;
-        debug!(
-            "➕▶ Added playlist {} to queue and started playing",
-            playlist_id
-        );
-        Ok(())
+        self.dispatch(
+            SongSource::Playlist(playlist_id.to_owned()),
+            QueueVerb::EnqueueAndPlay,
+        )
+        .await
     }
 
     // =========================================================================
@@ -644,33 +638,20 @@ impl AppService {
 
     /// Insert an album's songs at a specific position in the queue.
     pub async fn insert_album_at_position(&self, album_id: &str, position: usize) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_album(album_id).await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in album"));
-        }
-        self.queue_orchestrator().insert_at(songs, position).await?;
-        debug!(
-            "📌 Inserted album {} at queue position {}",
-            album_id, position
-        );
-        Ok(())
+        self.dispatch(
+            SongSource::Album(album_id.to_owned()),
+            QueueVerb::InsertAt(position),
+        )
+        .await
     }
 
     /// Insert an artist's songs at a specific position in the queue.
     pub async fn insert_artist_at_position(&self, artist_id: &str, position: usize) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_artist(artist_id)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found for artist"));
-        }
-        self.queue_orchestrator().insert_at(songs, position).await?;
-        debug!(
-            "📌 Inserted artist {} at queue position {}",
-            artist_id, position
-        );
-        Ok(())
+        self.dispatch(
+            SongSource::Artist(artist_id.to_owned()),
+            QueueVerb::InsertAt(position),
+        )
+        .await
     }
 
     /// Insert a single song at a specific position in the queue.
@@ -679,28 +660,20 @@ impl AppService {
         song: crate::types::song::Song,
         position: usize,
     ) -> Result<()> {
-        self.queue_orchestrator()
-            .insert_at(vec![song], position)
-            .await?;
-        debug!("📌 Inserted song at queue position {}", position);
-        Ok(())
+        self.dispatch(
+            SongSource::Preloaded(vec![song]),
+            QueueVerb::InsertAt(position),
+        )
+        .await
     }
 
     /// Insert all songs in a genre at a specific position in the queue.
     pub async fn insert_genre_at_position(&self, genre_name: &str, position: usize) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_genre(genre_name)
-            .await?;
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs found in genre"));
-        }
-        self.queue_orchestrator().insert_at(songs, position).await?;
-        debug!(
-            "📌 Inserted genre '{}' at queue position {}",
-            genre_name, position
-        );
-        Ok(())
+        self.dispatch(
+            SongSource::Genre(genre_name.to_owned()),
+            QueueVerb::InsertAt(position),
+        )
+        .await
     }
 }
 
@@ -780,35 +753,35 @@ impl AppService {
 
     /// Play next: add album songs right after currently playing track.
     pub async fn play_next_album(&self, album_id: &str) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_album(album_id).await?;
-        self.queue_orchestrator().play_next(songs).await
+        self.dispatch(SongSource::Album(album_id.to_owned()), QueueVerb::PlayNext)
+            .await
     }
 
     /// Play next: add artist songs right after currently playing track.
     pub async fn play_next_artist(&self, artist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_artist(artist_id)
-            .await?;
-        self.queue_orchestrator().play_next(songs).await
+        self.dispatch(
+            SongSource::Artist(artist_id.to_owned()),
+            QueueVerb::PlayNext,
+        )
+        .await
     }
 
     /// Play next: add genre songs right after currently playing track.
     pub async fn play_next_genre(&self, genre_name: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_genre(genre_name)
-            .await?;
-        self.queue_orchestrator().play_next(songs).await
+        self.dispatch(
+            SongSource::Genre(genre_name.to_owned()),
+            QueueVerb::PlayNext,
+        )
+        .await
     }
 
     /// Play next: add playlist songs right after currently playing track.
     pub async fn play_next_playlist(&self, playlist_id: &str) -> Result<()> {
-        let songs = self
-            .library_orchestrator()
-            .resolve_playlist(playlist_id)
-            .await?;
-        self.queue_orchestrator().play_next(songs).await
+        self.dispatch(
+            SongSource::Playlist(playlist_id.to_owned()),
+            QueueVerb::PlayNext,
+        )
+        .await
     }
 
     // =========================================================================
@@ -828,22 +801,23 @@ impl AppService {
 
     /// Play a batch. Replaces the current queue and starts playing.
     pub async fn play_batch(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_batch(batch).await?;
-        self.queue_orchestrator().play(songs, 0).await
+        self.dispatch(
+            SongSource::Batch(batch),
+            QueueVerb::Play(StartPosition::First),
+        )
+        .await
     }
 
     /// Add a batch to the queue (append).
     pub async fn add_batch_to_queue(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_batch(batch).await?;
-        self.queue_orchestrator().enqueue(songs).await?;
-        debug!("➕ Added batch to queue");
-        Ok(())
+        self.dispatch(SongSource::Batch(batch), QueueVerb::Enqueue)
+            .await
     }
 
     /// Add a batch right after the currently playing track.
     pub async fn play_next_batch(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_batch(batch).await?;
-        self.queue_orchestrator().play_next(songs).await
+        self.dispatch(SongSource::Batch(batch), QueueVerb::PlayNext)
+            .await
     }
 
     /// Insert a batch at a specific position in the queue.
@@ -852,10 +826,8 @@ impl AppService {
         batch: crate::types::batch::BatchPayload,
         position: usize,
     ) -> Result<()> {
-        let songs = self.library_orchestrator().resolve_batch(batch).await?;
-        self.queue_orchestrator().insert_at(songs, position).await?;
-        debug!("📌 Inserted batch at queue position {}", position);
-        Ok(())
+        self.dispatch(SongSource::Batch(batch), QueueVerb::InsertAt(position))
+            .await
     }
 
     /// Remove queue rows by per-row `entry_id` and keep the audio engine in
@@ -1546,6 +1518,94 @@ mod tests {
             drop(app);
         }
 
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    // =========================================================================
+    // dispatch (source-verb entry point) tests. Non-empty Play /
+    // EnqueueAndPlay inputs are deliberately avoided — those verbs reach the
+    // engine-load path (mirrors queue_orchestrator's compile-only smoke
+    // convention for playback-touching verbs).
+    // =========================================================================
+
+    fn dispatch_test_songs(ids: &[&str]) -> Vec<crate::types::song::Song> {
+        ids.iter()
+            .map(|id| crate::types::song::Song::test_default(id, &format!("Song {id}")))
+            .collect()
+    }
+
+    fn dispatch_queue_ids(app: &AppService) -> Vec<String> {
+        app.queue_service
+            .get_songs()
+            .iter()
+            .map(|s| s.id.clone())
+            .collect()
+    }
+
+    /// An empty `Preloaded` source must hit the single shared empty guard
+    /// with the Preloaded message — for every non-playback-reaching verb.
+    #[tokio::test]
+    async fn dispatch_empty_preloaded_errors_no_songs_to_play() {
+        let (app, db_path) = test_app().await;
+
+        for verb in [
+            QueueVerb::Enqueue,
+            QueueVerb::InsertAt(1),
+            QueueVerb::PlayNext,
+        ] {
+            let err = app
+                .dispatch(SongSource::Preloaded(Vec::new()), verb)
+                .await
+                .expect_err("empty preloaded dispatch must error");
+            assert!(
+                err.to_string().contains("No songs to play"),
+                "expected 'No songs to play' for {verb:?}, got: {err}"
+            );
+        }
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// `dispatch(Preloaded, Enqueue)` appends to the live queue.
+    #[tokio::test]
+    async fn dispatch_preloaded_enqueue_appends() {
+        let (app, db_path) = test_app().await;
+
+        app.dispatch(
+            SongSource::Preloaded(dispatch_test_songs(&["a", "b"])),
+            QueueVerb::Enqueue,
+        )
+        .await
+        .expect("enqueue dispatch");
+
+        assert_eq!(dispatch_queue_ids(&app), vec!["a", "b"]);
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// `dispatch(Preloaded, InsertAt(1))` splices at the requested position.
+    #[tokio::test]
+    async fn dispatch_preloaded_insert_at_splices_in_order() {
+        let (app, db_path) = test_app().await;
+
+        app.dispatch(
+            SongSource::Preloaded(dispatch_test_songs(&["a", "b"])),
+            QueueVerb::Enqueue,
+        )
+        .await
+        .expect("seed enqueue");
+        app.dispatch(
+            SongSource::Preloaded(dispatch_test_songs(&["x", "y"])),
+            QueueVerb::InsertAt(1),
+        )
+        .await
+        .expect("insert dispatch");
+
+        assert_eq!(dispatch_queue_ids(&app), vec!["a", "x", "y", "b"]);
+
+        drop(app);
         let _ = std::fs::remove_file(&db_path);
     }
 }

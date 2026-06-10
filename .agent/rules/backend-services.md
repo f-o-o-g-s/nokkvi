@@ -18,11 +18,21 @@ AppService (orchestrator)
 ├── Orchestrator borrow-handles (built per-call from `app.queue_orchestrator()`
 │   / `app.library_orchestrator()`, not stored on AppService):
 │   ├── `QueueOrchestrator` — five queue-mutation verbs (`enqueue`,
-│   │   `enqueue_and_play`, `insert_at`, `play_next`, `play`). Every
-│   │   `play_*` / `add_*` / `insert_*` family on AppService is a thin
-│   │   delegation to one of these
+│   │   `enqueue_and_play`, `insert_at`, `play_next`, `play`), plus the
+│   │   `QueueVerb` / `StartPosition` enums consumed by the private
+│   │   `AppService::dispatch(SongSource, QueueVerb)`. Every public
+│   │   `play_*` / `add_*` / `insert_*` / `play_next_*` entity-verb
+│   │   wrapper on AppService is a one-line delegation to `dispatch`,
+│   │   which resolves the source, applies the single empty guard
+│   │   (`SongSource::empty_error_message()`, entity-named + toast-
+│   │   surfaced), then hands the songs to the matching orchestrator
+│   │   verb. Add new entity-verb combinations as wrappers over
+│   │   `dispatch` — never as hand-rolled resolve+guard+verb bodies.
+│   │   (`add_song_to_queue_by_id` is the one special case: find-in-album
+│   │   + custom error, then `queue_orchestrator().enqueue`)
 │   └── `LibraryOrchestrator` — entity resolution for albums / artists /
-│       genres / playlists / songs / batch via `SongSource::Batch`
+│       genres / playlists / songs / batch via `SongSource::Batch`,
+│       unified behind `resolve(SongSource)`
 ├── Album/Artist/Songs services share the `LazyAuthedService<A>` newtype
 │   (`backend/lazy_authed_service.rs`) for their `tokio::OnceCell` +
 │   constructor closure pattern — added in Group D Lane 2 to keep their
@@ -32,7 +42,11 @@ AppService (orchestrator)
 │   of `app_service.rs`. Native: `songs_api()`. Subsonic (factory adds
 │   `server_url` + `subsonic_credential` from `AuthGateway::server_config()`):
 │   `genres_api()`, `libraries_api()`, `playlists_api()`, `radios_api()`,
-│   `similar_api()`
+│   `similar_api()`. All native construction (the macro, the ad-hoc
+│   `SongsApiService` sites, `LibraryOrchestrator::resolve_genre`) funnels
+│   through `AuthGateway::build_native_api(factory)` — one auth dance, one
+│   "Not authenticated" error. `LazyAuthedService::build_authed(factory)`
+│   layers it for ad-hoc (uncached) construction from a wrapped gateway
 ├── Multi-library selection — `active_library_ids: Arc<RwLock<HashSet<i32>>>`
 │   + `all_libraries: Arc<RwLock<Vec<Library>>>`. Empty selection = "no
 │   filter" (all libraries). Read-mostly hot path on every `load_*`. Persisted
