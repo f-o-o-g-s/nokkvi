@@ -19,7 +19,7 @@ Steps to add a new slot-list-based view, in order.
    - Explicit `impl ViewPage for {Name}Page`
    - `impl HasCommonAction for {Name}Action` if it has SearchChanged/SortModeChanged/SortOrderChanged
 
-3. Add `{name}_page: views::{Name}Page` to `Nokkvi` in `src/main.rs`. If the view is a top-level destination, also add a `View` variant and extend `View::ALL` (length-anchored), then decide its start-view eligibility in `View::start_view_option()` — the exhaustive match forces the call. Eligible views additionally need their name added to the `general.start_view` options in `data/src/services/settings_tables/general.rs` (iced-free, can't see `View`); the `view_metadata_tests` drift guard in `src/main.rs` pins the two lists together.
+3. Add `{name}_page: views::{Name}Page` to `Nokkvi` in `src/main.rs`. If the view is a top-level destination, also add a `View` variant and extend `View::ALL` (length-anchored), then decide its start-view eligibility in `View::start_view_option()` — the exhaustive match forces the call. Eligible views additionally need their name added to the `general.start_view` options in `data/src/services/settings_tables/general.rs` (iced-free, can't see `View`); the `view_metadata_tests` drift guard in `src/main.rs` pins the two lists together. Also opt the variant in or out of the IPC `switch-view` verb via `ipc_switchable` in `src/update/ipc.rs` — the wire-name parser and its error listing derive from `View::ALL`, so a `view_name` entry plus the opt-in is all it takes.
 
 4. Add `Message::{Name}({Name}Message)` to `src/app_message.rs`.
 

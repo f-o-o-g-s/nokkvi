@@ -336,29 +336,44 @@ fn extract_f32_arg(args: &serde_json::Value, name: &str) -> Result<f32, String> 
 }
 
 /// Map a CLI / wire view-name to the corresponding [`View`] variant. Accepts
-/// the lowercase canonical names matching the CLI surface. Returns the list
-/// of supported names in the error message so the caller (or curious user)
-/// can self-correct.
+/// the lowercase canonical names matching the CLI surface — derived from
+/// [`View::ALL`] filtered through [`ipc_switchable`], so the parser and its
+/// error listing track the enum automatically. Returns the list of supported
+/// names in the error message so the caller (or curious user) can
+/// self-correct.
 pub(crate) fn parse_view_name(name: &str) -> Result<View, String> {
-    match name {
-        "albums" => Ok(View::Albums),
-        "queue" => Ok(View::Queue),
-        "songs" => Ok(View::Songs),
-        "artists" => Ok(View::Artists),
-        "genres" => Ok(View::Genres),
-        "playlists" => Ok(View::Playlists),
-        "radios" => Ok(View::Radios),
-        "settings" => Ok(View::Settings),
-        other => Err(format!(
-            "unknown view `{other}` (expected one of: albums, queue, songs, \
-             artists, genres, playlists, radios, settings)"
-        )),
+    let switchable = || View::ALL.iter().copied().filter(|v| ipc_switchable(*v));
+    switchable().find(|v| view_name(*v) == name).ok_or_else(|| {
+        let supported: Vec<&'static str> = switchable().map(view_name).collect();
+        format!(
+            "unknown view `{name}` (expected one of: {})",
+            supported.join(", ")
+        )
+    })
+}
+
+/// Whether a [`View`] is a valid `switch-view` target. Exhaustive on
+/// purpose — a new view must opt in (or out) here explicitly; an enumerated
+/// `matches!` would silently return `false` for new variants.
+const fn ipc_switchable(view: View) -> bool {
+    match view {
+        View::Albums
+        | View::Queue
+        | View::Songs
+        | View::Artists
+        | View::Genres
+        | View::Playlists
+        | View::Radios
+        | View::Settings => true,
+        // Contextual destination — never a switch-view target.
+        View::PlaylistEditor => false,
     }
 }
 
 /// Canonical lowercase name for a [`View`] — the inverse of [`parse_view_name`]
 /// (plus `playlist-editor`, which has no nav tab and isn't a `switch-view`
-/// target). Used by the `selection` verb to report the focused view.
+/// target). Used by the `selection` verb to report the focused view and by
+/// [`parse_view_name`] to derive the accepted-name list.
 fn view_name(view: View) -> &'static str {
     match view {
         View::Albums => "albums",

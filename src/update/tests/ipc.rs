@@ -531,6 +531,18 @@ fn switch_view_unknown_view_returns_invalid_args_error_listing_options() {
 }
 
 #[test]
+fn switch_view_rejects_playlist_editor_name() {
+    // `playlist-editor` is `view_name(View::PlaylistEditor)`, but the editor
+    // is a contextual destination, never a `switch-view` target — pinned by
+    // the `ipc_switchable` carve-out so the parser derivation from View::ALL
+    // can't quietly make it switchable.
+    let resp = drive_with_args("switch-view", json!({"view": "playlist-editor"}));
+    let err = resp.error.expect("playlist-editor must be rejected");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("playlist-editor"));
+}
+
+#[test]
 fn love_with_no_playing_track_returns_no_playing_track_error() {
     // Default test_app() has scrobble.current_song_id = None, so `love`
     // should bail with a structured error rather than dispatching anything.
