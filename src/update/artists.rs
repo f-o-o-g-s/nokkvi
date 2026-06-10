@@ -214,11 +214,10 @@ impl Nokkvi {
         }
         // Capture child album ids before consuming `msg` so we can fan out
         // mini-artwork fetches for the newly-loaded expansion children.
-        let expansion_album_ids: Vec<(String, Option<String>, String)> = match &msg {
-            ArtistsMessage::AlbumsLoaded(_, albums) => albums
-                .iter()
-                .map(|a| (a.id.clone(), a.updated_at.clone(), a.artwork_url.clone()))
-                .collect(),
+        let expansion_album_ids = match &msg {
+            ArtistsMessage::AlbumsLoaded(_, albums) => {
+                super::components::expansion_child_album_ids(albums)
+            }
             _ => Vec::new(),
         };
         // Capture the loaded artist id too — the page's `update` runs
@@ -484,28 +483,7 @@ impl Nokkvi {
             _ => {} // None + already-handled common actions
         }
 
-        let cmd_task = cmd.map(Message::Artists);
-        if expansion_album_ids.is_empty() {
-            return cmd_task;
-        }
-        let Some(shell) = &self.app_service else {
-            return cmd_task;
-        };
-        let cached: std::collections::HashSet<&String> =
-            self.artwork.album_art.iter().map(|(k, _)| k).collect();
-        let prefetch = super::components::expansion_album_artwork_tasks(
-            &cached,
-            &self.artwork.album_art_versions,
-            shell.albums().clone(),
-            expansion_album_ids,
-        );
-        if prefetch.is_empty() {
-            cmd_task
-        } else {
-            let mut tasks = vec![cmd_task];
-            tasks.extend(prefetch);
-            Task::batch(tasks)
-        }
+        self.append_expansion_album_prefetch(cmd.map(Message::Artists), expansion_album_ids)
     }
 
     /// Routes `Message::ArtistsLoader(...)` arrivals to the existing

@@ -40,8 +40,8 @@ mod artwork_prefetch;
 #[cfg(test)]
 pub(super) use artwork_prefetch::should_refetch;
 pub(super) use artwork_prefetch::{
-    expansion_album_artwork_tasks, passive_artwork_version, prefetch_album_artwork_tasks,
-    prefetch_song_artwork_tasks,
+    expansion_album_artwork_tasks, expansion_child_album_ids, passive_artwork_version,
+    prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
 };
 
 /// Map an `anyhow::Error` chain to [`Message::SessionExpired`] when its
@@ -477,6 +477,38 @@ impl Nokkvi {
                 ))
             }
         })
+    }
+
+    /// Append the expansion-children mini-artwork prefetch fan-out to a
+    /// page-update task. Shared tail of the Artists and Genres handlers:
+    /// returns `cmd_task` untouched when no children were newly loaded (or
+    /// pre-login), otherwise batches the version-gated 80px fetches behind it.
+    pub(crate) fn append_expansion_album_prefetch(
+        &self,
+        cmd_task: Task<Message>,
+        album_ids: Vec<(String, Option<String>, String)>,
+    ) -> Task<Message> {
+        if album_ids.is_empty() {
+            return cmd_task;
+        }
+        let Some(shell) = &self.app_service else {
+            return cmd_task;
+        };
+        let cached: std::collections::HashSet<&String> =
+            self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        let prefetch = expansion_album_artwork_tasks(
+            &cached,
+            &self.artwork.album_art_versions,
+            shell.albums().clone(),
+            album_ids,
+        );
+        if prefetch.is_empty() {
+            cmd_task
+        } else {
+            let mut tasks = vec![cmd_task];
+            tasks.extend(prefetch);
+            Task::batch(tasks)
+        }
     }
 
     /// Execute an async action on the shell, showing a success toast and reloading

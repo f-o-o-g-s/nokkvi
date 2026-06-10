@@ -9,7 +9,10 @@
 use std::collections::{HashMap, HashSet};
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::albums::AlbumsService, utils::artwork_url::THUMBNAIL_SIZE};
+use nokkvi_data::{
+    backend::albums::{AlbumUIViewData, AlbumsService},
+    utils::artwork_url::THUMBNAIL_SIZE,
+};
 
 use crate::{
     app_message::{ArtworkMessage, Message},
@@ -246,4 +249,47 @@ pub(crate) fn expansion_album_artwork_tasks(
             )
         })
         .collect()
+}
+
+/// Project newly-loaded expansion children into the
+/// `(id, updated_at, artwork_url)` triples [`expansion_album_artwork_tasks`]
+/// consumes (the doc comment above documents the triple contract). Shared by
+/// the Artists and Genres handler prologues, which capture the triples from
+/// the `AlbumsLoaded` message before the page update consumes it.
+pub(crate) fn expansion_child_album_ids(
+    albums: &[AlbumUIViewData],
+) -> Vec<(String, Option<String>, String)> {
+    albums
+        .iter()
+        .map(|a| (a.id.clone(), a.updated_at.clone(), a.artwork_url.clone()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expansion_child_album_ids;
+    use crate::test_helpers::make_album;
+
+    #[test]
+    fn expansion_child_album_ids_maps_id_version_url_triples() {
+        let mut a1 = make_album("a1", "Alpha", "Artist");
+        a1.updated_at = Some("2026-01-01".to_string());
+        a1.artwork_url = "http://server/art/a1".to_string();
+        let mut a2 = make_album("a2", "Beta", "Artist");
+        a2.artwork_url = "http://server/art/a2".to_string();
+
+        let triples = expansion_child_album_ids(&[a1, a2]);
+
+        assert_eq!(
+            triples,
+            vec![
+                (
+                    "a1".to_string(),
+                    Some("2026-01-01".to_string()),
+                    "http://server/art/a1".to_string()
+                ),
+                ("a2".to_string(), None, "http://server/art/a2".to_string()),
+            ]
+        );
+    }
 }
