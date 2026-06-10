@@ -141,6 +141,26 @@ fn decode_buffer_size(format: &AudioFormat) -> usize {
     }
 }
 
+/// Decode one ~100ms chunk and convert it to f32 samples — the shared
+/// read→validate→convert step of the play/seek prebuffers and both decode
+/// loops. Returns `None` when the decoder produced no usable data this call
+/// (uninitialized → `AudioBuffer::invalid()`, EOF, or an empty read).
+///
+/// Synchronous: the decoder does blocking HTTP I/O, so async-runtime callers
+/// wrap the call in `tokio::task::block_in_place`; the seek prebuffer calls it
+/// bare from inside an existing `block_in_place` closure. Takes only
+/// `&mut AudioDecoder` and acquires NO locks, so callers keep their decoder
+/// guard and the lock ordering is untouched.
+fn decode_one_chunk(decoder: &mut AudioDecoder) -> Option<Vec<f32>> {
+    let buffer_size = decode_buffer_size(decoder.format());
+    let buffer = decoder.read_buffer(buffer_size);
+    if buffer.is_valid() && buffer.byte_count() > 0 {
+        Some(s16_bytes_to_f32(buffer.data()))
+    } else {
+        None
+    }
+}
+
 /// Buffers to fill before starting playback. `play` cold-starts the decoder
 /// and renderer together so it needs more buffers to absorb the worst-case
 /// network latency before the first sample feeds out; `seek` runs against a
@@ -204,6 +224,66 @@ fn compute_watermarks(frame_rate: u32, crossfade_ms: u64) -> (usize, usize) {
     let high = samples_for_duration(frame_rate, cushion_ms);
     let low = high / BACKPRESSURE_RELEASE_DIVISOR as usize;
     (high, low)
+}
+
+/// What a decode loop should do this iteration about ring-buffer backpressure.
+/// Mirrors the renderer's `RebufferAction` pattern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackpressureAction {
+    /// Ring is above the high watermark (or still draining toward the low
+    /// watermark): sleep this long, then re-check. The caller owns the actual
+    /// `sleep().await` + `continue` so the helper stays sync and lock-free.
+    Sleep(std::time::Duration),
+    /// Not backpressured (or just released): go decode a chunk.
+    Proceed,
+}
+
+/// Shared dual-watermark backpressure step for the primary and crossfade
+/// decode loops. Computes the time-based watermarks (`compute_watermarks`),
+/// flips the caller's `backpressure_active` latch, and returns the action.
+///
+/// Synchronous, takes NO locks, never awaits: the caller snapshots
+/// `buffer_count` with the renderer lock already dropped, then performs the
+/// returned sleep itself.
+///
+/// `is_infinite` MUST be `false` for the crossfade loop (incoming crossfade
+/// tracks are always finite). Radio (`is_infinite == true`) NEVER backpressures:
+/// radio streams send data precisely at 1x speed, and sleeping the decode task
+/// would neglect the raw TCP socket — the resulting TCP zero window makes
+/// Icecast drop the connection with 1-2 second reconnect delays. Symphonia must
+/// read the Icecast stream continuously to maintain network stability. Since
+/// the latch can then never engage for radio, the OFF/hold branches are
+/// unreachable there.
+fn backpressure_step(
+    label: &'static str,
+    buffer_count: usize,
+    frame_rate: u32,
+    crossfade_ms: u64,
+    is_infinite: bool,
+    backpressure_active: &mut bool,
+) -> BackpressureAction {
+    let (high_watermark, low_watermark) = compute_watermarks(frame_rate, crossfade_ms);
+    if buffer_count >= high_watermark && !is_infinite {
+        if !*backpressure_active {
+            tracing::trace!(
+                "⏸️ [{label}] Backpressure ON: buffer count {buffer_count} >= {high_watermark} (high watermark, cf={crossfade_ms}ms)"
+            );
+            *backpressure_active = true;
+        }
+        // Sleep longer while waiting for buffers to drain
+        BackpressureAction::Sleep(std::time::Duration::from_millis(100))
+    } else if *backpressure_active && buffer_count <= low_watermark {
+        tracing::trace!(
+            "▶️ [{label}] Backpressure OFF: buffer count {buffer_count} <= {low_watermark} (low watermark)"
+        );
+        *backpressure_active = false;
+        BackpressureAction::Proceed
+    } else if *backpressure_active {
+        // Still in backpressure mode, waiting for low_watermark
+        BackpressureAction::Sleep(std::time::Duration::from_millis(50))
+    } else {
+        BackpressureAction::Proceed
+    }
 }
 
 /// The inline gapless swap stands down when a crossfade is armed OR active, so
@@ -617,27 +697,26 @@ impl CustomAudioEngine {
         {
             let mut decoder_guard = self.decoder.lock().await;
             for i in 0..PLAY_PREBUFFER_COUNT {
-                let buffer_size = decode_buffer_size(decoder_guard.format());
-
                 // Use block_in_place for blocking HTTP I/O
-                let buffer = tokio::task::block_in_place(|| decoder_guard.read_buffer(buffer_size));
-                if buffer.is_valid() && buffer.byte_count() > 0 {
-                    let samples = s16_bytes_to_f32(buffer.data());
-                    let mut renderer = self.renderer.lock();
-                    renderer.write_samples(&samples);
-                    drop(renderer);
-                    trace!(
-                        " AudioEngine: queued prebuffer {}/{}",
-                        i + 1,
-                        PLAY_PREBUFFER_COUNT
-                    );
-                } else {
-                    warn!(
-                        "  AudioEngine: prebuffering stopped at {}/{} (no more data)",
-                        i + 1,
-                        PLAY_PREBUFFER_COUNT
-                    );
-                    break;
+                match tokio::task::block_in_place(|| decode_one_chunk(&mut decoder_guard)) {
+                    Some(samples) => {
+                        let mut renderer = self.renderer.lock();
+                        renderer.write_samples(&samples);
+                        drop(renderer);
+                        trace!(
+                            " AudioEngine: queued prebuffer {}/{}",
+                            i + 1,
+                            PLAY_PREBUFFER_COUNT
+                        );
+                    }
+                    None => {
+                        warn!(
+                            "  AudioEngine: prebuffering stopped at {}/{} (no more data)",
+                            i + 1,
+                            PLAY_PREBUFFER_COUNT
+                        );
+                        break;
+                    }
                 }
             }
             drop(decoder_guard);
@@ -742,38 +821,21 @@ impl CustomAudioEngine {
                 // Time-based watermarks: scale with the stream's frame_rate so the
                 // cushion is a constant duration at every sample rate, and grow
                 // with crossfade duration so the buffer can hold a full fade-out.
+                // Radio never backpressures — see `backpressure_step`.
                 let cf_ms = crossfade_duration_shared.load(Ordering::Relaxed);
-                let (high_watermark, low_watermark) = compute_watermarks(frame_rate, cf_ms);
-
-                // CRITICAL FIX: NEVER apply backpressure to Infinite Streams (Internet Radio)!
-                // Radio streams send data precisely at 1x speed. If we apply backpressure by sleeping
-                // the decode async thread, we completely neglect the raw TCP socket! When it wakes up,
-                // the TCP Zero Window will cause Icecast dropping and 1-2 second connection delays.
-                // We MUST let Symphonia read the Icecast stream continuously to maintain network stability!
-                if buffer_count >= high_watermark && !stream_is_infinite_cached {
-                    if !backpressure_active {
-                        tracing::trace!(
-                            "⏸️ [DECODE LOOP] Backpressure ON: buffer count {} >= {} (high watermark, cf={}ms)",
-                            buffer_count,
-                            high_watermark,
-                            cf_ms,
-                        );
-                        backpressure_active = true;
+                match backpressure_step(
+                    "DECODE LOOP",
+                    buffer_count,
+                    frame_rate,
+                    cf_ms,
+                    stream_is_infinite_cached,
+                    &mut backpressure_active,
+                ) {
+                    BackpressureAction::Sleep(duration) => {
+                        tokio::time::sleep(duration).await;
+                        continue;
                     }
-                    // Sleep longer while waiting for buffers to drain
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    continue;
-                } else if backpressure_active && buffer_count <= low_watermark {
-                    tracing::trace!(
-                        "▶️ [DECODE LOOP] Backpressure OFF: buffer count {} <= {} (low watermark)",
-                        buffer_count,
-                        low_watermark,
-                    );
-                    backpressure_active = false;
-                } else if backpressure_active {
-                    // Still in backpressure mode, waiting for low_watermark
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                    continue;
+                    BackpressureAction::Proceed => {}
                 }
 
                 // Try to acquire decoder lock with a short timeout
@@ -795,16 +857,15 @@ impl CustomAudioEngine {
                     continue;
                 }
 
-                let buffer_size = decode_buffer_size(decoder_guard.format());
                 // Cache the stream frame_rate for the next iteration's (pre-lock)
                 // backpressure watermark computation.
                 frame_rate = decoder_guard.format().frame_rate();
 
-                // Decode buffer - this is where HTTP I/O happens
+                // Decode one chunk - this is where HTTP I/O happens
                 // CRITICAL: Use block_in_place to prevent blocking the async runtime!
                 // The decoder uses reqwest::blocking::Client for HTTP which would otherwise
                 // starve the tokio runtime, causing timeouts and deadlocks.
-                let buffer = tokio::task::block_in_place(|| decoder_guard.read_buffer(buffer_size));
+                let chunk = tokio::task::block_in_place(|| decode_one_chunk(&mut decoder_guard));
 
                 // Propagate live bitrate from decoder to engine atomic
                 let current_bitrate = decoder_guard.live_bitrate();
@@ -823,12 +884,9 @@ impl CustomAudioEngine {
                 let is_eof = decoder_guard.is_eof();
                 let is_infinite = stream_is_infinite_cached;
 
-                if buffer.is_valid() && buffer.byte_count() > 0 {
+                if let Some(samples) = chunk {
                     // Release decoder lock before acquiring renderer lock
                     drop(decoder_guard);
-
-                    // Convert S16 bytes to f32 and write to ring buffer
-                    let samples = s16_bytes_to_f32(buffer.data());
 
                     let mut samples_to_write = samples.as_slice();
                     while !samples_to_write.is_empty() {
@@ -893,6 +951,10 @@ impl CustomAudioEngine {
                         drop(guard);
                         // Emit only on anomaly — silent ticks are noise.
                         if ur_count > 0 || empty_buffer_count > 0 {
+                            // Pure + cheap recompute (fires at most every 5s,
+                            // and only on anomaly).
+                            let (high_watermark, low_watermark) =
+                                compute_watermarks(frame_rate, cf_ms);
                             let frame_rate_f = frame_rate.max(1) as f32;
                             let sec_rem = buffered as f32 / frame_rate_f;
                             let peak_ms = ur_peak as f32 * 1000.0 / frame_rate_f;
@@ -1273,11 +1335,8 @@ impl CustomAudioEngine {
                 trace!("🔍 [SEEK] Prebuffering {} buffers", SEEK_PREBUFFER_COUNT);
 
                 for i in 0..SEEK_PREBUFFER_COUNT {
-                    let buffer_size = decode_buffer_size(decoder.format());
-
-                    let buffer = decoder.read_buffer(buffer_size);
-                    if buffer.is_valid() && buffer.byte_count() > 0 {
-                        let samples = s16_bytes_to_f32(buffer.data());
+                    // Bare call — already inside the outer block_in_place closure.
+                    if let Some(samples) = decode_one_chunk(&mut decoder) {
                         renderer.write_samples(&samples);
                         trace!(
                             "🔍 [SEEK] Queued prebuffer {}/{}",
@@ -1683,10 +1742,9 @@ impl CustomAudioEngine {
         tokio::spawn(async move {
             trace!("🔀 [CROSSFADE DECODE] Loop started");
 
-            // Backpressure: dual-watermark strategy matching the primary decode loop.
-            // Convert raw sample counts to ~100ms "buffer units" (÷800) and scale
-            // watermarks with crossfade duration so the ring buffer can hold enough
-            // audio for the full fade-in ramp.
+            // Backpressure: shared dual-watermark step (`backpressure_step`)
+            // matching the primary decode loop; watermarks scale with crossfade
+            // duration so the ring buffer can hold the full fade-in ramp.
             let mut backpressure_active = false;
             // Cached incoming-stream frame_rate for the time-based watermarks
             // (see the primary loop). 0 until the first decoded buffer.
@@ -1710,27 +1768,20 @@ impl CustomAudioEngine {
                 };
 
                 let cf_ms = crossfade_duration_shared.load(Ordering::Relaxed);
-                let (high_watermark, low_watermark) = compute_watermarks(frame_rate, cf_ms);
-
-                if buffer_count >= high_watermark {
-                    if !backpressure_active {
-                        trace!(
-                            "🔀 [CROSSFADE DECODE] Backpressure ON: {} >= {} (cf={}ms)",
-                            buffer_count, high_watermark, cf_ms,
-                        );
-                        backpressure_active = true;
+                // is_infinite = false: incoming crossfade tracks are always finite.
+                match backpressure_step(
+                    "CROSSFADE DECODE",
+                    buffer_count,
+                    frame_rate,
+                    cf_ms,
+                    false,
+                    &mut backpressure_active,
+                ) {
+                    BackpressureAction::Sleep(duration) => {
+                        tokio::time::sleep(duration).await;
+                        continue;
                     }
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    continue;
-                } else if backpressure_active && buffer_count <= low_watermark {
-                    trace!(
-                        "🔀 [CROSSFADE DECODE] Backpressure OFF: {} <= {}",
-                        buffer_count, low_watermark
-                    );
-                    backpressure_active = false;
-                } else if backpressure_active {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                    continue;
+                    BackpressureAction::Proceed => {}
                 }
 
                 // Decode a buffer from the incoming track
@@ -1746,14 +1797,12 @@ impl CustomAudioEngine {
                     break;
                 }
 
-                let buffer_size = decode_buffer_size(dec.format());
                 frame_rate = dec.format().frame_rate();
 
-                let buffer = tokio::task::block_in_place(|| dec.read_buffer(buffer_size));
+                let chunk = tokio::task::block_in_place(|| decode_one_chunk(dec));
                 drop(decoder_guard);
 
-                if buffer.is_valid() && buffer.byte_count() > 0 {
-                    let samples = s16_bytes_to_f32(buffer.data());
+                if let Some(samples) = chunk {
                     let mut renderer_guard = renderer.lock();
                     renderer_guard.write_crossfade_samples(&samples);
                     drop(renderer_guard);
@@ -2306,6 +2355,16 @@ mod tests {
         AudioDecoder::new(Arc::new(std::sync::RwLock::new(None)))
     }
 
+    /// Pins the `None` contract of the shared decode step: an uninitialized
+    /// decoder yields `AudioBuffer::invalid()` from `read_buffer`, which the
+    /// prebuffers and decode loops rely on mapping to `None` (stop / EOF /
+    /// empty handling) rather than an empty sample vec.
+    #[test]
+    fn decode_one_chunk_returns_none_for_uninitialized_decoder() {
+        let mut decoder = fresh_decoder();
+        assert!(decode_one_chunk(&mut decoder).is_none());
+    }
+
     /// N20: seek must NOT bump the source generation — the source URL is
     /// unchanged, so renderer.seek recreates the primary stream under the same
     /// generation (gated by the `seeking` flag + decode_loop.supersede). This
@@ -2650,6 +2709,71 @@ mod tests {
 
         // Unknown format → a non-triggering high so the loop never backpressures.
         assert_eq!(compute_watermarks(0, 0), (usize::MAX, 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // backpressure_step state machine (shared by primary + crossfade loops)
+    // -----------------------------------------------------------------------
+
+    /// 44.1k stereo frame rate for the backpressure tests.
+    const BP_FRAME_RATE: u32 = 88_200;
+
+    #[test]
+    fn backpressure_enters_at_high_watermark() {
+        let (high, _) = compute_watermarks(BP_FRAME_RATE, 0);
+        let mut active = false;
+        let action = backpressure_step("TEST", high, BP_FRAME_RATE, 0, false, &mut active);
+        assert_eq!(
+            action,
+            BackpressureAction::Sleep(std::time::Duration::from_millis(100))
+        );
+        assert!(active, "latch must engage at the high watermark");
+    }
+
+    #[test]
+    fn backpressure_holds_between_low_and_high_while_active() {
+        let (high, low) = compute_watermarks(BP_FRAME_RATE, 0);
+        let mut active = true;
+        let mid = (low + high) / 2;
+        let action = backpressure_step("TEST", mid, BP_FRAME_RATE, 0, false, &mut active);
+        assert_eq!(
+            action,
+            BackpressureAction::Sleep(std::time::Duration::from_millis(50))
+        );
+        assert!(active, "latch must stay engaged while draining toward low");
+    }
+
+    #[test]
+    fn backpressure_releases_at_low_watermark() {
+        let (_, low) = compute_watermarks(BP_FRAME_RATE, 0);
+        let mut active = true;
+        let action = backpressure_step("TEST", low, BP_FRAME_RATE, 0, false, &mut active);
+        assert_eq!(action, BackpressureAction::Proceed);
+        assert!(!active, "latch must release at the low watermark");
+    }
+
+    #[test]
+    fn backpressure_never_engages_for_infinite_streams() {
+        let mut active = false;
+        let action = backpressure_step("TEST", usize::MAX, BP_FRAME_RATE, 0, true, &mut active);
+        assert_eq!(
+            action,
+            BackpressureAction::Proceed,
+            "radio must proceed at ANY buffer count"
+        );
+        assert!(!active, "radio must never enter backpressure");
+    }
+
+    #[test]
+    fn backpressure_never_engages_before_frame_rate_is_known() {
+        let mut active = false;
+        // frame_rate 0 → compute_watermarks high == usize::MAX (non-triggering).
+        let action = backpressure_step("TEST", usize::MAX - 1, 0, 0, false, &mut active);
+        assert_eq!(action, BackpressureAction::Proceed);
+        assert!(
+            !active,
+            "frame_rate 0 yields a non-triggering high watermark"
+        );
     }
 
     /// Pins the gate invariant that REPLACES the old `phantom_unreachable` test:
