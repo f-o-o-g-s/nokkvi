@@ -6,17 +6,25 @@
 //! used to ship a hand-written `match` body inside both the loader and the
 //! store helper — the encoding lived in two places per enum and could drift.
 //!
-//! This macro takes a single integer-to-variant table per enum and emits both
-//! halves of a UI-crate-local [`AtomicU8Enum`] impl:
+//! The bytes are a **transient in-process cache encoding** and nothing more:
+//! they live only inside the `UI_MODE` atomics for the lifetime of the
+//! process. Persistence of these enums goes through their serde wire strings
+//! (TOML in `config.toml`, JSON-in-redb via `PersistedPlayerSettings`) — no
+//! byte value ever reaches disk, so renumbering variants is safe.
 //!
-//! 1. `fn from_u8(v: u8) -> Self` — loader: maps each listed byte to its named
-//!    variant; unknown bytes fall back to the declared `default` variant. This
-//!    matches the original `match ... { _ => Default }` shape and preserves the
-//!    redb on-disk back-compat contract (legacy `app.redb` files with future
-//!    bytes still load cleanly).
+//! This macro takes the enum's variant list (declaration order, mirroring the
+//! data-crate definition) and emits both halves of a UI-crate-local
+//! [`AtomicU8Enum`] impl, deriving each byte from the variant's `repr`
+//! discriminant (`Variant as u8`) so the encoding cannot drift from the enum:
+//!
+//! 1. `fn from_u8(v: u8) -> Self` — loader: maps each variant's discriminant
+//!    byte back to the variant; unknown bytes fall back to the declared
+//!    `default` variant. The fallback is purely defensive (a corrupted or
+//!    out-of-range atomic value can't panic the render thread) — there is no
+//!    on-disk compatibility contract behind it.
 //! 2. `fn to_u8(self) -> u8` — store: enumerates every variant explicitly so
-//!    adding a variant without updating the table is a compile error (just like
-//!    the original enum-exhaustive `match` blocks).
+//!    adding a variant to the data-crate enum without updating the invocation
+//!    is a compile error (non-exhaustive match).
 //!
 //! ## Why a local trait instead of `From<u8>` / `From<Enum> for u8`?
 //!
@@ -31,10 +39,11 @@
 //! ```ignore
 //! atomic_u8_enum! {
 //!     TrackInfoDisplay {
-//!         0 => Off,
-//!         1 => PlayerBar,
-//!         2 => TopBar,
-//!         3 => MiniPlayer,
+//!         Off,
+//!         PlayerBar,
+//!         TopBar,
+//!         TopBarUnder,
+//!         MiniPlayer,
 //!     } default Off
 //! }
 //! ```
@@ -61,8 +70,9 @@
 /// without tripping Rust's orphan rules.
 pub(crate) trait AtomicU8Enum: Sized + Copy {
     /// Convert a stored byte back into the enum variant. Unknown bytes fall
-    /// back to the type's declared default (preserves redb back-compat with
-    /// app.redb files written by a future build with extra variants).
+    /// back to the type's declared default — a purely defensive guard (the
+    /// bytes never persist, so the only way to see an unknown byte is a
+    /// corrupted atomic).
     fn from_u8(value: u8) -> Self;
 
     /// Convert the enum variant into its stored-byte discriminant.
@@ -70,28 +80,32 @@ pub(crate) trait AtomicU8Enum: Sized + Copy {
 }
 
 /// Emit a paired [`AtomicU8Enum`] impl for an enum: loader (unknown→default
-/// fallback) + store (enum-exhaustive).
+/// fallback) + store (enum-exhaustive). Bytes are the variants' declaration
+/// discriminants (`Variant as u8`) — list the variants in the data-crate
+/// declaration order.
 ///
 /// See the module-level docs for the full rationale and call-site shape.
 macro_rules! atomic_u8_enum {
     (
         $enum:ident {
-            $( $byte:literal => $variant:ident ),* $(,)?
+            $( $variant:ident ),* $(,)?
         } default $default:ident
     ) => {
         impl $crate::atomic_u8_enum::AtomicU8Enum for $enum {
             #[inline]
             fn from_u8(value: u8) -> Self {
-                match value {
-                    $( $byte => Self::$variant, )*
-                    _ => Self::$default,
-                }
+                $(
+                    if value == Self::$variant as u8 {
+                        return Self::$variant;
+                    }
+                )*
+                Self::$default
             }
 
             #[inline]
             fn to_u8(self) -> u8 {
                 match self {
-                    $( $enum::$variant => $byte, )*
+                    $( $enum::$variant => Self::$variant as u8, )*
                 }
             }
         }

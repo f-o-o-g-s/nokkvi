@@ -77,13 +77,13 @@ struct UiModeFlags {
     /// Rounded corner borders — tri-state (Off / On / PlayerOnly). Backed
     /// by `AtomicU8` via the `atomic_u8_enum!` impl on `RoundedMode`.
     rounded_mode: AtomicU8,
-    /// Track info display mode: 0 = Off, 1 = PlayerBar, 2 = TopBar
+    /// Track info display mode (`TrackInfoDisplay` discriminant)
     track_info_display: AtomicU8,
-    /// Navigation layout: 0 = Top, 1 = Side, 2 = None
+    /// Navigation layout (`NavLayout` discriminant: Top / Side / None)
     nav_layout: AtomicU8,
-    /// Navigation display: 0 = TextOnly, 1 = TextAndIcons, 2 = IconsOnly
+    /// Navigation display (`NavDisplayMode` discriminant)
     nav_display_mode: AtomicU8,
-    /// Target row height for slot lists (discriminant: 0=Compact 1=Default 2=Comfortable 3=Spacious)
+    /// Target row height for slot lists (`SlotRowHeight` discriminant)
     slot_row_height: AtomicU8,
     /// Whether the opacity gradient on non-center slots is enabled
     opacity_gradient: AtomicBool,
@@ -115,11 +115,11 @@ struct UiModeFlags {
     /// Whether the metastrip renders artist/album/title as a single shared
     /// scrolling unit with one set of bookends.
     strip_merged_mode: AtomicBool,
-    /// Strip click action: 0=GoToQueue, 1=GoToAlbum, 2=GoToArtist, 3=CopyTrackInfo, 4=DoNothing
+    /// Strip click action (`StripClickAction` discriminant)
     strip_click_action: AtomicU8,
     /// Whether `title:` / `artist:` / `album:` labels are prepended to fields
     strip_show_labels: AtomicBool,
-    /// Strip merged-mode separator: 0=Dot, 1=Bullet, 2=Pipe, 3=EmDash, 4=Slash, 5=Bar
+    /// Strip merged-mode separator (`StripSeparator` discriminant)
     strip_separator: AtomicU8,
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view
     albums_artwork_overlay: AtomicBool,
@@ -129,11 +129,10 @@ struct UiModeFlags {
     songs_artwork_overlay: AtomicBool,
     /// Whether the metadata text overlay is rendered on the large artwork in Playlists view
     playlists_artwork_overlay: AtomicBool,
-    /// Artwork column display mode: 0=Auto, 1=AlwaysNative, 2=AlwaysStretched,
-    /// 3=Never, 4=AlwaysVerticalNative, 5=AlwaysVerticalStretched.
+    /// Artwork column display mode (`ArtworkColumnMode` discriminant)
     artwork_column_mode: AtomicU8,
     /// Artwork stretch fit when column mode is AlwaysStretched or
-    /// AlwaysVerticalStretched: 0=Cover, 1=Fill.
+    /// AlwaysVerticalStretched (`ArtworkStretchFit` discriminant)
     artwork_column_stretch_fit: AtomicU8,
     /// Artwork column width as fraction of window width (f32 bits, 0.05..=0.80)
     artwork_column_width_pct: AtomicU32,
@@ -150,20 +149,20 @@ struct UiModeFlags {
 
 static UI_MODE: UiModeFlags = UiModeFlags {
     light_mode: AtomicBool::new(false),
-    // RoundedMode::Off discriminant (0). PlayerSettings load corrects this
-    // to the user's preference on first dump.
-    rounded_mode: AtomicU8::new(0),
-    track_info_display: AtomicU8::new(0),
-    nav_layout: AtomicU8::new(0),
-    nav_display_mode: AtomicU8::new(0),
-    slot_row_height: AtomicU8::new(1), // Default variant
+    // RoundedMode::Off (not the enum's `#[default]`). PlayerSettings load
+    // corrects this to the user's preference on first dump.
+    rounded_mode: AtomicU8::new(RoundedMode::Off as u8),
+    track_info_display: AtomicU8::new(TrackInfoDisplay::Off as u8),
+    nav_layout: AtomicU8::new(NavLayout::Top as u8),
+    nav_display_mode: AtomicU8::new(NavDisplayMode::TextOnly as u8),
+    slot_row_height: AtomicU8::new(SlotRowHeight::Default as u8),
     opacity_gradient: AtomicBool::new(true),
     slot_text_links: AtomicBool::new(true),
     horizontal_volume: AtomicBool::new(false),
     autohide_toolbar: AtomicBool::new(false),
     autohide_toolbar_height: AtomicU8::new(6),
     autohide_toolbar_grip: AtomicBool::new(true),
-    autohide_collapsed_appearance: AtomicU8::new(0), // Hairline
+    autohide_collapsed_appearance: AtomicU8::new(CollapsedAppearance::Hairline as u8),
     mini_player_show_volume: AtomicBool::new(true),
     mini_player_show_modes: AtomicBool::new(true),
     strip_show_title: AtomicBool::new(true),
@@ -171,15 +170,15 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     strip_show_album: AtomicBool::new(true),
     strip_show_format_info: AtomicBool::new(true),
     strip_merged_mode: AtomicBool::new(false),
-    strip_click_action: AtomicU8::new(0), // GoToQueue
+    strip_click_action: AtomicU8::new(StripClickAction::GoToQueue as u8),
     strip_show_labels: AtomicBool::new(true),
-    strip_separator: AtomicU8::new(4), // Slash (default)
+    strip_separator: AtomicU8::new(StripSeparator::Slash as u8),
     albums_artwork_overlay: AtomicBool::new(true),
     artists_artwork_overlay: AtomicBool::new(true),
     songs_artwork_overlay: AtomicBool::new(true),
     playlists_artwork_overlay: AtomicBool::new(true),
-    artwork_column_mode: AtomicU8::new(0),        // Auto
-    artwork_column_stretch_fit: AtomicU8::new(0), // Cover
+    artwork_column_mode: AtomicU8::new(ArtworkColumnMode::Auto as u8),
+    artwork_column_stretch_fit: AtomicU8::new(ArtworkStretchFit::Cover as u8),
     // Initial values mirror the data-crate defaults in
     // `nokkvi_data::types::player_settings::artwork`. `f32::to_bits` is `const`
     // so the bit pattern is derived at compile time — no magic hex.
@@ -588,19 +587,19 @@ use crate::atomic_u8_enum::{AtomicU8Enum, atomic_u8_enum};
 
 atomic_u8_enum! {
     TrackInfoDisplay {
-        0 => Off,
-        1 => PlayerBar,
-        2 => TopBar,
-        3 => MiniPlayer,
-        4 => TopBarUnder,
+        Off,
+        PlayerBar,
+        TopBar,
+        TopBarUnder,
+        MiniPlayer,
     } default Off
 }
 
 atomic_u8_enum! {
     RoundedMode {
-        0 => Off,
-        1 => On,
-        2 => PlayerOnly,
+        Off,
+        On,
+        PlayerOnly,
     } default Off
 }
 
@@ -696,33 +695,33 @@ use nokkvi_data::types::player_settings::{NavDisplayMode, NavLayout};
 
 atomic_u8_enum! {
     NavLayout {
-        0 => Top,
-        1 => Side,
-        2 => None,
+        Top,
+        Side,
+        None,
     } default Top
 }
 
 /// Returns true if side navigation layout is active
 #[inline]
 pub(crate) fn is_side_nav() -> bool {
-    UI_MODE.nav_layout.load(Ordering::Relaxed) == 1
+    UI_MODE.nav_layout.load(Ordering::Relaxed) == NavLayout::Side as u8
 }
 
 /// Returns true if the minimalist (no-chrome) layout is active
 #[inline]
 pub(crate) fn is_none_nav() -> bool {
-    UI_MODE.nav_layout.load(Ordering::Relaxed) == 2
+    UI_MODE.nav_layout.load(Ordering::Relaxed) == NavLayout::None as u8
 }
 
 /// Returns true if the top-bar navigation layout is active (the default)
 #[inline]
 pub(crate) fn is_top_nav() -> bool {
-    UI_MODE.nav_layout.load(Ordering::Relaxed) == 0
+    UI_MODE.nav_layout.load(Ordering::Relaxed) == NavLayout::Top as u8
 }
 
 /// Current navigation layout — bytes round-trip through `NavLayout::from_u8`
 /// (unknown bytes fall back to `Top`, the declared default; see the
-/// `atomic_u8_enum!` macro's forward-compat contract).
+/// `atomic_u8_enum!` macro's defensive-fallback contract).
 ///
 /// Test-only: production code uses `is_top_nav()` / `is_side_nav()` /
 /// `is_none_nav()` directly; the enum-shaped reader is here so chrome-math
@@ -746,9 +745,9 @@ pub(crate) fn set_nav_layout(layout: NavLayout) {
 
 atomic_u8_enum! {
     NavDisplayMode {
-        0 => TextOnly,
-        1 => TextAndIcons,
-        2 => IconsOnly,
+        TextOnly,
+        TextAndIcons,
+        IconsOnly,
     } default TextOnly
 }
 
@@ -782,10 +781,10 @@ use nokkvi_data::types::player_settings::SlotRowHeight;
 
 atomic_u8_enum! {
     SlotRowHeight {
-        0 => Compact,
-        1 => Default,
-        2 => Comfortable,
-        3 => Spacious,
+        Compact,
+        Default,
+        Comfortable,
+        Spacious,
     } default Default
 }
 
@@ -902,9 +901,9 @@ use nokkvi_data::types::player_settings::CollapsedAppearance;
 
 atomic_u8_enum! {
     CollapsedAppearance {
-        0 => Hairline,
-        1 => Hidden,
-        2 => CountStrip,
+        Hairline,
+        Hidden,
+        CountStrip,
     } default Hairline
 }
 
@@ -968,22 +967,22 @@ use nokkvi_data::types::player_settings::{StripClickAction, StripSeparator};
 
 atomic_u8_enum! {
     StripClickAction {
-        0 => GoToQueue,
-        1 => GoToAlbum,
-        2 => GoToArtist,
-        3 => CopyTrackInfo,
-        4 => DoNothing,
+        GoToQueue,
+        GoToAlbum,
+        GoToArtist,
+        CopyTrackInfo,
+        DoNothing,
     } default GoToQueue
 }
 
 atomic_u8_enum! {
     StripSeparator {
-        0 => Dot,
-        1 => Bullet,
-        2 => Pipe,
-        3 => EmDash,
-        4 => Slash,
-        5 => Bar,
+        Dot,
+        Bullet,
+        Pipe,
+        EmDash,
+        Slash,
+        Bar,
     } default Slash
 }
 
@@ -1160,28 +1159,27 @@ use nokkvi_data::types::player_settings::{
     ArtworkColumnMode, ArtworkStretchFit,
 };
 
-// Encoding NOTE: the atomic uses 0=Auto, 1=AlwaysNative, 2=AlwaysStretched,
-// 3=Never (kept where it is for redb back-compat — do not renumber even
-// though `Never` sits awkwardly between the two Always-mode clusters),
-// 4=AlwaysVerticalNative, 5=AlwaysVerticalStretched. New variants must be
-// appended at 6+; the `atomic_u8_enum!` loader falls back to `Auto` for
-// unknown values and the store half is enum-exhaustive (so adding a variant
-// forces a compile error here).
+// Encoding NOTE: the bytes are the enum's declaration discriminants and are
+// a transient in-process cache encoding only — nothing persists them
+// (persistence goes through serde wire strings), so renumbering variants is
+// safe. The `atomic_u8_enum!` loader falls back to `Auto` for unknown values
+// and the store half is enum-exhaustive (so adding a variant to the
+// data-crate enum forces a compile error here).
 atomic_u8_enum! {
     ArtworkColumnMode {
-        0 => Auto,
-        1 => AlwaysNative,
-        2 => AlwaysStretched,
-        3 => Never,
-        4 => AlwaysVerticalNative,
-        5 => AlwaysVerticalStretched,
+        Auto,
+        AlwaysNative,
+        AlwaysStretched,
+        AlwaysVerticalNative,
+        AlwaysVerticalStretched,
+        Never,
     } default Auto
 }
 
 atomic_u8_enum! {
     ArtworkStretchFit {
-        0 => Cover,
-        1 => Fill,
+        Cover,
+        Fill,
     } default Cover
 }
 
@@ -2437,10 +2435,11 @@ mod tests {
 
     // ------------------------------------------------------------------------
     // atomic_u8_enum! macro — verifies that the loader/store impls emitted
-    // for every `UiModeFlags` enum preserve the on-disk byte encodings that
-    // app.redb depends on, and that unknown bytes fall back to the declared
-    // default variant (forward-compat for legacy `app.redb` files written by
-    // a future build).
+    // for every `UiModeFlags` enum round-trip each variant through its
+    // declaration discriminant, and that unknown bytes fall back to the
+    // declared default variant. The bytes are a transient in-process cache
+    // encoding (nothing persists them — persistence is serde wire strings),
+    // so the fallback is purely defensive.
     // ------------------------------------------------------------------------
 
     /// Roundtrip every variant of two enums (one with a small variant set, one
@@ -2449,7 +2448,7 @@ mod tests {
     /// hand-written impl.
     #[test]
     fn atomic_u8_enum_macro_emits_roundtrip() {
-        // NavLayout: 3 variants, contiguous {0,1,2}.
+        // NavLayout: 3 variants, declaration discriminants {0,1,2}.
         for (byte, variant) in [
             (0u8, NavLayout::Top),
             (1u8, NavLayout::Side),
@@ -2463,9 +2462,9 @@ mod tests {
             assert_eq!(variant.to_u8(), byte, "NavLayout::{variant:?}.to_u8()");
         }
 
-        // StripSeparator: 6 variants, contiguous {0..=5}. Exercises a larger
-        // table so we catch any macro misexpansion that only manifests with
-        // more arms.
+        // StripSeparator: 6 variants, declaration discriminants {0..=5}.
+        // Exercises a larger variant list so we catch any macro misexpansion
+        // that only manifests with more arms.
         for (byte, variant) in [
             (0u8, StripSeparator::Dot),
             (1u8, StripSeparator::Bullet),
@@ -2483,10 +2482,11 @@ mod tests {
         }
     }
 
-    /// An unknown stored byte (e.g. a future variant written by a newer build
-    /// then read by an older build) MUST decode to the declared default
-    /// variant. This preserves the original `match { _ => Default }` shape and
-    /// is the redb on-disk back-compat contract.
+    /// An unknown stored byte MUST decode to the declared default variant.
+    /// This is purely defensive: the bytes live only inside the in-process
+    /// `UI_MODE` atomics (nothing persists them), so an unknown byte can only
+    /// come from a corrupted atomic — the fallback keeps the render thread
+    /// from ever panicking on one.
     #[test]
     fn atomic_u8_enum_unknown_byte_falls_back_to_default() {
         // TrackInfoDisplay default = Off.
@@ -2499,52 +2499,41 @@ mod tests {
         assert_eq!(StripSeparator::from_u8(6), StripSeparator::Slash);
     }
 
-    /// `ArtworkColumnMode`'s integer encoding has `Never` sitting at byte 3,
-    /// awkwardly between the two `Always*` clusters at bytes 1-2 and the two
-    /// `AlwaysVertical*` cluster at bytes 4-5 — declaration order and byte
-    /// order do not match. This is locked in for redb back-compat and any
-    /// renumbering would silently corrupt every existing user's queue/session
-    /// state. Roundtrip every variant byte-for-byte so we catch a future
-    /// "tidy up the enum" PR that flips Never to byte 5 or 6.
+    /// `ArtworkColumnMode` is the largest enum behind a `UI_MODE` atomic —
+    /// round-trip every variant through `to_u8` / `from_u8` and pin that each
+    /// byte equals the variant's declaration discriminant. The bytes are an
+    /// in-memory cache encoding only (persistence is serde wire strings), so
+    /// the discriminants are free to follow declaration order; this test
+    /// catches a macro misexpansion that maps a variant to the wrong byte.
     #[test]
-    fn artwork_column_mode_non_contiguous_encoding_preserved() {
-        // The full {byte → variant} table the redb on-disk format depends on.
+    fn artwork_column_mode_encoding_roundtrips_every_variant() {
+        // {declaration discriminant → variant}, in declaration order.
         let table = [
             (0u8, ArtworkColumnMode::Auto),
             (1u8, ArtworkColumnMode::AlwaysNative),
             (2u8, ArtworkColumnMode::AlwaysStretched),
-            (3u8, ArtworkColumnMode::Never),
-            (4u8, ArtworkColumnMode::AlwaysVerticalNative),
-            (5u8, ArtworkColumnMode::AlwaysVerticalStretched),
+            (3u8, ArtworkColumnMode::AlwaysVerticalNative),
+            (4u8, ArtworkColumnMode::AlwaysVerticalStretched),
+            (5u8, ArtworkColumnMode::Never),
         ];
 
         for (byte, variant) in table {
+            assert_eq!(
+                ArtworkColumnMode::from_u8(variant.to_u8()),
+                variant,
+                "ArtworkColumnMode::{variant:?} must survive a to_u8/from_u8 roundtrip"
+            );
+            assert_eq!(
+                variant.to_u8(),
+                byte,
+                "ArtworkColumnMode::{variant:?} must encode to its declaration discriminant {byte}"
+            );
             assert_eq!(
                 ArtworkColumnMode::from_u8(byte),
                 variant,
                 "ArtworkColumnMode byte {byte} must decode to {variant:?}"
             );
-            assert_eq!(
-                variant.to_u8(),
-                byte,
-                "ArtworkColumnMode::{variant:?} must encode to byte {byte}"
-            );
         }
-
-        // The two "AlwaysVertical" variants specifically must round-trip
-        // through byte 5 / byte 4, not through the bytes that the declaration
-        // order would suggest (5 is the last variant declared but its byte
-        // sits BELOW Never's variant-declaration position).
-        assert_eq!(
-            ArtworkColumnMode::AlwaysVerticalStretched.to_u8(),
-            5,
-            "AlwaysVerticalStretched MUST encode to byte 5"
-        );
-        assert_eq!(
-            ArtworkColumnMode::from_u8(5),
-            ArtworkColumnMode::AlwaysVerticalStretched,
-            "byte 5 MUST decode to AlwaysVerticalStretched"
-        );
     }
 
     /// End-to-end test through the actual `Theme` get/set helpers (not just
