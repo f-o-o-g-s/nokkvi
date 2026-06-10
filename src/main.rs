@@ -80,6 +80,38 @@ impl View {
         View::Settings,
         View::PlaylistEditor,
     ];
+
+    /// The persisted start-view name for this view, or `None` when the view
+    /// is not start-view eligible. Exhaustive on purpose — a new view must
+    /// decide its eligibility here, and making an existing view eligible is
+    /// a product decision (owner sign-off), not a refactor. The user-facing
+    /// dropdown options live in the iced-free data crate
+    /// (`data/src/services/settings_tables/general.rs`), which cannot
+    /// reference `View`; the `view_metadata_tests` drift guard pins the two
+    /// lists together.
+    pub(crate) const fn start_view_option(self) -> Option<&'static str> {
+        match self {
+            View::Queue => Some("Queue"),
+            View::Albums => Some("Albums"),
+            View::Artists => Some("Artists"),
+            View::Songs => Some("Songs"),
+            View::Genres => Some("Genres"),
+            View::Playlists => Some("Playlists"),
+            // None = not start-view eligible: Settings and PlaylistEditor
+            // are contextual destinations, and Radios has stayed out of the
+            // start-view dropdown since the setting shipped.
+            View::Radios | View::Settings | View::PlaylistEditor => None,
+        }
+    }
+
+    /// Inverse of [`Self::start_view_option`]: resolve a persisted start-view
+    /// name to its `View`. `None` for ineligible or unknown names.
+    pub(crate) fn from_start_view_name(name: &str) -> Option<View> {
+        View::ALL
+            .iter()
+            .copied()
+            .find(|v| v.start_view_option().is_some_and(|n| n == name))
+    }
 }
 
 // Length anchor: adding a `View` variant without extending `ALL` fails to
@@ -1469,5 +1501,88 @@ mod build_ipc_cli_args_tests {
             build_ipc_cli_args("rate", Some("loud")),
             json!({"delta": "loud"}),
         );
+    }
+}
+
+#[cfg(test)]
+mod view_metadata_tests {
+    use nokkvi_data::{
+        services::settings_tables::general::build_general_tab_settings_items,
+        types::{
+            setting_item::SettingsEntry, setting_value::SettingValue,
+            settings_data::GeneralSettingsData,
+        },
+    };
+
+    use super::View;
+
+    #[test]
+    fn start_view_names_round_trip_through_from_start_view_name() {
+        for view in View::ALL.iter().copied() {
+            if let Some(name) = view.start_view_option() {
+                assert_eq!(
+                    View::from_start_view_name(name),
+                    Some(view),
+                    "start-view name {name:?} must round-trip to {view:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn from_start_view_name_rejects_ineligible_and_unknown_names() {
+        for name in ["Radios", "Settings", "PlaylistEditor", "garbage", ""] {
+            assert_eq!(
+                View::from_start_view_name(name),
+                None,
+                "{name:?} must not resolve to a start view"
+            );
+        }
+    }
+
+    /// Drift guard: the start-view dropdown options live in the iced-free
+    /// data crate (`data/src/services/settings_tables/general.rs`), which
+    /// cannot reference `View` — this test is the only sync net between the
+    /// two lists. Set-equality, not order: the table is Queue-first while
+    /// `View::ALL` is Albums-first, so order is presentation, not contract.
+    #[test]
+    fn settings_table_start_view_options_match_view_metadata() {
+        let entries = build_general_tab_settings_items(&GeneralSettingsData::default());
+        let options = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.start_view" => {
+                    match &item.value {
+                        SettingValue::Enum { options, .. } => Some(options.clone()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("settings table must expose a general.start_view Enum entry");
+
+        let eligible: Vec<&'static str> = View::ALL
+            .iter()
+            .filter_map(|v| v.start_view_option())
+            .collect();
+
+        assert_eq!(
+            options.len(),
+            eligible.len(),
+            "start-view dropdown {options:?} and View metadata {eligible:?} disagree in size"
+        );
+        for name in &eligible {
+            assert!(
+                options.contains(name),
+                "{name:?} is start-view eligible per View::start_view_option but missing \
+                 from the settings-table options"
+            );
+        }
+        for name in &options {
+            assert!(
+                eligible.contains(name),
+                "settings table offers {name:?} but no View claims it via start_view_option"
+            );
+        }
     }
 }

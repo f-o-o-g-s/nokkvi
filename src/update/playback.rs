@@ -1419,14 +1419,9 @@ impl Nokkvi {
         let mut start_view_task = Task::none();
         if !self.start_view_applied {
             self.start_view_applied = true;
-            self.current_view = match settings.start_view.as_str() {
-                "Albums" => crate::View::Albums,
-                "Artists" => crate::View::Artists,
-                "Songs" => crate::View::Songs,
-                "Genres" => crate::View::Genres,
-                "Playlists" => crate::View::Playlists,
-                _ => crate::View::Queue,
-            };
+            // Unknown / ineligible names fall back to Queue.
+            self.current_view = crate::View::from_start_view_name(&settings.start_view)
+                .unwrap_or(crate::View::Queue);
             // Trigger data load for the start view.
             // Albums + Artists are also loaded by ViewPreferencesLoaded with persisted
             // sort prefs, but start_view may render before prefs arrive — trigger load
