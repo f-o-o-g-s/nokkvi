@@ -6,7 +6,10 @@ use super::{
     items::{SettingItem, SettingMeta, SettingsEntry},
     sentinel::SentinelKind,
 };
-use crate::visualizer_config::{VisualizerConfig, keys};
+use crate::visualizer_config::{
+    BarsGradientMode, BarsGradientOrientation, BarsPeakGradientMode, BarsPeakMode,
+    LinesGradientMode, LinesStyle, VisualizerConfig, keys,
+};
 
 /// Push color entries for one mode (dark or light) into the settings list.
 ///
@@ -309,7 +312,7 @@ pub(crate) fn build_visualizer_items(
             ),
         config.bars.gradient_mode.as_wire_str(),
         d.bars.gradient_mode.as_wire_str(),
-        vec!["static", "wave", "shimmer", "energy", "alternate"],
+        BarsGradientMode::all_wire_strs(),
     ));
     e.push(SettingItem::enum_val(
         SettingMeta::new(
@@ -322,7 +325,7 @@ pub(crate) fn build_visualizer_items(
         ),
         config.bars.gradient_orientation.as_wire_str(),
         d.bars.gradient_orientation.as_wire_str(),
-        vec!["vertical", "horizontal"],
+        BarsGradientOrientation::all_wire_strs(),
     ));
     e.push(SettingItem::enum_val(
         SettingMeta::new(
@@ -335,7 +338,7 @@ pub(crate) fn build_visualizer_items(
         ),
         config.bars.peak_gradient_mode.as_wire_str(),
         d.bars.peak_gradient_mode.as_wire_str(),
-        vec!["static", "cycle", "height", "match"],
+        BarsPeakGradientMode::all_wire_strs(),
     ));
     e.push(SettingItem::enum_val(
         SettingMeta::new(keys::BARS_PEAK_MODE, "Peak Mode", "Bars")
@@ -344,7 +347,7 @@ pub(crate) fn build_visualizer_items(
             ),
         config.bars.peak_mode.as_wire_str(),
         d.bars.peak_mode.as_wire_str(),
-        vec!["none", "fade", "fall", "fall_accel", "fall_fade"],
+        BarsPeakMode::all_wire_strs(),
     ));
     e.push(SettingItem::int(
         SettingMeta::new(keys::BARS_PEAK_HOLD_TIME, "Peak Hold Time", "Bars")
@@ -482,7 +485,7 @@ pub(crate) fn build_visualizer_items(
             ),
         config.lines.gradient_mode.as_wire_str(),
         d.lines.gradient_mode.as_wire_str(),
-        vec!["breathing", "static", "position", "height", "gradient"],
+        LinesGradientMode::all_wire_strs(),
     ));
     e.push(SettingItem::float(
         SettingMeta::new(keys::LINES_FILL_OPACITY, "Fill Opacity", "Lines")
@@ -507,7 +510,7 @@ pub(crate) fn build_visualizer_items(
             ),
         config.lines.style.as_wire_str(),
         d.lines.style.as_wire_str(),
-        vec!["smooth", "angular"],
+        LinesStyle::all_wire_strs(),
     ));
     e.push(SettingItem::bool_val(
         SettingMeta::new(keys::LINES_BOAT, "Surfing boat", "Lines")

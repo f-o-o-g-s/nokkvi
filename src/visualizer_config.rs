@@ -58,6 +58,16 @@ pub enum BarsGradientMode {
 }
 
 impl BarsGradientMode {
+    /// Every variant in declaration order — the settings dropdown derives its
+    /// option list from this, so the display order is pinned here.
+    pub const ALL: &'static [Self] = &[
+        Self::Static,
+        Self::Wave,
+        Self::Shimmer,
+        Self::Energy,
+        Self::Alternate,
+    ];
+
     /// Wire-format string used in `config.toml`. Must match the
     /// `#[serde(rename_all = "snake_case")]` output exactly.
     pub fn as_wire_str(&self) -> &'static str {
@@ -68,6 +78,12 @@ impl BarsGradientMode {
             Self::Energy => "energy",
             Self::Alternate => "alternate",
         }
+    }
+
+    /// Wire strings for every variant in declaration order — feeds the
+    /// settings dropdown so the option list can never drift from the enum.
+    pub fn all_wire_strs() -> Vec<&'static str> {
+        Self::ALL.iter().map(Self::as_wire_str).collect()
     }
 }
 
@@ -84,12 +100,20 @@ pub enum BarsGradientOrientation {
 }
 
 impl BarsGradientOrientation {
+    /// Every variant in declaration order — pins the settings dropdown order.
+    pub const ALL: &'static [Self] = &[Self::Vertical, Self::Horizontal];
+
     /// Wire-format string used in `config.toml`.
     pub fn as_wire_str(&self) -> &'static str {
         match self {
             Self::Vertical => "vertical",
             Self::Horizontal => "horizontal",
         }
+    }
+
+    /// Wire strings for every variant in declaration order.
+    pub fn all_wire_strs() -> Vec<&'static str> {
+        Self::ALL.iter().map(Self::as_wire_str).collect()
     }
 }
 
@@ -110,6 +134,9 @@ pub enum BarsPeakGradientMode {
 }
 
 impl BarsPeakGradientMode {
+    /// Every variant in declaration order — pins the settings dropdown order.
+    pub const ALL: &'static [Self] = &[Self::Static, Self::Cycle, Self::Height, Self::Match];
+
     /// Wire-format string used in `config.toml`.
     pub fn as_wire_str(&self) -> &'static str {
         match self {
@@ -118,6 +145,11 @@ impl BarsPeakGradientMode {
             Self::Height => "height",
             Self::Match => "match",
         }
+    }
+
+    /// Wire strings for every variant in declaration order.
+    pub fn all_wire_strs() -> Vec<&'static str> {
+        Self::ALL.iter().map(Self::as_wire_str).collect()
     }
 }
 
@@ -140,6 +172,15 @@ pub enum BarsPeakMode {
 }
 
 impl BarsPeakMode {
+    /// Every variant in declaration order — pins the settings dropdown order.
+    pub const ALL: &'static [Self] = &[
+        Self::None,
+        Self::Fade,
+        Self::Fall,
+        Self::FallAccel,
+        Self::FallFade,
+    ];
+
     /// Wire-format string used in `config.toml`.
     pub fn as_wire_str(&self) -> &'static str {
         match self {
@@ -149,6 +190,11 @@ impl BarsPeakMode {
             Self::FallAccel => "fall_accel",
             Self::FallFade => "fall_fade",
         }
+    }
+
+    /// Wire strings for every variant in declaration order.
+    pub fn all_wire_strs() -> Vec<&'static str> {
+        Self::ALL.iter().map(Self::as_wire_str).collect()
     }
 }
 
@@ -171,6 +217,15 @@ pub enum LinesGradientMode {
 }
 
 impl LinesGradientMode {
+    /// Every variant in declaration order — pins the settings dropdown order.
+    pub const ALL: &'static [Self] = &[
+        Self::Breathing,
+        Self::Static,
+        Self::Position,
+        Self::Height,
+        Self::Gradient,
+    ];
+
     /// Wire-format string used in `config.toml`.
     pub fn as_wire_str(&self) -> &'static str {
         match self {
@@ -180,6 +235,11 @@ impl LinesGradientMode {
             Self::Height => "height",
             Self::Gradient => "gradient",
         }
+    }
+
+    /// Wire strings for every variant in declaration order.
+    pub fn all_wire_strs() -> Vec<&'static str> {
+        Self::ALL.iter().map(Self::as_wire_str).collect()
     }
 }
 
@@ -196,12 +256,20 @@ pub enum LinesStyle {
 }
 
 impl LinesStyle {
+    /// Every variant in declaration order — pins the settings dropdown order.
+    pub const ALL: &'static [Self] = &[Self::Smooth, Self::Angular];
+
     /// Wire-format string used in `config.toml`.
     pub fn as_wire_str(&self) -> &'static str {
         match self {
             Self::Smooth => "smooth",
             Self::Angular => "angular",
         }
+    }
+
+    /// Wire strings for every variant in declaration order.
+    pub fn all_wire_strs() -> Vec<&'static str> {
+        Self::ALL.iter().map(Self::as_wire_str).collect()
     }
 }
 
@@ -1308,6 +1376,120 @@ style = "wibbly"
         // And the as_wire_str helper.
         assert_eq!(BarsPeakMode::FallFade.as_wire_str(), "fall_fade");
         assert_eq!(BarsPeakMode::FallAccel.as_wire_str(), "fall_accel");
+    }
+
+    /// Every `ALL` const carries every variant exactly once, in declaration
+    /// order, with pairwise-distinct wire strings. The no-wildcard exhaustive
+    /// match per enum means adding a variant breaks this test at compile time,
+    /// forcing a review of the `ALL` slice (and thus the settings dropdown).
+    #[test]
+    fn all_consts_are_exhaustive_and_ordered() {
+        for v in BarsGradientMode::ALL {
+            match v {
+                BarsGradientMode::Static
+                | BarsGradientMode::Wave
+                | BarsGradientMode::Shimmer
+                | BarsGradientMode::Energy
+                | BarsGradientMode::Alternate => {}
+            }
+        }
+        assert_eq!(BarsGradientMode::ALL.len(), 5);
+
+        for v in BarsGradientOrientation::ALL {
+            match v {
+                BarsGradientOrientation::Vertical | BarsGradientOrientation::Horizontal => {}
+            }
+        }
+        assert_eq!(BarsGradientOrientation::ALL.len(), 2);
+
+        for v in BarsPeakGradientMode::ALL {
+            match v {
+                BarsPeakGradientMode::Static
+                | BarsPeakGradientMode::Cycle
+                | BarsPeakGradientMode::Height
+                | BarsPeakGradientMode::Match => {}
+            }
+        }
+        assert_eq!(BarsPeakGradientMode::ALL.len(), 4);
+
+        for v in BarsPeakMode::ALL {
+            match v {
+                BarsPeakMode::None
+                | BarsPeakMode::Fade
+                | BarsPeakMode::Fall
+                | BarsPeakMode::FallAccel
+                | BarsPeakMode::FallFade => {}
+            }
+        }
+        assert_eq!(BarsPeakMode::ALL.len(), 5);
+
+        for v in LinesGradientMode::ALL {
+            match v {
+                LinesGradientMode::Breathing
+                | LinesGradientMode::Static
+                | LinesGradientMode::Position
+                | LinesGradientMode::Height
+                | LinesGradientMode::Gradient => {}
+            }
+        }
+        assert_eq!(LinesGradientMode::ALL.len(), 5);
+
+        for v in LinesStyle::ALL {
+            match v {
+                LinesStyle::Smooth | LinesStyle::Angular => {}
+            }
+        }
+        assert_eq!(LinesStyle::ALL.len(), 2);
+
+        // Wire strings must be pairwise distinct per enum — duplicates would
+        // make the dropdown's selected-value matching ambiguous.
+        fn assert_distinct(name: &str, strs: &[&'static str]) {
+            for (i, a) in strs.iter().enumerate() {
+                for b in &strs[i + 1..] {
+                    assert_ne!(a, b, "{name} has duplicate wire string {a:?}");
+                }
+            }
+        }
+        assert_distinct("BarsGradientMode", &BarsGradientMode::all_wire_strs());
+        assert_distinct(
+            "BarsGradientOrientation",
+            &BarsGradientOrientation::all_wire_strs(),
+        );
+        assert_distinct(
+            "BarsPeakGradientMode",
+            &BarsPeakGradientMode::all_wire_strs(),
+        );
+        assert_distinct("BarsPeakMode", &BarsPeakMode::all_wire_strs());
+        assert_distinct("LinesGradientMode", &LinesGradientMode::all_wire_strs());
+        assert_distinct("LinesStyle", &LinesStyle::all_wire_strs());
+    }
+
+    /// Pins each `all_wire_strs()` output to the exact literal vec the
+    /// settings dropdowns used before deriving from `ALL` — locks both the
+    /// display order and the snake_case wire contract.
+    #[test]
+    fn all_wire_strs_pin_dropdown_display_order() {
+        assert_eq!(
+            BarsGradientMode::all_wire_strs(),
+            vec!["static", "wave", "shimmer", "energy", "alternate"],
+        );
+        assert_eq!(
+            BarsGradientOrientation::all_wire_strs(),
+            vec!["vertical", "horizontal"],
+        );
+        assert_eq!(
+            BarsPeakGradientMode::all_wire_strs(),
+            vec!["static", "cycle", "height", "match"],
+        );
+        assert_eq!(
+            BarsPeakMode::all_wire_strs(),
+            vec!["none", "fade", "fall", "fall_accel", "fall_fade"],
+        );
+        assert_eq!(
+            LinesGradientMode::all_wire_strs(),
+            vec!["breathing", "static", "position", "height", "gradient"],
+        );
+        assert_eq!(LinesStyle::all_wire_strs(), vec!["smooth", "angular"]);
     }
 
     // ══════════════════════════════════════════════════════════════════
