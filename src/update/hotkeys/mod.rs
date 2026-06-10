@@ -161,8 +161,8 @@ impl Nokkvi {
         // (Albums/Songs/Artists/Genres), not `self.current_view` (the host view,
         // e.g. PlaylistEditor during edit). The Similar tab is handled by the
         // short-circuit above; `current_target_view()` returns None for it so
-        // the `unwrap_or` falls back to the host view, which the catch-all
-        // arm reports as "not available" — correct for Genres/Playlists hosts.
+        // the `unwrap_or` falls back to the host view, which the enumerated
+        // not-available arm reports as such — correct for Genres/Playlists hosts.
         let effective_view = self.current_target_view().unwrap_or(self.current_view);
         match effective_view {
             View::Songs => {
@@ -308,7 +308,9 @@ impl Nokkvi {
                     );
                 }
             }
-            _ => {
+            // Exhaustive on purpose — a new view must decide whether Get Info
+            // applies to it rather than silently landing here.
+            View::Genres | View::Radios | View::Settings | View::PlaylistEditor => {
                 self.toast_info("Get Info is not available in this view");
                 return Task::none();
             }

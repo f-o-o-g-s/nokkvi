@@ -127,11 +127,18 @@ impl Nokkvi {
         // For library views: dispatch a synthetic SetOffset(current_offset) via
         // the trait method, which flows through the normal handler and triggers
         // artwork prefetch via the LoadLargeArtwork / prefetch_album_artwork_tasks path.
-        // For settings: no-op.
+        // Settings has no artwork; the playlist editor routes slot events
+        // through `EditorMessage::SlotList` and never arms a seek timer —
+        // both no-op.
         match view {
             View::Queue => self.load_queue_viewport_artwork(),
-            View::Settings => Task::none(),
-            _ => {
+            View::Settings | View::PlaylistEditor => Task::none(),
+            View::Albums
+            | View::Artists
+            | View::Songs
+            | View::Genres
+            | View::Playlists
+            | View::Radios => {
                 let msg = self.view_page(view).and_then(|page| {
                     let offset = page.common().slot_list.viewport_offset;
                     page.synth_set_offset_message(offset)

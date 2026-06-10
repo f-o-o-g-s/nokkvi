@@ -402,9 +402,13 @@ impl Nokkvi {
                     "play random song from artist",
                 )
             }
-            View::Settings => Task::none(),
-            other => {
-                let Some(page) = self.view_page_mut(other) else {
+            // No ViewPage and nothing to pick — unreachable in practice
+            // (`roulette_view_total` returns 0 for both and
+            // `handle_roulette_start` gates on total == 0), kept exhaustive
+            // so a new view must place itself explicitly.
+            View::Settings | View::PlaylistEditor => Task::none(),
+            View::Queue | View::Songs | View::Albums | View::Playlists | View::Radios => {
+                let Some(page) = self.view_page_mut(view) else {
                     return Task::none();
                 };
                 let common = page.common_mut();

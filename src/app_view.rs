@@ -17,11 +17,12 @@ use crate::{
 // View ⇄ NavView conversions
 // ============================================================================
 //
-// `View` (8 variants) is the app's screen enum; `NavView` (7 variants) is the
-// nav-bar widget's column enum. Settings has no nav-bar column, so the
-// conversion is naturally lossy in one direction — `Option<NavView>` handles
-// that without per-call-site `match` boilerplate. The 7 overlapping variants
-// pair 1:1 by name, so each impl is just a small renaming table.
+// `View` is the app's screen enum; `NavView` is the nav-bar widget's column
+// enum. Settings and PlaylistEditor are contextual destinations with no
+// nav-bar column, so the conversion is naturally lossy in one direction —
+// `Option<NavView>` handles that without per-call-site `match` boilerplate.
+// The variants that do have columns pair 1:1 by name, so each impl is just a
+// small renaming table.
 
 impl From<View> for Option<widgets::NavView> {
     fn from(v: View) -> Self {

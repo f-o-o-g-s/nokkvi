@@ -169,7 +169,9 @@ impl Nokkvi {
                     }),
                     SlotListEntry::Parent(_) => None, // genres themselves can't be starred/rated
                 }),
-            _ => None,
+            // No starrable/ratable centered item on these views — a new view
+            // must opt in to the star/rating hotkeys explicitly.
+            View::Radios | View::Settings | View::PlaylistEditor => None,
         }
     }
 
