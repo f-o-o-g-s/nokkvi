@@ -306,15 +306,25 @@ where
 /// exceed its in-flight backlog cap. Genre/artist expansions have no
 /// scroll-triggered re-fetch path, so a single dropped fetch leaves a
 /// permanently-blank slot until the next expansion.
+///
+/// `pending_ids` is the `album_art_pending` in-flight set: a genre's
+/// expansion children lead with the SAME albums its row quad is warming
+/// (both derive from the name-ASC `/api/album` listing), and FocusAndExpand
+/// fires the quad dispatch and the expansion fan-out in the same event
+/// cluster — without this filter the fan-out duplicates every quad fetch
+/// still in flight.
 pub(crate) fn expansion_album_artwork_tasks(
     cached_ids: &HashSet<&String>,
     versions: &HashMap<String, Option<String>>,
+    pending_ids: &HashSet<String>,
     albums_vm: AlbumsService,
     album_ids_urls: Vec<(String, Option<String>, String)>,
 ) -> Vec<Task<Message>> {
     album_ids_urls
         .into_iter()
-        .filter(|(id, updated_at, _)| should_refetch(cached_ids, versions, id, updated_at))
+        .filter(|(id, updated_at, _)| {
+            should_refetch(cached_ids, versions, id, updated_at) && !pending_ids.contains(id)
+        })
         .map(|(id, updated_at, url)| {
             let vm = albums_vm.clone();
             Task::perform(

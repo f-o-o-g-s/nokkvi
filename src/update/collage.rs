@@ -182,6 +182,7 @@ impl Nokkvi {
         expansion_album_artwork_tasks(
             &cached,
             &self.artwork.album_art_versions,
+            &self.artwork.album_art_pending,
             albums_vm,
             triples,
         )
