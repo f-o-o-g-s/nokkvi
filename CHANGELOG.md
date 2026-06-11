@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.7.2 — 2026-06-10
+
+### Added
+
 - Turning off Verbose Config now trims config.toml down to only your non-default settings and view sorts.
 - Playlist and genre rows, plus the queue's "Playing From" strip, now show a 2x2 collage of up to four album covers.
 
