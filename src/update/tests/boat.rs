@@ -55,7 +55,10 @@ mod boat_tests {
     #[test]
     fn boat_hidden_when_settings_toggle_off() {
         let mut app = test_app();
-        // Lines mode active, but the user's boat toggle is off (the default).
+        // Lines mode active, but the user's boat toggle is explicitly off.
+        // Set it rather than leaning on the shipped default (which is on) so
+        // the test stays hermetic against config.debug.toml and default flips.
+        enable_boat_in_config(&app, false);
         app.engine.visualization_mode = VisualizationMode::Lines;
         let _ = app.update(Message::BoatTick(Instant::now()));
         assert!(
