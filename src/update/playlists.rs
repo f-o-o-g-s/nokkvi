@@ -281,7 +281,7 @@ impl Nokkvi {
                     // Row 2×2 quads source their tiles from the shared 80px
                     // album_art cache — warm the viewport's tile ids in the
                     // same pass (dedup-gated, so warm viewports add nothing).
-                    tasks.extend(self.playlists_quad_prefetch_tasks());
+                    tasks.extend(self.quad_prefetch_tasks(CollageTarget::Playlist));
 
                     if !tasks.is_empty() {
                         return Task::batch(tasks);

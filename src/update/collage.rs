@@ -67,16 +67,17 @@ impl Nokkvi {
         )
     }
 
-    /// Viewport-window 80px prefetch for the playlist rows' 2×2 quad tiles.
+    /// Viewport-window 80px prefetch for the slot rows' 2×2 quad tiles
+    /// (playlists and genres — selected by `target`).
     ///
     /// Dispatched alongside the collage mini/tile loads on every
-    /// `PlaylistsAction::LoadArtwork`, and re-dispatched when album ids land
+    /// viewport-driven `LoadArtwork`, and re-dispatched when album ids land
     /// late (`CollageAlbumIdsLoaded` / `CollageLoaded`) because the initial
     /// `LoadArtwork(0)` after a list load runs before the bulk id prefetch
     /// returns. Dedup-gated against `album_art` membership AND the
     /// `album_art_pending` in-flight set, so repeat dispatches over a warm or
     /// still-loading viewport add nothing.
-    pub(crate) fn playlists_quad_prefetch_tasks(&mut self) -> Vec<Task<Message>> {
+    pub(crate) fn quad_prefetch_tasks(&mut self, target: CollageTarget) -> Vec<Task<Message>> {
         use std::collections::HashSet;
 
         use super::components::prefetch_quad_album_artwork_tasks;
@@ -86,14 +87,24 @@ impl Nokkvi {
         };
         let albums_vm = shell.albums().clone();
         let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
-        let (queued_ids, tasks) = prefetch_quad_album_artwork_tasks(
-            &self.playlists_page.common.slot_list,
-            &self.library.playlists,
-            &cached,
-            &self.artwork.album_art_pending,
-            albums_vm,
-            |p| p.artwork_album_ids.as_slice(),
-        );
+        let (queued_ids, tasks) = match target {
+            CollageTarget::Genre => prefetch_quad_album_artwork_tasks(
+                &self.genres_page.common.slot_list,
+                &self.library.genres,
+                &cached,
+                &self.artwork.album_art_pending,
+                albums_vm,
+                |g| g.artwork_album_ids.as_slice(),
+            ),
+            CollageTarget::Playlist => prefetch_quad_album_artwork_tasks(
+                &self.playlists_page.common.slot_list,
+                &self.library.playlists,
+                &cached,
+                &self.artwork.album_art_pending,
+                albums_vm,
+                |p| p.artwork_album_ids.as_slice(),
+            ),
+        };
         drop(cached);
         for id in queued_ids {
             self.artwork.album_art_pending.insert(id);
@@ -500,12 +511,10 @@ impl Nokkvi {
 
         if !album_ids.is_empty() {
             self.set_collage_item_album_ids(target, &item_id, album_ids);
-            // A centered playlist may have just resolved its ids for the
-            // first time — warm its row's quad tiles without waiting for the
-            // next scroll-driven `LoadArtwork`.
-            if matches!(target, CollageTarget::Playlist) {
-                return Task::batch(self.playlists_quad_prefetch_tasks());
-            }
+            // A centered item may have just resolved its ids for the first
+            // time — warm its row's quad tiles without waiting for the next
+            // scroll-driven `LoadArtwork`.
+            return Task::batch(self.quad_prefetch_tasks(target));
         }
         Task::none()
     }
@@ -524,9 +533,6 @@ impl Nokkvi {
         // The bulk id prefetch lands AFTER the post-load `LoadArtwork(0)`
         // pass, which therefore saw only empty id lists — re-dispatch the
         // viewport quad prefetch now that rows know their albums.
-        if matches!(target, CollageTarget::Playlist) {
-            return Task::batch(self.playlists_quad_prefetch_tasks());
-        }
-        Task::none()
+        Task::batch(self.quad_prefetch_tasks(target))
     }
 }

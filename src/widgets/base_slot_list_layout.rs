@@ -622,8 +622,8 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
 
 /// Create a 2×2 quad artwork grid at a fixed edge size.
 ///
-/// Small-thumbnail sibling of [`collage_artwork_panel`] for playlist slot
-/// rows and the queue's "Playing From" strip cover: the same seamless
+/// Small-thumbnail sibling of [`collage_artwork_panel`] for playlist/genre
+/// slot rows and the queue's "Playing From" strip cover: the same seamless
 /// zero-spacing grid with the same modulo wrap when fewer than 4 distinct
 /// tiles exist (2 tiles → AB/AB, 3 → ABC/A). Handles are cloned into the
 /// tree eagerly (the edge is known, so no `responsive` indirection), which

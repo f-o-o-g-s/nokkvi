@@ -172,6 +172,7 @@ impl GenresPage {
                         genre,
                         &ctx,
                         genre_artwork,
+                        data.album_art,
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
@@ -259,6 +260,7 @@ impl GenresPage {
         genre: &GenreUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         genre_artwork: &'a HashMap<String, image::Handle>,
+        album_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
@@ -287,13 +289,30 @@ impl GenresPage {
         }
         if self.column_visibility.thumbnail {
             use crate::widgets::slot_list::slot_list_artwork_column;
-            content = content.push(slot_list_artwork_column(
-                genre_artwork.get(&genre.id),
-                artwork_size,
-                ctx.is_center,
-                false,
-                ctx.opacity,
-            ));
+            // 2×2 quad of the genre's first distinct album covers; while any
+            // tile is still cold (or the genre spans ≤1 album) the column
+            // keeps the single first-album mini, mirroring the large panel's
+            // mini→collage upgrade. Same treatment as the playlists rows.
+            let quad_tiles = crate::services::collage_artwork::resolve_quad_handles(
+                &genre.artwork_album_ids,
+                album_art,
+            );
+            content = content.push(match quad_tiles {
+                Some(tiles) => crate::widgets::slot_list::slot_list_artwork_quad_column(
+                    &tiles,
+                    artwork_size,
+                    ctx.is_center,
+                    false,
+                    ctx.opacity,
+                ),
+                None => slot_list_artwork_column(
+                    genre_artwork.get(&genre.id),
+                    artwork_size,
+                    ctx.is_center,
+                    false,
+                    ctx.opacity,
+                ),
+            });
         }
         content = content.push(
             container(slot_list_text(

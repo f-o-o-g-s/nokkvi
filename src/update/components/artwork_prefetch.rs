@@ -205,8 +205,9 @@ where
 /// Generate 80px quad-tile prefetch tasks for a slot list viewport.
 ///
 /// Variant of [`prefetch_album_artwork_tasks`] for rows that render a 2×2
-/// quad of album covers (playlists): each viewport item contributes its first
-/// `QUAD_TILE_COUNT` distinct `artwork_album_ids` instead of a single id.
+/// quad of album covers (playlists, genres): each viewport item contributes
+/// its first `QUAD_TILE_COUNT` distinct `artwork_album_ids` instead of a
+/// single id.
 /// Tiles are fetched by bare album id at `THUMBNAIL_SIZE` — the same
 /// album-id-keyed URL shape the queue's song minis use — and land via
 /// `ArtworkMessage::Loaded` in the shared `album_art` LRU, so tiles warmed by

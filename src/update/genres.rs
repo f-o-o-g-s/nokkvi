@@ -325,7 +325,7 @@ impl Nokkvi {
                         memory_collage: &self.artwork.genre.collage.snapshot,
                     };
 
-                    let (pending_inserts, tasks) = collage_artwork::load_visible_artwork(
+                    let (pending_inserts, mut tasks) = collage_artwork::load_visible_artwork(
                         &self.library.genres,
                         &ctx,
                         shell.auth().clone(),
@@ -353,6 +353,11 @@ impl Nokkvi {
                     for id in pending_inserts {
                         self.artwork.genre.pending.insert(id);
                     }
+
+                    // Row 2×2 quads source their tiles from the shared 80px
+                    // album_art cache — warm the viewport's tile ids in the
+                    // same pass (dedup-gated, so warm viewports add nothing).
+                    tasks.extend(self.quad_prefetch_tasks(CollageTarget::Genre));
 
                     if !tasks.is_empty() {
                         return Task::batch(tasks);
