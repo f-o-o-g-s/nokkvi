@@ -115,6 +115,31 @@ fn playback_state_updated_detects_song_change() {
 }
 
 #[test]
+fn focus_mirror_refreshes_on_same_index_entry_id_swap() {
+    let mut app = test_app();
+    // Prior queue recorded at index 0 with a now-stale entry_id (e.g. the
+    // restored queue's reseeded id). A fresh queue swap (PlayGenre at index 0
+    // when the prior queue was also at index 0) keeps the index unchanged but
+    // allocates a new entry_id at that row.
+    app.last_queue_current_index = Some(0);
+    app.last_queue_current_entry_id = Some(99);
+    app.scrobble.current_song_id = Some("song_1".to_string());
+
+    let mut update = make_playback_update();
+    update.current_index = Some(0);
+    update.current_entry_id = Some(7);
+    update.song_id = Some("song_1".to_string());
+
+    let _ = app.handle_playback_state_updated(update);
+
+    // The entry_id mirror that gates the now-playing breathing glow must track
+    // the fresh row, not the stale prior value — otherwise the queue view's
+    // `is_current` (entry_id AND song_id) fails and the now-playing row never
+    // arms its glow + sheen until a real index change.
+    assert_eq!(app.last_queue_current_entry_id, Some(7));
+}
+
+#[test]
 fn playback_state_updated_same_song_no_reset() {
     let mut app = test_app();
     app.scrobble.current_song_id = Some("song_1".to_string());

@@ -554,16 +554,30 @@ impl Nokkvi {
         tasks: &mut Vec<Task<Message>>,
     ) {
         let index_changed = self.last_queue_current_index != current_index;
+        let prev_index = self.last_queue_current_index;
+
+        // Refresh the now-playing identity mirror on EVERY call, before the
+        // index-change early-return. `current_entry_id` is the authoritative
+        // per-row id of the playing track (`entry_id_at(current_index)`). A
+        // same-index queue swap — e.g. playing a genre at index 0 while the
+        // prior queue was also parked at index 0 — leaves the index unchanged
+        // but stamps a fresh, never-reused entry_id at that row. Gating the
+        // mirror on index change alone left `last_queue_current_entry_id`
+        // stale, failing the entry_id half of the queue view's `is_current`
+        // test, so the now-playing row's breathing glow + sheen never armed
+        // until the next real index change. The focus + gapless side effects
+        // below still run only on a true index transition.
+        self.last_queue_current_index = current_index;
+        self.last_queue_current_entry_id = current_entry_id;
+
         if !index_changed {
             return;
         }
 
         trace!(
             "🎯 [FOCUS] Index changed: {:?} -> {:?}",
-            self.last_queue_current_index, current_index
+            prev_index, current_index
         );
-        self.last_queue_current_index = current_index;
-        self.last_queue_current_entry_id = current_entry_id;
 
         // Reset gapless preparation flag for the new track
         self.engine.gapless_preparing = false;

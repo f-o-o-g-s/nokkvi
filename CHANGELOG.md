@@ -15,6 +15,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The now-playing row's breathing glow and sheen now appear on the first track of a freshly played queue, not only after skipping ahead.
+
 ### Removed
 
 ## v0.7.2 — 2026-06-10
