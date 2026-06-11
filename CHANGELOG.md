@@ -7,8 +7,12 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Turning off Verbose Config now trims config.toml down to only your non-default settings and view sorts.
+- Playlist and genre rows, plus the queue's "Playing From" strip, now show a 2x2 collage of up to four album covers.
 
 ### Changed
+
+- Playing an empty album, artist, genre, or playlist now reports which kind of item was empty instead of a generic message.
+- The Settings view rebuilds its entries only when a setting changes, instead of re-reading config files every frame.
 
 ### Fixed
 
@@ -16,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - Album and song lists no longer draw the date, year, duration, or genre sort column larger than the rest of the row.
 
 ### Removed
+
+- The Theme tab no longer offers the background "level4" and foreground "gray" colors, which never affected any rendered surface.
 
 ## v0.7.1 — 2026-06-07
 
