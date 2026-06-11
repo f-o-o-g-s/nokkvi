@@ -10,7 +10,7 @@ globs: data/src/audio/**
 ```
 CustomAudioEngine
 ├── AudioDecoder (Symphonia)
-│   ├── Standard: HTTP via RangeHttpReader (256KB chunks, MAX_CACHED_CHUNKS=16, prefetch on seek)
+│   ├── Standard: HTTP via RangeHttpReader (256KB chunks, MAX_CACHED_CHUNKS=16, prefetch on seek + background sliding-window read-ahead)
 │   └── Radio:    HTTP via AsyncNetworkBuffer (tokio async → bounded mpsc → sync Read) with generation-gated auto-reconnect
 ├── AudioRenderer (ring buffers) → visualizer callback from StreamingSource
 │   └── RodioOutput (shared rodio Mixer) → ActiveStream per track
@@ -19,7 +19,7 @@ CustomAudioEngine
 ├── CrossfadeState enum (renderer): Idle / Armed / Active — per-phase data lives inside the variant; `mem::replace` swaps phases atomically
 ├── GaplessSlot — bundles `decoder` + `source` + `prepared` under one `tokio::Mutex` so the decode loop, async path, and `cancel_crossfade` always lock together (audit IG-13)
 ├── DecodeLoopHandle / SourceGeneration (`generation.rs`) — typed atomic-counter wrappers; `bump_for_user_action` / `bump_for_gapless` / `accept_internal_swap` make every "stop the loop" / "invalidate callback" call site self-documenting
-├── LiveStringSlot (`engine.rs`) — atomic-swap newtype for the engine's hot-path live strings (`live_icy_metadata`, `live_codec_name`). Only exposes `reset()` / `set()` — the type makes the reset-side discipline (B11 hot-path) impossible to drift into a blocking `write()`
+├── LiveStringSlot (`engine.rs`) — `Arc<RwLock<Option<String>>>` newtype for the engine's hot-path live strings (`live_icy_metadata`, `live_codec_name`). Writes go through `reset()` (non-blocking `try_write`) / `set()` (blocking) — the type encodes the reset-side discipline (B11 hot-path) so it can't drift into a blocking `write()`
 └── EqState (eq.rs) — shared atomic gains passed to each StreamingSource
 ```
 
@@ -33,12 +33,21 @@ One native PipeWire stream via a shared `rodio::Mixer`:
 
 ## Critical Rules
 
-- **Codec registry**: every Symphonia decoder/lookup MUST go through `audio::symphonia_registry::codecs()`, never `symphonia::default::get_codecs()`. The shared registry adds `symphonia-adapter-libopus` on top of the Symphonia defaults; the upstream default registry has no Opus decoder (pdeljanov/Symphonia#8 open since 2020), so any direct call to `get_codecs()` re-breaks `.opus` playback (see GH#3). The `audio::symphonia_registry::probe_and_make_decoder(mss, hint, hot)` helper owns the shared probe+decoder build; pass `hot = true` from streaming decode paths and `false` from one-shot probes.
+- **Codec registry**: every Symphonia decoder/lookup MUST go through `audio::symphonia_registry::codecs()`, never `symphonia::default::get_codecs()`. The shared registry adds `symphonia-adapter-libopus` on top of the Symphonia defaults; the upstream default registry has no Opus decoder (pdeljanov/Symphonia#8 open since 2020), so any direct call to `get_codecs()` re-breaks `.opus` playback (see GH#3). The `audio::symphonia_registry::probe_and_make_decoder(mss, hint, enable_gapless)` helper owns the shared probe+decoder build; `enable_gapless` is load-bearing — `true` only for the primary init in `AudioDecoder::open_input`, `false` for the `ResetRequired` reprobe and `SfxEngine::decode_wav_stream`.
 - **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Use `engine.load_track_with_rg(url, rg)` — the atomic pair that stashes ReplayGain on the renderer and then calls `set_source(url)`, replacing the historical `set_pending_replay_gain` + `load_track` / `set_source` pairing in `PlaybackController`.
 - **`SourceGeneration`**: typed atomic counter; `bump_for_user_action()` on every user-driven source change. The renderer snapshots `current()` before releasing the engine lock and discards stale completion callbacks.
 - **Next-track reset**: `reset_next_track()` clears the prepared decoder and disarms crossfade. Every queue mutator (mode toggles, move/insert/remove/sort, set_queue, add_songs, reposition_to_index) returns `NextTrackResetEffect` — a `#[must_use]` token that the caller dispatches via `apply_to(&engine)` (engine mutex) or `apply_locked(&mut engine)` (engine lock already held). The token makes the reset a compile-time obligation, so a new reorder path can't reintroduce the shuffle + crossfade UI-vs-engine desync.
 - **Track-completion path**: the playback navigator releases its lock across engine I/O — do not re-introduce a held lock around `PeekedQueue::transition()` / `set_source()`.
 - Decoupled render thread: 20 ms intervals (50 Hz), handles crossfade tick + completion detection.
+
+## Network Resilience (issue #9)
+
+Layered subsystems keep finite HTTP streams playing on shallow networks (shipped v0.6.9; hi-res deadlock fixed v0.7.1):
+
+- **Background read-ahead** (`range_http_reader.rs`): `prefetch_loop` keeps a sliding window of `PREFETCH_WINDOW_CHUNKS = 5` chunks ahead of the read cursor, topping up when the lead drops to `PREFETCH_LOW_WATERMARK_CHUNKS` (= 2). Spawned lazily by `maybe_spawn_prefetch()` on the first forward-sequential read (current chunk == previous + 1), so the FLAC init-probe's binary-search seeks never spawn a task chasing a bouncing cursor. A const assert (`1 + PREFETCH_WINDOW_CHUNKS + EXPECTED_BEHIND_CHUNKS <= MAX_CACHED_CHUNKS`) guarantees the LRU can never evict the live window — keep it satisfied when resizing any of the three. The synchronous seek-time prefetch is a separate, unchanged path.
+- **Decode cushion** (`engine.rs`): the decode loop buffers `CUSHION_MS = 1100` ms ahead (TIME-based, scaled by frame rate, grown for long crossfades); backpressure releases at `CUSHION_MS / BACKPRESSURE_RELEASE_DIVISOR` (= 3).
+- **Pause-and-rebuffer** (`renderer.rs`): pure state machine `rebuffer_action()` → `RebufferAction::{Enter, Hold, Exit, None}` driven from `render_tick`. Watermarks are TIME-based — enter below `REBUFFER_ENTER_MS = 200`, resume at `REBUFFER_RESUME_MS = 800` — converted to samples per-format via `frame_rate`. Fixed-SAMPLE budgets were the v0.6.9 hi-res deadlock: at 96k/192k they shrank in time until rebuffer entry sat above the decode backpressure-release point, freezing the ring. Compile-time interlocks encode the ordering (`REBUFFER_ENTER_MS * BACKPRESSURE_RELEASE_DIVISOR < CUSHION_MS`, `REBUFFER_RESUME_MS < CUSHION_MS`, `REBUFFER_ENTER_MS < REBUFFER_RESUME_MS`) — keep all three satisfied when changing any of these constants. Finite (seekable) streams only: never radio, never mid-crossfade. `MAX_REBUFFER_TICKS = 500` is the dead-socket safety valve.
+- **Latch discipline**: `reset_rebuffer_latch()` zeroes `rebuffering` / `rebuffer_primed` / `rebuffer_ticks` on every fresh-ring transition — start, stop, seek, and `finalize_crossfade` (carrying a stale `rebuffer_primed` across a sample-rate change is the one path that re-creates the deadlock; test `finalize_crossfade_resets_rebuffer_latch`). `pause()` deliberately clears only `rebuffering`. The latch primes once the ring first reaches the resume target, so a cold track start cannot false-pause at 0:00.
 
 ## Volume
 
@@ -50,7 +59,7 @@ Dual-path: PipeWire native (preferred) or software fallback.
 
 ## Volume Normalization & ReplayGain
 
-`VolumeNormalizationMode`: `Off`, `Agc`, `ReplayGainTrack`, `ReplayGainAlbum`. Settings under General → Application include preamp dB, fallback dB, fallback-to-AGC, prevent-clipping. Renderer reads `volume_normalization_mode` and resolves a gain factor; `RodioOutput` applies it via `source.amplify(gain).limit(LimitSettings::dynamic_content())`. Primary loads stash incoming-track ReplayGain via `load_track_with_rg(url, rg)`; the crossfade decoder uses `set_pending_crossfade_replay_gain()` before its stream is built — both paths land the right factor at stream creation.
+`VolumeNormalizationMode`: `Off`, `Agc`, `ReplayGainTrack`, `ReplayGainAlbum`. Settings live in the Settings view's Playback tab, "Volume Normalization" section (`src/views/settings/items_playback.rs`): mode dropdown, AGC target level (AGC only), and — in RG modes — preamp dB, fallback dB, fallback-to-AGC, prevent-clipping. Renderer reads `volume_normalization_mode` and resolves a gain factor; `RodioOutput` applies it via `source.amplify(gain).limit(LimitSettings::dynamic_content())`. Primary loads stash incoming-track ReplayGain via `load_track_with_rg(url, rg)`; the crossfade decoder uses `set_pending_crossfade_replay_gain()` before its stream is built — both paths land the right factor at stream creation.
 
 ## Equalizer
 

@@ -46,7 +46,7 @@ Every view follows this pattern — do not deviate:
 
 ```rust
 pub struct AlbumsPage { common: SlotListPageState, /* ... */ }
-pub enum AlbumsMessage { SlotListNavigateUp, /* ... */ }
+pub enum AlbumsMessage { SlotList(SlotListPageMessage), /* ... */ }
 pub enum AlbumsAction { PlayAlbum(String), None }
 fn update(&mut self, msg: AlbumsMessage) -> (Task<AlbumsMessage>, AlbumsAction);
 fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>;  // pure
@@ -56,12 +56,12 @@ fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>;  
 
 Key shared infrastructure:
 - `ViewPage` trait (`views/mod.rs`) — explicit `impl` per view, no macro. Has pane-aware `current_view_page{,_mut}()` (delegates to browsing panel in split-view) and direct `view_page{,_mut}(View)`.
-- `CommonViewAction` + `HasCommonAction` — generic SearchChanged/SortModeChanged/SortOrderChanged dispatch. Handled centrally by `handle_common_view_action()` in `update/components.rs`.
+- `CommonViewAction` + `HasCommonAction` — generic SearchChanged/SortModeChanged/SortOrderChanged dispatch. Handled centrally by `handle_common_view_action()` in `update/components/`.
 - `impl_expansion_update!` macro — deduplicates inline expansion handling.
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
-- Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (block plays during playlist edit / split-view conflicts), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components.rs`.
+- Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (block plays during playlist edit / split-view conflicts), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components/mod.rs`.
 
-Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `NavigationMessage`, `FindMessage`, `SplitViewMessage`, `CrossPaneDragMessage`, `ToastMessage`). Flat variants remain only for cross-cutting concerns. See `src/app_message.rs`.
+Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage`, `NavigationMessage`, `FindMessage`, `SplitViewMessage`, `CrossPaneDragMessage`, `ToastMessage`). Flat variants remain only for cross-cutting concerns. See `src/app_message.rs`.
 
 ## Backend (`data/`) architecture
 
@@ -77,7 +77,7 @@ AppService (orchestrator)
 └── TaskManager              — centralized spawn tracking + status channel for UI notifications
 ```
 
-The Navidrome SSE subscriber lives in the **UI crate** (`src/services/navidrome_sse.rs`) and parses events with `data/src/services/navidrome_events.rs::parse_sse_event()`; it is not part of `AppService`. There is no centralized `ArtworkPrefetch` component — artwork prefetching is dispatched ad-hoc via Iced `Task::perform` calls from update handlers (see `src/update/components.rs`); it does not go through `TaskManager`.
+The Navidrome SSE subscriber lives in the **UI crate** (`src/services/navidrome_sse.rs`) and parses events with `data/src/services/navidrome_events.rs::parse_sse_event()`; it is not part of `AppService`. There is no backend `ArtworkPrefetch` component — artwork prefetching is dispatched via Iced `Task::perform` from the shared task builders in `src/update/components/artwork_prefetch.rs`; it does not go through `TaskManager`.
 
 - **`PagedBuffer<T>`** (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it drop-in. Load state via `set_loading()` / `needs_fetch()`. Always call `set_loading(true)` before dispatching a page fetch — otherwise rapid scroll triggers duplicate fetches.
 - **Persistence**: `redb` (`app.redb`) for queue/session/structured state via `services/state_storage.rs`; TOML (`config.toml`) for user-editable config via `services/toml_settings_io.rs` and `src/config_writer.rs`. **Routing matters**: `update_config_value()` writes `config.toml`; `update_theme_value()` writes the active theme file in `~/.config/nokkvi/themes/`. Misrouting silently overwrites the wrong file.
@@ -116,7 +116,7 @@ Critical invariants:
 - **Search**: always immediate — never debounce.
 - **Dependencies**: rely on the existing workspace crates; discuss before adding new ones. Runtime: `iced`, `tokio` (+ `tokio-util`), `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `lru`, `bytemuck`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `symphonia`, `icy-metadata`, `thiserror`, `pipewire`, `ksni` (last two linux-only). Test-only `[dev-dependencies]`: `proptest`, `tempfile`.
 - **Render output**: keep a view's root widget type stable across renders (e.g., always `Column`) — changing it destroys `text_input` focus. Use `base_slot_list_empty_state` for empty/loaded parity.
-- **Border radii**: use `ui_border_radius()` (theme-aware via `ROUNDED_MODE` atomic), not hardcoded values. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
+- **Border radii**: use the role-appropriate scale helpers `ui_radius_xs/sm/md/lg/pill` (`src/theme/radius.rs`, mode-gated via `UI_MODE.rounded_mode`), not hardcoded values. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
 - **Manual UI verification (overrides default Claude Code guidance)**: nokkvi is a native Rust/Iced desktop app — there is no browser, no dev server, no `npm run dev`. Ignore any default instruction to "start the dev server" or "test in a browser". When the human owner asks for a UI change, deliver code that compiles cleanly (`cargo build`), passes tests/clippy/fmt, and stop there. The human runs `cargo run` (or a release build) and tests the running window themselves; their feedback is the verification loop. If a change has UI implications you cannot validate from code alone (visual layout, focus, marquee timing, etc.), say so explicitly in the handoff so the owner knows what to look at.
 
 ## Red-Green TDD for handlers

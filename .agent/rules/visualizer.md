@@ -7,17 +7,17 @@ globs: src/widgets/visualizer/**,src/visualizer_config.rs
 
 ## SpectrumEngine (RustFFT)
 
-Pure-Rust FFT in `data/src/audio/spectrum.rs`. Dual-band FFT (bass 2×, treble 1×). `max_bars_for_sample_rate()` caps treble bins; `interpolate_bars()` fills gaps. Zero allocation (pre-allocated scratch). Engine reinitializes on sample rate change.
+Pure-Rust FFT in `data/src/audio/spectrum.rs`. Dual-band FFT (bass 2×, treble 1×). `max_bars_for_sample_rate()` caps treble bins; `interpolate_bars()` (`src/widgets/visualizer/state.rs`) fills gaps. Zero allocation (pre-allocated scratch). Engine reinitializes on sample rate change.
 
-Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `auto_sensitivity`. Smoothing filters (mutually exclusive): `waves` (Catmull-Rom, `waves_smoothing` 2–16) or `monstercat` (exponential; values < `MONSTERCAT_MIN_EFFECTIVE = 0.7` are snapped to 0 / off; default 1.0).
+Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `auto_sensitivity` (fields + `MONSTERCAT_MIN_EFFECTIVE` in `src/visualizer_config.rs`). Smoothing filters (mutually exclusive, applied as `waves_filter` / `monstercat_filter` in `src/widgets/visualizer/state.rs`): `waves` (Catmull-Rom, `waves_smoothing` 2–16) or `monstercat` (exponential; values < `MONSTERCAT_MIN_EFFECTIVE = 0.7` are snapped to 0 / off; default 1.0).
 
 ## Module Structure
 
-- `widgets/visualizer/mod.rs` — `ShaderVisualizer` Iced widget glue; `build_shader_params(...)` constructs the 32-field `ShaderParams` from a config snapshot, theme palette, and viewport
+- `widgets/visualizer/mod.rs` — `Visualizer` Iced widget glue (its `view()` wraps a `ShaderVisualizer` in `iced::widget::shader`); `build_shader_params(...)` constructs the 32-field `ShaderParams` from a config snapshot, theme palette, and viewport
 - `widgets/visualizer/state.rs` — `VisualizerState` runtime (audio callback, FFT pipeline, peak/effect state, display buffers); `VisualizerTiming` is a zero-sized struct holding the per-frame tick constants (`TICK_RATE_HZ = 60`, `TICK_INTERVAL`, and ms/secs variants) all derived from one rate
-- `widgets/visualizer/pipeline.rs` — `MAX_BARS = 2048`, GPU buffers, `Pipeline::new`
-- `widgets/visualizer/shader.rs` — `ShaderParams` struct, render dispatch, MSAA texture cache, blit shader
-- `widgets/visualizer/shaders/bars.wgsl`, `lines.wgsl` — share a `Config` struct (must stay in sync with `ShaderParams` field order)
+- `widgets/visualizer/pipeline.rs` — `MAX_BARS = 2048`, GPU buffers, `VisualizerPipeline::new` (the struct itself is declared in `shader.rs`)
+- `widgets/visualizer/shader.rs` — `ShaderParams` struct, `ShaderVisualizer` (the `shader::Program` impl), render dispatch, MSAA texture cache, blit shader
+- `widgets/visualizer/shaders/bars.wgsl`, `lines.wgsl` — share a `Config` struct that must mirror the bytemuck-Pod GPU uniform `VisualizerConfig` (`shader.rs`, NOT `ShaderParams` — that is a CPU-side grouping struct with a different field list) verbatim; a drift is silent memory reinterpretation. Interlocks: const-asserts in `shader.rs` pin alignment (16), size (8336), and key offsets; `wgsl_config_field_names_match_rust_struct` in `mod.rs` pins the WGSL field names against the Rust struct. Update all three together when changing a config field.
 
 **Render path:** non-MSAA fast path by default; switches to **4× MSAA → resolve → blit** when perspective lean is active (the `has_perspective` flag on `VisualizerPrimitive`, set from `bar_depth_3d > 0.001`, gates the path per-frame).
 
@@ -25,7 +25,7 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 ## Bars Mode
 
-Mode enums in `src/visualizer_config.rs` (real Rust enums, not strings — hand-rolled `#[derive(Serialize, Deserialize)]` `#[serde(rename_all = "snake_case")]` `#[repr(u32)]` enums, each with a manual `as_wire_str()`; deserialization is via the derived `Deserialize`):
+Mode enums in `src/visualizer_config.rs` (real Rust enums, not strings — hand-rolled `#[derive(Serialize, Deserialize)]` `#[serde(rename_all = "snake_case")]` `#[repr(u32)]` enums, each with a manual `as_wire_str()`, a pinned `ALL` const slice (declaration order = settings-dropdown display order), and `all_wire_strs()`; deserialization is via the derived `Deserialize`). The settings dropdowns in `src/views/settings/items_visualizer.rs` derive their option lists from `all_wire_strs()` — when adding a variant, extend `ALL` too; pin tests assert each `ALL` carries every variant exactly once in declaration order, and the no-wildcard `as_wire_str()` matches force a compile error until both are updated. Enums:
 - `BarsPeakMode`: `None` / `Fade` / `Fall` / `FallAccel` / `FallFade`. `peak_fall_speed` 1–20.
 - `BarsGradientMode`: `Static` (0) / `Wave` (2) / `Shimmer` (3) / `Energy` (4) / `Alternate` (5). **Discriminant `1` is intentionally skipped** — `bars.wgsl` has no branch for it; the `bars_gradient_mode_never_emits_dead_1u` test in `src/visualizer_config.rs` pins this against accidental future use.
 - `BarsGradientOrientation`: `Vertical` (within-bar) / `Horizontal` (bass → treble across bars).

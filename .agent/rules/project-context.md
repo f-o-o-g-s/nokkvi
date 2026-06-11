@@ -39,7 +39,7 @@ fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>;  
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged / SortModeChanged / SortOrderChanged dispatch.
 - `impl_expansion_update!` macro — deduplicates inline expansion handling.
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
-- `PaginatedFetch::from_common()` (`update/components.rs`) — needs_fetch-gated paginated load helper used by Albums / Artists / Songs.
+- `PaginatedFetch::from_common()` (`update/components/mod.rs`) — needs_fetch-gated paginated load helper used by Albums / Artists / Songs.
 
 Root routing in `update/mod.rs` dispatches `Message::Albums(msg)` → `albums_page.update(msg)`, then handles the returned Action.
 

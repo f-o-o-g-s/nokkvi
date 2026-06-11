@@ -11,8 +11,8 @@ All slot-list-based views implement `ViewPage` (in `views/mod.rs`) — explicit 
 - `current_view_page() / current_view_page_mut()` — pane-aware routing (delegates to browsing panel in split-view)
 - `view_page(View) / view_page_mut(View)` — direct lookup by `View` enum
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged / SortModeChanged / SortOrderChanged dispatch (handled centrally in `handle_common_view_action()`)
-- `impl_expansion_update!` macro — deduplicates expansion handling (9 common arms for expansion views)
-- `synth_set_offset_message(&self, offset: usize) -> Option<Message>` — builds a per-view `SlotList(SlotListPageMessage::SetOffset(offset, default_modifiers))` message; used by `handle_seek_settled` to trigger artwork prefetch after scrollbar seek. Expansion views implement this; Queue and Settings return `None`.
+- `impl_expansion_update!` macro — deduplicates expansion handling (12 common arms for expansion views: 7 named arms — expand_center, collapse, children_loaded, sort_selected, toggle_sort, search_changed, search_focused — plus 5 `slot_list_wrap` arms: `HoverEnterSlot` / `HoverExitSlot` and the three `Toolbar*` reveal-lock variants)
+- `synth_set_offset_message(&self, offset: usize) -> Option<Message>` — builds a per-view `SlotList(SlotListPageMessage::SetOffset(offset, default_modifiers))` message; used by `handle_seek_settled` to trigger artwork prefetch after scrollbar seek. Six views override it (the four expansion views plus Songs and Radios); Queue and Similar fall through to the trait default `None`; Settings doesn't implement `ViewPage` at all.
 - `reload_message(&self) -> Option<Message>` — emits the view's "reload from server" message (the `R` hotkey + manual refresh button bind through this). Reloadable views return `Some(...)`; views without server backing return `None`. Replaces the prior `RefreshView` 7-arm match in update routing.
 - `slot_list_message(&self, msg: SlotListPageMessage) -> Message` — wraps a `SlotListPageMessage` in the view's per-view `*Message::SlotList(...)` variant. Lets cross-view dispatch (slot_list.rs, roulette.rs, center-on-playing) fan out without a manual match on `View`.
 
@@ -26,6 +26,8 @@ Shared by every slot-list view: search query, scroll position, focus index. Visi
 
 **Multi-selection** (Ctrl+click / Shift+click / per-row checkbox / select-all): `selected_indices: HashSet`, `anchor_index` for range. `handle_slot_click()` handles modifier-aware selection; `handle_selection_toggle(offset, total)` and `handle_select_all_toggle(total)` drive the optional checkbox column. `select_all_state(total)` returns the tri-state (`None` / `Some` / `All`) the header bar uses. `clear_multi_selection()` resets. `evaluate_context_menu()` resolves batch targets for right-click menus.
 
+**Auto-hide toolbar** (opt-in, Interface → Slot List, `settings.autohide_toolbar`): the view-header toolbar collapses to a thin strip until revealed. Reveal state lives on `SlotListPageState`: `toolbar_hovered` (cursor over the reveal zone), `toolbar_dropdown_open` (sort `pick_list` open), and `toolbar_reveal_until` (2.5 s hotkey reveal window set by `reveal_toolbar()`). `toolbar_revealed(autohide_enabled)` resolves these at render time — an active search query or focused search input also keeps it open. The `Toolbar*` `SlotListPageMessage` variants land via `set_toolbar_hovered()` / `set_toolbar_dropdown_open()` in both `SlotListPageState::handle()` and the `impl_expansion_update!` macro. **Invariant**: the flags are normally cleared by `on_exit` / `on_close`, which can't fire once the header unmounts — so `reset_reveal_locks()` must run on every unmount edge: view switch (`clear_all_toolbar_reveal_locks()` in `handle_switch_view`), browsing-panel close (`clear_browsing_panel_reveal_locks()`), and session reset. The collapse animation depends on the unconditional 100 ms `PlaybackMessage::Tick` for redraws — keep that tick ungated on playback.
+
 ## Navigation & Interaction
 
 ### Root-level SlotListMessage (keyboard + scrollbar)
@@ -34,7 +36,7 @@ Shared by every slot-list view: search query, scroll position, focus index. Visi
 
 ### Per-view SlotList(SlotListPageMessage) carrier
 
-Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` variant (e.g., `AlbumsMessage::SlotList(…)`, `SongsMessage::SlotList(…)`). `SlotListPageMessage` (in `widgets/slot_list_page.rs`) enumerates all slot-list actions: `NavigateUp`, `NavigateDown`, `SetOffset(usize, Modifiers)`, `ScrollSeek(usize)`, `ActivateCenter`, `ClickPlay(usize)`, `SelectionToggle(usize)`, `SelectAllToggle`, `AddCenterToQueue`, `RefreshViewData`, `CenterOnPlaying`, `SearchQueryChanged(String)`, `SearchFocused(bool)`, `SortModeSelected(SortMode)`, `ToggleSortOrder`, `HoverEnterSlot(HoveredSlot)`, `HoverExitSlot(HoveredSlot)`. The hover variants are published by per-slot `mouse_area::on_enter` / `on_exit` and land on `SlotListView::hovered_slot` (via `SlotHoverCallback` in `widgets/slot_list.rs`) so cross-pane drag resolves "cursor over which slot" structurally rather than from chrome math; `HoverExitSlot` is idempotent (only clears when its payload still matches).
+Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` variant (e.g., `AlbumsMessage::SlotList(…)`, `SongsMessage::SlotList(…)`). `SlotListPageMessage` (in `widgets/slot_list_page.rs`) enumerates all slot-list actions: `NavigateUp`, `NavigateDown`, `SetOffset(usize, Modifiers)`, `ScrollSeek(usize)`, `ActivateCenter`, `ClickPlay(usize)`, `SelectionToggle(usize)`, `SelectAllToggle`, `AddCenterToQueue`, `RefreshViewData`, `CenterOnPlaying`, `SearchQueryChanged(String)`, `SearchFocused(bool)`, `SortModeSelected(SortMode)`, `ToggleSortOrder`, `HoverEnterSlot(HoveredSlot)`, `HoverExitSlot(HoveredSlot)`, `ToolbarHoverEnter`, `ToolbarHoverExit`, `ToolbarDropdownToggled(bool)`. The slot-hover variants are published by per-slot `mouse_area::on_enter` / `on_exit` and land on `SlotListView::hovered_slot` (via `SlotHoverCallback` in `widgets/slot_list.rs`) so cross-pane drag resolves "cursor over which slot" structurally rather than from chrome math; `HoverExitSlot` is idempotent (only clears when its payload still matches). The three `Toolbar*` variants drive the auto-hide toolbar's reveal-lock state (see SlotListPageState above).
 
 **Non-expansion views** (Songs, Queue, Radios, Similar) call `self.common.handle(msg, total)` → `SlotListPageAction`, then map the action to their `*Action` enum. `SlotListPageState::handle()` is the unified dispatcher.
 
@@ -46,7 +48,7 @@ Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` va
 - **Stable viewport** (default): non-center clicks → `SetOffset` (highlight in-place); center clicks → `ActivateCenter`.
 - **Legacy mode**: non-center clicks → `ClickPlay` (direct play).
 - Activation flash: `slot_list.flash_center()` on activation/transitions.
-- Clickable text links: inline album/artist text dispatches `NavigateAndFilter(View, LibraryFilter)` via `mouse_area`. When the browsing panel is active, navigation updates its tab instead of switching the main view.
+- Clickable text links: inline album/artist text dispatches `NavigateAndFilter { view, filter, for_browsing_pane }` via `mouse_area`. When the browsing panel is active, `for_browsing_pane: true` routes the change into its tab instead of switching the main view.
 - Clickable star ratings + clickable hearts on every slot via `mouse_area`.
 - Scrollbar timers carry the target `View` so seek messages route correctly between panes.
 
@@ -103,19 +105,19 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-
 - All 8 impls are generated by the file-private `impl_view_chrome!` macro. Each invocation declares the per-view variation axes as `{ roulette: yes|no, expand: yes|no, drag: yes|no }` (Similar has no `Roulette` variant; only the 4 expansion views flag expand SFX; Radios has no artwork-drag variants). A wrong flag is a compile error, not silent drift — `yes` references the variant by name. New view-message enums get one invocation plus axis flags, not a hand-written impl.
 - `dispatch_view_chrome<M: HasViewChrome>(handler, msg, view)` — run at the top of every `handle_*` function. Returns `Some(task)` for `SetOpenMenu` / `Roulette` intercepts (caller returns immediately); returns `None` for normal page actions (after triggering the appropriate SFX).
 
-**`update/components.rs`** — shared action helpers:
+**`update/components/`** (directory module: `mod.rs` + `artwork_prefetch.rs`) — shared action helpers:
 - `guard_play_action` — split-view + playlist-edit conflict guard
 - `set_item_rating_task`, `star_item_task`, `radio_mutation_task`
 - `handle_common_view_action` — applies generic Search/Sort/Navigate actions to non-Queue library views; called from each view's handler after the page `update()` returns a `CommonViewAction`
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)
-- `prefetch_album_artwork_tasks` / `prefetch_song_artwork_tasks` — viewport-window artwork prefetch
+- `prefetch_album_artwork_tasks` / `prefetch_song_artwork_tasks` — viewport-window artwork prefetch; defined in `artwork_prefetch.rs`, re-exported so call sites keep using `components::<fn>`
 - `play_entity_task` / `add_entity_to_queue_task` / `insert_entity_to_queue_at_position_task` — generic entity-action builders
 - `reset_session_state(&mut self) -> Task<Message>` — full session-teardown reset (audio engine, task manager, queue/library/state/scrobble caches, focus, modals). Single source for logout + session-expired auth flows; callers add only their tail-specific work (toast, dialog) afterward.
 - Boilerplate extraction helpers in `widgets/slot_list_page.rs` (`get_queue_target_indices`, `get_batch_target_indices`) and `views/expansion.rs` (`build_batch_payload`)
 
 **`update/loader_target.rs`** — paged-loader unification (Group U Lane C):
-- `LoaderTarget` trait per entity: `AlbumsTarget`, `ArtistsTarget`, `SongsTarget`, `GenresTarget`, `PlaylistsTarget`. Encapsulates `page_size`, `page_common()` accessor, `sort_mode_to_api()`, and the entity-specific paged-fetch closure.
-- `Nokkvi::load_paged<T: LoaderTarget>(...)` owns the shared body (defensive `offset > 0 && needs_fetch().is_none()` gate, `set_loading(true)`, `shell_task` build). Per-entity `load_<entity>_internal` callers shrink to a single `self.load_paged::<TargetType>(...)` line. New paged views implement `LoaderTarget` rather than copying the body.
+- `LoaderTarget` trait per entity: `AlbumsTarget`, `ArtistsTarget`, `SongsTarget`, `GenresTarget`, `PlaylistsTarget`. Encapsulates the `page_common()` accessor and `sort_mode_to_api()` (plus library-buffer/artwork/viewport hooks).
+- `Nokkvi::load_paged<T: LoaderTarget>(...)` owns the shared body (defensive `offset > 0 && needs_fetch().is_none()` gate, `set_loading(true)`, `shell_task` build). Page size is read from `settings.library_page_size` inside `load_paged`; the entity-specific paged-fetch closure is a per-call parameter captured at the call site, not threaded through the trait. Per-entity callers (`handle_load_*` / `handle_*_load_page` / `force_load_*_page`) shrink to a single `self.load_paged::<TargetType>(...)` line. New paged views implement `LoaderTarget` rather than copying the body.
 
 ## View Data Refresh
 

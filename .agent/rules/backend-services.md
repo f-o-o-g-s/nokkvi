@@ -62,16 +62,22 @@ AppService (orchestrator)
 │   │   (3 attempts, 100/200 ms backoff) sitting in front of Navidrome's
 │   │   `getCoverArt` throttle. Empty-bytes responses surface as errors
 │   │   so retries can recover instead of caching a blank handle
-│   └── Session-scoped Handle reuse via UI's `album_art` (LRU 512) +
-│       `large_artwork` (LRU 200) maps
+│   └── Session-scoped Handle reuse via UI's `album_art` (LRU 1024 —
+│       doubled when the 2×2 quad thumbnails landed) + `large_artwork`
+│       (LRU 200) maps, plus per-target `CollageArtworkCache` LRUs
+│       (100 each) for genre/playlist collages (`src/state/artwork.rs`)
 ├── SSE — `data/src/services/navidrome_events.rs::parse_sse_event` parses
 │   events; the subscription itself runs in the UI crate
 │   (`src/services/navidrome_sse.rs`) and dispatches
 │   `Message::LibraryChanged(LibraryChange { album_ids, artist_ids, song_ids,
 │   playlist_ids, genre_ids, is_wildcard })` → ID-anchored slot-list reload
-│   handled by `update/library_refresh.rs`. Non-wildcard events trigger silent
-│   re-fetch for any affected album in `album_art` / `large_artwork`; wildcard
-│   payloads still reload slot lists but skip per-album artwork eviction.
+│   handled by `update/library_refresh.rs`. Each entity branch reloads only
+│   when its ID list is non-empty (or the payload is a wildcard); wildcard
+│   events also re-fetch the multi-library list. Artwork is deliberately NOT
+│   refreshed from SSE — Navidrome fires `library_changed` on every
+│   play-count bump and the auto-refresh caused a one-frame GPU-upload
+│   flicker. Cover-art replacements propagate via the paged slot-list reload
+│   and the user-initiated right-click "Refresh Artwork" path.
 └── TaskManager — real supervisor: `shutdown_all(budget)` fires the shared
     cancellation token and awaits every tracked `JoinHandle` (`JoinSet`)
     within the budget, then aborts stragglers. `request_shutdown()` on
@@ -97,12 +103,12 @@ AppService (orchestrator)
 
 `SongPool` (HashMap) + `Queue` ordering (`song_ids` + `order` array + `current_order`). Modules: `services/queue/{mod, navigation, order, write_guard}.rs`.
 
-- **Mutation guard** (`write_guard.rs`): every queue write goes through `QueueWriteGuard`, which forces the caller to pick a commit mode at the end of the borrow — `commit_save_all` (full save), `commit_save_order` (order-only), or `commit_no_save` (in-memory only). Each `commit_*` method returns a `NextTrackResetEffect` so a future reorder path can't silently skip the engine's gapless-prep reset. Drop without committing panics in debug, warns in release.
+- **Mutation guard** (`write_guard.rs`): every queue write goes through `QueueWriteGuard`, which forces the caller to pick a commit mode at the end of the borrow — `commit_save_all` (full save), `commit_save_order` (order-only), or `commit_no_save` (in-memory only). Each `commit_*` method returns a `NextTrackResetEffect` so a future reorder path can't silently skip the engine's gapless-prep reset. Drop without committing is the intentional safety net: it still runs `clear_queued()`, so `?` propagation or a panic between `write()` and `commit_*` can't leave a buffered next song keyed to pre-mutation order.
 - **Navigation typestate** (`navigation.rs`): `peek_next_song()` returns a `PeekedQueue<'_>` guard whose only public consumer is `transition()`. The crate-internal `transition_to_queued_internal` is the actual mutator — no other call site can advance the queue without first peeking.
 - Shuffle off: identity order. Shuffle on: Fisher-Yates with the current song anchored at index 0.
 - Every queue mutation calls `clear_queued()` to invalidate the buffered next song.
 - All queue mutators — mode toggles (`toggle_shuffle`, `set_repeat`, `toggle_consume`), reorders (`move_item`, `insert_*`, `remove_*`, `sort_queue`, `shuffle_queue`), and full replacements (`set_queue`, `add_songs`, `reposition_to_index`) — return `NextTrackResetEffect`. The `#[must_use]` discharge contract makes engine gapless-prep invalidation a compile-time obligation across every reorder path, closing the queue/engine desync window that a shuffle + crossfade reorder used to open.
-- Progressive build: first 500 plays immediately; recursive `ProgressiveQueueAppendPage` chain for the rest.
+- Progressive build: everything already loaded in the songs `PagedBuffer` plays immediately; a recursive `ProgressiveQueueAppendPage` chain (`src/update/progressive_queue.rs`) fetches the rest at `library_page_size` per page (100/500/1000/5000, default 500).
 - Serialization: bincode `Encode` / `Decode` (~3× faster than JSON) via `StateStorage::save_binary()` / `load_binary()` — no JSON fallback path.
 - **Reshuffle on repeat wrap**: shuffle + repeat-playlist re-shuffles the order array when the queue wraps back to the start.
 
@@ -118,7 +124,7 @@ AppService (orchestrator)
 | **TOML config** (`~/.config/nokkvi/config.toml`, `config.debug.toml` in debug builds) | `services/toml_settings_io.rs` | Hot-reloadable via `toml_edit`. `verbose_config` writes all defaults |
 | **Theme files** (`~/.config/nokkvi/themes/`) | `services/theme_loader.rs` | Named `.toml`. **22 built-in** (compiled via `include_str!`, seeded on first run; `svalbard` is the first-run default). Discovery, load/save, restore-builtin |
 | **Artwork** | (no disk cache) | Server-only. Session-scoped Handle reuse in UI maps |
-| **Config writer** | `src/config_writer.rs` (UI crate) | Typed `ConfigKey { AppScalar, Theme, ThemeArrayEntry }`. Per-key TOML updates routed through `nokkvi_data::utils::paths::write_atomic` (temp file + rename + `LAST_INTERNAL_WRITE` tag for the config watcher's reflection-suppression) |
+| **Config writer** | `src/config_writer.rs` (UI crate) | Typed `ConfigKey { AppScalar, Theme, ThemeArrayEntry }`. Per-key TOML updates routed through `nokkvi_data::utils::paths::write_atomic` (temp file + rename; records the write in the per-path `INTERNAL_WRITES` registry so the config watcher's `was_internal_write(path, content_hash)` check suppresses self-write reflections) |
 | **Credentials** | `data/src/credentials.rs` | `server_url` / `username` in `config.toml`; JWT + Subsonic credential in redb. **No password on disk** — JWT auto-refreshes via `X-ND-Authorization`; expired JWT (48h default) drops to the login screen |
 
 ## SettingsService & SettingsManager
@@ -140,7 +146,7 @@ Adjacent enum macros: `define_labeled_enum!` (`data/src/types/labeled_enum.rs`) 
 ## Theme System
 
 - `ThemeFile`: `name`, `dark: ThemePalette`, `light: ThemePalette`
-- `ThemePalette`: `BackgroundConfig` (6 levels), `ForegroundConfig` (5 levels), `AccentConfig`, four `SemanticColorConfig` (danger / success / warning / star), `VisualizerColors`
+- `ThemePalette`: `BackgroundConfig` (6 levels), `ForegroundConfig` (5 levels), `AccentConfig`, four `SemanticColorConfig` (danger / success / warning / star), `VisualizerColors`, plus a serde-default `border` hairline color (empty string → runtime derives it by darkening `background.hard` 30 %)
 - `config.toml` stores `theme = "name"` — points to `~/.config/nokkvi/themes/{name}.toml`
 - Font is a **global setting** (`font_family` in `LivePlayerSettings` / `TomlSettings`), decoupled from `ThemeFile`
 

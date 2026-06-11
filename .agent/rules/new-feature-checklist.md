@@ -29,7 +29,7 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] **MPRIS**: update `services/mpris.rs` for playback-related changes
 - [ ] **Scrobbling**: check `update/scrobbling.rs` for track-lifecycle hooks
 - [ ] **Sort/Search**: extend `SortMode` (or `QueueSortMode`); search is immediate (no debounce)
-- [ ] **Settings**: General / Interface / Playback knobs are declared via `define_settings!` in `data/src/services/settings_tables/{general,interface,playback}.rs` (each entry includes `on_dispatch` + `write` for both directions of the TOML round-trip). Theme / Visualizer / Hotkey items still build via `views/settings/items_*.rs` using `SettingMeta::new(key, label, category).with_subtitle(...)` (subtitle is optional)
+- [ ] **Settings**: General / Interface / Playback knobs are declared via `define_settings!` in `data/src/services/settings_tables/{general,interface,playback}.rs` (each entry includes `on_dispatch` + `write` for both directions of the TOML round-trip). Theme / Visualizer / Hotkey items still build via `views/settings/items_*.rs` using `SettingMeta::new(key, label, category).with_subtitle(...)` (subtitle is optional). New settings rows get curated search synonyms in `data/src/utils/setting_keywords.rs::keywords_for` so the fuzzy settings search finds them by alias terms
 - [ ] **Config write routing**: settings → `ConfigKey::AppScalar` / `Theme` / `ThemeArrayEntry` (typed dispatch in `config_writer.rs`). Sentinel pseudo-keys (restore-all, apply-preset) route through `SentinelKind` in `views/settings/sentinel.rs`
 - [ ] **Playlist edit guard**: `guard_play_action()` on every play handler
 - [ ] **HasCommonAction**: implement on the action enum if the view has SearchChanged/SortModeChanged/SortOrderChanged
@@ -38,5 +38,5 @@ description: End-to-end checklist when building new features. Covers cross-view 
 
 ## Verification
 - [ ] **TDD**: write tests for observable state mutations *before* implementing handlers (`update/tests/{area}.rs` or the per-area `tests_*.rs` siblings; `test_app()` from `src/test_helpers.rs`)
-- [ ] `cargo +nightly fmt --all`, `cargo clippy --all-targets -- -D warnings`, `cargo test` clean
+- [ ] `cargo +nightly fmt --all`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` clean
 - [ ] Manual: happy path + edge cases + stable widget tree (root widget type unchanged across renders)

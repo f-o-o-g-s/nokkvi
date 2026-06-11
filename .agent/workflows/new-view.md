@@ -11,34 +11,37 @@ Steps to add a new slot-list-based view, in order.
    - `{Name}Message` enum (slot-list navigation variants)
    - `{Name}Action` enum with `None` at minimum
    - `update()` returning `(Task<{Name}Message>, {Name}Action)`
-   - `view()` taking `&{Name}ViewData`
+   - `view()` taking the ViewData struct by value — it is itself a struct of `&'a` borrows: `pub fn view<'a>(&'a self, data: {Name}ViewData<'a>) -> Element<'a, {Name}Message>`
 
 2. Add to `src/views/mod.rs`:
    - Module declaration + re-exports
    - Search ID constant `{NAME}_SEARCH_ID`
-   - Explicit `impl ViewPage for {Name}Page`
-   - `impl HasCommonAction for {Name}Action` if it has SearchChanged/SortModeChanged/SortOrderChanged
+
+   And in the view's own module file (the trait + macro live in `src/views/mod.rs`; the impls live with each view):
+   - Explicit `impl super::ViewPage for {Name}Page` (pattern: `src/views/albums/mod.rs`)
+   - `impl_has_common_action!({Name}Action { ... })` if the Action enum has SearchChanged/SortModeChanged/SortOrderChanged — invoke the macro rather than hand-writing `HasCommonAction`. The variadic list names the enum's `NavigateAndExpand*` variants; pass `, no_center` to skip the `CenterOnPlaying` arm, `, no_navigate_filter` for views with neither (e.g. `impl_has_common_action!(RadiosAction, no_navigate_filter);` in `src/views/radios.rs`)
 
 3. Add `{name}_page: views::{Name}Page` to `Nokkvi` in `src/main.rs`. If the view is a top-level destination, also add a `View` variant and extend `View::ALL` (length-anchored), then decide its start-view eligibility in `View::start_view_option()` — the exhaustive match forces the call. Eligible views additionally need their name added to the `general.start_view` options in `data/src/services/settings_tables/general.rs` (iced-free, can't see `View`); the `view_metadata_tests` drift guard in `src/main.rs` pins the two lists together. Also opt the variant in or out of the IPC `switch-view` verb via `ipc_switchable` in `src/update/ipc.rs` — the wire-name parser and its error listing derive from `View::ALL`, so a `view_name` entry plus the opt-in is all it takes. The remaining `match`es over `View` (get-info / star-rating hotkeys, seek-settled artwork dispatch, roulette settle, view_page lookup) are exhaustive on purpose: the compiler walks you through each placement decision — keep them wildcard-free.
 
 4. Add `Message::{Name}({Name}Message)` to `src/app_message.rs`.
 
 5. Wire root dispatch in `src/update/mod.rs`:
-   - Forward `Message::{Name}(msg)` to `self.{name}_page.update(msg)`
-   - Map returned `{Name}Action` variants to side effects
+   - Route `Message::{Name}(msg)` through the `dispatch_view_with_seek!` macro to a `handle_{name}` method (pattern: the `Message::Albums` arm), naming the view's `SlotList(ScrollSeek)` variant
+   - Register the message type with `impl_view_chrome!({Name}Message { ... })` in `src/update/chrome.rs` and start `handle_{name}` with the mandatory prologue `dispatch_view_chrome(self, &msg, View::{Name})` (see `src/update/albums.rs::handle_albums`). This prologue carries the shared SetOpenMenu/roulette/SFX/artwork-drag handling — skipping it compiles fine but silently drops that chrome for the new view
+   - In `handle_{name}`, map the `{Name}Action` returned by the page's `update()` to side effects
 
 6. If the view has a paginated/async loader, add a typed loader inbox (Phase 2 pattern — see Albums/Songs/Artists/Playlists/Queue):
    - Define `{Name}LoaderMessage` in `src/app_message.rs` with `Loaded { ... }` / `PageLoaded(result, total_count)` variants for each loader result shape
    - Add `Message::{Name}Loader({Name}LoaderMessage)` to the root `Message`
    - Route in `src/update/mod.rs`: `Message::{Name}Loader(msg) => self.dispatch_{name}_loader(msg)`
    - Implement `dispatch_{name}_loader(msg)` in `src/update/{name}.rs`. Loader closures inside `shell_task(...)` construct `Message::{Name}Loader({Name}LoaderMessage::Loaded { ... })` instead of view-side variants, keeping the page's `{Name}Message` enum focused on user-driven UI events.
-   - For the actual paged-fetch dispatch, implement `LoaderTarget` for a `{Name}Target` in `src/update/loader_target.rs` (`page_common`, `sort_mode_to_api`, page-fetch closure) and call `self.load_paged::<{Name}Target>(...)` from your page handler. Avoid hand-writing a `set_loading(true)` + defensive-gate + `shell_task` body — the shared `load_paged` body owns that invariant.
+   - For the actual paged-fetch dispatch, implement `LoaderTarget` for a `{Name}Target` in `src/update/loader_target.rs` (`page_common`, `sort_mode_to_api`, buffer/artwork accessors) and call `self.load_paged::<{Name}Target>(...)` from your page handler — the page-fetch closure is passed at the call site, deliberately not threaded through the trait. Avoid hand-writing a `set_loading(true)` + defensive-gate + `shell_task` body — the shared `load_paged` body owns that invariant.
 
 7. Render the page in `src/app_view.rs`.
 
-8. Create the data/action handler at `src/update/{name}.rs`. Use `PaginatedFetch::from_common()` from `update/components.rs` for paginated loads — needs_fetch gating is built in.
+8. Create the data/action handler at `src/update/{name}.rs`. For paginated loads always go through `load_paged` (step 6): `PaginatedFetch::from_common()` (`src/update/components/mod.rs`) only bundles view/sort/search/filter params — the needs_fetch duplicate-dispatch gate and the `set_loading(true)` invariant live in `Nokkvi::load_paged` (`src/update/loader_target.rs`).
 
-9. If the view shows artwork, dispatch prefetch from `update/window.rs` (centralized).
+9. If the view shows artwork, add an arm to the per-view match in `prefetch_viewport_artwork()` (`src/update/window.rs`, centralized) using the shared task builders in `src/update/components/artwork_prefetch.rs`.
 
 10. Wrap the slot list in `wrap_with_scroll_indicator()` (`widgets/scroll_indicator.rs`).
 
@@ -55,7 +58,7 @@ Steps to add a new slot-list-based view, in order.
 16. Verify:
     - `cargo +nightly fmt --all -- --check`
     - `cargo clippy --all-targets -- -D warnings`
-    - `cargo test`
+    - `cargo test --workspace` (bare `cargo test` runs only the root crate and would skip the data-crate tests touched in step 12)
     - Slot navigation (↑/↓, focus, center activation)
     - Search filtering (immediate, no debounce)
     - Context menu (every entry functional)

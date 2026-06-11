@@ -14,7 +14,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Queue peek/transition**: track transitions go `peek_next_song()` → `PeekedQueue::transition()`. Use `reposition_to_index()` ONLY for non-transition updates (play-from-here).
 - **Progressive queue generation**: `ProgressiveQueueAppendPage` chains check `progressive_queue_generation` before appending — stale chains silently stop.
 - **Play button cold-start**: resolves the selected row via `get_center_item_index` and plays its `entry_id` via `play_entry_from_queue` — not `queue_songs.first()`, not `track_number - 1`.
-- **Gapless re-peek on mutation**: a queue mutation between gapless prep and `on_track_finished` calls `clear_queued()`, so `transition_to_queued_internal()` would return `None`. The navigator re-peeks when `queued.is_none() && !needs_load` before transitioning.
+- **Gapless re-peek on mutation**: a queue mutation between gapless prep and `on_track_finished` calls `clear_queued()`. The transition path always re-peeks — `peek_next_song()` re-computes `queued` when it was cleared, then `PeekedQueue::transition()` consumes it — so the mutation can't strand the transition.
 
 ## Multi-Selection & Batch
 
@@ -31,7 +31,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Source generation counter**: typed `SourceGeneration` wrapper (over `AtomicU64`) — every user-driven source change goes through `bump_for_user_action()`; renderer snapshots `current()` before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
 - **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `PaginatedFetch::from_common()` handles this in update handlers.
 - **PagedBuffer generation**: `generation()` bumps on every mutation. Use `(query, generation)` keys when memoizing filtered results.
-- **Artwork LRU caches go through `SnapshottedLru<K, V>`**: `album_art`, `large_artwork`, and both `CollageArtworkCache.{mini,collage}` are `SnapshottedLru` newtypes that maintain the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — the manual `refresh_*_snapshot()` discipline was deleted (Group U Lane A); a fresh cache must use `SnapshottedLru`.
+- **Artwork LRU caches go through `SnapshottedLru<K, V>`**: `album_art`, `large_artwork`, and the `{mini, collage}` pair on each `CollageArtworkCache` (two instances — `ArtworkState.genre` and `ArtworkState.playlist`) are `SnapshottedLru` newtypes that maintain the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — a fresh cache must use `SnapshottedLru`.
 
 ## Widget Tree & Focus
 
@@ -65,10 +65,12 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 
 ## Artwork
 
-- **No client-side persistent cache**: every artwork fetch goes straight to Navidrome via `AlbumsService::fetch_album_artwork(...)`. Session-scoped Handle reuse comes from the UI's `album_art` (LRU 512) and `large_artwork` (LRU 200) maps in `ArtworkState`.
+- **No client-side persistent cache**: every artwork fetch goes straight to Navidrome via `AlbumsService::fetch_album_artwork(...)`. Session-scoped Handle reuse comes from the UI's `album_art` (LRU 1024 — doubled when the 2×2 quads landed, since a quad row claims up to 4 ids) and `large_artwork` (LRU 200) maps in `ArtworkState`.
 - **Always `Handle::from_bytes`**: `from_bytes` allocates a fresh `Id::Unique` per call — safe **only** because Handles are stored in the LRUs and reused across renders. Never re-create from bytes per frame; that bypasses Iced's GPU texture cache (`reference-iced/wgpu/src/image/raster.rs:55`).
-- **Snapshot mirrors**: `view()` borrows the `HashMap` snapshot inside each `SnapshottedLru`, not the LRU directly, because LRU `get` is `&mut`. The newtype keeps both in sync on every `put` / `promote`; no caller-side discipline needed.
+- **Snapshot mirrors**: `view()` borrows the `HashMap` snapshot inside each `SnapshottedLru`, not the LRU directly, because LRU `get` is `&mut`. The newtype keeps both in sync on every `put` / `get_touch` promotion; no caller-side discipline needed.
 - **Queue mini vs large artwork**: queue songs request 80 px thumbs using `album_id` so `fetch_album_artwork` builds a consistent URL across consumers. Large artwork constructs the full-size URL (`size=artwork_resolution`) — never reuse the 80 px URL.
+- **Quad fetches gate on `album_art_pending`**: the 2×2 quad prefetch is re-dispatched from every scroll step and collage event, so each ×4 quad path filters against `ArtworkState.album_art_pending` AND inserts its queued ids (`quad_prefetch_tasks` / `strip_quad_prefetch_tasks` in `src/update/collage.rs`); `handle_artwork_loaded` releases the slot on success and failure alike so a throttled tile can retry. The expansion album fan-out (`expansion_album_artwork_tasks`) also filters on the set — genre expansion children lead with the same albums their row quad is warming, and `FocusAndExpand` fires both in one event cluster. Single-id prefetch surfaces stay gate-free; any new ×4 quad path must both consult and insert.
+- **Frozen strip quad identity**: the queue strip's playlist quad renders from `strip_quad_album_ids`, snapshotted via `snapshot_strip_quad_ids()` on the FIRST queue load for the active playlist context (`handle_queue_loaded`) — at that moment queue order == playlist track order. Later queue reloads (consume advance, sort, SSE) intentionally leave the frozen ids untouched so prefetch and render agree on identity; `clear_active_playlist()` drops the snapshot with the context so the next playlist re-freezes from its own queue head.
 - **Wildcard SSE skips artwork**: `LibraryChanged { is_wildcard: true }` (full-library scan) MUST NOT trigger silent re-fetch — it would re-download every cached cover. Slot-list reloads still run.
 - **Random-sort SSE protection**: background SSE reload mustn't corrupt the artwork ref when the active sort is Random — guarded in `library_refresh.rs`.
 - **Albums viewport clamp**: clamp `viewport_offset` against the new total count on background refresh — otherwise the viewport can land past the end after a remove.

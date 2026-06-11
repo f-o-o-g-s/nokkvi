@@ -21,7 +21,7 @@ trigger: always_on
 ## Error Handling
 
 - Backend services return `Result<T, E>` — propagate with `?`.
-- UI handlers use `shell_task` / `shell_spawn` from `update/components.rs`.
+- UI handlers run async `AppService` work through `shell_task` / `shell_spawn` (methods on `Nokkvi` in `src/main.rs`).
 - Log at the boundary that finally handles, not at every propagation layer.
 - User-facing errors get `toast_error()` / `toast_warn()`. Confirmations get `toast_success()` / `toast_info()`.
 
@@ -31,7 +31,7 @@ trigger: always_on
 - Complex views/services/handlers use directory modules (e.g., `views/settings/mod.rs`, `services/queue/mod.rs`, `update/hotkeys/mod.rs`).
 - Handler files in `update/` correspond 1:1 to views, plus specialized handlers for cross-cutting concerns. `ls src/update/` to see them.
 - `shell_task` / `shell_spawn` are methods on `Nokkvi` (`src/main.rs`) — they bridge UI handlers to async `AppService` work.
-- Shared helpers in `update/components.rs` — `PaginatedFetch::from_common`, `guard_play_action`, `set_item_rating_task`, `radio_mutation_task`, `handle_common_view_action`, `shell_action_task`, `shell_fire_and_forget_task`, `prefetch_album_artwork_tasks`, `prefetch_song_artwork_tasks`, plus the entity-action helpers (`play_entity_task`, `add_entity_to_queue_task`, `insert_entity_to_queue_at_position_task`, `star_item_task`). For auth/session work: `session_expired_message(&anyhow::Error) -> Option<Message>` collapses the 9 prior inline 401 downcasts, and `Nokkvi::reset_session_state(&mut self) -> Task<Message>` is the single source for the full logout + session-expired teardown (engine, task manager, library/queue/scrobble caches, modals).
+- Shared helpers in the `update/components/` directory module — `mod.rs` holds `PaginatedFetch::from_common`, `guard_play_action`, `set_item_rating_task`, `radio_mutation_task`, `handle_common_view_action`, `shell_action_task`, `shell_fire_and_forget_task`, plus the entity-action helpers (`play_entity_task`, `add_entity_to_queue_task`, `insert_entity_to_queue_at_position_task`, `star_item_task`); the artwork prefetch helpers (`prefetch_album_artwork_tasks`, `prefetch_song_artwork_tasks`, `prefetch_quad_album_artwork_tasks`) live in `update/components/artwork_prefetch.rs`. For auth/session work: `session_expired_message(&anyhow::Error) -> Option<Message>` collapses the 9 prior inline 401 downcasts, and `Nokkvi::reset_session_state(&mut self) -> Task<Message>` is the single source for the full logout + session-expired teardown (engine, task manager, library/queue/scrobble caches, modals).
 
 ## Core Requirements
 

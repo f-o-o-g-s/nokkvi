@@ -39,7 +39,7 @@ Promote the existing `## [Unreleased]` section in `CHANGELOG.md` to `## vX.Y.Z �
   - ✅ *Renaming a playlist or editing its comment no longer wipes the other field or flips it to private.*
 - **Frame by user-visible effect**, not internal mechanism. Skip internal type names, file paths, function names, PR numbers.
 - **Drop internal-only churn**: CI, workflow, lockfile, dep bumps with no runtime effect, refactors with no behavior change. If a refactor produces a perceptible effect (memory, startup time, fewer crashes), record the effect, not the refactor.
-- **Version-header format**: keep `## vX.Y.Z — YYYY-MM-DD` exact — `.github/workflows/release.yml`'s awk extractor matches on it character-by-character.
+- **Version-header format**: use `## vX.Y.Z — YYYY-MM-DD` — `.github/workflows/release.yml`'s awk extractor keys on the exact `## vX.Y.Z` prefix at line start (followed by a space); the em-dash date suffix is repo convention.
 
 The release workflow extracts the section matching the pushed tag verbatim into the GitHub Release body — write for someone deciding whether to upgrade.
 
@@ -70,7 +70,7 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 ```bash
-cargo test
+cargo test --workspace
 ```
 
 ```bash

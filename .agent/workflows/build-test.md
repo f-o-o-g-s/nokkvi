@@ -16,9 +16,9 @@ cargo +nightly fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-3. Run the test suite:
+3. Run the full test suite (matches CI; bare `cargo test` runs only the root crate and skips nokkvi-data and nokkvi-ipc):
 ```bash
-cargo test
+cargo test --workspace
 ```
 
 4. Verify release build compiles:
