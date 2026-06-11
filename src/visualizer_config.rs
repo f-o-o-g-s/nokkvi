@@ -409,7 +409,7 @@ pub struct BarsConfig {
 
     /// Enable LED-style segmented bars (like VU meters).
     /// When enabled, bars are rendered as stacked LED segments with gaps.
-    /// Default: true
+    /// Default: false
     pub led_bars: bool,
 
     /// Height of each LED segment in pixels.
@@ -482,7 +482,7 @@ impl Default for BarsConfig {
             bar_width_max: 20.0,
             bar_spacing: 2.0,
             border_width: 2.0,
-            led_bars: true,
+            led_bars: false,
             led_segment_height: 5.0,
             gradient_mode: BarsGradientMode::Wave,
             gradient_orientation: BarsGradientOrientation::Vertical,
@@ -564,7 +564,7 @@ pub struct LinesConfig {
     #[serde(deserialize_with = "deserialize_or_default")]
     pub style: LinesStyle,
     /// Surfing boat: render a small boat that rides the waveform.
-    /// Default: false
+    /// Default: true
     pub boat: bool,
 }
 
@@ -580,7 +580,7 @@ impl Default for LinesConfig {
             fill_opacity: 0.5,
             mirror: false,
             style: LinesStyle::Smooth,
-            boat: false,
+            boat: true,
         }
     }
 }

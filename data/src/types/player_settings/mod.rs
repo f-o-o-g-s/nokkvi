@@ -87,13 +87,13 @@ pub struct LivePlayerSettings {
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     pub horizontal_volume: bool,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
-    /// or a sort/search shortcut is used (default: false)
+    /// or a sort/search shortcut is used (default: true)
     pub autohide_toolbar: bool,
-    /// Collapsed auto-hide toolbar height in px (default: 6)
+    /// Collapsed auto-hide toolbar height in px (default: 4)
     pub autohide_toolbar_height: u32,
     /// Whether the collapsed auto-hide toolbar shows a centered accent grip bar (default: true)
     pub autohide_toolbar_grip: bool,
-    /// What the collapsed auto-hide toolbar shows (default: Hairline)
+    /// What the collapsed auto-hide toolbar shows (default: Count strip)
     pub autohide_collapsed_appearance: CollapsedAppearance,
     /// Whether the mini-player bar shows the volume slider (default: true).
     /// Only affects `TrackInfoDisplay::MiniPlayer`.

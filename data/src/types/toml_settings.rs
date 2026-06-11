@@ -90,14 +90,15 @@ pub struct TomlSettings {
     pub slot_text_links: bool,
     pub horizontal_volume: bool,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
-    /// or a sort/search shortcut is used (default false).
-    #[serde(default)]
+    /// or a sort/search shortcut is used (default true). Missing keys fill from
+    /// the container `#[serde(default)]` -> `TomlSettings::default()`, the single
+    /// anchor the sparse-strip round-trip is pinned against.
     pub autohide_toolbar: bool,
-    /// Collapsed auto-hide toolbar height in px (default 6).
+    /// Collapsed auto-hide toolbar height in px (default 4).
     pub autohide_toolbar_height: u32,
     /// Whether the collapsed auto-hide toolbar shows a centered accent grip bar (default true).
     pub autohide_toolbar_grip: bool,
-    /// What the collapsed auto-hide toolbar shows (default Hairline).
+    /// What the collapsed auto-hide toolbar shows (default Count strip).
     pub autohide_collapsed_appearance: CollapsedAppearance,
     pub mini_player_show_volume: bool,
     pub mini_player_show_modes: bool,
@@ -245,15 +246,15 @@ impl Default for TomlSettings {
             rounded_mode: RoundedMode::On,
             nav_layout: NavLayout::default(),
             nav_display_mode: NavDisplayMode::default(),
-            track_info_display: TrackInfoDisplay::PlayerBar,
+            track_info_display: TrackInfoDisplay::MiniPlayer,
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: false,
             slot_text_links: true,
             horizontal_volume: false,
-            autohide_toolbar: false,
-            autohide_toolbar_height: 6,
+            autohide_toolbar: true,
+            autohide_toolbar_height: 4,
             autohide_toolbar_grip: true,
-            autohide_collapsed_appearance: CollapsedAppearance::default(),
+            autohide_collapsed_appearance: CollapsedAppearance::CountStrip,
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             font_family: String::new(),

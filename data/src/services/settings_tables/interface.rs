@@ -80,7 +80,7 @@ define_settings! {
                 label: "Metadata Strip",
                 category: "Layout",
                 subtitle: Some("Where to show the now-playing metadata strip"),
-                default: "Off",
+                default: "Mini Player",
                 options: &["Off", "Player Bar", "Top Bar", "Top Bar Under", "Mini Player"],
                 read_field: |d| d.track_info_display.as_ref(),
             },
@@ -131,7 +131,7 @@ define_settings! {
                 subtitle: Some(
                     "Collapse the sort & search bar to a thin line until you hover it or use a sort/search shortcut",
                 ),
-                default: false,
+                default: true,
                 read_field: |d| d.autohide_toolbar,
             },
         },
@@ -146,7 +146,7 @@ define_settings! {
                 label: "Toolbar Hidden Height",
                 category: "Slot List",
                 subtitle: Some("Height of the collapsed toolbar's hover strip"),
-                default: 6_i64,
+                default: 4_i64,
                 min: 4_i64,
                 max: 24_i64,
                 step: 1_i64,
@@ -184,7 +184,7 @@ define_settings! {
                 label: "Collapsed Appearance",
                 category: "Slot List",
                 subtitle: Some("What stays on screen while the bar is hidden"),
-                default: "Hairline",
+                default: "Count strip",
                 options: &["Hairline", "Hidden", "Count strip"],
                 read_field: |d| d.autohide_collapsed_appearance.as_ref(),
             },
@@ -686,12 +686,14 @@ mod tests {
 
     #[test]
     fn apply_toml_interface_copies_autohide_toolbar() {
+        // Drive the source to the OPPOSITE of the shipped default so this
+        // verifies the copy itself, independent of what the default is.
         let mut ts = TomlSettings::default();
-        ts.autohide_toolbar = true;
+        ts.autohide_toolbar = false;
         let mut p = PersistedPlayerSettings::default();
-        assert!(!p.autohide_toolbar);
+        p.autohide_toolbar = true;
         apply_toml_interface_tab(&ts, &mut p);
-        assert!(p.autohide_toolbar);
+        assert!(!p.autohide_toolbar);
     }
 
     #[test]
@@ -791,9 +793,6 @@ mod tests {
     #[test]
     fn ui_meta_defaults_match_persisted_player_settings_defaults() {
         const KNOWN_SPLITS: &[&str] = &[
-            // ui_meta "Off" vs `TrackInfoDisplay::PlayerBar` ("Player Bar")
-            // in the struct `Default` impl (settings.rs).
-            "general.track_info_display",
             // ui_meta "Default" vs `SlotRowHeight::Compact` ("Compact") in
             // the struct `Default` impl (settings.rs).
             "general.slot_row_height",

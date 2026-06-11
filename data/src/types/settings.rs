@@ -117,16 +117,16 @@ pub struct PersistedPlayerSettings {
     #[serde(default)]
     pub horizontal_volume: bool,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
-    /// or a sort/search shortcut is used (default: false)
+    /// or a sort/search shortcut is used (default: true)
     #[serde(default)]
     pub autohide_toolbar: bool,
-    /// Collapsed auto-hide toolbar height in px (default: 6)
+    /// Collapsed auto-hide toolbar height in px (default: 4)
     #[serde(default = "default_autohide_toolbar_height")]
     pub autohide_toolbar_height: u32,
     /// Whether the collapsed auto-hide toolbar shows a centered accent grip bar (default: true)
     #[serde(default = "default_true")]
     pub autohide_toolbar_grip: bool,
-    /// What the collapsed auto-hide toolbar shows (default: Hairline)
+    /// What the collapsed auto-hide toolbar shows (default: Count strip)
     #[serde(default)]
     pub autohide_collapsed_appearance: CollapsedAppearance,
     /// Whether the mini-player bar shows the volume slider (default: true).
@@ -348,7 +348,7 @@ fn default_crossfade_duration_secs() -> u32 {
     7
 }
 fn default_autohide_toolbar_height() -> u32 {
-    6
+    4
 }
 fn default_true() -> bool {
     true
@@ -375,7 +375,7 @@ impl Default for PersistedPlayerSettings {
             rounded_mode: RoundedMode::On,
             nav_layout: NavLayout::default(),
             nav_display_mode: NavDisplayMode::default(),
-            track_info_display: TrackInfoDisplay::PlayerBar,
+            track_info_display: TrackInfoDisplay::MiniPlayer,
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: default_opacity_gradient(),
             slot_text_links: default_true(),
@@ -387,10 +387,10 @@ impl Default for PersistedPlayerSettings {
             quick_add_to_playlist: false,
             queue_show_default_playlist: false,
             horizontal_volume: false,
-            autohide_toolbar: false,
+            autohide_toolbar: true,
             autohide_toolbar_height: default_autohide_toolbar_height(),
             autohide_toolbar_grip: true,
-            autohide_collapsed_appearance: CollapsedAppearance::default(),
+            autohide_collapsed_appearance: CollapsedAppearance::CountStrip,
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             font_family: String::new(),

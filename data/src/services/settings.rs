@@ -1202,7 +1202,7 @@ mod sentinel_roundtrip_tests {
             rounded_mode: RoundedMode::PlayerOnly, // default On
             nav_layout: NavLayout::Side,           // default Top
             nav_display_mode: NavDisplayMode::IconsOnly, // default TextOnly
-            track_info_display: TrackInfoDisplay::TopBar, // default Off
+            track_info_display: TrackInfoDisplay::TopBar, // default Mini Player
             slot_row_height: SlotRowHeight::Spacious, // default Default
             opacity_gradient: false,               // default true
             slot_text_links: false,                // default true
@@ -1216,11 +1216,11 @@ mod sentinel_roundtrip_tests {
             quick_add_to_playlist: true,       // default false
             queue_show_default_playlist: true, // default false
             horizontal_volume: true,           // default false
-            autohide_toolbar: true,            // default false
-            autohide_toolbar_height: 12,       // default 6
+            autohide_toolbar: false,           // default true
+            autohide_toolbar_height: 12,       // default 4
             autohide_toolbar_grip: false,      // default true
             autohide_collapsed_appearance:
-                crate::types::player_settings::CollapsedAppearance::CountStrip, // default Hairline
+                crate::types::player_settings::CollapsedAppearance::Hidden, // default Count strip
             mini_player_show_volume: false,    // default true
             mini_player_show_modes: false,     // default true
             font_family: "Sentinel Mono".to_string(),

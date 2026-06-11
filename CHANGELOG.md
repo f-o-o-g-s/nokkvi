@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The metadata strip now defaults to Mini Player instead of the Player Bar.
+- The sort and search toolbar now auto-hides by default, collapsing to a count strip.
+- The visualizer's bars now default to a solid fill instead of segmented LED bars.
+- The visualizer's surfing boat (Lines mode) is now enabled by default.
+
 ### Fixed
 
 ### Removed
