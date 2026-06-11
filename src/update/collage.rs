@@ -73,9 +73,10 @@ impl Nokkvi {
     /// `PlaylistsAction::LoadArtwork`, and re-dispatched when album ids land
     /// late (`CollageAlbumIdsLoaded` / `CollageLoaded`) because the initial
     /// `LoadArtwork(0)` after a list load runs before the bulk id prefetch
-    /// returns. Fully dedup-gated against `album_art`, so repeat dispatches
-    /// are free once the viewport is warm.
-    pub(crate) fn playlists_quad_prefetch_tasks(&self) -> Vec<Task<Message>> {
+    /// returns. Dedup-gated against `album_art` membership AND the
+    /// `album_art_pending` in-flight set, so repeat dispatches over a warm or
+    /// still-loading viewport add nothing.
+    pub(crate) fn playlists_quad_prefetch_tasks(&mut self) -> Vec<Task<Message>> {
         use std::collections::HashSet;
 
         use super::components::prefetch_quad_album_artwork_tasks;
@@ -83,56 +84,94 @@ impl Nokkvi {
         let Some(shell) = &self.app_service else {
             return Vec::new();
         };
+        let albums_vm = shell.albums().clone();
         let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
-        prefetch_quad_album_artwork_tasks(
+        let (queued_ids, tasks) = prefetch_quad_album_artwork_tasks(
             &self.playlists_page.common.slot_list,
             &self.library.playlists,
             &cached,
-            &self.artwork.album_art_versions,
-            shell.albums().clone(),
+            &self.artwork.album_art_pending,
+            albums_vm,
             |p| p.artwork_album_ids.as_slice(),
-        )
+        );
+        drop(cached);
+        for id in queued_ids {
+            self.artwork.album_art_pending.insert(id);
+        }
+        tasks
     }
 
-    /// 80px prefetch for the queue strip's 2×2 quad tiles: the first ≤4
-    /// distinct albums of the FULL queue. Runs from `handle_queue_loaded` —
-    /// the restored viewport may sit far past the head of the queue, so the
-    /// regular visible-row prefetch can miss exactly these albums. No-op
-    /// when no playlist context is active or every tile is already warm.
-    pub(crate) fn strip_quad_prefetch_tasks(&self) -> Vec<Task<Message>> {
-        use std::collections::HashSet;
-
-        use super::components::expansion_album_artwork_tasks;
+    /// Snapshot the queue strip's quad identity: the first ≤4 distinct album
+    /// ids of the current (unfiltered) queue, frozen into
+    /// `strip_quad_album_ids`. Called when a playlist context is entered with
+    /// its queue already loaded (save-queue-as-playlist, session restore with
+    /// an early queue) and by `handle_queue_loaded` while the snapshot is
+    /// still empty — at those moments queue order == playlist track order, so
+    /// the frozen ids genuinely are the playlist's first albums. Later queue
+    /// mutations (consume, sort, play-next) leave the snapshot untouched.
+    /// No-op-to-empty when no playlist context is active.
+    pub(crate) fn snapshot_strip_quad_ids(&mut self) {
         use crate::services::collage_artwork::first_distinct_album_ids;
 
         if self.active_playlist_info.is_none() {
+            self.strip_quad_album_ids.clear();
+            return;
+        }
+        self.strip_quad_album_ids =
+            first_distinct_album_ids(self.library.queue_songs.iter().map(|s| s.album_id.as_str()))
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+    }
+
+    /// 80px prefetch for the queue strip's 2×2 quad tiles — the FROZEN
+    /// `strip_quad_album_ids`, so prefetch and render agree on identity. Runs
+    /// from `handle_queue_loaded` (after the snapshot pass): the restored
+    /// viewport may sit far past the head of the queue, so the regular
+    /// visible-row prefetch can miss exactly these albums. No-op when no
+    /// snapshot exists or every tile is already warm / in flight.
+    pub(crate) fn strip_quad_prefetch_tasks(&mut self) -> Vec<Task<Message>> {
+        use super::components::expansion_album_artwork_tasks;
+
+        if self.strip_quad_album_ids.is_empty() {
             return Vec::new();
         }
         let Some(shell) = &self.app_service else {
             return Vec::new();
         };
+        let albums_vm = shell.albums().clone();
 
-        let quad_ids =
-            first_distinct_album_ids(self.library.queue_songs.iter().map(|s| s.album_id.as_str()));
-        // Reuse each contributing song's pre-built 80px URL (album-id keyed,
+        // Reuse a contributing song's pre-built 80px URL (album-id keyed,
         // `build_song_artwork_url`) so the bytes land under the same cache
-        // key the strip resolves.
-        let triples: Vec<(String, Option<String>, String)> = quad_ids
+        // key the strip resolves. A frozen id whose songs have since left the
+        // queue (consume mode) is skipped — its tile is either already warm
+        // or the strip degrades to the single cover.
+        let triples: Vec<(String, Option<String>, String)> = self
+            .strip_quad_album_ids
             .iter()
+            .filter(|id| {
+                !self.artwork.album_art.contains(id)
+                    && !self.artwork.album_art_pending.contains(*id)
+            })
             .filter_map(|id| {
                 self.library
                     .queue_songs
                     .iter()
-                    .find(|s| s.album_id == *id)
+                    .find(|s| &s.album_id == id)
                     .map(|s| (s.album_id.clone(), None, s.artwork_url.clone()))
             })
             .collect();
 
-        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        for (id, _, _) in &triples {
+            self.artwork.album_art_pending.insert(id.clone());
+        }
+
+        let cached: std::collections::HashSet<&String> =
+            self.artwork.album_art.iter().map(|(k, _)| k).collect();
         expansion_album_artwork_tasks(
             &cached,
             &self.artwork.album_art_versions,
-            shell.albums().clone(),
+            albums_vm,
             triples,
         )
     }

@@ -124,6 +124,10 @@ impl Nokkvi {
         updated_at: Option<String>,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
+        // Quad-tile fetches gate on this in-flight set; release the slot on
+        // success and failure alike so a throttled tile can be retried by the
+        // next prefetch dispatch instead of staying blocked forever.
+        self.artwork.album_art_pending.remove(&id);
         if let Some(h) = handle {
             // Record the cache-buster the URL carried, in lockstep with the
             // handle, so a later server cover change is a version-aware miss

@@ -19,9 +19,12 @@ const LARGE_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(200).expect("capacity must be > 0");
 /// Capacity for the mini-artwork (`album_art`) LRU. Sized roughly 6× a typical
 /// 80px slot list viewport so recently-visited slot regions stay warm but
-/// memory stays bounded as the user scrolls a large library.
+/// memory stays bounded as the user scrolls a large library. Doubled when the
+/// playlist 2×2 quads landed: a playlists viewport claims up to 4 ids per row
+/// instead of 1, and the quads share this cache with every other 80px surface
+/// — at ~3-6KB per 80px handle the cap stays a few MB.
 const MINI_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
-    NonZeroUsize::new(512).expect("capacity must be > 0");
+    NonZeroUsize::new(1024).expect("capacity must be > 0");
 /// Capacity for the per-target collage mini LRU (genre or playlist).
 const COLLAGE_MINI_CACHE_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(100).expect("capacity must be > 0");
@@ -86,6 +89,14 @@ pub struct ArtworkState {
     /// can outlive its handle — `should_refetch` guards against that by checking
     /// `album_art` membership, not just this map.
     pub album_art_versions: HashMap<String, Option<String>>,
+    /// Album ids with an in-flight 80px quad-tile fetch. The quad prefetch is
+    /// re-dispatched from every scroll step and collage event; without an
+    /// in-flight gate a cold viewport would duplicate every still-loading
+    /// request on each step. Inserted when a quad fetch task is built, removed
+    /// by `handle_artwork_loaded` on success AND failure (the `Loaded` message
+    /// always arrives). The single-id prefetch surfaces keep their existing
+    /// gate-free behavior — only the ×4 quad paths consult this set.
+    pub album_art_pending: HashSet<String>,
     /// Large artwork cache for detail views (LRU-bounded).
     pub large_artwork: SnapshottedLru<String, image::Handle>,
     /// Genre artwork cache.
@@ -101,6 +112,7 @@ impl Default for ArtworkState {
         Self {
             album_art: SnapshottedLru::new(MINI_ARTWORK_CACHE_CAPACITY),
             album_art_versions: HashMap::new(),
+            album_art_pending: HashSet::new(),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
             genre: CollageArtworkCache::new(),
             playlist: CollageArtworkCache::new(),

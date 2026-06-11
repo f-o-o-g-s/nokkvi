@@ -45,6 +45,16 @@ impl Nokkvi {
                 // reload (consume-mode advance, SSE refresh, navigation).
                 self.queue_page.common.slot_list.clear_multi_selection();
 
+                // Freeze the strip quad identity on the FIRST queue that
+                // arrives for the active playlist context (PlayPlaylist
+                // clears the snapshot; a restored session boots with it
+                // empty) — at that moment queue order == playlist track
+                // order. Later reloads (consume advance, sort, SSE) leave
+                // the frozen ids untouched.
+                if self.active_playlist_info.is_some() && self.strip_quad_album_ids.is_empty() {
+                    self.snapshot_strip_quad_ids();
+                }
+
                 // Load artwork for queue songs using canonical prefetch
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 
@@ -81,14 +91,13 @@ impl Nokkvi {
                                 song.album_id.clone(),
                             ))));
                         }
-
-                        // Warm the "Playing From" strip's 2×2 quad tiles (the
-                        // first ≤4 distinct albums of the full queue) — the
-                        // restored viewport may sit far past the queue head,
-                        // so the visible-row prefetch above can miss them.
-                        tasks.extend(self.strip_quad_prefetch_tasks());
                     }
                 }
+
+                // Warm the "Playing From" strip's frozen quad tiles — the
+                // restored viewport may sit far past the queue head, so the
+                // visible-row prefetch above can miss exactly these albums.
+                tasks.extend(self.strip_quad_prefetch_tasks());
 
                 // Always clamp queue slot list offset to valid range after queue data changes.
                 // When the queue is replaced (e.g. playing an album), the old offset may

@@ -235,6 +235,14 @@ pub struct Nokkvi {
     /// Identity of the playlist currently loaded in the queue.
     /// Set on PlayPlaylist, cleared on non-playlist play.
     pub active_playlist_info: Option<crate::state::ActivePlaylistContext>,
+    /// Frozen first ≤4 distinct album ids backing the queue strip's 2×2 quad
+    /// cover. Snapshotted from the queue head when the playlist context is
+    /// entered (queue order == playlist track order at that moment) and left
+    /// untouched by later queue mutations — consume-mode advances, queue
+    /// sorts, and play-next insertions must not morph the "PLAYING FROM"
+    /// thumbnail's identity. Cleared with the context; empty = no quad (the
+    /// strip falls back to its single cover).
+    pub strip_quad_album_ids: Vec<String>,
     pub browsing_panel: Option<views::BrowsingPanel>,
     pub pane_focus: crate::state::PaneFocus,
     /// Cross-pane drag cluster: active drag + press tracking + pending drop
@@ -414,6 +422,7 @@ impl Default for Nokkvi {
             last_queue_current_entry_id: None,
             playlist_editor: None,
             active_playlist_info: None,
+            strip_quad_album_ids: Vec::new(),
             browsing_panel: None,
             pane_focus: crate::state::PaneFocus::Queue,
             cross_pane_drag: crate::state::CrossPaneDragUi::default(),

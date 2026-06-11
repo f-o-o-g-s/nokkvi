@@ -1025,20 +1025,19 @@ impl Nokkvi {
             .or_else(|| self.artwork.playlist.mini.snapshot.get(&ctx.id))
     }
 
-    /// Resolve the active playlist's strip cover as a 2×2 quad: the first ≤4
-    /// distinct album ids of the UNFILTERED queue (queue order == playlist
-    /// track order at enqueue time), each tile served by the album-id-keyed
-    /// 80px `album_art` cache. `None` when no playlist is active, the queue
-    /// spans fewer than 2 distinct albums, or any tile is still cold — the
-    /// strip then falls back to the single [`Self::active_playlist_strip_cover`]
-    /// exactly as before.
+    /// Resolve the active playlist's strip cover as a 2×2 quad from the
+    /// FROZEN `strip_quad_album_ids` snapshot (taken when the playlist
+    /// context was entered, so the tiles are the playlist's first ≤4 distinct
+    /// album covers regardless of later queue mutations), each tile served by
+    /// the album-id-keyed 80px `album_art` cache. `None` when no playlist is
+    /// active, the snapshot spans fewer than 2 distinct albums, or any tile
+    /// is still cold — the strip then falls back to the single
+    /// [`Self::active_playlist_strip_cover`] exactly as before.
     pub(crate) fn active_playlist_strip_quad(&self) -> Option<Vec<&iced::widget::image::Handle>> {
-        use crate::services::collage_artwork::{first_distinct_album_ids, resolve_quad_handles};
+        use crate::services::collage_artwork::resolve_quad_handles;
 
         self.active_playlist_info.as_ref()?;
-        let ids =
-            first_distinct_album_ids(self.library.queue_songs.iter().map(|s| s.album_id.as_str()));
-        resolve_quad_handles(&ids, &self.artwork.album_art.snapshot)
+        resolve_quad_handles(&self.strip_quad_album_ids, &self.artwork.album_art.snapshot)
     }
 
     // -------------------------------------------------------------------------

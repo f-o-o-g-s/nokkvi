@@ -260,6 +260,10 @@ impl Nokkvi {
                                 ),
                         );
                         self.persist_active_playlist_info();
+                        // The queue IS the just-saved playlist's content —
+                        // freeze the strip quad from it now; no queue reload
+                        // will fire to do it for us.
+                        self.snapshot_strip_quad_ids();
                     }
                     _ => {}
                 }

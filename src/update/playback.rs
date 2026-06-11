@@ -1410,6 +1410,13 @@ impl Nokkvi {
                 settings.active_playlist_song_count,
             )
         });
+        // Freeze the strip quad identity in case the restored queue landed
+        // before this context restore (the usual ordering — context first,
+        // queue later — leaves the snapshot empty here and
+        // `handle_queue_loaded` freezes it instead).
+        if self.active_playlist_info.is_some() && self.strip_quad_album_ids.is_empty() {
+            self.snapshot_strip_quad_ids();
+        }
         // The collage cache is empty on a fresh launch, so fetch the restored
         // playlist's strip cover up front instead of leaving it blank until the
         // Playlists view is visited.

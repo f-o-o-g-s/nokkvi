@@ -210,21 +210,36 @@ where
 /// Tiles are fetched by bare album id at `THUMBNAIL_SIZE` — the same
 /// album-id-keyed URL shape the queue's song minis use — and land via
 /// `ArtworkMessage::Loaded` in the shared `album_art` LRU, so tiles warmed by
-/// any other surface are reused for free. Quad surfaces are PASSIVE (the id
-/// list carries no album-coherent `updated_at`), so the version slot is a
-/// constant `None`: id-only dedup, exactly like the queue/song-mini paths.
+/// any other surface are reused for free.
+///
+/// Dedup is strictly membership-based, on purpose:
+/// - `cached_ids` membership (never the version map — a quad re-dispatch must
+///   not treat an album-coherent `Some(updated_at)` entry as a miss and stomp
+///   it back to `None`, which would ping-pong fetches against the Albums
+///   view's version-aware gate);
+/// - `pending_ids` in-flight gate (this prefetch re-fires on every scroll
+///   step and collage event, so without it a cold viewport would duplicate
+///   every still-loading request per step). Returned queued ids must be
+///   inserted into that set by the caller; `handle_artwork_loaded` releases
+///   them.
+///
+/// Fetches go through the retry wrapper: quad tiles have no scroll-refetch
+/// guarantee on a stationary viewport, so a single throttled request must
+/// not pin a row to its single-mini fallback until the next dispatch.
 ///
 /// Items whose `artwork_album_ids` are still unresolved contribute nothing;
 /// the `CollageAlbumIdsLoaded` / `CollageLoaded` handlers re-dispatch this
 /// prefetch once ids land.
+///
+/// Returns `(queued_ids, tasks)` — the collage-loader convention.
 pub(crate) fn prefetch_quad_album_artwork_tasks<T, F>(
     slot_list: &SlotListView,
     items: &[T],
     cached_ids: &HashSet<&String>,
-    versions: &HashMap<String, Option<String>>,
+    pending_ids: &HashSet<String>,
     albums_vm: AlbumsService,
     extract_album_ids: F,
-) -> Vec<Task<Message>>
+) -> (Vec<String>, Vec<Task<Message>>)
 where
     F: Fn(&T) -> &[String],
 {
@@ -232,9 +247,10 @@ where
 
     let total = items.len();
     if total == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
+    let mut queued_ids: Vec<String> = Vec::new();
     let mut already_queued: HashSet<String> = HashSet::new();
     let mut tasks: Vec<Task<Message>> = Vec::new();
 
@@ -243,17 +259,19 @@ where
         for id in extract_album_ids(item).iter().take(QUAD_TILE_COUNT) {
             if id.is_empty()
                 || already_queued.contains(id)
-                || !should_refetch(cached_ids, versions, id, &None)
+                || cached_ids.contains(id)
+                || pending_ids.contains(id)
             {
                 continue;
             }
             already_queued.insert(id.clone());
+            queued_ids.push(id.clone());
             let vm = albums_vm.clone();
             let id = id.clone();
             tasks.push(Task::perform(
                 async move {
                     let bytes = vm
-                        .fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), None)
+                        .fetch_album_artwork_with_retry(&id, Some(THUMBNAIL_SIZE), None)
                         .await
                         .ok();
                     (id, bytes.map(image::Handle::from_bytes))
@@ -263,7 +281,7 @@ where
         }
     }
 
-    tasks
+    (queued_ids, tasks)
 }
 
 /// Fan-out 80px album artwork fetches for albums newly delivered into a

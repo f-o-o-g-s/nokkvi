@@ -10,9 +10,10 @@ fn blank_handle() -> iced::widget::image::Handle {
     iced::widget::image::Handle::from_bytes(Vec::<u8>::new())
 }
 
-/// Activate a playlist context and load a queue whose first rows span the
-/// given albums (one song per album, `make_queue_song` keys album ids as
-/// `album_<song id>`).
+/// Activate a playlist context with a queue whose rows span the given albums
+/// (one song per album, `make_queue_song` keys album ids as `album_<song
+/// id>`). The strip quad snapshot is NOT taken — tests arrange the queue
+/// first, then call `snapshot_strip_quad_ids()` to freeze.
 fn app_with_active_playlist_queue(song_ids: &[&str]) -> crate::Nokkvi {
     let mut app = test_app();
     app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
@@ -30,6 +31,7 @@ fn app_with_active_playlist_queue(song_ids: &[&str]) -> crate::Nokkvi {
 #[test]
 fn strip_quad_none_without_active_playlist() {
     let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3", "s4"]);
+    app.snapshot_strip_quad_ids();
     for s in &["s1", "s2", "s3", "s4"] {
         app.artwork
             .album_art
@@ -45,13 +47,14 @@ fn strip_quad_resolves_first_four_distinct_queue_albums() {
     let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3", "s4", "s5"]);
     // A repeated album in the leading rows must not consume a quad slot.
     app.library.queue_songs[1].album_id = "album_s1".to_string();
+    app.snapshot_strip_quad_ids();
     for s in &["s1", "s3", "s4", "s5"] {
         app.artwork
             .album_art
             .put(format!("album_{s}"), blank_handle());
     }
-    // The quad reads the UNFILTERED queue — an active search that matches
-    // nothing must not blank the strip cover.
+    // The quad reads the snapshot, not the rendered list — an active search
+    // that matches nothing must not blank the strip cover.
     app.queue_page.common.search_query = "no-match".to_string();
 
     let tiles = app
@@ -66,6 +69,7 @@ fn strip_quad_none_when_queue_spans_one_album() {
     for song in app.library.queue_songs.iter_mut() {
         song.album_id = "album_s1".to_string();
     }
+    app.snapshot_strip_quad_ids();
     app.artwork
         .album_art
         .put("album_s1".to_string(), blank_handle());
@@ -76,10 +80,78 @@ fn strip_quad_none_when_queue_spans_one_album() {
 #[test]
 fn strip_quad_none_while_any_tile_cold() {
     let mut app = app_with_active_playlist_queue(&["s1", "s2"]);
+    app.snapshot_strip_quad_ids();
     app.artwork
         .album_art
         .put("album_s1".to_string(), blank_handle());
 
+    assert!(app.active_playlist_strip_quad().is_none());
+}
+
+/// Queue mutations after the freeze (consume advance, sort, play-next
+/// insertions) must not morph the strip quad's identity.
+#[test]
+fn strip_quad_identity_frozen_across_queue_mutations() {
+    let mut app = app_with_active_playlist_queue(&["s1", "s2", "s3", "s4"]);
+    app.snapshot_strip_quad_ids();
+    let frozen = app.strip_quad_album_ids.clone();
+    for s in &["s1", "s2", "s3", "s4"] {
+        app.artwork
+            .album_art
+            .put(format!("album_{s}"), blank_handle());
+    }
+
+    // Simulate a consume-mode reload with a foreign play-next insertion: the
+    // queue head now leads with different albums.
+    app.library.queue_songs = ["s9", "s8", "s3", "s4"]
+        .iter()
+        .map(|id| make_queue_song(id, "Title", "Artist", "Album"))
+        .collect();
+
+    assert_eq!(app.strip_quad_album_ids, frozen);
+    let tiles = app
+        .active_playlist_strip_quad()
+        .expect("frozen ids keep resolving after queue mutation");
+    assert_eq!(tiles.len(), 4);
+}
+
+/// `handle_queue_loaded` freezes the snapshot only while it is empty — the
+/// first queue for a context wins; later reloads leave it alone.
+#[test]
+fn queue_loaded_freezes_strip_quad_ids_once() {
+    let mut app = test_app();
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
+        "pl-1".to_string(),
+        "Mix".to_string(),
+        String::new(),
+    ));
+
+    let first: Vec<_> = ["s1", "s2"]
+        .iter()
+        .map(|id| make_queue_song(id, "Title", "Artist", "Album"))
+        .collect();
+    let _ = app.handle_queue_loaded(Ok(first));
+    let frozen = app.strip_quad_album_ids.clone();
+    assert_eq!(frozen, vec!["album_s1".to_string(), "album_s2".to_string()]);
+
+    let second: Vec<_> = ["s7", "s8"]
+        .iter()
+        .map(|id| make_queue_song(id, "Title", "Artist", "Album"))
+        .collect();
+    let _ = app.handle_queue_loaded(Ok(second));
+    assert_eq!(app.strip_quad_album_ids, frozen);
+}
+
+/// Clearing the playlist context drops the frozen quad identity with it.
+#[test]
+fn clear_active_playlist_drops_strip_quad_ids() {
+    let mut app = app_with_active_playlist_queue(&["s1", "s2"]);
+    app.snapshot_strip_quad_ids();
+    assert!(!app.strip_quad_album_ids.is_empty());
+
+    app.clear_active_playlist();
+
+    assert!(app.strip_quad_album_ids.is_empty());
     assert!(app.active_playlist_strip_quad().is_none());
 }
 
