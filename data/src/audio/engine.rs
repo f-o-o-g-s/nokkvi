@@ -1168,9 +1168,20 @@ impl CustomAudioEngine {
                         continue;
                     }
 
-                    // No gapless possible — signal EOF and exit
-                    decoder_eof.store(true, Ordering::Release);
-                    tracing::debug!("📭 [DECODE LOOP] Decoder EOF — signaling renderer");
+                    // No gapless possible — signal EOF and exit. Re-check the
+                    // generation first: read_buffer can block for seconds, so
+                    // this loop may have been superseded mid-iteration (e.g.
+                    // crossfade finalize promoting the next track) — a stale
+                    // EOF stored here would be attributed to the new track
+                    // and end it moments after its transition.
+                    if decode_gen.current() == my_gen {
+                        decoder_eof.store(true, Ordering::Release);
+                        tracing::debug!("📭 [DECODE LOOP] Decoder EOF — signaling renderer");
+                    } else {
+                        tracing::debug!(
+                            "📭 [DECODE LOOP] Decoder EOF after supersession — discarding signal"
+                        );
+                    }
                     break;
                 } else {
                     // Release decoder lock before sleeping
@@ -2032,7 +2043,11 @@ impl CustomAudioEngine {
         );
 
         // Phase 1: Crossfade finalization — outgoing queue drained
-        if self.try_finalize_crossfade(is_eof).await {
+        let renderer_fade_active = self.renderer.lock().is_crossfade_active();
+        if self
+            .try_finalize_crossfade(is_eof, renderer_fade_active)
+            .await
+        {
             return false;
         }
 
@@ -2058,22 +2073,40 @@ impl CustomAudioEngine {
         }
     }
 
-    /// Check if an active crossfade's outgoing queue has drained and finalize it.
+    /// Check if an active crossfade has run its course and finalize it.
     ///
-    /// Handles both phases:
+    /// Handles three cases:
     /// - `Active + is_eof`: queue drained BEFORE decoder signaled EOF (race)
     /// - `OutgoingFinished`: decoder already signaled EOF, queue drained after
-    async fn try_finalize_crossfade(&mut self, is_eof: bool) -> bool {
-        let should_finalize = matches!(
-            (&self.crossfade_phase, is_eof),
-            (CrossfadePhase::OutgoingFinished { .. }, _) | (CrossfadePhase::Active { .. }, true)
-        );
+    /// - `Active + !renderer_fade_active`: the renderer's fade ELAPSED and it
+    ///   already finalized its side, but the outgoing decoder has not reached
+    ///   EOF — e.g. a coarse VBR seek landed earlier in the audio than the
+    ///   position implied, leaving a long tail. The outgoing is at zero
+    ///   volume past the fade, so the tail is inaudible by construction:
+    ///   finalize and discard it. Waiting for EOF instead leaves a torn
+    ///   state (renderer promoted, engine still Active) in which the
+    ///   crossfade decode loop free-runs the incoming decoder against stale
+    ///   queue bookkeeping and its premature EOF then kills the promoted
+    ///   track moments after its transition.
+    ///
+    /// The renderer goes Active strictly BEFORE the engine phase does
+    /// (render_tick swaps Armed→Active synchronously, then signals the
+    /// engine), and cancel paths clear both sides together, so engine-Active
+    /// with renderer-not-Active can only mean the fade completed.
+    async fn try_finalize_crossfade(&mut self, is_eof: bool, renderer_fade_active: bool) -> bool {
+        let should_finalize = match (&self.crossfade_phase, is_eof) {
+            (CrossfadePhase::OutgoingFinished { .. }, _) => true,
+            (CrossfadePhase::Active { .. }, true) => true,
+            (CrossfadePhase::Active { .. }, false) => !renderer_fade_active,
+            (CrossfadePhase::Idle, _) => false,
+        };
 
         if should_finalize {
             debug!(
-                "🔀 [RENDERER FINISHED] Outgoing queue drained during crossfade (phase={}, eof={}) — finalizing",
+                "🔀 [RENDERER FINISHED] Crossfade ran its course (phase={}, eof={}, renderer_fade_active={}) — finalizing",
                 self.crossfade_phase.label(),
-                is_eof
+                is_eof,
+                renderer_fade_active
             );
             self.finalize_crossfade_engine().await;
         }
@@ -2390,6 +2423,61 @@ mod tests {
             engine.source_generation(),
             before,
             "seek must not bump the source generation",
+        );
+    }
+
+    /// Fade-completes-before-outgoing-EOF: when the renderer has already
+    /// finalized its side of the crossfade (elapsed hit the fade duration)
+    /// but the outgoing decoder has not reached EOF — e.g. a coarse VBR seek
+    /// landed earlier in the audio than the position implied — the engine
+    /// must finalize anyway. The outgoing is at zero volume past the fade,
+    /// so its tail is inaudible by construction; waiting for EOF leaves a
+    /// torn state (renderer promoted, engine Active) where the crossfade
+    /// decode loop free-runs the incoming decoder to a stale EOF that then
+    /// kills the next track seconds after promotion (observed live:
+    /// In the House skipped 33ms after its transition).
+    #[tokio::test]
+    async fn fade_completed_before_outgoing_eof_finalizes() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        // renderer_fade_active=false mirrors the post-render-tick-finalize
+        // reality: the renderer already promoted the incoming and went Idle.
+        let finalized = engine.try_finalize_crossfade(false, false).await;
+
+        assert!(
+            finalized,
+            "engine must finalize when the renderer's fade already completed, \
+             even though the outgoing decoder is not at EOF"
+        );
+        assert!(
+            engine.crossfade_phase.is_idle(),
+            "finalize must clear the engine-side crossfade phase"
+        );
+    }
+
+    /// Counterpart guard: while the renderer's fade is STILL ACTIVE, an
+    /// on_renderer_finished with eof=false (e.g. transient outgoing-ring
+    /// starvation mid-fade) must NOT finalize early.
+    #[tokio::test]
+    async fn fade_still_running_does_not_finalize_without_eof() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        let finalized = engine.try_finalize_crossfade(false, true).await;
+
+        assert!(
+            !finalized,
+            "a mid-fade starvation signal must not finalize the crossfade"
+        );
+        assert!(
+            !engine.crossfade_phase.is_idle(),
+            "the engine-side phase must stay Active while the fade runs"
         );
     }
 
