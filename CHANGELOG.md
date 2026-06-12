@@ -16,6 +16,9 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - The now-playing row's breathing glow and sheen now appear on the first track of a freshly played queue, not only after skipping ahead.
+- Certain MP3s no longer display a wildly wrong duration and bitrate (such as 30:24 for a 4:44 track).
+- Seeking in those affected MP3s now lands at the chosen position instead of far earlier in the track.
+- Seeking near the end of a track no longer makes the crossfaded-in next song get skipped moments after it starts.
 
 ### Removed
 
