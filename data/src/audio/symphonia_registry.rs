@@ -183,6 +183,52 @@ mod tests {
         );
     }
 
+    /// CANARY for upstream pdeljanov/Symphonia#516 — this test fails the day
+    /// the bug is FIXED in whatever symphonia version is pinned.
+    ///
+    /// The pinned symphonia rejects the Xing tag of CRC-protected MP3 frames
+    /// (`is_maybe_info_tag` scans the 16-bit frame CRC as if it were side
+    /// info) and falls back to a 17-frame bitrate extrapolation. This fixture
+    /// (1s digital silence + 1s noise, `lame -p -V 2`) carries a valid Xing
+    /// tag of 78 MPEG frames (89,856 samples = 2.038s at 44.1kHz) yet probes
+    /// at ~176k samples (~4.0s). nokkvi works around the bug with
+    /// `sanitize_probed_duration` + `seek_scale` in `decoder.rs`.
+    ///
+    /// If this assertion fails after a symphonia bump: the upstream bug is
+    /// fixed. The workarounds go dormant on their own (an in-tolerance probe
+    /// wins and `seek_scale` stays 1.0), so nothing breaks — re-verify
+    /// duration and seek on a CRC-protected VBR MP3, update the
+    /// `sanitize_probed_duration` docs, then delete this canary and the
+    /// fixture. Context: https://github.com/pdeljanov/Symphonia/issues/516
+    #[test]
+    fn symphonia_516_xing_crc_rejection_still_reproduces() {
+        const FIXTURE: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
+        /// Ground truth from the fixture's own Xing tag: 78 frames × 1152.
+        const XING_SAMPLES: u64 = 89_856;
+
+        let mss =
+            MediaSourceStream::new(Box::new(Cursor::new(FIXTURE.to_vec())), Default::default());
+        let mut hint = Hint::new();
+        hint.with_extension("mp3");
+
+        let (format, _decoder, track_id) = probe_and_make_decoder(mss, &hint, true)
+            .expect("the CRC-protected MP3 fixture must probe successfully");
+        let n_frames = format
+            .tracks()
+            .iter()
+            .find(|t| t.id == track_id)
+            .and_then(|t| t.codec_params.n_frames)
+            .expect("an MP3 probe with known byte length must produce n_frames");
+
+        assert!(
+            n_frames > XING_SAMPLES * 3 / 2,
+            "Symphonia#516 no longer reproduces (probed {n_frames} samples vs Xing \
+             {XING_SAMPLES}): the pinned symphonia now honors the Xing tag of \
+             CRC-protected MP3s. See this test's doc comment for the retirement \
+             checklist."
+        );
+    }
+
     /// Empty input must surface a probe error rather than a panic — the
     /// production sites all use `?`-propagation, so a panic here would mean
     /// the helper is silently `unwrap`ing somewhere it shouldn't.

@@ -20,6 +20,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 toml = { version = "1.0", features = ["parse", "display"] }
 toml_edit = "0.25"
+# Before bumping: the Symphonia#516 canary test in `audio::symphonia_registry`
+# (Xing tag rejected on CRC-protected MP3s) fails when a new version fixes the
+# bug upstream — see its doc comment for the workaround-retirement checklist.
 symphonia = { version = "0.5.5", features = ["mp3", "flac", "ogg", "wav", "aac", "isomp4", "alac", "aiff"] }
 # Opus decoder adapter for Symphonia. Workaround for pdeljanov/Symphonia#8 —
 # Symphonia ships no native Opus codec (open since 2020, no ETA). Drop this
