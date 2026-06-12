@@ -1005,7 +1005,7 @@ impl AppService {
         {
             let mut engine = engine_arc.lock().await;
             let _ = engine.stop().await;
-            engine.set_source(String::new()).await;
+            engine.set_source(String::new(), None).await;
         }
         let effect = self.queue_service.set_queue(Vec::new(), None).await?;
         effect.apply_to(&engine_arc).await;

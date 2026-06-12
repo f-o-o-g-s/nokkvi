@@ -955,7 +955,8 @@ impl Nokkvi {
                     shell.playback().stop().await?;
                     let engine_arc = shell.playback().audio_engine();
                     let mut engine = engine_arc.lock().await;
-                    engine.set_source(stream_url).await;
+                    // Radio: infinite stream, no metadata duration to expect.
+                    engine.set_source(stream_url, None).await;
                     engine.play().await?;
                     Ok(())
                 },

@@ -467,7 +467,11 @@ impl QueueNavigator {
                 reason,
             } => {
                 engine
-                    .load_track_with_rg(&stream_url, song.replay_gain.clone())
+                    .load_track_with_rg(
+                        &stream_url,
+                        song.replay_gain.clone(),
+                        song.expected_duration_ms(),
+                    )
                     .await;
                 engine.play().await?;
                 Ok(Some((song, reason)))
@@ -503,7 +507,11 @@ impl QueueNavigator {
         *self.current_song_id.lock().await = Some(song.id.clone());
 
         engine
-            .load_track_with_rg(&stream_url, song.replay_gain.clone())
+            .load_track_with_rg(
+                &stream_url,
+                song.replay_gain.clone(),
+                song.expected_duration_ms(),
+            )
             .await;
         engine.play().await?;
 

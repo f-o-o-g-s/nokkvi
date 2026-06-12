@@ -132,6 +132,15 @@ impl Song {
         self.starred
     }
 
+    /// Server-reported duration in milliseconds, for sanity-checking the
+    /// audio decoder's probed duration (`None` when the server reports no
+    /// duration). Navidrome's value comes from a full taglib scan, so it
+    /// stays trustworthy even when Symphonia's probe falls back to a
+    /// bitrate-extrapolated estimate (see GH pdeljanov/Symphonia#516).
+    pub fn expected_duration_ms(&self) -> Option<u64> {
+        (self.duration > 0).then(|| u64::from(self.duration) * 1000)
+    }
+
     /// Construct a minimal Song for unit tests. All optional fields default to `None`.
     #[cfg(test)]
     pub fn test_default(id: &str, title: &str) -> Self {

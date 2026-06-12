@@ -250,6 +250,14 @@ pub struct AudioDecoder {
     /// Engine uses this to skip gapless preparation, crossfade arming, and
     /// consume-mode queue mutation.
     infinite_stream: bool,
+    /// Server-reported track duration in ms, used to sanity-check the probed
+    /// duration in `open_input`. `None` for radio and engine-internal loads.
+    expected_duration_ms: Option<u64>,
+    /// Maps the real timeline onto Symphonia's internal one for `seek()`.
+    /// 1.0 except when `sanitize_probed_duration` overrode the probe: the
+    /// format reader still believes the probed total, so coarse seeks must be
+    /// scaled by probed/real or they land at the wrong byte offset.
+    seek_scale: f64,
     /// Arc passed in by the AudioEngine, populated by `IcyMetadataReader` if this stream supports ICY.
     live_icy_metadata: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     /// The short-name of the actual hardware codec (e.g., "mp3", "aac", "vorbis").
@@ -286,6 +294,66 @@ fn fill_silence_for_error(
     }
 }
 
+/// Cross-check the probe-derived duration against the server-reported one.
+///
+/// Symphonia's probe is sample-accurate when the container carries real frame
+/// counts, but for MP3 it can fall back to extrapolating from the first 17
+/// frames (and a Xing tag on a CRC-protected frame is rejected outright —
+/// pdeljanov/Symphonia#516), producing durations that are several times off
+/// for VBR files with quiet intros. The server value comes from a full
+/// metadata scan, so when the two disagree beyond `max(2s, 5%)` the probe is
+/// considered garbage and the server value wins. Within tolerance the probe
+/// wins: it is sample-accurate (gapless-trimmed) where the server rounds to
+/// whole seconds.
+///
+/// Known cost of the inverse case (probe right, server stale-short by more
+/// than the tolerance — e.g. a file extended on disk before a Navidrome
+/// rescan): the displayed range, seek clamp, and crossfade trigger follow the
+/// short server value until the server rescans. Accepted: that case is rare
+/// and self-healing, while the #516 case is deterministic for every
+/// CRC-protected VBR MP3.
+fn sanitize_probed_duration(probed_ms: u64, expected_ms: Option<u64>) -> u64 {
+    let Some(expected) = expected_ms.filter(|&e| e > 0) else {
+        return probed_ms;
+    };
+
+    if probed_ms == 0 {
+        return expected;
+    }
+
+    const TOLERANCE_FLOOR_MS: u64 = 2_000;
+    let tolerance = (expected / 20).max(TOLERANCE_FLOOR_MS);
+
+    if probed_ms.abs_diff(expected) > tolerance {
+        warn!(
+            " [DECODER] Probed duration {probed_ms}ms contradicts server metadata \
+             ({expected}ms) — using the server value (likely a bitrate-extrapolated \
+             estimate, see Symphonia#516)"
+        );
+        expected
+    } else {
+        probed_ms
+    }
+}
+
+/// Ratio that maps the real (displayed) timeline onto Symphonia's internal
+/// one after `sanitize_probed_duration` overrode the probe.
+///
+/// The format reader keeps believing its probed total, so a coarse seek
+/// interpolates `target / probed_total` into the byte range. Scaling the
+/// target by `probed / real` first makes that interpolation come out at
+/// `target / real` of the bytes — the mapping a correct coarse seek would
+/// use. Without this, seeking on a #516-affected file lands far short of the
+/// target (observed: seek to 262s of a 4:44 track landed at ~41s, the
+/// position-based crossfade then fired 230s before real EOF and the
+/// completion handler wedged on "buffer starvation").
+fn compute_seek_scale(probed_ms: u64, sanitized_ms: u64) -> f64 {
+    if probed_ms == 0 || sanitized_ms == 0 || probed_ms == sanitized_ms {
+        return 1.0;
+    }
+    probed_ms as f64 / sanitized_ms as f64
+}
+
 impl AudioDecoder {
     pub fn new(live_icy_metadata: std::sync::Arc<std::sync::RwLock<Option<String>>>) -> Self {
         Self {
@@ -300,9 +368,18 @@ impl AudioDecoder {
             frame_buffer: Vec::new(),
             smoothed_bitrate_kbps: 0.0,
             infinite_stream: false,
+            expected_duration_ms: None,
+            seek_scale: 1.0,
             live_icy_metadata,
             live_codec: None,
         }
+    }
+
+    /// Stamp the server-reported duration (ms) before `init()`. The probe's
+    /// duration is cross-checked against it in `open_input`; pass `None` when
+    /// no trustworthy metadata exists (radio, engine-internal fallback loads).
+    pub fn set_expected_duration_ms(&mut self, expected_ms: Option<u64>) {
+        self.expected_duration_ms = expected_ms;
     }
 
     /// Initialize decoder with URL (HTTP or file path)
@@ -648,6 +725,14 @@ impl AudioDecoder {
             0
         };
 
+        // Cross-check against server metadata: Symphonia's probe can hand back
+        // a bitrate-extrapolated estimate that is several times off (#516).
+        let probed_ms = duration_ms;
+        let duration_ms = sanitize_probed_duration(probed_ms, self.expected_duration_ms);
+        // When the probe was overridden, the format reader still believes the
+        // probed timeline — seeks must be mapped into it (see seek()).
+        self.seek_scale = compute_seek_scale(probed_ms, duration_ms);
+
         debug!(
             " [DECODER] Format: {}Hz, {} channels, duration: {}ms",
             sample_rate, channels, duration_ms
@@ -673,6 +758,7 @@ impl AudioDecoder {
         self.track_id = None;
         self.format = AudioFormat::invalid();
         self.duration = 0;
+        self.seek_scale = 1.0;
         self.initialized = false;
         self.eof = false;
         self.frame_buffer.clear();
@@ -1017,9 +1103,24 @@ impl AudioDecoder {
             .and_then(|t| t.codec_params.time_base)
             .unwrap_or_else(|| TimeBase::new(1, 1000));
 
+        // Map the real-timeline target into Symphonia's internal timeline.
+        // Identity unless the probe duration was overridden in open_input —
+        // then the format reader still believes its inflated total and would
+        // interpolate the byte offset against it (Symphonia#516).
+        let target_ms = if self.seek_scale == 1.0 {
+            position_ms
+        } else {
+            let scaled = (position_ms as f64 * self.seek_scale) as u64;
+            debug!(
+                "🔍 [DECODER SEEK] Mapping {}ms into the format reader's timeline: {}ms (scale {:.3})",
+                position_ms, scaled, self.seek_scale
+            );
+            scaled
+        };
+
         // Convert milliseconds to seconds
-        let seconds = position_ms / 1000;
-        let frac = (position_ms % 1000) as f64 / 1000.0;
+        let seconds = target_ms / 1000;
+        let frac = (target_ms % 1000) as f64 / 1000.0;
         let time = Time::new(seconds, frac);
         let _ts = time_base.calc_timestamp(time);
 
@@ -1174,6 +1275,84 @@ pub(crate) fn format_hint_from_radio_url(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // sanitize_probed_duration — the probe-vs-server-metadata cross-check
+    // applied in open_input. Pure fn; the bug it guards against is Symphonia's
+    // bitrate-extrapolated MP3 duration estimate (pdeljanov/Symphonia#516:
+    // a 4:44 VBR file probed as 30:24).
+    // =========================================================================
+
+    #[test]
+    fn sanitize_keeps_probe_without_expectation() {
+        assert_eq!(sanitize_probed_duration(284_280, None), 284_280);
+        assert_eq!(
+            sanitize_probed_duration(284_280, Some(0)),
+            284_280,
+            "a zero expectation carries no information"
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_probe_within_tolerance() {
+        // Probe is sample-accurate where the server rounds to whole seconds —
+        // small disagreement must not displace it.
+        assert_eq!(sanitize_probed_duration(284_280, Some(284_000)), 284_280);
+        // Short track: the 2s floor dominates 5% (30s ± 2s). Exactly at the
+        // boundary is agreement; one ms past it is not.
+        assert_eq!(sanitize_probed_duration(32_000, Some(30_000)), 32_000);
+        assert_eq!(sanitize_probed_duration(32_001, Some(30_000)), 30_000);
+        // Long track: 5% beats the 2s floor (3600s ± 180s).
+        assert_eq!(
+            sanitize_probed_duration(3_750_000, Some(3_600_000)),
+            3_750_000
+        );
+    }
+
+    #[test]
+    fn sanitize_prefers_server_when_probe_is_wildly_off() {
+        // The real Symphonia#516 numbers: 4:44 track probed as 30:24.757.
+        assert_eq!(sanitize_probed_duration(1_824_757, Some(284_000)), 284_000);
+        // Probe far too short is equally garbage.
+        assert_eq!(sanitize_probed_duration(30_000, Some(284_000)), 284_000);
+    }
+
+    #[test]
+    fn sanitize_falls_back_to_server_when_probe_is_zero() {
+        // No n_frames (or the 24h garbage guard zeroed the probe): the server
+        // value is strictly better than reporting nothing.
+        assert_eq!(sanitize_probed_duration(0, Some(284_000)), 284_000);
+        assert_eq!(sanitize_probed_duration(0, None), 0);
+    }
+
+    // =========================================================================
+    // compute_seek_scale — real-timeline → Symphonia-timeline mapping for
+    // coarse seeks after the duration override. Wrong scale = seeks land at
+    // the wrong byte offset (the "seek to the end repeats the song" bug).
+    // =========================================================================
+
+    #[test]
+    fn seek_scale_is_identity_when_probe_was_kept() {
+        assert_eq!(compute_seek_scale(284_280, 284_280), 1.0);
+    }
+
+    #[test]
+    fn seek_scale_maps_real_targets_into_the_inflated_probe_timeline() {
+        // The Symphonia#516 numbers: probe 1824.757s, real 284.28s. A seek to
+        // the real end must land near the probe timeline's end.
+        let scale = compute_seek_scale(1_824_757, 284_280);
+        assert!((scale - 6.418).abs() < 0.01, "scale was {scale}");
+        let mapped = (284_280.0 * scale) as u64;
+        assert!((1_820_000..=1_830_000).contains(&mapped), "mapped {mapped}");
+    }
+
+    #[test]
+    fn seek_scale_is_identity_without_a_probe_timeline() {
+        // probed == 0 means Symphonia has no duration model to map into.
+        assert_eq!(compute_seek_scale(0, 284_000), 1.0);
+        // sanitized == 0 cannot happen after the zero-fallback, but stay safe.
+        assert_eq!(compute_seek_scale(284_000, 0), 1.0);
+    }
 
     // =========================================================================
     // fill_silence_for_error — the shared silence-fill used by read_buffer's two

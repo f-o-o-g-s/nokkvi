@@ -230,8 +230,9 @@ impl PlaybackController {
 
                     // Load and play the track
                     let rg = song.replay_gain.clone();
+                    let expected_ms = song.expected_duration_ms();
                     drop(queue_manager);
-                    audio.load_track_with_rg(&stream_url, rg).await;
+                    audio.load_track_with_rg(&stream_url, rg, expected_ms).await;
                     audio.play().await?;
                     return Ok(());
                 }
@@ -289,7 +290,11 @@ impl PlaybackController {
 
                 // Load and play the track
                 audio
-                    .load_track_with_rg(&stream_url, song.replay_gain.clone())
+                    .load_track_with_rg(
+                        &stream_url,
+                        song.replay_gain.clone(),
+                        song.expected_duration_ms(),
+                    )
                     .await;
                 audio.play().await?;
 
@@ -551,9 +556,10 @@ impl PlaybackController {
         }
 
         // Get the next track URL from queue manager WITHOUT holding the engine lock
-        let (stream_url, replay_gain, is_repeat_track): (
+        let (stream_url, replay_gain, expected_duration_ms, is_repeat_track): (
             Option<String>,
             Option<crate::types::song::ReplayGain>,
+            Option<u64>,
             bool,
         ) = {
             let queue_manager_arc = self.queue_service.queue_manager();
@@ -569,9 +575,14 @@ impl PlaybackController {
                     &server_url,
                     &subsonic_credential,
                 );
-                (Some(url), next_song.replay_gain.clone(), repeat_track)
+                (
+                    Some(url),
+                    next_song.replay_gain.clone(),
+                    next_song.expected_duration_ms(),
+                    repeat_track,
+                )
             } else {
-                (None, None, repeat_track)
+                (None, None, None, repeat_track)
             }
         };
 
@@ -613,6 +624,7 @@ impl PlaybackController {
                 // Create and initialize decoder OUTSIDE the engine lock
                 // This is the slow part - downloads ~20MB of audio
                 let mut decoder = crate::audio::AudioDecoder::default();
+                decoder.set_expected_duration_ms(expected_duration_ms);
                 decoder.init(&url_for_task).await?;
 
                 // BRIEF lock to store the already-downloaded decoder
@@ -677,6 +689,7 @@ impl PlaybackController {
         self.load_play_and_set_current(
             &stream_url,
             song.replay_gain.clone(),
+            song.expected_duration_ms(),
             effect,
             song.id.clone(),
         )
@@ -697,11 +710,14 @@ impl PlaybackController {
         &self,
         stream_url: &str,
         rg: Option<crate::types::song::ReplayGain>,
+        expected_duration_ms: Option<u64>,
         effect: crate::types::next_track_reset::NextTrackResetEffect,
         song_id: String,
     ) -> Result<()> {
         let mut engine = self.audio_engine.lock().await;
-        engine.load_track_with_rg(stream_url, rg).await;
+        engine
+            .load_track_with_rg(stream_url, rg, expected_duration_ms)
+            .await;
         engine.play().await?;
         effect.apply_locked(&mut engine).await;
         drop(engine);
@@ -769,12 +785,14 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
-        let rg = {
+        let (rg, expected_ms) = {
             let qm = queue_manager.lock().await;
-            qm.get_song(&song_id).and_then(|s| s.replay_gain.clone())
+            qm.get_song(&song_id).map_or((None, None), |s| {
+                (s.replay_gain.clone(), s.expected_duration_ms())
+            })
         };
 
-        self.load_play_and_set_current(&stream_url, rg, reposition_effect, song_id)
+        self.load_play_and_set_current(&stream_url, rg, expected_ms, reposition_effect, song_id)
             .await?;
 
         Ok(())
@@ -823,13 +841,21 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
-        let rg = {
+        let (rg, expected_ms) = {
             let qm = queue_manager.lock().await;
-            qm.get_song(song_id).and_then(|s| s.replay_gain.clone())
+            qm.get_song(song_id).map_or((None, None), |s| {
+                (s.replay_gain.clone(), s.expected_duration_ms())
+            })
         };
 
-        self.load_play_and_set_current(&stream_url, rg, reposition_effect, song_id.to_string())
-            .await?;
+        self.load_play_and_set_current(
+            &stream_url,
+            rg,
+            expected_ms,
+            reposition_effect,
+            song_id.to_string(),
+        )
+        .await?;
 
         Ok(())
     }
@@ -896,11 +922,12 @@ impl PlaybackController {
                 new_index: _,
                 resume,
             } => {
-                let replay_gain = {
+                let (replay_gain, expected_ms) = {
                     let qm_arc = self.queue_service.queue_manager();
                     let qm = qm_arc.lock().await;
-                    qm.get_song(&new_song_id)
-                        .and_then(|s| s.replay_gain.clone())
+                    qm.get_song(&new_song_id).map_or((None, None), |s| {
+                        (s.replay_gain.clone(), s.expected_duration_ms())
+                    })
                 };
 
                 let (server_url, subsonic_credential) =
@@ -926,7 +953,9 @@ impl PlaybackController {
                     // paused app must not start playing just because its
                     // current row was removed.
                     let mut engine = self.audio_engine.lock().await;
-                    engine.load_track_with_rg(&stream_url, replay_gain).await;
+                    engine
+                        .load_track_with_rg(&stream_url, replay_gain, expected_ms)
+                        .await;
                     if resume {
                         engine.play().await?;
                     }

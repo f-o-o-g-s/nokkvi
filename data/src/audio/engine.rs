@@ -491,7 +491,7 @@ impl CustomAudioEngine {
     }
 
     /// Set source URL
-    pub async fn set_source(&mut self, source: String) {
+    pub async fn set_source(&mut self, source: String, expected_duration_ms: Option<u64>) {
         trace!(
             " AudioEngine: set_source called with: {}",
             redact_subsonic_url(&source)
@@ -519,9 +519,9 @@ impl CustomAudioEngine {
         self.live_codec_name.reset();
 
         trace!(" AudioEngine: creating fresh decoder for new source");
-        self.decoder = Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
-            self.live_icy_metadata.clone_arc(),
-        )));
+        let mut fresh_decoder = AudioDecoder::new(self.live_icy_metadata.clone_arc());
+        fresh_decoder.set_expected_duration_ms(expected_duration_ms);
+        self.decoder = Arc::new(tokio::sync::Mutex::new(fresh_decoder));
 
         self.duration = 0;
         self.position = 0;
@@ -1396,9 +1396,10 @@ impl CustomAudioEngine {
         &mut self,
         url: &str,
         rg: Option<crate::types::song::ReplayGain>,
+        expected_duration_ms: Option<u64>,
     ) {
         self.renderer.lock().set_pending_replay_gain(rg);
-        self.set_source(url.to_string()).await;
+        self.set_source(url.to_string(), expected_duration_ms).await;
     }
 
     /// Store an already-initialized decoder for gapless playback.
