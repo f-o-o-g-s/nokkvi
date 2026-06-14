@@ -106,6 +106,32 @@ fn pixel_to_ndc(pixel_x: f32, pixel_y: f32) -> vec2<f32> {
     return vec2<f32>(ndc_x, ndc_y);
 }
 
+// ---------- Neon glow constants/helpers ----------
+// Exponential emissive halo beyond the main stroke. The falloff radius scales
+// with intensity (stronger glow is also wider); EXTENT_MULT sets how far the
+// line geometry is widened in vs_main so the exp tail has fragments to draw
+// into instead of being clipped to the quad. The vertical expansion budget
+// (`max_expansion`) folds in `lines_glow_extent()` so the halo has room at the
+// canvas edges too — turning glow on therefore reserves a little headroom.
+const LINES_GLOW_MIN_RADIUS: f32 = 3.0;
+const LINES_GLOW_MAX_RADIUS: f32 = 10.0;
+const LINES_GLOW_EXTENT_MULT: f32 = 2.5;
+
+// Halo exp-falloff radius (px) for the current intensity.
+fn lines_glow_radius() -> f32 {
+    let s = clamp(uniforms.config.lines_glow_intensity, 0.0, 1.0);
+    return mix(LINES_GLOW_MIN_RADIUS, LINES_GLOW_MAX_RADIUS, s);
+}
+
+// How far (px) to widen the line geometry for the halo. Zero when glow is
+// disabled, so a disabled glow costs no extra fragments or headroom.
+fn lines_glow_extent() -> f32 {
+    if (uniforms.config.lines_glow_intensity <= 0.001) {
+        return 0.0;
+    }
+    return lines_glow_radius() * LINES_GLOW_EXTENT_MULT;
+}
+
 // Get gradient color based on time (breathing animation cycling through all colors)
 fn get_gradient_color_animated(time: f32) -> vec4<f32> {
     // Cycle speed from config (higher = faster cycling through gradient colors)
@@ -231,8 +257,8 @@ fn get_point(idx: i32, point_count: i32, canvas_width: f32, canvas_height: f32) 
     let line_thickness = max(uniforms.config.line_thickness, 2.0);
     let outline_extra = uniforms.config.lines_outline_thickness;
     let aa_padding = 1.5;
-    let max_expansion = ((line_thickness * 0.5) + outline_extra + aa_padding) * 4.0;
-    
+    let max_expansion = ((line_thickness * 0.5) + outline_extra + aa_padding) * 4.0 + lines_glow_extent();
+
     var y: f32;
     if (uniforms.config.lines_mirror == 1u) {
         // Mirror mode: line extends from center, value controls displacement
@@ -352,7 +378,7 @@ fn vs_main(
     // Clamp Y coordinates after spline interpolation
     let outline_extra = uniforms.config.lines_outline_thickness;
     let aa_padding = 1.5;
-    let max_expansion = half_thickness + outline_extra + aa_padding;
+    let max_expansion = half_thickness + outline_extra + aa_padding + lines_glow_extent();
     if (uniforms.config.lines_mirror == 1u) {
         let center_y = canvas_height * 0.5;
         current_point.y = clamp(current_point.y, max_expansion, center_y);
@@ -378,7 +404,7 @@ fn vs_main(
     // Calculate amplitude from the current point's Y position
     let outline_extra_val = uniforms.config.lines_outline_thickness;
     let aa_pad_val = 1.5;
-    let max_exp_val = ((line_thickness * 0.5) + outline_extra_val + aa_pad_val) * 4.0;
+    let max_exp_val = ((line_thickness * 0.5) + outline_extra_val + aa_pad_val) * 4.0 + lines_glow_extent();
     let draw_h = canvas_height - max_exp_val;
     var amplitude: f32;
     if (uniforms.config.lines_mirror == 1u) {
@@ -435,7 +461,10 @@ fn vs_main(
     // Determine thickness based on outline vs main line
     let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, is_outline_pass);
     
-    let extended_half_thickness = actual_half_thickness + aa_padding;
+    // Widen ONLY the main line pass for the glow halo; the dark outline pass
+    // keeps its tight footprint (it never glows in the fragment shader).
+    let pass_glow_extent = select(lines_glow_extent(), 0.0, is_outline_pass);
+    let extended_half_thickness = actual_half_thickness + aa_padding + pass_glow_extent;
     
     // Offset vertex to left or right of center line
     var offset_point: vec2<f32>;
@@ -488,15 +517,34 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Line/outline pass: antialiased rendering
     let line_thickness = max(uniforms.config.line_thickness, 2.0);
     let half_thickness = line_thickness * 0.5;
-    
+
     let outline_extra = uniforms.config.lines_outline_thickness;
-    let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, input.is_outline > 0.5);
-    
+    let is_outline = input.is_outline > 0.5;
+    let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, is_outline);
+
     let dist = abs(input.distance_to_center);
-    let alpha = smoothstep(actual_half_thickness + 0.75, actual_half_thickness - 0.75, dist);
-    
-    color.a *= alpha;
+    let core = smoothstep(actual_half_thickness + 0.75, actual_half_thickness - 0.75, dist);
+
+    var coverage = core;
+
+    // Neon glow: an exponential emissive halo beyond the main stroke (the dark
+    // outline pass is skipped so it stays crisp). Same gradient color as the
+    // line; alpha-blended over the dark visualizer backdrop it reads as a tube
+    // of light. Brightens with overall loudness (`average_energy`) so loud
+    // passages flare — and since that signal stops changing when audio pauses,
+    // the glow simply holds steady rather than animating, so no redraw-gate
+    // change is needed for this effect.
+    let glow_strength = uniforms.config.lines_glow_intensity;
+    if (glow_strength > 0.001 && !is_outline) {
+        let beyond = max(dist - actual_half_thickness, 0.0);
+        let halo = exp(-beyond / lines_glow_radius());
+        let energy = clamp(uniforms.config.average_energy, 0.0, 1.0);
+        let halo_coverage = halo * glow_strength * (0.45 + 0.55 * energy);
+        coverage = max(core, halo_coverage);
+    }
+
+    color.a *= coverage;
     color.a *= uniforms.config.global_opacity;
-    
+
     return color;
 }

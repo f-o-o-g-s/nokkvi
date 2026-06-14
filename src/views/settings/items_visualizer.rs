@@ -497,6 +497,16 @@ pub(crate) fn build_visualizer_items(
         0.05,
         "",
     ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::LINES_GLOW_INTENSITY, "Glow Intensity", "Lines")
+            .with_subtitle("Neon halo around the line. 0 = disabled, brightens with loudness"),
+        config.lines.glow_intensity as f64,
+        d.lines.glow_intensity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
     e.push(SettingItem::bool_val(
         SettingMeta::new(keys::LINES_MIRROR, "Mirror", "Lines")
             .with_subtitle("Symmetric oscilloscope — line extends from center"),

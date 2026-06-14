@@ -432,8 +432,8 @@ impl Visualizer {
     /// - `self.peak_enabled` / `peak_alpha` / `peak_color` / `line_thickness` /
     ///   `bar_width` / `bar_spacing` / `edge_spacing` — per-widget builder
     ///   state set by `width()` / `mode()` / the `peak_*` setters.
-    /// - `lines_glow_intensity: 0.0` — feature toggle held at zero by design;
-    ///   the glow path lives in the shader but the UI never exposes it.
+    /// - `cfg.lines.glow_intensity` — neon-halo strength for Lines mode,
+    ///   exposed in the Visualizer settings tab and consumed by `lines.wgsl`.
     fn build_shader_params(
         &self,
         cfg: &crate::visualizer_config::VisualizerConfig,
@@ -470,7 +470,7 @@ impl Visualizer {
             lines_gradient_mode: cfg.lines.get_gradient_mode_value(),
             lines_fill_opacity: cfg.lines.fill_opacity,
             lines_mirror: cfg.lines.mirror,
-            lines_glow_intensity: 0.0,
+            lines_glow_intensity: cfg.lines.glow_intensity,
             lines_style: cfg.lines.get_style_value(),
         }
     }
@@ -773,6 +773,7 @@ mod build_shader_params_tests {
         cfg.bars.led_bars = true;
         cfg.opacity = 0.42;
         cfg.lines.mirror = true;
+        cfg.lines.glow_intensity = 0.7;
 
         let shared = Arc::new(RwLock::new(cfg.clone()));
         let viz = Visualizer::new(64, shared);
@@ -789,6 +790,7 @@ mod build_shader_params_tests {
         // cfg-routed (cfg.opacity / cfg.lines.*)
         assert!((params.global_opacity - 0.42).abs() < 1e-6);
         assert!(params.lines_mirror);
+        assert!((params.lines_glow_intensity - 0.7).abs() < 1e-6);
 
         // colors-routed — peak/bar gradient palettes must be padded to 8.
         assert_eq!(params.gradient_colors.len(), 8);
@@ -799,9 +801,6 @@ mod build_shader_params_tests {
         assert!(params.peak_enabled);
         assert!((params.peak_alpha - 1.0).abs() < 1e-6);
         assert_eq!(params.peak_color, iced::Color::TRANSPARENT);
-
-        // Constant: lines_glow_intensity is pinned at 0.0 by design.
-        assert!((params.lines_glow_intensity - 0.0).abs() < 1e-9);
     }
 }
 

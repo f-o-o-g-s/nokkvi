@@ -140,6 +140,7 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "visualizer.lines.point_count" => &["resolution", "detail", "samples", "vertices"],
         "visualizer.lines.gradient_mode" => &["color mode", "breathing", "rainbow", "coloring"],
         "visualizer.lines.fill_opacity" => &["area fill", "shade under", "filled curve"],
+        "visualizer.lines.glow_intensity" => &["neon", "halo", "bloom", "glow", "luminous"],
         "visualizer.lines.style" => &["smooth", "angular", "curve", "interpolation"],
         "visualizer.lines.mirror" => &["symmetric", "oscilloscope", "reflect"],
         "visualizer.lines.boat" => &["surf", "rider", "easter egg"],

@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The Lines visualizer can now glow like neon, with a halo that brightens with the music and an adjustable Glow Intensity setting.
+
 ### Changed
 
 - The metadata strip now defaults to Mini Player instead of the Player Bar.

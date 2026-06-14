@@ -285,6 +285,7 @@ mod tests {
                 vkeys::LINES_ANIMATION_SPEED,
                 vkeys::LINES_GRADIENT_MODE,
                 vkeys::LINES_FILL_OPACITY,
+                vkeys::LINES_GLOW_INTENSITY,
                 vkeys::LINES_MIRROR,
                 vkeys::LINES_STYLE,
                 vkeys::LINES_BOAT,
@@ -292,9 +293,9 @@ mod tests {
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 3 + 4 + 19 + 5 + 5 + 10 = 46. Catches an item landing OUTSIDE the
+        // 3 + 4 + 19 + 5 + 5 + 11 = 47. Catches an item landing OUTSIDE the
         // pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 46);
+        assert_eq!(count_items(&entries), 47);
     }
 
     #[test]

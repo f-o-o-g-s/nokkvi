@@ -555,6 +555,11 @@ pub struct LinesConfig {
     /// Fill opacity under the curve (0.0 = disabled, 1.0 = fully opaque).
     /// Default: 0.5
     pub fill_opacity: f32,
+    /// Neon glow halo around the main line (0.0 = disabled, 1.0 = max).
+    /// An exponential emissive falloff beyond the stroke that brightens with
+    /// loudness. Rendered in `lines.wgsl` (the dark outline pass never glows).
+    /// Default: 0.5
+    pub glow_intensity: f32,
     /// Mirror mode: render waveform symmetrically from center.
     /// Default: false
     pub mirror: bool,
@@ -578,6 +583,7 @@ impl Default for LinesConfig {
             animation_speed: 0.1,
             gradient_mode: LinesGradientMode::Static,
             fill_opacity: 0.5,
+            glow_intensity: 0.5,
             mirror: false,
             style: LinesStyle::Smooth,
             boat: true,
@@ -646,6 +652,7 @@ pub(crate) mod keys {
     pub(crate) const LINES_ANIMATION_SPEED: &str = "visualizer.lines.animation_speed";
     pub(crate) const LINES_GRADIENT_MODE: &str = "visualizer.lines.gradient_mode";
     pub(crate) const LINES_FILL_OPACITY: &str = "visualizer.lines.fill_opacity";
+    pub(crate) const LINES_GLOW_INTENSITY: &str = "visualizer.lines.glow_intensity";
     pub(crate) const LINES_MIRROR: &str = "visualizer.lines.mirror";
     pub(crate) const LINES_STYLE: &str = "visualizer.lines.style";
     pub(crate) const LINES_BOAT: &str = "visualizer.lines.boat";
@@ -773,6 +780,7 @@ impl VisualizerConfig {
         self.lines.outline_opacity = self.lines.outline_opacity.clamp(0.0, 1.0);
         self.lines.animation_speed = self.lines.animation_speed.clamp(0.05, 1.0);
         self.lines.fill_opacity = self.lines.fill_opacity.clamp(0.0, 1.0);
+        self.lines.glow_intensity = self.lines.glow_intensity.clamp(0.0, 1.0);
 
         // Validate height_percent (10% to 60% — above 60% the visualizer overlaps the player bar)
         self.height_percent = self.height_percent.clamp(0.1, 0.60);
