@@ -477,8 +477,13 @@ fn vs_main(
         dist_to_center = -extended_half_thickness;
     }
     
-    // Clamp offset point to stay within canvas bounds
-    offset_point.y = clamp(offset_point.y, 0.0, canvas_height);
+    // NOTE: deliberately NOT clamping offset_point.y here. iced sets the
+    // shader pass's viewport to the widget bounds and its scissor rect to the
+    // clip bounds (see iced_wgpu primitive docs), so overflow is clipped on
+    // the GPU. Per-vertex clamping would pin one edge of the ribbon while
+    // leaving the other free, shifting the interpolated centerline — which
+    // desyncs the wide glow-main pass from the narrow outline pass near the
+    // canvas edges (the thin offset line + triangular wedge artifacts).
     
     // Calculate color
     var color: vec4<f32>;
