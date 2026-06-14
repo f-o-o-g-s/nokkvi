@@ -215,7 +215,13 @@ mod tests {
         assert_section_keys(
             &entries,
             "Frame",
-            &[restore.as_str(), vkeys::HEIGHT_PERCENT, vkeys::OPACITY],
+            &[
+                restore.as_str(),
+                vkeys::HEIGHT_PERCENT,
+                vkeys::OPACITY,
+                vkeys::BLOOM,
+                vkeys::BLOOM_INTENSITY,
+            ],
         );
         assert_section_keys(
             &entries,
@@ -294,9 +300,9 @@ mod tests {
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 3 + 4 + 20 + 5 + 5 + 11 = 48. Catches an item landing OUTSIDE the
+        // 5 + 4 + 20 + 5 + 5 + 11 = 50. Catches an item landing OUTSIDE the
         // pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 48);
+        assert_eq!(count_items(&entries), 50);
     }
 
     #[test]

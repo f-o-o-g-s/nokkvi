@@ -158,6 +158,22 @@ pub(crate) fn build_visualizer_items(
         0.05,
         "",
     ));
+    e.push(SettingItem::bool_val(
+        SettingMeta::new(keys::BLOOM, "Bloom Glow", "Frame")
+            .with_subtitle("Soft glow halo around bright bars, peak flashes, and the line"),
+        config.bloom,
+        d.bloom,
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::BLOOM_INTENSITY, "Bloom Intensity", "Frame")
+            .with_subtitle("Strength of the bloom glow. 0 = off"),
+        config.bloom_intensity as f64,
+        d.bloom_intensity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
 
     // --- Signal section (FFT/DSP, affects both Bars and Lines modes) ---
     e.push(SettingsEntry::Header {

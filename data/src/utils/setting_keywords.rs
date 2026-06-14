@@ -119,6 +119,8 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "visualizer.lower_cutoff_freq" => &["bass", "low frequency", "highpass"],
         "visualizer.higher_cutoff_freq" => &["treble", "high frequency", "lowpass"],
         "visualizer.opacity" => &["transparency", "alpha", "fade"],
+        "visualizer.bloom" => &["glow", "halo", "neon", "emissive", "shine"],
+        "visualizer.bloom_intensity" => &["glow strength", "halo", "neon", "bloom amount"],
         "visualizer.auto_sensitivity" => &["agc", "auto gain", "normalize", "auto scale"],
         "visualizer.waves" => &["spline", "rolling hills", "catmull-rom"],
         "visualizer.monstercat" => &["spread", "falloff", "blur", "cava"],

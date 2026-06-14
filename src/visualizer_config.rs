@@ -632,6 +632,8 @@ pub(crate) mod keys {
     pub(crate) const HEIGHT_PERCENT: &str = "visualizer.height_percent";
     pub(crate) const OPACITY: &str = "visualizer.opacity";
     pub(crate) const AUTO_SENSITIVITY: &str = "visualizer.auto_sensitivity";
+    pub(crate) const BLOOM: &str = "visualizer.bloom";
+    pub(crate) const BLOOM_INTENSITY: &str = "visualizer.bloom_intensity";
 
     // ── Bars ─────────────────────────────────────────────────────────────
     pub(crate) const BARS_MAX_BARS: &str = "visualizer.bars.max_bars";
@@ -719,6 +721,15 @@ pub struct VisualizerConfig {
     /// Default: 1.0
     pub opacity: f32,
 
+    /// Bloom glow post-processing: bright bars / peak flashes / the neon line
+    /// core bleed a soft additive halo. Applies to every mode.
+    /// Default: true
+    pub bloom: bool,
+
+    /// Bloom glow strength (0.0 = off, 1.0 = max additive glow).
+    /// Default: 0.6
+    pub bloom_intensity: f32,
+
     /// Bars mode specific settings
     /// Use [visualizer.bars] in config.toml
     #[serde(default)]
@@ -746,6 +757,8 @@ impl Default for VisualizerConfig {
             higher_cutoff_freq: 10000,
             height_percent: 0.25,
             opacity: 1.0,
+            bloom: true,
+            bloom_intensity: 0.6,
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
         }
@@ -796,6 +809,9 @@ impl VisualizerConfig {
 
         // Validate opacity (0.0–1.0)
         self.opacity = self.opacity.clamp(0.0, 1.0);
+
+        // Validate bloom intensity (0.0–1.0)
+        self.bloom_intensity = self.bloom_intensity.clamp(0.0, 1.0);
     }
 }
 

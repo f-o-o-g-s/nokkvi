@@ -5,7 +5,7 @@
 
 use iced::wgpu;
 
-use super::shader::{Uniforms, VisualizerPipeline};
+use super::shader::{BloomParams, Uniforms, VisualizerPipeline};
 
 /// Build one of the four bars/lines × default/MSAA render pipelines.
 ///
@@ -365,6 +365,123 @@ fn fs_blit(in: VertexOut) -> @location(0) vec4f {
             ..Default::default()
         });
 
+        // --- Bloom post-processing pipelines ---
+        let bloom_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer bloom shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/bloom.wgsl"
+            ))),
+        });
+
+        // texture + sampler + BloomParams uniform
+        let bloom_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("visualizer bloom bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let bloom_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("visualizer bloom uniform buffer"),
+            size: std::mem::size_of::<BloomParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bloom_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("visualizer bloom pipeline layout"),
+            bind_group_layouts: &[&bloom_bind_group_layout],
+            immediate_size: 0,
+        });
+
+        let make_bloom_pipeline =
+            |entry: &'static str, blend: wgpu::BlendState, label: &'static str| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&bloom_layout),
+                    vertex: wgpu::VertexState {
+                        module: &bloom_shader,
+                        entry_point: Some("vs_main"),
+                        buffers: &[],
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        ..Default::default()
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &bloom_shader,
+                        entry_point: Some(entry),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: Some(blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            };
+
+        // Blur/threshold passes overwrite their target; the composite adds light.
+        let additive_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+
+        let bloom_bright_pipeline = make_bloom_pipeline(
+            "fs_bright_h",
+            wgpu::BlendState::REPLACE,
+            "visualizer bloom bright/H pipeline",
+        );
+        let bloom_blur_v_pipeline = make_bloom_pipeline(
+            "fs_blur_v",
+            wgpu::BlendState::REPLACE,
+            "visualizer bloom blur V pipeline",
+        );
+        let bloom_composite_pipeline = make_bloom_pipeline(
+            "fs_composite",
+            additive_blend,
+            "visualizer bloom composite pipeline",
+        );
+
         Self {
             bars_pipeline,
             bars_pipeline_msaa,
@@ -384,6 +501,16 @@ fn fs_blit(in: VertexOut) -> @location(0) vec4f {
             sampler,
             msaa_size: (0, 0),
             format,
+            bloom_bright_pipeline,
+            bloom_blur_v_pipeline,
+            bloom_composite_pipeline,
+            bloom_bind_group_layout,
+            bloom_uniform_buffer,
+            bloom_texture_a: None,
+            bloom_texture_b: None,
+            bloom_bg_scene: None,
+            bloom_bg_a: None,
+            bloom_bg_b: None,
         }
     }
 }

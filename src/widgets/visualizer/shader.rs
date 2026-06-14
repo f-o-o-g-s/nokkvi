@@ -20,6 +20,11 @@ fn get_elapsed_time() -> f32 {
     start.elapsed().as_secs_f32()
 }
 
+/// Soft-knee brightness cutoff for the bloom bright-pass (premultiplied luma).
+/// Only scene pixels brighter than this bleed a glow; tuned conservative so the
+/// dark background and faint AA edges don't haze.
+const BLOOM_THRESHOLD: f32 = 0.35;
+
 /// Configuration passed to the GPU shader
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(16))]
@@ -111,6 +116,11 @@ pub(crate) struct VisualizerPrimitive {
     pub state: VisualizerState,
     /// Whether perspective lean is active (triggers MSAA render path)
     pub has_perspective: bool,
+    /// Whether bloom post-processing is active (routes through the render()
+    /// offscreen path so the scene can be blurred + additively composited)
+    pub bloom_enabled: bool,
+    /// Bloom glow strength (0.0-1.0), uploaded to the bloom uniform in prepare()
+    pub bloom_intensity: f32,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -183,6 +193,10 @@ pub(crate) struct ShaderParams {
     pub lines_style: u32,
     /// Bars mode: peak-flash bloom strength (0.0 = disabled, 1.0 = max)
     pub bars_flash_intensity: f32,
+    /// Bloom post-processing enabled (soft additive glow over the whole scene)
+    pub bloom_enabled: bool,
+    /// Bloom glow strength (0.0 = off, 1.0 = max additive glow)
+    pub bloom_intensity: f32,
 }
 
 impl VisualizerPrimitive {
@@ -281,6 +295,7 @@ impl VisualizerPrimitive {
         };
 
         let has_perspective = params.bar_depth_3d > 0.001;
+        let bloom_enabled = params.bloom_enabled && params.bloom_intensity > 0.001;
 
         Self {
             gradient_colors: gradient,
@@ -290,6 +305,8 @@ impl VisualizerPrimitive {
             config,
             state: state.clone(),
             has_perspective,
+            bloom_enabled,
+            bloom_intensity: params.bloom_intensity,
         }
     }
 }
@@ -318,7 +335,38 @@ pub(crate) struct VisualizerPipeline {
     pub(super) sampler: wgpu::Sampler,
     pub(super) msaa_size: (u32, u32),
     pub(super) format: wgpu::TextureFormat,
+    // --- Bloom post-processing ---
+    /// resolve_texture -> half-res bloom (horizontal blur + soft-knee threshold)
+    pub(super) bloom_bright_pipeline: wgpu::RenderPipeline,
+    /// half-res bloom -> half-res bloom (vertical blur)
+    pub(super) bloom_blur_v_pipeline: wgpu::RenderPipeline,
+    /// half-res bloom -> framebuffer (additive composite, One/One blend)
+    pub(super) bloom_composite_pipeline: wgpu::RenderPipeline,
+    /// Bind group layout for bloom passes (texture + sampler + BloomParams uniform)
+    pub(super) bloom_bind_group_layout: wgpu::BindGroupLayout,
+    /// BloomParams uniform (intensity + threshold), refreshed each frame in prepare()
+    pub(super) bloom_uniform_buffer: wgpu::Buffer,
+    /// Half-res ping-pong bloom targets (created alongside the resolve texture)
+    pub(super) bloom_texture_a: Option<(wgpu::Texture, wgpu::TextureView)>,
+    pub(super) bloom_texture_b: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Bloom bind groups, recreated with the textures: sample resolve / bloom_a / bloom_b
+    pub(super) bloom_bg_scene: Option<wgpu::BindGroup>,
+    pub(super) bloom_bg_a: Option<wgpu::BindGroup>,
+    pub(super) bloom_bg_b: Option<wgpu::BindGroup>,
 }
+
+/// Bloom pass parameters — a small standalone uniform, deliberately NOT part of
+/// the 8336-byte `VisualizerConfig` interlock.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub(super) struct BloomParams {
+    pub(super) intensity: f32,
+    pub(super) threshold: f32,
+    pub(super) _pad: [f32; 2],
+}
+
+unsafe impl bytemuck::Pod for BloomParams {}
+unsafe impl bytemuck::Zeroable for BloomParams {}
 
 /// Uniforms passed to the shader
 #[derive(Debug, Clone, Copy)]
@@ -512,8 +560,9 @@ impl shader::Primitive for VisualizerPrimitive {
             bytemuck::cast_slice(&peak_alpha_padded),
         );
 
-        // Create/resize MSAA + resolve textures if perspective/3D is active
-        if self.has_perspective {
+        // Create/resize offscreen targets if perspective/3D OR bloom is active
+        // (both need the resolve texture; bloom also needs the half-res targets).
+        if self.has_perspective || self.bloom_enabled {
             let scale = _viewport.scale_factor();
             let w = (bounds.width * scale).ceil() as u32;
             let h = (bounds.height * scale).ceil() as u32;
@@ -570,11 +619,112 @@ impl shader::Primitive for VisualizerPrimitive {
                     ],
                 });
 
+                // --- Half-res ping-pong bloom targets + their bind groups ---
+                let bw = (w / 2).max(1);
+                let bh = (h / 2).max(1);
+                let bloom_size = wgpu::Extent3d {
+                    width: bw,
+                    height: bh,
+                    depth_or_array_layers: 1,
+                };
+                let bloom_desc = wgpu::TextureDescriptor {
+                    label: Some("visualizer bloom texture"),
+                    size: bloom_size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: pipeline.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                };
+                let bloom_a = device.create_texture(&bloom_desc);
+                let bloom_a_view = bloom_a.create_view(&wgpu::TextureViewDescriptor::default());
+                let bloom_b = device.create_texture(&bloom_desc);
+                let bloom_b_view = bloom_b.create_view(&wgpu::TextureViewDescriptor::default());
+
+                // Bind groups: bloom_bg_scene samples resolve, bg_a samples
+                // bloom_a, bg_b samples bloom_b — all share the bloom uniform.
+                let bloom_bg_scene = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("visualizer bloom bg scene"),
+                    layout: &pipeline.bloom_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&resolve_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&pipeline.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: pipeline.bloom_uniform_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                let bloom_bg_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("visualizer bloom bg a"),
+                    layout: &pipeline.bloom_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&bloom_a_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&pipeline.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: pipeline.bloom_uniform_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                let bloom_bg_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("visualizer bloom bg b"),
+                    layout: &pipeline.bloom_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&bloom_b_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&pipeline.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: pipeline.bloom_uniform_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
                 pipeline.msaa_texture = Some((msaa_tex, msaa_view));
                 pipeline.resolve_texture = Some((resolve_tex, resolve_view));
                 pipeline.blit_bind_group = Some(blit_bind_group);
+                pipeline.bloom_texture_a = Some((bloom_a, bloom_a_view));
+                pipeline.bloom_texture_b = Some((bloom_b, bloom_b_view));
+                pipeline.bloom_bg_scene = Some(bloom_bg_scene);
+                pipeline.bloom_bg_a = Some(bloom_bg_a);
+                pipeline.bloom_bg_b = Some(bloom_bg_b);
                 pipeline.msaa_size = (w, h);
             }
+        }
+
+        // Refresh the bloom uniform every frame (intensity tracks config without
+        // necessarily triggering a texture resize).
+        if self.bloom_enabled {
+            let bloom_params = BloomParams {
+                intensity: self.bloom_intensity,
+                threshold: BLOOM_THRESHOLD,
+                _pad: [0.0; 2],
+            };
+            queue.write_buffer(
+                &pipeline.bloom_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&bloom_params),
+            );
         }
     }
 
@@ -584,8 +734,8 @@ impl shader::Primitive for VisualizerPrimitive {
             return true;
         }
 
-        // When perspective/3D is active, fall through to render() for MSAA
-        if self.has_perspective {
+        // Perspective/3D (MSAA) or bloom both need the offscreen render() path.
+        if self.has_perspective || self.bloom_enabled {
             return false;
         }
 
@@ -661,6 +811,65 @@ impl shader::Primitive for VisualizerPrimitive {
             );
         }
 
+        // Bloom blur passes (BP1: resolve -> bloom_a with bright/H, BP2: bloom_a
+        // -> bloom_b with V). The match result is Copy (all refs), so the same
+        // handles drive the additive composite after the scene blit below.
+        let bloom_views = match (
+            self.bloom_enabled,
+            &pipeline.bloom_texture_a,
+            &pipeline.bloom_texture_b,
+            &pipeline.bloom_bg_scene,
+            &pipeline.bloom_bg_a,
+            &pipeline.bloom_bg_b,
+        ) {
+            (true, Some((_, av)), Some((_, bv)), Some(bgs), Some(bga), Some(bgb)) => {
+                Some((av, bv, bgs, bga, bgb))
+            }
+            _ => None,
+        };
+
+        if let Some((bloom_a_view, bloom_b_view, bg_scene, bg_a, _)) = bloom_views {
+            let bw = (pipeline.msaa_size.0 / 2).max(1);
+            let bh = (pipeline.msaa_size.1 / 2).max(1);
+
+            for (label, view, blur_pipeline, bind_group) in [
+                (
+                    "visualizer bloom bright/H pass",
+                    bloom_a_view,
+                    &pipeline.bloom_bright_pipeline,
+                    bg_scene,
+                ),
+                (
+                    "visualizer bloom blur V pass",
+                    bloom_b_view,
+                    &pipeline.bloom_blur_v_pipeline,
+                    bg_a,
+                ),
+            ] {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(label),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_viewport(0.0, 0.0, bw as f32, bh as f32, 0.0, 1.0);
+                pass.set_scissor_rect(0, 0, bw, bh);
+                pass.set_pipeline(blur_pipeline);
+                pass.set_bind_group(0, bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+
         // Pass 2: Blit the resolve texture onto the framebuffer with premultiplied alpha blending
         {
             let mut blit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -695,6 +904,41 @@ impl shader::Primitive for VisualizerPrimitive {
             blit_pass.set_pipeline(&pipeline.blit_pipeline);
             blit_pass.set_bind_group(0, blit_bg, &[]);
             blit_pass.draw(0..3, 0..1); // Single fullscreen triangle
+        }
+
+        // Pass 3: additively composite the blurred bloom over the scene.
+        if let Some((.., bg_bloom)) = bloom_views {
+            let mut bloom_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("visualizer bloom composite pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            let (tex_w, tex_h) = pipeline.msaa_size;
+            bloom_pass.set_viewport(
+                clip_bounds.x as f32,
+                clip_bounds.y as f32,
+                tex_w as f32,
+                tex_h as f32,
+                0.0,
+                1.0,
+            );
+            bloom_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
+
+            bloom_pass.set_pipeline(&pipeline.bloom_composite_pipeline);
+            bloom_pass.set_bind_group(0, bg_bloom, &[]);
+            bloom_pass.draw(0..3, 0..1);
         }
     }
 }
