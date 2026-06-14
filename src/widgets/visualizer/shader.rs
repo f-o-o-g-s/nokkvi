@@ -44,6 +44,16 @@ const BLOOM_DIP: f32 = 0.55;
 const BLOOM_BEAT_GAIN: f32 = 0.35;
 const BLOOM_BASS_GAIN: f32 = 0.85;
 
+/// Echo (Milkdrop feedback) warp tuning. `decay` (persistence) = echo * MAX_DECAY.
+/// The warp zooms slowly inward (BASE_ZOOM) and harder on bass (BASS_ZOOM), and
+/// spins slowly (BASE_ROT rad/frame) and faster on the beat (BEAT_ROT) — both
+/// audio terms scaled by beat reactivity.
+const ECHO_MAX_DECAY: f32 = 0.94;
+const ECHO_BASE_ZOOM: f32 = 0.012;
+const ECHO_BASS_ZOOM: f32 = 0.04;
+const ECHO_BASE_ROT: f32 = 0.005;
+const ECHO_BEAT_ROT: f32 = 0.02;
+
 /// Configuration passed to the GPU shader
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(16))]
@@ -148,6 +158,11 @@ pub(crate) struct VisualizerPrimitive {
     /// Per-frame trail persistence/decay (0.0 = no trail). Set as the fade
     /// pass's blend constant each frame.
     pub trails_decay: f32,
+    /// Whether echo (Milkdrop feedback) is active — routes through the offscreen
+    /// path and takes over the display.
+    pub echo_enabled: bool,
+    /// Echo amount (0.0-1.0) — drives the EchoParams decay + warp in prepare().
+    pub echo: f32,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -229,6 +244,8 @@ pub(crate) struct ShaderParams {
     pub beat_reactivity: f32,
     /// Motion trails amount (0.0 = off, 1.0 = long after-images)
     pub trails: f32,
+    /// Echo (Milkdrop feedback) amount (0.0 = off, 1.0 = strong persistence)
+    pub echo: f32,
 }
 
 impl VisualizerPrimitive {
@@ -331,6 +348,7 @@ impl VisualizerPrimitive {
         // Map the trails amount to a per-frame decay. Any non-zero amount maps
         // into a visible range (short 0.6 → long 0.92); 0 disables entirely.
         let trails_enabled = params.trails > 0.001;
+        let echo_enabled = params.echo > 0.001;
         let trails_decay = if trails_enabled {
             0.6 + 0.32 * params.trails.clamp(0.0, 1.0)
         } else {
@@ -350,6 +368,8 @@ impl VisualizerPrimitive {
             beat_reactivity: params.beat_reactivity,
             trails_enabled,
             trails_decay,
+            echo_enabled,
+            echo: params.echo,
         }
     }
 }
@@ -414,6 +434,25 @@ pub(crate) struct VisualizerPipeline {
     /// instead of loads, so a stale trail from a prior session can't ghost back
     /// in. (A freshly resized accumulator is already zero, so it's a no-op then.)
     pub(super) trail_needs_clear: bool,
+    // --- Echo (Milkdrop zoom/rotate feedback) ---
+    /// Feedback pass: `max(scene, decay * echo_prev(warp(uv)))` -> echo_texture.
+    pub(super) echo_feedback_pipeline: wgpu::RenderPipeline,
+    /// Bind group layout: scene tex + prev-echo (scratch) tex + sampler + EchoParams.
+    pub(super) echo_bind_group_layout: wgpu::BindGroupLayout,
+    /// EchoParams uniform (decay + warp), refreshed each frame in prepare().
+    pub(super) echo_uniform_buffer: wgpu::Buffer,
+    /// Persistent echo accumulator (written by the feedback pass, then displayed).
+    pub(super) echo_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Per-frame copy of the accumulator that the feedback pass samples (warped),
+    /// so the warped read never aliases the write — no ping-pong parity needed.
+    pub(super) echo_temp: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Feedback bind group (resolve scene + echo_temp + sampler + uniform).
+    pub(super) echo_feedback_bg: Option<wgpu::BindGroup>,
+    /// Blit bind group that samples echo_texture for the final display.
+    pub(super) blit_bg_echo: Option<wgpu::BindGroup>,
+    /// Off->on transition tracking (clear stale echo on re-enable, like trails).
+    pub(super) echo_were_active: bool,
+    pub(super) echo_needs_clear: bool,
 }
 
 /// Bloom pass parameters — a small standalone uniform, deliberately NOT part of
@@ -428,6 +467,22 @@ pub(super) struct BloomParams {
 
 unsafe impl bytemuck::Pod for BloomParams {}
 unsafe impl bytemuck::Zeroable for BloomParams {}
+
+/// Echo (Milkdrop zoom/rotate feedback) params — a small standalone uniform.
+/// The feedback warps the previous frame by `zoom` + a rotation given as
+/// precomputed `sin_a`/`cos_a`, then fades it by `decay` and maxes the scene on
+/// top. `decay = 0` clears the accumulator (used on the off->on transition).
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub(super) struct EchoParams {
+    pub(super) decay: f32,
+    pub(super) zoom: f32,
+    pub(super) sin_a: f32,
+    pub(super) cos_a: f32,
+}
+
+unsafe impl bytemuck::Pod for EchoParams {}
+unsafe impl bytemuck::Zeroable for EchoParams {}
 
 /// Uniforms passed to the shader
 #[derive(Debug, Clone, Copy)]
@@ -634,10 +689,10 @@ impl shader::Primitive for VisualizerPrimitive {
             bytemuck::cast_slice(&peak_alpha_padded),
         );
 
-        // Create/resize offscreen targets if perspective/3D, bloom, OR trails
-        // are active (all need the resolve texture; bloom adds the half-res
-        // targets, trails the persistent accumulator).
-        if self.has_perspective || self.bloom_enabled || self.trails_enabled {
+        // Create/resize offscreen targets if perspective/3D, bloom, trails, OR
+        // echo are active (all need the resolve texture; bloom adds the half-res
+        // targets, trails the accumulator, echo the accumulator + scratch).
+        if self.has_perspective || self.bloom_enabled || self.trails_enabled || self.echo_enabled {
             let scale = _viewport.scale_factor();
             let w = (bounds.width * scale).ceil() as u32;
             let h = (bounds.height * scale).ceil() as u32;
@@ -808,6 +863,74 @@ impl shader::Primitive for VisualizerPrimitive {
                     ],
                 });
 
+                // --- Echo (Milkdrop feedback): accumulator + scratch + bgs ---
+                let echo_size = wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                };
+                let echo_tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("visualizer echo texture"),
+                    size: echo_size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: TRAIL_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let echo_tex_view = echo_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let echo_temp_tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("visualizer echo scratch"),
+                    size: echo_size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: TRAIL_FORMAT,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                let echo_temp_view =
+                    echo_temp_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let echo_feedback_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("visualizer echo feedback bind group"),
+                    layout: &pipeline.echo_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&resolve_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&echo_temp_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&pipeline.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: pipeline.echo_uniform_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                let blit_bg_echo = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("visualizer echo blit bind group"),
+                    layout: &pipeline.blit_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&echo_tex_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&pipeline.sampler),
+                        },
+                    ],
+                });
+
                 pipeline.msaa_texture = Some((msaa_tex, msaa_view));
                 pipeline.resolve_texture = Some((resolve_tex, resolve_view));
                 pipeline.blit_bind_group = Some(blit_bind_group);
@@ -818,6 +941,10 @@ impl shader::Primitive for VisualizerPrimitive {
                 pipeline.bloom_bg_b = Some(bloom_bg_b);
                 pipeline.trail_texture = Some((trail_tex, trail_view));
                 pipeline.blit_bg_trail = Some(blit_bg_trail);
+                pipeline.echo_texture = Some((echo_tex, echo_tex_view));
+                pipeline.echo_temp = Some((echo_temp_tex, echo_temp_view));
+                pipeline.echo_feedback_bg = Some(echo_feedback_bg);
+                pipeline.blit_bg_echo = Some(blit_bg_echo);
                 pipeline.msaa_size = (w, h);
             }
         }
@@ -851,6 +978,36 @@ impl shader::Primitive for VisualizerPrimitive {
         // otherwise the stale trail fades back in over ~1s on re-enable.
         pipeline.trail_needs_clear = self.trails_enabled && !pipeline.trails_were_active;
         pipeline.trails_were_active = self.trails_enabled;
+
+        // Echo just turned on: clear the stale accumulator on the first frame
+        // (decay = 0 below makes the feedback ignore the prev), same idea as
+        // trails. Then refresh the echo uniform (warp pulses with bass/beat).
+        pipeline.echo_needs_clear = self.echo_enabled && !pipeline.echo_were_active;
+        pipeline.echo_were_active = self.echo_enabled;
+        if self.echo_enabled {
+            let beat = self.state.current_beat_pulse();
+            let (bass, _, _) = self.state.current_bands();
+            let react = self.beat_reactivity;
+            let decay = if pipeline.echo_needs_clear {
+                0.0
+            } else {
+                self.echo * ECHO_MAX_DECAY
+            };
+            let zoom = 1.0 + ECHO_BASE_ZOOM + bass * ECHO_BASS_ZOOM * react;
+            let angle = ECHO_BASE_ROT + beat * ECHO_BEAT_ROT * react;
+            let (sin_a, cos_a) = angle.sin_cos();
+            let echo_params = EchoParams {
+                decay,
+                zoom,
+                sin_a,
+                cos_a,
+            };
+            queue.write_buffer(
+                &pipeline.echo_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&echo_params),
+            );
+        }
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
@@ -859,9 +1016,9 @@ impl shader::Primitive for VisualizerPrimitive {
             return true;
         }
 
-        // Perspective/3D (MSAA), bloom, and motion trails all need the
-        // offscreen render() path (to sample/accumulate the scene).
-        if self.has_perspective || self.bloom_enabled || self.trails_enabled {
+        // Perspective/3D (MSAA), bloom, trails, and echo all need the offscreen
+        // render() path (to sample/accumulate the scene).
+        if self.has_perspective || self.bloom_enabled || self.trails_enabled || self.echo_enabled {
             return false;
         }
 
@@ -1078,11 +1235,76 @@ impl shader::Primitive for VisualizerPrimitive {
             }
         }
 
-        // The displayed scene is the trail accumulator when trails are active,
-        // otherwise the raw resolve texture.
-        let display_bg = match trail_handles {
-            Some((_, bg)) => bg,
-            None => blit_bg,
+        // Echo (Milkdrop feedback): copy the accumulator into the scratch (so the
+        // warped read can't alias the write), then run one feedback pass that
+        // warps + fades the scratch and maxes the scene on top. Echo, when on,
+        // takes over the display.
+        let echo_handles = match (
+            self.echo_enabled,
+            &pipeline.echo_texture,
+            &pipeline.echo_temp,
+            &pipeline.echo_feedback_bg,
+            &pipeline.blit_bg_echo,
+        ) {
+            (true, Some((etex, ev)), Some((ttex, _)), Some(fbg), Some(dbg)) => {
+                Some((etex, ev, ttex, fbg, dbg))
+            }
+            _ => None,
+        };
+
+        if let Some((echo_tex, echo_view, echo_temp_tex, feedback_bg, _)) = echo_handles {
+            let (tex_w, tex_h) = pipeline.msaa_size;
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: echo_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: echo_temp_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: tex_w,
+                    height: tex_h,
+                    depth_or_array_layers: 1,
+                },
+            );
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("visualizer echo feedback pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: echo_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // REPLACE blend overwrites every pixel
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_viewport(0.0, 0.0, tex_w as f32, tex_h as f32, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, tex_w, tex_h);
+            pass.set_pipeline(&pipeline.echo_feedback_pipeline);
+            pass.set_bind_group(0, feedback_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // The displayed scene is the echo accumulator when echo is on, else the
+        // trail accumulator when trails are on, else the raw resolve texture.
+        let display_bg = match echo_handles {
+            Some((.., dbg)) => dbg,
+            None => match trail_handles {
+                Some((_, bg)) => bg,
+                None => blit_bg,
+            },
         };
 
         // Pass 2: Blit the displayed scene onto the framebuffer with premultiplied alpha blending
@@ -1204,8 +1426,9 @@ impl<Message> shader::Program<Message> for ShaderVisualizer {
         // fading out. Both conditions converge to false when nothing is
         // animating, so a paused/stopped visualizer still drops to near-zero
         // GPU once the trail has faded.
-        let trail_draining = self.params.trails > 0.001 && self.state.trail_draining();
-        if self.state.is_dirty() || trail_draining {
+        let feedback_draining =
+            (self.params.trails > 0.001 || self.params.echo > 0.001) && self.state.trail_draining();
+        if self.state.is_dirty() || feedback_draining {
             Some(shader::Action::request_redraw())
         } else {
             None

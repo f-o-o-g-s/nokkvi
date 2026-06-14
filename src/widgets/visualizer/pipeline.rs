@@ -5,7 +5,7 @@
 
 use iced::wgpu;
 
-use super::shader::{BloomParams, TRAIL_FORMAT, Uniforms, VisualizerPipeline};
+use super::shader::{BloomParams, EchoParams, TRAIL_FORMAT, Uniforms, VisualizerPipeline};
 
 /// Build one of the four bars/lines × default/MSAA render pipelines.
 ///
@@ -560,6 +560,88 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             "visualizer bloom composite pipeline",
         );
 
+        // --- Echo (Milkdrop feedback) pipeline ---
+        let echo_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer echo shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/echo.wgsl"
+            ))),
+        });
+        let texture_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let echo_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("visualizer echo bind group layout"),
+                entries: &[
+                    texture_entry(0), // scene
+                    texture_entry(1), // prev echo (scratch)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let echo_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("visualizer echo uniform buffer"),
+            size: std::mem::size_of::<EchoParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let echo_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("visualizer echo pipeline layout"),
+            bind_group_layouts: &[&echo_bind_group_layout],
+            immediate_size: 0,
+        });
+        let echo_feedback_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("visualizer echo feedback pipeline"),
+                layout: Some(&echo_layout),
+                vertex: wgpu::VertexState {
+                    module: &echo_shader,
+                    entry_point: Some("vs_echo"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &echo_shader,
+                    entry_point: Some("fs_echo"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: TRAIL_FORMAT,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+
         Self {
             bars_pipeline,
             bars_pipeline_msaa,
@@ -595,6 +677,15 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             blit_bg_trail: None,
             trails_were_active: false,
             trail_needs_clear: false,
+            echo_feedback_pipeline,
+            echo_bind_group_layout,
+            echo_uniform_buffer,
+            echo_texture: None,
+            echo_temp: None,
+            echo_feedback_bg: None,
+            blit_bg_echo: None,
+            echo_were_active: false,
+            echo_needs_clear: false,
         }
     }
 }

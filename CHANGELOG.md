@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - The visualizer now has a bloom glow: bright bars, peak flashes, and the neon line bleed a soft halo that surges on bass drops, with a Bloom toggle and intensity setting.
 - A Beat Reactivity setting controls how hard the glow, bars, and bloom pump on the beat and bass (0 = static, loudness-only).
 - A Motion Trails setting makes the bars and lines leave a fading comet-trail after-image (off by default).
+- An Echo setting adds Milkdrop-style feedback: the visualizer spirals and tunnels into itself, swirling with the bass and beat (off by default).
 
 ### Changed
 

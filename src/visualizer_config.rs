@@ -625,6 +625,7 @@ pub(crate) mod keys {
     pub(crate) const BLOOM_INTENSITY: &str = "visualizer.bloom_intensity";
     pub(crate) const BEAT_REACTIVITY: &str = "visualizer.beat_reactivity";
     pub(crate) const TRAILS: &str = "visualizer.trails";
+    pub(crate) const ECHO: &str = "visualizer.echo";
 
     // ── Bars ─────────────────────────────────────────────────────────────
     pub(crate) const BARS_MAX_BARS: &str = "visualizer.bars.max_bars";
@@ -732,6 +733,12 @@ pub struct VisualizerConfig {
     /// Default: 0.0 (off — it noticeably changes the visualizer's character)
     pub trails: f32,
 
+    /// Echo (Milkdrop-style zoom/rotate feedback): the visualizer spirals and
+    /// tunnels into itself, swirling with the bass/beat (0.0 = off, 1.0 = strong
+    /// persistence). A psychedelic feedback layer; takes over the display when on.
+    /// Default: 0.0 (off — strong character change)
+    pub echo: f32,
+
     /// Bars mode specific settings
     /// Use [visualizer.bars] in config.toml
     #[serde(default)]
@@ -763,6 +770,7 @@ impl Default for VisualizerConfig {
             bloom_intensity: 0.6,
             beat_reactivity: 1.0,
             trails: 0.0,
+            echo: 0.0,
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
         }
@@ -822,6 +830,7 @@ impl VisualizerConfig {
 
         // Validate trails (0.0–1.0)
         self.trails = self.trails.clamp(0.0, 1.0);
+        self.echo = self.echo.clamp(0.0, 1.0);
     }
 }
 
