@@ -420,7 +420,7 @@ impl Visualizer {
         }
     }
 
-    /// Construct the 37-field `ShaderParams` from a config snapshot, theme
+    /// Construct the 38-field `ShaderParams` from a config snapshot, theme
     /// colors, and the widget's per-instance state.
     ///
     /// Sources, by axis:
@@ -476,6 +476,7 @@ impl Visualizer {
             bloom_enabled: cfg.bloom,
             bloom_intensity: cfg.bloom_intensity,
             beat_reactivity: cfg.beat_reactivity,
+            trails: cfg.trails,
         }
     }
 

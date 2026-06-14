@@ -184,6 +184,16 @@ pub(crate) fn build_visualizer_items(
         0.05,
         "",
     ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::TRAILS, "Motion Trails", "Frame")
+            .with_subtitle("Bars/lines leave a fading after-image. 0 = off"),
+        config.trails as f64,
+        d.trails as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
 
     // --- Signal section (FFT/DSP, affects both Bars and Lines modes) ---
     e.push(SettingsEntry::Header {

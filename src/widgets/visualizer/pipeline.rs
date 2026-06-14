@@ -280,6 +280,14 @@ fn vs_blit(@builtin(vertex_index) idx: u32) -> VertexOut {
 fn fs_blit(in: VertexOut) -> @location(0) vec4f {
     return textureSample(t_resolve, s_resolve, in.uv);
 }
+
+// Trail fade: output is multiplied by the Zero src-factor, so the value is
+// irrelevant — the pass exists only to scale the destination by the blend
+// constant (trail *= decay). Returns 0 to keep it explicit.
+@fragment
+fn fs_fade(in: VertexOut) -> @location(0) vec4f {
+    return vec4f(0.0);
+}
 "#,
             )),
         });
@@ -357,6 +365,74 @@ fn fs_blit(in: VertexOut) -> @location(0) vec4f {
             multiview_mask: None,
             cache: None,
         });
+
+        // --- Motion trail pipelines (reuse the blit shader + layout) ---
+        // Fade: out = dst * blend_constant (the per-frame decay) — src is
+        // multiplied by Zero so fs_fade's output is irrelevant.
+        let trail_fade_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::Constant,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::Constant,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        // Max: out = max(scene, faded trail) — bright motion leaves a fading
+        // ghost without additive saturation.
+        let trail_max_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Max,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Max,
+            },
+        };
+        let make_trail_pipeline =
+            |entry: &'static str, blend: wgpu::BlendState, label: &'static str| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&blit_layout),
+                    vertex: wgpu::VertexState {
+                        module: &blit_shader,
+                        entry_point: Some("vs_blit"),
+                        buffers: &[],
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        ..Default::default()
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &blit_shader,
+                        entry_point: Some(entry),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: Some(blend),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                })
+            };
+        let trail_fade_pipeline = make_trail_pipeline(
+            "fs_fade",
+            trail_fade_blend,
+            "visualizer trail fade pipeline",
+        );
+        let trail_max_pipeline =
+            make_trail_pipeline("fs_blit", trail_max_blend, "visualizer trail max pipeline");
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("visualizer blit sampler"),
@@ -511,6 +587,10 @@ fn fs_blit(in: VertexOut) -> @location(0) vec4f {
             bloom_bg_scene: None,
             bloom_bg_a: None,
             bloom_bg_b: None,
+            trail_fade_pipeline,
+            trail_max_pipeline,
+            trail_texture: None,
+            blit_bg_trail: None,
         }
     }
 }

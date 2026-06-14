@@ -132,6 +132,12 @@ pub(crate) struct VisualizerPrimitive {
     pub bloom_intensity: f32,
     /// Beat reactivity (0.0-1.0) — scales how hard effects pump on beat/bass
     pub beat_reactivity: f32,
+    /// Whether motion trails are active (routes through the offscreen path so
+    /// the scene can be accumulated into the persistent trail texture)
+    pub trails_enabled: bool,
+    /// Per-frame trail persistence/decay (0.0 = no trail). Set as the fade
+    /// pass's blend constant each frame.
+    pub trails_decay: f32,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -211,6 +217,8 @@ pub(crate) struct ShaderParams {
     /// Beat reactivity (0.0 = static, 1.0 = full pump) — scales the bloom
     /// surge, glow flare, and bar lift together
     pub beat_reactivity: f32,
+    /// Motion trails amount (0.0 = off, 1.0 = long after-images)
+    pub trails: f32,
 }
 
 impl VisualizerPrimitive {
@@ -310,6 +318,14 @@ impl VisualizerPrimitive {
 
         let has_perspective = params.bar_depth_3d > 0.001;
         let bloom_enabled = params.bloom_enabled && params.bloom_intensity > 0.001;
+        // Map the trails amount to a per-frame decay. Any non-zero amount maps
+        // into a visible range (short 0.6 → long 0.92); 0 disables entirely.
+        let trails_enabled = params.trails > 0.001;
+        let trails_decay = if trails_enabled {
+            0.6 + 0.32 * params.trails.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
 
         Self {
             gradient_colors: gradient,
@@ -322,6 +338,8 @@ impl VisualizerPrimitive {
             bloom_enabled,
             bloom_intensity: params.bloom_intensity,
             beat_reactivity: params.beat_reactivity,
+            trails_enabled,
+            trails_decay,
         }
     }
 }
@@ -368,6 +386,17 @@ pub(crate) struct VisualizerPipeline {
     pub(super) bloom_bg_scene: Option<wgpu::BindGroup>,
     pub(super) bloom_bg_a: Option<wgpu::BindGroup>,
     pub(super) bloom_bg_b: Option<wgpu::BindGroup>,
+    // --- Motion trails ---
+    /// In-place fade pass (trail *= decay via a Zero/Constant blend; the
+    /// decay is the per-frame blend constant). Reuses the blit bind group.
+    pub(super) trail_fade_pipeline: wgpu::RenderPipeline,
+    /// In-place max-blend pass (trail = max(scene, faded trail)) so bright
+    /// motion leaves a fading ghost without saturating. Samples resolve.
+    pub(super) trail_max_pipeline: wgpu::RenderPipeline,
+    /// Persistent full-res trail accumulator (NOT cleared between frames).
+    pub(super) trail_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Blit bind group that samples the trail texture (for the final display).
+    pub(super) blit_bg_trail: Option<wgpu::BindGroup>,
 }
 
 /// Bloom pass parameters — a small standalone uniform, deliberately NOT part of
@@ -588,9 +617,10 @@ impl shader::Primitive for VisualizerPrimitive {
             bytemuck::cast_slice(&peak_alpha_padded),
         );
 
-        // Create/resize offscreen targets if perspective/3D OR bloom is active
-        // (both need the resolve texture; bloom also needs the half-res targets).
-        if self.has_perspective || self.bloom_enabled {
+        // Create/resize offscreen targets if perspective/3D, bloom, OR trails
+        // are active (all need the resolve texture; bloom adds the half-res
+        // targets, trails the persistent accumulator).
+        if self.has_perspective || self.bloom_enabled || self.trails_enabled {
             let scale = _viewport.scale_factor();
             let w = (bounds.width * scale).ceil() as u32;
             let h = (bounds.height * scale).ceil() as u32;
@@ -728,6 +758,38 @@ impl shader::Primitive for VisualizerPrimitive {
                     ],
                 });
 
+                // --- Persistent full-res trail accumulator + its blit bind group ---
+                let trail_tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("visualizer trail texture"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: pipeline.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let trail_view = trail_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let blit_bg_trail = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("visualizer trail blit bind group"),
+                    layout: &pipeline.blit_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&trail_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&pipeline.sampler),
+                        },
+                    ],
+                });
+
                 pipeline.msaa_texture = Some((msaa_tex, msaa_view));
                 pipeline.resolve_texture = Some((resolve_tex, resolve_view));
                 pipeline.blit_bind_group = Some(blit_bind_group);
@@ -736,6 +798,8 @@ impl shader::Primitive for VisualizerPrimitive {
                 pipeline.bloom_bg_scene = Some(bloom_bg_scene);
                 pipeline.bloom_bg_a = Some(bloom_bg_a);
                 pipeline.bloom_bg_b = Some(bloom_bg_b);
+                pipeline.trail_texture = Some((trail_tex, trail_view));
+                pipeline.blit_bg_trail = Some(blit_bg_trail);
                 pipeline.msaa_size = (w, h);
             }
         }
@@ -770,8 +834,9 @@ impl shader::Primitive for VisualizerPrimitive {
             return true;
         }
 
-        // Perspective/3D (MSAA) or bloom both need the offscreen render() path.
-        if self.has_perspective || self.bloom_enabled {
+        // Perspective/3D (MSAA), bloom, and motion trails all need the
+        // offscreen render() path (to sample/accumulate the scene).
+        if self.has_perspective || self.bloom_enabled || self.trails_enabled {
             return false;
         }
 
@@ -906,7 +971,88 @@ impl shader::Primitive for VisualizerPrimitive {
             }
         }
 
-        // Pass 2: Blit the resolve texture onto the framebuffer with premultiplied alpha blending
+        // Motion trails: fade the persistent accumulator (trail *= decay), then
+        // max-blend the current scene onto it (trail = max(scene, faded trail)).
+        // The accumulator (scene + fading history) then becomes what we display.
+        // Refs are Copy, so the same handle drives the blit-source swap below.
+        let trail_handles = match (
+            self.trails_enabled,
+            &pipeline.trail_texture,
+            &pipeline.blit_bg_trail,
+        ) {
+            (true, Some((_, tv)), Some(bg)) => Some((tv, bg)),
+            _ => None,
+        };
+
+        if let Some((trail_view, _)) = trail_handles {
+            let (tex_w, tex_h) = pipeline.msaa_size;
+            let decay = self.trails_decay as f64;
+
+            // Fade pass: scale the accumulator by the decay blend constant.
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("visualizer trail fade pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: trail_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_viewport(0.0, 0.0, tex_w as f32, tex_h as f32, 0.0, 1.0);
+                pass.set_scissor_rect(0, 0, tex_w, tex_h);
+                pass.set_blend_constant(wgpu::Color {
+                    r: decay,
+                    g: decay,
+                    b: decay,
+                    a: decay,
+                });
+                pass.set_pipeline(&pipeline.trail_fade_pipeline);
+                pass.set_bind_group(0, blit_bg, &[]); // ignored by fs_fade
+                pass.draw(0..3, 0..1);
+            }
+
+            // Max pass: composite the current scene onto the faded trail.
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("visualizer trail max pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: trail_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_viewport(0.0, 0.0, tex_w as f32, tex_h as f32, 0.0, 1.0);
+                pass.set_scissor_rect(0, 0, tex_w, tex_h);
+                pass.set_pipeline(&pipeline.trail_max_pipeline);
+                pass.set_bind_group(0, blit_bg, &[]); // samples resolve (the scene)
+                pass.draw(0..3, 0..1);
+            }
+        }
+
+        // The displayed scene is the trail accumulator when trails are active,
+        // otherwise the raw resolve texture.
+        let display_bg = match trail_handles {
+            Some((_, bg)) => bg,
+            None => blit_bg,
+        };
+
+        // Pass 2: Blit the displayed scene onto the framebuffer with premultiplied alpha blending
         {
             let mut blit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("visualizer blit pass"),
@@ -938,7 +1084,7 @@ impl shader::Primitive for VisualizerPrimitive {
             blit_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
 
             blit_pass.set_pipeline(&pipeline.blit_pipeline);
-            blit_pass.set_bind_group(0, blit_bg, &[]);
+            blit_pass.set_bind_group(0, display_bg, &[]);
             blit_pass.draw(0..3, 0..1); // Single fullscreen triangle
         }
 

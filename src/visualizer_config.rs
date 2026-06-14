@@ -635,6 +635,7 @@ pub(crate) mod keys {
     pub(crate) const BLOOM: &str = "visualizer.bloom";
     pub(crate) const BLOOM_INTENSITY: &str = "visualizer.bloom_intensity";
     pub(crate) const BEAT_REACTIVITY: &str = "visualizer.beat_reactivity";
+    pub(crate) const TRAILS: &str = "visualizer.trails";
 
     // ── Bars ─────────────────────────────────────────────────────────────
     pub(crate) const BARS_MAX_BARS: &str = "visualizer.bars.max_bars";
@@ -737,6 +738,11 @@ pub struct VisualizerConfig {
     /// Default: 1.0
     pub beat_reactivity: f32,
 
+    /// Motion trails: bars/lines leave a fading after-image (0.0 = off,
+    /// 1.0 = long comet trails). Maps to a per-frame persistence/decay.
+    /// Default: 0.0 (off — it noticeably changes the visualizer's character)
+    pub trails: f32,
+
     /// Bars mode specific settings
     /// Use [visualizer.bars] in config.toml
     #[serde(default)]
@@ -767,6 +773,7 @@ impl Default for VisualizerConfig {
             bloom: true,
             bloom_intensity: 0.6,
             beat_reactivity: 1.0,
+            trails: 0.0,
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
         }
@@ -823,6 +830,9 @@ impl VisualizerConfig {
 
         // Validate beat reactivity (0.0–1.0)
         self.beat_reactivity = self.beat_reactivity.clamp(0.0, 1.0);
+
+        // Validate trails (0.0–1.0)
+        self.trails = self.trails.clamp(0.0, 1.0);
     }
 }
 
