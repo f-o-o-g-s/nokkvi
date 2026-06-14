@@ -420,7 +420,7 @@ impl Visualizer {
         }
     }
 
-    /// Construct the 38-field `ShaderParams` from a config snapshot, theme
+    /// Construct the 39-field `ShaderParams` from a config snapshot, theme
     /// colors, and the widget's per-instance state.
     ///
     /// Sources, by axis:
@@ -478,6 +478,7 @@ impl Visualizer {
             beat_reactivity: cfg.beat_reactivity,
             trails: cfg.trails,
             echo: cfg.echo,
+            crt: cfg.crt,
         }
     }
 

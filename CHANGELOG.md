@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - A Beat Reactivity setting controls how hard the glow, bars, and bloom pump on the beat and bass (0 = static, loudness-only).
 - A Motion Trails setting makes the bars and lines leave a fading comet-trail after-image (off by default).
 - An Echo setting adds Milkdrop-style feedback: the visualizer spirals and tunnels into itself, swirling with the bass and beat (off by default).
+- A CRT / Film setting adds a retro post-process — chromatic aberration, scanlines, vignette, grain, and a beat zoom-punch (off by default).
 
 ### Changed
 

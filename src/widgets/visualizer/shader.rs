@@ -163,6 +163,10 @@ pub(crate) struct VisualizerPrimitive {
     pub echo_enabled: bool,
     /// Echo amount (0.0-1.0) — drives the EchoParams decay + warp in prepare().
     pub echo: f32,
+    /// Whether the CRT/film composite is active — replaces the plain display blit.
+    pub crt_enabled: bool,
+    /// CRT amount (0.0-1.0) — master retro intensity, into CrtParams.
+    pub crt: f32,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -246,6 +250,8 @@ pub(crate) struct ShaderParams {
     pub trails: f32,
     /// Echo (Milkdrop feedback) amount (0.0 = off, 1.0 = strong persistence)
     pub echo: f32,
+    /// CRT / film composite amount (0.0 = off, 1.0 = full retro)
+    pub crt: f32,
 }
 
 impl VisualizerPrimitive {
@@ -349,6 +355,7 @@ impl VisualizerPrimitive {
         // into a visible range (short 0.6 → long 0.92); 0 disables entirely.
         let trails_enabled = params.trails > 0.001;
         let echo_enabled = params.echo > 0.001;
+        let crt_enabled = params.crt > 0.001;
         let trails_decay = if trails_enabled {
             0.6 + 0.32 * params.trails.clamp(0.0, 1.0)
         } else {
@@ -370,6 +377,8 @@ impl VisualizerPrimitive {
             trails_decay,
             echo_enabled,
             echo: params.echo,
+            crt_enabled,
+            crt: params.crt,
         }
     }
 }
@@ -453,6 +462,15 @@ pub(crate) struct VisualizerPipeline {
     /// Off->on transition tracking (clear stale echo on re-enable, like trails).
     pub(super) echo_were_active: bool,
     pub(super) echo_needs_clear: bool,
+    // --- CRT / film composite ---
+    /// Post-process pipeline: samples the display source (group 0 = the blit
+    /// bind-group layout) + CrtParams (group 1), applies the retro stack, and
+    /// writes the framebuffer in place of the plain blit.
+    pub(super) crt_pipeline: wgpu::RenderPipeline,
+    /// CrtParams uniform (amount + beat + time), refreshed each frame.
+    pub(super) crt_uniform_buffer: wgpu::Buffer,
+    /// Bind group for the CrtParams uniform (group 1; reused every frame).
+    pub(super) crt_uniform_bind_group: wgpu::BindGroup,
 }
 
 /// Bloom pass parameters — a small standalone uniform, deliberately NOT part of
@@ -483,6 +501,20 @@ pub(super) struct EchoParams {
 
 unsafe impl bytemuck::Pod for EchoParams {}
 unsafe impl bytemuck::Zeroable for EchoParams {}
+
+/// CRT / film composite params — master `amount` plus the beat pulse (zoom
+/// punch) and time (grain + scanline scroll). A small standalone uniform.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub(super) struct CrtParams {
+    pub(super) amount: f32,
+    pub(super) beat: f32,
+    pub(super) time: f32,
+    pub(super) _pad: f32,
+}
+
+unsafe impl bytemuck::Pod for CrtParams {}
+unsafe impl bytemuck::Zeroable for CrtParams {}
 
 /// Uniforms passed to the shader
 #[derive(Debug, Clone, Copy)]
@@ -692,7 +724,12 @@ impl shader::Primitive for VisualizerPrimitive {
         // Create/resize offscreen targets if perspective/3D, bloom, trails, OR
         // echo are active (all need the resolve texture; bloom adds the half-res
         // targets, trails the accumulator, echo the accumulator + scratch).
-        if self.has_perspective || self.bloom_enabled || self.trails_enabled || self.echo_enabled {
+        if self.has_perspective
+            || self.bloom_enabled
+            || self.trails_enabled
+            || self.echo_enabled
+            || self.crt_enabled
+        {
             let scale = _viewport.scale_factor();
             let w = (bounds.width * scale).ceil() as u32;
             let h = (bounds.height * scale).ceil() as u32;
@@ -1008,6 +1045,21 @@ impl shader::Primitive for VisualizerPrimitive {
                 bytemuck::bytes_of(&echo_params),
             );
         }
+
+        // Refresh the CRT uniform (master amount + beat zoom-punch + time).
+        if self.crt_enabled {
+            let crt_params = CrtParams {
+                amount: self.crt,
+                beat: self.state.current_beat_pulse(),
+                time: get_elapsed_time(),
+                _pad: 0.0,
+            };
+            queue.write_buffer(
+                &pipeline.crt_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&crt_params),
+            );
+        }
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
@@ -1018,7 +1070,12 @@ impl shader::Primitive for VisualizerPrimitive {
 
         // Perspective/3D (MSAA), bloom, trails, and echo all need the offscreen
         // render() path (to sample/accumulate the scene).
-        if self.has_perspective || self.bloom_enabled || self.trails_enabled || self.echo_enabled {
+        if self.has_perspective
+            || self.bloom_enabled
+            || self.trails_enabled
+            || self.echo_enabled
+            || self.crt_enabled
+        {
             return false;
         }
 
@@ -1338,8 +1395,17 @@ impl shader::Primitive for VisualizerPrimitive {
             );
             blit_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
 
-            blit_pass.set_pipeline(&pipeline.blit_pipeline);
-            blit_pass.set_bind_group(0, display_bg, &[]);
+            // When CRT is on, the display blit runs through the CRT post-process
+            // pipeline instead (same display texture at group 0, CrtParams at
+            // group 1). Bloom still composites on top afterward.
+            if self.crt_enabled {
+                blit_pass.set_pipeline(&pipeline.crt_pipeline);
+                blit_pass.set_bind_group(0, display_bg, &[]);
+                blit_pass.set_bind_group(1, &pipeline.crt_uniform_bind_group, &[]);
+            } else {
+                blit_pass.set_pipeline(&pipeline.blit_pipeline);
+                blit_pass.set_bind_group(0, display_bg, &[]);
+            }
             blit_pass.draw(0..3, 0..1); // Single fullscreen triangle
         }
 

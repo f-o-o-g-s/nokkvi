@@ -207,6 +207,17 @@ pub(crate) fn build_visualizer_items(
         0.05,
         "",
     ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::CRT, "CRT / Film", "Frame").with_subtitle(
+            "Retro post-process: chromatic aberration, scanlines, vignette, grain, beat zoom. 0 = off",
+        ),
+        config.crt as f64,
+        d.crt as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
 
     // --- Signal section (FFT/DSP, affects both Bars and Lines modes) ---
     e.push(SettingsEntry::Header {

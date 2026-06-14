@@ -626,6 +626,7 @@ pub(crate) mod keys {
     pub(crate) const BEAT_REACTIVITY: &str = "visualizer.beat_reactivity";
     pub(crate) const TRAILS: &str = "visualizer.trails";
     pub(crate) const ECHO: &str = "visualizer.echo";
+    pub(crate) const CRT: &str = "visualizer.crt";
 
     // ── Bars ─────────────────────────────────────────────────────────────
     pub(crate) const BARS_MAX_BARS: &str = "visualizer.bars.max_bars";
@@ -739,6 +740,12 @@ pub struct VisualizerConfig {
     /// Default: 0.0 (off — strong character change)
     pub echo: f32,
 
+    /// CRT / film composite: a retro post-process (chromatic aberration, barrel
+    /// curve, scanlines, vignette, grain, beat zoom-punch), one master amount
+    /// (0.0 = off, 1.0 = full). Opt-in.
+    /// Default: 0.0
+    pub crt: f32,
+
     /// Bars mode specific settings
     /// Use [visualizer.bars] in config.toml
     #[serde(default)]
@@ -771,6 +778,7 @@ impl Default for VisualizerConfig {
             beat_reactivity: 1.0,
             trails: 0.0,
             echo: 0.0,
+            crt: 0.0,
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
         }
@@ -831,6 +839,7 @@ impl VisualizerConfig {
         // Validate trails (0.0–1.0)
         self.trails = self.trails.clamp(0.0, 1.0);
         self.echo = self.echo.clamp(0.0, 1.0);
+        self.crt = self.crt.clamp(0.0, 1.0);
     }
 }
 

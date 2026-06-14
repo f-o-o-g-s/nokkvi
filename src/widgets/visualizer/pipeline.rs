@@ -5,7 +5,9 @@
 
 use iced::wgpu;
 
-use super::shader::{BloomParams, EchoParams, TRAIL_FORMAT, Uniforms, VisualizerPipeline};
+use super::shader::{
+    BloomParams, CrtParams, EchoParams, TRAIL_FORMAT, Uniforms, VisualizerPipeline,
+};
 
 /// Build one of the four bars/lines × default/MSAA render pipelines.
 ///
@@ -642,6 +644,77 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
                 cache: None,
             });
 
+        // --- CRT / film composite pipeline ---
+        let crt_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer crt shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/crt.wgsl"
+            ))),
+        });
+        let crt_uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("visualizer crt uniform bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let crt_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("visualizer crt uniform buffer"),
+            size: std::mem::size_of::<CrtParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let crt_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("visualizer crt uniform bind group"),
+            layout: &crt_uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: crt_uniform_buffer.as_entire_binding(),
+            }],
+        });
+        // Group 0 reuses the blit layout (display texture + sampler); group 1 is
+        // the CrtParams uniform.
+        let crt_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("visualizer crt pipeline layout"),
+            bind_group_layouts: &[&blit_bind_group_layout, &crt_uniform_layout],
+            immediate_size: 0,
+        });
+        let crt_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("visualizer crt pipeline"),
+            layout: Some(&crt_layout),
+            vertex: wgpu::VertexState {
+                module: &crt_shader,
+                entry_point: Some("vs_crt"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &crt_shader,
+                entry_point: Some("fs_crt"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(premultiplied_blend),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             bars_pipeline,
             bars_pipeline_msaa,
@@ -686,6 +759,9 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             blit_bg_echo: None,
             echo_were_active: false,
             echo_needs_clear: false,
+            crt_pipeline,
+            crt_uniform_buffer,
+            crt_uniform_bind_group,
         }
     }
 }
