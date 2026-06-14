@@ -593,6 +593,8 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             trail_max_pipeline,
             trail_texture: None,
             blit_bg_trail: None,
+            trails_were_active: false,
+            trail_needs_clear: false,
         }
     }
 }

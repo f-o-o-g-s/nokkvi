@@ -63,7 +63,7 @@ pub(crate) struct VisualizerConfig {
     pub led_segment_height: f32,      // Height of each LED segment in pixels
     pub led_border_opacity: f32, // 0.0 = transparent, 1.0 = opaque (border opacity in LED mode)
     pub border_opacity: f32,     // 0.0 = transparent, 1.0 = opaque (border opacity in non-LED mode)
-    pub gradient_mode: u32,      // 0 = static, 2 = wave, 3 = shimmer, 4 = energy, 5 = alternate
+    pub gradient_mode: u32,      // 0 = static, 2 = wave (1 is intentionally unused)
     pub peak_gradient_mode: u32, // 0=static, 1=cycle, 2=height, 3=match
     pub peak_mode: u32,          // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade
     pub peak_hold_time: f32,     // Time in seconds for peak to hold
@@ -186,7 +186,7 @@ pub(crate) struct ShaderParams {
     pub led_border_opacity: f32,
     /// Border opacity in non-LED mode (0.0-1.0)
     pub border_opacity: f32,
-    /// Gradient mode: 0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate
+    /// Gradient mode: 0=static, 2=wave (1 is intentionally unused)
     pub gradient_mode: u32,
     /// Peak gradient mode: 0=static, 1=cycle, 2=height, 3=match
     pub peak_gradient_mode: u32,
@@ -407,6 +407,13 @@ pub(crate) struct VisualizerPipeline {
     pub(super) trail_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Blit bind group that samples the trail texture (for the final display).
     pub(super) blit_bg_trail: Option<wgpu::BindGroup>,
+    /// Whether trails rendered last frame. The accumulator is only reallocated
+    /// on resize, so prepare() uses this to detect the off->on transition.
+    pub(super) trails_were_active: bool,
+    /// Set by prepare() on the off->on transition: the trail fade pass clears
+    /// instead of loads, so a stale trail from a prior session can't ghost back
+    /// in. (A freshly resized accumulator is already zero, so it's a no-op then.)
+    pub(super) trail_needs_clear: bool,
 }
 
 /// Bloom pass parameters — a small standalone uniform, deliberately NOT part of
@@ -837,6 +844,13 @@ impl shader::Primitive for VisualizerPrimitive {
                 bytemuck::bytes_of(&bloom_params),
             );
         }
+
+        // Trails just turned on: the accumulator still holds whatever it had
+        // when trails were last disabled (it's only reallocated on resize), so
+        // tell the render trail-fade pass to clear it instead of loading —
+        // otherwise the stale trail fades back in over ~1s on re-enable.
+        pipeline.trail_needs_clear = self.trails_enabled && !pipeline.trails_were_active;
+        pipeline.trails_were_active = self.trails_enabled;
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
@@ -999,7 +1013,15 @@ impl shader::Primitive for VisualizerPrimitive {
             let (tex_w, tex_h) = pipeline.msaa_size;
             let decay = self.trails_decay as f64;
 
-            // Fade pass: scale the accumulator by the decay blend constant.
+            // Fade pass: scale the accumulator by the decay blend constant. On
+            // the frame trails turn back on, clear it instead of loading so a
+            // stale trail from a prior session can't ghost back in (see
+            // prepare(): trail_needs_clear).
+            let fade_load = if pipeline.trail_needs_clear {
+                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+            } else {
+                wgpu::LoadOp::Load
+            };
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("visualizer trail fade pass"),
@@ -1008,7 +1030,7 @@ impl shader::Primitive for VisualizerPrimitive {
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
+                            load: fade_load,
                             store: wgpu::StoreOp::Store,
                         },
                     })],

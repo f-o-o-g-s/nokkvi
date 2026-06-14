@@ -53,7 +53,10 @@ const W2: f32 = 0.1216216;
 const W3: f32 = 0.054054;
 const W4: f32 = 0.016216;
 
-// Separable Gaussian along `dir` (unit vector), stepping by source texels.
+// Separable Gaussian stepping `dir` source-texels per tap. `dir` is NOT
+// necessarily unit length: pass 1 reads the full-res resolve while pass 2 reads
+// the half-res bloom target, so pass 1 doubles its step to keep the blur radius
+// equal on both axes (otherwise the glow halo is 2x taller than it is wide).
 fn blur_axis(uv: vec2<f32>, dir: vec2<f32>) -> vec4<f32> {
     let texel = 1.0 / vec2<f32>(textureDimensions(src_tex));
     let off = dir * texel;
@@ -70,9 +73,11 @@ fn blur_axis(uv: vec2<f32>, dir: vec2<f32>) -> vec4<f32> {
 }
 
 // Pass 1: horizontal blur + soft-knee threshold (resolve -> half-res bloom).
+// The source is the FULL-res resolve, so step 2 source-texels per tap to match
+// the half-res step pass 2 takes — keeps the halo circular, not stretched.
 @fragment
 fn fs_bright_h(in: VsOut) -> @location(0) vec4<f32> {
-    let blurred = blur_axis(in.uv, vec2<f32>(1.0, 0.0));
+    let blurred = blur_axis(in.uv, vec2<f32>(2.0, 0.0));
     let luma = dot(blurred.rgb, vec3<f32>(0.299, 0.587, 0.114));
     let knee = smoothstep(params.threshold, params.threshold + 0.25, luma);
     return blurred * knee;

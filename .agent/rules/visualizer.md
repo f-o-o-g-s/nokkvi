@@ -27,7 +27,7 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 Mode enums in `src/visualizer_config.rs` (real Rust enums, not strings — hand-rolled `#[derive(Serialize, Deserialize)]` `#[serde(rename_all = "snake_case")]` `#[repr(u32)]` enums, each with a manual `as_wire_str()`, a pinned `ALL` const slice (declaration order = settings-dropdown display order), and `all_wire_strs()`; deserialization is via the derived `Deserialize`). The settings dropdowns in `src/views/settings/items_visualizer.rs` derive their option lists from `all_wire_strs()` — when adding a variant, extend `ALL` too; pin tests assert each `ALL` carries every variant exactly once in declaration order, and the no-wildcard `as_wire_str()` matches force a compile error until both are updated. Enums:
 - `BarsPeakMode`: `None` / `Fade` / `Fall` / `FallAccel` / `FallFade`. `peak_fall_speed` 1–20.
-- `BarsGradientMode`: `Static` (0) / `Wave` (2) / `Shimmer` (3) / `Energy` (4) / `Alternate` (5). **Discriminant `1` is intentionally skipped** — `bars.wgsl` has no branch for it; the `bars_gradient_mode_never_emits_dead_1u` test in `src/visualizer_config.rs` pins this against accidental future use.
+- `BarsGradientMode`: `Static` (0) / `Wave` (2). **Discriminant `1` is intentionally skipped** — `bars.wgsl` has no branch for it; the `bars_gradient_mode_never_emits_dead_1u` test in `src/visualizer_config.rs` pins this against accidental future use. (Shimmer/Energy/Alternate were dropped in b92d311; the glow/bloom/beat effects supersede them.)
 - `BarsGradientOrientation`: `Vertical` (within-bar) / `Horizontal` (bass → treble across bars).
 - `BarsPeakGradientMode`: `Static` / `Cycle` / `Height` / `Match` (separate enum from bar gradients).
 

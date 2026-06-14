@@ -495,11 +495,11 @@ impl Default for BarsConfig {
 }
 
 impl BarsConfig {
-    /// Get the gradient mode as u32 for shader (0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate).
+    /// Get the gradient mode as u32 for shader (0=static, 2=wave).
     ///
     /// `1u` is intentionally absent from the emitted set — `bars.wgsl` does not branch on it
     /// and would silently fall through to the static gradient. The explicit discriminants on
-    /// [`BarsGradientMode`] preserve this non-contiguous {0, 2, 3, 4, 5} encoding; the
+    /// [`BarsGradientMode`] preserve this non-contiguous {0, 2} encoding; the
     /// `bars_gradient_mode_never_emits_dead_1u` test below pins this so a future agent who
     /// adds a `1`-valued variant fails immediately.
     pub fn get_gradient_mode_value(&self) -> u32 {

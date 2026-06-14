@@ -35,7 +35,7 @@ struct Config {
     led_segment_height: f32,  // Height of each LED segment in pixels (not used in lines mode)
     led_border_opacity: f32,  // Border opacity in LED mode (not used in lines mode)
     border_opacity: f32,      // Border opacity in non-LED mode (not used in lines mode)
-    gradient_mode: u32,       // 0 = static, 2 = wave, 3 = shimmer, 4 = energy, 5 = alternate (1 is intentionally unused)
+    gradient_mode: u32,       // 0 = static, 2 = wave (1 is intentionally unused)
     peak_gradient_mode: u32,  // 0=static, 1=cycle, 2=height, 3=match (not used in lines mode)
     peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade (not used in lines mode)
     peak_hold_time: f32,      // Time in seconds for peak to hold (not used in lines mode)
