@@ -16,7 +16,7 @@ struct Uniforms {
     peak_color: vec4<f32>,
     border_color: vec4<f32>,
     config: Config,
-    audio: vec4<f32>,  // [beat_pulse, _, _, _] — appended after config (16-aligned)
+    audio: vec4<f32>,  // [beat * reactivity, bass, mid, treble] — appended after config (16-aligned)
 }
 
 struct Config {

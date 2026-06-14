@@ -420,7 +420,7 @@ impl Visualizer {
         }
     }
 
-    /// Construct the 38-field `ShaderParams` from a config snapshot, theme
+    /// Construct the 37-field `ShaderParams` from a config snapshot, theme
     /// colors, and the widget's per-instance state.
     ///
     /// Sources, by axis:

@@ -445,7 +445,7 @@ pub(super) struct Uniforms {
     pub(super) border_color: [f32; 4],
     /// Config
     pub(super) config: VisualizerConfig,
-    /// Audio signals for beat-reactive effects: `[beat_pulse, _, _, _]`.
+    /// Audio signals for beat-reactive effects: `[beat * reactivity, bass, mid, treble]`.
     /// Appended after `config` (lands 16-aligned), so it sits OUTSIDE the
     /// pinned 8336-byte Config layout — the WGSL `Uniforms` mirrors mirror it
     /// with a trailing `audio: vec4<f32>` in bars.wgsl + lines.wgsl.
