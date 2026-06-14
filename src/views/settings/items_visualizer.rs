@@ -402,6 +402,16 @@ pub(crate) fn build_visualizer_items(
         1,
         " px",
     ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::BARS_FLASH_INTENSITY, "Peak Flash", "Bars")
+            .with_subtitle("Bars bloom toward the peak color on a beat. 0 = disabled"),
+        config.bars.flash_intensity as f64,
+        d.bars.flash_intensity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
 
     // --- Bar Colors (Dark / Light) ---
     // These keys are theme-file-relative — they write to the active theme file,

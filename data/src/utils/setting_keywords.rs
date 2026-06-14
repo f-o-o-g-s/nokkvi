@@ -134,6 +134,9 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "visualizer.bars.peak_fall_speed" => &["cap", "tip", "drop rate", "gravity"],
         "visualizer.bars.peak_height_ratio" => &["cap", "tip", "marker size"],
         "visualizer.bars.bar_depth_3d" => &["3d", "perspective"],
+        "visualizer.bars.flash_intensity" => {
+            &["beat flash", "bloom", "pulse", "peak flash", "punch"]
+        }
         "visualizer.bar_gradient_colors" => {
             &["palette", "color stops", "rainbow", "spectrum colors"]
         }

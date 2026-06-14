@@ -51,9 +51,9 @@ struct Config {
     lines_mirror: u32,             // Lines mode only: 0=normal, 1=mirrored
     lines_glow_intensity: f32,     // Lines mode only: glow bloom (0.0 = disabled)
     lines_style: u32,              // Lines mode only: 0=smooth, 1=angular, 2=stepped
+    bars_flash_intensity: f32,     // Bars mode: peak-flash bloom strength (0 = off)
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s
     // Up to 2048 bars = 512 vec4s
     flash_data: array<vec4<f32>, 512>,
@@ -878,6 +878,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             base_color = get_gradient_color(base_pos);
         }
         
+        // Peak-flash bloom: bars bloom toward the warm peak color on a peak
+        // hit, using the per-bar flash envelope (computed + uploaded every
+        // tick, previously unused). Squared for a punchy attack, weighted
+        // toward the bar top, additive so it reads as emissive over any
+        // gradient mode. Applied before brightness_mod so the 3D top/side
+        // faces inherit the bloom and stay shading-consistent.
+        let flash = get_flash_intensity(u32(input.bar_index)) * uniforms.config.bars_flash_intensity;
+        if (flash > 0.001) {
+            let top_weight = 0.4 + 0.6 * clamped_y;
+            let bloom = uniforms.peak_gradient_colors[0].rgb * (flash * flash * top_weight);
+            base_color = vec4<f32>(min(base_color.rgb + bloom, vec3<f32>(1.0)), base_color.a);
+        }
+
         // Apply 3D brightness modulation
         base_color = apply_brightness_mod(base_color, input.brightness_mod);
         // Front face (bm ~= 1.0): no modification

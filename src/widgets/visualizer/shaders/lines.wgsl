@@ -52,9 +52,9 @@ struct Config {
     lines_mirror: u32,             // 0=normal, 1=mirrored
     lines_glow_intensity: f32,     // Glow bloom (0.0 = disabled)
     lines_style: u32,              // 0=smooth, 1=angular, 2=stepped
+    bars_flash_intensity: f32,     // Bars mode: peak-flash bloom strength (0 = off)
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s
     // Up to 2048 bars = 512 vec4s (not used in lines mode)
     flash_data: array<vec4<f32>, 512>,

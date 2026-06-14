@@ -469,6 +469,12 @@ pub struct BarsConfig {
     /// Default: 0.0
     pub bar_depth_3d: f32,
 
+    /// Peak-flash bloom strength for Bars mode (0.0 = disabled, 1.0 = max).
+    /// Bars bloom toward the peak color when they hit a transient/beat, using
+    /// the per-bar flash envelope already computed by `update_flash_effect`.
+    /// Default: 0.6
+    pub flash_intensity: f32,
+
     /// Maximum number of bars to display.
     /// The dynamic layout algorithm will try to fit up to this many bars in the window.
     /// Default: 512, range 16–2048
@@ -493,6 +499,7 @@ impl Default for BarsConfig {
             peak_height_ratio: 35,
             peak_fall_speed: 5,
             bar_depth_3d: 0.0,
+            flash_intensity: 0.6,
             max_bars: 512,
         }
     }
@@ -643,6 +650,7 @@ pub(crate) mod keys {
     pub(crate) const BARS_PEAK_FALL_SPEED: &str = "visualizer.bars.peak_fall_speed";
     pub(crate) const BARS_PEAK_HEIGHT_RATIO: &str = "visualizer.bars.peak_height_ratio";
     pub(crate) const BARS_BAR_DEPTH_3D: &str = "visualizer.bars.bar_depth_3d";
+    pub(crate) const BARS_FLASH_INTENSITY: &str = "visualizer.bars.flash_intensity";
 
     // ── Lines ────────────────────────────────────────────────────────────
     pub(crate) const LINES_POINT_COUNT: &str = "visualizer.lines.point_count";
@@ -769,6 +777,7 @@ impl VisualizerConfig {
         self.bars.border_width = self.bars.border_width.clamp(0.0, 5.0);
         self.bars.led_segment_height = self.bars.led_segment_height.clamp(2.0, 20.0);
         self.bars.bar_depth_3d = self.bars.bar_depth_3d.clamp(0.0, 20.0);
+        self.bars.flash_intensity = self.bars.flash_intensity.clamp(0.0, 1.0);
         self.bars.peak_height_ratio = self.bars.peak_height_ratio.clamp(10, 100);
         self.bars.peak_fall_speed = self.bars.peak_fall_speed.clamp(1, 20);
         self.bars.max_bars = self.bars.max_bars.clamp(16, 2048);

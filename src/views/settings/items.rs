@@ -250,6 +250,7 @@ mod tests {
                 vkeys::BARS_PEAK_FALL_SPEED,
                 vkeys::BARS_PEAK_HEIGHT_RATIO,
                 vkeys::BARS_BAR_DEPTH_3D,
+                vkeys::BARS_FLASH_INTENSITY,
             ],
         );
         assert_section_keys(
@@ -293,9 +294,9 @@ mod tests {
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 3 + 4 + 19 + 5 + 5 + 11 = 47. Catches an item landing OUTSIDE the
+        // 3 + 4 + 20 + 5 + 5 + 11 = 48. Catches an item landing OUTSIDE the
         // pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 47);
+        assert_eq!(count_items(&entries), 48);
     }
 
     #[test]

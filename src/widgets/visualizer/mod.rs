@@ -420,7 +420,7 @@ impl Visualizer {
         }
     }
 
-    /// Construct the 33-field `ShaderParams` from a config snapshot, theme
+    /// Construct the 34-field `ShaderParams` from a config snapshot, theme
     /// colors, and the widget's per-instance state.
     ///
     /// Sources, by axis:
@@ -472,6 +472,7 @@ impl Visualizer {
             lines_mirror: cfg.lines.mirror,
             lines_glow_intensity: cfg.lines.glow_intensity,
             lines_style: cfg.lines.get_style_value(),
+            bars_flash_intensity: cfg.bars.flash_intensity,
         }
     }
 
@@ -691,6 +692,7 @@ mod wgsl_config_identity_tests {
         "lines_mirror",
         "lines_glow_intensity",
         "lines_style",
+        "bars_flash_intensity",
         "_pad",
         "flash_data",
     ];
@@ -774,6 +776,7 @@ mod build_shader_params_tests {
         cfg.opacity = 0.42;
         cfg.lines.mirror = true;
         cfg.lines.glow_intensity = 0.7;
+        cfg.bars.flash_intensity = 0.9;
 
         let shared = Arc::new(RwLock::new(cfg.clone()));
         let viz = Visualizer::new(64, shared);
@@ -791,6 +794,7 @@ mod build_shader_params_tests {
         assert!((params.global_opacity - 0.42).abs() < 1e-6);
         assert!(params.lines_mirror);
         assert!((params.lines_glow_intensity - 0.7).abs() < 1e-6);
+        assert!((params.bars_flash_intensity - 0.9).abs() < 1e-6);
 
         // colors-routed — peak/bar gradient palettes must be padded to 8.
         assert_eq!(params.gradient_colors.len(), 8);

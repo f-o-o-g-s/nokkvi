@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - The Lines visualizer can now glow like neon, with a halo that brightens with the music and an adjustable Glow Intensity setting.
+- The Bars visualizer now blooms toward the peak color when bars hit a beat, with an adjustable Peak Flash setting.
 
 ### Changed
 

@@ -57,7 +57,8 @@ pub(crate) struct VisualizerConfig {
     pub lines_mirror: u32,       // Lines mode: 0=normal, 1=mirrored
     pub lines_glow_intensity: f32, // Lines mode: glow bloom (0.0 = disabled)
     pub lines_style: u32,        // Lines mode: 0=smooth, 1=angular, 2=stepped
-    pub _pad: [u32; 3],          // Padding for 16-byte alignment before flash_data
+    pub bars_flash_intensity: f32, // Bars mode: peak-flash bloom strength (0 = off)
+    pub _pad: [u32; 2],          // Padding for 16-byte alignment before flash_data
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s for GPU efficiency
     // Up to 2048 bars = 512 vec4s
     pub flash_data: [[f32; 4]; 512], // 2048 bars max
@@ -84,8 +85,8 @@ const _: () = assert!(core::mem::offset_of!(VisualizerConfig, bar_count) == 0);
 const _: () = assert!(core::mem::offset_of!(VisualizerConfig, time) == 40);
 const _: () = assert!(core::mem::offset_of!(VisualizerConfig, lines_style) == 128);
 const _: () = assert!(
-    core::mem::offset_of!(VisualizerConfig, _pad) == 132,
-    "_pad must sit at 132 so flash_data lands on a 16-byte boundary (144)",
+    core::mem::offset_of!(VisualizerConfig, _pad) == 136,
+    "_pad must sit at 136 so flash_data lands on a 16-byte boundary (144)",
 );
 const _: () = assert!(
     core::mem::offset_of!(VisualizerConfig, flash_data) == 144,
@@ -180,6 +181,8 @@ pub(crate) struct ShaderParams {
     pub lines_glow_intensity: f32,
     /// Lines mode: interpolation style (0=smooth, 1=angular, 2=stepped)
     pub lines_style: u32,
+    /// Bars mode: peak-flash bloom strength (0.0 = disabled, 1.0 = max)
+    pub bars_flash_intensity: f32,
 }
 
 impl VisualizerPrimitive {
@@ -272,7 +275,8 @@ impl VisualizerPrimitive {
             lines_mirror: u32::from(params.lines_mirror),
             lines_glow_intensity: params.lines_glow_intensity,
             lines_style: params.lines_style,
-            _pad: [0; 3],
+            bars_flash_intensity: params.bars_flash_intensity,
+            _pad: [0; 2],
             flash_data,
         };
 
@@ -777,7 +781,7 @@ mod layout_tests {
 
     #[test]
     fn flash_data_is_sixteen_byte_aligned() {
-        assert_eq!(core::mem::offset_of!(VisualizerConfig, _pad), 132);
+        assert_eq!(core::mem::offset_of!(VisualizerConfig, _pad), 136);
         assert_eq!(core::mem::offset_of!(VisualizerConfig, flash_data) % 16, 0);
     }
 }
