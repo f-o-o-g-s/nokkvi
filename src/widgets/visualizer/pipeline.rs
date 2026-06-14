@@ -68,6 +68,61 @@ fn build_visualizer_pipeline(
     })
 }
 
+/// Build one of the fullscreen-triangle post-process pipelines (blit, trail
+/// fade/max, bloom bright/blur/composite, echo feedback, CRT).
+///
+/// Every post-process pass shares the same descriptor skeleton — a single
+/// fullscreen `TriangleList`, no depth/stencil, default (non-MSAA) multisample,
+/// no vertex buffers, full `ColorWrites::ALL` mask, no multiview, no pipeline
+/// cache — and differs only along `layout`, `shader`, the vertex/fragment
+/// `entries`, `blend`, target `format`, and `label`. Centralizing the skeleton
+/// here means a future change to it (pipeline caching, a primitive-state tweak,
+/// a wgpu API rename) lands once instead of at eight call sites that could
+/// silently diverge.
+///
+/// (`build_visualizer_pipeline` can't be reused for these — it hardcodes
+/// `vs_main`/`fs_main` + `ALPHA_BLENDING` and carries the MSAA branch the
+/// post-process passes never use.)
+fn build_postprocess_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    entries: (&'static str, &'static str),
+    blend: wgpu::BlendState,
+    format: wgpu::TextureFormat,
+    label: &'static str,
+) -> wgpu::RenderPipeline {
+    let (vs_entry, fs_entry) = entries;
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some(vs_entry),
+            buffers: &[],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(fs_entry),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(blend),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 impl VisualizerPipeline {
     pub(crate) const MAX_BARS: usize = 2048;
 
@@ -339,34 +394,15 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             },
         };
 
-        let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("visualizer blit pipeline"),
-            layout: Some(&blit_layout),
-            vertex: wgpu::VertexState {
-                module: &blit_shader,
-                entry_point: Some("vs_blit"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &blit_shader,
-                entry_point: Some("fs_blit"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(premultiplied_blend),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let blit_pipeline = build_postprocess_pipeline(
+            device,
+            &blit_layout,
+            &blit_shader,
+            ("vs_blit", "fs_blit"),
+            premultiplied_blend,
+            format,
+            "visualizer blit pipeline",
+        );
 
         // --- Motion trail pipelines (reuse the blit shader + layout) ---
         // Fade: out = dst * blend_constant (the per-frame decay) — src is
@@ -397,46 +433,26 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
                 operation: wgpu::BlendOperation::Max,
             },
         };
-        let make_trail_pipeline =
-            |entry: &'static str, blend: wgpu::BlendState, label: &'static str| {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(label),
-                    layout: Some(&blit_layout),
-                    vertex: wgpu::VertexState {
-                        module: &blit_shader,
-                        entry_point: Some("vs_blit"),
-                        buffers: &[],
-                        compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    },
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module: &blit_shader,
-                        entry_point: Some(entry),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            // Trail pipelines render into the float accumulator,
-                            // not the 8-bit surface (see TRAIL_FORMAT).
-                            format: TRAIL_FORMAT,
-                            blend: Some(blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    }),
-                    multiview_mask: None,
-                    cache: None,
-                })
-            };
-        let trail_fade_pipeline = make_trail_pipeline(
-            "fs_fade",
+        // Trail pipelines render into the float accumulator, not the 8-bit
+        // surface (see TRAIL_FORMAT).
+        let trail_fade_pipeline = build_postprocess_pipeline(
+            device,
+            &blit_layout,
+            &blit_shader,
+            ("vs_blit", "fs_fade"),
             trail_fade_blend,
+            TRAIL_FORMAT,
             "visualizer trail fade pipeline",
         );
-        let trail_max_pipeline =
-            make_trail_pipeline("fs_blit", trail_max_blend, "visualizer trail max pipeline");
+        let trail_max_pipeline = build_postprocess_pipeline(
+            device,
+            &blit_layout,
+            &blit_shader,
+            ("vs_blit", "fs_blit"),
+            trail_max_blend,
+            TRAIL_FORMAT,
+            "visualizer trail max pipeline",
+        );
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("visualizer blit sampler"),
@@ -500,38 +516,6 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             immediate_size: 0,
         });
 
-        let make_bloom_pipeline =
-            |entry: &'static str, blend: wgpu::BlendState, label: &'static str| {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(label),
-                    layout: Some(&bloom_layout),
-                    vertex: wgpu::VertexState {
-                        module: &bloom_shader,
-                        entry_point: Some("vs_main"),
-                        buffers: &[],
-                        compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    },
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module: &bloom_shader,
-                        entry_point: Some(entry),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format,
-                            blend: Some(blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    }),
-                    multiview_mask: None,
-                    cache: None,
-                })
-            };
-
         // Blur/threshold passes overwrite their target; the composite adds light.
         let additive_blend = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -546,19 +530,31 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             },
         };
 
-        let bloom_bright_pipeline = make_bloom_pipeline(
-            "fs_bright_h",
+        let bloom_bright_pipeline = build_postprocess_pipeline(
+            device,
+            &bloom_layout,
+            &bloom_shader,
+            ("vs_main", "fs_bright_h"),
             wgpu::BlendState::REPLACE,
+            format,
             "visualizer bloom bright/H pipeline",
         );
-        let bloom_blur_v_pipeline = make_bloom_pipeline(
-            "fs_blur_v",
+        let bloom_blur_v_pipeline = build_postprocess_pipeline(
+            device,
+            &bloom_layout,
+            &bloom_shader,
+            ("vs_main", "fs_blur_v"),
             wgpu::BlendState::REPLACE,
+            format,
             "visualizer bloom blur V pipeline",
         );
-        let bloom_composite_pipeline = make_bloom_pipeline(
-            "fs_composite",
+        let bloom_composite_pipeline = build_postprocess_pipeline(
+            device,
+            &bloom_layout,
+            &bloom_shader,
+            ("vs_main", "fs_composite"),
             additive_blend,
+            format,
             "visualizer bloom composite pipeline",
         );
 
@@ -614,35 +610,15 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             bind_group_layouts: &[&echo_bind_group_layout],
             immediate_size: 0,
         });
-        let echo_feedback_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("visualizer echo feedback pipeline"),
-                layout: Some(&echo_layout),
-                vertex: wgpu::VertexState {
-                    module: &echo_shader,
-                    entry_point: Some("vs_echo"),
-                    buffers: &[],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    ..Default::default()
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &echo_shader,
-                    entry_point: Some("fs_echo"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: TRAIL_FORMAT,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                multiview_mask: None,
-                cache: None,
-            });
+        let echo_feedback_pipeline = build_postprocess_pipeline(
+            device,
+            &echo_layout,
+            &echo_shader,
+            ("vs_echo", "fs_echo"),
+            wgpu::BlendState::REPLACE,
+            TRAIL_FORMAT,
+            "visualizer echo feedback pipeline",
+        );
 
         // --- CRT / film composite pipeline ---
         let crt_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -686,34 +662,15 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             bind_group_layouts: &[&blit_bind_group_layout, &crt_uniform_layout],
             immediate_size: 0,
         });
-        let crt_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("visualizer crt pipeline"),
-            layout: Some(&crt_layout),
-            vertex: wgpu::VertexState {
-                module: &crt_shader,
-                entry_point: Some("vs_crt"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &crt_shader,
-                entry_point: Some("fs_crt"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(premultiplied_blend),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let crt_pipeline = build_postprocess_pipeline(
+            device,
+            &crt_layout,
+            &crt_shader,
+            ("vs_crt", "fs_crt"),
+            premultiplied_blend,
+            format,
+            "visualizer crt pipeline",
+        );
 
         Self {
             bars_pipeline,
