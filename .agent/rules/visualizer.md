@@ -13,7 +13,7 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 ## Module Structure
 
-- `widgets/visualizer/mod.rs` — `Visualizer` Iced widget glue (its `view()` wraps a `ShaderVisualizer` in `iced::widget::shader`); `build_shader_params(...)` constructs the 37-field `ShaderParams` from a config snapshot, theme palette, and viewport
+- `widgets/visualizer/mod.rs` — `Visualizer` Iced widget glue (its `view()` wraps a `ShaderVisualizer` in `iced::widget::shader`); `build_shader_params(...)` constructs the 38-field `ShaderParams` from a config snapshot, theme palette, and viewport
 - `widgets/visualizer/state.rs` — `VisualizerState` runtime (audio callback, FFT pipeline, peak/effect state, display buffers); `VisualizerTiming` is a zero-sized struct holding the per-frame tick constants (`TICK_RATE_HZ = 60`, `TICK_INTERVAL`, and ms/secs variants) all derived from one rate
 - `widgets/visualizer/pipeline.rs` — `MAX_BARS = 2048`, GPU buffers, `VisualizerPipeline::new` (the struct itself is declared in `shader.rs`)
 - `widgets/visualizer/shader.rs` — `ShaderParams` struct, `ShaderVisualizer` (the `shader::Program` impl), render dispatch, MSAA texture cache, blit shader

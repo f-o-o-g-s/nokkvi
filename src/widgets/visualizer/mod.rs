@@ -660,8 +660,8 @@ mod wgsl_config_identity_tests {
     }
 
     /// Field names of the Rust `VisualizerConfig` (shader.rs), in declaration
-    /// order, with the 3-u32 `_pad` collapsed to a single `_pad` token to match
-    /// how this test normalizes the WGSL `_pad0/_pad1/_pad2` split. Update this
+    /// order, with the 2-u32 `_pad` collapsed to a single `_pad` token to match
+    /// how this test normalizes the WGSL `_pad0/_pad1` split. Update this
     /// list AND shader.rs's const-asserts whenever a config field changes.
     const RUST_CONFIG_FIELDS: &[&str] = &[
         "bar_count",
@@ -704,8 +704,8 @@ mod wgsl_config_identity_tests {
 
     /// Pull the field-name token from each line of an extracted Config block,
     /// skipping the `struct Config {` opener + closing `}`, and collapsing the
-    /// consecutive `_pad0/_pad1/_pad2` lines into a single `_pad` token (the
-    /// Rust struct declares them as one `_pad: [u32; 3]` member).
+    /// consecutive `_pad0/_pad1` lines into a single `_pad` token (the
+    /// Rust struct declares them as one `_pad: [u32; 2]` member).
     fn wgsl_field_names(block: &str) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for line in block.lines() {
