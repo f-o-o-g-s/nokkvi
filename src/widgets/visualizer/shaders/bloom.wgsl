@@ -14,6 +14,15 @@
 // resolve texture holds premultiplied-alpha color (it is rendered onto a
 // transparent-cleared target), which is the correct space to blur and to add
 // additively, so no un/re-premultiply dance is needed here.
+//
+// v1 limitation: bloom samples the live resolve texture (current frame's bars /
+// lines), not the trail / echo accumulator. So when bloom is stacked with
+// trails or echo, the halo tracks the current frame, not the fading after-image
+// — faded comet trails / echo tunnels get no glow. Subtle by construction (the
+// brightest, most bloom-prone pixels are the live scene; the un-haloed history
+// is the dim part least likely to bloom), so it ships as-is. A true fix would
+// move the bright/blur passes to run after the trail/echo accumulation and add
+// a bloom bind group sampling whichever accumulator is displayed.
 
 struct BloomParams {
     intensity: f32, // additive strength of the glow (composite pass)

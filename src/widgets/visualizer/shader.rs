@@ -1338,7 +1338,9 @@ impl shader::Primitive for VisualizerPrimitive {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load, // REPLACE blend overwrites every pixel
+                        // REPLACE blend covers every texel, so the prior contents
+                        // are never read — clear (matches the bloom blur passes).
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

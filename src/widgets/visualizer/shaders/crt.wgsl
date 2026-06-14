@@ -29,6 +29,10 @@ const CRT_VIGNETTE: f32 = 0.9;
 const CRT_GRAIN: f32 = 0.07;
 const CRT_BEAT_ZOOM: f32 = 0.02;
 const CRT_SCAN_SCROLL: f32 = 12.0;
+// Fixed scanline count so density is resolution-independent and stays well
+// under the framebuffer Nyquist limit (tying it to physical texture height
+// aliases/shimmers on HiDPI / fractional-scaled displays).
+const CRT_SCANLINE_COUNT: f32 = 320.0;
 
 fn hash(p: vec2<f32>) -> f32 {
     return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
@@ -77,7 +81,8 @@ fn fs_crt(in: VsOut) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(tex));
 
     // Scanlines.
-    let scan = 0.5 + 0.5 * sin(uv.y * dims.y * PI + crt.time * CRT_SCAN_SCROLL);
+    let scan_count = min(CRT_SCANLINE_COUNT, dims.y * 0.5);
+    let scan = 0.5 + 0.5 * sin(uv.y * scan_count * PI + crt.time * CRT_SCAN_SCROLL);
     col = col * mix(1.0, scan, CRT_SCANLINE * amount);
 
     // Vignette (darken toward the corners).
