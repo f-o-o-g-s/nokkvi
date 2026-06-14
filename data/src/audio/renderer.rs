@@ -274,6 +274,12 @@ pub struct AudioRenderer {
     /// all `RodioOutput` instances and their `StreamingSource`s.
     viz_callback: SharedVisualizerCallback,
 
+    /// Shared master visualizer on/off gate. Owned by the renderer, cloned into
+    /// every `RodioOutput`/`StreamingSource`. Flipped `false` (via
+    /// [`Self::set_visualizer_enabled`]) when the user turns the visualizer off
+    /// so the real-time audio thread skips the per-sample tap; `true` otherwise.
+    viz_enabled: Arc<std::sync::atomic::AtomicBool>,
+
     /// Shared mixer from the app-wide MixerDeviceSink (set after login).
     shared_mixer: Option<rodio::mixer::Mixer>,
 
@@ -425,6 +431,7 @@ impl AudioRenderer {
             crossfade_state: CrossfadeState::Idle,
             crossfade_finalized_elapsed_ms: 0,
             viz_callback: std::sync::Arc::new(parking_lot::RwLock::new(None)),
+            viz_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shared_mixer: None,
             volume_normalization_mode: VolumeNormalizationMode::Off,
             normalization_target_level: 1.0,
@@ -532,7 +539,11 @@ impl AudioRenderer {
             let mixer = self.shared_mixer.clone().ok_or_else(|| {
                 anyhow::anyhow!("Shared mixer not set — call set_shared_mixer() first")
             })?;
-            self.output = Some(RodioOutput::new(mixer, self.viz_callback.clone())?);
+            self.output = Some(RodioOutput::new(
+                mixer,
+                self.viz_callback.clone(),
+                self.viz_enabled.clone(),
+            )?);
         }
 
         // Stop old primary stream if any
@@ -875,6 +886,16 @@ impl AudioRenderer {
     /// because the shared slot is owned by the renderer.
     pub fn set_visualizer_callback(&self, callback: VisualizerCallback) {
         *self.viz_callback.write() = Some(callback);
+    }
+
+    /// Toggle the master visualizer gate. When `false`, every stream skips the
+    /// per-sample visualizer tap (no S16 push, no callback) — so turning the
+    /// visualizer off stops the audio-thread DSP feed, not just the GPU render.
+    /// Works even if the output doesn't exist yet (the gate is owned here and
+    /// cloned into streams at creation).
+    pub fn set_visualizer_enabled(&self, enabled: bool) {
+        self.viz_enabled
+            .store(enabled, std::sync::atomic::Ordering::Release);
     }
 
     /// Set the shared mixer from the app-wide MixerDeviceSink.
@@ -1861,6 +1882,7 @@ mod tests {
             None,
             Arc::new(Notify::new()),
             false,
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
         );
         let stream = ActiveStream {
             producer,

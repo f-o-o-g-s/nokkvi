@@ -4,7 +4,10 @@
 //! implementation. Uses a shared `Mixer` (from the app-wide `MixerDeviceSink`)
 //! to add streaming sources. All audio (music + SFX) flows through one cpal stream.
 
-use std::{num::NonZero, sync::Arc};
+use std::{
+    num::NonZero,
+    sync::{Arc, atomic::AtomicBool},
+};
 
 use anyhow::Result;
 use ringbuf::{HeapRb, traits::Split};
@@ -102,6 +105,10 @@ pub struct RodioOutput {
     mixer: Mixer,
     /// Shared visualizer callback slot. All streams read from this; updated dynamically.
     visualizer_callback: SharedVisualizerCallback,
+    /// Shared master visualizer on/off gate. Cloned into every stream so the
+    /// renderer can suppress the per-sample tap on all of them at once when
+    /// the user turns the visualizer off.
+    viz_enabled: Arc<AtomicBool>,
 }
 
 impl RodioOutput {
@@ -110,12 +117,17 @@ impl RodioOutput {
     /// The `mixer` should come from the app-wide `MixerDeviceSink` (typically
     /// owned by the SFX engine). The `viz_callback` is the shared visualizer
     /// callback slot owned by the renderer.
-    pub fn new(mixer: Mixer, viz_callback: SharedVisualizerCallback) -> Result<Self> {
+    pub fn new(
+        mixer: Mixer,
+        viz_callback: SharedVisualizerCallback,
+        viz_enabled: Arc<AtomicBool>,
+    ) -> Result<Self> {
         info!("🔊 [RODIO] Music output initialized (shared mixer)");
 
         Ok(Self {
             mixer,
             visualizer_callback: viz_callback,
+            viz_enabled,
         })
     }
 
@@ -167,6 +179,7 @@ impl RodioOutput {
             eq_state,
             consumed_notify,
             feeds_visualizer,
+            self.viz_enabled.clone(),
         );
 
         // Pre-mixer chain. The peak limiter sits at the end of every variant so

@@ -173,6 +173,12 @@ pub struct StreamingSource {
     handle: StreamHandle,
     /// Shared visualizer callback slot — dynamically updated, read via RwLock.
     visualizer: SharedVisualizerCallback,
+    /// Master visualizer on/off gate, shared by every stream from the same
+    /// output. Distinct from `feeds_visualizer` (the crossfade primary
+    /// selector): when the user turns the visualizer OFF, the renderer flips
+    /// this `false` so `next()` skips the per-sample S16 push + RwLock read +
+    /// callback entirely — no DSP feed for a spectrum nothing renders.
+    viz_enabled: Arc<AtomicBool>,
     /// Visualizer sample accumulator.
     viz_buffer: Vec<f32>,
     /// Number of samples to batch before calling visualizer callback.
@@ -215,6 +221,8 @@ impl StreamingSource {
     ///   visualizer callback. The renderer passes `false` for a crossfade incoming
     ///   stream so two concurrent streams cannot thrash the visualizer's per-batch
     ///   sample-rate atomic, then flips it `true` after promotion in `finalize_crossfade`.
+    /// - `viz_enabled`: shared master gate — when `false` the source skips the
+    ///   visualizer tap entirely (set when the user turns the visualizer off).
     #[expect(
         clippy::too_many_arguments,
         reason = "low-level stream constructor; each arg is independent decoder/output config — struct-bundling would just wrap them"
@@ -228,6 +236,7 @@ impl StreamingSource {
         eq_state: Option<super::eq::EqState>,
         consumed_notify: Arc<Notify>,
         feeds_visualizer: bool,
+        viz_enabled: Arc<AtomicBool>,
     ) -> (Self, StreamHandle) {
         let volume = initial_volume.clamp(0.0, 1.0);
         let handle = StreamHandle {
@@ -260,6 +269,7 @@ impl StreamingSource {
             sample_rate,
             handle: handle.clone(),
             visualizer,
+            viz_enabled,
             viz_buffer: Vec::with_capacity(2048),
             viz_batch_size: 2048,
             smoothed_volume: volume,
@@ -274,7 +284,9 @@ impl StreamingSource {
 
     /// Flush any remaining visualizer samples.
     fn flush_viz(&mut self) {
-        if !self.handle.feeds_visualizer.load(Ordering::Acquire) {
+        if !self.viz_enabled.load(Ordering::Relaxed)
+            || !self.handle.feeds_visualizer.load(Ordering::Acquire)
+        {
             self.viz_buffer.clear();
             return;
         }
@@ -367,7 +379,10 @@ impl Iterator for StreamingSource {
         // crossfade the incoming stream is gated off here so two streams at
         // different sample rates cannot flip the visualizer's per-batch rate
         // atomic and thrash the spectrum engine into constant reinit.
-        if raw.is_some() && self.handle.feeds_visualizer.load(Ordering::Acquire) {
+        if self.viz_enabled.load(Ordering::Relaxed)
+            && raw.is_some()
+            && self.handle.feeds_visualizer.load(Ordering::Acquire)
+        {
             let guard = self.visualizer.read();
             if guard.is_some() {
                 // Feed the pre-volume AND pre-EQ sample scaled to S16 range for
@@ -432,6 +447,19 @@ mod tests {
         callback: SharedVisualizerCallback,
         feeds_visualizer: bool,
     ) -> (StreamingSource, StreamHandle) {
+        make_source_gated(sample_rate, samples, callback, feeds_visualizer, true)
+    }
+
+    /// Like [`make_source`] but with explicit control over the master
+    /// `viz_enabled` gate (the off-switch the renderer flips when the user
+    /// turns the visualizer off).
+    fn make_source_gated(
+        sample_rate: u32,
+        samples: usize,
+        callback: SharedVisualizerCallback,
+        feeds_visualizer: bool,
+        viz_enabled: bool,
+    ) -> (StreamingSource, StreamHandle) {
         let rb = HeapRb::<f32>::new(samples.max(1));
         let (mut producer, consumer) = rb.split();
         let data: Vec<f32> = (0..samples).map(|i| (i as f32 * 0.001).sin()).collect();
@@ -446,6 +474,7 @@ mod tests {
             None,
             Arc::new(Notify::new()),
             feeds_visualizer,
+            Arc::new(AtomicBool::new(viz_enabled)),
         )
     }
 
@@ -532,6 +561,45 @@ mod tests {
         );
     }
 
+    /// Master-gate regression: when `viz_enabled` is `false` (the user turned
+    /// the visualizer off), a primary stream must NOT fire the callback even
+    /// while real audio is flowing — the per-sample tap is skipped entirely so
+    /// the audio thread stops feeding a spectrum nothing renders.
+    #[test]
+    fn viz_disabled_suppresses_tap() {
+        let (slot, observed) = counting_callback();
+
+        // feeds_visualizer = true (this is the primary stream), but the master
+        // gate is OFF — plenty of samples to cross several batch boundaries.
+        let (mut source, _handle) = make_source_gated(44_100, 8_192, slot, true, false);
+        for _ in 0..4_096 {
+            let _ = source.next();
+        }
+
+        assert!(
+            observed.lock().is_empty(),
+            "viz_enabled=false must suppress the tap; saw rates {:?}",
+            *observed.lock()
+        );
+    }
+
+    /// Positive control for [`viz_disabled_suppresses_tap`]: with the master
+    /// gate ON, the same primary stream feeds the callback as normal.
+    #[test]
+    fn viz_enabled_feeds_tap() {
+        let (slot, observed) = counting_callback();
+
+        let (mut source, _handle) = make_source_gated(44_100, 8_192, slot, true, true);
+        for _ in 0..4_096 {
+            let _ = source.next();
+        }
+
+        assert!(
+            !observed.lock().is_empty(),
+            "viz_enabled=true primary stream should feed the visualizer"
+        );
+    }
+
     /// Build a callback that records every f32 sample pushed into it.
     fn recording_callback() -> (SharedVisualizerCallback, Arc<parking_lot::Mutex<Vec<f32>>>) {
         let observed = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -565,6 +633,7 @@ mod tests {
             eq_state,
             Arc::new(Notify::new()),
             true,
+            Arc::new(AtomicBool::new(true)),
         );
         (source, observed)
     }

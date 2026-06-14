@@ -408,6 +408,13 @@ impl Visualizer {
         self.state.apply_config();
     }
 
+    /// Toggle the feed gate. Driven by the cycle-visualization handler: `false`
+    /// when the visualizer is turned Off (idles the FFT worker + drops incoming
+    /// audio batches), `true` for Bars/Lines.
+    pub fn set_feed_active(&self, active: bool) {
+        self.state.set_feed_active(active);
+    }
+
     /// Get callback for clearing sample buffer on track changes
     ///
     /// Clears the raw sample buffer used by the visualizer.

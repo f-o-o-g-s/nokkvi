@@ -1162,10 +1162,29 @@ impl Nokkvi {
     pub(crate) fn handle_cycle_visualization(&mut self) -> Task<Message> {
         self.engine.visualization_mode = self.engine.visualization_mode.next();
 
-        // Persist to storage
         let mode = self.engine.visualization_mode;
+        let active = mode != nokkvi_data::types::player_settings::VisualizationMode::Off;
+
+        // Synchronously gate the UI-side FFT worker + sample-buffering callback
+        // so the 60 Hz DSP pipeline idles the instant the visualizer is turned
+        // off — ahead of (and independent of) the async engine round-trip below.
+        // Gate semantics are pinned at the unit layer (the `feed_inactive_*`
+        // tests in visualizer/state.rs and the `viz_*_tap` tests in
+        // streaming_source.rs); this wiring isn't handler-testable because
+        // `test_app()` builds with `visualizer: None`.
+        if let Some(viz) = &self.visualizer {
+            viz.set_feed_active(active);
+        }
+
+        // Persist the mode and gate the real-time audio tap on the engine (skips
+        // the per-sample S16 push + RwLock read when off). Mirrors
+        // handle_toggle_crossfade's settings-then-engine sync.
         self.shell_spawn("persist_vis_mode", move |shell| async move {
-            shell.settings().set_visualization_mode(mode).await
+            shell.settings().set_visualization_mode(mode).await?;
+            let engine_arc = shell.audio_engine();
+            let engine = engine_arc.lock().await;
+            engine.set_visualizer_enabled(active);
+            Ok(())
         });
         Task::none()
     }
@@ -1319,6 +1338,15 @@ impl Nokkvi {
         self.sfx.volume = settings.sfx_volume;
         self.sfx.enabled = settings.sound_effects_enabled;
         self.engine.visualization_mode = settings.visualization_mode;
+        // Sync the visualizer feed gate to the loaded mode so a persisted "Off"
+        // doesn't leave the FFT worker + audio tap running after login. The
+        // synchronous half idles the UI-side worker now; the engine-side tap
+        // gate is pushed alongside crossfade below.
+        let viz_active = settings.visualization_mode
+            != nokkvi_data::types::player_settings::VisualizationMode::Off;
+        if let Some(viz) = &self.visualizer {
+            viz.set_feed_active(viz_active);
+        }
 
         // Crossfade settings
         self.engine.crossfade_enabled = settings.crossfade_enabled;
@@ -1376,6 +1404,7 @@ impl Nokkvi {
                         prevent_clipping,
                     );
                     engine_guard.set_eq_state(eq_state);
+                    engine_guard.set_visualizer_enabled(viz_active);
                 },
                 |_| Message::NoOp,
             )

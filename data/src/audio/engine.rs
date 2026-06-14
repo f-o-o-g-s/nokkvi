@@ -1987,6 +1987,17 @@ impl CustomAudioEngine {
         renderer.set_visualizer_callback(callback);
     }
 
+    /// Toggle the master visualizer gate on every stream.
+    ///
+    /// When `false`, the real-time audio thread skips the per-sample visualizer
+    /// tap entirely — so turning the visualizer off stops the audio-thread DSP
+    /// feed, not just the GPU render. The UI calls this from the
+    /// cycle-visualization handler (Off → `false`, Bars/Lines → `true`).
+    pub fn set_visualizer_enabled(&self, enabled: bool) {
+        let renderer = self.renderer.lock();
+        renderer.set_visualizer_enabled(enabled);
+    }
+
     /// Set the shared mixer from the app-wide MixerDeviceSink.
     /// Delegates to the renderer so it can use the shared mixer on first play.
     pub fn set_shared_mixer(&mut self, mixer: rodio::mixer::Mixer) {
@@ -2596,6 +2607,7 @@ mod tests {
             None,
             notify,
             true,
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
         );
 
         if paused {

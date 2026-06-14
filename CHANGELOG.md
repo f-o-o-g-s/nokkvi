@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Turning the visualizer off now releases the CPU it was using during playback; previously its background audio analysis kept running unseen.
+
 ### Removed
 
 ## v0.8.0 — 2026-06-14

@@ -450,6 +450,15 @@ pub(crate) struct VisualizerState {
     /// True when in lines mode — skips CPU-side smoothing (lines smooth in GPU shader)
     is_lines_mode: Arc<AtomicBool>,
 
+    /// Master feed gate — `false` when the visualizer is toggled Off.
+    ///
+    /// The 60 Hz worker checks this at the top of `tick()` and the audio
+    /// callback checks it before buffering samples, so turning the visualizer
+    /// off idles the DSP pipeline instead of running FFTs nobody renders. The
+    /// cycle-visualization handler flips it synchronously so it takes effect
+    /// the instant the user toggles — ahead of the async engine-side tap gate.
+    feed_active: Arc<AtomicBool>,
+
     // === Spectral flux / onset envelope ===
     /// Fast smoothed spectral-flux envelope (`f32::to_bits()` packed
     /// into a u32 for lock-free reads from the boat handler). Updated
@@ -546,6 +555,18 @@ impl Drop for FftShutdownGuard {
 
 impl VisualizerState {
     pub(crate) fn new(bar_count: usize, config: SharedVisualizerConfig) -> Self {
+        let state = Self::build(bar_count, config);
+        // Spawn the background FFT thread
+        state.start_fft_thread();
+        state
+    }
+
+    /// Construct the state WITHOUT spawning the background FFT worker.
+    ///
+    /// `new()` spawns the worker on top of this; tests call `build()` directly
+    /// so they can drive `tick()` deterministically — with no concurrent worker
+    /// draining the sample buffer underneath the assertions.
+    fn build(bar_count: usize, config: SharedVisualizerConfig) -> Self {
         // Generate unique instance ID for debugging
         static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(0);
         let instance_id = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -565,7 +586,7 @@ impl VisualizerState {
         let fft_thread_running = Arc::new(AtomicBool::new(true));
         let fft_thread_handle = Arc::new(Mutex::new(None));
 
-        let state = Self {
+        Self {
             _instance_id: instance_id,
             // Consolidated buffers (sized to visual bar count)
             display: Arc::new(Mutex::new(DisplayBuffers::new(bar_count))),
@@ -591,6 +612,8 @@ impl VisualizerState {
             fft_thread_handle,
             // Visualization mode
             is_lines_mode: Arc::new(AtomicBool::new(false)),
+            // Feed gate — on by default; the handler flips it off when Off
+            feed_active: Arc::new(AtomicBool::new(true)),
             // Onset envelope
             onset_envelope: Arc::new(AtomicU32::new(0_f32.to_bits())),
             long_onset_envelope: Arc::new(AtomicU32::new(0_f32.to_bits())),
@@ -601,12 +624,7 @@ impl VisualizerState {
             band_mid: Arc::new(AtomicU32::new(0_f32.to_bits())),
             band_treble: Arc::new(AtomicU32::new(0_f32.to_bits())),
             trail_settle_frames: Arc::new(AtomicU32::new(0)),
-        };
-
-        // Spawn the background FFT thread
-        state.start_fft_thread();
-
-        state
+        }
     }
 
     /// Start the background FFT processing thread
@@ -666,6 +684,13 @@ impl VisualizerState {
         })
     }
 
+    /// Toggle the feed gate. `false` idles the FFT worker (`tick()` early-returns)
+    /// and drops incoming audio batches (the callback early-returns) so the DSP
+    /// pipeline stops when the visualizer is off; `true` resumes both.
+    pub(crate) fn set_feed_active(&self, active: bool) {
+        self.feed_active.store(active, Ordering::Relaxed);
+    }
+
     #[cfg(test)]
     pub(super) fn fft_thread_running_handle(&self) -> Arc<AtomicBool> {
         self.fft_thread_running.clone()
@@ -682,8 +707,16 @@ impl VisualizerState {
         let sample_rate_arc = self.sample_rate.clone();
         let cached_chunk_size = self.cached_chunk_size.clone();
         let pending_engine_reinit = self.pending_engine_reinit.clone();
+        let feed_active = self.feed_active.clone();
 
         move |samples: &[f32], sample_rate: u32| {
+            // Visualizer off: drop the incoming batch so the buffer never fills.
+            // This closes the window between the synchronous gate flip and the
+            // engine-side tap gate landing, and guarantees no buffer growth.
+            if !feed_active.load(Ordering::Relaxed) {
+                return;
+            }
+
             // Update sample rate and cached chunk size if changed (lock-free)
             {
                 let sr = sample_rate_arc.load(Ordering::Relaxed);
@@ -722,6 +755,14 @@ impl VisualizerState {
     /// Process one chunk of buffered samples (called at 60 FPS from shader prepare())
     /// Returns true if the visualizer was updated
     pub(crate) fn tick(&self) -> bool {
+        // Visualizer off: idle the worker entirely — no buffer drain, no FFT,
+        // no peak/flux work for a spectrum nothing renders. Pending clear /
+        // reinit flags are intentionally left set; they're handled on the
+        // first tick after the feed is re-enabled.
+        if !self.feed_active.load(Ordering::Relaxed) {
+            return false;
+        }
+
         // Check for pending buffer clear (from track change callback)
         if self.pending_clear.swap(false, Ordering::SeqCst) {
             self.apply_pending_clear();
@@ -1817,5 +1858,79 @@ mod tests {
         // peak_bars unchanged (decay skipped); hold decremented by 16ms.
         assert!((display.peak_bars[0] - 0.5).abs() < 1e-9);
         assert_eq!(peaks.hold_times[0], Duration::from_millis(84));
+    }
+
+    /// Build a thread-free `VisualizerState` for the feed-gate tests. Uses
+    /// `build()` (not `new()`) so no background worker races `tick()`.
+    fn test_state() -> VisualizerState {
+        let config: SharedVisualizerConfig = Arc::new(RwLock::new(VisualizerConfig::default()));
+        VisualizerState::build(8, config)
+    }
+
+    /// Feed-gate regression (FFT worker): when the feed is off, `tick()` must
+    /// early-return without draining or processing the sample buffer — the
+    /// 60 Hz worker idles instead of running FFTs nobody renders. Re-enabling
+    /// resumes processing.
+    #[test]
+    fn feed_inactive_skips_tick() {
+        let state = test_state();
+        let chunk = state.cached_chunk_size.load(Ordering::Acquire);
+        // More than one chunk, but under the chunk*3 cap so an active tick()
+        // drains exactly one chunk rather than dropping overflow first.
+        state
+            .sample_buffer
+            .lock()
+            .extend(std::iter::repeat_n(0.25_f64, chunk + 500));
+        let before = state.sample_buffer.lock().len();
+
+        // Gate OFF: no update, no drain.
+        state.set_feed_active(false);
+        assert!(
+            !state.tick(),
+            "tick() must report no update while the feed is off"
+        );
+        assert_eq!(
+            state.sample_buffer.lock().len(),
+            before,
+            "an off feed must not drain the sample buffer"
+        );
+
+        // Gate ON: processes and drains a chunk.
+        state.set_feed_active(true);
+        assert!(
+            state.tick(),
+            "tick() should process a full chunk once re-enabled"
+        );
+        assert!(
+            state.sample_buffer.lock().len() < before,
+            "an active tick() must drain at least one chunk"
+        );
+    }
+
+    /// Feed-gate regression (audio callback): when the feed is off, the audio
+    /// callback must drop incoming batches so the sample buffer never fills —
+    /// closing the async window between the synchronous gate flip and the
+    /// engine-side tap gate landing. Re-enabling resumes buffering.
+    #[test]
+    fn feed_inactive_audio_callback_drops_samples() {
+        let state = test_state();
+        let cb = state.audio_callback();
+
+        // Gate OFF: incoming batch dropped.
+        state.set_feed_active(false);
+        cb(&[0.1_f32; 256], 44_100);
+        assert!(
+            state.sample_buffer.lock().is_empty(),
+            "an off feed must not buffer incoming audio"
+        );
+
+        // Gate ON: batch buffered.
+        state.set_feed_active(true);
+        cb(&[0.1_f32; 256], 44_100);
+        assert_eq!(
+            state.sample_buffer.lock().len(),
+            256,
+            "an active feed must buffer the incoming batch"
+        );
     }
 }
