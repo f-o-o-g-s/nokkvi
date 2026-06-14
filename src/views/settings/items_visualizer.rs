@@ -176,7 +176,9 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         SettingMeta::new(keys::BEAT_REACTIVITY, "Beat Reactivity", "Frame")
-            .with_subtitle("How hard effects pump on the beat / bass. 0 = static"),
+            .with_subtitle(
+                "Pulses the bloom, glow, and bars with the beat + bass drops.\n1 = punches on every kick, 0 = steady (tracks loudness only)",
+            ),
         config.beat_reactivity as f64,
         d.beat_reactivity as f64,
         0.0,
