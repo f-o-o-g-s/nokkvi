@@ -25,6 +25,16 @@ fn get_elapsed_time() -> f32 {
 /// dark background and faint AA edges don't haze.
 const BLOOM_THRESHOLD: f32 = 0.35;
 
+/// Pixel format for the motion-trail accumulator. It MUST be a float format,
+/// not the 8-bit surface format: a multiplicative per-frame fade (`trail *=
+/// decay`) on an 8-bit UNORM target has a rounding fixed point — `round(v *
+/// 0.92) >= v` for any stored `v <= 6` — so dim pixels get stuck at ~1/255 and
+/// never fade, leaving a permanent ghost of wherever the visualizer has been.
+/// Rgba16Float has no such floor and is a blendable + filterable render target
+/// on Vulkan/Metal/DX12 with no extra wgpu feature. The trail texture and the
+/// trail fade/max pipelines must share this format.
+pub(super) const TRAIL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
 /// Beat-reactive bloom: intensity = bloom_intensity * (dip_base + pump).
 /// `dip_base` falls from 1.0 (reactivity 0 = steady glow at the configured
 /// strength) toward BLOOM_DIP as reactivity rises, and `pump` surges on bass
@@ -769,7 +779,8 @@ impl shader::Primitive for VisualizerPrimitive {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: pipeline.format,
+                    // Float, NOT the 8-bit surface format — see TRAIL_FORMAT.
+                    format: TRAIL_FORMAT,
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                         | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
@@ -1165,11 +1176,14 @@ impl<Message> shader::Program<Message> for ShaderVisualizer {
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Option<shader::Action<Message>> {
-        // Only request a redraw when the FFT thread has produced new data.
-        // This prevents the GPU from being perpetually busy with redundant
-        // redraws during mouse moves, key presses, and other Iced events.
-        // When music is paused/stopped, GPU usage drops to near-zero.
-        if self.state.is_dirty() {
+        // Request a redraw when the FFT thread has produced new data, OR (with
+        // motion trails on) while the trail is still draining after audio
+        // stopped — otherwise a paused trail freezes on screen instead of
+        // fading out. Both conditions converge to false when nothing is
+        // animating, so a paused/stopped visualizer still drops to near-zero
+        // GPU once the trail has faded.
+        let trail_draining = self.params.trails > 0.001 && self.state.trail_draining();
+        if self.state.is_dirty() || trail_draining {
             Some(shader::Action::request_redraw())
         } else {
             None

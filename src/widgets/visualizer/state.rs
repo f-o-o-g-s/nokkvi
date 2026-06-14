@@ -484,6 +484,12 @@ pub(crate) struct VisualizerState {
     band_bass: Arc<AtomicU32>,
     band_mid: Arc<AtomicU32>,
     band_treble: Arc<AtomicU32>,
+    /// Frames the motion trail still needs to keep draining after the last FFT
+    /// tick. Re-armed each dirtying tick; decremented once per rendered frame
+    /// in `clear_dirty()`. While > 0 the widget keeps self-requesting redraws
+    /// so a PAUSED trail fades out instead of freezing on screen, then converges
+    /// to 0 so the GPU still idles once nothing is animating.
+    trail_settle_frames: Arc<AtomicU32>,
 }
 
 /// EMA smoothing coefficient for the fast onset envelope. At 60 Hz tick
@@ -495,6 +501,11 @@ pub(crate) struct VisualizerState {
 /// read as full-scale beats, while loud songs still normalize to ~[0,1].
 const BEAT_MAX_DECAY: f32 = 0.995;
 const BEAT_MAX_FLOOR: f32 = 0.15;
+
+/// How many frames to keep redrawing the trail after the last FFT tick so it
+/// can fully fade. Worst case (max decay 0.92) reaches ~1/255 in ~66 frames;
+/// 90 (~1.5 s at 60 Hz) leaves margin before the redraw gate goes idle.
+const TRAIL_SETTLE_FRAMES: u32 = 90;
 
 const ONSET_ENVELOPE_ALPHA_FAST: f64 = 0.3;
 
@@ -589,6 +600,7 @@ impl VisualizerState {
             band_bass: Arc::new(AtomicU32::new(0_f32.to_bits())),
             band_mid: Arc::new(AtomicU32::new(0_f32.to_bits())),
             band_treble: Arc::new(AtomicU32::new(0_f32.to_bits())),
+            trail_settle_frames: Arc::new(AtomicU32::new(0)),
         };
 
         // Spawn the background FFT thread
@@ -807,6 +819,10 @@ impl VisualizerState {
                     };
                     display.bars = output.clone();
                     display.dirty = true;
+                    // Re-arm the trail drain budget while audio is live; when it
+                    // stops, the budget runs out and the redraw gate idles.
+                    self.trail_settle_frames
+                        .store(TRAIL_SETTLE_FRAMES, Ordering::Relaxed);
                 }
 
                 // Spectral flux: positive bin-to-bin deltas vs. the last
@@ -1291,6 +1307,20 @@ impl VisualizerState {
 
     pub(crate) fn clear_dirty(&self) {
         self.display.lock().dirty = false;
+        // One frame of trail drain consumed (saturating at 0). Tied to rendered
+        // frames since clear_dirty() runs once per prepare().
+        let _ = self
+            .trail_settle_frames
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                Some(n.saturating_sub(1))
+            });
+    }
+
+    /// True while the motion trail is still draining after audio stopped — used
+    /// to keep the widget redrawing so a paused trail fades out instead of
+    /// freezing on screen. Converges to false once the budget runs out.
+    pub(crate) fn trail_draining(&self) -> bool {
+        self.trail_settle_frames.load(Ordering::Relaxed) > 0
     }
 
     pub(crate) fn bar_count(&self) -> usize {

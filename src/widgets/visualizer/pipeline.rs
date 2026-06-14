@@ -5,7 +5,7 @@
 
 use iced::wgpu;
 
-use super::shader::{BloomParams, Uniforms, VisualizerPipeline};
+use super::shader::{BloomParams, TRAIL_FORMAT, Uniforms, VisualizerPipeline};
 
 /// Build one of the four bars/lines × default/MSAA render pipelines.
 ///
@@ -416,7 +416,9 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
                         module: &blit_shader,
                         entry_point: Some(entry),
                         targets: &[Some(wgpu::ColorTargetState {
-                            format,
+                            // Trail pipelines render into the float accumulator,
+                            // not the 8-bit surface (see TRAIL_FORMAT).
+                            format: TRAIL_FORMAT,
                             blend: Some(blend),
                             write_mask: wgpu::ColorWrites::ALL,
                         })],
