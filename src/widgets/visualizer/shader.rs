@@ -389,6 +389,11 @@ pub(super) struct Uniforms {
     pub(super) border_color: [f32; 4],
     /// Config
     pub(super) config: VisualizerConfig,
+    /// Audio signals for beat-reactive effects: `[beat_pulse, _, _, _]`.
+    /// Appended after `config` (lands 16-aligned), so it sits OUTSIDE the
+    /// pinned 8336-byte Config layout — the WGSL `Uniforms` mirrors mirror it
+    /// with a trailing `audio: vec4<f32>` in bars.wgsl + lines.wgsl.
+    pub(super) audio: [f32; 4],
 }
 
 unsafe impl bytemuck::Pod for Uniforms {}
@@ -535,6 +540,7 @@ impl shader::Primitive for VisualizerPrimitive {
             peak_color: self.peak_color,
             border_color: self.border_color,
             config: self.config,
+            audio: [self.state.current_beat_pulse(), 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&pipeline.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
 

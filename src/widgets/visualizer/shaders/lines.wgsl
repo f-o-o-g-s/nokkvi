@@ -16,6 +16,7 @@ struct Uniforms {
     peak_color: vec4<f32>,
     border_color: vec4<f32>,
     config: Config,
+    audio: vec4<f32>,  // [beat_pulse, _, _, _] — appended after config (16-aligned)
 }
 
 struct Config {
@@ -116,6 +117,9 @@ fn pixel_to_ndc(pixel_x: f32, pixel_y: f32) -> vec2<f32> {
 const LINES_GLOW_MIN_RADIUS: f32 = 3.0;
 const LINES_GLOW_MAX_RADIUS: f32 = 10.0;
 const LINES_GLOW_EXTENT_MULT: f32 = 2.5;
+
+// Beat flare: extra glow halo brightness on a full kick (uniforms.audio.x).
+const LINES_BEAT_GLOW: f32 = 0.7;
 
 // Halo exp-falloff radius (px) for the current intensity.
 fn lines_glow_radius() -> f32 {
@@ -544,7 +548,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let beyond = max(dist - actual_half_thickness, 0.0);
         let halo = exp(-beyond / lines_glow_radius());
         let energy = clamp(uniforms.config.average_energy, 0.0, 1.0);
-        let halo_coverage = halo * glow_strength * (0.45 + 0.55 * energy);
+        // Flare the halo on each kick (uniforms.audio.x = beat_pulse).
+        let beat_flare = 1.0 + uniforms.audio.x * LINES_BEAT_GLOW;
+        let halo_coverage = halo * glow_strength * (0.45 + 0.55 * energy) * beat_flare;
         coverage = max(core, halo_coverage);
     }
 

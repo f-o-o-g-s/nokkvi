@@ -15,6 +15,7 @@ struct Uniforms {
     peak_color: vec4<f32>,
     border_color: vec4<f32>,
     config: Config,
+    audio: vec4<f32>,  // [beat_pulse, _, _, _] — appended after config (16-aligned)
 }
 
 struct Config {
@@ -74,6 +75,10 @@ const BRIGHTNESS_LIGHTEN_FACTOR: f32 = 0.5;
 // ---------- Animation constants ----------
 // Complete cycle through gradient/peak colors in ~4 seconds (1.0 / 0.25).
 const BARS_GRADIENT_CYCLE_SPEED: f32 = 0.25;
+
+// Beat lift: brighten the whole bar field by up to this fraction on a full kick
+// (uniforms.audio.x = beat_pulse). Keeps the spectrum pumping with the music.
+const BARS_BEAT_LIFT: f32 = 0.18;
 
 // ---------- Palette segment-count constants ----------
 // CPU side (ThemeBarColors::get_bar_gradient_colors) pads to 8 entries.
@@ -894,6 +899,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // Apply 3D brightness modulation
         base_color = apply_brightness_mod(base_color, input.brightness_mod);
         // Front face (bm ~= 1.0): no modification
+
+        // Beat lift: gently brighten the whole spectrum on each kick.
+        base_color = vec4<f32>(
+            min(base_color.rgb * (1.0 + uniforms.audio.x * BARS_BEAT_LIFT), vec3<f32>(1.0)),
+            base_color.a,
+        );
 
         // Apply global opacity
         base_color.a *= uniforms.config.global_opacity;
