@@ -221,6 +221,7 @@ mod tests {
                 vkeys::OPACITY,
                 vkeys::BLOOM,
                 vkeys::BLOOM_INTENSITY,
+                vkeys::BEAT_REACTIVITY,
             ],
         );
         assert_section_keys(
@@ -300,9 +301,9 @@ mod tests {
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 5 + 4 + 20 + 5 + 5 + 11 = 50. Catches an item landing OUTSIDE the
+        // 6 + 4 + 20 + 5 + 5 + 11 = 51. Catches an item landing OUTSIDE the
         // pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 50);
+        assert_eq!(count_items(&entries), 51);
     }
 
     #[test]

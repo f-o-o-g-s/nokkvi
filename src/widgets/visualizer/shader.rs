@@ -25,10 +25,14 @@ fn get_elapsed_time() -> f32 {
 /// dark background and faint AA edges don't haze.
 const BLOOM_THRESHOLD: f32 = 0.35;
 
-/// Beat-reactive bloom: glow strength = bloom_intensity * (BASE + GAIN * beat).
-/// Between kicks the glow sits at BASE; on a kick it flares toward BASE + GAIN.
-const BLOOM_BEAT_BASE: f32 = 0.55;
-const BLOOM_BEAT_GAIN: f32 = 0.75;
+/// Beat-reactive bloom: intensity = bloom_intensity * (dip_base + pump).
+/// `dip_base` falls from 1.0 (reactivity 0 = steady glow at the configured
+/// strength) toward BLOOM_DIP as reactivity rises, and `pump` surges on bass
+/// drops (weighted heavily) plus a touch of any-transient beat. So at full
+/// reactivity the glow dips between hits and blooms hard on the bass.
+const BLOOM_DIP: f32 = 0.55;
+const BLOOM_BEAT_GAIN: f32 = 0.35;
+const BLOOM_BASS_GAIN: f32 = 0.85;
 
 /// Configuration passed to the GPU shader
 #[derive(Debug, Clone, Copy)]
@@ -126,6 +130,8 @@ pub(crate) struct VisualizerPrimitive {
     pub bloom_enabled: bool,
     /// Bloom glow strength (0.0-1.0), uploaded to the bloom uniform in prepare()
     pub bloom_intensity: f32,
+    /// Beat reactivity (0.0-1.0) — scales how hard effects pump on beat/bass
+    pub beat_reactivity: f32,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -202,6 +208,9 @@ pub(crate) struct ShaderParams {
     pub bloom_enabled: bool,
     /// Bloom glow strength (0.0 = off, 1.0 = max additive glow)
     pub bloom_intensity: f32,
+    /// Beat reactivity (0.0 = static, 1.0 = full pump) — scales the bloom
+    /// surge, glow flare, and bar lift together
+    pub beat_reactivity: f32,
 }
 
 impl VisualizerPrimitive {
@@ -312,6 +321,7 @@ impl VisualizerPrimitive {
             has_perspective,
             bloom_enabled,
             bloom_intensity: params.bloom_intensity,
+            beat_reactivity: params.beat_reactivity,
         }
     }
 }
@@ -540,7 +550,14 @@ impl shader::Primitive for VisualizerPrimitive {
             peak_color: self.peak_color,
             border_color: self.border_color,
             config: self.config,
-            audio: [self.state.current_beat_pulse(), 0.0, 0.0, 0.0],
+            audio: {
+                // [beat (scaled by reactivity, drives the glow flare + bar
+                // pump), bass, mid, treble]. Bands are raw for future
+                // band-driven shader effects (motion trails, warp).
+                let (bass, mid, treble) = self.state.current_bands();
+                let beat = self.state.current_beat_pulse() * self.beat_reactivity;
+                [beat, bass, mid, treble]
+            },
         };
         queue.write_buffer(&pipeline.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
 
@@ -726,9 +743,14 @@ impl shader::Primitive for VisualizerPrimitive {
         // Refresh the bloom uniform every frame (intensity tracks config without
         // necessarily triggering a texture resize).
         if self.bloom_enabled {
-            // Beat-reactive: flare the glow on each kick, dip between beats.
+            // Surge on bass drops specifically (bass weighted heavily) plus a
+            // little any-transient beat, scaled by the user's beat reactivity.
+            // At reactivity 0 the glow holds steady at the configured strength.
             let beat = self.state.current_beat_pulse();
-            let intensity = self.bloom_intensity * (BLOOM_BEAT_BASE + BLOOM_BEAT_GAIN * beat);
+            let (bass, _, _) = self.state.current_bands();
+            let dip_base = 1.0 - self.beat_reactivity * (1.0 - BLOOM_DIP);
+            let pump = (BLOOM_BEAT_GAIN * beat + BLOOM_BASS_GAIN * bass) * self.beat_reactivity;
+            let intensity = self.bloom_intensity * (dip_base + pump);
             let bloom_params = BloomParams {
                 intensity,
                 threshold: BLOOM_THRESHOLD,

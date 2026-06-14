@@ -477,6 +477,13 @@ pub(crate) struct VisualizerState {
     /// Internal decaying running-max of the onset envelope that normalizes
     /// `beat_pulse` across loud/quiet songs.
     beat_running_max: Arc<AtomicU32>,
+    /// Per-band energy: mean of the low / mid / high third of the FFT output,
+    /// each ~[0,1] (auto-sensitivity scaled), f32-packed for lock-free reads.
+    /// Lets effects respond to bass drops specifically rather than any
+    /// transient (the bloom surge weights `band_bass` heavily).
+    band_bass: Arc<AtomicU32>,
+    band_mid: Arc<AtomicU32>,
+    band_treble: Arc<AtomicU32>,
 }
 
 /// EMA smoothing coefficient for the fast onset envelope. At 60 Hz tick
@@ -579,6 +586,9 @@ impl VisualizerState {
             prev_flux_bars: Arc::new(Mutex::new(vec![0.0; bar_count])),
             beat_pulse: Arc::new(AtomicU32::new(0_f32.to_bits())),
             beat_running_max: Arc::new(AtomicU32::new(BEAT_MAX_FLOOR.to_bits())),
+            band_bass: Arc::new(AtomicU32::new(0_f32.to_bits())),
+            band_mid: Arc::new(AtomicU32::new(0_f32.to_bits())),
+            band_treble: Arc::new(AtomicU32::new(0_f32.to_bits())),
         };
 
         // Spawn the background FFT thread
@@ -844,6 +854,22 @@ impl VisualizerState {
                         .store(new_max.to_bits(), Ordering::Relaxed);
                     let beat = (smoothed_fast / new_max).clamp(0.0, 1.0);
                     self.beat_pulse.store(beat.to_bits(), Ordering::Relaxed);
+
+                    // Per-band energy (low / mid / high third of the spectrum)
+                    // so effects can react to bass specifically.
+                    let n = output.len();
+                    if n >= 3 {
+                        let third = n / 3;
+                        let mean = |slice: &[f64]| {
+                            (slice.iter().sum::<f64>() / slice.len().max(1) as f64) as f32
+                        };
+                        self.band_bass
+                            .store(mean(&output[0..third]).to_bits(), Ordering::Relaxed);
+                        self.band_mid
+                            .store(mean(&output[third..2 * third]).to_bits(), Ordering::Relaxed);
+                        self.band_treble
+                            .store(mean(&output[2 * third..]).to_bits(), Ordering::Relaxed);
+                    }
                     let prev_slow =
                         f32::from_bits(self.long_onset_envelope.load(Ordering::Relaxed));
                     let smoothed_slow = (ONSET_ENVELOPE_ALPHA_SLOW * flux
@@ -1057,6 +1083,21 @@ impl VisualizerState {
             return 0.0;
         }
         f32::from_bits(self.beat_pulse.load(Ordering::Relaxed))
+    }
+
+    /// Per-band energies (bass, mid, treble), each ~[0,1]. Lock-free reads,
+    /// gated to `(0,0,0)` mid-clear so effects don't surge on stale energy.
+    pub(crate) fn current_bands(&self) -> (f32, f32, f32) {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return (0.0, 0.0, 0.0);
+        }
+        (
+            f32::from_bits(self.band_bass.load(Ordering::Relaxed)),
+            f32::from_bits(self.band_mid.load(Ordering::Relaxed)),
+            f32::from_bits(self.band_treble.load(Ordering::Relaxed)),
+        )
     }
 
     pub(crate) fn get_peak_bars(&self) -> Vec<f64> {

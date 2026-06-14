@@ -174,6 +174,16 @@ pub(crate) fn build_visualizer_items(
         0.05,
         "",
     ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::BEAT_REACTIVITY, "Beat Reactivity", "Frame")
+            .with_subtitle("How hard effects pump on the beat / bass. 0 = static"),
+        config.beat_reactivity as f64,
+        d.beat_reactivity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
 
     // --- Signal section (FFT/DSP, affects both Bars and Lines modes) ---
     e.push(SettingsEntry::Header {

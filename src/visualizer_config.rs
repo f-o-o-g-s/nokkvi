@@ -634,6 +634,7 @@ pub(crate) mod keys {
     pub(crate) const AUTO_SENSITIVITY: &str = "visualizer.auto_sensitivity";
     pub(crate) const BLOOM: &str = "visualizer.bloom";
     pub(crate) const BLOOM_INTENSITY: &str = "visualizer.bloom_intensity";
+    pub(crate) const BEAT_REACTIVITY: &str = "visualizer.beat_reactivity";
 
     // ── Bars ─────────────────────────────────────────────────────────────
     pub(crate) const BARS_MAX_BARS: &str = "visualizer.bars.max_bars";
@@ -730,6 +731,12 @@ pub struct VisualizerConfig {
     /// Default: 0.6
     pub bloom_intensity: f32,
 
+    /// Beat reactivity: how strongly effects pump on the beat / bass drops
+    /// (0.0 = static, loudness-only; 1.0 = full punch). Scales the bloom
+    /// surge, the neon glow flare, and the bar brightness lift together.
+    /// Default: 1.0
+    pub beat_reactivity: f32,
+
     /// Bars mode specific settings
     /// Use [visualizer.bars] in config.toml
     #[serde(default)]
@@ -759,6 +766,7 @@ impl Default for VisualizerConfig {
             opacity: 1.0,
             bloom: true,
             bloom_intensity: 0.6,
+            beat_reactivity: 1.0,
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
         }
@@ -812,6 +820,9 @@ impl VisualizerConfig {
 
         // Validate bloom intensity (0.0–1.0)
         self.bloom_intensity = self.bloom_intensity.clamp(0.0, 1.0);
+
+        // Validate beat reactivity (0.0–1.0)
+        self.beat_reactivity = self.beat_reactivity.clamp(0.0, 1.0);
     }
 }
 

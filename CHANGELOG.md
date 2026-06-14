@@ -8,7 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - The Lines visualizer can now glow like neon, with a halo that brightens with the music and flares on each beat, plus an adjustable Glow Intensity setting.
 - The Bars visualizer now blooms toward the peak color when bars hit a beat, with an adjustable Peak Flash setting.
-- The visualizer now has a bloom glow: bright bars, peak flashes, and the neon line bleed a soft halo that flares on each beat, with a Bloom toggle and intensity setting.
+- The visualizer now has a bloom glow: bright bars, peak flashes, and the neon line bleed a soft halo that surges on bass drops, with a Bloom toggle and intensity setting.
+- A Beat Reactivity setting controls how hard the glow, bars, and bloom pump on the beat and bass (0 = static, loudness-only).
 
 ### Changed
 
