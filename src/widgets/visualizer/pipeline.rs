@@ -241,7 +241,7 @@ impl VisualizerPipeline {
         // Pipeline layout
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("visualizer pipeline layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -374,7 +374,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
 
         let blit_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("visualizer blit pipeline layout"),
-            bind_group_layouts: &[&blit_bind_group_layout],
+            bind_group_layouts: &[Some(&blit_bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -512,7 +512,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
 
         let bloom_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("visualizer bloom pipeline layout"),
-            bind_group_layouts: &[&bloom_bind_group_layout],
+            bind_group_layouts: &[Some(&bloom_bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -607,7 +607,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
         });
         let echo_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("visualizer echo pipeline layout"),
-            bind_group_layouts: &[&echo_bind_group_layout],
+            bind_group_layouts: &[Some(&echo_bind_group_layout)],
             immediate_size: 0,
         });
         let echo_feedback_pipeline = build_postprocess_pipeline(
@@ -659,7 +659,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
         // the CrtParams uniform.
         let crt_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("visualizer crt pipeline layout"),
-            bind_group_layouts: &[&blit_bind_group_layout, &crt_uniform_layout],
+            bind_group_layouts: &[Some(&blit_bind_group_layout), Some(&crt_uniform_layout)],
             immediate_size: 0,
         });
         let crt_pipeline = build_postprocess_pipeline(

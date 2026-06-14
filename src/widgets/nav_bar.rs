@@ -1113,6 +1113,10 @@ mod layout_invariants {
         let renderer: NullRenderer = ();
         let limits = Limits::new(Size::ZERO, Size::new(max_w, 100.0));
         let mut row_owned = row;
+        // iced's `Tree::new` no longer populates children, so reconcile before
+        // layout (matching the runtime's diff-then-layout order) — otherwise
+        // `Row::layout` zips against an empty child-state tree.
+        tree.diff(&mut row_owned as &mut dyn Widget<TestMessage, iced::Theme, NullRenderer>);
         row_owned.layout(&mut tree, &renderer, &limits)
     }
 

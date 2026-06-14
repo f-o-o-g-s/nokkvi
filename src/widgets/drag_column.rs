@@ -129,7 +129,7 @@ where
 
     pub fn push(mut self, child: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
         let child = child.into();
-        let child_size = child.as_widget().size_hint();
+        let child_size = child.as_widget().size();
 
         self.width = self.width.enclose(child_size.width);
         self.height = self.height.enclose(child_size.height);
@@ -227,12 +227,8 @@ where
         tree::State::new(DragState::Idle)
     }
 
-    fn children(&self) -> Vec<Tree> {
-        self.children.iter().map(Tree::new).collect()
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(&self.children);
+    fn diff(&mut self, tree: &mut Tree) {
+        tree.diff_children(&mut self.children);
     }
 
     fn size(&self) -> Size<Length> {

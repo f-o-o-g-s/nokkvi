@@ -91,6 +91,18 @@ mod tests {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
     }
 
+    /// Builds a throwaway `Shell` for exercising `handle_dismiss`. iced's
+    /// `Shell::new` now takes a window handle + waker; a headless window and a
+    /// no-op waker are inert here (the tests only assert on capture/messages).
+    fn test_shell(messages: &mut Vec<Close>) -> Shell<'_, Close> {
+        static WINDOW: iced::window::Headless = iced::window::Headless;
+        Shell::new(
+            &WINDOW,
+            iced::advanced::graphics::core::shell::Waker::noop(),
+            messages,
+        )
+    }
+
     #[test]
     fn press_began_matches_mouse_and_touch_presses() {
         assert!(press_began(&left_press()));
@@ -122,7 +134,7 @@ mod tests {
     #[test]
     fn outside_press_closes_without_capturing() {
         let mut messages: Vec<Close> = Vec::new();
-        let mut shell = Shell::new(&mut messages);
+        let mut shell = test_shell(&mut messages);
         let event = left_press();
 
         let handled = handle_dismiss(&event, &mut shell, || true, || Close);
@@ -135,7 +147,7 @@ mod tests {
     #[test]
     fn inside_press_is_not_handled() {
         let mut messages: Vec<Close> = Vec::new();
-        let mut shell = Shell::new(&mut messages);
+        let mut shell = test_shell(&mut messages);
         let event = left_press();
 
         let handled = handle_dismiss(&event, &mut shell, || false, || Close);
@@ -148,7 +160,7 @@ mod tests {
     #[test]
     fn escape_closes_and_captures() {
         let mut messages: Vec<Close> = Vec::new();
-        let mut shell = Shell::new(&mut messages);
+        let mut shell = test_shell(&mut messages);
         let event = escape_event();
 
         let handled = handle_dismiss(&event, &mut shell, || false, || Close);
@@ -161,7 +173,7 @@ mod tests {
     #[test]
     fn unrelated_event_with_false_predicate_is_ignored() {
         let mut messages: Vec<Close> = Vec::new();
-        let mut shell = Shell::new(&mut messages);
+        let mut shell = test_shell(&mut messages);
         let event = Event::Mouse(mouse::Event::CursorMoved {
             position: Point::ORIGIN,
         });

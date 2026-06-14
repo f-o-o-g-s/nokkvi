@@ -566,12 +566,8 @@ where
         tree::State::new(State::new())
     }
 
-    fn children(&self) -> Vec<widget::Tree> {
-        vec![widget::Tree::new(&self.base)]
-    }
-
-    fn diff(&self, tree: &mut widget::Tree) {
-        tree.diff_children(slice::from_ref(&self.base));
+    fn diff(&mut self, tree: &mut widget::Tree) {
+        tree.diff_children(slice::from_mut(&mut self.base));
     }
 
     fn size(&self) -> Size<Length> {
@@ -762,11 +758,12 @@ where
     // closure captures fresh data. We diff against the persisted `menu_tree`
     // so button widget state (is_pressed, hover) survives the view rebuild.
     let m = menu.get_or_insert_with(|| build_menu_element(entries, entry_view));
-    if state.menu_tree.children.is_empty() {
-        state.menu_tree = widget::Tree::new(&*m);
-    } else {
-        state.menu_tree.diff(&*m as &Element<'a, Message>);
-    }
+    // diff against the persisted `menu_tree` unconditionally: on a fresh (empty)
+    // tree it allocates+populates the child state; on a populated tree it reconciles
+    // while preserving button state (is_pressed, hover). Since iced's `Tree::new` no
+    // longer eagerly populates children, the old `is_empty()` guard would otherwise
+    // leave the overlay rendering against an empty child tree.
+    state.menu_tree.diff(&mut *m as &mut Element<'a, Message>);
 
     menu.as_mut().map(|m| {
         overlay::Element::new(Box::new(MenuOverlay {
