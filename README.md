@@ -40,7 +40,7 @@ Things that shaped this project:
 ## Highlights
 
 - Native PipeWire audio engine with gapless playback, crossfade, AGC + ReplayGain volume normalization, and a 10-band EQ
-- GPU-accelerated visualizer with `bars` and `lines` modes, gradient controls, and peak indicators
+- GPU-accelerated visualizer with `bars` and `lines` modes, beat-reactive neon glow and bloom, plus optional motion trails, echo, and CRT/film post-processing
 - Browse albums, artists, songs, genres, playlists, internet radios, and similar artists; inline expansion, split-view browsing, and multi-library filtering included
 - 22 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
 - Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling (Last.fm / ListenBrainz)
