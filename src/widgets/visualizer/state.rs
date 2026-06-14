@@ -469,12 +469,26 @@ pub(crate) struct VisualizerState {
     /// Resized lazily on the first tick if the visual bar count
     /// changes (e.g., resize debounce).
     prev_flux_bars: Arc<Mutex<Vec<f64>>>,
+    /// Beat pulse: the fast onset envelope auto-scaled by a decaying running
+    /// max, so transients read ~1.0 regardless of song loudness. ~[0,1],
+    /// f32-packed for lock-free reads. Drives beat-reactive visual effects
+    /// (e.g. the bloom flares on each kick).
+    beat_pulse: Arc<AtomicU32>,
+    /// Internal decaying running-max of the onset envelope that normalizes
+    /// `beat_pulse` across loud/quiet songs.
+    beat_running_max: Arc<AtomicU32>,
 }
 
 /// EMA smoothing coefficient for the fast onset envelope. At 60 Hz tick
 /// rate, `α = 0.3` gives a ~50 ms time constant — fast enough that bass
 /// kicks produce a visible spike on the same beat, slow enough that the
 /// envelope doesn't twitch on individual FFT-frame jitter.
+/// Decay/floor for the `beat_pulse` running-max normalizer. The max decays
+/// slowly toward a floor so a sudden quiet section doesn't make stray noise
+/// read as full-scale beats, while loud songs still normalize to ~[0,1].
+const BEAT_MAX_DECAY: f32 = 0.995;
+const BEAT_MAX_FLOOR: f32 = 0.15;
+
 const ONSET_ENVELOPE_ALPHA_FAST: f64 = 0.3;
 
 /// EMA smoothing coefficient for the slow onset envelope. At 60 Hz, an
@@ -563,6 +577,8 @@ impl VisualizerState {
             onset_envelope: Arc::new(AtomicU32::new(0_f32.to_bits())),
             long_onset_envelope: Arc::new(AtomicU32::new(0_f32.to_bits())),
             prev_flux_bars: Arc::new(Mutex::new(vec![0.0; bar_count])),
+            beat_pulse: Arc::new(AtomicU32::new(0_f32.to_bits())),
+            beat_running_max: Arc::new(AtomicU32::new(BEAT_MAX_FLOOR.to_bits())),
         };
 
         // Spawn the background FFT thread
@@ -816,6 +832,18 @@ impl VisualizerState {
                         as f32;
                     self.onset_envelope
                         .store(smoothed_fast.to_bits(), Ordering::Relaxed);
+
+                    // Beat pulse: auto-scale the fast onset envelope by a
+                    // slowly-decaying running max so a kick reads ~1.0 in both
+                    // loud and quiet songs. Drives beat-reactive visuals.
+                    let prev_max = f32::from_bits(self.beat_running_max.load(Ordering::Relaxed));
+                    let new_max = (prev_max * BEAT_MAX_DECAY)
+                        .max(BEAT_MAX_FLOOR)
+                        .max(smoothed_fast);
+                    self.beat_running_max
+                        .store(new_max.to_bits(), Ordering::Relaxed);
+                    let beat = (smoothed_fast / new_max).clamp(0.0, 1.0);
+                    self.beat_pulse.store(beat.to_bits(), Ordering::Relaxed);
                     let prev_slow =
                         f32::from_bits(self.long_onset_envelope.load(Ordering::Relaxed));
                     let smoothed_slow = (ONSET_ENVELOPE_ALPHA_SLOW * flux
@@ -1017,6 +1045,18 @@ impl VisualizerState {
             return 0.0;
         }
         f32::from_bits(self.long_onset_envelope.load(Ordering::Relaxed))
+    }
+
+    /// Normalized beat pulse (~[0,1]) — rises on transients/kicks, decays
+    /// between. Lock-free atomic read. Returns `0.0` mid-clear so effects
+    /// don't flare on stale energy across track changes.
+    pub(crate) fn current_beat_pulse(&self) -> f32 {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return 0.0;
+        }
+        f32::from_bits(self.beat_pulse.load(Ordering::Relaxed))
     }
 
     pub(crate) fn get_peak_bars(&self) -> Vec<f64> {

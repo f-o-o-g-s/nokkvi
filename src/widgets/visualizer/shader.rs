@@ -25,6 +25,11 @@ fn get_elapsed_time() -> f32 {
 /// dark background and faint AA edges don't haze.
 const BLOOM_THRESHOLD: f32 = 0.35;
 
+/// Beat-reactive bloom: glow strength = bloom_intensity * (BASE + GAIN * beat).
+/// Between kicks the glow sits at BASE; on a kick it flares toward BASE + GAIN.
+const BLOOM_BEAT_BASE: f32 = 0.55;
+const BLOOM_BEAT_GAIN: f32 = 0.75;
+
 /// Configuration passed to the GPU shader
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(16))]
@@ -715,8 +720,11 @@ impl shader::Primitive for VisualizerPrimitive {
         // Refresh the bloom uniform every frame (intensity tracks config without
         // necessarily triggering a texture resize).
         if self.bloom_enabled {
+            // Beat-reactive: flare the glow on each kick, dip between beats.
+            let beat = self.state.current_beat_pulse();
+            let intensity = self.bloom_intensity * (BLOOM_BEAT_BASE + BLOOM_BEAT_GAIN * beat);
             let bloom_params = BloomParams {
-                intensity: self.bloom_intensity,
+                intensity,
                 threshold: BLOOM_THRESHOLD,
                 _pad: [0.0; 2],
             };
