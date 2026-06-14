@@ -346,7 +346,7 @@ pub(crate) fn build_visualizer_items(
     e.push(SettingItem::enum_val(
         SettingMeta::new(keys::BARS_GRADIENT_MODE, "Gradient Mode", "Bars")
             .with_subtitle(
-                "static: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)\nshimmer: bars cycle through all gradient colors as flat per-bar colors\nenergy: gradient shifts based on overall loudness\nalternate: bars alternate between first two gradient colors",
+                "static: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)",
             ),
         config.bars.gradient_mode.as_wire_str(),
         d.bars.gradient_mode.as_wire_str(),
@@ -359,7 +359,7 @@ pub(crate) fn build_visualizer_items(
             "Bars",
         )
         .with_subtitle(
-            "Axis the gradient colors are mapped along (ignored by alternate mode)\nvertical: colors map bottom-to-top within each bar\nhorizontal: colors map left-to-right across bars (bass to treble)",
+            "Axis the gradient colors are mapped along\nvertical: colors map bottom-to-top within each bar\nhorizontal: colors map left-to-right across bars (bass to treble)",
         ),
         config.bars.gradient_orientation.as_wire_str(),
         d.bars.gradient_orientation.as_wire_str(),

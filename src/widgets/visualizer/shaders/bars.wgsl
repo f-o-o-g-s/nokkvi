@@ -335,27 +335,6 @@ fn get_gradient_color_flash(normalized_y: f32, bar_index: u32) -> vec4<f32> {
     return mix(base_color, flash_color, flash * 0.7);  // 70% max flash intensity
 }
 
-// Get gradient color with energy-scaled offset
-// Gradient shifts based on overall loudness (passed from vertex shader)
-fn get_gradient_color_energy(normalized_y: f32, energy: f32) -> vec4<f32> {
-    // Use energy to offset the gradient position
-    // Quiet = base gradient, loud = shifted gradient
-    let energy_offset = energy * 2.0;  // Increased from 0.5 to make effect more visible
-    let combined_offset = fract(normalized_y + energy_offset);
-    
-    // Use 6 segments for seamless looping
-    let segments = BARS_PALETTE_SEGMENTS_LOOPED;
-    let pos = combined_offset * segments;
-    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
-    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;
-    let frac = pos - floor(pos);
-
-    let c1 = uniforms.gradient_colors[idx];
-    let c2 = uniforms.gradient_colors[next_idx];
-
-    return mix(c1, c2, frac);
-}
-
 // Get gradient color with height-based stretching (wave mode)
 // Taller bars show more of the bottom gradient colors (gradient stretches)
 fn get_gradient_color_stretched(normalized_y: f32, bar_amplitude: f32) -> vec4<f32> {
@@ -364,46 +343,6 @@ fn get_gradient_color_stretched(normalized_y: f32, bar_amplitude: f32) -> vec4<f
     let stretch_factor = 1.0 + (bar_amplitude * 1.5);  // 1.0-2.5 range
     let stretched_y = pow(normalized_y, 1.0 / stretch_factor);
     return get_gradient_color(stretched_y);
-}
-
-// Shimmer mode: bars cycle through all gradient colors (flat, no height gradient)
-// Each bar gets a single color from the palette based on its index, wrapping around
-// Animation speed is driven by average energy — quiet = slow drift, loud = fast scrolling
-fn get_gradient_color_shimmer(bar_index: u32, time: f32, energy: f32) -> vec4<f32> {
-    // Speed scales with energy: base 0.15 cycles/sec + up to 1.0 extra when loud
-    let speed = 0.15 + energy * 1.0;
-    let time_offset = time * speed;
-
-    // Each bar is offset by 1/6 of the cycle, so adjacent bars show different colors
-    // fract() keeps it in [0,1), then scale to 6 color segments for smooth interpolation
-    let bar_phase = f32(bar_index % BARS_PALETTE_INDEX_MOD) / BARS_PALETTE_SEGMENTS_LOOPED;
-    let pos = fract(bar_phase + time_offset) * BARS_PALETTE_SEGMENTS_LOOPED;
-    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
-    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;
-    let frac = pos - floor(pos);
-
-    let c1 = uniforms.gradient_colors[idx];
-    let c2 = uniforms.gradient_colors[next_idx];
-
-    return mix(c1, c2, frac);
-}
-
-// Alternate mode: bars alternate between first two gradient colors (flat, no height gradient)
-// Animation speed is driven by average energy — quiet = slow drift, loud = fast pulsing
-// Even bars start at color[0], odd bars start at color[1], then they smoothly swap over time
-fn get_gradient_color_alternate(bar_index: u32, time: f32, energy: f32) -> vec4<f32> {
-    let color_a = uniforms.gradient_colors[0];
-    let color_b = uniforms.gradient_colors[1];
-
-    // Speed scales with energy: base 0.3 cycles/sec + up to 2.0 extra when loud
-    let speed = 0.3 + energy * 2.0;
-
-    // sin() oscillation: maps to 0..1 mix factor
-    // Odd bars are phase-shifted by PI so they start on the opposite color
-    let phase = select(0.0, 3.14159265, bar_index % 2u == 1u);
-    let t = sin(time * speed * 6.28318530 + phase) * 0.5 + 0.5;
-
-    return mix(color_a, color_b, t);
 }
 
 // Helper: create a "dead" (offscreen) vertex output to cull unused quads
@@ -857,29 +796,21 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         
         // Choose color based on gradient mode, using orientation-aware base position.
         //
-        // gradient_mode discriminants: 0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate.
-        // 1u is intentionally unused — see BarsConfig::get_gradient_mode_value in
-        // src/visualizer_config.rs. Group G #3 will replace this with a typed enum.
-        // The bars_gradient_mode_never_emits_dead_1u test pins the emitted set so a
-        // future agent who picks 1u as a discriminant fails before shipping a dead branch.
+        // gradient_mode discriminants: 0=static, 2=wave. 1u is intentionally
+        // unused — see BarsConfig::get_gradient_mode_value in
+        // src/visualizer_config.rs; the bars_gradient_mode_never_emits_dead_1u
+        // test pins the emitted set so a future agent who picks 1u as a
+        // discriminant fails before shipping a dead branch. (Modes 3–5 —
+        // shimmer/energy/alternate — were removed; the glow/bloom/beat effects
+        // supersede those per-bar color-cycling gimmicks.)
         let gradient_mode = uniforms.config.gradient_mode;
         var base_color: vec4<f32>;
 
-        if (gradient_mode == 0u) {
-            base_color = get_gradient_color(base_pos);
-        } else if (gradient_mode == 2u) {
+        if (gradient_mode == 2u) {
             base_color = get_gradient_color_stretched(base_pos, input.bar_amplitude);
-        } else if (gradient_mode == 3u) {
-            // Shimmer: flat color per bar cycling through full palette
-            let bar_index = u32(input.bar_index);
-            base_color = get_gradient_color_shimmer(bar_index, uniforms.config.time, input.average_energy);
-        } else if (gradient_mode == 4u) {
-            base_color = get_gradient_color_energy(base_pos, input.average_energy);
-        } else if (gradient_mode == 5u) {
-            // Alternate mode: 2-color oscillation, ignores orientation
-            let bar_index = u32(input.bar_index);
-            base_color = get_gradient_color_alternate(bar_index, uniforms.config.time, input.average_energy);
         } else {
+            // 0u (static) and any unexpected value fall through to the
+            // height-based gradient.
             base_color = get_gradient_color(base_pos);
         }
         

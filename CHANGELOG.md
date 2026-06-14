@@ -28,6 +28,8 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- The Bars visualizer's shimmer, energy, and alternate gradient modes, which the new glow, bloom, and beat effects make redundant (existing configs fall back to wave).
+
 ## v0.7.2 — 2026-06-10
 
 ### Added

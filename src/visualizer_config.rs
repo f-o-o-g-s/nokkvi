@@ -49,24 +49,16 @@ pub enum BarsGradientMode {
     /// Gradient stretching (taller bars show more bottom colors).
     #[default]
     Wave = 2,
-    /// Bars cycle through gradient colors with music-driven animation.
-    Shimmer = 3,
-    /// Gradient shifts based on overall loudness.
-    Energy = 4,
-    /// Bars alternate between first two gradient colors.
-    Alternate = 5,
+    // Modes 3 (Shimmer), 4 (Energy), 5 (Alternate) were removed: the per-bar
+    // color-cycling gimmicks they provided are superseded by the glow / bloom /
+    // beat-reactive effects. Existing configs naming them fall back to Wave via
+    // `deserialize_or_default` on the field.
 }
 
 impl BarsGradientMode {
     /// Every variant in declaration order — the settings dropdown derives its
     /// option list from this, so the display order is pinned here.
-    pub const ALL: &'static [Self] = &[
-        Self::Static,
-        Self::Wave,
-        Self::Shimmer,
-        Self::Energy,
-        Self::Alternate,
-    ];
+    pub const ALL: &'static [Self] = &[Self::Static, Self::Wave];
 
     /// Wire-format string used in `config.toml`. Must match the
     /// `#[serde(rename_all = "snake_case")]` output exactly.
@@ -74,9 +66,6 @@ impl BarsGradientMode {
         match self {
             Self::Static => "static",
             Self::Wave => "wave",
-            Self::Shimmer => "shimmer",
-            Self::Energy => "energy",
-            Self::Alternate => "alternate",
         }
     }
 
@@ -424,7 +413,7 @@ pub struct BarsConfig {
     pub gradient_mode: BarsGradientMode,
 
     /// Gradient orientation — controls which axis the gradient colors are mapped along.
-    /// Works with all gradient modes except `Alternate`.
+    /// Works with all gradient modes.
     ///
     /// Default: [`BarsGradientOrientation::Vertical`]
     #[serde(deserialize_with = "deserialize_or_default")]
@@ -1138,13 +1127,7 @@ mod tests {
     #[test]
     fn bars_gradient_mode_never_emits_dead_1u() {
         // Every defined variant (the only inputs reachable from the TOML config + UI dropdown).
-        let variants = [
-            BarsGradientMode::Static,
-            BarsGradientMode::Wave,
-            BarsGradientMode::Shimmer,
-            BarsGradientMode::Energy,
-            BarsGradientMode::Alternate,
-        ];
+        let variants = [BarsGradientMode::Static, BarsGradientMode::Wave];
         for variant in variants {
             let cfg = BarsConfig {
                 gradient_mode: variant,
@@ -1171,13 +1154,8 @@ mod tests {
     /// "no variant maps to 1" and "the full set is what bars.wgsl branches on".
     #[test]
     fn bars_gradient_mode_emits_expected_discriminants() {
-        let expected: &[(BarsGradientMode, u32)] = &[
-            (BarsGradientMode::Static, 0),
-            (BarsGradientMode::Wave, 2),
-            (BarsGradientMode::Shimmer, 3),
-            (BarsGradientMode::Energy, 4),
-            (BarsGradientMode::Alternate, 5),
-        ];
+        let expected: &[(BarsGradientMode, u32)] =
+            &[(BarsGradientMode::Static, 0), (BarsGradientMode::Wave, 2)];
         for (variant, want) in expected {
             let cfg = BarsConfig {
                 gradient_mode: *variant,
@@ -1199,9 +1177,6 @@ mod tests {
         let cases: &[(BarsGradientMode, &str)] = &[
             (BarsGradientMode::Static, "static"),
             (BarsGradientMode::Wave, "wave"),
-            (BarsGradientMode::Shimmer, "shimmer"),
-            (BarsGradientMode::Energy, "energy"),
-            (BarsGradientMode::Alternate, "alternate"),
         ];
         for (variant, expected_wire) in cases {
             assert_eq!(variant.as_wire_str(), *expected_wire);
@@ -1377,18 +1352,9 @@ style = "wibbly"
     fn bars_gradient_mode_discriminants_match_wgsl_dispatch() {
         assert_eq!(BarsGradientMode::Static as u32, 0);
         assert_eq!(BarsGradientMode::Wave as u32, 2);
-        assert_eq!(BarsGradientMode::Shimmer as u32, 3);
-        assert_eq!(BarsGradientMode::Energy as u32, 4);
-        assert_eq!(BarsGradientMode::Alternate as u32, 5);
 
-        // Lock the full {0, 2, 3, 4, 5} set — assert no variant emits 1.
-        let all = [
-            BarsGradientMode::Static,
-            BarsGradientMode::Wave,
-            BarsGradientMode::Shimmer,
-            BarsGradientMode::Energy,
-            BarsGradientMode::Alternate,
-        ];
+        // Lock the full {0, 2} set — assert no variant emits 1 (dead in bars.wgsl).
+        let all = [BarsGradientMode::Static, BarsGradientMode::Wave];
         for v in all {
             assert_ne!(v as u32, 1, "{v:?} emits 1u — dead in bars.wgsl");
         }
@@ -1440,14 +1406,10 @@ style = "wibbly"
     fn all_consts_are_exhaustive_and_ordered() {
         for v in BarsGradientMode::ALL {
             match v {
-                BarsGradientMode::Static
-                | BarsGradientMode::Wave
-                | BarsGradientMode::Shimmer
-                | BarsGradientMode::Energy
-                | BarsGradientMode::Alternate => {}
+                BarsGradientMode::Static | BarsGradientMode::Wave => {}
             }
         }
-        assert_eq!(BarsGradientMode::ALL.len(), 5);
+        assert_eq!(BarsGradientMode::ALL.len(), 2);
 
         for v in BarsGradientOrientation::ALL {
             match v {
@@ -1523,10 +1485,7 @@ style = "wibbly"
     /// display order and the snake_case wire contract.
     #[test]
     fn all_wire_strs_pin_dropdown_display_order() {
-        assert_eq!(
-            BarsGradientMode::all_wire_strs(),
-            vec!["static", "wave", "shimmer", "energy", "alternate"],
-        );
+        assert_eq!(BarsGradientMode::all_wire_strs(), vec!["static", "wave"]);
         assert_eq!(
             BarsGradientOrientation::all_wire_strs(),
             vec!["vertical", "horizontal"],
