@@ -339,7 +339,11 @@ impl SettingsManager {
     }
 
     pub fn set_crossfade_duration(&mut self, duration_secs: u32) -> Result<()> {
-        self.settings.player.crossfade_duration_secs = duration_secs.clamp(1, 12);
+        use crate::types::player_settings::{
+            CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
+        };
+        self.settings.player.crossfade_duration_secs =
+            duration_secs.clamp(CROSSFADE_DURATION_MIN_SECS, CROSSFADE_DURATION_MAX_SECS);
         self.save()
     }
 

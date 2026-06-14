@@ -22,7 +22,8 @@ use crate::{
     define_settings,
     types::{
         player_settings::{
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, VolumeNormalizationMode,
+            CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS, NormalizationLevel,
+            RatingReminderTrigger, RoundedMode, VolumeNormalizationMode,
         },
         settings_data::PlaybackSettingsData,
     },
@@ -51,7 +52,10 @@ define_settings! {
             ui_meta: {
                 label: "Crossfade",
                 category: "Playback",
-                subtitle: Some("Fade between tracks instead of gapless transitions"),
+                subtitle: Some(
+                    "Overlap and blend the end of each track into the next. Off plays tracks \
+                     gapless with no overlap. Tracks under 10 seconds always play gapless.",
+                ),
                 default: true,
                 read_field: |d| d.crossfade_enabled,
             },
@@ -66,10 +70,10 @@ define_settings! {
             ui_meta: {
                 label: "Crossfade Duration",
                 category: "Playback",
-                subtitle: Some("Duration of crossfade between tracks"),
+                subtitle: Some("1s = quick blend, 12s = long overlap. Applies as tracks change, not when you skip."),
                 default: 7_i64,
-                min: 1_i64,
-                max: 15_i64,
+                min: i64::from(CROSSFADE_DURATION_MIN_SECS),
+                max: i64::from(CROSSFADE_DURATION_MAX_SECS),
                 step: 1_i64,
                 unit: "s",
                 read_field: |d| d.crossfade_duration_secs,
@@ -431,6 +435,48 @@ mod tests {
             SettingValue::Int { val, .. } => assert_eq!(*val, 75),
             other => panic!("expected Int, got {other:?}"),
         }
+    }
+
+    /// Single-source-of-truth interlock: the crossfade-duration slider's
+    /// declared `max` MUST equal what `set_crossfade_duration` actually persists
+    /// for that value. The slider once offered 15s while the setter clamped to
+    /// 12s, so dragging to 13-15 silently truncated to 12 and snapped back on
+    /// reload. Both sides now derive from `CROSSFADE_DURATION_MAX_SECS`.
+    #[test]
+    fn crossfade_duration_slider_max_matches_persisted_clamp() {
+        let entries = build_playback_tab_settings_items(&default_playback_data());
+        let slider_max = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.crossfade_duration" => {
+                    match &item.value {
+                        SettingValue::Int { max, .. } => Some(*max),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("crossfade_duration row with an Int value");
+
+        let (mut mgr, _tmp) = make_test_manager();
+
+        // The top of the slider must round-trip through the setter unchanged.
+        mgr.set_crossfade_duration(slider_max as u32)
+            .expect("set to slider max");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().crossfade_duration_secs),
+            slider_max,
+            "slider max {slider_max}s is silently truncated by the persistence clamp"
+        );
+
+        // One step past the top clamps down to exactly the slider max.
+        mgr.set_crossfade_duration(slider_max as u32 + 1)
+            .expect("set above slider max");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().crossfade_duration_secs),
+            slider_max,
+            "values above the slider max must clamp to the slider max"
+        );
     }
 
     #[test]

@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::define_labeled_enum;
 
+/// Crossfade duration bounds, in seconds. Single source of truth shared by the
+/// enforcement clamp in `SettingsManager::set_crossfade_duration` and the
+/// slider's declared `min`/`max` in the playback settings table, so the slider
+/// can never offer a value the setter would silently truncate.
+pub const CROSSFADE_DURATION_MIN_SECS: u32 = 1;
+pub const CROSSFADE_DURATION_MAX_SECS: u32 = 12;
+
 define_labeled_enum! {
     /// Volume normalization level — controls the AGC target loudness.
     ///

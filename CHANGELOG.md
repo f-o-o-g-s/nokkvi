@@ -8,9 +8,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The crossfade settings now explain that turning crossfade off plays tracks gapless, and that very short tracks always play gapless.
+
 ### Fixed
 
 - Turning the visualizer off now releases the CPU it was using during playback; previously its background audio analysis kept running unseen.
+- The crossfade duration slider no longer offers values above 12 seconds that silently reset to 12 on the next launch.
 
 ### Removed
 
