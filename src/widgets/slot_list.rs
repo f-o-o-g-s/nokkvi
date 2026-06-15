@@ -172,11 +172,13 @@ const SHIMMER_HALF_WIDTH: f32 = 0.13;
 const SHIMMER_ANGLE_RAD: f32 = 1.9;
 const SHIMMER_SWEEP_FRACTION: f32 = 0.45;
 
-/// How far each glow light is blended from the accent seed toward white. The
-/// light must be brighter than the (accent) fill to read over it; the inner
-/// glow keeps more accent tint, the sheen is closer to white.
-const INNER_GLOW_LIGHT_MIX: f32 = 0.55;
-const SHIMMER_LIGHT_MIX: f32 = 0.85;
+/// How far each glow light's perceptual lightness is lifted toward white from
+/// the accent seed (Oklch `l`-lift via [`theme::lighten_oklch`], holding hue and
+/// chroma). The light must be brighter than the (accent) fill to read over it;
+/// the inner glow stays nearer the accent, the sheen is lifted closer to white.
+/// (These are Oklch lift amounts, not sRGB mix fractions — retune by eye.)
+const INNER_GLOW_LIGHT_LIFT: f32 = 0.55;
+const SHIMMER_LIGHT_LIFT: f32 = 0.85;
 
 /// Global breathing/shimmer phase in `0.0..1.0`, written each frame by the boat
 /// frame tick (`update::boat::handle_boat_tick`) while audio is playing, and
@@ -191,16 +193,6 @@ pub(crate) fn set_now_playing_phase(phase: f32) {
 
 fn now_playing_phase() -> f32 {
     f32::from_bits(NOW_PLAYING_PHASE.load(Ordering::Relaxed))
-}
-
-/// Linear blend `a` → `b` by `t` (0 = `a`, 1 = `b`), preserving `a`'s alpha.
-fn lerp_color(a: Color, b: Color, t: f32) -> Color {
-    Color {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a,
-    }
 }
 
 /// Eased 0 → 1 → 0 breath over one period.
@@ -229,7 +221,7 @@ fn shimmer_band_center(phase: f32) -> f32 {
 /// is vertical: offset 0 = bottom, 1 = top), transparent center, edge alpha
 /// breathing on `phase`.
 fn inner_glow_gradient(seed: Color, phase: f32) -> Gradient {
-    let light = lerp_color(seed, Color::WHITE, INNER_GLOW_LIGHT_MIX);
+    let light = theme::lighten_oklch(seed, INNER_GLOW_LIGHT_LIFT);
     let edge = Color {
         a: inner_glow_edge_alpha(phase),
         ..light
@@ -254,7 +246,7 @@ fn inner_glow_gradient(seed: Color, phase: f32) -> Gradient {
 /// is irrelevant) without the log spam. A fully parked band keeps only the two
 /// anchor stops, leaving a transparent (no-sheen) gradient.
 fn shimmer_gradient(seed: Color, phase: f32) -> Gradient {
-    let light = lerp_color(seed, Color::WHITE, SHIMMER_LIGHT_MIX);
+    let light = theme::lighten_oklch(seed, SHIMMER_LIGHT_LIFT);
     let clear = Color { a: 0.0, ..light };
     let bright = Color {
         a: SHIMMER_PEAK_ALPHA,

@@ -150,7 +150,10 @@ pub(crate) fn border() -> Color {
 // Used by `darken()` (the border-token fallback in theme_config and the
 // `status_strip_bg` derivation), and by `slot_list`'s depth-darkening of
 // now-playing rows. The flat redesign removed the 3D bevel chrome, taking
-// the old `border_3d_*` / `lighten` helpers with it.
+// the old `border_3d_*` / sRGB `lighten` helpers with it. `lighten_oklch()`
+// is the perceptual replacement for "a brighter version of the same accent"
+// (the now-playing glow lights), brightening without the sRGB-toward-white
+// desaturation/hue-drift the old helper suffered.
 
 /// Blend a color toward a target color by the given factor (0.0 = base, 1.0 = target).
 #[inline]
@@ -167,6 +170,23 @@ pub(super) fn blend_toward(base: Color, target: Color, factor: f32) -> Color {
 #[inline]
 pub(crate) fn darken(color: Color, amount: f32) -> Color {
     blend_toward(color, Color::BLACK, amount)
+}
+
+/// Lighten a color perceptually by lifting its Oklch lightness toward white by
+/// `amount` (0.0 = unchanged, 1.0 = `l` driven to 1.0), holding hue and chroma.
+///
+/// The perceptual counterpart to `darken()` and the replacement for the removed
+/// sRGB toward-white `lighten`. Naive sRGB lerp-toward-white desaturates as it
+/// brightens (chroma collapses to 0 at white) and drifts hue through the blend,
+/// so a saturated accent reads as a washed-out grey tint rather than a brighter
+/// version of itself. Lifting Oklch `l` while keeping `c`/`h` yields a genuinely
+/// brighter same-hue accent. Alpha is preserved (Oklch round-trips it). On a
+/// low-chroma/near-white accent the lift is near a no-op, which is correct.
+#[inline]
+pub(crate) fn lighten_oklch(color: Color, amount: f32) -> Color {
+    let mut oklch = color.into_oklch();
+    oklch.l = (oklch.l + (1.0 - oklch.l) * amount).min(1.0);
+    Color::from_oklch(oklch)
 }
 
 // ============================================================================
@@ -410,4 +430,56 @@ pub(crate) fn playing_fill() -> Color {
 #[inline]
 pub(crate) fn selected_fill_resolved() -> Color {
     resolve_highlight_fills(accent(), accent_bright(), bg0_hard()).1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A clearly chromatic mid-blue, so hue/chroma assertions are meaningful.
+    fn accent_sample() -> Color {
+        Color::from_rgb(0.20, 0.45, 0.85)
+    }
+
+    #[test]
+    fn lighten_oklch_zero_is_identity() {
+        let c = accent_sample();
+        let out = lighten_oklch(c, 0.0);
+        // Oklch round-trip is not bit-exact; a small epsilon is expected.
+        assert!((out.r - c.r).abs() < 1e-3);
+        assert!((out.g - c.g).abs() < 1e-3);
+        assert!((out.b - c.b).abs() < 1e-3);
+    }
+
+    #[test]
+    fn lighten_oklch_raises_perceptual_lightness() {
+        let c = accent_sample();
+        assert!(lighten_oklch(c, 0.5).into_oklch().l > c.into_oklch().l);
+    }
+
+    #[test]
+    fn lighten_oklch_is_monotonic_in_amount() {
+        let c = accent_sample();
+        assert!(lighten_oklch(c, 0.7).into_oklch().l > lighten_oklch(c, 0.3).into_oklch().l);
+    }
+
+    #[test]
+    fn lighten_oklch_preserves_hue_in_gamut() {
+        // Hue is held exactly in Oklch; observable drift only comes from sRGB
+        // gamut clamping on out-of-gamut lifts. A muted sample lifted modestly
+        // stays in gamut, so the held hue is preserved to float precision.
+        let c = Color::from_rgb(0.35, 0.45, 0.62);
+        let h0 = c.into_oklch().h;
+        let h1 = lighten_oklch(c, 0.25).into_oklch().h;
+        assert!((h1 - h0).abs() < 1e-2, "hue drifted: {h0} -> {h1}");
+    }
+
+    #[test]
+    fn lighten_oklch_preserves_alpha() {
+        let c = Color {
+            a: 0.5,
+            ..accent_sample()
+        };
+        assert!((lighten_oklch(c, 0.4).a - 0.5).abs() < 1e-3);
+    }
 }
