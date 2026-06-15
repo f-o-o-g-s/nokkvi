@@ -8,7 +8,7 @@
 use iced::{
     Alignment, Element, Length,
     font::{Font, Weight},
-    widget::{container, mouse_area, row, space, text},
+    widget::{container, mouse_area, row, space, text, tooltip},
 };
 
 use crate::theme;
@@ -30,6 +30,134 @@ fn strip_text(color: iced::Color) -> iced::Color {
     theme::legible_strip_text(color, theme::status_strip_bg())
 }
 
+/// The small honest bit-perfect indicator: a label + color, or `None` when
+/// there's nothing to show (mode off, or the real device rate is unknown).
+/// "BIT-PERFECT" = the DAC is clocked at the track rate; "RESAMPLED" = PipeWire
+/// is converting (e.g. a live down-switch the device can't follow).
+///
+/// `pub(crate)` so the nav-bar's MiniPlayer strip reuses the SAME label/color
+/// mapping instead of duplicating the match (one source of truth for the badge).
+pub(crate) fn bit_perfect_badge(
+    status: crate::state::BitPerfectStatus,
+    holder: Option<&str>,
+) -> Option<(String, iced::Color)> {
+    use crate::state::BitPerfectStatus;
+    match status {
+        BitPerfectStatus::Verified => Some(("BIT-PERFECT".to_owned(), theme::accent_bright())),
+        // Show the rate the device is actually clocked at, INLINE (the capsule
+        // has no tooltip), so the badge itself says what it's resampled to —
+        // e.g. "RESAMPLED→96k". When the PipeWire graph names the app holding
+        // the device, tack it on: "RESAMPLED→96k · Zen".
+        BitPerfectStatus::Resampled { device_rate } => {
+            let mut label = format!("RESAMPLED→{}", khz_label(device_rate));
+            if let Some(h) = holder {
+                label.push_str(" · ");
+                label.push_str(h);
+            }
+            Some((label, theme::fg3()))
+        }
+        BitPerfectStatus::Unverifiable => Some(("UNVERIFIED".to_owned(), theme::fg3())),
+        BitPerfectStatus::Off | BitPerfectStatus::Unknown => None,
+    }
+}
+
+/// The kHz NUMBER for a sample rate as a string — "96", "44.1", "176.4" (one
+/// decimal only when it isn't a whole number of kHz). Shared by the compact
+/// badge label (which appends "k") and the hover tooltip (which appends " kHz")
+/// so the same device rate never renders two different ways across the two
+/// adjacent surfaces.
+fn khz_number(rate: u32) -> String {
+    let khz = rate as f32 / 1000.0;
+    if khz.fract().abs() < f32::EPSILON {
+        format!("{}", khz as u32)
+    } else {
+        format!("{khz:.1}")
+    }
+}
+
+/// Compact kHz label for a sample rate: "96k", "44.1k", "176.4k".
+fn khz_label(rate: u32) -> String {
+    format!("{}k", khz_number(rate))
+}
+
+/// One-line plain-language explanation for the bit-perfect badge — surfaced as a
+/// hover tooltip on the now-playing badge (the "blocker diagnostic"). `Verified`
+/// confirms; `Resampled` and `Unverifiable` explain *why* playback isn't
+/// bit-perfect. `None` for `Off` and the transient `Unknown` (no badge to hover).
+/// Single-sourced so every render site shares the same copy.
+pub(crate) fn bit_perfect_status_tooltip(
+    status: crate::state::BitPerfectStatus,
+    holder: Option<&str>,
+) -> Option<String> {
+    use crate::state::BitPerfectStatus;
+    match status {
+        BitPerfectStatus::Verified => Some(
+            "Bit-perfect — the DAC is clocked at the track's rate, with no resampling or DSP."
+                .to_owned(),
+        ),
+        BitPerfectStatus::Resampled { device_rate } => {
+            let khz = khz_number(device_rate);
+            Some(match holder {
+                Some(h) => format!(
+                    "Output device is locked at {khz} kHz by {h}, so this track is being \
+                     resampled. Close {h} for bit-perfect."
+                ),
+                None => format!(
+                    "Output device is locked at {khz} kHz, so this track is being resampled. \
+                     Another app may be holding the device — close other audio apps for \
+                     bit-perfect."
+                ),
+            })
+        }
+        BitPerfectStatus::Unverifiable => Some(
+            "Can't read the output device's clock — it's Bluetooth (which re-encodes the audio, so \
+             bit-perfect isn't possible) or the device is idle."
+                .to_owned(),
+        ),
+        BitPerfectStatus::Off | BitPerfectStatus::Unknown => None,
+    }
+}
+
+/// The styled bit-perfect badge as a ready-to-push widget (size-10 bold,
+/// no-wrap), or `None` when there's nothing to show. Single-sources the badge
+/// WIDGET — not just the (label, color) tuple — so the three render sites (this
+/// strip's two layouts + the MiniPlayer nav strip) can't drift in font, size,
+/// or wrapping. `color_for` adapts the badge color to the host strip's
+/// legibility transform (`strip_text` here, the nav bar's `nav_strip_text`
+/// closure there). Callers still add the surrounding separator themselves
+/// (its placement differs per layout).
+pub(crate) fn bit_perfect_badge_widget<'a, M: 'a>(
+    status: crate::state::BitPerfectStatus,
+    holder: Option<&str>,
+    color_for: impl Fn(iced::Color) -> iced::Color,
+) -> Option<Element<'a, M>> {
+    let (label, color) = bit_perfect_badge(status, holder)?;
+    let badge = text(label)
+        .size(10.0)
+        .font(Font {
+            weight: Weight::Bold,
+            ..theme::ui_font()
+        })
+        .color(color_for(color))
+        .wrapping(text::Wrapping::None);
+    // The badge's hover tooltip is the "blocker diagnostic": it explains why
+    // playback is / isn't bit-perfect (device locked at X by whom, Bluetooth,
+    // etc.). The default look is unchanged — the explanation is hover-only.
+    match bit_perfect_status_tooltip(status, holder) {
+        Some(tip) => Some(
+            tooltip(
+                badge,
+                container(text(tip).size(11.0).font(theme::ui_font())).padding(4),
+                tooltip::Position::Top,
+            )
+            .gap(4)
+            .style(theme::container_tooltip)
+            .into(),
+        ),
+        None => Some(badge.into()),
+    }
+}
+
 /// Embedded-SVG path for the radio-tower glyph. Shared between the nav-tab row,
 /// both metadata-strip widgets, and the radios view so a future rename touches
 /// one site instead of five (the embedded-svg lookup falls back to play.svg on
@@ -43,6 +171,10 @@ pub(crate) struct TrackInfoStripData<'a> {
     pub album: &'a str,
     pub format_suffix: &'a str,
     pub sample_rate: u32,
+    /// Honest bit-perfect status for the small now-playing indicator.
+    pub bit_perfect_status: crate::state::BitPerfectStatus,
+    /// When resampled, the app holding the device (inline `· Zen`).
+    pub bit_perfect_holder: Option<&'a str>,
     pub bitrate: u32,
     pub radio_name: Option<&'a str>,
     pub radio_url: Option<&'a str>,
@@ -237,6 +369,8 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                 format_split,
                 on_press,
                 Some(RADIO_TOWER_ICON_PATH),
+                data.bit_perfect_status,
+                data.bit_perfect_holder,
             );
         }
     } else if merged_mode {
@@ -251,7 +385,14 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
             &album,
         );
         if !merged.is_empty() {
-            return build_merged_centered_strip(merged, format_split, on_press, None);
+            return build_merged_centered_strip(
+                merged,
+                format_split,
+                on_press,
+                None,
+                data.bit_perfect_status,
+                data.bit_perfect_holder,
+            );
         }
     }
 
@@ -273,6 +414,12 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                 .color(strip_text(theme::fg3()))
                 .wrapping(text::Wrapping::None),
         );
+        if let Some(badge) =
+            bit_perfect_badge_widget(data.bit_perfect_status, data.bit_perfect_holder, strip_text)
+        {
+            info_row = info_row.push(info_sep());
+            info_row = info_row.push(badge);
+        }
         info_row = info_row.push(info_sep());
     }
 
@@ -413,6 +560,10 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
     format_split: Option<(String, Option<String>)>,
     on_press: Option<M>,
     leading_icon: Option<&'static str>,
+    bit_perfect_status: crate::state::BitPerfectStatus,
+    // Elided (not `'a`): the badge builds an owned label, so the returned
+    // element doesn't borrow the holder — keep it off the return lifetime.
+    bit_perfect_holder: Option<&str>,
 ) -> Element<'a, M> {
     let info_sep = || -> Element<'a, M> { theme::vertical_separator(STRIP_HEIGHT - 2.0) };
 
@@ -449,6 +600,11 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
         .padding([0, 8]);
     if let Some((ref left, _)) = format_split {
         info_row = info_row.push(format_text(left.clone()));
+        if let Some(badge) =
+            bit_perfect_badge_widget(bit_perfect_status, bit_perfect_holder, strip_text)
+        {
+            info_row = info_row.push(badge);
+        }
         info_row = info_row.push(info_sep());
     }
     if let Some(icon_path) = leading_icon {
@@ -617,9 +773,112 @@ pub(crate) fn merged_radio_strip_string(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::BitPerfectStatus;
 
     const DOT: &str = "  ·  ";
     const PIPE: &str = "  |  ";
+
+    #[test]
+    fn badge_label_per_status() {
+        let label = |s, h| bit_perfect_badge(s, h).map(|(l, _)| l);
+        assert_eq!(
+            label(BitPerfectStatus::Verified, None).as_deref(),
+            Some("BIT-PERFECT")
+        );
+        // Resampled shows the device rate INLINE so the (tooltip-less) capsule is
+        // informative: a 96k device latch reads "RESAMPLED→96k".
+        assert_eq!(
+            label(
+                BitPerfectStatus::Resampled {
+                    device_rate: 96_000
+                },
+                None
+            )
+            .as_deref(),
+            Some("RESAMPLED→96k")
+        );
+        // With the holder named (from the PipeWire graph), it's tacked on inline.
+        assert_eq!(
+            label(
+                BitPerfectStatus::Resampled {
+                    device_rate: 96_000
+                },
+                Some("Zen")
+            )
+            .as_deref(),
+            Some("RESAMPLED→96k · Zen")
+        );
+        // Non-whole-kHz rates keep one decimal.
+        assert_eq!(
+            label(
+                BitPerfectStatus::Resampled {
+                    device_rate: 44_100
+                },
+                None
+            )
+            .as_deref(),
+            Some("RESAMPLED→44.1k")
+        );
+        // The settled can't-read state (Bluetooth / idle) shows the UNVERIFIED hint.
+        assert_eq!(
+            label(BitPerfectStatus::Unverifiable, None).as_deref(),
+            Some("UNVERIFIED")
+        );
+        // Off and the TRANSIENT Unknown (probe in flight) stay hidden — Unknown
+        // must not flash a chip mid-transition (preserves the gate's reset-to-hidden).
+        assert_eq!(bit_perfect_badge(BitPerfectStatus::Off, None), None);
+        assert_eq!(bit_perfect_badge(BitPerfectStatus::Unknown, None), None);
+    }
+
+    #[test]
+    fn status_tooltip_explains_the_blocker() {
+        // Verified confirms; Resampled names the device rate + the likely cause;
+        // Unverifiable explains the BT/idle case. Off/Unknown have no tooltip.
+        assert!(bit_perfect_status_tooltip(BitPerfectStatus::Verified, None).is_some());
+        let resampled = bit_perfect_status_tooltip(
+            BitPerfectStatus::Resampled {
+                device_rate: 48_000,
+            },
+            None,
+        )
+        .expect("resampled has a tooltip");
+        // Whole-kHz rate renders without a trailing ".0" — consistent with the
+        // badge's compact "48k" (both go through `khz_number`), not "48.0 kHz".
+        assert!(
+            resampled.contains("48 kHz") && !resampled.contains("48.0"),
+            "names the device rate consistently with the badge: {resampled}"
+        );
+        assert!(
+            resampled.contains("Another app"),
+            "points at the likely cause: {resampled}"
+        );
+        // When the holder is known, the tooltip names it and says to close IT.
+        let named = bit_perfect_status_tooltip(
+            BitPerfectStatus::Resampled {
+                device_rate: 48_000,
+            },
+            Some("Zen"),
+        )
+        .expect("resampled has a tooltip");
+        assert!(
+            named.contains("by Zen") && named.contains("Close Zen"),
+            "names the holder: {named}"
+        );
+        assert!(
+            bit_perfect_status_tooltip(BitPerfectStatus::Unverifiable, None)
+                .expect("unverifiable has a tooltip")
+                .contains("Bluetooth"),
+            "unverifiable explains the Bluetooth/idle case"
+        );
+        assert_eq!(
+            bit_perfect_status_tooltip(BitPerfectStatus::Off, None),
+            None
+        );
+        assert_eq!(
+            bit_perfect_status_tooltip(BitPerfectStatus::Unknown, None),
+            None
+        );
+    }
 
     #[test]
     fn merged_string_all_three_visible() {

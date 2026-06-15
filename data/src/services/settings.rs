@@ -338,6 +338,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_bit_perfect(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.bit_perfect = enabled;
+        self.save()
+    }
+
     pub fn set_crossfade_duration(&mut self, duration_secs: u32) -> Result<()> {
         use crate::types::player_settings::{
             CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
@@ -1213,6 +1218,7 @@ mod sentinel_roundtrip_tests {
 
             // Playback / crossfade
             crossfade_enabled: true,    // default false
+            bit_perfect: true,          // default false
             crossfade_duration_secs: 9, // default 5
             rewind_on_previous: true,   // default false
 

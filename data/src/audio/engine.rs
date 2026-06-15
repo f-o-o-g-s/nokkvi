@@ -15,11 +15,30 @@ use crate::{
     utils::url_redaction::redact_subsonic_url,
 };
 
-/// Convert S16 (i16) PCM bytes to f32 samples normalized to [-1.0, 1.0].
-/// The decoder always produces S16 via `RawSampleBuffer::<i16>`.
-fn s16_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
-    let samples: &[i16] = bytemuck::cast_slice(bytes);
-    samples.iter().map(|&s| s as f32 / 32768.0).collect()
+/// Reinterpret the decoder's interleaved f32 (native-endian) PCM bytes as f32
+/// samples. The decoder emits full-precision f32 via `RawSampleBuffer::<f32>`,
+/// so this is a lossless reinterpret — no quantization. It replaces the former
+/// S16 path that truncated 24-bit / float sources to 16-bit before widening,
+/// which made hi-res content impossible to play back bit-perfectly.
+///
+/// `from_ne_bytes` over `chunks_exact(4)` is alignment-free (a `Vec<u8>` is not
+/// guaranteed f32-aligned) and matches Symphonia's native-endian raw output;
+/// `output_data` is always a whole number of f32 frames so no bytes are dropped.
+fn decoded_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
+    // `chunks_exact` silently drops a trailing 1–3 byte remainder. Every caller
+    // feeds whole f32 frames today (see the module doc), so this never fires;
+    // the assert pins that invariant so a future decode/silence path that ever
+    // leaks a partial sample trips loudly in debug/tests instead of silently
+    // shifting the channel interleave for the rest of the buffer.
+    debug_assert_eq!(
+        bytes.len() % std::mem::size_of::<f32>(),
+        0,
+        "decoded byte count must be a whole number of f32 samples"
+    );
+    bytes
+        .chunks_exact(std::mem::size_of::<f32>())
+        .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
+        .collect()
 }
 
 /// Playback state
@@ -130,9 +149,10 @@ impl GaplessSlot {
 /// Calculate buffer size for one decode chunk (~100ms of audio).
 ///
 /// Returns bytes for 100ms of the given format, clamped to [4096, 65_536], or
-/// 8192 if the format is not yet known. The upper bound holds a full ~100ms at
-/// up to ~170k stereo; the old 16_384 ceiling capped hi-res at ~43ms/iteration
-/// (96k stereo), forcing the decode loop to run >2x more iterations to keep pace.
+/// 8192 if the format is not yet known. With full-precision f32 output (8
+/// bytes/frame stereo) the 65_536 ceiling holds a full ~100ms up to ~82k stereo
+/// and ~85ms/iteration at 96k stereo; a lower ceiling would shrink hi-res reads
+/// further, forcing the decode loop to run more iterations to keep pace.
 fn decode_buffer_size(format: &AudioFormat) -> usize {
     if format.is_valid() {
         format.bytes_for_duration(100).clamp(4096, 65_536)
@@ -155,7 +175,7 @@ fn decode_one_chunk(decoder: &mut AudioDecoder) -> Option<Vec<f32>> {
     let buffer_size = decode_buffer_size(decoder.format());
     let buffer = decoder.read_buffer(buffer_size);
     if buffer.is_valid() && buffer.byte_count() > 0 {
-        Some(s16_bytes_to_f32(buffer.data()))
+        Some(decoded_bytes_to_f32(buffer.data()))
     } else {
         None
     }
@@ -1506,6 +1526,36 @@ impl CustomAudioEngine {
         self.crossfade_enabled
     }
 
+    /// Set bit-perfect output from settings — applied to the renderer, which
+    /// owns the bit (native-rate output + DSP bypass) and the viability check
+    /// (`pw_volume_active`); the engine keeps no mirrored copy.
+    ///
+    /// On a REAL change (the renderer reports whether the flag flipped) this
+    /// also abandons any prepared/armed/in-flight transition via
+    /// `reset_next_track`: bit-perfect flips crossfade eligibility, and a
+    /// crossfade armed under the old mode could otherwise desync — `render_tick`
+    /// fires it synchronously (renderer → Active + an incoming stream) while the
+    /// engine's gate now refuses, orphaning the blend. Mirrors the
+    /// shuffle/repeat/consume mode-toggle contract. No-op when unchanged so a
+    /// routine settings save (which re-applies every field) never disturbs an
+    /// in-flight transition.
+    pub async fn set_bit_perfect(&mut self, enabled: bool) {
+        let changed = self.renderer.lock().set_bit_perfect(enabled);
+        if changed {
+            self.reset_next_track().await;
+        }
+    }
+
+    /// Whether the CURRENTLY-PLAYING primary stream was actually built
+    /// bit-perfect (the renderer captures this at stream-build time, not the
+    /// live setting). The honest now-playing badge reads this so a mid-track
+    /// toggle — which only takes effect on the next track — can't make the badge
+    /// claim BIT-PERFECT while the running stream is still on the DSP path. The
+    /// brief renderer lock matches `position()`, already taken every snapshot.
+    pub fn current_stream_bit_perfect(&self) -> bool {
+        self.renderer.lock().current_stream_bit_perfect()
+    }
+
     /// Crossfade duration in milliseconds
     pub fn crossfade_duration_ms(&self) -> u64 {
         self.crossfade_duration_ms
@@ -1998,20 +2048,16 @@ impl CustomAudioEngine {
         renderer.set_visualizer_enabled(enabled);
     }
 
-    /// Set the shared mixer from the app-wide MixerDeviceSink.
-    /// Delegates to the renderer so it can use the shared mixer on first play.
-    pub fn set_shared_mixer(&mut self, mixer: rodio::mixer::Mixer) {
+    /// Connect the music-output bridge (shared with the SFX engine + volume UI),
+    /// then build the initial 48 kHz music sink so SFX + node volume work before
+    /// the first track. The renderer rebuilds it at native rate per track in
+    /// bit-perfect mode. Call once at login.
+    pub fn set_music_bridge(
+        &mut self,
+        bridge: std::sync::Arc<crate::audio::music_bridge::MusicOutputBridge>,
+    ) {
         let mut renderer = self.renderer.lock();
-        renderer.set_shared_mixer(mixer);
-    }
-
-    /// Enable/disable PipeWire-native volume control on the renderer.
-    ///
-    /// When `true`, the renderer keeps software volume at 1.0 and the
-    /// caller is responsible for mirroring volume changes to PipeWire.
-    pub fn set_pw_volume_active(&mut self, active: bool) {
-        let mut renderer = self.renderer.lock();
-        renderer.set_pw_volume_active(active);
+        renderer.set_music_bridge(bridge);
     }
 
     /// Set engine reference in renderer
@@ -2138,6 +2184,14 @@ impl CustomAudioEngine {
             || !self.crossfade_enabled
             || self.crossfade_duration_ms == 0
         {
+            return false;
+        }
+
+        // Bit-perfect hard-cuts every transition (no crossfade). Returning false
+        // here falls through to the normal gapless/hard-cut path. Gates on the
+        // SAME `crossfade_blocked()` the renderer's `arm_crossfade` uses, so the
+        // two triggers can't disagree and start/orphan a blend.
+        if self.renderer.lock().crossfade_blocked() {
             return false;
         }
 
@@ -2370,6 +2424,36 @@ impl CustomAudioEngine {
 mod tests {
     use super::*;
 
+    /// The decoder now emits full-precision f32 (`RawSampleBuffer::<f32>`) and
+    /// `decoded_bytes_to_f32` must reinterpret those bytes losslessly. This pins
+    /// the bit-perfect prerequisite: samples that 16-bit quantization (the old
+    /// `s16_bytes_to_f32` path) could not represent must survive untouched.
+    #[test]
+    fn decoded_bytes_to_f32_is_lossless_for_sub_16bit_detail() {
+        // Includes values that fall strictly between adjacent 16-bit codes, plus
+        // exact endpoints. A 24-bit/float source carries exactly this kind of
+        // detail; the former i16 funnel would have flattened it.
+        let samples: [f32; 6] = [0.0, 1.0, -1.0, 0.123_456_79, -0.000_001_5, 0.499_998_4];
+        let mut bytes = Vec::with_capacity(samples.len() * 4);
+        for s in samples {
+            bytes.extend_from_slice(&s.to_ne_bytes());
+        }
+
+        let round_tripped = decoded_bytes_to_f32(&bytes);
+        assert_eq!(round_tripped, samples, "f32 reinterpret must be bit-exact");
+
+        // Contrast: the old S16 path quantized to i16 and back, which is lossy
+        // for at least one of these values — proving the change is meaningful.
+        let i16_quantized: Vec<f32> = samples
+            .iter()
+            .map(|&s| ((s.clamp(-1.0, 1.0) * 32768.0) as i16) as f32 / 32768.0)
+            .collect();
+        assert_ne!(
+            round_tripped, i16_quantized,
+            "the new path must preserve detail the 16-bit path destroyed"
+        );
+    }
+
     /// IG-8: the typestate makes `Idle → OutgoingFinished` direct transition
     /// impossible. Previously the bool-flag representation could be set to
     /// any value at any time; now `OutgoingFinished` only exists by destructuring
@@ -2518,6 +2602,49 @@ mod tests {
         );
     }
 
+    /// Toggling bit-perfect mid-transition must abandon the in-flight crossfade
+    /// (it flips crossfade eligibility — a blend armed/active under the old mode
+    /// would otherwise desync against the engine's now-refusing gate).
+    #[tokio::test]
+    async fn set_bit_perfect_change_cancels_active_crossfade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        assert!(
+            !engine.crossfade_is_idle(),
+            "precondition: engine must start mid-crossfade",
+        );
+
+        // Default bit_perfect is false; enabling it is a real change.
+        engine.set_bit_perfect(true).await;
+
+        assert!(
+            engine.crossfade_is_idle(),
+            "toggling bit-perfect must cancel the in-flight crossfade",
+        );
+    }
+
+    /// A no-op `set_bit_perfect` (same value) must NOT disturb an in-flight
+    /// transition — `apply_player_settings` re-applies every field on each save.
+    #[tokio::test]
+    async fn set_bit_perfect_no_change_preserves_active_crossfade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        // bit_perfect already defaults to false; setting false again is a no-op.
+        engine.set_bit_perfect(false).await;
+
+        assert!(
+            !engine.crossfade_is_idle(),
+            "an unchanged bit-perfect value must not cancel a crossfade",
+        );
+    }
+
     #[test]
     fn gapless_slot_new_is_not_prepared() {
         let slot = GaplessSlot::new();
@@ -2608,6 +2735,7 @@ mod tests {
             notify,
             true,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            false,
         );
 
         if paused {

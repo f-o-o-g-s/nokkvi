@@ -94,6 +94,11 @@ pub struct PersistedPlayerSettings {
     /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default = "default_true")]
     pub crossfade_enabled: bool,
+    /// Whether bit-perfect output is enabled: play at each track's native
+    /// sample rate with the DSP chain (EQ / software volume / limiter) bypassed,
+    /// letting PipeWire switch the device clock. Off by default (opt-in).
+    #[serde(default)]
+    pub bit_perfect: bool,
     /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]
     pub crossfade_duration_secs: u32,
@@ -380,6 +385,7 @@ impl Default for PersistedPlayerSettings {
             opacity_gradient: default_opacity_gradient(),
             slot_text_links: default_true(),
             crossfade_enabled: true,
+            bit_perfect: false,
             crossfade_duration_secs: default_crossfade_duration_secs(),
             rewind_on_previous: false,
             default_playlist_id: None,

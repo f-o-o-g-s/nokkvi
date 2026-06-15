@@ -21,6 +21,7 @@ fn threshold_crossing_update(song_id: &str, pos: u32, dur: u32) -> PlaybackState
         song_id: Some(song_id.to_string()),
         format_suffix: "flac".to_string(),
         sample_rate: 44100,
+        current_stream_bit_perfect: false,
         bitrate: 1411,
         live_icy_metadata: None,
         bpm: None,

@@ -264,11 +264,11 @@ pub struct AudioDecoder {
     live_codec: Option<String>,
 }
 
-/// Append `packet_dur` frames of S16 silence (`channel_count` channels) when a
-/// packet is skipped, keeping time sync and preventing buffer starvation. Fills
-/// `output_data` up to its `target_bytes` goal, then carries any remainder into
-/// the decoder's `frame_buffer` for the next `read_buffer` call. No-op when
-/// `packet_dur == 0`.
+/// Append `packet_dur` frames of silence (`channel_count` channels,
+/// `bytes_per_sample` bytes per sample) when a packet is skipped, keeping time
+/// sync and preventing buffer starvation. Fills `output_data` up to its
+/// `target_bytes` goal, then carries any remainder into the decoder's
+/// `frame_buffer` for the next `read_buffer` call. No-op when `packet_dur == 0`.
 ///
 /// A free function taking the buffers as disjoint `&mut` args (not a `&mut self`
 /// method): inside `read_buffer`, `self.decoder`/`self.format_reader` are already
@@ -277,6 +277,7 @@ pub struct AudioDecoder {
 fn fill_silence_for_error(
     channel_count: usize,
     packet_dur: u64,
+    bytes_per_sample: usize,
     target_bytes: usize,
     output_data: &mut Vec<u8>,
     frame_buffer: &mut Vec<u8>,
@@ -284,7 +285,7 @@ fn fill_silence_for_error(
     if packet_dur == 0 {
         return;
     }
-    let silence_bytes = (packet_dur as usize) * channel_count * 2; // 2 bytes for i16
+    let silence_bytes = (packet_dur as usize) * channel_count * bytes_per_sample;
     let needed = target_bytes.saturating_sub(output_data.len());
     let to_take = needed.min(silence_bytes);
 
@@ -692,10 +693,12 @@ impl AudioDecoder {
         let sample_rate = codec_params.sample_rate.unwrap_or(44100);
         let channels = codec_params.channels.map_or(2, |c| c.count()) as u32;
 
-        // Convert symphonia sample format to our format
-        // Note: symphonia uses a different sample format system, we'll default to S16
-        // and convert during decoding
-        let sample_format = SampleFormat::S16; // We'll convert to S16 during decode
+        // We decode every codec to full-precision interleaved f32 (see
+        // `read_buffer`'s `RawSampleBuffer::<f32>`). f32 losslessly represents
+        // 16- and 24-bit integer PCM, so this preserves the source's full
+        // resolution end to end — the prerequisite for bit-perfect hi-res
+        // playback. (The former S16 path truncated 24-bit/float sources.)
+        let sample_format = SampleFormat::F32;
 
         let audio_format = AudioFormat::new(sample_format, sample_rate, channels);
 
@@ -993,14 +996,14 @@ impl AudioDecoder {
                     // Convert to interleaved bytes
                     let spec = *audio_buf.spec();
                     let mut raw_buf =
-                        RawSampleBuffer::<i16>::new(audio_buf.capacity() as u64, spec);
+                        RawSampleBuffer::<f32>::new(audio_buf.capacity() as u64, spec);
                     raw_buf.copy_interleaved_ref(audio_buf);
 
                     let mut decoded_bytes = raw_buf.as_bytes();
 
                     // Apply gapless trimming if enabled
                     let channels = spec.channels.count();
-                    let bytes_per_sample = 2; // i16 = 2 bytes per sample
+                    let bytes_per_sample = std::mem::size_of::<f32>();
                     let bytes_per_frame = channels * bytes_per_sample;
 
                     // Trim start: remove encoder delay frames from beginning
@@ -1041,6 +1044,7 @@ impl AudioDecoder {
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
                         packet.dur,
+                        self.format.bytes_per_sample(),
                         bytes,
                         &mut output_data,
                         &mut self.frame_buffer,
@@ -1055,6 +1059,7 @@ impl AudioDecoder {
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
                         packet.dur,
+                        self.format.bytes_per_sample(),
                         bytes,
                         &mut output_data,
                         &mut self.frame_buffer,
@@ -1364,18 +1369,18 @@ mod tests {
     fn fill_silence_zero_duration_is_noop() {
         let mut output = vec![1u8; 4];
         let mut frame_buffer = Vec::new();
-        fill_silence_for_error(2, 0, 100, &mut output, &mut frame_buffer);
+        fill_silence_for_error(2, 0, 4, 100, &mut output, &mut frame_buffer);
         assert_eq!(output, vec![1u8; 4], "zero-dur packet must not append");
         assert!(frame_buffer.is_empty());
     }
 
     #[test]
     fn fill_silence_all_fits_in_output_leaves_frame_buffer_empty() {
-        // 2 ch * 10 frames * 2 bytes = 40 bytes of silence; output goal has room.
+        // 2 ch * 10 frames * 4 bytes (f32) = 80 bytes of silence; output goal has room.
         let mut output = Vec::new();
         let mut frame_buffer = Vec::new();
-        fill_silence_for_error(2, 10, 100, &mut output, &mut frame_buffer);
-        assert_eq!(output, vec![0u8; 40], "all silence goes to output");
+        fill_silence_for_error(2, 10, 4, 100, &mut output, &mut frame_buffer);
+        assert_eq!(output, vec![0u8; 80], "all silence goes to output");
         assert!(
             frame_buffer.is_empty(),
             "no carry-over when silence fits the goal"
@@ -1384,15 +1389,15 @@ mod tests {
 
     #[test]
     fn fill_silence_splits_remainder_into_frame_buffer() {
-        // Output already 90/100 full of real data; 40 bytes of silence → 10 to
-        // output (reaching the 100 goal), 30 carried into the frame buffer.
+        // Output already 90/100 full of real data; 80 bytes of silence → 10 to
+        // output (reaching the 100 goal), 70 carried into the frame buffer.
         let mut output = vec![1u8; 90];
         let mut frame_buffer = Vec::new();
-        fill_silence_for_error(2, 10, 100, &mut output, &mut frame_buffer);
+        fill_silence_for_error(2, 10, 4, 100, &mut output, &mut frame_buffer);
         assert_eq!(output.len(), 100);
         assert_eq!(&output[..90], &[1u8; 90], "existing data is preserved");
         assert_eq!(&output[90..], &[0u8; 10], "goal is topped up with silence");
-        assert_eq!(frame_buffer, vec![0u8; 30], "remainder carries over");
+        assert_eq!(frame_buffer, vec![0u8; 70], "remainder carries over");
     }
 
     #[test]
@@ -1400,9 +1405,9 @@ mod tests {
         // Output already at the goal: nothing appended there, all silence carried.
         let mut output = vec![1u8; 100];
         let mut frame_buffer = Vec::new();
-        fill_silence_for_error(2, 10, 100, &mut output, &mut frame_buffer);
+        fill_silence_for_error(2, 10, 4, 100, &mut output, &mut frame_buffer);
         assert_eq!(output.len(), 100, "no append once the goal is met");
-        assert_eq!(frame_buffer, vec![0u8; 40], "full silence carries over");
+        assert_eq!(frame_buffer, vec![0u8; 80], "full silence carries over");
     }
 
     // =========================================================================

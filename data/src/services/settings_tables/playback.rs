@@ -54,10 +54,34 @@ define_settings! {
                 category: "Playback",
                 subtitle: Some(
                     "Overlap and blend the end of each track into the next. Off plays tracks \
-                     gapless with no overlap. Tracks under 10 seconds always play gapless.",
+                     gapless with no overlap. Tracks under 10 seconds always play gapless. \
+                     Turning this on switches off Bit-Perfect — a blend can't be bit-perfect.",
                 ),
                 default: true,
                 read_field: |d| d.crossfade_enabled,
+            },
+        },
+        BitPerfect {
+            key: "general.bit_perfect",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_bit_perfect(v),
+            toml_apply: |ts, p| p.bit_perfect = ts.bit_perfect,
+            read: |src, out| out.bit_perfect = src.bit_perfect,
+            write: |ps, ts| ts.bit_perfect = ps.bit_perfect,
+            ui_meta: {
+                label: "Bit-Perfect Output",
+                category: "Playback",
+                subtitle: Some(
+                    "Bypass EQ, software volume, and the limiter and feed the DAC each track at its \
+                     native sample rate (volume moves to the PipeWire node). The device switches \
+                     rate on a fresh start or a step up; a mid-session step down (e.g. 96k to \
+                     44.1k) is high-quality resampled, because the DAC can't re-clock live without \
+                     a gap. Off keeps the standard 48kHz output. Turning this on switches off \
+                     Crossfade — blending two tracks can't be bit-perfect. Needs PipeWire \
+                     rate-switching (allowed-rates) configured.",
+                ),
+                default: false,
+                read_field: |d| d.bit_perfect,
             },
         },
         CrossfadeDuration {
@@ -377,6 +401,7 @@ mod tests {
     fn default_playback_data() -> PlaybackSettingsData {
         PlaybackSettingsData {
             crossfade_enabled: false,
+            bit_perfect: false,
             crossfade_duration_secs: 5,
             rewind_on_previous: false,
             volume_normalization: "Off".into(),
@@ -406,10 +431,10 @@ mod tests {
     /// rows are emitted here unconditionally but the UI builder
     /// (`items_playback.rs`) only splices them in when the feature is enabled.
     #[test]
-    fn build_playback_tab_settings_items_emits_eleven_rows() {
+    fn build_playback_tab_settings_items_emits_twelve_rows() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 11);
+        assert_eq!(entries.len(), 12);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -772,6 +797,7 @@ mod tests {
 
         let data = PlaybackSettingsData {
             crossfade_enabled: live.crossfade_enabled,
+            bit_perfect: live.bit_perfect,
             crossfade_duration_secs: i64::from(live.crossfade_duration_secs),
             rewind_on_previous: live.rewind_on_previous,
             volume_normalization: live.volume_normalization.as_label().into(),

@@ -53,6 +53,9 @@ impl Nokkvi {
             PlayerBarMessage::ToggleCrossfade => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleCrossfade))
             }
+            PlayerBarMessage::ToggleBitPerfect => {
+                Task::done(Message::Playback(PlaybackMessage::ToggleBitPerfect))
+            }
             PlayerBarMessage::ScrollVolume(delta) => Task::done(
                 scroll_volume_to_committed_message(self.playback.volume, delta),
             ),

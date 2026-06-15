@@ -120,6 +120,7 @@ pub struct TomlSettings {
 
     // -- Playback --
     pub crossfade_enabled: bool,
+    pub bit_perfect: bool,
     pub crossfade_duration_secs: u32,
     /// Whether the Previous button restarts the current track (instead of
     /// stepping back) once it has played past the threshold. Default false.
@@ -267,6 +268,7 @@ impl Default for TomlSettings {
             strip_show_labels: true,
             strip_separator: crate::types::player_settings::StripSeparator::Slash,
             crossfade_enabled: true,
+            bit_perfect: false,
             crossfade_duration_secs: 7,
             rewind_on_previous: false,
             volume_normalization: VolumeNormalizationMode::default(),

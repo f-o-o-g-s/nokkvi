@@ -475,12 +475,12 @@ impl Nokkvi {
                 self.visualizer = Some(visualizer);
 
                 let audio_engine = shell.audio_engine();
-                // Share the SFX engine's mixer with the music engine so both use
-                // one cpal output stream (avoids dual-ALSA-stream silence bug).
-                // Returns None if no audio device is available — music will also be disabled.
-                let shared_mixer = self.sfx_engine.mixer();
-                let pw_volume = self.sfx_engine.has_native_volume();
-                // Push the canonical shared EqState alongside the mixer so the
+                // Hand the music-output bridge to the engine. The renderer owns
+                // the music sink (rebuilt per-track at native rate in bit-perfect
+                // mode) and publishes its mixer + IPC into the bridge; the SFX
+                // engine + volume UI reach the current sink through it.
+                let music_bridge = self.sfx_engine.music_bridge();
+                // Push the canonical shared EqState alongside the bridge so the
                 // renderer holds the live UI-owned atomics BEFORE the first
                 // stream is created — otherwise a track that starts before the
                 // async apply_player_settings task lands would track the
@@ -492,10 +492,7 @@ impl Nokkvi {
                     .spawn("setup_audio", move || async move {
                         let mut engine = audio_engine.lock().await;
                         engine.set_visualizer_callback(viz_callback);
-                        if let Some(mixer) = shared_mixer {
-                            engine.set_shared_mixer(mixer);
-                        }
-                        engine.set_pw_volume_active(pw_volume);
+                        engine.set_music_bridge(music_bridge);
                         engine.set_eq_state(eq_state);
                     });
 

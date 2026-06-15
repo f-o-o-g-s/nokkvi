@@ -657,6 +657,7 @@ mod tests {
             vec![
                 "general.crossfade_enabled",
                 "general.crossfade_duration",
+                "general.bit_perfect",
                 "general.rewind_on_previous",
                 "general.volume_normalization",
                 "general.scrobbling_enabled",

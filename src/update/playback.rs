@@ -16,6 +16,107 @@ use crate::{
 /// seconds), so restart engages once the clock reaches 0:05.
 const PREV_RESTART_THRESHOLD_SECS: u32 = 5;
 
+/// Resolve which of the open ALSA playback rates is the OUTPUT DEVICE's — for
+/// the honest bit-perfect indicator — given the track's rate. The device-rate
+/// READ lives in the data crate ([`nokkvi_data::audio::active_alsa_playback_rates`]);
+/// this is the pure policy on top of it. Pure for testing.
+///
+/// - Prefer `track_rate` when it's among the open rates: the DAC the track
+///   feeds is then clocked at the track rate (genuine bit-perfect) even if a
+///   SECOND app holds another card open at a different rate — the multi-device
+///   desktop case that previously read as a false "UNVERIFIED".
+/// - Otherwise, when exactly one rate is open, that's the device (resampled to
+///   it).
+/// - Otherwise `None`: the tree was unreadable (idle / Bluetooth — no ALSA PCM)
+///   or several rates are open with NONE matching the track — genuinely
+///   ambiguous, so we don't guess which is the DAC.
+fn resolve_device_rate(open_rates: &[u32], track_rate: u32) -> Option<u32> {
+    if open_rates.contains(&track_rate) {
+        Some(track_rate)
+    } else if let [only] = open_rates {
+        Some(*only)
+    } else {
+        None
+    }
+}
+
+/// Re-probe the real device rate at most this often (in 100ms playback ticks ≈
+/// 1s) while a bit-perfect track plays steadily — the device re-clock settles
+/// asynchronously after a sink rebuild, so the badge must keep checking to
+/// self-heal, but not on every tick (the `/proc/asound` walk blocks the UI).
+const BIT_PERFECT_PROBE_INTERVAL_TICKS: u8 = 10;
+
+/// Consecutive unreadable device-rate probes required after a transition before
+/// the badge commits to the settled "UNVERIFIED" verdict. PipeWire opens the
+/// hardware PCM asynchronously after a per-track sink rebuild, so the first
+/// probe(s) can read nothing even on a wired DAC about to verify; holding at the
+/// hidden `Unknown` for one grace probe (≈1s, one re-probe interval) avoids a
+/// false "UNVERIFIED" flash at the start of every hi-res track, while a truly
+/// unreadable sink (Bluetooth / idle) still settles to `Unverifiable`.
+const BIT_PERFECT_UNVERIFIABLE_GRACE_PROBES: u8 = 2;
+
+/// Re-derive the resampled HOLDER name (the expensive full PipeWire-graph walk)
+/// at most once per this many device-rate probes (≈ this many seconds, since the
+/// rate probe runs ~1/s). Between re-derives the cached name is reused, so a
+/// steadily-resampled track doesn't open a fresh PipeWire client every second;
+/// bounding it (rather than caching for the whole episode) means a holder that
+/// closes or is replaced at the same device rate self-corrects within a few
+/// seconds instead of showing a stale "Close X" for the rest of the track.
+const BIT_PERFECT_HOLDER_REPROBE_PROBES: u8 = 5;
+
+/// Map the probed device clock to an honest bit-perfect status. The caller has
+/// already confirmed bit-perfect is engaged and a track is playing, and resolved
+/// the device rate from the open-rate set via [`resolve_device_rate`]; this only
+/// compares the track rate to that REAL device rate: equal → `Verified` (no
+/// resampler), different → `Resampled` (PipeWire is converting), `None` →
+/// `Unverifiable` (no readable ALSA hardware PCM — Bluetooth or idle).
+/// `Unverifiable` is the SETTLED can't-read state and surfaces an "UNVERIFIED"
+/// hint; the separate `Unknown` state is only the transient pre-probe
+/// placeholder the gate resets to (and the unverifiable-grace window holds),
+/// which stays hidden.
+fn bit_perfect_status_for(
+    track_rate: u32,
+    device_rate: Option<u32>,
+) -> crate::state::BitPerfectStatus {
+    use crate::state::BitPerfectStatus;
+    match device_rate {
+        Some(dev) if dev == track_rate => BitPerfectStatus::Verified,
+        Some(dev) => BitPerfectStatus::Resampled { device_rate: dev },
+        None => BitPerfectStatus::Unverifiable,
+    }
+}
+
+/// Whether the honest bit-perfect badge should be live for the playing track.
+/// Pure for testing.
+///
+/// Keys off the build-time fact `current_stream_bit_perfect` (whether the
+/// CURRENTLY-PLAYING stream was actually constructed bit-perfect) rather than
+/// the live setting: a mid-track toggle only takes effect on the next track, so
+/// reading the setting would let the badge claim BIT-PERFECT for a stream still
+/// on the DSP path. `current_stream_bit_perfect` already encodes the
+/// native-PipeWire-volume requirement (the cpal fallback can't be bit-perfect),
+/// so no separate native-volume check is needed. Radio is excluded outright —
+/// a lossy network stream can't be bit-perfect regardless of the device clock.
+fn bit_perfect_badge_engaged(
+    current_stream_bit_perfect: bool,
+    playing: bool,
+    is_radio: bool,
+) -> bool {
+    current_stream_bit_perfect && playing && !is_radio
+}
+
+/// Whether a loaded config must have crossfade cleared because BOTH crossfade
+/// and bit-perfect are enabled (mutually exclusive — a blend can't be
+/// bit-perfect; bit-perfect wins as the non-default opt-in). Pure for testing.
+///
+/// Deliberately a plain "both true" check, NOT `resolve_exclusion`: that helper
+/// assumes the named setting was just toggled on, so its `BitPerfect` arm keys
+/// on `crossfade_enabled` alone — using it here would clear crossfade for every
+/// crossfade-only config (the shipped default), silently wiping the setting.
+fn load_reconcile_clears_crossfade(crossfade_enabled: bool, bit_perfect: bool) -> bool {
+    crossfade_enabled && bit_perfect
+}
+
 /// Resolve the next radio-station index when cycling.
 ///
 /// `current_pos` is the position of the currently-playing station in the list,
@@ -90,6 +191,11 @@ impl Nokkvi {
                 let playing = engine.playing();
                 let paused = engine.immediate_paused();
                 let sample_rate = engine.sample_rate();
+                // Build-time bit-perfect fact for the honest badge: whether the
+                // CURRENTLY-PLAYING stream was actually built bit-perfect, not
+                // the live setting (a mid-track toggle only takes effect next
+                // track). Read here under the same engine lock as the rest.
+                let current_stream_bit_perfect = engine.current_stream_bit_perfect();
                 // Live compressed bitrate from decoder (0 if not yet decoding)
                 let engine_live_bitrate = engine.live_bitrate();
                 let engine_live_icy_metadata = engine.live_icy_metadata();
@@ -226,6 +332,7 @@ impl Nokkvi {
                     song_id,
                     format_suffix,
                     sample_rate,
+                    current_stream_bit_perfect,
                     bitrate,
                     live_icy_metadata: engine_live_icy_metadata,
                     bpm,
@@ -258,6 +365,7 @@ impl Nokkvi {
             song_id,
             format_suffix,
             sample_rate,
+            current_stream_bit_perfect,
             bitrate,
             live_icy_metadata,
             bpm,
@@ -312,6 +420,8 @@ impl Nokkvi {
         }
 
         // Update playback and mode fields
+        let prev_rate = self.playback.sample_rate;
+        let prev_playing = self.playback.playing;
         self.playback.position = pos;
         self.playback.duration = dur;
         self.playback.playing = playing;
@@ -321,6 +431,118 @@ impl Nokkvi {
         self.playback.album = album.clone();
         self.playback.format_suffix = format_suffix;
         self.playback.sample_rate = sample_rate;
+        // Honest bit-perfect badge. Engaged only when the CURRENTLY-PLAYING
+        // stream was actually built bit-perfect (build-time fact from the
+        // renderer — NOT the live setting, which a mid-track toggle flips before
+        // the running stream changes), playback is active, and this is queue
+        // playback (a lossy radio stream can't be bit-perfect). The renderer's
+        // build-time fact already encodes the native-PipeWire-volume requirement
+        // (`bit_perfect_active`), so the cpal fallback reports false here.
+        let mut bit_perfect_probe_task: Option<Task<Message>> = None;
+        let bit_perfect_engaged = bit_perfect_badge_engaged(
+            current_stream_bit_perfect,
+            playing,
+            self.active_playback.is_radio(),
+        );
+        self.playback.bit_perfect_engaged = bit_perfect_engaged;
+        // A genuine track / play-state change (vs a same-track periodic
+        // re-probe) — bound once so the probe-dispatch gate and the
+        // verdict-reset below can't drift (they MUST agree, or a stale verdict
+        // lingers).
+        let is_transition = prev_rate != sample_rate || !prev_playing;
+        if !bit_perfect_engaged {
+            self.playback.bit_perfect_status = crate::state::BitPerfectStatus::Off;
+            self.playback.bit_perfect_probe_ticks = 0;
+        } else if is_transition || self.playback.bit_perfect_probe_ticks == 0 {
+            // Re-probe the REAL device clock immediately on a rate/play-state
+            // change, and otherwise at most once every ~1s
+            // (BIT_PERFECT_PROBE_INTERVAL_TICKS) — not on every 100ms tick. The
+            // blocking /proc/asound walk runs OFF the update/render thread via
+            // Task::perform; its result lands as `BitPerfectDeviceRateProbed`.
+            // On a genuine track/play-state CHANGE, clear the prior track's
+            // verdict to Unknown (badge hidden) so the honest badge shows nothing
+            // — rather than the previous track's stale claim — until the fresh
+            // probe lands, and reset the unverifiable-grace streak so the new
+            // track's settling window is judged from scratch. The periodic
+            // same-track re-probe keeps the current verdict to avoid a ~1s flicker.
+            if is_transition {
+                self.playback.bit_perfect_status = crate::state::BitPerfectStatus::Unknown;
+                self.playback.bit_perfect_unverifiable_streak = 0;
+                // Fresh episode: re-derive the holder on this probe, then cache
+                // it for the next few cycles.
+                self.playback.bit_perfect_holder_reprobe_ticks = 0;
+            }
+            self.playback.bit_perfect_probe_ticks = BIT_PERFECT_PROBE_INTERVAL_TICKS;
+            // Tag this probe so a stale, out-of-order result can't clobber a
+            // fresher one (the blocking pool gives no completion ordering).
+            self.playback.bit_perfect_probe_generation =
+                self.playback.bit_perfect_probe_generation.wrapping_add(1);
+            let generation = self.playback.bit_perfect_probe_generation;
+            let track_rate = sample_rate;
+            // The expensive part is the resampled HOLDER walk (a fresh PipeWire
+            // client + full graph enumeration). Re-derive it only when the device
+            // rate changed, we have no name yet, or this re-probe tick is due
+            // (BIT_PERFECT_HOLDER_REPROBE_PROBES); otherwise reuse the cached
+            // name. The cheap /proc/asound rate read still runs every cycle to
+            // self-heal the Verified/Resampled verdict. Bounding the reuse (vs
+            // caching for the whole episode) means a holder that closes or is
+            // replaced at the same rate self-corrects within a few seconds.
+            let force_holder_reprobe = self.playback.bit_perfect_holder_reprobe_ticks == 0;
+            self.playback.bit_perfect_holder_reprobe_ticks = if force_holder_reprobe {
+                BIT_PERFECT_HOLDER_REPROBE_PROBES
+            } else {
+                self.playback.bit_perfect_holder_reprobe_ticks - 1
+            };
+            let prior_holder = self.playback.bit_perfect_holder.clone();
+            let prior_device_rate = match self.playback.bit_perfect_status {
+                crate::state::BitPerfectStatus::Resampled { device_rate } => Some(device_rate),
+                _ => None,
+            };
+            bit_perfect_probe_task = Some(Task::perform(
+                // Run the blocking /proc/asound walk on tokio's dedicated
+                // blocking pool so it ties up neither the update/render thread
+                // nor an async worker. `unwrap_or_default()` swallows a JoinError
+                // (e.g. a panic in the walk) as "no rates read". When the device
+                // rate differs from the track (resampled), reuse the cached
+                // holder name unless a re-derive is due, else probe the PipeWire
+                // graph off-thread to name the app holding the device.
+                async move {
+                    let open_rates =
+                        tokio::task::spawn_blocking(nokkvi_data::audio::active_alsa_playback_rates)
+                            .await
+                            .unwrap_or_default();
+                    let device_rate = resolve_device_rate(&open_rates, track_rate);
+                    let holder = if device_rate.is_some_and(|d| d != track_rate) {
+                        if !force_holder_reprobe
+                            && prior_device_rate == device_rate
+                            && prior_holder.is_some()
+                        {
+                            prior_holder
+                        } else {
+                            tokio::task::spawn_blocking(|| {
+                                nokkvi_data::audio::probe_sink_holder("Nokkvi")
+                            })
+                            .await
+                            .unwrap_or(None)
+                        }
+                    } else {
+                        None
+                    };
+                    (device_rate, holder)
+                },
+                move |(device_rate, holder)| {
+                    Message::Playback(PlaybackMessage::BitPerfectDeviceRateProbed {
+                        generation,
+                        track_rate,
+                        device_rate,
+                        holder,
+                    })
+                },
+            ));
+        } else {
+            self.playback.bit_perfect_probe_ticks =
+                self.playback.bit_perfect_probe_ticks.saturating_sub(1);
+        }
         self.playback.bitrate = bitrate;
         self.playback.bpm = bpm;
         // Reconcile mode flags from the backend snapshot — but ONLY when no
@@ -464,6 +686,12 @@ impl Nokkvi {
             repeat_queue,
             random,
         });
+
+        // Fold in the off-thread device-rate probe (when one was dispatched for
+        // the honest bit-perfect badge this tick).
+        if let Some(probe) = bit_perfect_probe_task {
+            tasks.push(probe);
+        }
 
         if tasks.is_empty() {
             Task::none()
@@ -1226,30 +1454,164 @@ impl Nokkvi {
         Task::none()
     }
 
-    pub(crate) fn handle_toggle_crossfade(&mut self) -> Task<Message> {
-        self.engine.crossfade_enabled = !self.engine.crossfade_enabled;
-        let label = if self.engine.crossfade_enabled {
-            "Crossfade: On"
-        } else {
-            "Crossfade: Off"
-        };
-        self.toast_info(label);
+    /// Apply the result of the off-thread `/proc/asound` device-rate probe to
+    /// the honest bit-perfect badge. Guarded against staleness three ways: the
+    /// probe is dropped if it is not the latest one dispatched (an out-of-order
+    /// result must not clobber a fresher one), if bit-perfect is no longer
+    /// engaged (the 100ms tick has already set the badge `Off`), or if the track
+    /// rate changed out from under it (a 96k probe must not relabel a now-playing
+    /// 44.1k track).
+    pub(crate) fn handle_bit_perfect_device_rate_probed(
+        &mut self,
+        generation: u64,
+        track_rate: u32,
+        device_rate: Option<u32>,
+        holder: Option<String>,
+    ) -> Task<Message> {
+        if generation == self.playback.bit_perfect_probe_generation
+            && self.playback.bit_perfect_engaged
+            && self.playback.sample_rate == track_rate
+        {
+            let status = match device_rate {
+                // Got a device-clock reading — commit the verdict and reset the
+                // grace streak.
+                Some(_) => {
+                    self.playback.bit_perfect_unverifiable_streak = 0;
+                    bit_perfect_status_for(track_rate, device_rate)
+                }
+                // No readable device rate. Right after a transition PipeWire may
+                // still be opening the hardware PCM, so hold at the hidden
+                // `Unknown` for a grace probe before committing the settled
+                // "UNVERIFIED"; only a persistently unreadable sink (Bluetooth /
+                // idle) reaches the threshold.
+                None => {
+                    self.playback.bit_perfect_unverifiable_streak = self
+                        .playback
+                        .bit_perfect_unverifiable_streak
+                        .saturating_add(1);
+                    if self.playback.bit_perfect_unverifiable_streak
+                        >= BIT_PERFECT_UNVERIFIABLE_GRACE_PROBES
+                    {
+                        crate::state::BitPerfectStatus::Unverifiable
+                    } else {
+                        crate::state::BitPerfectStatus::Unknown
+                    }
+                }
+            };
+            // The holder name is only meaningful while resampled; clear it
+            // otherwise so a stale name never lingers on a Verified/BT badge.
+            self.playback.bit_perfect_holder =
+                matches!(status, crate::state::BitPerfectStatus::Resampled { .. })
+                    .then_some(holder)
+                    .flatten();
+            self.playback.bit_perfect_status = status;
+        }
+        Task::none()
+    }
 
-        // Persist to storage and sync to audio engine
-        let enabled = self.engine.crossfade_enabled;
-        self.shell_spawn("persist_crossfade_toggle", move |shell| async move {
-            shell.settings().set_crossfade_enabled(enabled).await?;
+    /// Flip one of the two mutually-exclusive playback modes (crossfade ⇄
+    /// bit-perfect) from the player-bar toggle / kebab / hotkey: optimistic
+    /// flip, the exclusion rule, one toast, persistence, and the engine sync,
+    /// once. Both toggle entry points route here so the orchestration stays
+    /// single-sourced — only the rule lives in `resolve_exclusion`; this is the
+    /// shared flip+toast+persist+sync around it. (The settings-checkbox path is
+    /// deliberately separate: it applies the flip inside its own blocking-lock
+    /// dispatch snapshot, but shares the same `resolve_exclusion`.)
+    fn apply_exclusive_toggle(
+        &mut self,
+        which: crate::update::components::ExclusiveSetting,
+    ) -> Task<Message> {
+        use crate::update::components::{ExclusiveSetting, resolve_exclusion};
+
+        // Optimistic flip of the chosen flag.
+        let now_enabled = match which {
+            ExclusiveSetting::Crossfade => {
+                self.engine.crossfade_enabled = !self.engine.crossfade_enabled;
+                self.engine.crossfade_enabled
+            }
+            ExclusiveSetting::BitPerfect => {
+                self.engine.bit_perfect = !self.engine.bit_perfect;
+                self.engine.bit_perfect
+            }
+        };
+
+        // Enabling one turns the other off (a blend can't be bit-perfect);
+        // disabling never touches the sibling. Resolved from the post-flip state
+        // via the shared rule so the player-bar/hotkey path matches the settings
+        // checkbox.
+        let exclusion = now_enabled
+            .then(|| {
+                resolve_exclusion(
+                    which,
+                    self.engine.crossfade_enabled,
+                    self.engine.bit_perfect,
+                )
+            })
+            .flatten();
+        if let Some(ex) = exclusion {
+            match ex.clear {
+                ExclusiveSetting::Crossfade => self.engine.crossfade_enabled = false,
+                ExclusiveSetting::BitPerfect => self.engine.bit_perfect = false,
+            }
+        }
+
+        // One toast: the combined exclusion message when it flipped the sibling,
+        // otherwise the plain on/off label for the toggled mode.
+        match exclusion {
+            Some(ex) => self.toast_info(ex.toast),
+            None => self.toast_info(match (which, now_enabled) {
+                (ExclusiveSetting::Crossfade, true) => "Crossfade: On",
+                (ExclusiveSetting::Crossfade, false) => "Crossfade: Off",
+                (ExclusiveSetting::BitPerfect, true) => "Bit-Perfect: On",
+                (ExclusiveSetting::BitPerfect, false) => "Bit-Perfect: Off",
+            }),
+        }
+
+        // Persist + engine-sync ONLY the flag(s) that actually changed. The
+        // toggled flag always flipped; the sibling changed only when the
+        // exclusion cleared it. Each `set_*` does a full save() (a redb write +
+        // a complete config.toml re-serialize), so persisting an unchanged flag
+        // is a wasted disk round-trip.
+        let (persist_crossfade, persist_bit_perfect) = match which {
+            ExclusiveSetting::Crossfade => (true, exclusion.is_some()),
+            ExclusiveSetting::BitPerfect => (exclusion.is_some(), true),
+        };
+        let crossfade = self.engine.crossfade_enabled;
+        let bit_perfect = self.engine.bit_perfect;
+        self.shell_spawn("persist_exclusive_toggle", move |shell| async move {
+            if persist_crossfade {
+                shell.settings().set_crossfade_enabled(crossfade).await?;
+            }
+            if persist_bit_perfect {
+                shell.settings().set_bit_perfect(bit_perfect).await?;
+            }
             let engine_arc = shell.audio_engine();
             let mut engine = engine_arc.lock().await;
-            engine.set_crossfade_enabled(enabled);
+            if persist_crossfade {
+                engine.set_crossfade_enabled(crossfade);
+            }
+            if persist_bit_perfect {
+                engine.set_bit_perfect(bit_perfect).await;
+            }
             Ok(())
         });
-        // The Playback tab's crossfade row mirrors this engine flag — the
-        // toggle is reachable from the player-bar mode menu while Settings
-        // is open, so refresh the cached entries (no-op off-Settings).
+        // The Playback tab's crossfade + bit-perfect rows mirror these engine
+        // flags — the toggle is reachable from the player-bar mode menu while
+        // Settings is open, so refresh the cached entries (no-op off-Settings).
         self.settings_page.config_dirty = true;
         self.refresh_settings_entries_if_dirty();
         Task::none()
+    }
+
+    pub(crate) fn handle_toggle_crossfade(&mut self) -> Task<Message> {
+        self.apply_exclusive_toggle(crate::update::components::ExclusiveSetting::Crossfade)
+    }
+
+    /// Toggle bit-perfect from the player-bar mode toggle / kebab / hotkey.
+    /// Enabling bit-perfect turns crossfade off (mutually exclusive) via the
+    /// shared `resolve_exclusion`; see [`Self::apply_exclusive_toggle`].
+    pub(crate) fn handle_toggle_bit_perfect(&mut self) -> Task<Message> {
+        self.apply_exclusive_toggle(crate::update::components::ExclusiveSetting::BitPerfect)
     }
 
     pub(crate) fn handle_seek(&mut self, val: f32) -> Task<Message> {
@@ -1369,7 +1731,7 @@ impl Nokkvi {
 
     pub(crate) fn handle_player_settings_loaded(
         &mut self,
-        settings: crate::app_message::LivePlayerSettings,
+        mut settings: crate::app_message::LivePlayerSettings,
     ) -> Task<Message> {
         self.playback.volume = settings.volume;
         self.sfx.volume = settings.sfx_volume;
@@ -1385,8 +1747,37 @@ impl Nokkvi {
             viz.set_feed_active(viz_active);
         }
 
-        // Crossfade settings
+        // Crossfade settings. Crossfade and bit-perfect are mutually exclusive
+        // (a blend can't be bit-perfect). The toggle/checkbox paths persist the
+        // cleared sibling so disk never holds both, but a hand-edited or
+        // pre-rule config could — reconcile on load via the SAME shared rule so
+        // the engine, the renderer, and the player-bar toggles agree. Bit-perfect
+        // wins (it's the non-default opt-in; crossfade defaults on).
+        // Reconcile on the `settings` struct ITSELF so every downstream consumer
+        // — the engine flags, the async engine push, AND the persisted
+        // `self.settings` mirror below — sees the corrected value and can't
+        // drift. Fire ONLY when BOTH are actually enabled (a hand-edited or
+        // pre-rule config); bit-perfect wins (the non-default opt-in). Do NOT
+        // route this through `resolve_exclusion`: that helper assumes the named
+        // setting was JUST toggled on, so its BitPerfect arm keys on
+        // `crossfade_enabled` alone and would wrongly fire for every
+        // crossfade-only config — the shipped default. The correction is written
+        // back to disk so an invalid both-true config self-heals.
+        let reconciled_crossfade_off =
+            load_reconcile_clears_crossfade(settings.crossfade_enabled, settings.bit_perfect);
+        if reconciled_crossfade_off {
+            tracing::warn!(
+                "⚙️ Settings had both crossfade and bit-perfect enabled; disabling crossfade \
+                 (mutually exclusive)"
+            );
+            settings.crossfade_enabled = false;
+            self.shell_spawn("persist_crossfade_reconcile", |shell| async move {
+                shell.settings().set_crossfade_enabled(false).await?;
+                Ok(())
+            });
+        }
         self.engine.crossfade_enabled = settings.crossfade_enabled;
+        self.engine.bit_perfect = settings.bit_perfect;
         self.engine.crossfade_duration_secs = settings.crossfade_duration_secs;
 
         // Volume normalization settings
@@ -1417,7 +1808,10 @@ impl Nokkvi {
         // Push crossfade + normalization settings to the audio engine (accumulated, not early-returned)
         let crossfade_task = if let Some(shell) = &self.app_service {
             let shell = shell.clone();
+            // `settings` is already reconciled above (bit-perfect may have
+            // cleared crossfade), so the engine sync matches the UI/renderer.
             let enabled = settings.crossfade_enabled;
+            let bit_perfect = settings.bit_perfect;
             let duration_secs = settings.crossfade_duration_secs;
             let mode = settings.volume_normalization;
             let norm_target = settings.normalization_level.target_level();
@@ -1431,6 +1825,7 @@ impl Nokkvi {
                     let engine = shell.audio_engine();
                     let mut engine_guard = engine.lock().await;
                     engine_guard.set_crossfade_enabled(enabled);
+                    engine_guard.set_bit_perfect(bit_perfect).await;
                     engine_guard.set_crossfade_duration(duration_secs);
                     engine_guard.set_volume_normalization(
                         mode,
@@ -1852,6 +2247,18 @@ impl Nokkvi {
             PlaybackMessage::SfxVolumeChanged(vol) => self.handle_sfx_volume_changed(vol),
             PlaybackMessage::CycleVisualization => self.handle_cycle_visualization(),
             PlaybackMessage::ToggleCrossfade => self.handle_toggle_crossfade(),
+            PlaybackMessage::ToggleBitPerfect => self.handle_toggle_bit_perfect(),
+            PlaybackMessage::BitPerfectDeviceRateProbed {
+                generation,
+                track_rate,
+                device_rate,
+                holder,
+            } => self.handle_bit_perfect_device_rate_probed(
+                generation,
+                track_rate,
+                device_rate,
+                holder,
+            ),
             PlaybackMessage::Seek(val) => self.handle_seek(val),
             PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
             PlaybackMessage::VolumeCommitted(val) => self.handle_volume_committed(val),
@@ -1902,5 +2309,135 @@ mod cycle_index_tests {
     fn resolve_cycle_index_empty_is_none() {
         assert_eq!(resolve_cycle_index(0, None, true), None);
         assert_eq!(resolve_cycle_index(0, Some(0), false), None);
+    }
+}
+
+#[cfg(test)]
+mod bit_perfect_badge_engaged_tests {
+    use super::bit_perfect_badge_engaged;
+
+    #[test]
+    fn engaged_only_when_stream_is_bit_perfect_playing_and_not_radio() {
+        // The happy path: a bit-perfect-built stream, playing, queue (not radio).
+        assert!(bit_perfect_badge_engaged(true, true, false));
+    }
+
+    #[test]
+    fn not_engaged_when_running_stream_is_not_bit_perfect() {
+        // A mid-track toggle flips the SETTING, but the running stream stays on
+        // the DSP path until the next track — the badge must read the build-time
+        // fact (false here), not the setting, so it does not falsely light up.
+        assert!(!bit_perfect_badge_engaged(false, true, false));
+    }
+
+    #[test]
+    fn not_engaged_when_paused_or_stopped() {
+        assert!(!bit_perfect_badge_engaged(true, false, false));
+    }
+
+    #[test]
+    fn not_engaged_for_radio_even_if_stream_built_bit_perfect() {
+        // A lossy network radio stream can't be bit-perfect regardless of the
+        // device clock, so the badge is suppressed for radio.
+        assert!(!bit_perfect_badge_engaged(true, true, true));
+    }
+}
+
+#[cfg(test)]
+mod load_reconcile_tests {
+    use super::load_reconcile_clears_crossfade;
+
+    #[test]
+    fn clears_crossfade_only_when_both_enabled() {
+        assert!(load_reconcile_clears_crossfade(true, true));
+    }
+
+    #[test]
+    fn keeps_crossfade_for_the_shipped_default_crossfade_only_config() {
+        // The regression guard: crossfade on + bit-perfect OFF (the shipped
+        // default) must NOT reconcile crossfade off. Routing this through
+        // resolve_exclusion(BitPerfect, ..) returned true here and silently wiped
+        // crossfade for the majority of users.
+        assert!(!load_reconcile_clears_crossfade(true, false));
+    }
+
+    #[test]
+    fn no_op_for_bit_perfect_only_or_neither() {
+        assert!(!load_reconcile_clears_crossfade(false, true));
+        assert!(!load_reconcile_clears_crossfade(false, false));
+    }
+}
+
+#[cfg(test)]
+mod bit_perfect_status_tests {
+    use super::bit_perfect_status_for;
+    use crate::state::BitPerfectStatus;
+
+    #[test]
+    fn device_rate_equal_to_track_is_verified() {
+        assert_eq!(
+            bit_perfect_status_for(96_000, Some(96_000)),
+            BitPerfectStatus::Verified
+        );
+    }
+
+    #[test]
+    fn device_rate_differs_is_resampled_with_real_device_rate() {
+        // The textbook live down-switch: track 44.1k, device held at 96k.
+        assert_eq!(
+            bit_perfect_status_for(44_100, Some(96_000)),
+            BitPerfectStatus::Resampled {
+                device_rate: 96_000
+            }
+        );
+    }
+
+    #[test]
+    fn unreadable_device_rate_is_unverifiable() {
+        // A probe that found no ALSA hardware clock (Bluetooth / idle) is the
+        // SETTLED can't-read state — Unverifiable (surfaces the UNVERIFIED hint),
+        // not the transient Unknown placeholder the gate resets to.
+        assert_eq!(
+            bit_perfect_status_for(44_100, None),
+            BitPerfectStatus::Unverifiable
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolve_device_rate_tests {
+    use super::resolve_device_rate;
+
+    #[test]
+    fn empty_rates_is_none() {
+        // Nothing open (idle / Bluetooth — no ALSA PCM) → can't determine.
+        assert_eq!(resolve_device_rate(&[], 96_000), None);
+    }
+
+    #[test]
+    fn single_matching_rate_is_the_device() {
+        assert_eq!(resolve_device_rate(&[96_000], 96_000), Some(96_000));
+    }
+
+    #[test]
+    fn single_non_matching_rate_is_resampled_to_it() {
+        // One device open at 48k while the track is 96k → resampled to 48k.
+        assert_eq!(resolve_device_rate(&[48_000], 96_000), Some(48_000));
+    }
+
+    #[test]
+    fn track_rate_present_among_several_wins() {
+        // The multi-device desktop case that used to read as a false UNVERIFIED:
+        // the DAC the track feeds is at the track rate (96k) while a second app
+        // holds another card at 48k. Preferring the track rate confirms
+        // bit-perfect instead of bailing to None.
+        assert_eq!(resolve_device_rate(&[48_000, 96_000], 96_000), Some(96_000));
+    }
+
+    #[test]
+    fn several_rates_none_matching_is_ambiguous_none() {
+        // Multiple devices open, none at the track rate → we can't tell which is
+        // the DAC, so don't guess.
+        assert_eq!(resolve_device_rate(&[44_100, 48_000], 96_000), None);
     }
 }

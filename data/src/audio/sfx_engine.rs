@@ -21,7 +21,7 @@ use rodio::{DeviceSinkBuilder, MixerDeviceSink, buffer::SamplesBuffer};
 use symphonia::core::{audio::SampleBuffer, io::MediaSourceStream, probe::Hint};
 
 use super::{load_f32, store_f32};
-use crate::audio::symphonia_registry;
+use crate::audio::{music_bridge::MusicOutputBridge, symphonia_registry};
 
 /// Sound effect types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,9 +71,12 @@ pub struct SfxEngine {
     view_select_samples: Arc<Vec<f32>>,
     expand_collapse_samples: Arc<Vec<f32>>,
     escape_samples: Arc<Vec<f32>>,
-    /// Audio device sink wrapper — its mixer() is used to add voices.
-    /// `None` when no audio device is available (graceful degradation).
-    sink: Option<ActiveSink>,
+    /// Bridge to the renderer-owned music sink. SFX voices are added to the
+    /// current music mixer (so they share the one music stream and the device
+    /// can switch rate), and the now-playing title + user volume are mirrored
+    /// to the music node through here. The renderer publishes into it whenever
+    /// it (re)builds the sink; empty until the renderer's first sink build.
+    bridge: Arc<MusicOutputBridge>,
     // Throttle: last play timestamps
     last_tab_play: Cell<Instant>,
     last_view_select_play: Cell<Instant>,
@@ -99,12 +102,10 @@ impl SfxEngine {
 
         tracing::info!("🔊 SfxEngine: Loaded {} sound effects (rodio mode)", 6);
 
-        // Open a dedicated rodio output for SFX
-        // (separate from the music output so SFX volume is independent)
-        let mut sink = open_preferred_sink()?;
-        sink.log_on_drop(false);
-        let sink = Some(sink);
-
+        // The music sink (and its mixer) is owned by the renderer, which
+        // (re)builds it at each track's native rate. SFX voices are added to
+        // that one mixer via the bridge, so there is a single music stream the
+        // device can switch rate on. Empty until the renderer's first build.
         Ok(Self {
             volume: Arc::new(AtomicU32::new(0.68_f32.to_bits())),
             enabled: Arc::new(AtomicBool::new(true)),
@@ -114,10 +115,16 @@ impl SfxEngine {
             view_select_samples: Arc::new(view_select_samples),
             expand_collapse_samples: Arc::new(expand_collapse_samples),
             escape_samples: Arc::new(escape_samples),
-            sink,
+            bridge: Arc::new(MusicOutputBridge::new()),
             last_tab_play: Cell::new(Instant::now() - Duration::from_millis(100)),
             last_view_select_play: Cell::new(Instant::now() - Duration::from_millis(100)),
         })
+    }
+
+    /// The bridge to the renderer-owned music sink. Handed to the audio engine
+    /// at login so the renderer can publish its mixer + IPC forwarder into it.
+    pub fn music_bridge(&self) -> Arc<MusicOutputBridge> {
+        Arc::clone(&self.bridge)
     }
 
     /// Seed the config sfx directory with bundled defaults.
@@ -330,15 +337,21 @@ impl SfxEngine {
             stereo.push(s); // Right
         }
 
-        // Create a SamplesBuffer (stereo, 48kHz) and add to mixer
-        let Some(ref sink) = self.sink else { return };
+        // Add the voice to the current music mixer (published by the renderer).
+        // The SamplesBuffer declares its own 48kHz rate, so rodio resamples it to
+        // the music mixer's rate when the track is hi-res — SFX quality is not a
+        // concern. `None` before the renderer's first sink build (SFX silent
+        // until the first track), or if no audio device is available.
+        let Some(mixer) = self.bridge.mixer() else {
+            return;
+        };
         use std::num::NonZero;
         let channels_nz = NonZero::new(2u16).expect("2 is nonzero");
         let sample_rate_nz = NonZero::new(Self::SAMPLE_RATE).expect("48000 is nonzero");
         let buffer = SamplesBuffer::new(channels_nz, sample_rate_nz, stereo);
 
         // mixer().add() adds the source to the mixer — polyphony is automatic
-        sink.mixer().add(buffer);
+        mixer.add(buffer);
     }
 
     /// Set volume (0.0-1.0)
@@ -361,23 +374,14 @@ impl SfxEngine {
         self.enabled.load(Ordering::Relaxed)
     }
 
-    /// Get a clone of the shared mixer reference.
-    ///
-    /// Used by the music engine to share the same cpal output stream,
-    /// avoiding conflicts with dual ALSA/PipeWire streams.
-    /// Returns `None` if no audio device is available.
-    pub fn mixer(&self) -> Option<rodio::mixer::Mixer> {
-        self.sink.as_ref().map(|s| s.mixer().clone())
-    }
-
-    /// Update the PipeWire stream description externally (only affects NativePipeWire mode)
+    /// Update the music node's PipeWire description (now-playing title; only
+    /// affects NativePipeWire mode). Routed through the bridge to the
+    /// renderer-owned sink.
     pub fn set_output_title(&self, title: String) {
-        if let Some(ref sink) = self.sink {
-            sink.set_title(title);
-        }
+        self.bridge.set_title(title);
     }
 
-    /// Mirror the user's volume to the PipeWire stream (only affects NativePipeWire mode).
+    /// Mirror the user's volume to the music node (only affects NativePipeWire mode).
     ///
     /// PipeWire shells (pavucontrol, Quickshell) display `cbrt(linear_volume)`
     /// as the percentage. To make the shell match Nokkvi's slider position,
@@ -385,18 +389,17 @@ impl SfxEngine {
     /// also provides natural perceptual volume feel — the same curve
     /// PulseAudio was designed around. No-op for cpal/ALSA fallback.
     pub fn set_output_volume(&self, volume: f32) {
-        if let Some(ref sink) = self.sink {
-            let v = volume.clamp(0.0, 1.0);
-            sink.set_output_volume(v * v * v);
-        }
+        let v = volume.clamp(0.0, 1.0);
+        self.bridge.set_volume(v * v * v);
     }
 
-    /// Whether the audio sink supports native PipeWire volume control.
+    /// Whether the live music sink supports native PipeWire volume control.
     ///
-    /// When `true`, the renderer should keep software volume at 1.0 (unity)
-    /// and let PipeWire handle the user's volume via `channelVolumes`.
+    /// When `true`, the renderer keeps software volume at 1.0 (unity) and lets
+    /// PipeWire handle the user's volume via `channelVolumes`. False until the
+    /// renderer publishes its first sink.
     pub fn has_native_volume(&self) -> bool {
-        self.sink.as_ref().is_some_and(|s| s.has_native_volume())
+        self.bridge.has_native_volume()
     }
 }
 
@@ -404,12 +407,9 @@ impl Default for SfxEngine {
     fn default() -> Self {
         Self::new().unwrap_or_else(|e| {
             tracing::error!("🔊 SfxEngine: Failed to initialize: {}", e);
-            // Return a dummy engine that does nothing — no panic if audio device
-            // is unavailable (e.g., headless servers, CI).
-            let sink = open_preferred_sink().ok();
-            if sink.is_none() {
-                tracing::warn!("🔊 SfxEngine: No audio device available — SFX disabled");
-            }
+            // Return a dummy engine that does nothing — no panic if sample
+            // loading failed (e.g., headless servers, CI). The renderer still
+            // owns the music sink; this engine just won't emit SFX.
             Self {
                 volume: Arc::new(AtomicU32::new(0.68_f32.to_bits())),
                 enabled: Arc::new(AtomicBool::new(false)),
@@ -419,7 +419,7 @@ impl Default for SfxEngine {
                 view_select_samples: Arc::new(Vec::new()),
                 expand_collapse_samples: Arc::new(Vec::new()),
                 escape_samples: Arc::new(Vec::new()),
-                sink,
+                bridge: Arc::new(MusicOutputBridge::new()),
                 last_tab_play: Cell::new(Instant::now()),
                 last_view_select_play: Cell::new(Instant::now()),
             }
@@ -427,22 +427,39 @@ impl Default for SfxEngine {
     }
 }
 
-/// Attempt to open the preferred audio sink
-fn open_preferred_sink() -> Result<ActiveSink> {
+/// Attempt to open the preferred audio sink under the given PipeWire node name
+/// at `rate` Hz. When `request_native_rate` is set, the PipeWire stream also
+/// asks (politely, via `node.rate`) for the device clock to follow `rate` —
+/// used by the bit-perfect music sink so PipeWire switches the DAC to the
+/// track's native rate.
+pub(crate) fn open_preferred_sink(
+    node_name: &str,
+    rate: u32,
+    request_native_rate: bool,
+) -> Result<ActiveSink> {
     #[cfg(target_os = "linux")]
     {
         // For native PipeWire environments, we spin up our own isolated stream graph
         // This ensures desktop volume and node metadata correctly identifies Nokkvi
         // without patching rodio.
         let (mixer_controller, mixer_source) = rodio::mixer::mixer(
-            // SAFETY: These are compile-time constants that are trivially non-zero.
+            // SAFETY: 2 is a trivially non-zero compile-time constant; `rate`
+            // comes from the decoder (>0) with the default music-sink rate as the
+            // fallback (the same const `ActiveSink::rate()`'s cpal arm reports, so
+            // a rate==0 caller and the cpal arm can't drift).
             std::num::NonZeroU16::new(2).expect("2 is non-zero"),
-            std::num::NonZeroU32::new(48000).expect("48000 is non-zero"),
+            std::num::NonZeroU32::new(rate).unwrap_or(
+                std::num::NonZeroU32::new(crate::audio::renderer::MUSIC_SINK_DEFAULT_RATE)
+                    .expect("MUSIC_SINK_DEFAULT_RATE is non-zero"),
+            ),
         );
 
         match crate::audio::pipewire_output::NativePipeWireSink::new(
             mixer_controller,
             Box::new(mixer_source),
+            node_name.to_owned(),
+            rate,
+            request_native_rate,
         ) {
             Ok(sink) => {
                 tracing::info!("🔊 Audio output: native PipeWire Custom Sink");
@@ -481,28 +498,41 @@ impl ActiveSink {
         }
     }
 
+    /// The sample rate this sink runs at. The cpal fallback always uses 48 kHz
+    /// (it never participates in native-rate switching, which is PipeWire-only).
+    pub fn rate(&self) -> u32 {
+        match self {
+            Self::Cpal(_) => crate::audio::renderer::MUSIC_SINK_DEFAULT_RATE,
+            #[cfg(target_os = "linux")]
+            Self::NativePipewire(p) => p.rate(),
+        }
+    }
+
+    /// Build a lock-free forwarder that mirrors title/volume to this sink's
+    /// PipeWire node, for the music output bridge. `None` on cpal (no node
+    /// volume). Keeps the PipeWire sender types encapsulated here.
+    pub fn command_forwarder(&self) -> Option<crate::audio::music_bridge::MusicCommandFn> {
+        match self {
+            Self::Cpal(_) => None,
+            #[cfg(target_os = "linux")]
+            Self::NativePipewire(p) => {
+                use crate::audio::music_bridge::MusicCommand;
+                let (title_tx, volume_tx) = p.controls();
+                Some(Box::new(move |cmd| match cmd {
+                    MusicCommand::SetTitle(t) => {
+                        let _ = title_tx.send(t);
+                    }
+                    MusicCommand::SetVolume(v) => {
+                        let _ = volume_tx.send(v);
+                    }
+                }))
+            }
+        }
+    }
+
     pub fn log_on_drop(&mut self, enabled: bool) {
         if let Self::Cpal(c) = self {
             c.log_on_drop(enabled);
-        }
-    }
-
-    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-    pub fn set_title(&self, title: String) {
-        match self {
-            Self::Cpal(_) => {}
-            #[cfg(target_os = "linux")]
-            Self::NativePipewire(p) => p.set_title(title),
-        }
-    }
-
-    /// Mirror volume to PipeWire stream (no-op for cpal).
-    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-    pub fn set_output_volume(&self, volume: f32) {
-        match self {
-            Self::Cpal(_) => {}
-            #[cfg(target_os = "linux")]
-            Self::NativePipewire(p) => p.set_volume(volume),
         }
     }
 

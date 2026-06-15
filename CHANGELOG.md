@@ -6,8 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A Bit-Perfect playback mode, reachable from Playback settings, the player-bar mode button, the player kebab menu, or a hotkey. It sends audio to your DAC untouched (no EQ, software volume, or limiter) and switches the output device to each track's native sample rate. A now-playing badge reads the real device clock and tells the truth: BIT-PERFECT when the DAC is locked to the track's rate, RESAMPLED at the device's actual rate when it is not (naming the app holding the device when it can), or UNVERIFIED when the clock cannot be read, such as on Bluetooth.
+
 ### Changed
 
+- Audio now decodes at full floating-point precision instead of narrowing high-resolution (24-bit and float) sources to 16-bit, so hi-res tracks play back at their real bit depth.
+- Crossfade and Bit-Perfect are mutually exclusive, since a blended crossfade cannot be bit-perfect, so turning one on turns the other off.
 - The crossfade settings now explain that turning crossfade off plays tracks gapless, and that very short tracks always play gapless.
 
 ### Fixed

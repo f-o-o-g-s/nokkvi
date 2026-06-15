@@ -192,6 +192,10 @@ pub struct StreamingSource {
     smoothing_coeff: f32,
     /// Per-stream EQ filter bank. None if EQ is not configured.
     eq: Option<super::eq::EqProcessor>,
+    /// Bit-perfect mode: when true, `next` bypasses EQ and software volume so
+    /// the decoded PCM is returned untouched. Fixed per stream (set at
+    /// creation); the visualizer tap and underrun tracking still run.
+    bit_perfect: bool,
     /// Consecutive silence samples emitted (ring buffer empty). Used for underrun tracking.
     consecutive_silence: u64,
     /// Samples consumed since the last `consumed_notify` fire.
@@ -237,6 +241,7 @@ impl StreamingSource {
         consumed_notify: Arc<Notify>,
         feeds_visualizer: bool,
         viz_enabled: Arc<AtomicBool>,
+        bit_perfect: bool,
     ) -> (Self, StreamHandle) {
         let volume = initial_volume.clamp(0.0, 1.0);
         let handle = StreamHandle {
@@ -275,6 +280,7 @@ impl StreamingSource {
             smoothed_volume: volume,
             smoothing_coeff,
             eq,
+            bit_perfect,
             consecutive_silence: 0,
             samples_since_notify: 0,
         };
@@ -328,18 +334,26 @@ impl Iterator for StreamingSource {
         // post-processing chain (matches the volume-independent invariant).
         let viz_sample = sample;
 
-        if let Some(ref mut eq) = self.eq
+        // Bit-perfect bypasses EQ entirely so the sample stays untouched.
+        if !self.bit_perfect
+            && let Some(ref mut eq) = self.eq
             && eq.is_enabled()
         {
             sample = eq.process_sample(sample);
         }
 
-        // Smoothly interpolate toward target volume (exponential moving average).
-        // This converts the 20ms step-function volume updates from crossfade into
-        // a smooth per-sample ramp, eliminating crackling.
-        let target = perceptual_volume(load_f32(&self.handle.volume));
-        self.smoothed_volume += self.smoothing_coeff * (target - self.smoothed_volume);
-        let output = sample * self.smoothed_volume;
+        // Bit-perfect returns the raw decoded sample — no software volume (not
+        // even the ~1.0000001 unity-curve multiply). Otherwise smoothly
+        // interpolate toward the target volume (exponential moving average),
+        // converting the 20ms step-function crossfade updates into a smooth
+        // per-sample ramp that eliminates crackling.
+        let output = if self.bit_perfect {
+            sample
+        } else {
+            let target = perceptual_volume(load_f32(&self.handle.volume));
+            self.smoothed_volume += self.smoothing_coeff * (target - self.smoothed_volume);
+            sample * self.smoothed_volume
+        };
 
         // Track underruns — count consecutive silence episodes for diagnostics
         if raw.is_some() {
@@ -475,6 +489,7 @@ mod tests {
             Arc::new(Notify::new()),
             feeds_visualizer,
             Arc::new(AtomicBool::new(viz_enabled)),
+            false,
         )
     }
 
@@ -634,6 +649,7 @@ mod tests {
             Arc::new(Notify::new()),
             true,
             Arc::new(AtomicBool::new(true)),
+            false,
         );
         (source, observed)
     }
@@ -662,6 +678,40 @@ mod tests {
             pushed.iter().all(|&s| (s - expected).abs() < 1e-3),
             "viz tap must be pre-EQ ({expected}); saw e.g. {:?}",
             pushed.first()
+        );
+    }
+
+    /// Bit-perfect: `next` must return the RAW decoded sample even with EQ
+    /// enabled+boosted AND a non-unity volume — both stages are bypassed so the
+    /// PCM reaches the sink untouched. (Volume is applied at the PipeWire node.)
+    #[test]
+    fn bit_perfect_bypasses_eq_and_software_volume() {
+        const RAW: f32 = 0.5;
+        let rb = HeapRb::<f32>::new(16);
+        let (mut producer, consumer) = rb.split();
+        producer.push_slice(&[RAW; 8]);
+
+        let eq = super::super::eq::EqState::new();
+        eq.set_enabled(true);
+        eq.set_band_gain(5, 12.0); // boost — would shape the sample IF applied
+        let viz: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(None));
+        let (mut source, _handle) = StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(44_100).expect("44100 is nonzero"),
+            viz,
+            0.5, // non-unity volume — would halve the sample IF applied
+            Some(eq),
+            Arc::new(Notify::new()),
+            true,
+            Arc::new(AtomicBool::new(true)),
+            true, // bit_perfect
+        );
+
+        let out = source.next().expect("a sample");
+        assert_eq!(
+            out, RAW,
+            "bit-perfect output must equal the raw decoded sample (EQ + volume bypassed)"
         );
     }
 

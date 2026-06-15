@@ -23,6 +23,8 @@ pub struct EngineState {
     pub gapless_preparing: bool,
     /// Whether crossfade between tracks is enabled
     pub crossfade_enabled: bool,
+    /// Whether bit-perfect output is enabled (native-rate, DSP bypassed)
+    pub bit_perfect: bool,
     /// Crossfade duration in seconds (1–12)
     pub crossfade_duration_secs: u32,
     /// Volume normalization mode (Off / AGC / ReplayGain-track / ReplayGain-album)

@@ -72,6 +72,7 @@ fn make_playback_update() -> PlaybackStateUpdate {
         song_id: Some("song_1".to_string()),
         format_suffix: "flac".to_string(),
         sample_rate: 44100,
+        current_stream_bit_perfect: false,
         bitrate: 1411,
         live_icy_metadata: None,
         bpm: None,
@@ -483,6 +484,256 @@ fn crossfade_toggle_from_enabled() {
     assert!(
         !app.engine.crossfade_enabled,
         "toggle from enabled should disable"
+    );
+}
+
+#[test]
+fn enabling_crossfade_via_toggle_disables_bit_perfect() {
+    let mut app = test_app();
+    // Bit-perfect on, crossfade off (they're mutually exclusive).
+    app.engine.bit_perfect = true;
+    app.engine.crossfade_enabled = false;
+
+    let _ = app.handle_toggle_crossfade();
+
+    assert!(
+        app.engine.crossfade_enabled,
+        "toggle should enable crossfade"
+    );
+    assert!(
+        !app.engine.bit_perfect,
+        "enabling crossfade must turn bit-perfect off (mutual exclusion)"
+    );
+}
+
+#[test]
+fn disabling_crossfade_via_toggle_leaves_bit_perfect_untouched() {
+    let mut app = test_app();
+    // Crossfade on, bit-perfect off; turning crossfade OFF must not flip BP on.
+    app.engine.crossfade_enabled = true;
+    app.engine.bit_perfect = false;
+
+    let _ = app.handle_toggle_crossfade();
+
+    assert!(
+        !app.engine.crossfade_enabled,
+        "toggle should disable crossfade"
+    );
+    assert!(
+        !app.engine.bit_perfect,
+        "disabling crossfade must not touch bit-perfect"
+    );
+}
+
+#[test]
+fn enabling_bit_perfect_via_toggle_disables_crossfade() {
+    let mut app = test_app();
+    // Crossfade on, bit-perfect off (mutually exclusive).
+    app.engine.crossfade_enabled = true;
+    app.engine.bit_perfect = false;
+
+    let _ = app.handle_toggle_bit_perfect();
+
+    assert!(app.engine.bit_perfect, "toggle should enable bit-perfect");
+    assert!(
+        !app.engine.crossfade_enabled,
+        "enabling bit-perfect must turn crossfade off (mutual exclusion)"
+    );
+}
+
+#[test]
+fn disabling_bit_perfect_via_toggle_leaves_crossfade_untouched() {
+    let mut app = test_app();
+    // Bit-perfect on, crossfade off; turning bit-perfect OFF must not flip crossfade on.
+    app.engine.bit_perfect = true;
+    app.engine.crossfade_enabled = false;
+
+    let _ = app.handle_toggle_bit_perfect();
+
+    assert!(!app.engine.bit_perfect, "toggle should disable bit-perfect");
+    assert!(
+        !app.engine.crossfade_enabled,
+        "disabling bit-perfect must not touch crossfade"
+    );
+}
+
+#[test]
+fn device_rate_probe_applies_when_engaged_and_rate_matches() {
+    use crate::state::BitPerfectStatus;
+    let mut app = test_app();
+    app.playback.bit_perfect_engaged = true;
+    app.playback.sample_rate = 96_000;
+    app.playback.bit_perfect_probe_generation = 3;
+    app.playback.bit_perfect_status = BitPerfectStatus::Off;
+
+    // Probe (current generation) came back with the device clocked at the track
+    // rate → Verified, and any holder name is cleared (not meaningful when ok).
+    let _ = app.handle_bit_perfect_device_rate_probed(3, 96_000, Some(96_000), Some("Zen".into()));
+    assert_eq!(app.playback.bit_perfect_status, BitPerfectStatus::Verified);
+    assert_eq!(app.playback.bit_perfect_holder, None);
+
+    // A different device rate → Resampled, carrying the real device rate AND the
+    // app holding it (for the inline `· Zen`).
+    let _ = app.handle_bit_perfect_device_rate_probed(3, 96_000, Some(48_000), Some("Zen".into()));
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        BitPerfectStatus::Resampled {
+            device_rate: 48_000
+        }
+    );
+    assert_eq!(app.playback.bit_perfect_holder.as_deref(), Some("Zen"));
+}
+
+#[test]
+fn device_rate_probe_ignored_when_not_engaged() {
+    use crate::state::BitPerfectStatus;
+    let mut app = test_app();
+    // Mode no longer engaged (e.g. toggled off since the probe was dispatched).
+    app.playback.bit_perfect_engaged = false;
+    app.playback.sample_rate = 96_000;
+    app.playback.bit_perfect_status = BitPerfectStatus::Off;
+
+    let _ = app.handle_bit_perfect_device_rate_probed(0, 96_000, Some(96_000), None);
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        BitPerfectStatus::Off,
+        "a probe result must not resurrect the badge once the mode is off"
+    );
+}
+
+#[test]
+fn device_rate_probe_ignored_when_track_rate_changed() {
+    use crate::state::BitPerfectStatus;
+    let mut app = test_app();
+    app.playback.bit_perfect_engaged = true;
+    // The track changed (now 44.1k) after a 96k probe was dispatched.
+    app.playback.sample_rate = 44_100;
+    app.playback.bit_perfect_status = BitPerfectStatus::Unknown;
+
+    let _ = app.handle_bit_perfect_device_rate_probed(0, 96_000, Some(96_000), None);
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        BitPerfectStatus::Unknown,
+        "a stale probe (track rate changed) must not relabel the current track"
+    );
+}
+
+#[test]
+fn unreadable_probe_holds_at_unknown_for_one_grace_probe_then_settles_unverifiable() {
+    use crate::state::BitPerfectStatus;
+    let mut app = test_app();
+    app.playback.bit_perfect_engaged = true;
+    app.playback.sample_rate = 96_000;
+    app.playback.bit_perfect_probe_generation = 5;
+    // Fresh after a transition: hidden, grace streak reset.
+    app.playback.bit_perfect_status = BitPerfectStatus::Unknown;
+    app.playback.bit_perfect_unverifiable_streak = 0;
+
+    // First probe right after the switch reads nothing (PipeWire is still
+    // opening the hardware PCM). Hold at the hidden Unknown — no false flash.
+    let _ = app.handle_bit_perfect_device_rate_probed(5, 96_000, None, None);
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        BitPerfectStatus::Unknown,
+        "the first unreadable probe after a transition must not flash UNVERIFIED"
+    );
+
+    // Still unreadable on the next probe → settle to Unverifiable (genuine
+    // Bluetooth / idle).
+    let _ = app.handle_bit_perfect_device_rate_probed(5, 96_000, None, None);
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        BitPerfectStatus::Unverifiable,
+        "a persistently unreadable sink settles to UNVERIFIED past the grace"
+    );
+}
+
+#[test]
+fn a_readable_probe_resets_the_unverifiable_grace_streak() {
+    use crate::state::BitPerfectStatus;
+    let mut app = test_app();
+    app.playback.bit_perfect_engaged = true;
+    app.playback.sample_rate = 96_000;
+    app.playback.bit_perfect_probe_generation = 7;
+    app.playback.bit_perfect_status = BitPerfectStatus::Unknown;
+
+    // One unreadable probe builds the streak partway.
+    let _ = app.handle_bit_perfect_device_rate_probed(7, 96_000, None, None);
+    assert_eq!(app.playback.bit_perfect_unverifiable_streak, 1);
+
+    // A good reading verifies AND zeroes the streak.
+    let _ = app.handle_bit_perfect_device_rate_probed(7, 96_000, Some(96_000), None);
+    assert_eq!(app.playback.bit_perfect_status, BitPerfectStatus::Verified);
+    assert_eq!(app.playback.bit_perfect_unverifiable_streak, 0);
+
+    // So a later single unreadable blip falls back to the hidden Unknown for the
+    // grace window — it does NOT flip straight to UNVERIFIED.
+    let _ = app.handle_bit_perfect_device_rate_probed(7, 96_000, None, None);
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        BitPerfectStatus::Unknown,
+        "a single blip after verifying must re-earn the grace, not jump to UNVERIFIED"
+    );
+}
+
+#[test]
+fn settings_load_keeps_crossfade_when_bit_perfect_off() {
+    use nokkvi_data::types::player_settings::LivePlayerSettings;
+    let mut app = test_app();
+    // The shipped default: crossfade on, bit-perfect off. Loading it must NOT
+    // reconcile crossfade off (the regression that silently wiped crossfade for
+    // the majority of users via a misused resolve_exclusion).
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
+        crossfade_enabled: true,
+        bit_perfect: false,
+        ..Default::default()
+    });
+    assert!(
+        app.engine.crossfade_enabled,
+        "a crossfade-only config must survive a settings load untouched"
+    );
+    assert!(!app.engine.bit_perfect);
+}
+
+#[test]
+fn settings_load_reconciles_both_enabled_to_bit_perfect() {
+    use nokkvi_data::types::player_settings::LivePlayerSettings;
+    let mut app = test_app();
+    // An invalid both-true config (hand-edited / pre-rule) reconciles crossfade
+    // off; bit-perfect wins.
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
+        crossfade_enabled: true,
+        bit_perfect: true,
+        ..Default::default()
+    });
+    assert!(
+        !app.engine.crossfade_enabled,
+        "a both-enabled config must reconcile crossfade off"
+    );
+    assert!(
+        app.engine.bit_perfect,
+        "bit-perfect wins the reconciliation"
+    );
+}
+
+#[test]
+fn stale_out_of_order_probe_does_not_clobber_a_fresher_result() {
+    use crate::state::BitPerfectStatus;
+    let mut app = test_app();
+    app.playback.bit_perfect_engaged = true;
+    app.playback.sample_rate = 96_000;
+    // The latest dispatched probe is generation 5; a fresher probe already set
+    // Verified.
+    app.playback.bit_perfect_probe_generation = 5;
+    app.playback.bit_perfect_status = BitPerfectStatus::Verified;
+
+    // An OLDER probe (generation 4, caught the device mid-reclock → 48k) lands
+    // late. It must be ignored, not overwrite the fresher Verified.
+    let _ = app.handle_bit_perfect_device_rate_probed(4, 96_000, Some(48_000), None);
+    assert_eq!(
+        app.playback.bit_perfect_status,
+        BitPerfectStatus::Verified,
+        "an out-of-order stale probe must not clobber the latest result"
     );
 }
 

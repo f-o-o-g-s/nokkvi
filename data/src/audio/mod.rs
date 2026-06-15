@@ -15,6 +15,9 @@ pub mod format;
 mod generation;
 pub mod normalization;
 
+pub(crate) mod graph_probe;
+pub use graph_probe::{active_alsa_playback_rates, probe_sink_holder};
+pub mod music_bridge;
 #[cfg(target_os = "linux")]
 pub mod pipewire_output;
 mod range_http_reader;
@@ -31,6 +34,7 @@ pub use decoder::AudioDecoder;
 pub use eq::{EqProcessor, EqState};
 pub use format::{AudioFormat, SampleFormat};
 pub(crate) use generation::{DecodeLoopHandle, SourceGeneration};
+pub use music_bridge::{MusicCommand, MusicOutputBridge};
 pub use normalization::{NormalizationConfig, NormalizationContext, resolve_normalization};
 pub use renderer::AudioRenderer;
 pub use rodio_output::{ActiveStream, RING_BUFFER_CAPACITY, RodioOutput};

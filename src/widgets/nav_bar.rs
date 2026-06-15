@@ -73,6 +73,10 @@ pub(crate) struct NavBarViewData {
     pub format_suffix: String,
     /// Sample rate in kHz (e.g., 44.1, 48.0, 96.0)
     pub sample_rate_khz: f32,
+    /// Honest bit-perfect status for the MiniPlayer strip's badge.
+    pub bit_perfect_status: crate::state::BitPerfectStatus,
+    /// When resampled, the app holding the device (inline `· Zen`).
+    pub bit_perfect_holder: Option<String>,
     /// Bitrate in kbps (e.g., 320, 1411)
     pub bitrate_kbps: u32,
     /// Current window width for responsive breakpoints
@@ -955,7 +959,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     None => left,
                 };
                 let fmt_sep = info_separator;
-                row![
+                let mut fmt_row = row![
                     fmt_sep(),
                     text(combined)
                         .size(10.0)
@@ -965,17 +969,32 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                         })
                         .color(nav_strip_text(theme::fg3()))
                         .wrapping(Wrapping::None),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .height(Length::Fill)
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 6.0,
-                    bottom: 0.0,
-                    left: 0.0,
-                })
-                .into()
+                ];
+                // Honest bit-perfect badge — the MiniPlayer strip renders its
+                // metadata inline (not via track_info_strip), so it reuses the
+                // shared `bit_perfect_badge_widget` here too (one source for the
+                // badge's font/size/color), placed after the format text exactly
+                // like track_info_strip, or the badge is invisible in MiniPlayer
+                // mode. `nav_strip_text` adapts the color to this strip's bg.
+                if let Some(badge) = super::track_info_strip::bit_perfect_badge_widget(
+                    data.bit_perfect_status,
+                    data.bit_perfect_holder.as_deref(),
+                    nav_strip_text,
+                ) {
+                    fmt_row = fmt_row.push(fmt_sep());
+                    fmt_row = fmt_row.push(badge);
+                }
+                fmt_row
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .height(Length::Fill)
+                    .padding(iced::Padding {
+                        top: 0.0,
+                        right: 6.0,
+                        bottom: 0.0,
+                        left: 0.0,
+                    })
+                    .into()
             } else {
                 Space::new().width(Length::Shrink).into()
             }

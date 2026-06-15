@@ -203,6 +203,7 @@ impl SettingsService {
     delegate_setter!(set_opacity_gradient, bool);
     delegate_setter!(set_slot_text_links, bool);
     delegate_setter!(set_crossfade_enabled, bool);
+    delegate_setter!(set_bit_perfect, bool);
     delegate_setter!(set_crossfade_duration, u32);
     delegate_setter!(set_rating_reminder_enabled, bool);
     delegate_setter!(set_rating_reminder_trigger, RatingReminderTrigger);

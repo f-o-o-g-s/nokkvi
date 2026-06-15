@@ -74,6 +74,11 @@ pub struct PlaybackStateUpdate {
     pub song_id: Option<String>,
     pub format_suffix: String,
     pub sample_rate: u32,
+    /// Whether the CURRENTLY-PLAYING stream was actually built bit-perfect
+    /// (build-time fact from the renderer, not the live setting). Drives the
+    /// honest now-playing badge so a mid-track toggle can't claim BIT-PERFECT
+    /// for a stream still on the DSP path.
+    pub current_stream_bit_perfect: bool,
     /// Bitrate in kbps (e.g., 320 for MP3, 1411 for CD-quality FLAC)
     pub bitrate: u32,
     /// Live ICY-metadata parsed by IcyMetadataReader
@@ -111,6 +116,20 @@ pub enum PlaybackMessage {
     SfxVolumeChanged(f32),
     CycleVisualization,
     ToggleCrossfade,
+    ToggleBitPerfect,
+    /// Result of the off-thread `/proc/asound` device-rate probe for the honest
+    /// bit-perfect badge. `generation` is the dispatch id (only the latest is
+    /// applied, so an out-of-order stale probe can't clobber a fresher result);
+    /// `track_rate` is the rate at dispatch time (dropped if the track changed
+    /// under it); `device_rate` is the real ALSA clock, or `None` when unknown.
+    BitPerfectDeviceRateProbed {
+        generation: u64,
+        track_rate: u32,
+        device_rate: Option<u32>,
+        /// The app holding the sink at a different rate (when resampled + the
+        /// PipeWire graph could be read) — the "who" of the blocker diagnostic.
+        holder: Option<String>,
+    },
     Seek(f32),
     VolumeChanged(f32),
     /// Discrete user-committed volume value — always persists to disk

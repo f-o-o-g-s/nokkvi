@@ -29,7 +29,6 @@ use pipewire::spa::pod::Pod;
 use pw::properties::properties;
 use rodio::Source;
 
-const SAMPLE_RATE: u32 = 48000;
 const CHANNELS: u32 = 2;
 
 /// PipeWire SPA property ID for per-channel volume array.
@@ -38,8 +37,9 @@ const SPA_PROP_CHANNEL_VOLUMES: u32 = 0x10008;
 
 pub struct NativePipeWireSink {
     mixer: rodio::mixer::Mixer,
+    rate: u32,
     handle: Option<JoinHandle<()>>,
-    quit_tx: std::sync::mpsc::Sender<()>,
+    quit_tx: pw::channel::Sender<()>,
     title_tx: pw::channel::Sender<String>,
     volume_tx: pw::channel::Sender<f32>,
 }
@@ -49,11 +49,20 @@ pub struct UserData {
 }
 
 impl NativePipeWireSink {
+    /// Create a native PipeWire output stream.
+    ///
+    /// `node_name` is the graph `MEDIA_NAME` (what pavucontrol / the desktop
+    /// mixer shows for this stream). The music sink passes "Nokkvi" (later
+    /// overridden per-track via [`set_title`]); the SFX sink passes a distinct
+    /// name so the two nodes are individually identifiable.
     pub fn new(
         mixer: rodio::mixer::Mixer,
         mixer_source: Box<dyn Source<Item = f32> + Send>,
+        node_name: String,
+        rate: u32,
+        request_native_rate: bool,
     ) -> Result<Self> {
-        let (quit_tx, quit_rx) = std::sync::mpsc::channel();
+        let (quit_tx, quit_rx) = pw::channel::channel::<()>();
         let (title_tx, title_rx) = pw::channel::channel::<String>();
         let (volume_tx, volume_rx) = pw::channel::channel::<f32>();
         let mixer_clone = mixer.clone();
@@ -96,16 +105,22 @@ impl NativePipeWireSink {
 
                 let data = UserData { mixer_source };
 
-                let stream = match pw::stream::StreamRc::new(
-                    core,
-                    "Nokkvi-Playback",
-                    properties! {
-                        *pw::keys::MEDIA_TYPE => "Audio",
-                        *pw::keys::MEDIA_CATEGORY => "Playback",
-                        *pw::keys::MEDIA_ROLE => "Music",
-                        *pw::keys::MEDIA_NAME => "Nokkvi",
-                    },
-                ) {
+                let mut stream_props = properties! {
+                    *pw::keys::MEDIA_TYPE => "Audio",
+                    *pw::keys::MEDIA_CATEGORY => "Playback",
+                    *pw::keys::MEDIA_ROLE => "Music",
+                    *pw::keys::MEDIA_NAME => node_name.as_str(),
+                };
+                if request_native_rate {
+                    // Ask PipeWire to run the graph clock at the source rate.
+                    // It switches the device when the device is idle AND the rate
+                    // is in `default.clock.allowed-rates`; otherwise it resamples.
+                    // A polite request (NODE_RATE), not a forced graph rate.
+                    let node_rate = format!("1/{rate}");
+                    stream_props.insert(*pw::keys::NODE_RATE, node_rate);
+                }
+                let stream = match pw::stream::StreamRc::new(core, "Nokkvi-Playback", stream_props)
+                {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::error!("Failed to create stream: {}", e);
@@ -161,17 +176,22 @@ impl NativePipeWireSink {
                         }
                     });
 
+                // Quit via a pw::channel (like title/volume) so it wakes the
+                // loop directly. The old std::mpsc quit was polled only inside
+                // the `process` callback, so the `Drop` join during a sink
+                // teardown could hang if the graph stopped driving the node
+                // (e.g. the device suspended) and the callback never fired again.
+                let _quit_receiver = quit_rx.attach(mainloop.loop_(), move |()| {
+                    tracing::debug!("🔊 PipeWire IPC: quit received, stopping main loop");
+                    loop_clone.quit();
+                });
+
                 let listener = stream
                     .add_local_listener_with_user_data(data)
                     .state_changed(|_, _, old, new| {
                         tracing::trace!("PipeWire Stream State: {:?} -> {:?}", old, new);
                     })
                     .process(move |stream, user_data| {
-                        if quit_rx.try_recv().is_ok() {
-                            loop_clone.quit();
-                            return;
-                        }
-
                         match stream.dequeue_buffer() {
                             None => {}
                             Some(mut buffer) => {
@@ -228,7 +248,7 @@ impl NativePipeWireSink {
 
                 let mut audio_info = pw::spa::param::audio::AudioInfoRaw::new();
                 audio_info.set_format(pw::spa::param::audio::AudioFormat::F32LE);
-                audio_info.set_rate(SAMPLE_RATE);
+                audio_info.set_rate(rate);
                 audio_info.set_channels(CHANNELS);
 
                 let obj = pw::spa::pod::Object {
@@ -273,6 +293,7 @@ impl NativePipeWireSink {
                 // dangling raw pointers in the FFI calls.
                 drop(_title_receiver);
                 drop(_volume_receiver);
+                drop(_quit_receiver);
                 drop(listener);
                 drop(stream);
             })
@@ -280,6 +301,7 @@ impl NativePipeWireSink {
 
         Ok(Self {
             mixer: mixer_clone,
+            rate,
             handle: Some(handle),
             quit_tx,
             title_tx,
@@ -287,18 +309,16 @@ impl NativePipeWireSink {
         })
     }
 
-    pub fn set_title(&self, title: String) {
-        tracing::debug!("🔊 Sending PipeWire title update: {:?}", title);
-        let _ = self.title_tx.send(title);
+    /// The sample rate this sink's PipeWire stream was connected at.
+    pub fn rate(&self) -> u32 {
+        self.rate
     }
 
-    /// Set the PipeWire stream channel volume (0.0–1.0, linear).
-    ///
-    /// Updates `SPA_PROP_channelVolumes` on the stream so the system mixer
-    /// (pavucontrol, Quickshell audio panel, etc.) reflects Nokkvi's volume.
-    pub fn set_volume(&self, volume: f32) {
-        tracing::debug!("🔊 Sending PipeWire volume update: {:.3}", volume);
-        let _ = self.volume_tx.send(volume);
+    /// Clone the title + volume IPC senders so another owner (e.g. the music
+    /// output bridge) can drive this sink's PipeWire node without holding the
+    /// sink itself. The senders are valid for the sink's lifetime.
+    pub fn controls(&self) -> (pw::channel::Sender<String>, pw::channel::Sender<f32>) {
+        (self.title_tx.clone(), self.volume_tx.clone())
     }
 
     pub fn mixer(&self) -> rodio::mixer::Mixer {

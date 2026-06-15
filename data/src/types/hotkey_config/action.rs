@@ -255,6 +255,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.toggle_crossfade",
             default: KeyCombo::key(KeyCode::Char('f')),
         },
+        ToggleBitPerfect {
+            display: "Toggle Bit-Perfect",
+            description: "Enable or disable bit-perfect output (disables crossfade)",
+            category: "Playback",
+            toml_key: "toggle_bit_perfect",
+            settings_key: "hotkey.toggle_bit_perfect",
+            default: KeyCombo::key(KeyCode::Char('b')),
+        },
 
         // --- Slot list navigation (category: "Navigation") ---
         SlotListUp {

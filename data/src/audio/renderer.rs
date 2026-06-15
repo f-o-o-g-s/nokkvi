@@ -136,6 +136,14 @@ fn rebuffer_low_samples(frame_rate: u32) -> usize {
     samples_for_duration(frame_rate, REBUFFER_ENTER_MS)
 }
 
+/// Whether bit-perfect mode must skip a crossfade for this transition.
+/// Default music-sink sample rate (Hz). The sink is built here on the first
+/// probe and whenever bit-perfect is off; only bit-perfect on the native
+/// PipeWire path rebuilds it at the track's native rate. The cpal fallback also
+/// runs here (it never re-clocks). Single source for the literal so the build
+/// sites and `ActiveSink::rate()`'s cpal arm can't drift.
+pub(crate) const MUSIC_SINK_DEFAULT_RATE: u32 = 48_000;
+
 /// Safety valve: if a finite stream stays drained this many render ticks (~10s at
 /// 20ms/tick) it likely never recovers (a dead socket that never signals EOF —
 /// the decode loop's empty-buffer branch loops forever with `decoder_eof=false`),
@@ -280,8 +288,14 @@ pub struct AudioRenderer {
     /// so the real-time audio thread skips the per-sample tap; `true` otherwise.
     viz_enabled: Arc<std::sync::atomic::AtomicBool>,
 
-    /// Shared mixer from the app-wide MixerDeviceSink (set after login).
-    shared_mixer: Option<rodio::mixer::Mixer>,
+    /// The music output sink (PipeWire node + its rodio mixer), owned here so
+    /// it can be rebuilt at each track's native rate in bit-perfect mode.
+    /// `None` until [`Self::ensure_music_output`] first builds it (at login).
+    music_sink: Option<crate::audio::sfx_engine::ActiveSink>,
+    /// Lock-free bridge that lets the SFX engine + the volume-drag UI reach the
+    /// current music sink (its mixer + IPC). The renderer publishes into it on
+    /// every (re)build. `None` until `set_music_bridge` runs at login.
+    music_bridge: Option<Arc<super::music_bridge::MusicOutputBridge>>,
 
     /// Volume normalization mode applied to new streams.
     volume_normalization_mode: VolumeNormalizationMode,
@@ -316,6 +330,19 @@ pub struct AudioRenderer {
     /// Software volume is kept at 1.0 during normal playback; crossfade
     /// ramps use only the fade factor (PipeWire applies user volume on top).
     pw_volume_active: bool,
+
+    /// Whether bit-perfect output is enabled: every new stream bypasses the
+    /// DSP chain (EQ / software volume / limiter) so the decoded PCM reaches
+    /// the sink untouched. Native-rate device switching is handled at the sink.
+    bit_perfect: bool,
+
+    /// Whether the CURRENTLY-PLAYING primary stream was actually built
+    /// bit-perfect (captured from `bit_perfect_active()` at stream-build time),
+    /// NOT the live setting. The honest now-playing badge reads this so a
+    /// mid-track toggle — which only takes effect on the next track — can't make
+    /// the badge claim BIT-PERFECT while the running stream is still on the DSP
+    /// path. Stays put until the next stream (re)build.
+    current_stream_bit_perfect: bool,
 
     /// Shared notify primitive passed to every `StreamingSource` created by
     /// this renderer.  Fired every `CONSUMED_NOTIFY_STRIDE` real samples; the
@@ -432,7 +459,8 @@ impl AudioRenderer {
             crossfade_finalized_elapsed_ms: 0,
             viz_callback: std::sync::Arc::new(parking_lot::RwLock::new(None)),
             viz_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            shared_mixer: None,
+            music_sink: None,
+            music_bridge: None,
             volume_normalization_mode: VolumeNormalizationMode::Off,
             normalization_target_level: 1.0,
             replay_gain_preamp_db: 0.0,
@@ -444,6 +472,8 @@ impl AudioRenderer {
             current_replay_gain: None,
             eq_state: super::eq::EqState::default(),
             pw_volume_active: false,
+            bit_perfect: false,
+            current_stream_bit_perfect: false,
             consumed_notify: Arc::new(Notify::new()),
         }
     }
@@ -534,22 +564,16 @@ impl AudioRenderer {
         // Format changed or first init — create new stream.
         self.format = format.clone();
 
-        // Ensure the rodio output is initialized
-        if self.output.is_none() {
-            let mixer = self.shared_mixer.clone().ok_or_else(|| {
-                anyhow::anyhow!("Shared mixer not set — call set_shared_mixer() first")
-            })?;
-            self.output = Some(RodioOutput::new(
-                mixer,
-                self.viz_callback.clone(),
-                self.viz_enabled.clone(),
-            )?);
-        }
-
-        // Stop old primary stream if any
+        // Stop the old primary stream BEFORE any sink rebuild: its ring buffer
+        // lives on the old mixer, which a bit-perfect rate change drops below.
         if let Some(old_stream) = self.primary_stream.take() {
             old_stream.silence_and_stop();
         }
+
+        // Ensure the music output exists at the right rate. In bit-perfect mode
+        // this rebuilds the sink + mixer at the track's native rate so PipeWire
+        // switches the device clock; otherwise it stays at 48 kHz.
+        self.ensure_music_output(format.sample_rate())?;
 
         // Create new primary stream
         let output = self
@@ -566,17 +590,31 @@ impl AudioRenderer {
             Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             true,
+            self.bit_perfect_active(),
         );
 
-        debug!(
-            "📡 Renderer::init() NEW STREAM created: {}ch, {}Hz, vol={:.2}, norm={:?}",
-            format.channel_count(),
-            format.sample_rate(),
-            self.volume,
-            norm
-        );
+        if self.bit_perfect_active() {
+            debug!(
+                "📡 Renderer::init() NEW STREAM created: {}ch, {}Hz, BIT-PERFECT (DSP bypassed, \
+                 volume at PipeWire node)",
+                format.channel_count(),
+                format.sample_rate(),
+            );
+        } else {
+            debug!(
+                "📡 Renderer::init() NEW STREAM created: {}ch, {}Hz, vol={:.2}, norm={:?}",
+                format.channel_count(),
+                format.sample_rate(),
+                self.volume,
+                norm
+            );
+        }
 
         self.primary_stream = Some(stream);
+        // Record the build-time bit-perfect fact for the honest badge (the
+        // stream captured this at construction; a later mid-track toggle won't
+        // change the running stream, so the badge must not read the live flag).
+        self.current_stream_bit_perfect = self.bit_perfect_active();
         self.current_replay_gain = self.pending_replay_gain.clone();
         self.position_offset = 0;
 
@@ -804,8 +842,10 @@ impl AudioRenderer {
                 Some(self.eq_state.clone()),
                 self.consumed_notify.clone(),
                 true,
+                self.bit_perfect_active(),
             );
             self.primary_stream = Some(stream);
+            self.current_stream_bit_perfect = self.bit_perfect_active();
             // Keep current_replay_gain consistent — don't blow it away.
             if let Some(rg) = rg_for_seek {
                 self.current_replay_gain = Some(rg.clone());
@@ -898,25 +938,214 @@ impl AudioRenderer {
             .store(enabled, std::sync::atomic::Ordering::Release);
     }
 
-    /// Set the shared mixer from the app-wide MixerDeviceSink.
-    /// Must be called before the first `init()` / `play()`.
-    pub fn set_shared_mixer(&mut self, mixer: rodio::mixer::Mixer) {
-        self.shared_mixer = Some(mixer);
+    /// Connect the music-output bridge (shared with the SFX engine + the
+    /// volume-drag UI) at login, and make the music output live. Builds the
+    /// initial 48 kHz sink if none exists yet (so SFX + node volume work before
+    /// the first track); if a sink is already live (e.g. a track started during
+    /// login wiring), it is republished to the new bridge UNCHANGED rather than
+    /// rebuilt — never downgrading a hi-res sink to 48 kHz.
+    pub fn set_music_bridge(&mut self, bridge: Arc<super::music_bridge::MusicOutputBridge>) {
+        self.music_bridge = Some(bridge);
+        if self.music_sink.is_none() {
+            if let Err(e) = self.build_music_sink(MUSIC_SINK_DEFAULT_RATE, false) {
+                tracing::error!("🔊 Renderer: initial music sink build failed: {e}");
+            }
+        } else {
+            self.republish_to_bridge();
+        }
     }
 
-    /// Enable/disable PipeWire-native volume control.
+    /// Publish the live sink's mixer + IPC forwarder to the current bridge
+    /// without rebuilding it (used when a fresh bridge attaches to an
+    /// already-running sink).
+    fn republish_to_bridge(&self) {
+        if let (Some(bridge), Some(sink)) = (&self.music_bridge, &self.music_sink) {
+            bridge.publish(
+                sink.mixer(),
+                sink.command_forwarder(),
+                sink.has_native_volume(),
+            );
+        }
+    }
+
+    /// Ensure the music sink exists and runs at the right rate for `format_rate`.
+    /// First build (or backend probe) is always 48 kHz; then, in bit-perfect
+    /// mode on the native-PipeWire path, it rebuilds at the track's native rate
+    /// so PipeWire switches the device clock. A no-op when the rate already
+    /// matches (the common, same-rate case — gapless and normal playback).
+    pub fn ensure_music_output(&mut self, format_rate: u32) -> anyhow::Result<()> {
+        // Build once at the default rate so we know the backend (native PipeWire
+        // vs cpal).
+        if self.music_sink.is_none() {
+            self.build_music_sink(MUSIC_SINK_DEFAULT_RATE, false)?;
+        }
+        // Native-rate switching only applies on the native PipeWire path.
+        let want_native = self.bit_perfect && self.pw_volume_active;
+        let target_rate = if want_native {
+            format_rate
+        } else {
+            MUSIC_SINK_DEFAULT_RATE
+        };
+        let current_rate = self.music_sink.as_ref().map_or(0, |s| s.rate());
+        if current_rate != target_rate
+            && let Err(e) = self.build_music_sink(target_rate, want_native)
+        {
+            if want_native {
+                // The native-rate rebuild failed (device transiently busy mid
+                // re-clock). `build_music_sink` has already torn the old sink
+                // down, so without a fallback the renderer would have NO output
+                // AND no primary stream (init() stopped the old one) — a dead,
+                // silent track until the NEXT track change. Fall back to the
+                // default-rate sink so the track still plays. The stream is still
+                // built DSP-bypassed (bit-perfect intent — pw_volume_active stays
+                // true), but the device is now at the default rate, so the honest
+                // device-rate badge resolves to RESAMPLED, never BIT-PERFECT
+                // (Verified requires the probed device rate to equal the track
+                // rate). Re-propagate only if even the fallback can't open.
+                warn!(
+                    "🔊 Native-rate music sink rebuild at {target_rate}Hz failed ({e:#}); \
+                     falling back to {MUSIC_SINK_DEFAULT_RATE}Hz (device resamples)"
+                );
+                self.build_music_sink(MUSIC_SINK_DEFAULT_RATE, false)?;
+            } else {
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    /// (Re)build the music sink + its rodio output at `rate`, then publish the
+    /// new mixer + IPC forwarder to the bridge (which re-applies the current
+    /// title + volume to the fresh node). `request_native` sets `node.rate` so
+    /// PipeWire follows the rate. Callers MUST stop the old primary stream first.
     ///
-    /// When `true`, the renderer keeps software volume at 1.0 (unity) and
-    /// expects the caller to mirror volume changes to PipeWire via
-    /// `SfxEngine::set_output_volume()`. Crossfade ramps use only the
-    /// fade coefficient — PipeWire applies the user's volume uniformly
-    /// to the entire mixed output.
-    pub fn set_pw_volume_active(&mut self, active: bool) {
-        self.pw_volume_active = active;
+    /// LOAD-BEARING ORDER — the old sink is torn down (synchronously: its `Drop`
+    /// joins the PipeWire thread, disconnecting the stream and releasing the
+    /// ALSA device) BEFORE `open_preferred_sink` opens the new one. This is what
+    /// makes native-rate switching work: PipeWire only re-clocks a device on a
+    /// FRESH open — while any stream holds the card open (`format_ref > 0`) the
+    /// rate is latched and a new stream is resampled to it, in EITHER direction
+    /// (see `local/bitperfect/verification-findings.md`). So do NOT turn this
+    /// into make-before-break or drop the old sink off-thread: opening the new
+    /// node while the old is still alive pins the card at the old rate and
+    /// silently loses bit-perfect (the hardware-proven up-switch regresses to
+    /// resampled).
+    ///
+    /// COST: the synchronous teardown (`Drop` blocking-joins the old PipeWire
+    /// thread) + device reopen runs while the renderer lock is held, INSIDE the
+    /// held async engine lock. So for its duration — a brief output-less window
+    /// in the common case, longer if the join is slow (device suspended /
+    /// contended) — the 20ms render thread, both decode loops, and every other
+    /// engine consumer (position/MPRIS/next user action) block on the lock; only
+    /// the FFT `try_lock` degrades gracefully. This is the accepted price of a
+    /// fresh re-clocking open. On a native-rate open failure `ensure_music_output`
+    /// falls back to the default-rate sink so the track still plays.
+    fn build_music_sink(&mut self, rate: u32, request_native: bool) -> anyhow::Result<()> {
+        use crate::audio::sfx_engine::open_preferred_sink;
+
+        // Tear the old sink fully down (releasing the device) BEFORE opening the
+        // new one — see the LOAD-BEARING ORDER note above. Old output first so
+        // its rodio mixer clone is released before the PipeWire thread is joined.
+        self.output = None;
+        self.music_sink = None;
+
+        let mut sink = open_preferred_sink("Nokkvi", rate, request_native).map_err(|e| {
+            // The old sink + its mixer/IPC are already gone (torn down above);
+            // the replacement failed to open. Clear the bridge so SFX + the
+            // volume UI stop proxying to the dead mixer/node — SFX silently
+            // no-ops (mixer() == None) instead of feeding a dropped mixer, and
+            // volume/title sends become no-ops — until the next track rebuilds
+            // the sink and republishes. The stored title/volume are kept.
+            if let Some(bridge) = &self.music_bridge {
+                bridge.clear();
+            }
+            // There is no live sink anymore, so drop the renderer-side facts that
+            // the honest badge and bit-perfect gating read: `pw_volume_active`
+            // (no node volume) and `current_stream_bit_perfect` (no live stream).
+            // Otherwise the badge could keep claiming BIT-PERFECT over a dead
+            // sink. Both are re-derived from the next successful build.
+            self.pw_volume_active = false;
+            self.current_stream_bit_perfect = false;
+            tracing::error!(
+                "🔊 Renderer: music sink build at {rate}Hz failed ({e}); output is down until the \
+                 next track rebuilds it"
+            );
+            e
+        })?;
+        sink.log_on_drop(false);
+        self.pw_volume_active = sink.has_native_volume();
+
+        let mixer = sink.mixer();
+        self.output = Some(RodioOutput::new(
+            mixer.clone(),
+            self.viz_callback.clone(),
+            self.viz_enabled.clone(),
+        )?);
+
+        if let Some(bridge) = &self.music_bridge {
+            bridge.publish(mixer, sink.command_forwarder(), sink.has_native_volume());
+        }
         tracing::info!(
-            "🔊 Renderer: PipeWire native volume {}",
-            if active { "ENABLED" } else { "disabled" }
+            "🔊 Renderer: music sink built at {}Hz (native-rate request: {})",
+            rate,
+            request_native
         );
+        self.music_sink = Some(sink);
+        Ok(())
+    }
+
+    /// Enable/disable bit-perfect output. Stored for the next stream creation;
+    /// streams created while `true` bypass the DSP chain (EQ / software volume /
+    /// limiter). Takes effect on the next track / format change, not mid-stream.
+    ///
+    /// Returns whether the flag actually CHANGED — the engine drives its
+    /// `reset_next_track()` off this so it doesn't keep a mirrored copy of the
+    /// bit, and a routine settings re-apply (same value) stays a no-op.
+    pub fn set_bit_perfect(&mut self, enabled: bool) -> bool {
+        let changed = self.bit_perfect != enabled;
+        self.bit_perfect = enabled;
+        if changed {
+            tracing::info!(
+                "🔊 Renderer: bit-perfect output {}",
+                if enabled { "ENABLED" } else { "disabled" }
+            );
+        }
+        changed
+    }
+
+    /// Whether bit-perfect is both requested AND viable. It is only honored on
+    /// the native PipeWire path (`pw_volume_active`): bit-perfect routes volume
+    /// to the PipeWire node, so on the cpal fallback — which has no node volume —
+    /// engaging it would leave the volume slider dead. There, the toggle is a
+    /// no-op and playback stays on the normal DSP path.
+    pub(crate) fn bit_perfect_active(&self) -> bool {
+        self.bit_perfect && self.pw_volume_active
+    }
+
+    /// Whether bit-perfect mode is currently blocking ALL crossfades. A
+    /// crossfade blends two streams on one mixer with a gain envelope, which
+    /// inherently alters samples — it can't be bit-perfect — and across a rate
+    /// change would also resample the incoming track (the device can't re-clock
+    /// mid-blend). So bit-perfect hard-cuts every transition: it falls through to
+    /// the normal non-crossfade path — gapless for a same-rate change, a sink
+    /// rebuild at the native rate for a cross-rate change. With bit-perfect off
+    /// nothing is blocked.
+    ///
+    /// BOTH crossfade triggers gate on THIS one method — the renderer's
+    /// `arm_crossfade` and the engine's EOF-fallback `try_start_crossfade_transition`
+    /// — so the two can never disagree (a renderer that arms while the engine
+    /// refuses would swap `crossfade_state` to `Active` with no blend, orphaning
+    /// the incoming stream).
+    pub(crate) fn crossfade_blocked(&self) -> bool {
+        self.bit_perfect_active()
+    }
+
+    /// Whether the CURRENTLY-PLAYING primary stream was built bit-perfect
+    /// (captured at stream-build time, not the live setting). The honest badge
+    /// reads this so a mid-track toggle can't claim BIT-PERFECT for a stream
+    /// still on the DSP path.
+    pub(crate) fn current_stream_bit_perfect(&self) -> bool {
+        self.current_stream_bit_perfect
     }
 
     /// The software volume to apply to streams during normal playback.
@@ -952,6 +1181,18 @@ impl AudioRenderer {
         track_duration_ms: u64,
         incoming_duration_ms: u64,
     ) {
+        // Bit-perfect hard-cuts EVERY transition: a crossfade applies a gain
+        // envelope to two mixed streams, which can't be bit-perfect, and across
+        // a rate change would also resample the incoming track. Skipping arm
+        // here lets the transition fall through to the normal non-crossfade
+        // path — gapless for a same-rate change, a sink rebuild at native rate
+        // for a cross-rate change. (The engine's EOF-fallback transition is
+        // gated to match, so neither trigger can start a blend.)
+        if self.crossfade_blocked() {
+            debug!("🔀 [RENDERER] Crossfade SKIPPED (bit-perfect): hard-cut transition");
+            return;
+        }
+
         // Guard: skip crossfade for short songs (fall back to gapless)
         let min_dur = track_duration_ms.min(incoming_duration_ms);
         if min_dur < Self::MIN_CROSSFADE_TRACK_MS {
@@ -1025,6 +1266,7 @@ impl AudioRenderer {
             Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             false,
+            self.bit_perfect_active(),
         );
 
         self.crossfade_state = CrossfadeState::Active {
@@ -1227,6 +1469,10 @@ impl AudioRenderer {
             old_primary.silence_and_stop();
         }
         self.primary_stream = Some(stream);
+        // A crossfade stream is never bit-perfect: arming is gated off whenever
+        // bit-perfect is active, so the promoted stream was built on the DSP
+        // path. Record that so the badge can't claim BIT-PERFECT post-fade.
+        self.current_stream_bit_perfect = false;
 
         // Set new primary to full user volume and promote it to visualizer
         // feeder (it was created silent for the viz to avoid the two-stream
@@ -1522,6 +1768,35 @@ mod tests {
 
     use super::*;
     use crate::audio::streaming_source::{SharedVisualizerCallback, StreamingSource};
+
+    /// `crossfade_blocked()` — the single gate both crossfade triggers share —
+    /// blocks every transition whenever bit-perfect is ACTIVE (regardless of
+    /// rate), and never when it is off or merely requested-but-not-viable. (A
+    /// crossfade applies a gain envelope to two mixed streams — it can't be
+    /// bit-perfect — so same-rate transitions are hard-cut too, not just
+    /// cross-rate ones.) `#[tokio::test]` because `AudioRenderer::new()` needs a
+    /// running reactor.
+    #[tokio::test]
+    async fn bit_perfect_blocks_all_crossfades_when_active() {
+        let mut renderer = AudioRenderer::new();
+        // Not bit-perfect → never blocked. set_bit_perfect reports the change.
+        assert!(!renderer.crossfade_blocked());
+        assert!(
+            renderer.set_bit_perfect(true),
+            "first enable is a real change"
+        );
+        assert!(
+            !renderer.set_bit_perfect(true),
+            "re-enable is a no-op change"
+        );
+        // Requested but not viable (cpal: no PipeWire node volume) → still not
+        // blocked; the toggle is a no-op on that path.
+        assert!(!renderer.crossfade_blocked());
+        // Requested AND viable (native PipeWire volume) → blocked (hard-cut),
+        // same-rate or cross-rate alike.
+        renderer.pw_volume_active = true;
+        assert!(renderer.crossfade_blocked());
+    }
 
     const FR: u32 = 44_100 * 2; // 44.1k stereo frame rate
     const FR_S: usize = FR as usize; // same, as a sample count for the buffer arg
@@ -1883,6 +2158,7 @@ mod tests {
             Arc::new(Notify::new()),
             false,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            false,
         );
         let stream = ActiveStream {
             producer,

@@ -230,12 +230,13 @@ pub(crate) fn player_bar_height() -> f32 {
 // because the slider is wider than a button).
 const BREAKPOINT_HIDE_SFX_SLIDER: f32 = 840.0;
 
-/// One of the seven mode toggles the player bar exposes. Used to tag a mode
+/// One of the mode toggles the player bar exposes. Used to tag a mode
 /// for cull-priority and in-kebab queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModeId {
     Visualizer,
     Crossfade,
+    BitPerfect,
     Sfx,
     Eq,
     Consume,
@@ -366,6 +367,20 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
             },
             message: PlayerBarMessage::ToggleCrossfade,
         },
+        ModeId::BitPerfect => ModeDescriptor {
+            icon: Some("assets/icons/binary.svg"),
+            tooltip: if data.bit_perfect {
+                "Bit-Perfect: Active"
+            } else {
+                "Bit-Perfect: Off"
+            },
+            kebab_label: if data.bit_perfect {
+                "Bit-Perfect: On"
+            } else {
+                "Bit-Perfect: Off"
+            },
+            message: PlayerBarMessage::ToggleBitPerfect,
+        },
         ModeId::Visualizer => ModeDescriptor {
             icon: Some(match data.visualization_mode {
                 VisualizationMode::Lines => "assets/icons/audio-waveform.svg",
@@ -391,9 +406,10 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
 /// Cull priority — index `i` is the i-th mode to fold into the kebab as the
 /// window narrows. Ordered to match the inline row's right-to-left disappear
 /// (rightmost-first) so gaps close cleanly from the right edge.
-pub(crate) const CULL_ORDER: [ModeId; 7] = [
+pub(crate) const CULL_ORDER: [ModeId; 8] = [
     ModeId::Visualizer,
     ModeId::Crossfade,
+    ModeId::BitPerfect,
     ModeId::Sfx,
     ModeId::Eq,
     ModeId::Consume,
@@ -405,9 +421,10 @@ pub(crate) const CULL_ORDER: [ModeId; 7] = [
 /// Hysteresis on the way back out: a culled mode pops back inline only once
 /// width ≥ this threshold + `CULL_HYSTERESIS_PX`, preventing drag-resize
 /// flicker at the boundary.
-pub(crate) const CULL_ENTER_WIDTHS: [f32; 7] = [
+pub(crate) const CULL_ENTER_WIDTHS: [f32; 8] = [
     1070.0, // Visualizer
     1010.0, // Crossfade
+    980.0,  // Bit-Perfect
     950.0,  // SFX
     890.0,  // EQ
     830.0,  // Consume
@@ -580,6 +597,10 @@ pub(crate) struct PlayerBarViewData {
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
     pub crossfade_enabled: bool,
+    /// Whether bit-perfect output is enabled (the setting). Drives the
+    /// Bit-Perfect mode toggle's active state. Distinct from `bit_perfect_status`
+    /// (the honest device-rate badge).
+    pub bit_perfect: bool,
     pub visualization_mode: nokkvi_data::types::player_settings::VisualizationMode,
     pub window_width: f32,
     pub layout: PlayerBarLayout,
@@ -599,6 +620,11 @@ pub(crate) struct PlayerBarViewData {
     pub format_suffix: String,
     pub sample_rate: u32,
     pub bitrate: u32,
+    /// Honest bit-perfect status — tucked into the MiniPlayer scrub cap after
+    /// the codec (`… · BIT-PERFECT`).
+    pub bit_perfect_status: crate::state::BitPerfectStatus,
+    /// When resampled, the app holding the device (`… · RESAMPLED→96k · Zen`).
+    pub bit_perfect_holder: Option<String>,
     pub radio_name: Option<String>,
     /// Album artwork for the currently playing song. Populated by
     /// `app_view.rs` from the artwork LRU (large preferred, falls back
@@ -634,6 +660,7 @@ pub enum PlayerBarMessage {
     SfxVolumeChanged(f32),
     CycleVisualization,
     ToggleCrossfade,
+    ToggleBitPerfect,
     ScrollVolume(f32),
     /// Wheel-scroll delta over the SFX slider — handler reads the
     /// current SFX volume from app state and clamps, avoiding the
@@ -895,6 +922,9 @@ fn mode_toggle_button<'a>(
 /// display is off, the suffix is empty, or there's no bitrate, the affected cap
 /// falls back to time-only (fully opaque). Pure (takes `show_format` as an
 /// argument rather than reading the theme atomic) so it stays unit-testable.
+// Many display inputs (time/codec/rate/bitrate/bit-perfect) — a builder for one
+// strip, not a candidate for a params struct.
+#[allow(clippy::too_many_arguments)]
 fn capsule_scrub_labels(
     elapsed: &str,
     duration: &str,
@@ -902,19 +932,30 @@ fn capsule_scrub_labels(
     sample_rate_khz: f32,
     bitrate_kbps: u32,
     show_format: bool,
+    bit_perfect_status: crate::state::BitPerfectStatus,
+    bit_perfect_holder: Option<&str>,
 ) -> (CapLabel, CapLabel) {
     let bare = || (CapLabel::time_only(elapsed), CapLabel::time_only(duration));
     if !show_format {
         return bare();
     }
+    // Tuck the honest bit-perfect badge in after the codec, sharing the codec's
+    // dim cap styling (the cap is plain text — it can't carry the accent color
+    // the wider strips use). Reuses the single-sourced `bit_perfect_badge` label,
+    // which already folds the holder in as "RESAMPLED→96k · Zen".
+    let badge_suffix =
+        match super::track_info_strip::bit_perfect_badge(bit_perfect_status, bit_perfect_holder) {
+            Some((label, _color)) => format!(" · {label}"),
+            None => String::new(),
+        };
     match super::format_info::format_audio_info_split(format_suffix, sample_rate_khz, bitrate_kbps)
     {
         Some((codec, Some(kbps))) => (
-            CapLabel::new(format!("{elapsed} · {codec}"), elapsed),
+            CapLabel::new(format!("{elapsed} · {codec}{badge_suffix}"), elapsed),
             CapLabel::new(format!("{kbps} · {duration}"), duration),
         ),
         Some((codec, None)) => (
-            CapLabel::new(format!("{elapsed} · {codec}"), elapsed),
+            CapLabel::new(format!("{elapsed} · {codec}{badge_suffix}"), elapsed),
             CapLabel::time_only(duration),
         ),
         None => bare(),
@@ -1225,6 +1266,7 @@ pub(crate) fn player_bar<'a>(
     let eq = mode_descriptor(ModeId::Eq, data);
     let sfx = mode_descriptor(ModeId::Sfx, data);
     let crossfade = mode_descriptor(ModeId::Crossfade, data);
+    let bit_perfect = mode_descriptor(ModeId::BitPerfect, data);
     let visualizer = mode_descriptor(ModeId::Visualizer, data);
 
     // Per-mode kebab membership — derived once from the layout snapshot so
@@ -1236,6 +1278,7 @@ pub(crate) fn player_bar<'a>(
     let eq_in_kebab = layout.is_in_kebab(ModeId::Eq);
     let sfx_in_kebab = layout.is_in_kebab(ModeId::Sfx);
     let crossfade_in_kebab = layout.is_in_kebab(ModeId::Crossfade);
+    let bit_perfect_in_kebab = layout.is_in_kebab(ModeId::BitPerfect);
     let visualizer_in_kebab = layout.is_in_kebab(ModeId::Visualizer);
 
     let mut mode_toggles_row = iced::widget::Row::new().spacing(4);
@@ -1294,6 +1337,18 @@ pub(crate) fn player_bar<'a>(
             sfx.tooltip,
         ));
     }
+    // Bit-Perfect renders to the LEFT of Crossfade inline so the row's
+    // right-to-left disappear order matches CULL_ORDER (Visualizer, then
+    // Crossfade, then BitPerfect) — gaps close cleanly from the right edge.
+    if !bit_perfect_in_kebab {
+        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
+            bit_perfect.icon.unwrap_or("assets/icons/binary.svg"),
+            bit_perfect.message.clone(),
+            data.bit_perfect,
+            bit_perfect.tooltip,
+            true,
+        ));
+    }
     if !crossfade_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             crossfade.icon.unwrap_or("assets/icons/blend.svg"),
@@ -1324,8 +1379,11 @@ pub(crate) fn player_bar<'a>(
             PlayerModesMenu, mode_menu_item, mode_menu_separator,
         };
         let queue_group_has_items = shuffle_in_kebab || repeat_in_kebab || consume_in_kebab;
-        let audio_group_has_items =
-            crossfade_in_kebab || eq_in_kebab || visualizer_in_kebab || sfx_in_kebab;
+        let audio_group_has_items = crossfade_in_kebab
+            || bit_perfect_in_kebab
+            || eq_in_kebab
+            || visualizer_in_kebab
+            || sfx_in_kebab;
 
         let mut kebab_rows = Vec::with_capacity(layout.kebab_mode_count as usize + 1);
         if shuffle_in_kebab {
@@ -1357,6 +1415,13 @@ pub(crate) fn player_bar<'a>(
                 crossfade.kebab_label,
                 data.crossfade_enabled,
                 crossfade.message.clone(),
+            ));
+        }
+        if bit_perfect_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                bit_perfect.kebab_label,
+                data.bit_perfect,
+                bit_perfect.message.clone(),
             ));
         }
         if eq_in_kebab {
@@ -1554,6 +1619,8 @@ pub(crate) fn player_bar<'a>(
             data.sample_rate as f32 / 1000.0,
             data.bitrate,
             theme::strip_show_format_info(),
+            data.bit_perfect_status,
+            data.bit_perfect_holder.as_deref(),
         );
         let capscrub =
             widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
@@ -1841,7 +1908,7 @@ mod mini_player_layout_tests {
     /// COMPACT MiniPlayer regime (wide_for_three_section = false): every mode is
     /// folded into one permanent kebab. Non-MiniPlayer modes pass through.
     #[test]
-    fn effective_forces_seven_in_compact_mini() {
+    fn effective_forces_all_modes_into_kebab_in_compact_mini() {
         let _guard = THEME_MODE_LOCK.lock();
         let saved = track_info_display();
 
@@ -1867,7 +1934,7 @@ mod mini_player_layout_tests {
 
     /// WIDE MiniPlayer regime (wide_for_three_section = true): the width-driven
     /// kebab_mode_count passes THROUGH (modes expand / cull like the normal bar),
-    /// NOT force-folded to seven.
+    /// NOT force-folded into one kebab.
     #[test]
     fn effective_passes_kebab_through_in_wide_mini() {
         let _guard = THEME_MODE_LOCK.lock();
@@ -2072,18 +2139,18 @@ mod section_width_tests {
         let chrome_w = crate::widgets::sizes::TOOLBAR_BUTTON_SIZE;
         let total_modes = CULL_ORDER.len() as f32;
 
-        // All inline (kebab_count=0): 7 buttons + 6 gaps, no kebab.
+        // All inline (kebab_count=0): 8 buttons + 7 gaps, no kebab.
         let all_inline = mode_section_width(layout(0), false);
         assert_eq!(
             all_inline,
             total_modes * mode_btn_w + (total_modes - 1.0) * SECTION_BUTTON_GAP
         );
 
-        // Some culled (kebab_count=5): 2 inline + kebab + 2 gaps.
+        // Some culled (kebab_count=5): with 8 modes, 3 inline + kebab + 3 gaps.
         let some_culled = mode_section_width(layout(5), false);
         assert_eq!(
             some_culled,
-            2.0 * mode_btn_w + chrome_w + 2.0 * SECTION_BUTTON_GAP
+            3.0 * mode_btn_w + chrome_w + 3.0 * SECTION_BUTTON_GAP
         );
 
         // Hamburger adds one more button + gap.
@@ -2155,6 +2222,34 @@ mod layout_tests {
         assert_eq!(result.kebab_mode_count, 0);
     }
 
+    /// Tripwire for the CULL_ORDER ↔ inline-row coupling. Modes fold
+    /// rightmost-first, so the inline row's order (left→right) REVERSED must
+    /// equal CULL_ORDER — otherwise a mode folds from the wrong end and the gap
+    /// doesn't close cleanly from the right edge (a real bug an earlier
+    /// Bit-Perfect insertion hit). `INLINE_ORDER` mirrors the `if !X_in_kebab {
+    /// push }` sequence in `player_bar()`; keep the two in lockstep when adding
+    /// or reordering a mode.
+    #[test]
+    fn inline_row_order_reversed_matches_cull_order() {
+        const INLINE_ORDER: [ModeId; 8] = [
+            ModeId::Repeat,
+            ModeId::Shuffle,
+            ModeId::Consume,
+            ModeId::Eq,
+            ModeId::Sfx,
+            ModeId::BitPerfect,
+            ModeId::Crossfade,
+            ModeId::Visualizer,
+        ];
+        let mut reversed = INLINE_ORDER;
+        reversed.reverse();
+        assert_eq!(
+            reversed, CULL_ORDER,
+            "inline render order reversed must equal CULL_ORDER (update both \
+             together) so modes fold cleanly from the right edge",
+        );
+    }
+
     #[test]
     fn one_pixel_below_first_threshold_culls_visualizer() {
         let result = compute_layout(CULL_ENTER_WIDTHS[0] - 1.0, empty());
@@ -2178,7 +2273,7 @@ mod layout_tests {
     }
 
     #[test]
-    fn extremely_narrow_width_culls_all_seven_modes() {
+    fn extremely_narrow_width_culls_all_modes() {
         let result = compute_layout(100.0, empty());
         assert_eq!(result.kebab_mode_count, CULL_ENTER_WIDTHS.len() as u8);
     }
@@ -2323,6 +2418,7 @@ mod layout_tests {
         let all = [
             ModeId::Visualizer,
             ModeId::Crossfade,
+            ModeId::BitPerfect,
             ModeId::Sfx,
             ModeId::Eq,
             ModeId::Consume,
@@ -2381,10 +2477,11 @@ mod layout_tests {
 
     #[test]
     fn is_in_kebab_all_modes_at_full_count() {
-        let l = layout(7);
+        let l = layout(8);
         for mode in [
             ModeId::Visualizer,
             ModeId::Crossfade,
+            ModeId::BitPerfect,
             ModeId::Sfx,
             ModeId::Eq,
             ModeId::Consume,
@@ -2405,6 +2502,8 @@ mod mode_descriptor_tests {
         capsule_scrub_labels, mode_descriptor,
     };
 
+    const BP_OFF: crate::state::BitPerfectStatus = crate::state::BitPerfectStatus::Off;
+
     /// Baseline view data with every mode toggled off / neutral. Individual
     /// tests flip just the fields they exercise.
     fn sample_data() -> PlayerBarViewData {
@@ -2424,6 +2523,7 @@ mod mode_descriptor_tests {
             sound_effects_enabled: false,
             sfx_volume: 1.0,
             crossfade_enabled: false,
+            bit_perfect: false,
             visualization_mode: VisualizationMode::Off,
             window_width: 1200.0,
             layout: PlayerBarLayout::default(),
@@ -2434,6 +2534,8 @@ mod mode_descriptor_tests {
             format_suffix: String::new(),
             sample_rate: 0,
             bitrate: 0,
+            bit_perfect_status: crate::state::BitPerfectStatus::Off,
+            bit_perfect_holder: None,
             radio_name: None,
             artwork_handle: None,
             hamburger_open: false,
@@ -2446,7 +2548,8 @@ mod mode_descriptor_tests {
     /// bare time is kept separate so it can render brighter than the metadata.
     #[test]
     fn capsule_labels_full_codec_and_bitrate() {
-        let (left, right) = capsule_scrub_labels("3:40", "8:00", "flac", 44.1, 1411, true);
+        let (left, right) =
+            capsule_scrub_labels("3:40", "8:00", "flac", 44.1, 1411, true, BP_OFF, None);
         assert_eq!(left.full, "3:40 · FLAC 44.1kHz");
         assert_eq!(left.time, "3:40");
         assert_eq!(right.full, "1411kbps · 8:00");
@@ -2457,7 +2560,8 @@ mod mode_descriptor_tests {
     /// still carries the codec + sample rate over a separate bare time.
     #[test]
     fn capsule_labels_no_bitrate_keeps_bare_duration() {
-        let (left, right) = capsule_scrub_labels("0:05", "5:00", "flac", 96.0, 0, true);
+        let (left, right) =
+            capsule_scrub_labels("0:05", "5:00", "flac", 96.0, 0, true, BP_OFF, None);
         assert_eq!(left.full, "0:05 · FLAC 96.0kHz");
         assert_eq!(left.time, "0:05");
         assert_eq!(right.full, "5:00");
@@ -2468,7 +2572,8 @@ mod mode_descriptor_tests {
     /// its kHz and the bitrate still tucks against the placeholder duration.
     #[test]
     fn capsule_labels_no_sample_rate_radio_duration() {
-        let (left, right) = capsule_scrub_labels("0:30", "--:--", "mp3", 0.0, 320, true);
+        let (left, right) =
+            capsule_scrub_labels("0:30", "--:--", "mp3", 0.0, 320, true, BP_OFF, None);
         assert_eq!(left.full, "0:30 · MP3");
         assert_eq!(left.time, "0:30");
         assert_eq!(right.full, "320kbps · --:--");
@@ -2478,7 +2583,8 @@ mod mode_descriptor_tests {
     /// Empty codec suffix → both caps fall back to time-only (no stray ` · `).
     #[test]
     fn capsule_labels_empty_suffix_falls_back_to_time() {
-        let (left, right) = capsule_scrub_labels("3:40", "8:00", "", 44.1, 1411, true);
+        let (left, right) =
+            capsule_scrub_labels("3:40", "8:00", "", 44.1, 1411, true, BP_OFF, None);
         assert_eq!(left.full, "3:40");
         assert_eq!(left.time, "3:40");
         assert_eq!(right.full, "8:00");
@@ -2489,11 +2595,46 @@ mod mode_descriptor_tests {
     /// (honors the shared `strip_show_format_info()` toggle).
     #[test]
     fn capsule_labels_format_off_is_bare_time() {
-        let (left, right) = capsule_scrub_labels("3:40", "8:00", "flac", 44.1, 1411, false);
+        let (left, right) =
+            capsule_scrub_labels("3:40", "8:00", "flac", 44.1, 1411, false, BP_OFF, None);
         assert_eq!(left.full, "3:40");
         assert_eq!(left.time, "3:40");
         assert_eq!(right.full, "8:00");
         assert_eq!(right.time, "8:00");
+    }
+
+    /// Bit-perfect Verified tucks a "· BIT-PERFECT" badge in after the codec on
+    /// the left cap (the MiniPlayer's honest indicator); the bare time and the
+    /// right cap are untouched. Resampled tucks "· RESAMPLED" the same way.
+    #[test]
+    fn capsule_labels_tuck_bit_perfect_badge_after_codec() {
+        let verified = crate::state::BitPerfectStatus::Verified;
+        let (left, right) =
+            capsule_scrub_labels("0:05", "5:00", "flac", 96.0, 0, true, verified, None);
+        assert_eq!(left.full, "0:05 · FLAC 96.0kHz · BIT-PERFECT");
+        assert_eq!(left.time, "0:05");
+        assert_eq!(
+            right.full, "5:00",
+            "the badge only tucks into the left/codec cap"
+        );
+
+        // Resampled tucks the device rate AND the holder in inline (track 96k,
+        // device latched at 48k by "Zen" → "RESAMPLED→48k · Zen"), so the
+        // tooltip-less capsule names the culprit at a glance.
+        let resampled = crate::state::BitPerfectStatus::Resampled {
+            device_rate: 48_000,
+        };
+        let (left, _) = capsule_scrub_labels(
+            "0:05",
+            "5:00",
+            "flac",
+            96.0,
+            0,
+            true,
+            resampled,
+            Some("Zen"),
+        );
+        assert_eq!(left.full, "0:05 · FLAC 96.0kHz · RESAMPLED→48k · Zen");
     }
 
     /// Repeat is the most state-rich icon mode: its icon, tooltip, and kebab
@@ -2607,6 +2748,7 @@ mod mode_descriptor_tests {
                 ModeId::Eq => matches!(d.message, PlayerBarMessage::ToggleEq),
                 ModeId::Sfx => matches!(d.message, PlayerBarMessage::ToggleSoundEffects),
                 ModeId::Crossfade => matches!(d.message, PlayerBarMessage::ToggleCrossfade),
+                ModeId::BitPerfect => matches!(d.message, PlayerBarMessage::ToggleBitPerfect),
                 ModeId::Visualizer => matches!(d.message, PlayerBarMessage::CycleVisualization),
             };
             assert!(ok, "wrong message ctor for {mode:?}: {:?}", d.message);

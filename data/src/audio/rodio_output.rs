@@ -160,6 +160,7 @@ impl RodioOutput {
         eq_state: Option<super::eq::EqState>,
         consumed_notify: Arc<Notify>,
         feeds_visualizer: bool,
+        bit_perfect: bool,
     ) -> ActiveStream {
         // Create lock-free ring buffer
         let rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
@@ -180,7 +181,28 @@ impl RodioOutput {
             consumed_notify,
             feeds_visualizer,
             self.viz_enabled.clone(),
+            bit_perfect,
         );
+
+        // Bit-perfect: add the source to the mixer with NO post-processing —
+        // no AGC, no static gain, no peak limiter. The StreamingSource itself
+        // also bypasses EQ and software volume (see its `next`), so the decoded
+        // PCM reaches the mixer untouched. User volume is applied at the
+        // PipeWire node instead. Safe to drop the limiter: a lossless source is
+        // already within full scale.
+        if bit_perfect {
+            self.mixer.add(source);
+            debug!(
+                "🔊 [RODIO] Created BIT-PERFECT stream (DSP bypassed): {}ch, {}Hz",
+                channels, sample_rate
+            );
+            return ActiveStream {
+                producer,
+                handle,
+                sample_rate,
+                channels,
+            };
+        }
 
         // Pre-mixer chain. The peak limiter sits at the end of every variant so
         // any AGC overshoot or static-gain boost is clamped before mixing.

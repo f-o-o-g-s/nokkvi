@@ -133,6 +133,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::CycleVisualization => Message::Playback(PlaybackMessage::CycleVisualization),
         HotkeyAction::ToggleEqModal => Message::EqModal(crate::widgets::EqModalMessage::Toggle),
         HotkeyAction::ToggleCrossfade => Message::Playback(PlaybackMessage::ToggleCrossfade),
+        HotkeyAction::ToggleBitPerfect => Message::Playback(PlaybackMessage::ToggleBitPerfect),
         // Slot List
         HotkeyAction::SlotListUp => Message::SlotList(SlotListMessage::NavigateUp),
         HotkeyAction::SlotListDown => Message::SlotList(SlotListMessage::NavigateDown),
