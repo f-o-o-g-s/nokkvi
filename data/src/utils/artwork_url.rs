@@ -15,22 +15,11 @@ pub const HIGH_RES_SIZE: u32 = 1000;
 /// Default size for thumbnails
 pub const THUMBNAIL_SIZE: u32 = 80;
 
-/// Build a Subsonic getCoverArt URL
-///
-/// # Arguments
-/// * `art_id` - The artwork identifier (album ID, cover_art field, etc.)
-/// * `server_url` - Base Navidrome server URL
-/// * `subsonic_credential` - Pre-formatted credential string (e.g., "u=user&t=token&s=salt")
-/// * `size` - Optional size in pixels (square). If None, uses HIGH_RES_SIZE (1000)
-///
-/// # Returns
-/// Complete URL string, or empty string if credentials are missing
-///
-/// # Examples
-/// ```ignore
-/// let url = build_cover_art_url("al-abc123", "http://server", "u=user&t=tok&s=salt", Some(80), None);
-/// ```
-pub fn build_cover_art_url(
+/// Test-only convenience wrapper over [`build_cover_art_url_with_timestamp`]
+/// that omits the cache-busting `updated_at` timestamp. Production code calls
+/// [`build_cover_art_url_with_timestamp`] directly.
+#[cfg(test)]
+fn build_cover_art_url(
     art_id: &str,
     server_url: &str,
     subsonic_credential: &str,

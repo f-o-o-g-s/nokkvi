@@ -467,21 +467,6 @@ pub enum EditorMessage {
     SetOpenMenu(Option<OpenMenu>),
 }
 
-/// Actions the editor bubbles to root for global state mutation.
-///
-/// Most editor mutations (reorder/remove/add) are plain local `Vec` ops with
-/// no backend round-trip, handled inline; only `Save` needs to bubble up to a
-/// backend call.
-//
-// Phase 3 wires the variants; Phase 1 only lands the type.
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(crate) enum EditorAction {
-    None,
-    /// Persist the editor buffer back to the playlist (triggers the save task).
-    Save,
-}
-
 /// Cross-pane drag state machine messages — drag from browsing panel into
 /// queue. Handled by `update/cross_pane_drag.rs`.
 #[derive(Debug, Clone)]

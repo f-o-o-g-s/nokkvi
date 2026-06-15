@@ -17,13 +17,13 @@
 
 /// Per matched character: base reward. Exposed so the search layer can derive
 /// its keep-floor relative to the needle length (see [`is_strong_score`]).
-pub const MATCH_BASE: i32 = 16;
+pub(crate) const MATCH_BASE: i32 = 16;
 
 /// Extra structure a match must carry, on top of `len * MATCH_BASE`, to count
 /// as "strong" — i.e. at least one consecutive run, word-start, or prefix hit.
 /// Filters first-keystroke scattered-subsequence noise without hiding real
 /// prefix/acronym matches.
-pub const STRUCTURE_MIN: i32 = 10;
+pub(crate) const STRUCTURE_MIN: i32 = 10;
 
 /// Bonus when a matched char immediately follows the previous matched char.
 /// Rewards contiguous runs so substrings outrank scattered subsequences.

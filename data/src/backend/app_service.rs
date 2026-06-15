@@ -745,46 +745,6 @@ impl AppService {
     }
 
     // =========================================================================
-    // Play-Next Orchestration Methods
-    //
-    // These methods add songs to the queue and then move them to right after
-    // the currently playing track, so they play next.
-    // =========================================================================
-
-    /// Play next: add album songs right after currently playing track.
-    pub async fn play_next_album(&self, album_id: &str) -> Result<()> {
-        self.dispatch(SongSource::Album(album_id.to_owned()), QueueVerb::PlayNext)
-            .await
-    }
-
-    /// Play next: add artist songs right after currently playing track.
-    pub async fn play_next_artist(&self, artist_id: &str) -> Result<()> {
-        self.dispatch(
-            SongSource::Artist(artist_id.to_owned()),
-            QueueVerb::PlayNext,
-        )
-        .await
-    }
-
-    /// Play next: add genre songs right after currently playing track.
-    pub async fn play_next_genre(&self, genre_name: &str) -> Result<()> {
-        self.dispatch(
-            SongSource::Genre(genre_name.to_owned()),
-            QueueVerb::PlayNext,
-        )
-        .await
-    }
-
-    /// Play next: add playlist songs right after currently playing track.
-    pub async fn play_next_playlist(&self, playlist_id: &str) -> Result<()> {
-        self.dispatch(
-            SongSource::Playlist(playlist_id.to_owned()),
-            QueueVerb::PlayNext,
-        )
-        .await
-    }
-
-    // =========================================================================
     // Batch Orchestration Methods
     //
     // These methods receive a `BatchPayload` and resolve it continuously, flattening

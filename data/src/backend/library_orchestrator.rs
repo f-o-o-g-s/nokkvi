@@ -60,18 +60,18 @@ impl<'a> LibraryOrchestrator<'a> {
         }
     }
 
-    pub async fn resolve_album(&self, album_id: &str) -> Result<Vec<Song>> {
+    pub(crate) async fn resolve_album(&self, album_id: &str) -> Result<Vec<Song>> {
         self.albums.load_album_songs(album_id).await
     }
 
-    pub async fn resolve_artist(&self, artist_id: &str) -> Result<Vec<Song>> {
+    pub(crate) async fn resolve_artist(&self, artist_id: &str) -> Result<Vec<Song>> {
         self.artists.load_artist_songs(artist_id).await
     }
 
     /// Genre is keyed by name (Navidrome API contract). Constructs
     /// `SongsApiService` on demand through the shared
     /// [`AuthGateway::build_native_api`] factory path.
-    pub async fn resolve_genre(&self, genre_name: &str) -> Result<Vec<Song>> {
+    pub(crate) async fn resolve_genre(&self, genre_name: &str) -> Result<Vec<Song>> {
         let songs_api = self.auth.build_native_api(SongsApiService::new).await?;
         let (songs, _) = songs_api.load_songs_by_genre(genre_name).await?;
         Ok(songs)

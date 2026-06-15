@@ -90,7 +90,7 @@ impl AudioFormat {
     }
 
     /// Calculate bytes needed for a given frame count
-    pub fn bytes_for_frames(&self, frame_count: usize) -> usize {
+    pub(crate) fn bytes_for_frames(&self, frame_count: usize) -> usize {
         frame_count * self.bytes_per_frame()
     }
 
@@ -104,7 +104,7 @@ impl AudioFormat {
     }
 
     /// Calculate frame count for a given duration in milliseconds
-    pub fn frames_for_duration(&self, ms: u64) -> usize {
+    pub(crate) fn frames_for_duration(&self, ms: u64) -> usize {
         if !self.is_valid() {
             return 0;
         }
@@ -112,7 +112,7 @@ impl AudioFormat {
     }
 
     /// Calculate duration in milliseconds for a given frame count
-    pub fn duration_for_frames(&self, frame_count: usize) -> u64 {
+    pub(crate) fn duration_for_frames(&self, frame_count: usize) -> u64 {
         if !self.is_valid() {
             return 0;
         }

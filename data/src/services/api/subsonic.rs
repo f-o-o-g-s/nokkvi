@@ -34,7 +34,7 @@ pub(crate) struct SubsonicEnvelope<T> {
 /// * `endpoint` - Subsonic endpoint name (e.g., "star", "setRating", "getPlaylist")
 /// * `subsonic_credential` - Pre-formatted credential string (e.g., "u=user&t=token&s=salt")
 /// * `extra_params` - Additional endpoint-specific parameters as key-value pairs
-pub async fn subsonic_post(
+pub(crate) async fn subsonic_post(
     http_client: &Arc<reqwest::Client>,
     server_url: &str,
     endpoint: &str,
@@ -185,21 +185,6 @@ pub(crate) fn deserialize_one_or_many<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Build a Subsonic REST API URL (GET-style, credentials in query string).
-///
-/// Only used for streaming URLs where POST is not possible due to HTTP Range
-/// request requirements. For all other endpoints, use [`subsonic_post`] instead.
-pub fn build_subsonic_url(
-    server_url: &str,
-    endpoint: &str,
-    song_id: &str,
-    subsonic_credential: &str,
-) -> String {
-    format!(
-        "{server_url}/rest/{endpoint}?id={song_id}&{subsonic_credential}&f=json&v=1.8.0&c=nokkvi"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use reqwest::StatusCode;
@@ -221,20 +206,6 @@ mod tests {
         assert!(
             serde_json::from_str::<SubsonicEnvelope<serde_json::Value>>(missing).is_err(),
             "body without the subsonic-response key must fail to parse"
-        );
-    }
-
-    #[test]
-    fn test_build_subsonic_url() {
-        let url = build_subsonic_url(
-            "http://localhost:4533",
-            "star",
-            "song123",
-            "u=admin&p=enc:hex123",
-        );
-        assert_eq!(
-            url,
-            "http://localhost:4533/rest/star?id=song123&u=admin&p=enc:hex123&f=json&v=1.8.0&c=nokkvi"
         );
     }
 

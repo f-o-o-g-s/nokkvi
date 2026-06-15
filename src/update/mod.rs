@@ -90,9 +90,8 @@ mod window;
 pub(crate) use chrome::dispatch_view_chrome;
 use iced::Task;
 pub(crate) use ipc::{CLI_ARGS as IPC_CLI_ARGS, CliArgType, KNOWN_COMMANDS as IPC_KNOWN_COMMANDS};
-#[allow(unused_imports)]
 pub(crate) use loader_target::{
-    AlbumsTarget, ArtistsTarget, GenresTarget, LoaderTarget, PlaylistsTarget, SongsTarget,
+    AlbumsTarget, ArtistsTarget, GenresTarget, PlaylistsTarget, SongsTarget,
 };
 pub(crate) use pending_expand_resolve::{AlbumSpec, ArtistSpec, GenreSpec, SongSpec};
 

@@ -71,16 +71,6 @@ impl PlaylistEditState {
         &self.loaded_updated_at
     }
 
-    /// Whether the playlist changed on the server since the editor opened.
-    ///
-    /// Compares the captured open-time `updatedAt` against the server's
-    /// current value. An empty captured token (e.g. a freshly-created empty
-    /// playlist with no `updatedAt` yet) is treated as "not stale" so the
-    /// create-and-edit flow is never blocked.
-    pub fn is_stale_against(&self, current_updated_at: &str) -> bool {
-        !self.loaded_updated_at.is_empty() && self.loaded_updated_at != current_updated_at
-    }
-
     /// Check whether the current queue differs from the saved snapshot (tracks only).
     pub fn is_dirty(&self, current_queue_ids: &[String]) -> bool {
         self.saved_snapshot != current_queue_ids
@@ -323,37 +313,5 @@ mod tests {
         assert_eq!(s.loaded_updated_at(), "", "defaults empty");
         s.set_loaded_updated_at("2026-05-30T10:00:00Z".into());
         assert_eq!(s.loaded_updated_at(), "2026-05-30T10:00:00Z");
-    }
-
-    #[test]
-    fn not_stale_when_token_unchanged() {
-        let mut s = state("Mix", "");
-        s.set_loaded_updated_at("2026-05-30T10:00:00Z".into());
-        assert!(
-            !s.is_stale_against("2026-05-30T10:00:00Z"),
-            "an unchanged server token must not be stale"
-        );
-    }
-
-    #[test]
-    fn stale_when_token_changed() {
-        let mut s = state("Mix", "");
-        s.set_loaded_updated_at("2026-05-30T10:00:00Z".into());
-        assert!(
-            s.is_stale_against("2026-05-30T11:30:00Z"),
-            "a changed server token must be stale (abort the overwrite)"
-        );
-    }
-
-    #[test]
-    fn empty_loaded_token_is_never_stale() {
-        // Create-and-edit-empty flow: a freshly-created playlist may have no
-        // updatedAt token. Empty/anything must never be treated as stale.
-        let s = state("Mix", "");
-        assert_eq!(s.loaded_updated_at(), "");
-        assert!(
-            !s.is_stale_against("2026-05-30T11:30:00Z"),
-            "an empty captured token must never block the save (new-playlist flow)"
-        );
     }
 }

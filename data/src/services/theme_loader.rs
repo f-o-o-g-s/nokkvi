@@ -279,20 +279,6 @@ pub fn builtin_theme_stems() -> Vec<&'static str> {
     BUILTIN_THEMES.iter().map(|t| t.stem).collect()
 }
 
-/// Save a theme to `~/.config/nokkvi/themes/{name}.toml`.
-pub fn save_theme(name: &str, theme: &ThemeFile) -> Result<()> {
-    let themes_dir = get_themes_dir()?;
-    let path = themes_dir.join(format!("{name}.toml"));
-
-    let content = theme.save().context("Failed to serialize theme")?;
-
-    crate::utils::paths::write_atomic(&path, &content)
-        .with_context(|| format!("Failed to write theme file: {}", path.display()))?;
-
-    debug!(theme = name, "Saved theme file");
-    Ok(())
-}
-
 /// Restore a built-in theme by overwriting the user's copy with the original.
 ///
 /// Returns `Err` if the theme is not a built-in. Routes through `write_atomic`,

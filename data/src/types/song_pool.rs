@@ -24,7 +24,7 @@ impl SongPool {
     }
 
     /// Build a pool from a list of songs (used during deserialization and migration).
-    pub fn from_songs(songs: Vec<Song>) -> Self {
+    pub(crate) fn from_songs(songs: Vec<Song>) -> Self {
         let map = songs.into_iter().map(|s| (s.id.clone(), s)).collect();
         Self { songs: map }
     }

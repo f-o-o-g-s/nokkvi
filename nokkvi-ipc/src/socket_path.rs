@@ -71,7 +71,7 @@ pub fn socket_path(pid: u32) -> PathBuf {
 /// Returns paths that match `nokkvi-*.sock`. Liveness is not checked here —
 /// callers that need it should layer [`is_alive`] on top, or use
 /// [`find_live_socket`] which does both.
-pub fn all_socket_paths() -> impl Iterator<Item = PathBuf> {
+pub(crate) fn all_socket_paths() -> impl Iterator<Item = PathBuf> {
     let dir = socket_dir();
     let entries = fs::read_dir(&dir).ok().into_iter().flatten().flatten();
     entries.filter_map(|entry| {
@@ -95,7 +95,7 @@ pub fn all_socket_paths() -> impl Iterator<Item = PathBuf> {
 /// blocking, but a local Unix-socket connect either succeeds in <1ms or
 /// fails immediately — there's no slow-network path.
 #[must_use]
-pub fn is_alive(path: &Path) -> bool {
+pub(crate) fn is_alive(path: &Path) -> bool {
     let Ok(addr) = std::os::unix::net::SocketAddr::from_pathname(path) else {
         return false;
     };

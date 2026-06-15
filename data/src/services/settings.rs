@@ -859,10 +859,6 @@ impl SettingsManager {
         }
     }
 
-    pub fn get_custom_eq_presets(&self) -> Vec<crate::audio::eq::CustomEqPreset> {
-        self.settings.player.custom_eq_presets.clone()
-    }
-
     pub fn set_verbose_config(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.verbose_config = enabled;
         // Only persist to redb — the UI handler writes all TOML sections
@@ -883,7 +879,7 @@ impl SettingsManager {
         self.save()
     }
 
-    pub fn is_verbose_config(&self) -> bool {
+    pub(crate) fn is_verbose_config(&self) -> bool {
         self.settings.player.verbose_config
     }
 

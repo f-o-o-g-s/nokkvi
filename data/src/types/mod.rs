@@ -21,7 +21,6 @@ pub mod paged_buffer;
 pub mod player_settings;
 pub mod playlist;
 pub mod playlist_edit;
-pub mod progress;
 pub mod queue;
 pub mod queue_sort_mode;
 pub mod radio_station;

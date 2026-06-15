@@ -37,7 +37,7 @@ impl NormalizationConfig {
         Self::Agc { target_level }
     }
 
-    pub fn static_gain(linear: f32) -> Self {
+    pub(crate) fn static_gain(linear: f32) -> Self {
         Self::Static(linear)
     }
 }

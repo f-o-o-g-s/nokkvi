@@ -26,8 +26,6 @@ pub(crate) use artists::{ArtistsAction, ArtistsMessage, ArtistsPage, ArtistsView
 pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingView};
 pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData};
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
-// Phase 3 wires the editor view through this re-export; dormant in Phase 1.
-#[allow(unused_imports)]
 pub(crate) use playlist_editor::EditorViewData;
 pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
 pub(crate) use queue::{QueueAction, QueueMessage, QueuePage, QueueSortMode, QueueViewData};
@@ -373,7 +371,6 @@ pub(crate) const RADIOS_SEARCH_ID: &str = "radios_search_input";
 ///     }
 /// }
 /// ```
-#[allow(unused_macros)]
 macro_rules! define_view_columns {
     // WITH setter annotations — production views that persist column visibility.
     // `=> $setter` maps each variant to its `SettingsManager` method name and
@@ -483,7 +480,6 @@ macro_rules! define_view_columns {
     };
 }
 
-#[allow(unused_imports)]
 pub(crate) use define_view_columns;
 
 // ============================================================================
@@ -513,7 +509,6 @@ pub(crate) use define_view_columns;
 /// impl_has_common_action!(PlaylistsAction, no_center { NavigateAndExpandArtist });
 /// impl_has_common_action!(RadiosAction, no_navigate_filter);
 /// ```
-#[allow(unused_macros)]
 macro_rules! impl_has_common_action {
     ($action:ident { $( $variant:ident ),* $(,)? }) => {
         impl $crate::views::HasCommonAction for $action {
@@ -569,7 +564,6 @@ macro_rules! impl_has_common_action {
     };
 }
 
-#[allow(unused_imports)]
 pub(crate) use impl_has_common_action;
 
 // ============================================================================

@@ -71,15 +71,6 @@ impl Artist {
     pub fn is_starred(&self) -> bool {
         self.starred.unwrap_or(false)
     }
-
-    /// Get the best available image URL
-    /// Priority: large > medium > small
-    pub fn get_image_url(&self) -> Option<&str> {
-        self.large_image_url
-            .as_deref()
-            .or(self.medium_image_url.as_deref())
-            .or(self.small_image_url.as_deref())
-    }
 }
 
 impl std::fmt::Display for Artist {

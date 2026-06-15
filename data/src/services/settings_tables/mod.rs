@@ -5,8 +5,7 @@
 //! emits, per tab:
 //!
 //! - `TAB_<TAB>_SETTINGS: &[SettingDef]` — declarative table.
-//! - `tab_<tab>_contains(key) -> bool` — quick presence check (used by the
-//!   strangler-fig caller before locking the manager mutex).
+//! - `tab_<tab>_contains(key) -> bool` — quick presence check for a tab's keys.
 //! - `dispatch_<tab>_tab_setting(key, value, &mut SettingsManager)` — sync
 //!   persistence dispatcher.
 //! - `apply_toml_<tab>_tab(ts, p)` — TOML→`PersistedPlayerSettings` copy step.
@@ -30,22 +29,15 @@ mod lock_watchpoint_test;
 
 pub use general::{
     TAB_GENERAL_SETTINGS, apply_toml_general_tab, dispatch_general_tab_setting,
-    dump_general_tab_player_settings, tab_general_contains, write_general_tab_toml,
+    dump_general_tab_player_settings, write_general_tab_toml,
 };
 pub use interface::{
     TAB_INTERFACE_SETTINGS, apply_toml_interface_tab, dispatch_interface_tab_setting,
-    dump_interface_tab_player_settings, tab_interface_contains, write_interface_tab_toml,
+    dump_interface_tab_player_settings, write_interface_tab_toml,
 };
 pub use playback::{
     TAB_PLAYBACK_SETTINGS, apply_toml_playback_tab, dispatch_playback_tab_setting,
-    dump_playback_tab_player_settings, tab_playback_contains, write_playback_tab_toml,
+    dump_playback_tab_player_settings, write_playback_tab_toml,
 };
 
 pub use crate::types::settings_side_effect::SettingsSideEffect;
-
-/// Returns true if any per-tab dispatcher claims `key`. The strangler-fig
-/// caller in `update/settings.rs` uses this as a sync pre-check before
-/// locking the manager mutex inside an async task.
-pub fn any_tab_contains(key: &str) -> bool {
-    tab_general_contains(key) || tab_interface_contains(key) || tab_playback_contains(key)
-}

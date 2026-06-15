@@ -2194,35 +2194,6 @@ impl Nokkvi {
                     ));
                 }
 
-                // Poll active progress handles and update sticky toasts.
-                // Collect snapshots first to avoid borrow conflicts with self.
-                let snapshots: Vec<_> = self
-                    .active_progress
-                    .iter()
-                    .map(|h| (h.toast_key(), h.snapshot()))
-                    .collect();
-
-                let mut completed_indices = Vec::new();
-                for (i, (toast_key, snap)) in snapshots.iter().enumerate() {
-                    if snap.done {
-                        self.toast.dismiss_key(toast_key);
-                        self.toast_success(format!("{} ✓", snap.label));
-                        completed_indices.push(i);
-                    } else if snap.total > 0 {
-                        let pct = snap.percent();
-                        let msg = format!("{}… {}%", snap.label, pct);
-                        self.toast.push(nokkvi_data::types::toast::Toast::keyed(
-                            toast_key.clone(),
-                            msg,
-                            nokkvi_data::types::toast::ToastLevel::Info,
-                        ));
-                    }
-                }
-                // Remove completed handles (iterate in reverse to preserve indices)
-                for i in completed_indices.into_iter().rev() {
-                    self.active_progress.remove(i);
-                }
-
                 self.handle_tick()
             }
             PlaybackMessage::PlaybackStateUpdated(update) => {

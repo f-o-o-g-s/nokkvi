@@ -40,11 +40,6 @@ impl Playlist {
     pub fn get_song_count(&self) -> u32 {
         self.song_count
     }
-
-    /// Get duration in seconds
-    pub fn get_duration(&self) -> f32 {
-        self.duration
-    }
 }
 
 impl std::fmt::Display for Playlist {

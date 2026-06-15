@@ -44,7 +44,7 @@ pub struct NativePipeWireSink {
     volume_tx: pw::channel::Sender<f32>,
 }
 
-pub struct UserData {
+pub(crate) struct UserData {
     mixer_source: Box<dyn Source<Item = f32> + Send>,
 }
 

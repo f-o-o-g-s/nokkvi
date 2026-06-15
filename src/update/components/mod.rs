@@ -1432,7 +1432,7 @@ impl Nokkvi {
     ///   should_auto_login, screen.
     /// - **Server-specific data pointing at gone IDs**: library, artwork,
     ///   similar_songs(+generation), active_playlist_info, playlist_editor,
-    ///   server_version, last_queue_current_index, active_progress,
+    ///   server_version, last_queue_current_index,
     ///   pending_expand (whole `PendingExpandState`), roulette.
     /// - **Transient UI work tied to the prior session**: open_menu,
     ///   browsing_panel, cross_pane_drag (whole `CrossPaneDragUi`),
@@ -1546,7 +1546,6 @@ impl Nokkvi {
         self.playlist_editor = None;
         self.server_version = None;
         self.last_queue_current_index = None;
-        self.active_progress = Vec::new();
         self.pending_expand = crate::state::PendingExpandState::default();
         self.roulette = None;
 

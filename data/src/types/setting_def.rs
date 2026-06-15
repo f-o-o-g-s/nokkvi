@@ -612,7 +612,6 @@ macro_rules! define_view_column_toml_helpers {
     ) => {
         /// Macro-emitted: copy declared view-column-visibility fields from
         /// `TomlSettings` onto the redb-backed `PersistedPlayerSettings`.
-        #[allow(dead_code)]
         pub fn $apply_fn(
             ts: &$crate::types::toml_settings::TomlSettings,
             p: &mut $crate::types::settings::PersistedPlayerSettings,
@@ -625,7 +624,6 @@ macro_rules! define_view_column_toml_helpers {
         /// Macro-emitted: copy declared view-column-visibility fields from
         /// the redb-backed `PersistedPlayerSettings` onto the UI-facing
         /// `LivePlayerSettings`.
-        #[allow(dead_code)]
         pub fn $dump_fn(
             src: &$crate::types::settings::PersistedPlayerSettings,
             out: &mut $crate::types::player_settings::LivePlayerSettings,
@@ -638,7 +636,6 @@ macro_rules! define_view_column_toml_helpers {
         /// Macro-emitted: copy declared view-column-visibility fields from
         /// the UI-facing `LivePlayerSettings` onto `TomlSettings` (for writing
         /// back to `config.toml`).
-        #[allow(dead_code)]
         pub fn $write_fn(
             ps: &$crate::types::player_settings::LivePlayerSettings,
             ts: &mut $crate::types::toml_settings::TomlSettings,

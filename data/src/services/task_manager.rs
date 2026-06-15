@@ -41,14 +41,6 @@ pub enum TaskStatus {
     Cancelled,
 }
 
-/// Progress update for a background task
-#[derive(Debug, Clone)]
-pub struct TaskProgress {
-    pub current: u64,
-    pub total: u64,
-    pub message: String,
-}
-
 /// A handle to a spawned task
 #[derive(Debug, Clone)]
 pub struct TaskHandle {

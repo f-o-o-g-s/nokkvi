@@ -77,19 +77,9 @@ impl StreamHandle {
         store_f32(&self.volume, vol.clamp(0.0, 1.0));
     }
 
-    /// Get current volume.
-    pub fn get_volume(&self) -> f32 {
-        load_f32(&self.volume)
-    }
-
     /// Stop this source (it will be removed from the mixer on next pull).
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
-    }
-
-    /// Return the total number of f32 samples consumed.
-    pub fn samples_consumed(&self) -> u64 {
-        self.samples_consumed.load(Ordering::Relaxed)
     }
 
     /// Calculate playback position in milliseconds given sample rate and channel count.

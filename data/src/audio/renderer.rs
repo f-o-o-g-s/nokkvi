@@ -69,7 +69,7 @@ enum CrossfadeState {
 /// fade — dropping the audible outgoing track and promoting a silent decoder to
 /// primary (music faded into silence with no recovery).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CrossfadeTick {
+pub(crate) enum CrossfadeTick {
     /// Fade still in progress — keep ticking.
     Continue,
     /// Fade complete and the incoming stream produced audio — promote it.
@@ -973,7 +973,7 @@ impl AudioRenderer {
     /// mode on the native-PipeWire path, it rebuilds at the track's native rate
     /// so PipeWire switches the device clock. A no-op when the rate already
     /// matches (the common, same-rate case — gapless and normal playback).
-    pub fn ensure_music_output(&mut self, format_rate: u32) -> anyhow::Result<()> {
+    pub(crate) fn ensure_music_output(&mut self, format_rate: u32) -> anyhow::Result<()> {
         // Build once at the default rate so we know the backend (native PipeWire
         // vs cpal).
         if self.music_sink.is_none() {
@@ -1362,7 +1362,7 @@ impl AudioRenderer {
     /// still empty (a stalled/failed incoming decoder) so the caller can
     /// restore the outgoing track and skip the bad one instead of fading into
     /// silence.
-    pub fn tick_crossfade(&mut self) -> CrossfadeTick {
+    pub(crate) fn tick_crossfade(&mut self) -> CrossfadeTick {
         // Compute fade coefficients first (immutable borrow), then apply them
         // to both streams in a separate pass so the variant's stream and the
         // primary stream can be touched without overlapping borrows.

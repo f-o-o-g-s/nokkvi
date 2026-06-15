@@ -80,7 +80,7 @@ struct AsyncNetworkBuffer {
 }
 
 impl AsyncNetworkBuffer {
-    pub fn new_async(response: reqwest::Response) -> Self {
+    pub(crate) fn new_async(response: reqwest::Response) -> Self {
         let (tx, rx) = mpsc::channel::<Bytes>(64);
         let cancel = CancellationToken::new();
         let child_cancel = cancel.clone();

@@ -50,28 +50,7 @@ impl GenresApiService {
         }
     }
 
-    /// Load genres from the API using hybrid approach:
-    /// - Native API (/api/genre) for genre IDs
-    /// - Subsonic API (getGenres) for album/song counts
-    ///
-    /// sort_mode: Sort mode (name, albumCount, songCount, random)
-    /// sort_order: Sort order (ASC or DESC)
-    /// search_query: Optional search query
-    ///
-    /// Shim that forwards an empty `library_ids` slice — preserved for
-    /// existing UI handler call sites. New library-aware code paths
-    /// should call [`load_genres_with_libraries`] directly.
-    pub async fn load_genres(
-        &self,
-        sort_mode: &str,
-        sort_order: &str,
-        search_query: Option<&str>,
-    ) -> Result<(Vec<Genre>, u32)> {
-        self.load_genres_with_libraries(sort_mode, sort_order, search_query, &[])
-            .await
-    }
-
-    /// Library-aware variant of [`load_genres`]: scopes the Native
+    /// Library-aware genre loader: scopes the Native
     /// `/api/genre` result to the given library (music folder) IDs via
     /// the `library_tag.library_id` join
     /// (`reference-navidrome/persistence/sql_tags.go:60-86`). The Subsonic

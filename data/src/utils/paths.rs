@@ -177,7 +177,7 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<()> {
 /// Get the configuration directory (`~/.config/nokkvi`).
 ///
 /// Holds user-editable configuration: `config.toml`, `themes/`, `sfx/`.
-pub fn get_app_dir() -> Result<PathBuf> {
+pub(crate) fn get_app_dir() -> Result<PathBuf> {
     let base_dirs = directories::BaseDirs::new()
         .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
 
@@ -199,7 +199,7 @@ pub fn get_app_dir() -> Result<PathBuf> {
 /// `app.redb`, `nokkvi.log`. Per the XDG Base Directory Specification,
 /// `$XDG_STATE_HOME` is the right home for this kind of persisted-but-not-
 /// portable data.
-pub fn get_state_dir() -> Result<PathBuf> {
+pub(crate) fn get_state_dir() -> Result<PathBuf> {
     let base_dirs = directories::BaseDirs::new()
         .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
 

@@ -73,15 +73,8 @@ pub enum CrossfadePhase {
 }
 
 impl CrossfadePhase {
-    pub fn is_idle(&self) -> bool {
+    pub(crate) fn is_idle(&self) -> bool {
         matches!(self, CrossfadePhase::Idle)
-    }
-
-    pub fn is_active_or_finished(&self) -> bool {
-        matches!(
-            self,
-            CrossfadePhase::Active { .. } | CrossfadePhase::OutgoingFinished { .. }
-        )
     }
 
     /// Short label for diagnostic logs (the variants' inner `Mutex`
@@ -135,7 +128,7 @@ impl GaplessSlot {
         }
     }
 
-    pub fn is_prepared(&self) -> bool {
+    pub(crate) fn is_prepared(&self) -> bool {
         self.prepared && self.decoder.is_some()
     }
 
@@ -1556,11 +1549,6 @@ impl CustomAudioEngine {
         self.renderer.lock().current_stream_bit_perfect()
     }
 
-    /// Crossfade duration in milliseconds
-    pub fn crossfade_duration_ms(&self) -> u64 {
-        self.crossfade_duration_ms
-    }
-
     // =========================================================================
     // Volume Normalization API
     // =========================================================================
@@ -1592,16 +1580,6 @@ impl CustomAudioEngine {
     pub fn set_eq_state(&mut self, state: super::eq::EqState) {
         let mut renderer = self.renderer.lock();
         renderer.set_eq_state(state);
-    }
-
-    /// Whether the engine is in the `Idle` crossfade phase.
-    pub fn crossfade_is_idle(&self) -> bool {
-        self.crossfade_phase.is_idle()
-    }
-
-    /// Whether the engine is mid-crossfade (`Active` or `OutgoingFinished`).
-    pub fn crossfade_is_active_or_finished(&self) -> bool {
-        self.crossfade_phase.is_active_or_finished()
     }
 
     /// Start a crossfade transition using the prepared next decoder.
@@ -1714,7 +1692,7 @@ impl CustomAudioEngine {
     /// Finalize crossfade: promote the incoming track to become the current track.
     /// Called when the renderer finishes mixing (crossfade progress reaches 1.0)
     /// or when the outgoing decoder's buffers are fully consumed.
-    pub async fn finalize_crossfade_engine(&mut self) {
+    pub(crate) async fn finalize_crossfade_engine(&mut self) {
         let phase = std::mem::replace(&mut self.crossfade_phase, CrossfadePhase::Idle);
         let (decoder_arc, incoming_source) = match phase {
             CrossfadePhase::Idle => return,
@@ -2469,19 +2447,15 @@ mod tests {
         let mut engine = CustomAudioEngine::new();
 
         assert!(
-            engine.crossfade_is_idle(),
+            engine.crossfade_phase.is_idle(),
             "fresh engine must start in Idle"
         );
 
         engine.on_decoder_finished().await;
 
         assert!(
-            engine.crossfade_is_idle(),
+            engine.crossfade_phase.is_idle(),
             "phase must remain Idle when no crossfade is active",
-        );
-        assert!(
-            !engine.crossfade_is_active_or_finished(),
-            "Idle predicate must NOT report Active/OutgoingFinished",
         );
     }
 
@@ -2590,14 +2564,14 @@ mod tests {
         };
 
         assert!(
-            !engine.crossfade_is_idle(),
+            !engine.crossfade_phase.is_idle(),
             "precondition: engine must start mid-crossfade",
         );
 
         engine.reset_next_track().await;
 
         assert!(
-            engine.crossfade_is_idle(),
+            engine.crossfade_phase.is_idle(),
             "reset_next_track must cancel the active crossfade (phase → Idle)",
         );
     }
@@ -2613,7 +2587,7 @@ mod tests {
             incoming_source: "http://example.test/next".to_string(),
         };
         assert!(
-            !engine.crossfade_is_idle(),
+            !engine.crossfade_phase.is_idle(),
             "precondition: engine must start mid-crossfade",
         );
 
@@ -2621,7 +2595,7 @@ mod tests {
         engine.set_bit_perfect(true).await;
 
         assert!(
-            engine.crossfade_is_idle(),
+            engine.crossfade_phase.is_idle(),
             "toggling bit-perfect must cancel the in-flight crossfade",
         );
     }
@@ -2640,7 +2614,7 @@ mod tests {
         engine.set_bit_perfect(false).await;
 
         assert!(
-            !engine.crossfade_is_idle(),
+            !engine.crossfade_phase.is_idle(),
             "an unchanged bit-perfect value must not cancel a crossfade",
         );
     }

@@ -12,9 +12,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Default page size for API requests (items per page).
-pub const PAGE_SIZE: usize = 500;
-
 /// A windowed buffer that loads data from the server in pages.
 ///
 /// Items are stored contiguously from index 0, with new pages appended
@@ -247,6 +244,9 @@ impl<T> DerefMut for PagedBuffer<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Page size used by the windowing tests below.
+    const PAGE_SIZE: usize = 500;
 
     #[test]
     fn new_buffer_is_empty() {

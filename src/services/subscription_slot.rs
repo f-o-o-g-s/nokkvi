@@ -245,7 +245,6 @@ mod tests {
     /// subscription modules (`String`, `()`, and the task-status tuple) must
     /// all satisfy `SubscriptionSlot<T>`'s bounds. If any of these stop
     /// compiling, the corresponding subscription module would too.
-    #[allow(dead_code)]
     fn _type_check_concrete_subscription_slot_types() {
         use nokkvi_data::services::task_manager::{TaskHandle, TaskStatus};
 

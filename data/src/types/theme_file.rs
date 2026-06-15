@@ -123,7 +123,7 @@ impl Default for ThemePalette {
 
 impl ThemePalette {
     /// Adwaita light mode defaults.
-    pub fn light_default() -> Self {
+    pub(crate) fn light_default() -> Self {
         Self {
             background: BackgroundConfig {
                 hard: "#ffffff".to_string(),
@@ -358,7 +358,7 @@ impl Default for VisualizerColors {
 
 impl VisualizerColors {
     /// Adwaita light mode default colors.
-    pub fn light_default() -> Self {
+    pub(crate) fn light_default() -> Self {
         Self {
             border_color: "#ffffff".to_string(),
             border_opacity: 0.0,

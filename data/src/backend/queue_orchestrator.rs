@@ -250,7 +250,6 @@ mod tests {
     /// `PlaybackController::play_*` which opens PipeWire output —
     /// behavioral coverage lives downstream once Lane C wires the
     /// real callers and integration tests target a live audio stack.
-    #[allow(dead_code)]
     async fn _compiles_playback_verbs(orch: &QueueOrchestrator<'_>) -> Result<()> {
         orch.play(vec![], 0).await?;
         orch.enqueue_and_play(vec![Song::test_default("z", "Song z")])

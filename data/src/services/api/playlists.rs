@@ -55,28 +55,7 @@ impl PlaylistsApiService {
         }
     }
 
-    /// Load playlists from the API
-    ///
-    /// sort_mode: Sort mode (name, songCount, duration, updatedAt, random)
-    /// sort_order: Sort order (ASC or DESC)
-    /// search_query: Optional search query
-    ///
-    /// Shim that forwards an empty `library_ids` slice — preserved for
-    /// existing UI handler call sites. New library-aware code paths
-    /// should call [`load_playlists_with_libraries`] directly (even
-    /// though the parameter is currently a no-op for this endpoint, see
-    /// that method's doc-comment).
-    pub async fn load_playlists(
-        &self,
-        sort_mode: &str,
-        sort_order: &str,
-        search_query: Option<&str>,
-    ) -> Result<(Vec<Playlist>, u32)> {
-        self.load_playlists_with_libraries(sort_mode, sort_order, search_query, &[])
-            .await
-    }
-
-    /// Library-aware variant of [`load_playlists`].
+    /// Library-aware playlist loader.
     ///
     /// `library_ids` is accepted for signature symmetry with the other
     /// browse endpoints but intentionally NOT forwarded — Navidrome's
@@ -309,7 +288,7 @@ impl PlaylistsApiService {
     /// Fetch a single playlist's current metadata.
     ///
     /// Uses Navidrome native API: GET /api/playlist/:id
-    pub async fn get_playlist(&self, playlist_id: &str) -> Result<Playlist> {
+    pub(crate) async fn get_playlist(&self, playlist_id: &str) -> Result<Playlist> {
         let body = self
             .client
             .get(&format!("/api/playlist/{playlist_id}"), &[])

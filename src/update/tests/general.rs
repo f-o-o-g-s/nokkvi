@@ -731,7 +731,6 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.playlist_editor.is_none());
     assert!(app.server_version.is_none());
     assert!(app.last_queue_current_index.is_none());
-    assert!(app.active_progress.is_empty());
     assert!(app.pending_expand.target.is_none());
     assert!(!app.pending_expand.center_only);
     assert!(app.pending_expand.top_pin.is_none());
@@ -860,9 +859,6 @@ fn logout_and_session_expired_reach_identical_state() {
             && via_session_expired.active_playlist_info.is_none()
     );
     assert!(via_logout.playlist_editor.is_none() && via_session_expired.playlist_editor.is_none());
-    assert!(
-        via_logout.active_progress.is_empty() && via_session_expired.active_progress.is_empty()
-    );
     assert!(
         via_logout.pending_expand.target.is_none()
             && via_session_expired.pending_expand.target.is_none()

@@ -710,7 +710,7 @@ impl QueueManager {
 
     /// Save only the song pool. Slower — serializes all Song data.
     /// Called only when songs are added, removed, or modified.
-    pub fn save_songs(&self) -> Result<()> {
+    pub(crate) fn save_songs(&self) -> Result<()> {
         self.storage.save_binary(KEY_QUEUE_SONGS, &self.pool)?;
         Ok(())
     }

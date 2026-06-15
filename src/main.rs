@@ -319,11 +319,6 @@ pub struct Nokkvi {
     pub server_version: Option<String>,
 
     // -------------------------------------------------------------------------
-    // Progress Tracking (polled from Tick for live toast updates)
-    // -------------------------------------------------------------------------
-    pub active_progress: Vec<nokkvi_data::types::progress::ProgressHandle>,
-
-    // -------------------------------------------------------------------------
     // Roulette (slot-machine random pick across slot-list views)
     // -------------------------------------------------------------------------
     /// In-progress roulette spin, if any. Drives the dedicated tick
@@ -444,7 +439,6 @@ impl Default for Nokkvi {
             eq_modal: crate::widgets::eq_modal::EqModalState::default(),
             default_playlist_picker: None,
             open_menu: None,
-            active_progress: Vec::new(),
             roulette: None,
         }
     }

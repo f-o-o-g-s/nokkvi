@@ -12,10 +12,6 @@
 //! invariant (CLAUDE.md gotcha — "rapid scroll triggers duplicate fetches"
 //! otherwise) lives in one place. Per-view fetch closures supply only the
 //! per-entity backend call and the UI-projection mapping.
-//!
-//! `dead_code` is suppressed at module level because no callers exist until
-//! Lanes B and C migrate the existing handler bodies to delegate here.
-#![allow(dead_code)]
 
 use std::{collections::HashSet, future::Future};
 

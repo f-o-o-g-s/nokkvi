@@ -65,14 +65,6 @@ define_labeled_enum! {
 }
 
 impl VolumeNormalizationMode {
-    pub fn is_off(self) -> bool {
-        matches!(self, Self::Off)
-    }
-
-    pub fn is_agc(self) -> bool {
-        matches!(self, Self::Agc)
-    }
-
     pub fn is_replay_gain(self) -> bool {
         matches!(self, Self::ReplayGainTrack | Self::ReplayGainAlbum)
     }
@@ -176,8 +168,6 @@ mod tests {
 
     #[test]
     fn volume_normalization_mode_classifiers() {
-        assert!(VolumeNormalizationMode::Off.is_off());
-        assert!(VolumeNormalizationMode::Agc.is_agc());
         assert!(VolumeNormalizationMode::ReplayGainTrack.is_replay_gain());
         assert!(VolumeNormalizationMode::ReplayGainAlbum.is_replay_gain());
         assert!(VolumeNormalizationMode::ReplayGainAlbum.prefers_album());

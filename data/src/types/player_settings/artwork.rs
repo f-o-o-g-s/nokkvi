@@ -126,13 +126,6 @@ impl ArtworkColumnMode {
     pub fn is_always_horizontal(self) -> bool {
         matches!(self, Self::AlwaysNative | Self::AlwaysStretched)
     }
-
-    /// True for any "Always" variant (horizontal or vertical, native or
-    /// stretched) — i.e. the artwork panel is forced visible and the resize
-    /// handle is drawn.
-    pub fn is_always_visible(self) -> bool {
-        self.is_always_horizontal() || self.is_vertical()
-    }
 }
 
 define_labeled_enum! {
