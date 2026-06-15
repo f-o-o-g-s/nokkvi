@@ -83,6 +83,16 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         // ── Playback · Transitions ───────────────────────────────────────────
         "general.crossfade_enabled" => &["fade", "blend", "gapless"],
         "general.crossfade_duration" => &["fade time", "fade length"],
+        "general.bit_perfect" => &[
+            "lossless",
+            "audiophile",
+            "hi-res",
+            "exclusive mode",
+            "passthrough",
+            "hifi",
+            "bit-exact",
+            "no dsp",
+        ],
         "general.rewind_on_previous" => &["restart track", "back button", "skip back"],
 
         // ── Playback · Volume Normalization ──────────────────────────────────
@@ -217,6 +227,15 @@ mod tests {
     fn visualizer_keys_resolve_without_palette_prefix() {
         assert!(keywords_for("visualizer.lower_cutoff_freq").contains(&"bass"));
         assert!(keywords_for("visualizer.higher_cutoff_freq").contains(&"treble"));
+    }
+
+    #[test]
+    fn bit_perfect_key_resolves() {
+        // The "Bit-Perfect Output" row's label/subtitle never say "lossless" or
+        // "exclusive mode" — the audiophile vocabulary a searcher actually types.
+        let kw = keywords_for("general.bit_perfect");
+        assert!(kw.contains(&"lossless"));
+        assert!(kw.contains(&"exclusive mode"));
     }
 
     #[test]
