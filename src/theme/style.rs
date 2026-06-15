@@ -376,7 +376,7 @@ pub(crate) fn iced_theme() -> Theme {
         danger: danger(),
     };
 
-    Theme::custom("Nokkvi".to_string(), palette)
+    Theme::custom("Nokkvi", palette)
 }
 
 // ============================================================================
