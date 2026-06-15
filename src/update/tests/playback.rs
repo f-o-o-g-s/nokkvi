@@ -114,6 +114,141 @@ fn playback_state_updated_detects_song_change() {
     assert!(!app.scrobble.submitted);
 }
 
+// ----------------------------------------------------------------------------
+// Now-playing artwork warm seam (now_playing_artwork_to_warm)
+//
+// The MiniPlayer thumbnail (and the queue view's now-playing artwork tier) read
+// the current track's album art from the large_artwork / album_art LRUs, which
+// are warmed only by the slot-list VIEWPORT. When the playing track is filtered
+// out of / scrolled away from the view, neither LRU holds its album_id and the
+// thumbnail goes gray. `now_playing_artwork_to_warm()` names the album a
+// song-change-driven warm must fetch to close that gap, independent of the
+// viewport. These tests pin the predicate; the async fetch it gates needs
+// `app_service`, so it is out of unit scope (asserted by reading the handler).
+// ----------------------------------------------------------------------------
+
+/// Build a throwaway image handle for seeding an artwork LRU. Contents are
+/// irrelevant — the seam only checks album_id key membership.
+fn blank_artwork_handle() -> iced::widget::image::Handle {
+    iced::widget::image::Handle::from_bytes(vec![0u8; 64])
+}
+
+#[test]
+fn now_playing_warm_needed_when_album_cold_in_both_lrus() {
+    // The gray-box repro: playing track's album is in NEITHER LRU.
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+
+    assert_eq!(
+        app.now_playing_artwork_to_warm(),
+        Some("album_s1".to_string()),
+        "a now-playing album cached in neither LRU must be flagged for a warm"
+    );
+}
+
+#[test]
+fn now_playing_warm_skipped_when_large_artwork_cached() {
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    app.artwork
+        .large_artwork
+        .put("album_s1".to_string(), blank_artwork_handle());
+
+    assert!(
+        app.now_playing_artwork_to_warm().is_none(),
+        "already-cached large art means no redundant warm"
+    );
+}
+
+#[test]
+fn now_playing_warm_skipped_when_only_mini_cached() {
+    // CRITICAL discriminator: the mini-player paints the 80px album_art
+    // fallback, so an album with only the mini cached is NOT a gray box. A
+    // naive large-only gate would wrongly re-fetch here.
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    app.artwork
+        .album_art
+        .put("album_s1".to_string(), blank_artwork_handle());
+
+    assert!(
+        app.now_playing_artwork_to_warm().is_none(),
+        "the 80px mini fallback already paints — warming again is wasted work"
+    );
+}
+
+#[test]
+fn now_playing_warm_none_for_radio_playback() {
+    use crate::state::{ActivePlayback, RadioPlaybackState};
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    app.active_playback = ActivePlayback::Radio(RadioPlaybackState {
+        station: nokkvi_data::types::radio_station::RadioStation {
+            id: "r1".into(),
+            name: "Test".into(),
+            stream_url: "http://example.invalid/stream".into(),
+            home_page_url: None,
+        },
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+
+    assert!(
+        app.now_playing_artwork_to_warm().is_none(),
+        "radio streams have no album-keyed art — never warm"
+    );
+}
+
+#[test]
+fn now_playing_warm_none_without_current_song() {
+    let app = test_app();
+    assert!(
+        app.scrobble.current_song_id.is_none(),
+        "precondition: no current song"
+    );
+    assert!(app.now_playing_artwork_to_warm().is_none());
+}
+
+#[test]
+fn now_playing_warm_none_when_song_absent_from_queue() {
+    // Guards against warming (or panicking) when current_song_id is not yet
+    // projected into queue_songs.
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("missing".to_string());
+
+    assert!(app.now_playing_artwork_to_warm().is_none());
+}
+
+#[test]
+fn song_change_resolves_new_cold_album_for_warm() {
+    // Integration smoke: the warm seam composes with real post-song-change
+    // handler state. After handle_playback_state_updated lands a new song,
+    // current_song_id is the LANDED track (reset_for_new_song) and — with that
+    // track's album cold in both LRUs — now_playing_artwork_to_warm() names that
+    // album, the value the warm block dispatches on. (The async fetch needs
+    // app_service, absent in test_app(), so the LRU stays cold; the per-predicate
+    // resolution rules are pinned by the now_playing_warm_* unit tests above.)
+    let mut app = test_app();
+    app.library.queue_songs = vec![make_queue_song("song_1", "T", "A", "Alb")];
+    app.scrobble.current_song_id = Some("old_song".to_string());
+
+    let _ = app.handle_playback_state_updated(make_playback_update()); // song_id = "song_1"
+
+    assert_eq!(app.scrobble.current_song_id.as_deref(), Some("song_1"));
+    assert_eq!(
+        app.now_playing_artwork_to_warm(),
+        Some("album_song_1".to_string()),
+        "after the song change the seam must name the NEW cold album"
+    );
+}
+
 #[test]
 fn focus_mirror_refreshes_on_same_index_entry_id_swap() {
     let mut app = test_app();

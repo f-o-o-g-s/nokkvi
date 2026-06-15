@@ -247,15 +247,35 @@ impl Nokkvi {
         }
     }
 
+    /// The currently-playing queue track's `album_id`, or `None` for radio
+    /// playback / no current song / the song being absent from
+    /// `library.queue_songs`.
+    ///
+    /// Shared resolution root for the now-playing artwork surfaces
+    /// ([`mini_player_artwork`](Self::mini_player_artwork) and
+    /// [`now_playing_artwork_to_warm`](Self::now_playing_artwork_to_warm)) so
+    /// the two cannot drift on how "the playing album" is derived.
+    fn current_queue_song_album_id(&self) -> Option<&str> {
+        if self.active_playback.is_radio() {
+            return None;
+        }
+        let sid = self.scrobble.current_song_id.as_deref()?;
+        self.library
+            .queue_songs
+            .iter()
+            .find(|s| s.id == sid)
+            .map(|s| s.album_id.as_str())
+    }
+
     /// Resolve the artwork handle for the player-bar mini-player section.
     ///
     /// Returns `None` whenever any of the following holds, in order:
     /// - `track_info_display() != TrackInfoDisplay::MiniPlayer` (every other
     ///   strip mode hides the mini-player section, so resolving artwork is
     ///   wasted work — short-circuit before walking the queue).
-    /// - Radio playback is active (radio streams don't have album-keyed art).
-    /// - No `scrobble.current_song_id` (no track loaded).
-    /// - The current song isn't in `library.queue_songs`.
+    /// - Radio playback is active, no `scrobble.current_song_id`, or the
+    ///   current song isn't in `library.queue_songs` (see
+    ///   [`current_queue_song_album_id`](Self::current_queue_song_album_id)).
     /// - Neither the large nor the mini LRU has a cached handle for the song's
     ///   `album_id`.
     ///
@@ -266,17 +286,42 @@ impl Nokkvi {
         if crate::theme::track_info_display() != TrackInfoDisplay::MiniPlayer {
             return None;
         }
-        if self.active_playback.is_radio() {
-            return None;
-        }
-        let sid = self.scrobble.current_song_id.as_deref()?;
-        let song = self.library.queue_songs.iter().find(|s| s.id == sid)?;
+        let album_id = self.current_queue_song_album_id()?;
         self.artwork
             .large_artwork
             .snapshot
-            .get(&song.album_id)
-            .or_else(|| self.artwork.album_art.snapshot.get(&song.album_id))
+            .get(album_id)
+            .or_else(|| self.artwork.album_art.snapshot.get(album_id))
             .cloned()
+    }
+
+    /// The now-playing queue track's `album_id` when its artwork is cached in
+    /// **neither** the large nor the mini LRU — i.e. the album that a
+    /// song-change-driven warm must fetch so the now-playing surfaces have art
+    /// independent of the slot-list viewport. `None` otherwise (radio, no
+    /// current song, song absent from the queue, or the album already warm in
+    /// either LRU).
+    ///
+    /// This is the inverse of [`mini_player_artwork`](Self::mini_player_artwork)'s
+    /// cache lookup. Crucially it treats the album as warm when **either** LRU
+    /// holds it: the mini-player paints the 80 px `album_art` fallback, so an
+    /// album with only the mini cached is not a gray box and re-fetching it
+    /// would be wasted work.
+    ///
+    /// Deliberately **not** gated on `track_info_display() == MiniPlayer`:
+    /// warming the now-playing album on song change is cheap (one deduped 80 px
+    /// fetch) and also benefits the queue view's now-playing artwork tier, and
+    /// leaving the strip-mode gate out keeps the warm path off the process-wide
+    /// `UI_MODE` atomic.
+    pub(crate) fn now_playing_artwork_to_warm(&self) -> Option<String> {
+        let album_id = self.current_queue_song_album_id()?;
+        if self.artwork.large_artwork.snapshot.contains_key(album_id)
+            || self.artwork.album_art.snapshot.contains_key(album_id)
+        {
+            None
+        } else {
+            Some(album_id.to_string())
+        }
     }
 
     /// Horizontal extent of the content pane — everything inside the outer

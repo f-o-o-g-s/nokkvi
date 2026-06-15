@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 
 - Turning the visualizer off now releases the CPU it was using during playback; previously its background audio analysis kept running unseen.
 - The crossfade duration slider no longer offers values above 12 seconds that silently reset to 12 on the next launch.
+- The Mini Player's thumbnail now shows artwork when you skip to a track that isn't currently visible in the queue, instead of a gray box.
 
 ### Removed
 

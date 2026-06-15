@@ -380,6 +380,43 @@ impl Nokkvi {
                 // handle_queue_focus_change miss the song transition.
                 self.engine.gapless_preparing = false;
                 self.handle_scrobble_on_song_change(&song_id, pos, &mut tasks);
+
+                // Warm the now-playing track's artwork independent of the
+                // slot-list viewport. The MiniPlayer thumbnail (and the queue
+                // view's now-playing artwork tier) read the current album from
+                // the artwork LRUs, which are warmed ONLY by the viewport —
+                // so skipping to a track that's filtered out of / scrolled away
+                // from the view leaves its album cold and the thumbnail gray
+                // until the row is scrolled in. `now_playing_artwork_to_warm`
+                // (resolved after `reset_for_new_song` updated current_song_id
+                // above, so it names the LANDED track) returns the cold album;
+                // fetch its 80px mini into `album_art`, the LRU the mini-player
+                // fallback reads. Deduped (Some only when neither LRU is warm)
+                // and marker-free: routes through SongMiniLoaded, never touching
+                // the centered-view `loading_large_artwork` spinner marker.
+                if let Some(album_id) = self.now_playing_artwork_to_warm()
+                    && let Some(shell) = &self.app_service
+                {
+                    let vm = shell.albums().clone();
+                    tasks.push(Task::perform(
+                        async move {
+                            let bytes = vm
+                                .fetch_album_artwork(
+                                    &album_id,
+                                    Some(nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE),
+                                    None,
+                                )
+                                .await
+                                .ok();
+                            (album_id, bytes.map(iced::widget::image::Handle::from_bytes))
+                        },
+                        |(id, handle)| {
+                            Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
+                                id, None, handle,
+                            ))
+                        },
+                    ));
+                }
             }
 
             // Scrobble: track listening time (anti-seek-fraud)
