@@ -39,18 +39,22 @@ const LOGIN_TWO_PANE_MIN_WIDTH: f32 = 720.0;
 /// Width cap for the single-column card; it shrinks below this on narrow
 /// windows but never grows past it on wide ones.
 const LOGIN_CARD_MAX_WIDTH: f32 = 420.0;
-/// Floor for the single-column card width on very narrow windows.
-const LOGIN_CARD_MIN_WIDTH: f32 = 200.0;
+/// Floor for the single-column card width on very narrow windows. Kept low so
+/// the card keeps shrinking (rather than overflowing the viewport) when a
+/// tiling compositor forces a very narrow window — the scrollable is
+/// vertical-only, so a too-wide card would clip horizontally.
+const LOGIN_CARD_MIN_WIDTH: f32 = 120.0;
 /// Width cap for the wider two-pane card.
 const LOGIN_TWO_PANE_MAX_WIDTH: f32 = 760.0;
 /// Breathing room between the card and the window edges.
 const LOGIN_PAGE_PAD: f32 = 24.0;
 /// Viewport heights at/above which the card is dead-centered vertically; below
-/// these it is top-aligned inside the scrollable so nothing clips. The
-/// thresholds sit safely above the tallest the card can be (error line +
-/// cleartext warning shown), so we only center when it provably fits.
-const LOGIN_FIT_HEIGHT_SINGLE: f32 = 700.0;
-const LOGIN_FIT_HEIGHT_TWO_PANE: f32 = 480.0;
+/// these it is top-aligned inside the scrollable so nothing clips. Set
+/// generously above the tallest the card can be (error line + cleartext warning
+/// both shown) so we bias toward the scroll path rather than risk clipping the
+/// centered (non-scrolling) card.
+const LOGIN_FIT_HEIGHT_SINGLE: f32 = 760.0;
+const LOGIN_FIT_HEIGHT_TWO_PANE: f32 = 520.0;
 
 // ============================================================================
 // Login State
@@ -552,45 +556,43 @@ impl LoginPage {
         .into()
     }
 
+    /// Version label, centered (shown at the bottom of the branding pane in
+    /// two-pane mode and the bottom of the card in single-column mode).
+    fn version_label(&self) -> Element<'_, LoginMessage> {
+        container(
+            text(format!("v{}", env!("CARGO_PKG_VERSION")))
+                .size(12)
+                .color(theme::fg4()),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
+    }
+
     /// The framed card: two-pane (branding | form) on wide windows, a single
     /// stacked column on narrow ones.
+    ///
+    /// The Fixed card width lives on the OUTER container, but the flex content
+    /// (`row!` / `column!`) carries `Length::Fill` so its `Fill` / `FillPortion`
+    /// children resolve against a definite width. A `Shrink`-width flex would
+    /// compress those children to ~0 intrinsic width (the form fields would
+    /// collapse) — see iced's flex layout compression rules.
     fn card(&self, two_pane: bool, avail_width: f32) -> Element<'_, LoginMessage> {
-        let version = text(format!("v{}", env!("CARGO_PKG_VERSION")))
-            .size(12)
-            .color(theme::fg4());
-
         let (content, card_width): (Element<'_, LoginMessage>, f32) = if two_pane {
-            let branding = column![
-                self.branding(96.0, 34.0),
-                container(version)
-                    .width(Length::Fill)
-                    .center_x(Length::Fill),
-            ]
-            .spacing(18)
-            .align_x(Alignment::Center);
-
-            // Vertically center the branding within the row's (form-driven)
-            // height; a hairline separator divides the panes.
-            let branding_pane = container(branding)
+            // Branding pane (left): logo / wordmark / tagline / version,
+            // vertically centered against the taller form via the row's
+            // align_y below.
+            let branding_pane = column![self.branding(96.0, 34.0), self.version_label()]
                 .width(Length::FillPortion(4))
-                .height(Length::Fill)
-                .center_y(Length::Fill);
-            let separator = container(iced::widget::Space::new())
-                .width(Length::Fixed(1.0))
-                .height(Length::Fill)
-                .style(|_theme| container::Style {
-                    background: Some(theme::border().into()),
-                    text_color: None,
-                    border: iced::Border::default(),
-                    shadow: iced::Shadow::default(),
-                    snap: false,
-                });
+                .spacing(18)
+                .align_x(Alignment::Center);
             let form_pane = container(self.form()).width(Length::FillPortion(5));
 
             let card_w = (avail_width - 2.0 * LOGIN_PAGE_PAD).min(LOGIN_TWO_PANE_MAX_WIDTH);
             (
-                row![branding_pane, separator, form_pane]
-                    .spacing(28)
+                row![branding_pane, form_pane]
+                    .width(Length::Fill)
+                    .spacing(32)
                     .align_y(Alignment::Center)
                     .into(),
                 card_w,
@@ -599,16 +601,11 @@ impl LoginPage {
             let card_w = (avail_width - 2.0 * LOGIN_PAGE_PAD)
                 .clamp(LOGIN_CARD_MIN_WIDTH, LOGIN_CARD_MAX_WIDTH);
             (
-                column![
-                    self.branding(80.0, 42.0),
-                    self.form(),
-                    container(version)
-                        .width(Length::Fill)
-                        .center_x(Length::Fill),
-                ]
-                .spacing(24)
-                .align_x(Alignment::Center)
-                .into(),
+                column![self.branding(80.0, 42.0), self.form(), self.version_label()]
+                    .width(Length::Fill)
+                    .spacing(24)
+                    .align_x(Alignment::Center)
+                    .into(),
                 card_w,
             )
         };

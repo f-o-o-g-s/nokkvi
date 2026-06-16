@@ -40,7 +40,18 @@ pub fn normalize_server_url_candidates(raw: &str) -> Vec<String> {
     if has_http_scheme(base) {
         vec![base.to_string()]
     } else {
-        vec![format!("https://{base}"), format!("http://{base}")]
+        // Prefer HTTPS for a bare host. Fall back to plain HTTP ONLY for
+        // local/LAN hosts, where cleartext is unremarkable — never silently
+        // downgrade a REMOTE host to cleartext. Otherwise a TLS failure on the
+        // https attempt (bad cert, blocked 443) would re-POST the password over
+        // http to a public host with no warning. A user who genuinely runs a
+        // remote server on plain HTTP can still opt in by typing `http://`
+        // explicitly, which surfaces the cleartext advisory (informed consent).
+        let mut candidates = vec![format!("https://{base}")];
+        if host_is_local_or_lan(host_of(base)) {
+            candidates.push(format!("http://{base}"));
+        }
+        candidates
     }
 }
 
@@ -84,13 +95,24 @@ fn host_is_local_or_lan(host: &str) -> bool {
     if h.ends_with(".local") || h.ends_with(".localhost") {
         return true;
     }
-    // A single-label hostname (no dots, not an IPv6 literal) is almost always a
-    // LAN / mDNS name rather than a public host.
-    if !h.contains('.') && !h.contains(':') {
+    // IPv6 literal: ULA (fc00::/7) and link-local (fe80::/10) are LAN ranges;
+    // any other IPv6 (e.g. a global 2000::/3) is remote.
+    if h.contains(':') {
+        return h.starts_with("fc")
+            || h.starts_with("fd")
+            || h.starts_with("fe8")
+            || h.starts_with("fe9")
+            || h.starts_with("fea")
+            || h.starts_with("feb");
+    }
+    // A single-label hostname (no dots) is almost always a LAN / mDNS name
+    // rather than a public host.
+    if !h.contains('.') {
         return true;
     }
     if let Some([a, b, _, _]) = parse_ipv4(h) {
-        return a == 127                                // loopback
+        return a == 0                                  // 0.0.0.0/8 unspecified (non-routable)
+            || a == 127                                // loopback
             || a == 10                                 // 10.0.0.0/8
             || (a == 192 && b == 168)                  // 192.168.0.0/16
             || (a == 172 && (16..=31).contains(&b))    // 172.16.0.0/12
@@ -145,13 +167,43 @@ mod tests {
     }
 
     #[test]
-    fn bare_host_prefers_https_then_http() {
+    fn bare_local_host_prefers_https_then_http() {
+        // .local / LAN-IP bare hosts keep the cleartext HTTP fallback.
         assert_eq!(
             normalize_server_url_candidates("navidrome.local:4533"),
             vec![
                 "https://navidrome.local:4533".to_string(),
                 "http://navidrome.local:4533".to_string(),
             ]
+        );
+        assert_eq!(
+            normalize_server_url_candidates("192.168.1.50:4533"),
+            vec![
+                "https://192.168.1.50:4533".to_string(),
+                "http://192.168.1.50:4533".to_string(),
+            ]
+        );
+        // Single-label LAN name also keeps the fallback.
+        assert_eq!(
+            normalize_server_url_candidates("mediaserver"),
+            vec![
+                "https://mediaserver".to_string(),
+                "http://mediaserver".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn bare_remote_host_is_https_only() {
+        // A REMOTE bare host must NOT silently fall back to cleartext HTTP — a
+        // TLS failure there would otherwise leak the password over http.
+        assert_eq!(
+            normalize_server_url_candidates("music.example.com:4533"),
+            vec!["https://music.example.com:4533".to_string()]
+        );
+        assert_eq!(
+            normalize_server_url_candidates("navidrome.mydomain.org"),
+            vec!["https://navidrome.mydomain.org".to_string()]
         );
     }
 
@@ -180,6 +232,8 @@ mod tests {
         ));
         // 172.32 is outside the private 172.16/12 block.
         assert!(is_cleartext_http_url("http://172.32.0.1"));
+        // A global IPv6 host is remote.
+        assert!(is_cleartext_http_url("http://[2001:db8::1]:4533"));
     }
 
     #[test]
@@ -202,6 +256,9 @@ mod tests {
             "http://nas.local",
             "http://mediaserver", // single-label LAN name
             "http://[::1]:4533",
+            "http://[fc00::1]:4533", // IPv6 ULA
+            "http://[fe80::1]",      // IPv6 link-local
+            "http://0.0.0.0:4533",   // unspecified / non-routable
         ] {
             assert!(
                 !is_cleartext_http_url(url),

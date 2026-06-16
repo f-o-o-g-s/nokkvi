@@ -390,6 +390,13 @@ impl Nokkvi {
 
         info!(target: "nokkvi::auth", "Resuming session for {username}@{server_url}");
 
+        // Mark the form busy for the duration of the resume so a manual
+        // login attempt during the brief auto-login window is blocked by the
+        // double-submit guard (two concurrent AppService::new() opens would
+        // collide on redb's exclusive lock). Cleared by on_login_success /
+        // on_login_error via handle_login_result.
+        self.login_page.login_in_progress = true;
+
         // Re-source username from the credential's u= field — login_page.username
         // can be empty when resuming a session predating save_credentials writes.
         if let Some(parsed) =
