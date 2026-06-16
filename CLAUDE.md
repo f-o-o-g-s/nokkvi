@@ -151,7 +151,7 @@ For the full set of rules and patterns, see `.agent/rules/` (loaded contextually
 - `backend-services.md` — services, persistence, queue system
 - `ui-views.md` — slot list views, expansion, browsing panel, modals
 - `widgets.md` — widget catalog, layout constants, shared menu/modal chrome modules, SVG icons
-- `visualizer.md` — FFT pipeline, shaders, peak/gradient modes
+- `visualizer.md` — FFT pipeline, shaders, Bars/Lines + effects
 - `settings-view.md` — settings module structure, persistent sidebar layout, SettingValue types
 - `gotchas.md` — full list of the subtle pitfalls
 - `new-feature-checklist.md` — end-to-end checklist for new features
