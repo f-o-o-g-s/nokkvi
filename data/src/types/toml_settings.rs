@@ -10,10 +10,11 @@ use crate::{
     audio::eq::{CustomEqPreset, EQ_BAND_COUNT},
     types::{
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
-            EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
-            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TrackInfoDisplay,
-            VisualizationMode, VolumeNormalizationMode, deserialize_rounded_mode_with_bool_compat,
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
+            CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
+            StripClickAction, TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
         },
         view_columns::ViewColumns,
     },
@@ -120,7 +121,8 @@ pub struct TomlSettings {
 
     // -- Playback --
     pub crossfade_enabled: bool,
-    pub bit_perfect: bool,
+    #[serde(deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
+    pub bit_perfect: BitPerfectMode,
     pub crossfade_duration_secs: u32,
     /// Whether the Previous button restarts the current track (instead of
     /// stepping back) once it has played past the threshold. Default false.
@@ -268,7 +270,7 @@ impl Default for TomlSettings {
             strip_show_labels: true,
             strip_separator: crate::types::player_settings::StripSeparator::Slash,
             crossfade_enabled: true,
-            bit_perfect: false,
+            bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: 7,
             rewind_on_previous: false,
             volume_normalization: VolumeNormalizationMode::default(),

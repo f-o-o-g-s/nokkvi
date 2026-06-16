@@ -138,7 +138,8 @@ impl Default for InterfaceSettingsData {
 #[derive(Debug, Clone)]
 pub struct PlaybackSettingsData {
     pub crossfade_enabled: bool,
-    pub bit_perfect: bool,
+    /// Bit-perfect mode label ("Off" / "Strict" / "Relaxed").
+    pub bit_perfect: Cow<'static, str>,
     pub crossfade_duration_secs: i64,
     /// Whether Previous restarts the current track past the threshold (default false).
     pub rewind_on_previous: bool,
@@ -171,7 +172,7 @@ impl Default for PlaybackSettingsData {
     fn default() -> Self {
         Self {
             crossfade_enabled: false,
-            bit_perfect: false,
+            bit_perfect: Cow::Borrowed("test-default"),
             crossfade_duration_secs: 0,
             rewind_on_previous: false,
             volume_normalization: Cow::Borrowed("test-default"),

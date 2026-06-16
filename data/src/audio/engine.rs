@@ -445,6 +445,16 @@ pub struct CustomAudioEngine {
     crossfade_phase: CrossfadePhase,
     /// Whether crossfade is enabled (from settings)
     crossfade_enabled: bool,
+    /// Engine-side mirror of the bit-perfect mode (the renderer owns the
+    /// canonical copy for the DSP path; this copy lets the arm gate decide
+    /// whether to self-arm a crossfade under Relaxed without taking the renderer
+    /// lock). Kept in sync by `set_bit_perfect`.
+    bit_perfect_mode: crate::types::player_settings::BitPerfectMode,
+    /// Set by `finalize_crossfade_engine` so the completion path can label the
+    /// "Now Playing" log line `crossfade` vs `gapless` (both reach the engine
+    /// "already playing" branch). Read-and-reset via
+    /// `take_last_transition_was_crossfade`.
+    last_transition_was_crossfade: bool,
     /// Crossfade duration in milliseconds (from settings)
     crossfade_duration_ms: u64,
 
@@ -491,6 +501,8 @@ impl CustomAudioEngine {
             crossfade_duration_shared: Arc::new(AtomicU64::new(DEFAULT_CROSSFADE_DURATION_MS)),
             crossfade_phase: CrossfadePhase::Idle,
             crossfade_enabled: false,
+            bit_perfect_mode: crate::types::player_settings::BitPerfectMode::Off,
+            last_transition_was_crossfade: false,
             crossfade_duration_ms: DEFAULT_CROSSFADE_DURATION_MS,
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             live_icy_metadata,
@@ -1406,9 +1418,48 @@ impl CustomAudioEngine {
         trace!("🔍 [SEEK] Clearing seeking flag");
         self.seeking.store(false, Ordering::Release);
 
+        // Re-arm the crossfade against the already-prepared next track. The seek
+        // cancelled the in-flight crossfade above (its timing was stale), but the
+        // prepared decoder is still valid. Without this, seeking near the track
+        // end disarms the crossfade and the transition falls back to a gapless
+        // hard-cut — and a single user seek often arrives as two seek events, so
+        // a second seek cancels the arm a fresh prep just set while no new prep
+        // re-arms (the slot is already prepared). Re-arming here closes that race.
+        self.rearm_crossfade_if_prepared().await;
+
         debug!(
             "🔍 [SEEK] Seek completed in {:?} total",
             seek_start.elapsed()
+        );
+    }
+
+    /// Re-arm the renderer crossfade against an already-prepared next track,
+    /// no-op when nothing is prepared, crossfade is ineligible, or the format
+    /// pair can't crossfade (the renderer's `arm_crossfade` gate decides the
+    /// last part). Mirrors the arm in [`Self::store_prepared_decoder`] but reads
+    /// the incoming duration from the existing prepared slot rather than a fresh
+    /// decoder, so a seek doesn't need a re-prep to restore the armed trigger.
+    async fn rearm_crossfade_if_prepared(&mut self) {
+        let crossfade_eligible = self.crossfade_enabled
+            || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed;
+        if !crossfade_eligible || self.crossfade_duration_ms == 0 {
+            return;
+        }
+        let incoming_duration = {
+            let slot = self.gapless.lock().await;
+            if !slot.is_prepared() {
+                return;
+            }
+            slot.decoder.as_ref().map(AudioDecoder::duration)
+        };
+        let Some(incoming_duration) = incoming_duration else {
+            return;
+        };
+        self.renderer.lock().arm_crossfade(
+            self.crossfade_duration_ms,
+            &self.next_format,
+            self.duration,
+            incoming_duration,
         );
     }
 
@@ -1465,8 +1516,16 @@ impl CustomAudioEngine {
             .lock()
             .set_pending_crossfade_replay_gain(replay_gain);
 
-        // Arm the renderer to trigger crossfade when the queue drains
-        if self.crossfade_enabled && self.crossfade_duration_ms > 0 {
+        // Arm the renderer to trigger crossfade when the queue drains. Crossfade
+        // fires when the user's Crossfade toggle is on (bit-perfect Off) OR under
+        // bit-perfect Relaxed, which runs its own same-rate crossfade even though
+        // its mutually-exclusive Crossfade toggle is off. The renderer's
+        // `crossfade_blocked` gate then decides per-transition (Relaxed crossfades
+        // only a same-format change; Strict, which never reaches here, would
+        // hard-cut all).
+        let crossfade_armed = self.crossfade_enabled
+            || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed;
+        if crossfade_armed && self.crossfade_duration_ms > 0 {
             self.renderer.lock().arm_crossfade(
                 self.crossfade_duration_ms,
                 &self.next_format,
@@ -1532,8 +1591,9 @@ impl CustomAudioEngine {
     /// shuffle/repeat/consume mode-toggle contract. No-op when unchanged so a
     /// routine settings save (which re-applies every field) never disturbs an
     /// in-flight transition.
-    pub async fn set_bit_perfect(&mut self, enabled: bool) {
-        let changed = self.renderer.lock().set_bit_perfect(enabled);
+    pub async fn set_bit_perfect(&mut self, mode: crate::types::player_settings::BitPerfectMode) {
+        self.bit_perfect_mode = mode;
+        let changed = self.renderer.lock().set_bit_perfect(mode);
         if changed {
             self.reset_next_track().await;
         }
@@ -1651,14 +1711,18 @@ impl CustomAudioEngine {
     /// Cancel an active crossfade (e.g., on skip, seek, or stop).
     pub async fn cancel_crossfade(&mut self) {
         let phase = std::mem::replace(&mut self.crossfade_phase, CrossfadePhase::Idle);
-        let decoder = match phase {
-            CrossfadePhase::Idle => return,
-            CrossfadePhase::Active { decoder, .. }
-            | CrossfadePhase::OutgoingFinished { decoder, .. } => decoder,
-        };
+        // Clear the engine-side incoming decoder if the engine had already
+        // acknowledged the crossfade. When only the renderer is Active (the
+        // engine hasn't acked yet — see `reset_next_track`), there is no decoder
+        // to clear, but the renderer's live incoming stream must STILL be torn
+        // down, so fall through to the renderer cancel rather than early-return.
+        if let CrossfadePhase::Active { decoder, .. }
+        | CrossfadePhase::OutgoingFinished { decoder, .. } = phase
+        {
+            // Signal the spawned decode loop to exit by clearing its inner Option.
+            *decoder.lock().await = None;
+        }
         debug!("🔀 [CROSSFADE] Cancelling");
-        // Signal the spawned decode loop to exit by clearing its inner Option.
-        *decoder.lock().await = None;
         let mut renderer = self.renderer.lock();
         renderer.cancel_crossfade();
         renderer.disarm_crossfade();
@@ -1707,6 +1771,11 @@ impl CustomAudioEngine {
         };
 
         debug!("🔀 [CROSSFADE] Finalizing — incoming becomes current");
+
+        // Mark this advance as a crossfade so the completion path labels the
+        // "Now Playing" log line `crossfade` (both gapless and crossfade reach
+        // the engine "already playing" branch). Read-and-reset by the controller.
+        self.last_transition_was_crossfade = true;
 
         // Stop outgoing decode loop by advancing generation
         self.decode_loop.supersede();
@@ -1944,6 +2013,14 @@ impl CustomAudioEngine {
         self.playing && !self.paused
     }
 
+    /// Read-and-reset whether the most recent auto-advance was a crossfade
+    /// (set by `finalize_crossfade_engine`). The completion path uses this to
+    /// label the "Now Playing" log line; resetting on read keeps it from
+    /// leaking into the next (gapless) transition.
+    pub fn take_last_transition_was_crossfade(&mut self) -> bool {
+        std::mem::replace(&mut self.last_transition_was_crossfade, false)
+    }
+
     /// Get immediate paused state
     pub fn immediate_paused(&self) -> bool {
         self.paused
@@ -1972,14 +2049,22 @@ impl CustomAudioEngine {
     /// to prevent a stale gapless transition to the wrong song.
     pub async fn reset_next_track(&mut self) {
         // Cancel an in-flight crossfade FIRST. A mode toggle (shuffle / repeat /
-        // consume) during an active fade must abandon the prepared/in-flight
-        // next track so the engine re-derives it under the new mode — otherwise
-        // finalize_crossfade_engine would still promote the now-wrong incoming
-        // track. cancel_crossfade resets crossfade_phase → Idle, clears the
-        // incoming decoder, and restores the outgoing as primary. Run it before
-        // taking the parking_lot renderer lock below (it acquires that lock and
-        // awaits the decoder lock itself).
-        if !self.crossfade_phase.is_idle() {
+        // consume / bit-perfect) during an active fade must abandon the
+        // prepared/in-flight next track so the engine re-derives it under the new
+        // mode — otherwise finalize_crossfade_engine would still promote the
+        // now-wrong incoming track. cancel_crossfade resets crossfade_phase →
+        // Idle, clears the incoming decoder, and restores the outgoing as primary.
+        //
+        // Check the RENDERER's state too, not just the engine's: render_tick
+        // swaps the renderer Armed → Active synchronously and creates the live
+        // incoming stream a tick BEFORE the spawned `on_renderer_finished` task
+        // sets the engine's `crossfade_phase`. A toggle landing in that window
+        // would otherwise skip the cancel (engine still Idle) and orphan the
+        // renderer's live incoming stream — fading the outgoing into silence with
+        // no recovery. `cancel_crossfade` tolerates the engine-Idle case and
+        // tears down the renderer regardless.
+        let renderer_crossfading = self.renderer.lock().is_crossfade_active();
+        if !self.crossfade_phase.is_idle() || renderer_crossfading {
             self.cancel_crossfade().await;
         }
         self.gapless.lock().await.clear();
@@ -2158,18 +2243,28 @@ impl CustomAudioEngine {
     /// NOTE: Does NOT gate on is_eof — the position-based trigger fires
     /// intentionally BEFORE EOF so both tracks can overlap during the fade.
     async fn try_start_crossfade_transition(&mut self, is_eof: bool) -> bool {
-        if !self.crossfade_phase.is_idle()
-            || !self.crossfade_enabled
-            || self.crossfade_duration_ms == 0
+        // Crossfade is eligible when the Crossfade toggle is on OR under Relaxed
+        // bit-perfect (which self-crossfades same-rate tracks). Mirror the
+        // `store_prepared_decoder` arm condition so both triggers agree.
+        let crossfade_eligible = self.crossfade_enabled
+            || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed;
+        if !self.crossfade_phase.is_idle() || !crossfade_eligible || self.crossfade_duration_ms == 0
         {
             return false;
         }
 
-        // Bit-perfect hard-cuts every transition (no crossfade). Returning false
-        // here falls through to the normal gapless/hard-cut path. Gates on the
-        // SAME `crossfade_blocked()` the renderer's `arm_crossfade` uses, so the
+        // Bit-perfect gates the crossfade per-transition: Strict hard-cuts
+        // everything, Relaxed hard-cuts only a cross-format change. Returning
+        // false here falls through to the normal gapless/hard-cut path. Gates on
+        // the SAME `crossfade_blocked()` the renderer's `arm_crossfade` uses,
+        // with the SAME (outgoing, incoming) format pair — `current_format` is
+        // the outgoing track, `next_format` the prepared incoming one — so the
         // two triggers can't disagree and start/orphan a blend.
-        if self.renderer.lock().crossfade_blocked() {
+        if self
+            .renderer
+            .lock()
+            .crossfade_blocked(&self.current_format, &self.next_format)
+        {
             return false;
         }
 
@@ -2591,8 +2686,10 @@ mod tests {
             "precondition: engine must start mid-crossfade",
         );
 
-        // Default bit_perfect is false; enabling it is a real change.
-        engine.set_bit_perfect(true).await;
+        // Default bit-perfect mode is Off; switching to Strict is a real change.
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Strict)
+            .await;
 
         assert!(
             engine.crossfade_phase.is_idle(),
@@ -2610,12 +2707,60 @@ mod tests {
             incoming_source: "http://example.test/next".to_string(),
         };
 
-        // bit_perfect already defaults to false; setting false again is a no-op.
-        engine.set_bit_perfect(false).await;
+        // bit-perfect mode already defaults to Off; setting Off again is a no-op.
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Off)
+            .await;
 
         assert!(
             !engine.crossfade_phase.is_idle(),
             "an unchanged bit-perfect value must not cancel a crossfade",
+        );
+    }
+
+    /// `rearm_crossfade_if_prepared` (run at the end of `seek` to close the
+    /// double-seek disarm race) must NOT arm when crossfade is ineligible — even
+    /// with a next track prepared. Off mode + Crossfade toggle off → no arm.
+    #[tokio::test]
+    async fn rearm_crossfade_noop_when_ineligible() {
+        use crate::types::player_settings::BitPerfectMode;
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_enabled = false;
+        engine.bit_perfect_mode = BitPerfectMode::Off;
+        engine.crossfade_duration_ms = 5_000;
+        engine.duration = 200_000;
+        engine.next_format = AudioFormat::new(crate::audio::format::SampleFormat::S16, 44_100, 2);
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(fresh_decoder());
+            slot.source = "http://example.test/next".to_string();
+            slot.prepared = true;
+        }
+
+        engine.rearm_crossfade_if_prepared().await;
+
+        assert!(
+            !engine.renderer.lock().is_crossfade_armed(),
+            "an ineligible mode must not arm a crossfade even with a prepared next track"
+        );
+    }
+
+    /// `rearm_crossfade_if_prepared` must be a no-op when nothing is prepared,
+    /// even under an eligible mode (Relaxed) — there is no incoming track to
+    /// crossfade into yet.
+    #[tokio::test]
+    async fn rearm_crossfade_noop_when_nothing_prepared() {
+        use crate::types::player_settings::BitPerfectMode;
+        let mut engine = CustomAudioEngine::new();
+        engine.bit_perfect_mode = BitPerfectMode::Relaxed;
+        engine.crossfade_duration_ms = 5_000;
+        engine.duration = 200_000;
+
+        engine.rearm_crossfade_if_prepared().await;
+
+        assert!(
+            !engine.renderer.lock().is_crossfade_armed(),
+            "no prepared next track means nothing to re-arm"
         );
     }
 

@@ -507,7 +507,7 @@ impl Nokkvi {
             sound_effects_enabled: self.sfx.enabled,
             sfx_volume: self.sfx.volume,
             crossfade_enabled: self.engine.crossfade_enabled,
-            bit_perfect: self.engine.bit_perfect,
+            bit_perfect_mode: self.engine.bit_perfect_mode,
             visualization_mode: self.engine.visualization_mode,
             window_width: self.window.width,
             // MiniPlayer remaps per the width-driven regime: the wide

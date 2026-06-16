@@ -20,10 +20,10 @@ use crate::{
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
-            EnterBehavior, LibraryPageSize, LivePlayerSettings, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
-            StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
+            CollapsedAppearance, EnterBehavior, LibraryPageSize, LivePlayerSettings,
+            NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
             VolumeNormalizationMode,
         },
         queue_sort_mode::QueueSortMode,
@@ -203,7 +203,7 @@ impl SettingsService {
     delegate_setter!(set_opacity_gradient, bool);
     delegate_setter!(set_slot_text_links, bool);
     delegate_setter!(set_crossfade_enabled, bool);
-    delegate_setter!(set_bit_perfect, bool);
+    delegate_setter!(set_bit_perfect, BitPerfectMode);
     delegate_setter!(set_crossfade_duration, u32);
     delegate_setter!(set_rating_reminder_enabled, bool);
     delegate_setter!(set_rating_reminder_trigger, RatingReminderTrigger);

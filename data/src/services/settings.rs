@@ -11,9 +11,9 @@ use crate::{
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, NavDisplayMode,
-            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
-            StripClickAction, TrackInfoDisplay, VolumeNormalizationMode,
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode, EnterBehavior,
+            NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+            SlotRowHeight, StripClickAction, TrackInfoDisplay, VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -338,8 +338,8 @@ impl SettingsManager {
         self.save()
     }
 
-    pub fn set_bit_perfect(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.bit_perfect = enabled;
+    pub fn set_bit_perfect(&mut self, mode: BitPerfectMode) -> Result<()> {
+        self.settings.player.bit_perfect = mode;
         self.save()
     }
 
@@ -1213,10 +1213,10 @@ mod sentinel_roundtrip_tests {
             slot_text_links: false,                // default true
 
             // Playback / crossfade
-            crossfade_enabled: true,    // default false
-            bit_perfect: true,          // default false
-            crossfade_duration_secs: 9, // default 5
-            rewind_on_previous: true,   // default false
+            crossfade_enabled: true,             // default false
+            bit_perfect: BitPerfectMode::Strict, // default Off
+            crossfade_duration_secs: 9,          // default 5
+            rewind_on_previous: true,            // default false
 
             // Playlists
             quick_add_to_playlist: true,       // default false

@@ -283,9 +283,11 @@ impl QueueNavigator {
         subsonic_credential: &str,
     ) -> TrackTransitionPlan {
         // ── Determine engine state and handle audio layer ──
+        let mut was_crossfade = false;
         let needs_load = if engine.immediate_playing() {
             // Path 1: Engine already playing (gapless/crossfade completed by engine)
             engine.consume_gapless_transition().await;
+            was_crossfade = engine.take_last_transition_was_crossfade();
             debug!(" [TRACK FINISHED] Engine already playing - gapless transition completed");
             false
         } else if engine.load_prepared_track().await.is_ok() {
@@ -394,7 +396,11 @@ impl QueueNavigator {
         let transition = peeked.transition();
 
         let song = transition.song.clone();
-        let reason = if queue_manager.get_queue().shuffle {
+        // A crossfade is the most specific transition fact for the log, so it
+        // wins the label even under shuffle (the engine blended the two tracks).
+        let reason = if was_crossfade {
+            TransitionReason::Crossfade
+        } else if queue_manager.get_queue().shuffle {
             TransitionReason::Shuffle
         } else {
             TransitionReason::Gapless

@@ -22,8 +22,8 @@ use crate::{
     define_settings,
     types::{
         player_settings::{
-            CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS, NormalizationLevel,
-            RatingReminderTrigger, RoundedMode, VolumeNormalizationMode,
+            BitPerfectMode, CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, VolumeNormalizationMode,
         },
         settings_data::PlaybackSettingsData,
     },
@@ -55,7 +55,8 @@ define_settings! {
                 subtitle: Some(
                     "Overlap and blend the end of each track into the next. Off plays tracks \
                      gapless with no overlap. Tracks under 10 seconds always play gapless. \
-                     Turning this on switches off Bit-Perfect — a blend can't be bit-perfect.",
+                     Mutually exclusive with Bit-Perfect — turning Crossfade on switches \
+                     Bit-Perfect off.",
                 ),
                 default: true,
                 read_field: |d| d.crossfade_enabled,
@@ -63,8 +64,8 @@ define_settings! {
         },
         BitPerfect {
             key: "general.bit_perfect",
-            value_type: Bool,
-            setter: |mgr, v: bool| mgr.set_bit_perfect(v),
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_bit_perfect(BitPerfectMode::from_label(&v)),
             toml_apply: |ts, p| p.bit_perfect = ts.bit_perfect,
             read: |src, out| out.bit_perfect = src.bit_perfect,
             write: |ps, ts| ts.bit_perfect = ps.bit_perfect,
@@ -72,16 +73,20 @@ define_settings! {
                 label: "Bit-Perfect Output",
                 category: "Playback",
                 subtitle: Some(
-                    "Bypass EQ, software volume, and the limiter and feed the DAC each track at its \
-                     native sample rate (volume moves to the PipeWire node). The device switches \
-                     rate on a fresh start or a step up; a mid-session step down (e.g. 96k to \
-                     44.1k) is high-quality resampled, because the DAC can't re-clock live without \
-                     a gap. Off keeps the standard 48kHz output. Turning this on switches off \
-                     Crossfade — blending two tracks can't be bit-perfect. Needs PipeWire \
-                     rate-switching (allowed-rates) configured.",
+                    "Off keeps the standard 48kHz DSP path (EQ, software volume, crossfade). \
+                     Strict and Relaxed bypass EQ, software volume, and the limiter and feed the \
+                     DAC each track at its native rate (volume moves to the PipeWire node) — Strict \
+                     hard-cuts between every track, Relaxed crossfades tracks that share a sample \
+                     rate (only that few-second blend isn't bit-perfect) and hard-cuts the rest. \
+                     Mutually exclusive with Crossfade — choosing Strict or Relaxed switches \
+                     Crossfade off (Relaxed runs its own same-rate crossfade). A mid-session step \
+                     down (e.g. 96k to 44.1k) is high-quality resampled, because the DAC can't \
+                     re-clock live without a gap. Needs PipeWire rate-switching (allowed-rates) \
+                     configured.",
                 ),
-                default: false,
-                read_field: |d| d.bit_perfect,
+                default: "Off",
+                options: &["Off", "Strict", "Relaxed"],
+                read_field: |d| d.bit_perfect.as_ref(),
             },
         },
         CrossfadeDuration {
@@ -401,7 +406,7 @@ mod tests {
     fn default_playback_data() -> PlaybackSettingsData {
         PlaybackSettingsData {
             crossfade_enabled: false,
-            bit_perfect: false,
+            bit_perfect: "Off".into(),
             crossfade_duration_secs: 5,
             rewind_on_previous: false,
             volume_normalization: "Off".into(),
@@ -797,7 +802,7 @@ mod tests {
 
         let data = PlaybackSettingsData {
             crossfade_enabled: live.crossfade_enabled,
-            bit_perfect: live.bit_perfect,
+            bit_perfect: live.bit_perfect.as_label().into(),
             crossfade_duration_secs: i64::from(live.crossfade_duration_secs),
             rewind_on_previous: live.rewind_on_previous,
             volume_normalization: live.volume_normalization.as_label().into(),

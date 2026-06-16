@@ -105,18 +105,6 @@ fn bit_perfect_badge_engaged(
     current_stream_bit_perfect && playing && !is_radio
 }
 
-/// Whether a loaded config must have crossfade cleared because BOTH crossfade
-/// and bit-perfect are enabled (mutually exclusive — a blend can't be
-/// bit-perfect; bit-perfect wins as the non-default opt-in). Pure for testing.
-///
-/// Deliberately a plain "both true" check, NOT `resolve_exclusion`: that helper
-/// assumes the named setting was just toggled on, so its `BitPerfect` arm keys
-/// on `crossfade_enabled` alone — using it here would clear crossfade for every
-/// crossfade-only config (the shipped default), silently wiping the setting.
-fn load_reconcile_clears_crossfade(crossfade_enabled: bool, bit_perfect: bool) -> bool {
-    crossfade_enabled && bit_perfect
-}
-
 /// Resolve the next radio-station index when cycling.
 ///
 /// `current_pos` is the position of the currently-playing station in the list,
@@ -1509,109 +1497,93 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Flip one of the two mutually-exclusive playback modes (crossfade ⇄
-    /// bit-perfect) from the player-bar toggle / kebab / hotkey: optimistic
-    /// flip, the exclusion rule, one toast, persistence, and the engine sync,
-    /// once. Both toggle entry points route here so the orchestration stays
-    /// single-sourced — only the rule lives in `resolve_exclusion`; this is the
-    /// shared flip+toast+persist+sync around it. (The settings-checkbox path is
-    /// deliberately separate: it applies the flip inside its own blocking-lock
-    /// dispatch snapshot, but shares the same `resolve_exclusion`.)
-    fn apply_exclusive_toggle(
-        &mut self,
-        which: crate::update::components::ExclusiveSetting,
-    ) -> Task<Message> {
-        use crate::update::components::{ExclusiveSetting, resolve_exclusion};
+    /// Toggle crossfade from the player-bar mode toggle / kebab / hotkey:
+    /// optimistic flip, toast, persist + engine sync, settings refresh.
+    ///
+    /// Crossfade and bit-perfect are MUTUALLY EXCLUSIVE modes: enabling crossfade
+    /// forces bit-perfect Off. (Disabling crossfade leaves bit-perfect alone.)
+    pub(crate) fn handle_toggle_crossfade(&mut self) -> Task<Message> {
+        use nokkvi_data::types::player_settings::BitPerfectMode;
 
-        // Optimistic flip of the chosen flag.
-        let now_enabled = match which {
-            ExclusiveSetting::Crossfade => {
-                self.engine.crossfade_enabled = !self.engine.crossfade_enabled;
-                self.engine.crossfade_enabled
-            }
-            ExclusiveSetting::BitPerfect => {
-                self.engine.bit_perfect = !self.engine.bit_perfect;
-                self.engine.bit_perfect
-            }
-        };
-
-        // Enabling one turns the other off (a blend can't be bit-perfect);
-        // disabling never touches the sibling. Resolved from the post-flip state
-        // via the shared rule so the player-bar/hotkey path matches the settings
-        // checkbox.
-        let exclusion = now_enabled
-            .then(|| {
-                resolve_exclusion(
-                    which,
-                    self.engine.crossfade_enabled,
-                    self.engine.bit_perfect,
-                )
-            })
-            .flatten();
-        if let Some(ex) = exclusion {
-            match ex.clear {
-                ExclusiveSetting::Crossfade => self.engine.crossfade_enabled = false,
-                ExclusiveSetting::BitPerfect => self.engine.bit_perfect = false,
-            }
+        self.engine.crossfade_enabled = !self.engine.crossfade_enabled;
+        let enabled = self.engine.crossfade_enabled;
+        // Enabling crossfade turns bit-perfect off (a blend can't be bit-perfect).
+        let cleared_bit_perfect = enabled && self.engine.bit_perfect_mode != BitPerfectMode::Off;
+        if cleared_bit_perfect {
+            self.engine.bit_perfect_mode = BitPerfectMode::Off;
         }
-
-        // One toast: the combined exclusion message when it flipped the sibling,
-        // otherwise the plain on/off label for the toggled mode.
-        match exclusion {
-            Some(ex) => self.toast_info(ex.toast),
-            None => self.toast_info(match (which, now_enabled) {
-                (ExclusiveSetting::Crossfade, true) => "Crossfade: On",
-                (ExclusiveSetting::Crossfade, false) => "Crossfade: Off",
-                (ExclusiveSetting::BitPerfect, true) => "Bit-Perfect: On",
-                (ExclusiveSetting::BitPerfect, false) => "Bit-Perfect: Off",
-            }),
-        }
-
-        // Persist + engine-sync ONLY the flag(s) that actually changed. The
-        // toggled flag always flipped; the sibling changed only when the
-        // exclusion cleared it. Each `set_*` does a full save() (a redb write +
-        // a complete config.toml re-serialize), so persisting an unchanged flag
-        // is a wasted disk round-trip.
-        let (persist_crossfade, persist_bit_perfect) = match which {
-            ExclusiveSetting::Crossfade => (true, exclusion.is_some()),
-            ExclusiveSetting::BitPerfect => (exclusion.is_some(), true),
-        };
-        let crossfade = self.engine.crossfade_enabled;
-        let bit_perfect = self.engine.bit_perfect;
-        self.shell_spawn("persist_exclusive_toggle", move |shell| async move {
-            if persist_crossfade {
-                shell.settings().set_crossfade_enabled(crossfade).await?;
-            }
-            if persist_bit_perfect {
-                shell.settings().set_bit_perfect(bit_perfect).await?;
-            }
+        self.toast_info(if cleared_bit_perfect {
+            "Crossfade on, Bit-Perfect off"
+        } else if enabled {
+            "Crossfade: On"
+        } else {
+            "Crossfade: Off"
+        });
+        let bit_perfect = self.engine.bit_perfect_mode;
+        self.shell_spawn("persist_crossfade_toggle", move |shell| async move {
+            shell.settings().set_crossfade_enabled(enabled).await?;
             let engine_arc = shell.audio_engine();
             let mut engine = engine_arc.lock().await;
-            if persist_crossfade {
-                engine.set_crossfade_enabled(crossfade);
-            }
-            if persist_bit_perfect {
+            engine.set_crossfade_enabled(enabled);
+            if cleared_bit_perfect {
+                shell.settings().set_bit_perfect(bit_perfect).await?;
                 engine.set_bit_perfect(bit_perfect).await;
             }
             Ok(())
         });
-        // The Playback tab's crossfade + bit-perfect rows mirror these engine
-        // flags — the toggle is reachable from the player-bar mode menu while
-        // Settings is open, so refresh the cached entries (no-op off-Settings).
+        // The Playback tab's Crossfade + Bit-Perfect rows mirror these engine
+        // values — reachable from the player-bar mode menu while Settings is
+        // open, so refresh the cached entries (no-op off-Settings).
         self.settings_page.config_dirty = true;
         self.refresh_settings_entries_if_dirty();
         Task::none()
     }
 
-    pub(crate) fn handle_toggle_crossfade(&mut self) -> Task<Message> {
-        self.apply_exclusive_toggle(crate::update::components::ExclusiveSetting::Crossfade)
-    }
-
-    /// Toggle bit-perfect from the player-bar mode toggle / kebab / hotkey.
-    /// Enabling bit-perfect turns crossfade off (mutually exclusive) via the
-    /// shared `resolve_exclusion`; see [`Self::apply_exclusive_toggle`].
+    /// Cycle the bit-perfect output mode from the player-bar mode toggle /
+    /// kebab / hotkey: Off → Strict → Relaxed → Off (modeled on
+    /// [`Self::handle_toggle_repeat`]). Optimistic UI update, toast, persist +
+    /// engine sync.
+    ///
+    /// Mutually exclusive with crossfade: switching to a non-Off mode forces the
+    /// Crossfade toggle off. Relaxed then runs its OWN same-rate crossfade (the
+    /// engine self-arms it), so the user gets a same-rate crossfade without the
+    /// Crossfade toggle. (Cycling back to Off leaves crossfade off — the user can
+    /// re-enable it.)
     pub(crate) fn handle_toggle_bit_perfect(&mut self) -> Task<Message> {
-        self.apply_exclusive_toggle(crate::update::components::ExclusiveSetting::BitPerfect)
+        use nokkvi_data::types::player_settings::BitPerfectMode;
+
+        let mode = self.engine.bit_perfect_mode.next();
+        self.engine.bit_perfect_mode = mode;
+        // A non-Off mode turns crossfade off (they're exclusive modes).
+        let cleared_crossfade = mode != BitPerfectMode::Off && self.engine.crossfade_enabled;
+        if cleared_crossfade {
+            self.engine.crossfade_enabled = false;
+        }
+        let label = match mode {
+            BitPerfectMode::Off => "Bit-Perfect: Off",
+            BitPerfectMode::Strict => "Bit-Perfect: Strict",
+            BitPerfectMode::Relaxed => "Bit-Perfect: Relaxed",
+        };
+        if cleared_crossfade {
+            self.toast_info(format!("{label} (Crossfade off)"));
+        } else {
+            self.toast_info(label);
+        }
+        let crossfade = self.engine.crossfade_enabled;
+        self.shell_spawn("persist_bit_perfect_cycle", move |shell| async move {
+            shell.settings().set_bit_perfect(mode).await?;
+            let engine_arc = shell.audio_engine();
+            let mut engine = engine_arc.lock().await;
+            engine.set_bit_perfect(mode).await;
+            if cleared_crossfade {
+                shell.settings().set_crossfade_enabled(crossfade).await?;
+                engine.set_crossfade_enabled(crossfade);
+            }
+            Ok(())
+        });
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
+        Task::none()
     }
 
     pub(crate) fn handle_seek(&mut self, val: f32) -> Task<Message> {
@@ -1747,28 +1719,19 @@ impl Nokkvi {
             viz.set_feed_active(viz_active);
         }
 
-        // Crossfade settings. Crossfade and bit-perfect are mutually exclusive
-        // (a blend can't be bit-perfect). The toggle/checkbox paths persist the
-        // cleared sibling so disk never holds both, but a hand-edited or
-        // pre-rule config could — reconcile on load via the SAME shared rule so
-        // the engine, the renderer, and the player-bar toggles agree. Bit-perfect
-        // wins (it's the non-default opt-in; crossfade defaults on).
-        // Reconcile on the `settings` struct ITSELF so every downstream consumer
-        // — the engine flags, the async engine push, AND the persisted
-        // `self.settings` mirror below — sees the corrected value and can't
-        // drift. Fire ONLY when BOTH are actually enabled (a hand-edited or
-        // pre-rule config); bit-perfect wins (the non-default opt-in). Do NOT
-        // route this through `resolve_exclusion`: that helper assumes the named
-        // setting was JUST toggled on, so its BitPerfect arm keys on
-        // `crossfade_enabled` alone and would wrongly fire for every
-        // crossfade-only config — the shipped default. The correction is written
-        // back to disk so an invalid both-true config self-heals.
-        let reconciled_crossfade_off =
-            load_reconcile_clears_crossfade(settings.crossfade_enabled, settings.bit_perfect);
-        if reconciled_crossfade_off {
+        // Crossfade and bit-perfect are mutually-exclusive modes. The toggle /
+        // checkbox paths persist the cleared sibling so disk never holds both,
+        // but a hand-edited or pre-migration config could — reconcile on load so
+        // the engine, renderer, and player-bar agree. Bit-perfect wins (the
+        // non-default opt-in; crossfade defaults on). Reconcile on `settings`
+        // itself so the async engine push below sees the corrected value, and
+        // persist the fix so the invalid both-on state self-heals.
+        if settings.crossfade_enabled
+            && settings.bit_perfect != nokkvi_data::types::player_settings::BitPerfectMode::Off
+        {
             tracing::warn!(
                 "⚙️ Settings had both crossfade and bit-perfect enabled; disabling crossfade \
-                 (mutually exclusive)"
+                 (mutually exclusive — bit-perfect wins)"
             );
             settings.crossfade_enabled = false;
             self.shell_spawn("persist_crossfade_reconcile", |shell| async move {
@@ -1777,7 +1740,7 @@ impl Nokkvi {
             });
         }
         self.engine.crossfade_enabled = settings.crossfade_enabled;
-        self.engine.bit_perfect = settings.bit_perfect;
+        self.engine.bit_perfect_mode = settings.bit_perfect;
         self.engine.crossfade_duration_secs = settings.crossfade_duration_secs;
 
         // Volume normalization settings
@@ -1808,8 +1771,6 @@ impl Nokkvi {
         // Push crossfade + normalization settings to the audio engine (accumulated, not early-returned)
         let crossfade_task = if let Some(shell) = &self.app_service {
             let shell = shell.clone();
-            // `settings` is already reconciled above (bit-perfect may have
-            // cleared crossfade), so the engine sync matches the UI/renderer.
             let enabled = settings.crossfade_enabled;
             let bit_perfect = settings.bit_perfect;
             let duration_secs = settings.crossfade_duration_secs;
@@ -2311,31 +2272,6 @@ mod bit_perfect_badge_engaged_tests {
         // A lossy network radio stream can't be bit-perfect regardless of the
         // device clock, so the badge is suppressed for radio.
         assert!(!bit_perfect_badge_engaged(true, true, true));
-    }
-}
-
-#[cfg(test)]
-mod load_reconcile_tests {
-    use super::load_reconcile_clears_crossfade;
-
-    #[test]
-    fn clears_crossfade_only_when_both_enabled() {
-        assert!(load_reconcile_clears_crossfade(true, true));
-    }
-
-    #[test]
-    fn keeps_crossfade_for_the_shipped_default_crossfade_only_config() {
-        // The regression guard: crossfade on + bit-perfect OFF (the shipped
-        // default) must NOT reconcile crossfade off. Routing this through
-        // resolve_exclusion(BitPerfect, ..) returned true here and silently wiped
-        // crossfade for the majority of users.
-        assert!(!load_reconcile_clears_crossfade(true, false));
-    }
-
-    #[test]
-    fn no_op_for_bit_perfect_only_or_neither() {
-        assert!(!load_reconcile_clears_crossfade(false, true));
-        assert!(!load_reconcile_clears_crossfade(false, false));
     }
 }
 

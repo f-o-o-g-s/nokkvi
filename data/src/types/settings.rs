@@ -5,10 +5,11 @@ use crate::{
     types::{
         hotkey_config::HotkeyConfig,
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CollapsedAppearance,
-            EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
-            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
-            TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
+            CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
+            StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
+            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
@@ -94,11 +95,13 @@ pub struct PersistedPlayerSettings {
     /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default = "default_true")]
     pub crossfade_enabled: bool,
-    /// Whether bit-perfect output is enabled: play at each track's native
-    /// sample rate with the DSP chain (EQ / software volume / limiter) bypassed,
-    /// letting PipeWire switch the device clock. Off by default (opt-in).
-    #[serde(default)]
-    pub bit_perfect: bool,
+    /// Bit-perfect output mode (Off / Strict / Relaxed): Strict and Relaxed
+    /// play at each track's native sample rate with the DSP chain (EQ / software
+    /// volume / limiter) bypassed, letting PipeWire switch the device clock.
+    /// They differ only on same-rate crossfades. Off by default (opt-in).
+    /// Legacy bool records load via the compat shim (true → Strict, false → Off).
+    #[serde(default, deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
+    pub bit_perfect: BitPerfectMode,
     /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]
     pub crossfade_duration_secs: u32,
@@ -385,7 +388,7 @@ impl Default for PersistedPlayerSettings {
             opacity_gradient: default_opacity_gradient(),
             slot_text_links: default_true(),
             crossfade_enabled: true,
-            bit_perfect: false,
+            bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: default_crossfade_duration_secs(),
             rewind_on_previous: false,
             default_playlist_id: None,

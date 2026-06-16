@@ -85,7 +85,7 @@ impl Nokkvi {
 
         let playback = PlaybackSettingsData {
             crossfade_enabled: self.engine.crossfade_enabled,
-            bit_perfect: self.engine.bit_perfect,
+            bit_perfect: self.engine.bit_perfect_mode.as_label().into(),
             crossfade_duration_secs: i64::from(self.engine.crossfade_duration_secs),
             rewind_on_previous: self.settings.rewind_on_previous,
             volume_normalization: self.engine.volume_normalization.as_label().into(),
@@ -647,22 +647,21 @@ impl Nokkvi {
         let Some(shell) = self.app_service.as_ref() else {
             return Task::none();
         };
-        use crate::{
-            update::components::{ExclusiveSetting, resolve_exclusion},
-            views::settings::items::SettingValue,
-        };
+
+        use nokkvi_data::types::player_settings::BitPerfectMode;
+
+        use crate::views::settings::items::SettingValue;
 
         let mgr_arc = shell.settings().settings_manager();
-        // Crossfade ⇄ bit-perfect mutual exclusion: enabling one turns the other
-        // off. Identify which (if any) is being ENABLED here; the flip is applied
-        // inside the lock below so it lands in the same `get_player_settings`
-        // snapshot and mirrors to the engine via `handle_player_settings_loaded`.
-        let enabling_exclusive = match key.as_str() {
-            "general.crossfade_enabled" => Some(ExclusiveSetting::Crossfade),
-            "general.bit_perfect" => Some(ExclusiveSetting::BitPerfect),
-            _ => None,
-        }
-        .filter(|_| matches!(value, SettingValue::Bool(true)));
+        // Crossfade and bit-perfect are mutually-exclusive modes: whichever the
+        // user just turned ON wins, clearing the sibling. Compute the intent
+        // BEFORE `value` is moved into dispatch; apply the sibling clear inside
+        // the same lock so the `get_player_settings` snapshot carries it.
+        let enabling_crossfade =
+            key == "general.crossfade_enabled" && matches!(value, SettingValue::Bool(true));
+        let enabling_bit_perfect = key == "general.bit_perfect"
+            && matches!(&value, SettingValue::Enum { val, .. }
+                if BitPerfectMode::from_label(val) != BitPerfectMode::Off);
         let result = {
             let mut mgr = mgr_arc.blocking_lock();
             nokkvi_data::services::settings_tables::dispatch_general_tab_setting(
@@ -684,36 +683,20 @@ impl Nokkvi {
             })
             .map(|res| {
                 res.map(|effect| {
-                    // Apply the sibling flip BEFORE the snapshot so `p` carries it.
-                    let exclusion = enabling_exclusive.and_then(|e| {
-                        let cur = mgr.get_player_settings();
-                        resolve_exclusion(e, cur.crossfade_enabled, cur.bit_perfect)
-                    });
-                    if let Some(ex) = exclusion {
-                        match ex.clear {
-                            ExclusiveSetting::Crossfade => {
-                                let _ = mgr.set_crossfade_enabled(false);
-                            }
-                            ExclusiveSetting::BitPerfect => {
-                                let _ = mgr.set_bit_perfect(false);
-                            }
-                        }
+                    if enabling_crossfade {
+                        let _ = mgr.set_bit_perfect(BitPerfectMode::Off);
                     }
-                    (
-                        effect,
-                        exclusion.map(|ex| ex.toast),
-                        mgr.get_player_settings(),
-                    )
+                    if enabling_bit_perfect {
+                        let _ = mgr.set_crossfade_enabled(false);
+                    }
+                    (effect, mgr.get_player_settings())
                 })
             })
         };
         match result {
-            Some(Ok((effect, exclusion_toast, p))) => {
+            Some(Ok((effect, p))) => {
                 let state_task = self.handle_player_settings_loaded(p);
                 let side_task = self.dispatch_settings_side_effect(effect);
-                if let Some(msg) = exclusion_toast {
-                    self.toast_info(msg);
-                }
                 Task::batch([state_task, side_task])
             }
             Some(Err(e)) => {

@@ -6,7 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Bit-Perfect output now has three modes you can cycle from the player-bar button: Off, Strict, and Relaxed. Strict hard-cuts between every track. Relaxed runs its own crossfade between tracks that share a sample rate (only the few-second blend itself is not bit-perfect) and hard-cuts the rest, so you can get crossfades while staying bit-perfect without touching the separate Crossfade setting.
+
 ### Changed
+
+- Bit-Perfect and Crossfade remain mutually exclusive: turning on Crossfade switches Bit-Perfect off, and switching Bit-Perfect to Strict or Relaxed switches Crossfade off.
 
 ### Fixed
 

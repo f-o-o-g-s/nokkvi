@@ -107,6 +107,91 @@ impl RatingReminderTrigger {
     }
 }
 
+define_labeled_enum! {
+    /// Bit-perfect output mode — three states cycled by the player-bar button
+    /// (Off → Strict → Relaxed → Off).
+    ///
+    /// `Strict` and `Relaxed` both build bit-perfect streams (EQ + software
+    /// volume + limiter bypassed, the DAC fed each track at its native rate).
+    /// They differ ONLY at track transitions:
+    /// - `Strict` hard-cuts every transition — a crossfade blends two streams
+    ///   with a gain envelope, which can never be bit-perfect.
+    /// - `Relaxed` allows a crossfade between adjacent tracks that share the
+    ///   same sample rate AND channel count (the few-second blend itself is not
+    ///   bit-perfect; cross-rate / cross-channel changes still hard-cut, since
+    ///   the DAC can't re-clock mid-blend without resampling the incoming
+    ///   track). A crossfade only fires when the user's Crossfade setting is on.
+    ///
+    /// Serializes to snake_case strings for redb storage. Legacy `bit_perfect`
+    /// records held a bool (`true`/`false`); a custom deserializer maps
+    /// `true → Strict`, `false → Off` (see `settings.rs` / `toml_settings.rs`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum BitPerfectMode {
+        /// Normal DSP path: EQ, software volume, limiter, and crossfade active.
+        #[default]
+        Off { label: "Off", wire: "off" },
+        /// Untouched samples to the DAC; every track change hard-cuts.
+        Strict { label: "Strict", wire: "strict" },
+        /// Untouched samples, but same-rate tracks may crossfade.
+        Relaxed { label: "Relaxed", wire: "relaxed" },
+    }
+}
+
+impl BitPerfectMode {
+    /// Whether streams should be built bit-perfect (DSP bypass + native-rate
+    /// sink). True for both `Strict` and `Relaxed`; only `Off` uses the normal
+    /// DSP path.
+    pub fn builds_bit_perfect(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    /// Whether this mode permits a crossfade between tracks that share an audio
+    /// format (same sample rate + channel count). Only `Relaxed`. `Strict`
+    /// hard-cuts everything; `Off` defers to the normal crossfade path.
+    pub fn allows_relaxed_crossfade(self) -> bool {
+        matches!(self, Self::Relaxed)
+    }
+
+    /// Cycle to the next mode for the player-bar button: Off → Strict →
+    /// Relaxed → Off.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Strict,
+            Self::Strict => Self::Relaxed,
+            Self::Relaxed => Self::Off,
+        }
+    }
+}
+
+/// Field-level shim used by `#[serde(deserialize_with = ...)]` on the
+/// `bit_perfect` fields of `PersistedPlayerSettings` and `TomlSettings`.
+///
+/// Accepts the new enum wire format (`"off"` / `"strict"` / `"relaxed"`) and
+/// the legacy bool from the pre-tri-state era (`true` → `Strict`,
+/// `false` → `Off`) in the same field, so upgrading does not reset users'
+/// existing preference. Mirrors [`deserialize_rounded_mode_with_bool_compat`].
+///
+/// [`deserialize_rounded_mode_with_bool_compat`]: super::deserialize_rounded_mode_with_bool_compat
+pub fn deserialize_bit_perfect_with_bool_compat<'de, D>(
+    deserializer: D,
+) -> Result<BitPerfectMode, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+        Bool(bool),
+        Mode(BitPerfectMode),
+    }
+    match Repr::deserialize(deserializer)? {
+        Repr::Bool(true) => Ok(BitPerfectMode::Strict),
+        Repr::Bool(false) => Ok(BitPerfectMode::Off),
+        Repr::Mode(mode) => Ok(mode),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +257,93 @@ mod tests {
         assert!(VolumeNormalizationMode::ReplayGainAlbum.is_replay_gain());
         assert!(VolumeNormalizationMode::ReplayGainAlbum.prefers_album());
         assert!(!VolumeNormalizationMode::ReplayGainTrack.prefers_album());
+    }
+
+    #[test]
+    fn bit_perfect_mode_default_is_off() {
+        assert_eq!(BitPerfectMode::default(), BitPerfectMode::Off);
+    }
+
+    #[test]
+    fn bit_perfect_mode_cycles_off_strict_relaxed_off() {
+        assert_eq!(BitPerfectMode::Off.next(), BitPerfectMode::Strict);
+        assert_eq!(BitPerfectMode::Strict.next(), BitPerfectMode::Relaxed);
+        assert_eq!(BitPerfectMode::Relaxed.next(), BitPerfectMode::Off);
+    }
+
+    #[test]
+    fn bit_perfect_mode_builds_bit_perfect_for_strict_and_relaxed_only() {
+        assert!(!BitPerfectMode::Off.builds_bit_perfect());
+        assert!(BitPerfectMode::Strict.builds_bit_perfect());
+        assert!(BitPerfectMode::Relaxed.builds_bit_perfect());
+    }
+
+    #[test]
+    fn bit_perfect_mode_allows_relaxed_crossfade_for_relaxed_only() {
+        assert!(!BitPerfectMode::Off.allows_relaxed_crossfade());
+        assert!(!BitPerfectMode::Strict.allows_relaxed_crossfade());
+        assert!(BitPerfectMode::Relaxed.allows_relaxed_crossfade());
+    }
+
+    #[test]
+    fn bit_perfect_mode_serde_roundtrip_and_snake_case() {
+        for mode in [
+            BitPerfectMode::Off,
+            BitPerfectMode::Strict,
+            BitPerfectMode::Relaxed,
+        ] {
+            let json = serde_json::to_string(&mode).unwrap();
+            let back: BitPerfectMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(mode, back);
+        }
+        assert_eq!(
+            serde_json::to_string(&BitPerfectMode::Relaxed).unwrap(),
+            "\"relaxed\""
+        );
+    }
+
+    #[test]
+    fn bit_perfect_mode_label_roundtrip() {
+        for mode in [
+            BitPerfectMode::Off,
+            BitPerfectMode::Strict,
+            BitPerfectMode::Relaxed,
+        ] {
+            assert_eq!(BitPerfectMode::from_label(mode.as_label()), mode);
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct BitPerfectWrapper {
+        #[serde(deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
+        bit_perfect: BitPerfectMode,
+    }
+
+    #[test]
+    fn legacy_bit_perfect_bool_true_loads_as_strict() {
+        let w: BitPerfectWrapper = serde_json::from_str(r#"{"bit_perfect": true}"#).unwrap();
+        assert_eq!(w.bit_perfect, BitPerfectMode::Strict);
+    }
+
+    #[test]
+    fn legacy_bit_perfect_bool_false_loads_as_off() {
+        let w: BitPerfectWrapper = serde_json::from_str(r#"{"bit_perfect": false}"#).unwrap();
+        assert_eq!(w.bit_perfect, BitPerfectMode::Off);
+    }
+
+    #[test]
+    fn new_bit_perfect_string_loads_as_mode() {
+        let w: BitPerfectWrapper = serde_json::from_str(r#"{"bit_perfect": "relaxed"}"#).unwrap();
+        assert_eq!(w.bit_perfect, BitPerfectMode::Relaxed);
+    }
+
+    #[test]
+    fn legacy_bit_perfect_bool_compat_roundtrips_through_toml() {
+        // config.toml stored a bool pre-migration; confirm the same shim works
+        // under the toml deserializer, not just serde_json.
+        let w: BitPerfectWrapper = toml::from_str("bit_perfect = true").unwrap();
+        assert_eq!(w.bit_perfect, BitPerfectMode::Strict);
+        let w: BitPerfectWrapper = toml::from_str(r#"bit_perfect = "relaxed""#).unwrap();
+        assert_eq!(w.bit_perfect, BitPerfectMode::Relaxed);
     }
 }

@@ -356,9 +356,9 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
         ModeId::Crossfade => ModeDescriptor {
             icon: Some("assets/icons/blend.svg"),
             tooltip: if data.crossfade_enabled {
-                "Crossfade: Active"
+                "Crossfade: Active — overlaps every track (turns off Bit-Perfect)"
             } else {
-                "Crossfade: Off"
+                "Crossfade: Off — turning it on switches off Bit-Perfect"
             },
             kebab_label: if data.crossfade_enabled {
                 "Crossfade: On"
@@ -367,20 +367,32 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
             },
             message: PlayerBarMessage::ToggleCrossfade,
         },
-        ModeId::BitPerfect => ModeDescriptor {
-            icon: Some("assets/icons/binary.svg"),
-            tooltip: if data.bit_perfect {
-                "Bit-Perfect: Active"
-            } else {
-                "Bit-Perfect: Off"
-            },
-            kebab_label: if data.bit_perfect {
-                "Bit-Perfect: On"
-            } else {
-                "Bit-Perfect: Off"
-            },
-            message: PlayerBarMessage::ToggleBitPerfect,
-        },
+        ModeId::BitPerfect => {
+            use nokkvi_data::types::player_settings::BitPerfectMode;
+            ModeDescriptor {
+                // Relaxed gets its own icon; Off/Strict share `binary` (Off is
+                // dimmed via the inactive flag at the render site, like Repeat).
+                icon: Some(match data.bit_perfect_mode {
+                    BitPerfectMode::Relaxed => "assets/icons/combine.svg",
+                    BitPerfectMode::Strict | BitPerfectMode::Off => "assets/icons/binary.svg",
+                }),
+                tooltip: match data.bit_perfect_mode {
+                    BitPerfectMode::Off => "Bit-Perfect: Off",
+                    BitPerfectMode::Strict => {
+                        "Bit-Perfect: Strict — untouched, hard-cut between tracks (turns off Crossfade)"
+                    }
+                    BitPerfectMode::Relaxed => {
+                        "Bit-Perfect: Relaxed — untouched, crossfades same-rate tracks (turns off Crossfade)"
+                    }
+                },
+                kebab_label: match data.bit_perfect_mode {
+                    BitPerfectMode::Off => "Bit-Perfect: Off",
+                    BitPerfectMode::Strict => "Bit-Perfect: Strict",
+                    BitPerfectMode::Relaxed => "Bit-Perfect: Relaxed",
+                },
+                message: PlayerBarMessage::ToggleBitPerfect,
+            }
+        }
         ModeId::Visualizer => ModeDescriptor {
             icon: Some(match data.visualization_mode {
                 VisualizationMode::Lines => "assets/icons/audio-waveform.svg",
@@ -597,10 +609,10 @@ pub(crate) struct PlayerBarViewData {
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
     pub crossfade_enabled: bool,
-    /// Whether bit-perfect output is enabled (the setting). Drives the
-    /// Bit-Perfect mode toggle's active state. Distinct from `bit_perfect_status`
-    /// (the honest device-rate badge).
-    pub bit_perfect: bool,
+    /// Bit-perfect output mode (the setting: Off / Strict / Relaxed). Drives the
+    /// Bit-Perfect mode toggle's icon + active state. Distinct from
+    /// `bit_perfect_status` (the honest device-rate badge).
+    pub bit_perfect_mode: nokkvi_data::types::player_settings::BitPerfectMode,
     pub visualization_mode: nokkvi_data::types::player_settings::VisualizationMode,
     pub window_width: f32,
     pub layout: PlayerBarLayout,
@@ -1344,7 +1356,7 @@ pub(crate) fn player_bar<'a>(
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             bit_perfect.icon.unwrap_or("assets/icons/binary.svg"),
             bit_perfect.message.clone(),
-            data.bit_perfect,
+            data.bit_perfect_mode != nokkvi_data::types::player_settings::BitPerfectMode::Off,
             bit_perfect.tooltip,
             true,
         ));
@@ -1420,7 +1432,7 @@ pub(crate) fn player_bar<'a>(
         if bit_perfect_in_kebab {
             kebab_rows.push(mode_menu_item(
                 bit_perfect.kebab_label,
-                data.bit_perfect,
+                data.bit_perfect_mode != nokkvi_data::types::player_settings::BitPerfectMode::Off,
                 bit_perfect.message.clone(),
             ));
         }
@@ -2523,7 +2535,7 @@ mod mode_descriptor_tests {
             sound_effects_enabled: false,
             sfx_volume: 1.0,
             crossfade_enabled: false,
-            bit_perfect: false,
+            bit_perfect_mode: nokkvi_data::types::player_settings::BitPerfectMode::Off,
             visualization_mode: VisualizationMode::Off,
             window_width: 1200.0,
             layout: PlayerBarLayout::default(),

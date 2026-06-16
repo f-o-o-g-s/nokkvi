@@ -23,8 +23,9 @@ pub struct EngineState {
     pub gapless_preparing: bool,
     /// Whether crossfade between tracks is enabled
     pub crossfade_enabled: bool,
-    /// Whether bit-perfect output is enabled (native-rate, DSP bypassed)
-    pub bit_perfect: bool,
+    /// Bit-perfect output mode (Off / Strict / Relaxed). Strict and Relaxed feed
+    /// the DAC native-rate, DSP-bypassed; they differ on same-rate crossfades.
+    pub bit_perfect_mode: nokkvi_data::types::player_settings::BitPerfectMode,
     /// Crossfade duration in seconds (1–12)
     pub crossfade_duration_secs: u32,
     /// Volume normalization mode (Off / AGC / ReplayGain-track / ReplayGain-album)

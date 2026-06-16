@@ -71,8 +71,10 @@ pub struct LivePlayerSettings {
     pub slot_text_links: bool,
     /// Whether crossfade between tracks is enabled
     pub crossfade_enabled: bool,
-    /// Whether bit-perfect output is enabled (native-rate, DSP bypassed).
-    pub bit_perfect: bool,
+    /// Bit-perfect output mode (Off / Strict / Relaxed). Strict and Relaxed
+    /// both feed the DAC native-rate, DSP-bypassed; they differ only on whether
+    /// same-rate crossfades are allowed.
+    pub bit_perfect: BitPerfectMode,
     /// Crossfade duration in seconds (1–12)
     pub crossfade_duration_secs: u32,
     /// Whether the Previous button restarts the current track once it has

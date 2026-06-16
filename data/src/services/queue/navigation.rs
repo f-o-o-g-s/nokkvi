@@ -11,8 +11,10 @@ use crate::types::{queue::RepeatMode, song::Song};
 /// Why a queue transition selected its next song.
 ///
 /// [`Display`](std::fmt::Display) emits the exact legacy log strings
-/// (`"repeat"`, `"shuffle"`, `"next"`, `"repeatQueue"`, `"gapless"`) so the
-/// `Now Playing ... (reason)` log lines stay grep-stable.
+/// (`"repeat"`, `"shuffle"`, `"next"`, `"repeatQueue"`, `"gapless"`,
+/// `"crossfade"`) so the `Now Playing ... (reason)` log lines stay grep-stable.
+/// `Gapless` and `Crossfade` are the two auto-advance audio paths: `Gapless` is
+/// a seamless hard-join, `Crossfade` is a blended overlap.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TransitionReason {
     Repeat,
@@ -20,6 +22,7 @@ pub enum TransitionReason {
     Next,
     RepeatQueue,
     Gapless,
+    Crossfade,
 }
 
 impl TransitionReason {
@@ -30,6 +33,7 @@ impl TransitionReason {
             TransitionReason::Next => "next",
             TransitionReason::RepeatQueue => "repeatQueue",
             TransitionReason::Gapless => "gapless",
+            TransitionReason::Crossfade => "crossfade",
         }
     }
 }

@@ -24,7 +24,10 @@ use crate::{
         rodio_output::{ActiveStream, RodioOutput},
         streaming_source::SharedVisualizerCallback,
     },
-    types::{player_settings::VolumeNormalizationMode, song::ReplayGain},
+    types::{
+        player_settings::{BitPerfectMode, VolumeNormalizationMode},
+        song::ReplayGain,
+    },
 };
 
 /// Callback for emitting audio samples to visualizer.
@@ -331,10 +334,12 @@ pub struct AudioRenderer {
     /// ramps use only the fade factor (PipeWire applies user volume on top).
     pw_volume_active: bool,
 
-    /// Whether bit-perfect output is enabled: every new stream bypasses the
-    /// DSP chain (EQ / software volume / limiter) so the decoded PCM reaches
-    /// the sink untouched. Native-rate device switching is handled at the sink.
-    bit_perfect: bool,
+    /// Bit-perfect output mode (Off / Strict / Relaxed). When Strict or Relaxed,
+    /// every new stream bypasses the DSP chain (EQ / software volume / limiter)
+    /// so the decoded PCM reaches the sink untouched, and native-rate device
+    /// switching is handled at the sink. The two differ only on whether a
+    /// same-format crossfade is allowed (see [`Self::crossfade_blocked`]).
+    bit_perfect_mode: BitPerfectMode,
 
     /// Whether the CURRENTLY-PLAYING primary stream was actually built
     /// bit-perfect (captured from `bit_perfect_active()` at stream-build time),
@@ -472,7 +477,7 @@ impl AudioRenderer {
             current_replay_gain: None,
             eq_state: super::eq::EqState::default(),
             pw_volume_active: false,
-            bit_perfect: false,
+            bit_perfect_mode: BitPerfectMode::Off,
             current_stream_bit_perfect: false,
             consumed_notify: Arc::new(Notify::new()),
         }
@@ -979,8 +984,9 @@ impl AudioRenderer {
         if self.music_sink.is_none() {
             self.build_music_sink(MUSIC_SINK_DEFAULT_RATE, false)?;
         }
-        // Native-rate switching only applies on the native PipeWire path.
-        let want_native = self.bit_perfect && self.pw_volume_active;
+        // Native-rate switching only applies on the native PipeWire path, and
+        // for both Strict and Relaxed (both build bit-perfect streams).
+        let want_native = self.bit_perfect_mode.builds_bit_perfect() && self.pw_volume_active;
         let target_rate = if want_native {
             format_rate
         } else {
@@ -1094,50 +1100,67 @@ impl AudioRenderer {
         Ok(())
     }
 
-    /// Enable/disable bit-perfect output. Stored for the next stream creation;
-    /// streams created while `true` bypass the DSP chain (EQ / software volume /
-    /// limiter). Takes effect on the next track / format change, not mid-stream.
+    /// Set the bit-perfect output mode. Stored for the next stream creation;
+    /// streams created while Strict/Relaxed bypass the DSP chain (EQ / software
+    /// volume / limiter). Takes effect on the next track / format change, not
+    /// mid-stream.
     ///
-    /// Returns whether the flag actually CHANGED — the engine drives its
+    /// Returns whether the mode actually CHANGED — the engine drives its
     /// `reset_next_track()` off this so it doesn't keep a mirrored copy of the
-    /// bit, and a routine settings re-apply (same value) stays a no-op.
-    pub fn set_bit_perfect(&mut self, enabled: bool) -> bool {
-        let changed = self.bit_perfect != enabled;
-        self.bit_perfect = enabled;
+    /// mode, and a routine settings re-apply (same value) stays a no-op.
+    pub fn set_bit_perfect(&mut self, mode: BitPerfectMode) -> bool {
+        let changed = self.bit_perfect_mode != mode;
+        self.bit_perfect_mode = mode;
         if changed {
-            tracing::info!(
-                "🔊 Renderer: bit-perfect output {}",
-                if enabled { "ENABLED" } else { "disabled" }
-            );
+            tracing::info!("🔊 Renderer: bit-perfect mode {}", mode);
         }
         changed
     }
 
-    /// Whether bit-perfect is both requested AND viable. It is only honored on
-    /// the native PipeWire path (`pw_volume_active`): bit-perfect routes volume
-    /// to the PipeWire node, so on the cpal fallback — which has no node volume —
-    /// engaging it would leave the volume slider dead. There, the toggle is a
-    /// no-op and playback stays on the normal DSP path.
+    /// Whether bit-perfect stream-building is both requested AND viable. True
+    /// for both Strict and Relaxed (both feed the DAC untouched PCM). It is only
+    /// honored on the native PipeWire path (`pw_volume_active`): bit-perfect
+    /// routes volume to the PipeWire node, so on the cpal fallback — which has no
+    /// node volume — engaging it would leave the volume slider dead. There, the
+    /// mode is a no-op and playback stays on the normal DSP path.
     pub(crate) fn bit_perfect_active(&self) -> bool {
-        self.bit_perfect && self.pw_volume_active
+        self.bit_perfect_mode.builds_bit_perfect() && self.pw_volume_active
     }
 
-    /// Whether bit-perfect mode is currently blocking ALL crossfades. A
-    /// crossfade blends two streams on one mixer with a gain envelope, which
-    /// inherently alters samples — it can't be bit-perfect — and across a rate
-    /// change would also resample the incoming track (the device can't re-clock
-    /// mid-blend). So bit-perfect hard-cuts every transition: it falls through to
-    /// the normal non-crossfade path — gapless for a same-rate change, a sink
-    /// rebuild at the native rate for a cross-rate change. With bit-perfect off
-    /// nothing is blocked.
+    /// Whether bit-perfect mode blocks the crossfade for THIS transition, given
+    /// the outgoing (`current`) and incoming format. A crossfade blends two
+    /// streams on one mixer with a gain envelope, which inherently alters
+    /// samples — it can never be bit-perfect during the blend.
     ///
-    /// BOTH crossfade triggers gate on THIS one method — the renderer's
-    /// `arm_crossfade` and the engine's EOF-fallback `try_start_crossfade_transition`
-    /// — so the two can never disagree (a renderer that arms while the engine
-    /// refuses would swap `crossfade_state` to `Active` with no blend, orphaning
-    /// the incoming stream).
-    pub(crate) fn crossfade_blocked(&self) -> bool {
-        self.bit_perfect_active()
+    /// - **Off / not viable** → never blocks (crossfade follows the normal path).
+    /// - **Strict** → blocks EVERY transition (hard-cut). Falls through to the
+    ///   normal non-crossfade path — gapless for a same-rate change, a sink
+    ///   rebuild at the native rate for a cross-rate change.
+    /// - **Relaxed** → blocks only when the formats differ (sample rate OR
+    ///   channel count). Same-format tracks may crossfade (only the few-second
+    ///   blend isn't bit-perfect); a cross-rate change still hard-cuts, because
+    ///   the device can't re-clock mid-blend without resampling the incoming
+    ///   track.
+    ///
+    /// BOTH crossfade triggers gate on THIS one method with the SAME
+    /// (current, incoming) pair — the renderer's `arm_crossfade` (passing
+    /// `self.format` + the armed incoming format) and the engine's EOF-fallback
+    /// `try_start_crossfade_transition` (passing `current_format` + `next_format`,
+    /// which describe the same two tracks) — so the two can never disagree (a
+    /// renderer that arms while the engine refuses would swap `crossfade_state`
+    /// to `Active` with no blend, orphaning the incoming stream).
+    pub(crate) fn crossfade_blocked(&self, current: &AudioFormat, incoming: &AudioFormat) -> bool {
+        if !self.bit_perfect_active() {
+            return false;
+        }
+        match self.bit_perfect_mode {
+            BitPerfectMode::Off => false,
+            BitPerfectMode::Strict => true,
+            BitPerfectMode::Relaxed => {
+                current.sample_rate() != incoming.sample_rate()
+                    || current.channel_count() != incoming.channel_count()
+            }
+        }
     }
 
     /// Whether the CURRENTLY-PLAYING primary stream was built bit-perfect
@@ -1181,14 +1204,17 @@ impl AudioRenderer {
         track_duration_ms: u64,
         incoming_duration_ms: u64,
     ) {
-        // Bit-perfect hard-cuts EVERY transition: a crossfade applies a gain
-        // envelope to two mixed streams, which can't be bit-perfect, and across
-        // a rate change would also resample the incoming track. Skipping arm
-        // here lets the transition fall through to the normal non-crossfade
-        // path — gapless for a same-rate change, a sink rebuild at native rate
-        // for a cross-rate change. (The engine's EOF-fallback transition is
-        // gated to match, so neither trigger can start a blend.)
-        if self.crossfade_blocked() {
+        // Bit-perfect gates the crossfade: Strict hard-cuts EVERY transition;
+        // Relaxed hard-cuts only when the incoming format differs from the
+        // outgoing one (`self.format`). A crossfade applies a gain envelope to
+        // two mixed streams (never bit-perfect), and a cross-rate change would
+        // also resample the incoming track. Skipping arm here lets the
+        // transition fall through to the normal non-crossfade path — gapless for
+        // a same-rate change, a sink rebuild at native rate for a cross-rate
+        // change. (The engine's EOF-fallback transition gates on the SAME method
+        // with the SAME (current, incoming) pair, so neither trigger can start a
+        // blend the other refuses and orphan the incoming stream.)
+        if self.crossfade_blocked(&self.format, incoming_format) {
             debug!("🔀 [RENDERER] Crossfade SKIPPED (bit-perfect): hard-cut transition");
             return;
         }
@@ -1277,6 +1303,11 @@ impl AudioRenderer {
             paused_accum: std::time::Duration::ZERO,
             paused_at: None,
         };
+        // The blend itself is never bit-perfect — two streams mixed under a gain
+        // envelope. Drop the honest badge for the duration of the overlap (even
+        // under Relaxed, where both bodies are bit-perfect); `finalize_crossfade`
+        // restores it to the promoted stream's build-time fact.
+        self.current_stream_bit_perfect = false;
 
         debug!(
             "🔀 [RENDERER] Crossfade STARTED: {}ms, incoming={:?}",
@@ -1328,6 +1359,13 @@ impl AudioRenderer {
         {
             stream.set_volume(self.stream_volume());
         }
+
+        // The outgoing primary is restored as the sole live stream. Restore the
+        // honest badge to its build-time fact (`start_crossfade` dropped it to
+        // false for the blend); without this a cancelled Relaxed crossfade would
+        // leave the badge stuck reading "not bit-perfect" for a bit-perfect
+        // outgoing track. Mirrors `finalize_crossfade`.
+        self.current_stream_bit_perfect = self.bit_perfect_active();
     }
 
     /// Write decoded f32 samples to the crossfade (incoming) stream.
@@ -1469,10 +1507,15 @@ impl AudioRenderer {
             old_primary.silence_and_stop();
         }
         self.primary_stream = Some(stream);
-        // A crossfade stream is never bit-perfect: arming is gated off whenever
-        // bit-perfect is active, so the promoted stream was built on the DSP
-        // path. Record that so the badge can't claim BIT-PERFECT post-fade.
-        self.current_stream_bit_perfect = false;
+        // Restore the honest badge to the promoted stream's build-time fact.
+        // Under Relaxed the incoming crossfade stream WAS built bit-perfect
+        // (same-format, DSP-bypassed) and now plays alone at unity — its body is
+        // bit-perfect again, so the badge should reflect that. Under Off the
+        // promoted stream was built on the DSP path (false). (Strict never
+        // crossfades, so it never reaches here.) `bit_perfect_active()` equals
+        // what `start_crossfade` built the stream with — a mode change mid-fade
+        // cancels the crossfade via `reset_next_track`, so it can't drift.
+        self.current_stream_bit_perfect = self.bit_perfect_active();
 
         // Set new primary to full user volume and promote it to visualizer
         // feeder (it was created silent for the viz to avoid the two-stream
@@ -1769,33 +1812,62 @@ mod tests {
     use super::*;
     use crate::audio::streaming_source::{SharedVisualizerCallback, StreamingSource};
 
-    /// `crossfade_blocked()` — the single gate both crossfade triggers share —
-    /// blocks every transition whenever bit-perfect is ACTIVE (regardless of
-    /// rate), and never when it is off or merely requested-but-not-viable. (A
-    /// crossfade applies a gain envelope to two mixed streams — it can't be
-    /// bit-perfect — so same-rate transitions are hard-cut too, not just
-    /// cross-rate ones.) `#[tokio::test]` because `AudioRenderer::new()` needs a
-    /// running reactor.
+    /// `crossfade_blocked(current, incoming)` — the single gate both crossfade
+    /// triggers share — encodes the three bit-perfect modes:
+    /// - Off: never blocks.
+    /// - Strict: blocks every transition (same-rate AND cross-rate alike).
+    /// - Relaxed: blocks only a cross-FORMAT transition (different sample rate
+    ///   or channel count); same-format tracks may crossfade.
+    /// And it is inert when bit-perfect is requested-but-not-viable (cpal: no
+    /// PipeWire node volume). `#[tokio::test]` because `AudioRenderer::new()`
+    /// needs a running reactor.
     #[tokio::test]
-    async fn bit_perfect_blocks_all_crossfades_when_active() {
+    async fn bit_perfect_crossfade_gate_per_mode_and_format() {
+        use crate::audio::format::SampleFormat;
+        let f44 = AudioFormat::new(SampleFormat::S16, 44_100, 2);
+        let f96 = AudioFormat::new(SampleFormat::S16, 96_000, 2);
+        let f44_mono = AudioFormat::new(SampleFormat::S16, 44_100, 1);
+
         let mut renderer = AudioRenderer::new();
-        // Not bit-perfect → never blocked. set_bit_perfect reports the change.
-        assert!(!renderer.crossfade_blocked());
+
+        // Off → never blocked. set_bit_perfect reports the change.
+        assert!(!renderer.crossfade_blocked(&f44, &f44));
+        assert!(!renderer.crossfade_blocked(&f44, &f96));
+
+        // Strict, requested but not viable (cpal: no node volume) → inert.
         assert!(
-            renderer.set_bit_perfect(true),
-            "first enable is a real change"
+            renderer.set_bit_perfect(BitPerfectMode::Strict),
+            "Off → Strict is a real change"
         );
         assert!(
-            !renderer.set_bit_perfect(true),
-            "re-enable is a no-op change"
+            !renderer.set_bit_perfect(BitPerfectMode::Strict),
+            "re-applying the same mode is a no-op change"
         );
-        // Requested but not viable (cpal: no PipeWire node volume) → still not
-        // blocked; the toggle is a no-op on that path.
-        assert!(!renderer.crossfade_blocked());
-        // Requested AND viable (native PipeWire volume) → blocked (hard-cut),
-        // same-rate or cross-rate alike.
+        assert!(!renderer.crossfade_blocked(&f44, &f44));
+
+        // Strict, viable (native PipeWire volume) → blocks EVERYTHING.
         renderer.pw_volume_active = true;
-        assert!(renderer.crossfade_blocked());
+        assert!(renderer.crossfade_blocked(&f44, &f44), "Strict same-rate");
+        assert!(renderer.crossfade_blocked(&f44, &f96), "Strict cross-rate");
+
+        // Relaxed, viable → same format passes, differing rate/channels block.
+        assert!(renderer.set_bit_perfect(BitPerfectMode::Relaxed));
+        assert!(
+            !renderer.crossfade_blocked(&f44, &f44),
+            "Relaxed allows a same-format crossfade"
+        );
+        assert!(
+            renderer.crossfade_blocked(&f44, &f96),
+            "Relaxed hard-cuts a sample-rate change"
+        );
+        assert!(
+            renderer.crossfade_blocked(&f44, &f44_mono),
+            "Relaxed hard-cuts a channel-count change"
+        );
+
+        // Relaxed but not viable → inert again.
+        renderer.pw_volume_active = false;
+        assert!(!renderer.crossfade_blocked(&f44, &f96));
     }
 
     const FR: u32 = 44_100 * 2; // 44.1k stereo frame rate
@@ -2208,6 +2280,30 @@ mod tests {
         assert!(
             matches!(renderer.crossfade_state, CrossfadeState::Armed { .. }),
             "cancel_crossfade must leave Armed alone — use disarm_crossfade to clear Armed"
+        );
+    }
+
+    /// Regression (Relaxed bit-perfect): `cancel_crossfade` must restore the
+    /// honest badge to the outgoing stream's build-time fact. `start_crossfade`
+    /// drops `current_stream_bit_perfect` to false for the (non-bit-perfect)
+    /// blend; cancelling the fade (skip / seek / mid-fade mode toggle) restores
+    /// the outgoing as the sole live stream, so the badge must read its
+    /// bit-perfect-ness again instead of staying stuck false.
+    #[tokio::test]
+    async fn cancel_crossfade_restores_bit_perfect_badge() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_bit_perfect(BitPerfectMode::Relaxed);
+        renderer.pw_volume_active = true; // makes bit_perfect_active() viable
+        let (incoming, _isrc) = test_active_stream(0);
+        renderer.crossfade_state = completed_active_state(incoming);
+        // start_crossfade had dropped the badge for the blend.
+        renderer.current_stream_bit_perfect = false;
+
+        renderer.cancel_crossfade();
+
+        assert!(
+            renderer.current_stream_bit_perfect,
+            "cancel_crossfade under viable Relaxed must restore the bit-perfect badge"
         );
     }
 

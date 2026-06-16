@@ -59,50 +59,6 @@ pub(crate) fn session_expired_message(e: &anyhow::Error) -> Option<Message> {
         .then_some(Message::SessionExpired)
 }
 
-/// The two mutually-exclusive playback settings. A crossfade blends two tracks
-/// with a gain envelope, which can't be bit-perfect — so enabling either one
-/// turns the other off.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExclusiveSetting {
-    Crossfade,
-    BitPerfect,
-}
-
-/// The sibling flip + toast produced by enabling one of the mutually-exclusive
-/// settings while the other was on. Carries the single setting to clear (an
-/// enum, not a pair of bools) so the contradictory "clear both" / "clear
-/// neither" states are unrepresentable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExclusionResult {
-    /// Which sibling to turn off (always the opposite of the one enabled).
-    pub clear: ExclusiveSetting,
-    pub toast: &'static str,
-}
-
-/// Resolve the crossfade ⇄ bit-perfect mutual exclusion for a setting that was
-/// just ENABLED. Returns the sibling to clear + the toast to show, or `None`
-/// when there's no conflict (the sibling was already off, or a setting was
-/// turned OFF — disabling one never touches the other). Both toggle entry
-/// points (the settings checkbox and the player-bar/hotkey crossfade toggle)
-/// route through this so the rule + copy stay single-sourced.
-pub(crate) fn resolve_exclusion(
-    enabled: ExclusiveSetting,
-    crossfade_enabled: bool,
-    bit_perfect: bool,
-) -> Option<ExclusionResult> {
-    match enabled {
-        ExclusiveSetting::Crossfade if bit_perfect => Some(ExclusionResult {
-            clear: ExclusiveSetting::BitPerfect,
-            toast: "Bit-Perfect disabled, Crossfade enabled",
-        }),
-        ExclusiveSetting::BitPerfect if crossfade_enabled => Some(ExclusionResult {
-            clear: ExclusiveSetting::Crossfade,
-            toast: "Crossfade disabled, Bit-Perfect enabled",
-        }),
-        _ => None,
-    }
-}
-
 /// Bundled params for a paginated library fetch (Albums, Artists, Songs).
 ///
 /// Built once at the call site from the page's common state via
@@ -1596,40 +1552,5 @@ impl Nokkvi {
         tracing::debug!(" [SESSION-RESET] cleared session-bound state");
 
         Task::batch([stop_task, mpris_art_clear_task])
-    }
-}
-
-#[cfg(test)]
-mod exclusion_tests {
-    use super::{ExclusiveSetting, resolve_exclusion};
-
-    #[test]
-    fn enabling_crossfade_clears_bit_perfect_when_it_was_on() {
-        let r = resolve_exclusion(ExclusiveSetting::Crossfade, true, true)
-            .expect("conflict: bit-perfect was on");
-        assert_eq!(r.clear, ExclusiveSetting::BitPerfect);
-        assert_eq!(r.toast, "Bit-Perfect disabled, Crossfade enabled");
-    }
-
-    #[test]
-    fn enabling_bit_perfect_clears_crossfade_when_it_was_on() {
-        let r = resolve_exclusion(ExclusiveSetting::BitPerfect, true, true)
-            .expect("conflict: crossfade was on");
-        assert_eq!(r.clear, ExclusiveSetting::Crossfade);
-        assert_eq!(r.toast, "Crossfade disabled, Bit-Perfect enabled");
-    }
-
-    #[test]
-    fn no_conflict_when_sibling_already_off() {
-        // Enabling crossfade with bit-perfect already off → nothing to do.
-        assert_eq!(
-            resolve_exclusion(ExclusiveSetting::Crossfade, true, false),
-            None
-        );
-        // Enabling bit-perfect with crossfade already off → nothing to do.
-        assert_eq!(
-            resolve_exclusion(ExclusiveSetting::BitPerfect, false, true),
-            None
-        );
     }
 }

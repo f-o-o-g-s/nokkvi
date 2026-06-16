@@ -332,13 +332,26 @@ impl Iterator for StreamingSource {
             sample = eq.process_sample(sample);
         }
 
-        // Bit-perfect returns the raw decoded sample — no software volume (not
-        // even the ~1.0000001 unity-curve multiply). Otherwise smoothly
-        // interpolate toward the target volume (exponential moving average),
-        // converting the 20ms step-function crossfade updates into a smooth
-        // per-sample ramp that eliminates crackling.
+        // Bit-perfect: the user's volume lives on the PipeWire node, so the
+        // `volume` atomic carries ONLY the crossfade fade coefficient (exactly
+        // 1.0 when not fading). At unity, return the raw decoded sample untouched
+        // — no software volume, not even the ~1.0000001 unity-curve multiply — so
+        // a settled body stays bit-identical. During a Relaxed crossfade the
+        // atomic holds the equal-power fade coefficient (< 1.0); apply it
+        // DIRECTLY (the tick already shaped it — do NOT re-curve through
+        // `perceptual_volume`), smoothed per-sample to avoid the step-update
+        // crackle, then snap back to raw passthrough once it resettles at unity.
+        // Otherwise (non-bit-perfect) interpolate toward the perceptual target.
+        const UNITY_SNAP_EPSILON: f32 = 1e-4;
         let output = if self.bit_perfect {
-            sample
+            let fade = load_f32(&self.handle.volume);
+            if fade >= 1.0 && (self.smoothed_volume - 1.0).abs() < UNITY_SNAP_EPSILON {
+                self.smoothed_volume = 1.0;
+                sample
+            } else {
+                self.smoothed_volume += self.smoothing_coeff * (fade - self.smoothed_volume);
+                sample * self.smoothed_volume
+            }
         } else {
             let target = perceptual_volume(load_f32(&self.handle.volume));
             self.smoothed_volume += self.smoothing_coeff * (target - self.smoothed_volume);
@@ -671,11 +684,13 @@ mod tests {
         );
     }
 
-    /// Bit-perfect: `next` must return the RAW decoded sample even with EQ
-    /// enabled+boosted AND a non-unity volume — both stages are bypassed so the
-    /// PCM reaches the sink untouched. (Volume is applied at the PipeWire node.)
+    /// Bit-perfect AT UNITY: `next` returns the RAW decoded sample even with EQ
+    /// enabled+boosted — EQ and the perceptual software-volume curve are both
+    /// bypassed so the PCM reaches the sink untouched. (User volume is applied at
+    /// the PipeWire node; the `volume` atomic stays at unity in normal play.)
+    /// This is the bit-perfect body invariant for normal (non-crossfade) playback.
     #[test]
-    fn bit_perfect_bypasses_eq_and_software_volume() {
+    fn bit_perfect_at_unity_outputs_raw_sample() {
         const RAW: f32 = 0.5;
         let rb = HeapRb::<f32>::new(16);
         let (mut producer, consumer) = rb.split();
@@ -690,7 +705,7 @@ mod tests {
             NonZero::new(2).expect("2 is nonzero"),
             NonZero::new(44_100).expect("44100 is nonzero"),
             viz,
-            0.5, // non-unity volume — would halve the sample IF applied
+            1.0, // unity (the volume the renderer builds bit-perfect streams with)
             Some(eq),
             Arc::new(Notify::new()),
             true,
@@ -701,7 +716,53 @@ mod tests {
         let out = source.next().expect("a sample");
         assert_eq!(
             out, RAW,
-            "bit-perfect output must equal the raw decoded sample (EQ + volume bypassed)"
+            "bit-perfect output at unity must equal the raw decoded sample (EQ + volume bypassed)"
+        );
+    }
+
+    /// Bit-perfect DURING A CROSSFADE: a crossfade incoming stream is built
+    /// bit-perfect AND silent (volume 0.0), then the crossfade tick ramps the
+    /// `volume` atomic up. The fade MUST apply (otherwise a Relaxed crossfade
+    /// would slam both tracks in at full volume), and once it resettles at unity
+    /// the body must become bit-exact raw output again (the snap-to-raw guard).
+    #[test]
+    fn bit_perfect_applies_crossfade_fade_then_snaps_to_raw_at_unity() {
+        const RAW: f32 = 0.5;
+        let rb = HeapRb::<f32>::new(8192);
+        let (mut producer, consumer) = rb.split();
+        producer.push_slice(&[RAW; 8192]);
+
+        let viz: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(None));
+        let (mut source, handle) = StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(44_100).expect("44100 is nonzero"),
+            viz,
+            0.0, // silent start — exactly how the renderer builds a crossfade stream
+            None,
+            Arc::new(Notify::new()),
+            true,
+            Arc::new(AtomicBool::new(true)),
+            true, // bit_perfect
+        );
+
+        // Silent start: the fade is applied, NOT bypassed to raw.
+        let first = source.next().expect("a sample");
+        assert!(
+            first < RAW,
+            "a bit-perfect crossfade stream must honor the fade (got {first}, raw is {RAW})"
+        );
+
+        // Drive the fade to unity (finalize sets the promoted stream to 1.0) and
+        // pump enough samples for the smoother to converge + snap to raw.
+        handle.set_volume(1.0);
+        let mut last = first;
+        for _ in 0..4096 {
+            last = source.next().expect("a sample");
+        }
+        assert_eq!(
+            last, RAW,
+            "a settled bit-perfect body must return to bit-exact raw output"
         );
     }
 
