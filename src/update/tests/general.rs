@@ -195,6 +195,31 @@ fn hotkey_fires_when_not_captured_toggle_random() {
 }
 
 #[test]
+fn login_screen_suppresses_global_hotkeys() {
+    // On the login screen the global hotkey system must stay inert: there is no
+    // slot list, queue, or playback to drive. Pressing `x` (ToggleRandom) with
+    // Status::Ignored would flip `modes.random` pre-fix; the Screen::Login guard
+    // in handle_raw_key_event must suppress it. This is the same guard that
+    // kills the Tab double-dispatch (Tab no longer reaches SlotList(NavigateDown)
+    // against the off-screen queue) that made login focus jump the wrong way.
+    let mut app = test_app();
+    app.screen = crate::Screen::Login;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        !app.modes.random,
+        "global hotkeys must not fire on the login screen"
+    );
+}
+
+#[test]
 fn escape_not_suppressed_when_captured() {
     // Escape should always fire, even when a text_input has captured the event.
     // This was the whole reason we switched to event::listen_with() in 2c54792.

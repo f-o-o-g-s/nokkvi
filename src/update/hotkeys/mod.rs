@@ -429,6 +429,19 @@ impl Nokkvi {
         modifiers: iced::keyboard::Modifiers,
         status: iced::event::Status,
     ) -> Task<Message> {
+        // The login screen owns its own keyboard handling: Tab focus traversal
+        // arrives via the `login_events` subscription (main.rs) and Enter via
+        // the password field's `on_submit`. The global hotkey system has
+        // nothing to drive before login — no slot list, queue, or playback — so
+        // dispatching here only causes harm: Tab would be DOUBLE-handled (the
+        // login form advances focus AND this path drives `SlotList(NavigateDown)`
+        // against the off-screen queue, which reads as focus jumping the wrong
+        // way), and bare keys like `x`/`c` would toggle random/consume against an
+        // idle engine. One guard closes the whole class.
+        if self.screen == crate::Screen::Login {
+            return Task::none();
+        }
+
         // If settings is in hotkey capture mode, forward the raw event there
         // instead of dispatching it as a normal hotkey action
         if self.settings_page.capturing_hotkey.is_some() {
