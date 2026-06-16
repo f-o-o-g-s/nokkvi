@@ -15,7 +15,21 @@ use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::albums::AlbumsApiService,
     types::{album::Album, reactive::ReactiveInt},
+    utils::url_redaction::redact_subsonic_url,
 };
+
+/// A `200 OK` response whose body is not an image — e.g. Navidrome answers a
+/// `getCoverArt` failure with a Subsonic JSON error doc (code 70, since we pass
+/// `f=json`). This is DETERMINISTIC: retrying re-fetches the identical body, so
+/// `fetch_artwork_by_url_with_retry` fails fast on it (1 request) instead of
+/// burning all 3 attempts, while genuinely-transient errors (429 throttle,
+/// timeout, empty body) stay retryable.
+#[derive(Debug, thiserror::Error)]
+#[error("artwork response was not an image (content-type={content_type}): {snippet}")]
+struct NonImageResponse {
+    content_type: String,
+    snippet: String,
+}
 
 /// UI-specific view data for albums
 /// UI-projected data
@@ -298,6 +312,13 @@ impl AlbumsService {
             ));
         }
 
+        // Capture the content type before `bytes()` consumes the response.
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_ascii_lowercase);
+
         let bytes = response
             .bytes()
             .await
@@ -307,7 +328,60 @@ impl AlbumsService {
             return Err(anyhow::anyhow!("artwork fetch returned 0 bytes"));
         }
 
+        // Navidrome answers a `getCoverArt` failure with `200 OK` + a JSON error
+        // body (we pass `f=json`), e.g. `{"subsonic-response":{"status":"failed",
+        // "error":{"code":70,"message":"Artwork not found"}}}` — not image bytes.
+        // Caching those hands every consumer (MPRIS shells, our own UI) an
+        // undecodable `.jpg`, so reject anything that isn't a real image.
+        if !Self::response_is_image(content_type.as_deref(), &bytes) {
+            return Err(NonImageResponse {
+                content_type: content_type.as_deref().unwrap_or("<none>").to_string(),
+                snippet: String::from_utf8_lossy(&bytes[..bytes.len().min(180)]).into_owned(),
+            }
+            .into());
+        }
+
         Ok(bytes.to_vec())
+    }
+
+    /// Guard against caching Subsonic error documents as artwork. Navidrome
+    /// returns `getCoverArt` failures as `200 OK` with a JSON/XML body (we
+    /// request `f=json`); those must never reach the image cache. Accept when
+    /// the server labels the payload `image/*`, or when the bytes carry a known
+    /// image signature — so a real cover with an odd/missing content-type still
+    /// passes, while a JSON/XML/text error (neither `image/*` nor image magic)
+    /// is rejected.
+    fn response_is_image(content_type: Option<&str>, bytes: &[u8]) -> bool {
+        let labelled_image = content_type.is_some_and(|ct| ct.starts_with("image/"));
+        labelled_image || Self::has_image_magic(bytes)
+    }
+
+    /// Magic-byte sniff for the raster formats Navidrome serves as cover art
+    /// (JPEG, PNG, GIF, TIFF, plus container-based WebP and AVIF/HEIC). BMP is
+    /// omitted deliberately: its 2-byte "BM" signature is weak enough to match
+    /// non-image bodies, and a correctly-typed image/bmp response is still
+    /// accepted via the content-type branch of response_is_image.
+    fn has_image_magic(bytes: &[u8]) -> bool {
+        const SIGNATURES: &[&[u8]] = &[
+            b"\xFF\xD8\xFF",      // JPEG
+            b"\x89PNG\r\n\x1a\n", // PNG
+            b"GIF87a",            // GIF
+            b"GIF89a",
+            b"II*\x00", // TIFF (little-endian)
+            b"MM\x00*", // TIFF (big-endian)
+        ];
+        if SIGNATURES.iter().any(|sig| bytes.starts_with(sig)) {
+            return true;
+        }
+        // Brands that sit past the first bytes: `RIFF????WEBP` (WebP) and
+        // `????ftyp…` (AVIF/HEIC, ISO base media file format).
+        if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            return true;
+        }
+        if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+            return true;
+        }
+        false
     }
 
     /// Convenience wrapper: build the URL from `art_id`/`size`/`updated_at` and
@@ -353,14 +427,22 @@ impl AlbumsService {
             }
             match self.fetch_artwork_by_url(url).await {
                 Ok(bytes) => return Ok(bytes),
-                Err(e) => last_err = Some(e),
+                Err(e) => {
+                    // A non-image body is deterministic — every attempt re-fetches
+                    // the same error doc. Fail fast (1 request) instead of 3, while
+                    // keeping transient errors (429/timeout/empty body) retryable.
+                    if e.downcast_ref::<NonImageResponse>().is_some() {
+                        return Err(e);
+                    }
+                    last_err = Some(e);
+                }
             }
         }
         let err = last_err.unwrap_or_else(|| anyhow::anyhow!("artwork fetch failed"));
         tracing::warn!(
             "Artwork fetch gave up after {} attempts for {}: {:?}",
             MAX_ATTEMPTS,
-            url,
+            redact_subsonic_url(url),
             err
         );
         Err(err)
