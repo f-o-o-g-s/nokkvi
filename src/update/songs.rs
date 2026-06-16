@@ -123,10 +123,16 @@ impl Nokkvi {
         if let Some(h) = handle {
             // Record the version in lockstep with the handle (N17) — see
             // `handle_artwork_loaded`.
+            self.artwork.failed_art.remove(&album_id);
             self.artwork
                 .album_art_versions
                 .insert(album_id.clone(), updated_at);
             self.artwork.album_art.put(album_id, h);
+        } else {
+            // Negatively cache the failed id so passive song-mini prefetch stops
+            // re-queuing it (passive surfaces feed version None, so it is keyed by
+            // None). Cleared on a later success, a Refresh Artwork, or logout.
+            self.artwork.failed_art.insert(album_id, updated_at);
         }
         Task::none()
     }

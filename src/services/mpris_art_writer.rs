@@ -59,11 +59,22 @@ const SANITIZED_COVER_ID_MAX_LEN: usize = 80;
 #[derive(Debug, Default)]
 pub(crate) struct ArtCacheState {
     last_written: Option<(String, String, PathBuf)>,
+    /// Last `(server_url, cover_id)` whose fetch failed (no art, non-image
+    /// body, or fetch error). `handle_tick` re-runs `write_art_for_mpris` every
+    /// ~100ms with the current track's cover_id; without this a cover the
+    /// server can't resolve would be re-fetched — and its credentialed
+    /// getCoverArt URL re-logged — on every tick. Recording the failed key
+    /// bounds it to one attempt per song, mirroring the `last_written` success
+    /// fast-path. Cleared on any success and on `clear()`.
+    last_failed: Option<(String, String)>,
 }
 
 impl ArtCacheState {
     pub(crate) const fn new() -> Self {
-        Self { last_written: None }
+        Self {
+            last_written: None,
+            last_failed: None,
+        }
     }
 }
 
@@ -284,12 +295,26 @@ where
         return Some(path_to_file_uri(prev_path));
     }
 
+    // Negative fast-path: this exact key already failed for the current song
+    // (no art, non-image body, or fetch error). Skip the re-fetch — handle_tick
+    // calls us every ~100ms, so without this a server-unresolvable cover would
+    // be re-fetched (and its credentialed getCoverArt URL re-logged) on every
+    // tick for the track's whole duration. The next track change carries a new
+    // cover_id and falls through to a fresh attempt.
+    if let Some((failed_server, failed_cover)) = &state.last_failed
+        && failed_server == server_url
+        && failed_cover == cover_id
+    {
+        return None;
+    }
+
     let bytes = match fetcher.await {
         Ok(b) if b.is_empty() => {
             warn!(
                 target: "nokkvi::mpris::art",
                 server_url, cover_id, "art fetch returned empty body; skipping write"
             );
+            state.last_failed = Some((server_url.to_string(), cover_id.to_string()));
             return None;
         }
         Ok(b) => b,
@@ -298,6 +323,7 @@ where
                 target: "nokkvi::mpris::art",
                 server_url, cover_id, %err, "art fetch failed; mpris will show no art"
             );
+            state.last_failed = Some((server_url.to_string(), cover_id.to_string()));
             return None;
         }
     };
@@ -329,6 +355,7 @@ where
         cover_id.to_string(),
         new_path.clone(),
     ));
+    state.last_failed = None;
 
     if let Some(prev) = prev_to_delete
         && prev != new_path
@@ -358,6 +385,7 @@ where
 /// dir without touching the module-level static.
 async fn clear_inner(state: &mut ArtCacheState, cache_dir: Option<&Path>) {
     state.last_written = None;
+    state.last_failed = None;
     let Some(dir) = cache_dir else { return };
     let pid = std::process::id();
     let prefix = format!("mpris-art-{pid}-");
@@ -812,6 +840,56 @@ mod tests {
         assert!(
             !cache_file_path_for(dir.path(), "al-fail").exists(),
             "failed fetch must not leave a cache file behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_cover_is_negative_cached_to_avoid_per_tick_refetch() {
+        // handle_tick calls write_art_for_mpris every ~100ms with the current
+        // track's cover_id. A cover the server can't resolve must be attempted
+        // at most once per song, not re-fetched (and re-logged) on every tick.
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        for _ in 0..4 {
+            let c = Arc::clone(&calls);
+            let result = write_art_inner(
+                &mut state,
+                dir.path(),
+                "https://server.example",
+                "al-missing",
+                async move {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    Err(anyhow::anyhow!("artwork response was not an image"))
+                },
+            )
+            .await;
+            assert!(result.is_none(), "a failing cover must yield no art");
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a known-failing cover must be fetched once per song, not every tick"
+        );
+
+        // A different cover is a different key — it must still be attempted.
+        let c = Arc::clone(&calls);
+        let _ = write_art_inner(
+            &mut state,
+            dir.path(),
+            "https://server.example",
+            "al-other",
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Err(anyhow::anyhow!("artwork response was not an image"))
+            },
+        )
+        .await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "a different cover must not be suppressed by another key's negative-cache entry"
         );
     }
 

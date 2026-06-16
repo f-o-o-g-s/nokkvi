@@ -19,30 +19,38 @@ use crate::{
     widgets::SlotListView,
 };
 
-/// Version-aware prefetch dedup gate (N17).
+/// Version-aware prefetch dedup gate (N17) with a negative-cache short-circuit.
 ///
 /// Returns `true` when an album's 80px thumbnail should be (re-)fetched:
-/// - the slot was never warmed (`id` absent from `album_art`), OR
 /// - the slot is warmed but the recorded `updated_at` differs from the one the
-///   current URL carries — i.e. the server-side cover changed.
+///   current URL carries — i.e. the server-side cover changed; OR
+/// - the slot was never warmed (`id` absent from `album_art`) AND `id` is not in
+///   the negative cache at the current version.
 ///
 /// `cached_ids` are the live `album_art` keys; `versions` is the sibling
-/// `album_art_versions` map. Checking `album_art` membership (not just the
-/// version map) guards the documented eviction skew: `album_art` evicts
-/// silently at capacity, so a stale version entry whose handle is gone must
-/// still count as a miss.
+/// `album_art_versions` map; `failed` is the `failed_art` negative cache
+/// (`id -> the updated_at that returned no image`). Checking `album_art`
+/// membership (not just the version map) guards the documented eviction skew:
+/// `album_art` evicts silently at capacity, so a stale version entry whose
+/// handle is gone must still count as a miss. The negative-cache check is
+/// version-aware too: a changed `updated_at` re-attempts a previously-dead id.
 pub(crate) fn should_refetch(
     cached_ids: &HashSet<&String>,
     versions: &HashMap<String, Option<String>>,
+    failed: &HashMap<String, Option<String>>,
     id: &String,
     updated_at: &Option<String>,
 ) -> bool {
-    if !cached_ids.contains(id) {
-        // Handle absent (never warmed, or evicted) — always a miss.
-        return true;
+    if cached_ids.contains(id) {
+        // Warmed: refetch only when the recorded version no longer matches.
+        return versions.get(id) != Some(updated_at);
     }
-    // Warmed: refetch only when the recorded version no longer matches.
-    versions.get(id) != Some(updated_at)
+    // Handle absent (never warmed, or evicted). Re-fetch UNLESS this id already
+    // failed at THIS exact version — a known-dead cover must not be re-queued on
+    // every scroll/resize. A changed updated_at (server cover added) bypasses the
+    // negative entry, mirroring the version branch; logout and a user "Refresh
+    // Artwork" also drop the entry.
+    failed.get(id) != Some(updated_at)
 }
 
 /// The album-coherent version that the PASSIVE 80px-thumbnail surfaces (queue,
@@ -88,6 +96,7 @@ pub(crate) fn prefetch_album_artwork_tasks<F, T>(
     items: &[T],
     cached_ids: &HashSet<&String>,
     versions: &HashMap<String, Option<String>>,
+    failed: &HashMap<String, Option<String>>,
     albums_vm: AlbumsService,
     extract_id_url: F,
 ) -> Vec<Task<Message>>
@@ -108,7 +117,7 @@ where
             let (id, updated_at, url) = extract_id_url(item);
             // Skip if version-warm (id cached AND recorded version matches) or
             // already queued in this batch; a changed updated_at is a miss.
-            if !should_refetch(cached_ids, versions, &id, &updated_at)
+            if !should_refetch(cached_ids, versions, failed, &id, &updated_at)
                 || already_queued.contains(&id)
             {
                 None
@@ -153,6 +162,7 @@ pub(crate) fn prefetch_song_artwork_tasks<T, F>(
     songs: &[T],
     cached_ids: &HashSet<&String>,
     versions: &HashMap<String, Option<String>>,
+    failed: &HashMap<String, Option<String>>,
     albums_vm: AlbumsService,
     extract_album_id: F,
 ) -> Vec<Task<Message>>
@@ -171,7 +181,7 @@ where
         .filter_map(|idx| songs.get(idx))
         .filter_map(|song| {
             extract_album_id(song).and_then(|(id, updated_at)| {
-                if !should_refetch(cached_ids, versions, id, &updated_at)
+                if !should_refetch(cached_ids, versions, failed, id, &updated_at)
                     || already_queued.contains(id)
                 {
                     None
@@ -237,6 +247,7 @@ pub(crate) fn prefetch_quad_album_artwork_tasks<T, F>(
     slot_list: &SlotListView,
     items: &[T],
     cached_ids: &HashSet<&String>,
+    failed: &HashMap<String, Option<String>>,
     pending_ids: &HashSet<String>,
     albums_vm: AlbumsService,
     extract_album_ids: F,
@@ -262,6 +273,7 @@ where
                 || already_queued.contains(id)
                 || cached_ids.contains(id)
                 || pending_ids.contains(id)
+                || failed.contains_key(id)
             {
                 continue;
             }
@@ -316,6 +328,7 @@ where
 pub(crate) fn expansion_album_artwork_tasks(
     cached_ids: &HashSet<&String>,
     versions: &HashMap<String, Option<String>>,
+    failed: &HashMap<String, Option<String>>,
     pending_ids: &HashSet<String>,
     albums_vm: AlbumsService,
     album_ids_urls: Vec<(String, Option<String>, String)>,
@@ -323,7 +336,8 @@ pub(crate) fn expansion_album_artwork_tasks(
     album_ids_urls
         .into_iter()
         .filter(|(id, updated_at, _)| {
-            should_refetch(cached_ids, versions, id, updated_at) && !pending_ids.contains(id)
+            should_refetch(cached_ids, versions, failed, id, updated_at)
+                && !pending_ids.contains(id)
         })
         .map(|(id, updated_at, url)| {
             let vm = albums_vm.clone();

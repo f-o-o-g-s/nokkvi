@@ -66,6 +66,7 @@ impl Nokkvi {
                             &state.songs,
                             &cached,
                             &self.artwork.album_art_versions,
+                            &self.artwork.failed_art,
                             shell.albums().clone(),
                             |s| {
                                 s.album_id.as_ref().map(|id| {
@@ -263,6 +264,7 @@ impl Nokkvi {
                             &state.songs,
                             &cached,
                             &self.artwork.album_art_versions,
+                            &self.artwork.failed_art,
                             shell.albums().clone(),
                             |s| {
                                 s.album_id.as_ref().map(|id| {

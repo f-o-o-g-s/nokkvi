@@ -176,6 +176,7 @@ impl LoaderTarget for AlbumsTarget {
             &app.library.albums,
             &cached,
             &app.artwork.album_art_versions,
+            &app.artwork.failed_art,
             shell.albums().clone(),
             |album| {
                 (
@@ -319,6 +320,7 @@ impl LoaderTarget for SongsTarget {
             &app.library.songs,
             &cached,
             &app.artwork.album_art_versions,
+            &app.artwork.failed_art,
             shell.albums().clone(),
             |song| {
                 song.album_id

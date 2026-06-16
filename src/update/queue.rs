@@ -69,6 +69,7 @@ impl Nokkvi {
                             &self.library.queue_songs,
                             &cached,
                             &self.artwork.album_art_versions,
+                            &self.artwork.failed_art,
                             shell.albums().clone(),
                             |song| {
                                 (
@@ -668,6 +669,7 @@ impl Nokkvi {
                 &filtered_queue,
                 &cached,
                 &self.artwork.album_art_versions,
+                &self.artwork.failed_art,
                 shell.albums().clone(),
                 |song| {
                     (
@@ -726,6 +728,7 @@ impl Nokkvi {
                 items,
                 &cached,
                 &self.artwork.album_art_versions,
+                &self.artwork.failed_art,
                 shell.albums().clone(),
                 |song: &QueueSongUIViewData| {
                     (
@@ -772,6 +775,7 @@ impl Nokkvi {
                 &filtered,
                 &cached,
                 &self.artwork.album_art_versions,
+                &self.artwork.failed_art,
                 shell.albums().clone(),
                 |song| {
                     (

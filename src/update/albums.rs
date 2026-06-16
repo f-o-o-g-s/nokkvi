@@ -133,12 +133,18 @@ impl Nokkvi {
             // handle, so a later server cover change is a version-aware miss
             // (N17). album_art evicts at capacity; `should_refetch` guards the
             // skew by also checking album_art membership.
+            self.artwork.failed_art.remove(&id);
             self.artwork
                 .album_art_versions
                 .insert(id.clone(), updated_at);
             self.artwork.album_art.put(id, h);
         } else {
+            // Negatively cache the failed id (keyed by the version that failed)
+            // so the membership-based prefetch gates stop re-queuing it on every
+            // scroll/resize. A bumped updated_at, a later success, a user Refresh
+            // Artwork, or logout all re-enable it.
             warn!(" Mini artwork failed to load for album: {}", id);
+            self.artwork.failed_art.insert(id, updated_at);
         }
         Task::none()
     }
@@ -271,6 +277,10 @@ impl Nokkvi {
         large: Option<image::Handle>,
         silent: bool,
     ) -> Task<Message> {
+        // A refresh is an explicit re-attempt signal: drop any negative-cache
+        // entry so the next prefetch re-fetches even if the recorded failed
+        // version still matches (the user may have fixed the cover server-side).
+        self.artwork.failed_art.remove(&album_id);
         if thumb.is_none() && large.is_none() {
             if !silent {
                 self.toast_warn("No artwork found on server for this album");

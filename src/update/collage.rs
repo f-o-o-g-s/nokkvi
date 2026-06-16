@@ -92,6 +92,7 @@ impl Nokkvi {
                 &self.genres_page.common.slot_list,
                 &self.library.genres,
                 &cached,
+                &self.artwork.failed_art,
                 &self.artwork.album_art_pending,
                 albums_vm,
                 |g| g.artwork_album_ids.as_slice(),
@@ -100,6 +101,7 @@ impl Nokkvi {
                 &self.playlists_page.common.slot_list,
                 &self.library.playlists,
                 &cached,
+                &self.artwork.failed_art,
                 &self.artwork.album_art_pending,
                 albums_vm,
                 |p| p.artwork_album_ids.as_slice(),
@@ -182,6 +184,7 @@ impl Nokkvi {
         expansion_album_artwork_tasks(
             &cached,
             &self.artwork.album_art_versions,
+            &self.artwork.failed_art,
             &self.artwork.album_art_pending,
             albums_vm,
             triples,

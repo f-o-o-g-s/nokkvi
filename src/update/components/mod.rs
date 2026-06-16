@@ -547,6 +547,7 @@ impl Nokkvi {
         let prefetch = expansion_album_artwork_tasks(
             &cached,
             &self.artwork.album_art_versions,
+            &self.artwork.failed_art,
             &self.artwork.album_art_pending,
             shell.albums().clone(),
             album_ids,

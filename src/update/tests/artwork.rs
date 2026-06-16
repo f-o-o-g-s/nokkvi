@@ -9,6 +9,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::update::components::{passive_artwork_version, should_refetch};
 
+/// Empty negative cache — the default for the version-behaviour tests below
+/// (they assert `should_refetch`'s membership/version logic, not the
+/// negative-cache short-circuit, which has its own tests at the bottom).
+fn no_failures() -> HashMap<String, Option<String>> {
+    HashMap::new()
+}
+
 /// Build a `(cached_ids, versions)` pair the way a prefetch tick would: the
 /// version map is kept in lockstep with the `album_art` keys.
 fn seeded() -> (Vec<String>, HashMap<String, Option<String>>) {
@@ -28,6 +35,7 @@ fn prefetch_dedup_treats_changed_updated_at_as_cache_miss() {
         !should_refetch(
             &cached,
             &versions,
+            &no_failures(),
             &"al-1".to_string(),
             &Some("v1".to_string())
         ),
@@ -39,6 +47,7 @@ fn prefetch_dedup_treats_changed_updated_at_as_cache_miss() {
         should_refetch(
             &cached,
             &versions,
+            &no_failures(),
             &"al-1".to_string(),
             &Some("v2".to_string())
         ),
@@ -55,6 +64,7 @@ fn prefetch_dedup_unknown_id_is_a_miss() {
         should_refetch(
             &cached,
             &versions,
+            &no_failures(),
             &"al-unknown".to_string(),
             &Some("v1".to_string())
         ),
@@ -74,6 +84,7 @@ fn prefetch_dedup_evicted_handle_is_a_miss() {
         should_refetch(
             &cached,
             &versions,
+            &no_failures(),
             &"al-1".to_string(),
             &Some("v1".to_string())
         ),
@@ -121,7 +132,7 @@ fn passive_single_album_queue_does_not_oscillate() {
     let cold: HashSet<&String> = HashSet::new();
     let mut versions: HashMap<String, Option<String>> = HashMap::new();
     assert!(
-        should_refetch(&cold, &versions, &album, &passive_a),
+        should_refetch(&cold, &versions, &no_failures(), &album, &passive_a),
         "cold slot is a miss",
     );
     versions.insert(album.clone(), passive_a.clone());
@@ -131,7 +142,7 @@ fn passive_single_album_queue_does_not_oscillate() {
     let warm_ids = [album.clone()];
     let warm: HashSet<&String> = warm_ids.iter().collect();
     assert!(
-        !should_refetch(&warm, &versions, &album, &passive_b),
+        !should_refetch(&warm, &versions, &no_failures(), &album, &passive_b),
         "a same-album row must not re-fetch once the album slot is version-warm",
     );
 
@@ -142,8 +153,65 @@ fn passive_single_album_queue_does_not_oscillate() {
     let mut versions_song_a: HashMap<String, Option<String>> = HashMap::new();
     versions_song_a.insert(album.clone(), song_a_updated.clone());
     assert!(
-        should_refetch(&warm, &versions_song_a, &album, &song_b_updated),
+        should_refetch(
+            &warm,
+            &versions_song_a,
+            &no_failures(),
+            &album,
+            &song_b_updated
+        ),
         "pre-fix: differing per-song updated_at oscillates the album-keyed gate \
          (the bug F4 removes at the call sites)",
+    );
+}
+
+/// Negative cache: once a cover fetch returns no image, `should_refetch` must
+/// stop re-queuing that id at the SAME version even though it is absent from
+/// `album_art` — otherwise every scroll/resize re-fetches a known-dead id.
+#[test]
+fn negative_cache_suppresses_refetch_of_a_known_failed_id() {
+    let album = "al-dead".to_string();
+    let versions: HashMap<String, Option<String>> = HashMap::new();
+    let cached: HashSet<&String> = HashSet::new(); // never warmed
+
+    // Cold + not failed → miss (would fetch).
+    assert!(
+        should_refetch(
+            &cached,
+            &versions,
+            &no_failures(),
+            &album,
+            &Some("v1".to_string())
+        ),
+        "a never-tried id must be a miss",
+    );
+
+    // The loaded-handler recorded the failure at version v1.
+    let mut failed: HashMap<String, Option<String>> = HashMap::new();
+    failed.insert(album.clone(), Some("v1".to_string()));
+
+    // Same id, same version, still absent from album_art → suppressed.
+    assert!(
+        !should_refetch(&cached, &versions, &failed, &album, &Some("v1".to_string())),
+        "a known-failed id at the same version must not be re-fetched",
+    );
+}
+
+/// A changed `updated_at` (server cover added) must bypass the negative entry
+/// and re-attempt — otherwise a cover that later appears stays permanently
+/// blank, since SSE reloads never clear the cache and the version bump is the
+/// only re-attempt signal.
+#[test]
+fn negative_cache_is_bypassed_when_the_version_changes() {
+    let album = "al-dead".to_string();
+    let versions: HashMap<String, Option<String>> = HashMap::new();
+    let cached: HashSet<&String> = HashSet::new();
+
+    let mut failed: HashMap<String, Option<String>> = HashMap::new();
+    failed.insert(album.clone(), Some("v1".to_string()));
+
+    assert!(
+        should_refetch(&cached, &versions, &failed, &album, &Some("v2".to_string())),
+        "a bumped updated_at must re-attempt a previously-failed cover",
     );
 }

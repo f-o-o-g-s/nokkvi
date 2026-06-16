@@ -339,6 +339,7 @@ impl Nokkvi {
             &editor.songs,
             &cached,
             &self.artwork.album_art_versions,
+            &self.artwork.failed_art,
             shell.albums().clone(),
             |song| {
                 (

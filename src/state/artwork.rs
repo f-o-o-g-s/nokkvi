@@ -97,6 +97,20 @@ pub struct ArtworkState {
     /// always arrives). The single-id prefetch surfaces keep their existing
     /// gate-free behavior — only the ×4 quad paths consult this set.
     pub album_art_pending: HashSet<String>,
+    /// Negative cache: album/artist ids whose 80px cover fetch returned NO image
+    /// — a stale/deleted id that resolves to Navidrome's code-70 "Artwork not
+    /// found". An album that merely lacks a cover gets a placeholder *image* and
+    /// caches normally via `album_art`, so it never lands here; only genuinely
+    /// unresolvable ids do. Maps `id -> the updated_at that failed`, mirroring
+    /// `album_art_versions`: the membership-based prefetch gates (`should_refetch`,
+    /// the artist gate, the quad gate) consult it to stop re-queuing a known-dead
+    /// id on every scroll/resize/view-switch. A CHANGED `updated_at` (server cover
+    /// added) bypasses the entry and re-attempts; it is cleared on any later
+    /// success in the loaded-handlers and on a user "Refresh Artwork", and dropped
+    /// wholesale by `ArtworkState::default()` on logout/session reset (so server-A
+    /// failures never suppress server-B art). Unbounded like `album_art_versions`,
+    /// but populated only by the narrow stale-id case and reset on logout.
+    pub failed_art: HashMap<String, Option<String>>,
     /// Large artwork cache for detail views (LRU-bounded).
     pub large_artwork: SnapshottedLru<String, image::Handle>,
     /// Genre artwork cache.
@@ -113,11 +127,22 @@ impl Default for ArtworkState {
             album_art: SnapshottedLru::new(MINI_ARTWORK_CACHE_CAPACITY),
             album_art_versions: HashMap::new(),
             album_art_pending: HashSet::new(),
+            failed_art: HashMap::new(),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
             genre: CollageArtworkCache::new(),
             playlist: CollageArtworkCache::new(),
             loading_large_artwork: None,
         }
+    }
+}
+
+impl ArtworkState {
+    /// True when `id`'s cover fetch already failed at exactly `version`, so the
+    /// membership-based prefetch gates should skip re-queuing it. A different
+    /// `version` (server cover changed) is deliberately NOT suppressed. Used by
+    /// the artist gate (which has no version) with `version == &None`.
+    pub fn art_failed_at(&self, id: &str, version: &Option<String>) -> bool {
+        self.failed_art.get(id) == Some(version)
     }
 }
 

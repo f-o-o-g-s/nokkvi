@@ -104,6 +104,7 @@ impl Nokkvi {
                     &self.library.albums,
                     &cached,
                     &self.artwork.album_art_versions,
+                    &self.artwork.failed_art,
                     albums_vm,
                     |album| {
                         (
@@ -128,6 +129,7 @@ impl Nokkvi {
                     &items,
                     &cached,
                     &self.artwork.album_art_versions,
+                    &self.artwork.failed_art,
                     albums_vm,
                     |song| {
                         (
@@ -151,6 +153,7 @@ impl Nokkvi {
                     &self.library.songs,
                     &cached,
                     &self.artwork.album_art_versions,
+                    &self.artwork.failed_art,
                     albums_vm,
                     |s| {
                         s.album_id
@@ -317,6 +320,7 @@ impl Nokkvi {
         for idx in self.artists_page.common.slot_list.prefetch_indices(total) {
             if let Some(artist) = self.library.artists.get(idx)
                 && !self.artwork.album_art.contains(&artist.id)
+                && !self.artwork.art_failed_at(&artist.id, &None)
             {
                 let id = artist.id.clone();
                 let art_id = format!("ar-{id}");
