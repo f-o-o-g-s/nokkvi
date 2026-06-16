@@ -6,22 +6,28 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.9.2 — 2026-06-15
+
+### Added
+
 - The login screen now uses a responsive two-panel layout on wide windows that folds into a single centered card on narrow ones.
-- The login form scrolls when the window is too short, so the Login button always stays reachable.
+- The login form now scrolls when the window is too short to fit it.
 - Login errors now name the problem (wrong username or password, server unreachable, or not a Navidrome server) and highlight the field at fault.
 - The login screen focuses the first empty field automatically, and Enter submits from any field.
 - Nokkvi now fills in the address scheme and trims trailing slashes on the server URL you type.
 - A subtle warning appears when an unencrypted http:// address points at a server outside your local network.
 
-### Changed
-
 ### Fixed
 
 - Pressing Tab on the login screen no longer moves focus the wrong way.
 - Resizing the window no longer cuts off the login form or the Login button.
-- The log file no longer records the salt and token from Subsonic request URLs (streaming, cover art, and the server-version probe), so sharing nokkvi.log (for a bug report) can no longer leak a reusable Navidrome credential.
-
-### Removed
+- Sharing nokkvi.log for a bug report no longer leaks a reusable Navidrome credential from logged Subsonic request URLs.
 
 ## v0.9.1 — 2026-06-15
 
