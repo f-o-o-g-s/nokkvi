@@ -6,9 +6,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The login screen now uses a responsive two-panel layout on wide windows that folds into a single centered card on narrow ones.
+- The login form scrolls when the window is too short, so the Login button always stays reachable.
+- Login errors now name the problem (wrong username or password, server unreachable, or not a Navidrome server) and highlight the field at fault.
+- The login screen focuses the first empty field automatically, and Enter submits from any field.
+- Nokkvi now fills in the address scheme and trims trailing slashes on the server URL you type.
+- A subtle warning appears when an unencrypted http:// address points at a server outside your local network.
+
 ### Changed
 
 ### Fixed
+
+- Pressing Tab on the login screen no longer moves focus the wrong way.
+- Resizing the window no longer cuts off the login form or the Login button.
 
 ### Removed
 
