@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Album art now shows in your desktop media controls and on the lock screen for tracks on multi-disc albums, instead of appearing blank.
+
 ### Removed
 
 ## v0.9.0 — 2026-06-15

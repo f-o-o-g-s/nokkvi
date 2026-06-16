@@ -6,8 +6,15 @@
 
 use crate::types::song::Song;
 
-/// Known Subsonic cover art ID prefixes
-const KNOWN_PREFIXES: [&str; 5] = ["al-", "ar-", "mf-", "pl-", "sh-"];
+/// Navidrome cover-art ID kind prefixes — the set `ParseArtworkID` accepts
+/// (`model/artwork_id.go` `artworkKindMap`: mf, ar, al, pl, dc, ra). An ID that
+/// already carries one of these is a fully-formed artwork ID and must pass
+/// through untouched; anything else is treated as a bare album ID and gets an
+/// `al-` prefix. `dc-` (per-disc cover, added in navidrome#5182) and `ra-`
+/// (radio) were missing, so disc-numbered tracks' `coverArt` (`dc-<albumID>:<disc>`)
+/// got mangled into `al-dc-…` and 404'd as "Artwork not found" (code 70); `sh-`
+/// was never an artwork kind and is dropped.
+const KNOWN_PREFIXES: [&str; 6] = ["al-", "ar-", "mf-", "pl-", "dc-", "ra-"];
 
 /// Default size for high-resolution artwork (matches QML client)
 pub const HIGH_RES_SIZE: u32 = 1000;
@@ -182,6 +189,39 @@ mod tests {
             "mf- prefix must be preserved, not double-prefixed to al-mf-456"
         );
         assert!(!url.contains("id=al-mf-456"));
+    }
+
+    #[test]
+    fn disc_and_radio_prefixes_not_double_prefixed() {
+        // Regression: Navidrome returns disc-numbered tracks' coverArt as
+        // `dc-<albumID>:<disc>` (per-disc art, navidrome#5182) and radio art as
+        // `ra-<id>`. Both are fully-formed artwork IDs — prepending `al-` yields
+        // `al-dc-…`/`al-ra-…`, which Navidrome rejects with "Artwork not found"
+        // (code 70). They must pass through untouched.
+        let disc = build_cover_art_url(
+            "dc-6nO394rZB3s7LQax01FoVn:1_0",
+            "http://srv",
+            "u=x",
+            Some(80),
+        );
+        assert!(
+            disc.contains("id=dc-6nO394rZB3s7LQax01FoVn:1_0"),
+            "dc- disc id must be preserved: {disc}"
+        );
+        assert!(
+            !disc.contains("id=al-dc-"),
+            "dc- must not be al-prefixed: {disc}"
+        );
+
+        let radio = build_cover_art_url("ra-station9", "http://srv", "u=x", None);
+        assert!(
+            radio.contains("id=ra-station9"),
+            "ra- id must be preserved: {radio}"
+        );
+        assert!(
+            !radio.contains("id=al-ra-"),
+            "ra- must not be al-prefixed: {radio}"
+        );
     }
 
     #[test]
