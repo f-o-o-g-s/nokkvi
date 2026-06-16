@@ -1543,7 +1543,9 @@ impl CustomAudioEngine {
         if let Some(info) = info {
             debug!(
                 "🎵 [GAPLESS] Consuming transition: source={}, duration={}, format={:?}",
-                info.source, info.duration, info.format
+                redact_subsonic_url(&info.source),
+                info.duration,
+                info.format
             );
             self.source = info.source;
             self.duration = info.duration;
@@ -1976,7 +1978,11 @@ impl CustomAudioEngine {
 
         debug!(
             "🔄 [GAPLESS] Transition: prev={:?} → cur={:?}, formats_match={}, force_reload={}, source={}",
-            prev_format, self.current_format, formats_match, force_reload, self.source
+            prev_format,
+            self.current_format,
+            formats_match,
+            force_reload,
+            redact_subsonic_url(&self.source)
         );
 
         // Initialize renderer with format-aware gapless logic
@@ -2316,7 +2322,7 @@ impl CustomAudioEngine {
     async fn on_decoder_finished(&mut self) {
         debug!(
             "🎵 [DECODER FINISHED] source={}, crossfade_phase={}, playing={}, paused={}",
-            self.source,
+            redact_subsonic_url(&self.source),
             self.crossfade_phase.label(),
             self.playing,
             self.paused
@@ -2365,7 +2371,10 @@ impl CustomAudioEngine {
                 // Gapless transition successful - continue playing
                 // NOTE: load_prepared_track() already starts the decoding loop
                 // and render thread, so we do NOT call start_decoding_loop() here.
-                debug!(" Gapless transition successful (source: {})", self.source);
+                debug!(
+                    " Gapless transition successful (source: {})",
+                    redact_subsonic_url(&self.source)
+                );
                 // IMPORTANT: Still call completion callback so playback controller updates queue index!
                 // Gapless always means a new track (we skip same-URL gapless prep), so is_loop=false.
                 if let Some(callback) = &self.completion_callback {

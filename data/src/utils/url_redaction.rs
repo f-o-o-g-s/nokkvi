@@ -153,4 +153,63 @@ mod tests {
         let redacted = redact_subsonic_url(url);
         assert_eq!(redacted, "http://srv/rest/stream?id=al-1");
     }
+
+    /// The string helper above only protects URLs we log *directly*. The other
+    /// half of the credential surface is `reqwest::Error`, whose `Display`/`Debug`
+    /// fold the full failing request URL (including `s=`/`t=`) into their output —
+    /// so logging such an error, or baking it into an `anyhow`/`io::Error` message,
+    /// leaks the credential even though no URL literal appears at the call site.
+    /// The fix everywhere is `reqwest::Error::without_url()`. This test pins that
+    /// contract so a future bare `{e}`/`.context(e)` on a credentialed request is
+    /// caught by the suite rather than in a user's pasted `nokkvi.log`.
+    #[test]
+    fn reqwest_error_without_url_drops_subsonic_credential() {
+        // A connect-refused request to a closed local port yields a real
+        // `reqwest::Error` that carries the request URL — exactly the shape the
+        // artwork-fetch and stream-decode error paths produce on a network drop.
+        // Bind :0 to get an OS-assigned port, then drop the listener so the port is
+        // guaranteed closed for this test (avoids a hardcoded ephemeral-range port
+        // colliding with a real listener under parallel/CI runs).
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local addr").port();
+        drop(listener);
+        let url = format!(
+            "http://127.0.0.1:{port}/rest/getCoverArt\
+             ?id=al-1&u=demo&s=SALT_SECRET&t=TOKEN_SECRET&f=json"
+        );
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .expect("blocking client builds");
+        let err = client
+            .get(url)
+            .send()
+            .expect_err("connection to a closed port must fail");
+
+        // Sanity: the error must actually carry the URL, or the test proves nothing.
+        assert!(
+            err.url().is_some(),
+            "expected the transport error to carry the request URL"
+        );
+        let raw = format!("{err:?}");
+        assert!(
+            raw.contains("SALT_SECRET") && raw.contains("TOKEN_SECRET"),
+            "precondition: the raw reqwest error should embed the credential, got: {raw}"
+        );
+
+        // `.without_url()` must strip the credential from both representations.
+        let stripped = err.without_url();
+        let debug = format!("{stripped:?}");
+        let display = format!("{stripped}");
+        for needle in ["SALT_SECRET", "TOKEN_SECRET"] {
+            assert!(
+                !debug.contains(needle),
+                "credential leaked via Debug: {debug}"
+            );
+            assert!(
+                !display.contains(needle),
+                "credential leaked via Display: {display}"
+            );
+        }
+    }
 }

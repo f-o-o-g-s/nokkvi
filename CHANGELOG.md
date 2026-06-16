@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 
 - Pressing Tab on the login screen no longer moves focus the wrong way.
 - Resizing the window no longer cuts off the login form or the Login button.
+- The log file no longer records the salt and token from Subsonic request URLs (streaming, cover art, and the server-version probe), so sharing nokkvi.log (for a bug report) can no longer leak a reusable Navidrome credential.
 
 ### Removed
 

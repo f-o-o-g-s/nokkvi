@@ -313,7 +313,11 @@ impl AlbumsService {
             .get(url)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("artwork fetch failed: {e}"))?;
+            // `reqwest::Error`'s `Display`/`Debug` embed the full request URL —
+            // including the `s=`/`t=` Subsonic credential — and that text is baked
+            // permanently into the `anyhow` message string here, so it must be
+            // stripped at construction (no downstream redaction can recover it).
+            .map_err(|e| anyhow::anyhow!("artwork fetch failed: {}", e.without_url()))?;
 
         if !response.status().is_success() {
             return Err(anyhow::anyhow!(
@@ -332,7 +336,10 @@ impl AlbumsService {
         let bytes = response
             .bytes()
             .await
-            .map_err(|e| anyhow::anyhow!("artwork body read failed: {e}"))?;
+            // Unlike the send() path above, a body-read (`Decode`-kind) error carries
+            // no URL in reqwest, so this `without_url()` is a no-op kept for symmetry /
+            // defense-in-depth; the load-bearing strip is the send() error above.
+            .map_err(|e| anyhow::anyhow!("artwork body read failed: {}", e.without_url()))?;
 
         if bytes.is_empty() {
             return Err(anyhow::anyhow!("artwork fetch returned 0 bytes"));
@@ -602,6 +609,38 @@ mod tests {
             assert!(
                 !is_missing_artwork(&transient),
                 "transient errors must not be treated as a deterministic miss: {transient}"
+            );
+        }
+    }
+
+    /// Regression guard for the leak that surfaced in a user's MPRIS "art fetch
+    /// failed" WARN: a transport failure on the REAL artwork path must not carry
+    /// the `s=`/`t=` Subsonic credential into the returned error (it is logged at
+    /// WARN level and ships in bug-report logs). Unlike the `without_url()` unit
+    /// test in `utils::url_redaction`, this exercises the actual call site, so it
+    /// fails if a future edit drops the strip at `fetch_artwork_by_url`.
+    #[tokio::test]
+    async fn fetch_artwork_by_url_error_omits_subsonic_credential() {
+        // Bind :0 then drop it, so the port is guaranteed closed (connection
+        // refused) without colliding with a real listener under parallel runs.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local addr").port();
+        drop(listener);
+        let url = format!(
+            "http://127.0.0.1:{port}/rest/getCoverArt\
+             ?id=al-1&u=demo&s=SALT_SECRET&t=TOKEN_SECRET&f=json"
+        );
+
+        let err = AlbumsService::new()
+            .fetch_artwork_by_url(&url)
+            .await
+            .expect_err("a connection to a closed port must fail");
+
+        let rendered = format!("{err:?}");
+        for needle in ["SALT_SECRET", "TOKEN_SECRET"] {
+            assert!(
+                !rendered.contains(needle),
+                "credential leaked from fetch_artwork_by_url error: {rendered}"
             );
         }
     }

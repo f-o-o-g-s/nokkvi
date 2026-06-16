@@ -240,6 +240,10 @@ impl AuthService {
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
+            // `ping_url` is the one Subsonic request that carries `s=`/`t=` in the
+            // query string (every other call POSTs them in the body), so strip the
+            // URL from any transport error before it can reach a log sink.
+            .map_err(reqwest::Error::without_url)
             .context("Failed to connect to server for ping")?;
 
         let body = response.text().await.unwrap_or_default();

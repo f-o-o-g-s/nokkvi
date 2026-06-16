@@ -15,7 +15,10 @@ use tokio_util::{
 use tracing::{debug, error, trace, warn};
 
 use super::range_http_reader::RangeHttpReader;
-use crate::audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry};
+use crate::{
+    audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry},
+    utils::url_redaction::redact_subsonic_url,
+};
 
 /// Detect if an HTTP response originates from an Icecast/SHOUTcast radio server.
 fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {
@@ -106,7 +109,11 @@ impl AsyncNetworkBuffer {
                         }
                     }
                     Ok(Some(Err(e))) => {
-                        warn!(" [NETWORK BUFFER] Stream error: {}", e);
+                        // `bytes_stream()` yields `Decode`-kind errors, which reqwest
+                        // builds with no URL attached, so `without_url()` is a no-op
+                        // here today — kept as defense-in-depth so this stays correct
+                        // if a future reqwest attaches the URL to body/stream errors.
+                        warn!(" [NETWORK BUFFER] Stream error: {}", e.without_url());
                         return;
                     }
                     Ok(None) => {
@@ -420,7 +427,7 @@ impl AudioDecoder {
             let init_start = std::time::Instant::now();
             trace!(
                 " [DECODER] Starting Range-based HTTP reader for: {}",
-                self.url
+                redact_subsonic_url(&self.url)
             );
 
             let client = reqwest::Client::builder()
@@ -494,7 +501,7 @@ impl AudioDecoder {
                         }
                     }
                     Err(e) => {
-                        trace!(" [DECODER] Range probe failed: {}", e);
+                        trace!(" [DECODER] Range probe failed: {}", e.without_url());
                     }
                 }
             }
@@ -573,6 +580,11 @@ impl AudioDecoder {
                     .header("Icy-MetaData", "1")
                     .send()
                     .await
+                    // A `.send()` error carries the credentialed URL; strip it before
+                    // wrapping. This anyhow chain surfaces in full at the decoder-init
+                    // failure log (engine.rs, `{:?}`); the radio-reconnect log uses
+                    // `{}`, which prints only the top context, so it never showed the URL.
+                    .map_err(reqwest::Error::without_url)
                     .context("Failed to open infinite stream connection")?;
 
                 let content_type = response

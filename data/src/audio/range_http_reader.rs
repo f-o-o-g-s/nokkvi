@@ -297,7 +297,15 @@ impl RangeHttpReader {
 
                     let read_start = std::time::Instant::now();
                     let bytes = response.bytes().map_err(|e| {
-                        std::io::Error::other(format!("Failed to read response: {e}"))
+                        // Body-read (`Decode`-kind) errors carry no URL in reqwest, so
+                        // `without_url()` is a no-op here — kept as defense-in-depth.
+                        // The credentialed stream URL on this path is stripped where it
+                        // actually appears: the `.send()` error captured below (which
+                        // also feeds the io::Error that resurfaces in the decoder logs).
+                        std::io::Error::other(format!(
+                            "Failed to read response: {}",
+                            e.without_url()
+                        ))
                     })?;
                     let read_elapsed = read_start.elapsed();
 
@@ -336,7 +344,10 @@ impl RangeHttpReader {
                     return Ok(());
                 }
                 Err(e) => {
-                    last_error = Some(e);
+                    // Strip the credentialed stream URL on capture: this one error
+                    // value feeds the retry debug!, the final error!, and the
+                    // io::Error message below (which resurfaces in the decoder logs).
+                    last_error = Some(e.without_url());
                     if attempt < MAX_RETRIES - 1 {
                         let backoff_ms = 500 * (attempt as u64 + 1);
                         tracing::debug!(
