@@ -353,7 +353,15 @@ impl Nokkvi {
                                 ))
                                 .await;
 
-                            Ok(shell)
+                            // The auth service resolved the typed input to the
+                            // candidate that actually connected; surface it so
+                            // the root persists the resolved URL, not the raw
+                            // input.
+                            let resolved_url = shell.auth().get_server_url().await;
+                            Ok(crate::app_message::LoginSuccess {
+                                shell,
+                                resolved_url,
+                            })
                         },
                         Message::LoginResult,
                     ),
@@ -400,6 +408,8 @@ impl Nokkvi {
                     None => AppService::new().await,
                 }
                 .map_err(|e| format!("{e:#}"))?;
+                // A resumed session reuses the already-canonical stored URL.
+                let resolved_url = server_url.clone();
                 shell
                     .auth()
                     .resume_session(server_url, username, jwt_token, subsonic_credential)
@@ -419,7 +429,10 @@ impl Nokkvi {
                     }))
                     .await;
 
-                Ok(shell)
+                Ok(crate::app_message::LoginSuccess {
+                    shell,
+                    resolved_url,
+                })
             },
             Message::LoginResult,
         )
@@ -427,10 +440,18 @@ impl Nokkvi {
 
     pub(crate) fn handle_login_result(
         &mut self,
-        result: Result<AppService, String>,
+        result: Result<crate::app_message::LoginSuccess, String>,
     ) -> Task<Message> {
         match result {
-            Ok(shell) => {
+            Ok(success) => {
+                let crate::app_message::LoginSuccess {
+                    shell,
+                    resolved_url,
+                } = success;
+                // Persist the RESOLVED server URL (the candidate that actually
+                // connected) so config save, SSE registration, and the resume
+                // path all use it rather than the raw typed input.
+                self.login_page.server_url = resolved_url;
                 info!(target: "nokkvi::auth", "Login successful");
 
                 // Save server_url + username to config.toml (no password)

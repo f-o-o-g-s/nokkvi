@@ -6,5 +6,6 @@ pub mod fuzzy;
 pub mod paths;
 pub mod scale;
 pub mod search;
+pub mod server_url;
 pub mod setting_keywords;
 pub mod url_redaction;

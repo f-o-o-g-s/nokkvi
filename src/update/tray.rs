@@ -115,6 +115,11 @@ impl Nokkvi {
         // a new id. Always replace, then mark the app as visible again.
         self.main_window_id = Some(id);
         self.tray_window_hidden = false;
+        // Auto-focus the first empty login field once the surface actually
+        // exists (covers cold start and a tray re-open while logged out).
+        if self.screen == crate::Screen::Login {
+            return Task::done(Message::Login(crate::views::LoginMessage::FocusFirstField));
+        }
         Task::none()
     }
 

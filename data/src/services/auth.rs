@@ -14,6 +14,16 @@ struct LoginResponse {
     subsonic_token: String,
 }
 
+/// Outcome of a single login attempt against one candidate URL.
+enum AttemptError {
+    /// The request never reached the server (DNS / connect / TLS / timeout).
+    /// Safe to fall through to the next candidate scheme.
+    Transport(anyhow::Error),
+    /// The server answered but rejected the attempt (bad credentials, non-2xx
+    /// status, or an unparseable body). The host is reachable — stop probing.
+    Reached(anyhow::Error),
+}
+
 pub struct AuthService {
     client: Option<ApiClient>,
     server_url: String,
@@ -47,10 +57,57 @@ impl AuthService {
     ) -> Result<()> {
         self.is_authenticating = true;
         self.error_message.clear();
-        self.server_url = server_url.clone();
-        self.username = username.clone();
 
-        let login_url = format!("{server_url}/auth/login");
+        // Expand the typed input into ordered candidates: an already-schemed
+        // URL is one canonical candidate; a bare host becomes
+        // [https://host, http://host] so the user can type `navidrome.local:4533`
+        // and we prefer TLS with an HTTP fallback. On success the WINNING URL is
+        // committed to `self.server_url` (the resolved URL the caller persists).
+        let candidates = crate::utils::server_url::normalize_server_url_candidates(&server_url);
+        if candidates.is_empty() {
+            self.is_authenticating = false;
+            self.error_message = "Server URL is required".to_string();
+            return Err(anyhow::anyhow!(self.error_message.clone()));
+        }
+
+        let mut last_transport: Option<anyhow::Error> = None;
+        for candidate in &candidates {
+            match self.try_login_once(candidate, &username, &password).await {
+                Ok(()) => {
+                    self.is_authenticating = false;
+                    return Ok(());
+                }
+                // The server answered and rejected us (bad credentials, non-2xx,
+                // unparseable body): stop. The host is reachable on this scheme,
+                // so falling through to http would be pointless and would leak
+                // the password in cleartext to a server that already said no.
+                Err(AttemptError::Reached(e)) => {
+                    self.is_authenticating = false;
+                    return Err(e);
+                }
+                // Never reached this candidate (DNS/connect/TLS/timeout): try the
+                // next scheme, remembering the error in case all candidates fail.
+                Err(AttemptError::Transport(e)) => last_transport = Some(e),
+            }
+        }
+
+        self.is_authenticating = false;
+        Err(last_transport
+            .unwrap_or_else(|| anyhow::anyhow!("Network error. Please check your server URL.")))
+    }
+
+    /// A single login attempt against one fully-qualified `base_url`. Splits
+    /// failures into [`AttemptError::Transport`] (request never reached the
+    /// server — safe to try the next candidate) and [`AttemptError::Reached`]
+    /// (server answered but rejected — stop probing). On success the winning
+    /// `base_url` and the derived session fields are committed to `self`.
+    async fn try_login_once(
+        &mut self,
+        base_url: &str,
+        username: &str,
+        password: &str,
+    ) -> std::result::Result<(), AttemptError> {
+        let login_url = format!("{base_url}/auth/login");
 
         let client = reqwest::Client::builder()
             .user_agent(crate::USER_AGENT)
@@ -65,9 +122,8 @@ impl AuthService {
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
-            .context("Network error. Please check your server URL.")?;
-
-        self.is_authenticating = false;
+            .context("Network error. Please check your server URL.")
+            .map_err(AttemptError::Transport)?;
 
         // Snapshot before the success arm's `.json()` consumes the response.
         let status = response.status();
@@ -76,34 +132,45 @@ impl AuthService {
             let login_response: LoginResponse = response
                 .json()
                 .await
-                .context("Invalid server response. Please check your server URL.")?;
+                .context("Invalid server response. Please check your server URL.")
+                .map_err(AttemptError::Reached)?;
 
             // Validate required fields
             if login_response.subsonic_salt.is_empty() || login_response.subsonic_token.is_empty() {
                 self.error_message =
                     "Server response missing required authentication fields".to_string();
-                return Err(anyhow::anyhow!(self.error_message.clone()));
+                return Err(AttemptError::Reached(anyhow::anyhow!(
+                    self.error_message.clone()
+                )));
             }
 
+            let base = Url::parse(base_url)
+                .context("Invalid server response. Please check your server URL.")
+                .map_err(AttemptError::Reached)?;
+
+            // Commit the winning candidate as the resolved session URL.
+            self.server_url = base_url.to_string();
+            self.username = username.to_string();
             self.token = login_response.token;
             self.user_id = login_response.id.unwrap_or_default();
             self.subsonic_credential = format!(
                 "u={}&s={}&t={}",
                 username, login_response.subsonic_salt, login_response.subsonic_token
             );
-
-            // Create API client with token
-            let base_url = Url::parse(&self.server_url)?;
-            self.client = Some(ApiClient::new(base_url, self.token.clone()));
+            self.client = Some(ApiClient::new(base, self.token.clone()));
 
             Ok(())
         } else if status == reqwest::StatusCode::UNAUTHORIZED {
             self.error_message = "Invalid username or password. Please try again.".to_string();
-            Err(anyhow::anyhow!(self.error_message.clone()))
+            Err(AttemptError::Reached(anyhow::anyhow!(
+                self.error_message.clone()
+            )))
         } else {
             self.error_message =
                 format!("Authentication failed (Status: {status}). Please try again.");
-            Err(anyhow::anyhow!(self.error_message.clone()))
+            Err(AttemptError::Reached(anyhow::anyhow!(
+                self.error_message.clone()
+            )))
         }
     }
 

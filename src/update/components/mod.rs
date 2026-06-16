@@ -1485,6 +1485,13 @@ impl Nokkvi {
         self.should_auto_login = false;
         self.screen = crate::Screen::Login;
 
+        // Clear transient login state so re-login starts from a clean slate:
+        // drop the prior password and any stale error / in-progress flag. The
+        // server URL and username stay pre-filled for convenience.
+        self.login_page.password.clear();
+        self.login_page.error = None;
+        self.login_page.login_in_progress = false;
+
         // Server-specific data pointing at gone IDs
         self.library = crate::state::LibraryData::default();
         // Artwork caches are session-bound: server-A's cover bytes must not be
@@ -1551,6 +1558,10 @@ impl Nokkvi {
 
         tracing::debug!(" [SESSION-RESET] cleared session-bound state");
 
-        Task::batch([stop_task, mpris_art_clear_task])
+        // Re-focus the first login field now that we're back on the login
+        // screen (the window already exists, so this lands on the next frame).
+        let focus_task = Task::done(Message::Login(crate::views::LoginMessage::FocusFirstField));
+
+        Task::batch([stop_task, mpris_art_clear_task, focus_task])
     }
 }

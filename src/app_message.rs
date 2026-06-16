@@ -50,6 +50,17 @@ pub(crate) use nokkvi_data::types::player_settings::LivePlayerSettings;
 /// Named struct for all view sort preferences — canonical definition in data crate
 pub(crate) use nokkvi_data::types::view_preferences::AllViewPreferences;
 
+/// A successful login/resume: the authenticated backend plus the RESOLVED
+/// server URL (the candidate that actually connected, e.g. `https://host` for a
+/// bare-host input). The resolved URL — not the raw typed input — is what gets
+/// persisted to config and registered for SSE, so a scheme-less or
+/// trailing-slash input can't break the resume path or the event stream.
+#[derive(Debug, Clone)]
+pub struct LoginSuccess {
+    pub shell: AppService,
+    pub resolved_url: String,
+}
+
 /// Grouped playback state for cleaner message passing (R1 refactoring)
 #[derive(Debug, Clone)]
 pub struct PlaybackStateUpdate {
@@ -740,7 +751,7 @@ pub enum Message {
     SetOpenMenu(Option<OpenMenu>),
 
     // --- Login Result (handled at app level since it transitions screens) ---
-    LoginResult(Result<AppService, String>),
+    LoginResult(Result<LoginSuccess, String>),
     /// Resume session from stored JWT (no password needed)
     ResumeSession,
     /// Response from pinging the server to fetch its native application version
