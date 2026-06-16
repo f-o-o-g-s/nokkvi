@@ -6,17 +6,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Bit-Perfect output now has three modes you can cycle from the player-bar button: Off, Strict, and Relaxed. Strict hard-cuts between every track. Relaxed runs its own crossfade between tracks that share a sample rate (only the few-second blend itself is not bit-perfect) and hard-cuts the rest, so you can get crossfades while staying bit-perfect without touching the separate Crossfade setting.
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.9.1 — 2026-06-15
+
+### Added
+
+- The player-bar Bit-Perfect button now cycles three modes: Off, Strict, and Relaxed.
+- Relaxed Bit-Perfect runs its own crossfade between back-to-back same-rate tracks, hard-cutting the rest.
 
 ### Changed
 
-- Bit-Perfect and Crossfade remain mutually exclusive: turning on Crossfade switches Bit-Perfect off, and switching Bit-Perfect to Strict or Relaxed switches Crossfade off.
+- Switching Bit-Perfect to Strict or Relaxed turns Crossfade off, and turning Crossfade on returns Bit-Perfect to Off.
+- In Relaxed Bit-Perfect mode, only the few-second blend between tracks is not bit-perfect.
 
 ### Fixed
 
 - Album art now shows in your desktop media controls and on the lock screen for tracks on multi-disc albums, instead of appearing blank.
-
-### Removed
+- A brief network glitch while loading album art no longer leaves the thumbnail permanently blank.
+- Album covers the server can't resolve now show a placeholder instead of being re-requested on every scroll and playback tick.
 
 ## v0.9.0 — 2026-06-15
 

@@ -40,7 +40,7 @@ Things that shaped this project:
 ## Highlights
 
 - Native PipeWire audio engine with gapless playback, crossfade, AGC + ReplayGain volume normalization, and a 10-band EQ
-- Opt-in **bit-perfect** playback that bypasses DSP (EQ, software volume, limiter) and follows each track's native sample rate, with a now-playing badge that reads the real hardware clock and honestly shows `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED` rather than trusting the requested rate
+- Opt-in **bit-perfect** playback that bypasses DSP (EQ, software volume, limiter) and follows each track's native sample rate, in a Strict mode or a Relaxed mode that still crossfades same-rate tracks, with a now-playing badge that reads the real hardware clock and honestly shows `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED` rather than trusting the requested rate
 - GPU-accelerated visualizer with `bars` and `lines` modes, beat-reactive neon glow and bloom, plus optional motion trails, echo, and CRT/film post-processing
 - Browse albums, artists, songs, genres, playlists, internet radios, and similar artists; inline expansion, split-view browsing, and multi-library filtering included
 - 22 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
