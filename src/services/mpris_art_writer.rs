@@ -66,6 +66,15 @@ pub(crate) struct ArtCacheState {
     /// getCoverArt URL re-logged — on every tick. Recording the failed key
     /// bounds it to one attempt per song, mirroring the `last_written` success
     /// fast-path. Cleared on any success and on `clear()`.
+    ///
+    /// Unlike the UI mini-cover negative cache (which records ONLY deterministic
+    /// "not found" misses and lets a transient drop retry on the next scroll),
+    /// this deliberately records ANY failure — including a transient throttle.
+    /// On the 100ms tick, NOT caching a transient would re-issue the 3-retry
+    /// fetch every tick and re-storm an already-throttled server; the accepted
+    /// cost is a one-song blank on a transient drop, which self-heals at the next
+    /// track change (a fresh cover_id falls through). That trade favours the
+    /// server over a one-song cosmetic gap.
     last_failed: Option<(String, String)>,
 }
 

@@ -8,14 +8,14 @@
 //! shared dedup core every surface routes through.
 use std::collections::{HashMap, HashSet};
 
-use iced::{Task, widget::image};
+use iced::Task;
 use nokkvi_data::{
     backend::albums::{AlbumUIViewData, AlbumsService},
     utils::artwork_url::THUMBNAIL_SIZE,
 };
 
 use crate::{
-    app_message::{ArtworkMessage, Message},
+    app_message::{ArtworkMessage, Message, MiniArt},
     widgets::SlotListView,
 };
 
@@ -115,6 +115,15 @@ where
         .filter_map(|idx| items.get(idx))
         .filter_map(|item| {
             let (id, updated_at, url) = extract_id_url(item);
+            // Nothing to fetch for an empty id/URL (e.g. a queue song with no
+            // album_id). Skip the no-op fetch — matches the quad path's
+            // id.is_empty() guard and the song variant's None-skip. Otherwise
+            // fetch_artwork_by_url returns a deterministic "empty url" error that
+            // classifies as Transient (not a NonImageResponse), so it is never
+            // negatively cached and re-queues on every viewport pass.
+            if id.is_empty() || url.is_empty() {
+                return None;
+            }
             // Skip if version-warm (id cached AND recorded version matches) or
             // already queued in this batch; a changed updated_at is a miss.
             if !should_refetch(cached_ids, versions, failed, &id, &updated_at)
@@ -130,11 +139,11 @@ where
             let vm = albums_vm.clone();
             Task::perform(
                 async move {
-                    let bytes = vm.fetch_artwork_by_url(&url).await.ok();
-                    (id, updated_at, bytes.map(image::Handle::from_bytes))
+                    let art = MiniArt::from_fetch(vm.fetch_artwork_by_url(&url).await);
+                    (id, updated_at, art)
                 },
-                |(id, updated_at, handle)| {
-                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, handle))
+                |(id, updated_at, art)| {
+                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, art))
                 },
             )
         })
@@ -196,15 +205,15 @@ where
             let id = album_id;
             Task::perform(
                 async move {
-                    let bytes = vm
-                        .fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), updated_at.as_deref())
-                        .await
-                        .ok();
-                    (id, updated_at, bytes.map(image::Handle::from_bytes))
+                    let art = MiniArt::from_fetch(
+                        vm.fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), updated_at.as_deref())
+                            .await,
+                    );
+                    (id, updated_at, art)
                 },
-                |(id, updated_at, handle)| {
+                |(id, updated_at, art)| {
                     Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
-                        id, updated_at, handle,
+                        id, updated_at, art,
                     ))
                 },
             )
@@ -283,13 +292,13 @@ where
             let id = id.clone();
             tasks.push(Task::perform(
                 async move {
-                    let bytes = vm
-                        .fetch_album_artwork_with_retry(&id, Some(THUMBNAIL_SIZE), None)
-                        .await
-                        .ok();
-                    (id, bytes.map(image::Handle::from_bytes))
+                    let art = MiniArt::from_fetch(
+                        vm.fetch_album_artwork_with_retry(&id, Some(THUMBNAIL_SIZE), None)
+                            .await,
+                    );
+                    (id, art)
                 },
-                |(id, handle)| Message::Artwork(ArtworkMessage::Loaded(id, None, handle)),
+                |(id, art)| Message::Artwork(ArtworkMessage::Loaded(id, None, art)),
             ));
         }
     }
@@ -343,15 +352,11 @@ pub(crate) fn expansion_album_artwork_tasks(
             let vm = albums_vm.clone();
             Task::perform(
                 async move {
-                    let handle = vm
-                        .fetch_artwork_by_url_with_retry(&url)
-                        .await
-                        .ok()
-                        .map(image::Handle::from_bytes);
-                    (id, updated_at, handle)
+                    let art = MiniArt::from_fetch(vm.fetch_artwork_by_url_with_retry(&url).await);
+                    (id, updated_at, art)
                 },
-                |(id, updated_at, handle)| {
-                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, handle))
+                |(id, updated_at, art)| {
+                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, art))
                 },
             )
         })

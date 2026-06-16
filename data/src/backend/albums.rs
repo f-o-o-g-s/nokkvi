@@ -31,6 +31,16 @@ struct NonImageResponse {
     snippet: String,
 }
 
+/// True if `err` is a DETERMINISTIC "no image at this id" failure — a Navidrome
+/// code-70 / non-image 200 body (see [`NonImageResponse`]) — as opposed to a
+/// TRANSIENT error (HTTP 429 throttle, timeout, empty body) that a retry or a
+/// later prefetch revisit could resolve. The UI artwork negative cache keys off
+/// this so a transient drop is never negatively cached (which would otherwise
+/// permanently blank a thumbnail that actually has art).
+pub fn is_missing_artwork(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<NonImageResponse>().is_some()
+}
+
 /// UI-specific view data for albums
 /// UI-projected data
 #[derive(Debug, Clone)]
@@ -566,6 +576,34 @@ mod tests {
 
     fn album_from_json(value: serde_json::Value) -> Album {
         serde_json::from_value(value).expect("valid album json")
+    }
+
+    /// The UI negative cache keys off `is_missing_artwork`: a deterministic
+    /// non-image body (Navidrome code-70) is negative-cacheable, but a transient
+    /// error (429 throttle, timeout, empty body) must NOT be — caching the latter
+    /// would permanently blank a thumbnail that actually has art.
+    #[test]
+    fn is_missing_artwork_distinguishes_deterministic_from_transient() {
+        let missing: anyhow::Error = NonImageResponse {
+            content_type: "application/json".to_string(),
+            snippet: "{\"subsonic-response\":{\"status\":\"failed\"}}".to_string(),
+        }
+        .into();
+        assert!(
+            is_missing_artwork(&missing),
+            "a code-70 non-image body is a deterministic miss"
+        );
+
+        for transient in [
+            anyhow::anyhow!("artwork fetch returned 429"),
+            anyhow::anyhow!("artwork fetch failed: timeout"),
+            anyhow::anyhow!("artwork fetch returned 0 bytes"),
+        ] {
+            assert!(
+                !is_missing_artwork(&transient),
+                "transient errors must not be treated as a deterministic miss: {transient}"
+            );
+        }
     }
 
     /// The grid thumbnail URL must embed the album's `updated_at` as the

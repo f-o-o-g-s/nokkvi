@@ -610,19 +610,19 @@ impl Nokkvi {
                     let vm = shell.albums().clone();
                     tasks.push(Task::perform(
                         async move {
-                            let bytes = vm
-                                .fetch_album_artwork(
+                            let art = crate::app_message::MiniArt::from_fetch(
+                                vm.fetch_album_artwork(
                                     &album_id,
                                     Some(nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE),
                                     None,
                                 )
-                                .await
-                                .ok();
-                            (album_id, bytes.map(iced::widget::image::Handle::from_bytes))
+                                .await,
+                            );
+                            (album_id, art)
                         },
-                        |(id, handle)| {
+                        |(id, art)| {
                             Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
-                                id, None, handle,
+                                id, None, art,
                             ))
                         },
                     ));

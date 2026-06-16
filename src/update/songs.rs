@@ -1,12 +1,12 @@
 //! Song data loading and component message handlers
 
-use iced::{Task, widget::image};
+use iced::Task;
 use nokkvi_data::{backend::songs::SongUIViewData, types::ItemKind};
 use tracing::{debug, error};
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, Message, NavigationMessage},
+    app_message::{ArtworkMessage, Message, MiniArt, NavigationMessage},
     update::SongsTarget,
     views::{self, HasCommonAction, SongsAction},
 };
@@ -118,21 +118,31 @@ impl Nokkvi {
         &mut self,
         album_id: String,
         updated_at: Option<String>,
-        handle: Option<image::Handle>,
+        art: MiniArt,
     ) -> Task<Message> {
-        if let Some(h) = handle {
-            // Record the version in lockstep with the handle (N17) — see
-            // `handle_artwork_loaded`.
-            self.artwork.failed_art.remove(&album_id);
-            self.artwork
-                .album_art_versions
-                .insert(album_id.clone(), updated_at);
-            self.artwork.album_art.put(album_id, h);
-        } else {
-            // Negatively cache the failed id so passive song-mini prefetch stops
-            // re-queuing it (passive surfaces feed version None, so it is keyed by
-            // None). Cleared on a later success, a Refresh Artwork, or logout.
-            self.artwork.failed_art.insert(album_id, updated_at);
+        match art {
+            MiniArt::Loaded(h) => {
+                // Record the version in lockstep with the handle (N17) — see
+                // `handle_artwork_loaded`.
+                self.artwork.failed_art.remove(&album_id);
+                self.artwork
+                    .album_art_versions
+                    .insert(album_id.clone(), updated_at);
+                self.artwork.album_art.put(album_id, h);
+            }
+            MiniArt::Missing => {
+                // Deterministic miss → negatively cache so passive song-mini
+                // prefetch stops re-queuing it (passive surfaces feed version
+                // None, so it is keyed by None). Cleared on a later success, a
+                // Refresh Artwork, or logout. Logged once (then suppressed).
+                debug!(
+                    " Song-mini artwork not found on server for album: {}",
+                    album_id
+                );
+                self.artwork.failed_art.insert(album_id, updated_at);
+            }
+            // Transient failure → record nothing; the next revisit re-attempts.
+            MiniArt::Transient => {}
         }
         Task::none()
     }

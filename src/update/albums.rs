@@ -2,11 +2,11 @@
 
 use iced::{Task, widget::image};
 use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
-use tracing::warn;
+use tracing::debug;
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
+    app_message::{ArtworkMessage, FindMessage, Message, MiniArt, NavigationMessage},
     update::AlbumsTarget,
     views::{self, AlbumsAction, AlbumsMessage, HasCommonAction},
 };
@@ -122,29 +122,40 @@ impl Nokkvi {
         &mut self,
         id: String,
         updated_at: Option<String>,
-        handle: Option<image::Handle>,
+        art: MiniArt,
     ) -> Task<Message> {
         // Quad-tile fetches gate on this in-flight set; release the slot on
-        // success and failure alike so a throttled tile can be retried by the
-        // next prefetch dispatch instead of staying blocked forever.
+        // every outcome so a throttled tile can be retried by the next prefetch
+        // dispatch instead of staying blocked forever.
         self.artwork.album_art_pending.remove(&id);
-        if let Some(h) = handle {
-            // Record the cache-buster the URL carried, in lockstep with the
-            // handle, so a later server cover change is a version-aware miss
-            // (N17). album_art evicts at capacity; `should_refetch` guards the
-            // skew by also checking album_art membership.
-            self.artwork.failed_art.remove(&id);
-            self.artwork
-                .album_art_versions
-                .insert(id.clone(), updated_at);
-            self.artwork.album_art.put(id, h);
-        } else {
-            // Negatively cache the failed id (keyed by the version that failed)
-            // so the membership-based prefetch gates stop re-queuing it on every
-            // scroll/resize. A bumped updated_at, a later success, a user Refresh
-            // Artwork, or logout all re-enable it.
-            warn!(" Mini artwork failed to load for album: {}", id);
-            self.artwork.failed_art.insert(id, updated_at);
+        match art {
+            MiniArt::Loaded(h) => {
+                // Record the cache-buster the URL carried, in lockstep with the
+                // handle, so a later server cover change is a version-aware miss
+                // (N17). album_art evicts at capacity; `should_refetch` guards the
+                // skew by also checking album_art membership.
+                self.artwork.failed_art.remove(&id);
+                self.artwork
+                    .album_art_versions
+                    .insert(id.clone(), updated_at);
+                self.artwork.album_art.put(id, h);
+            }
+            MiniArt::Missing => {
+                // Deterministic: the server has no art for this id. Negatively
+                // cache it (keyed by the version that failed) so the membership-
+                // based prefetch gates stop re-queuing it on every scroll/resize.
+                // A bumped updated_at, a later success, a user Refresh Artwork, or
+                // logout all re-enable it. Logged once (then suppressed).
+                debug!(" Mini artwork not found on server for album: {}", id);
+                self.artwork.failed_art.insert(id, updated_at);
+            }
+            MiniArt::Transient => {
+                // Throttle/timeout/empty — record NOTHING so the next prefetch
+                // revisit re-attempts (the documented throttle-recovery path).
+                // Negative-caching here would blank a cover that actually exists.
+                // Silent on purpose: expected under throttle and self-healing;
+                // the retry wrapper already logs a give-up for the retry surfaces.
+            }
         }
         Task::none()
     }

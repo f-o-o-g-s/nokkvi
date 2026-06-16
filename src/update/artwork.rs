@@ -56,8 +56,8 @@ impl Nokkvi {
     pub(super) fn dispatch_artwork(&mut self, msg: ArtworkMessage) -> Task<Message> {
         match msg {
             // Shared album artwork
-            ArtworkMessage::Loaded(id, updated_at, handle) => {
-                self.handle_artwork_loaded(id, updated_at, handle)
+            ArtworkMessage::Loaded(id, updated_at, art) => {
+                self.handle_artwork_loaded(id, updated_at, art)
             }
             ArtworkMessage::LoadLarge(album_id) => self.handle_load_large_artwork(album_id),
             ArtworkMessage::LargeLoaded(id, handle) => self.handle_large_artwork_loaded(id, handle),
@@ -181,8 +181,8 @@ impl Nokkvi {
                 }))
             }
             // Song artwork
-            ArtworkMessage::SongMiniLoaded(album_id, updated_at, handle) => {
-                self.handle_song_artwork_loaded(album_id, updated_at, handle)
+            ArtworkMessage::SongMiniLoaded(album_id, updated_at, art) => {
+                self.handle_song_artwork_loaded(album_id, updated_at, art)
             }
             // Artwork-pane drag. The per-view chrome dispatcher already routes
             // the per-view `ArtworkColumnDrag` / `ArtworkColumnVerticalDrag`

@@ -237,17 +237,46 @@ pub enum CollageTarget {
     Playlist,
 }
 
+/// Outcome of a mini (80px) cover fetch, so the loaded-handlers can tell a
+/// DETERMINISTIC "no art for this id" (safe to negative-cache) from a TRANSIENT
+/// failure (HTTP 429 throttle / timeout / empty body — re-attempt on the next
+/// prefetch revisit, never cached). Distinguishing them is what keeps a single
+/// throttle drop from permanently blanking a thumbnail that actually has art.
+#[derive(Debug, Clone)]
+pub enum MiniArt {
+    /// Decoded cover handle.
+    Loaded(image::Handle),
+    /// Navidrome has no artwork for this id (code-70 / non-image 200 body, per
+    /// `nokkvi_data::backend::albums::is_missing_artwork`). Negative-cacheable.
+    Missing,
+    /// Transient failure — record nothing so the next revisit re-attempts.
+    Transient,
+}
+
+impl MiniArt {
+    /// Classify a raw 80px artwork fetch result: `Ok` → `Loaded`; a deterministic
+    /// `NonImageResponse` (code-70) → `Missing`; any other error → `Transient`.
+    pub fn from_fetch(result: anyhow::Result<Vec<u8>>) -> Self {
+        match result {
+            Ok(bytes) => MiniArt::Loaded(image::Handle::from_bytes(bytes)),
+            Err(e) if nokkvi_data::backend::albums::is_missing_artwork(&e) => MiniArt::Missing,
+            Err(_) => MiniArt::Transient,
+        }
+    }
+}
+
 /// Artwork pipeline messages, namespaced under `Message::Artwork(..)`
 ///
 /// Covers shared album artwork, collage artwork (genre/playlist), and song artwork.
 #[derive(Debug, Clone)]
 pub enum ArtworkMessage {
     // --- Shared Album Artwork ---
-    /// `(album_id, updated_at, handle)`. `updated_at` is the cache-buster the
-    /// fetch URL carried; recorded into `album_art_versions` in lockstep with
-    /// the handle so a later server cover change is a version-aware prefetch
-    /// miss (N17).
-    Loaded(String, Option<String>, Option<image::Handle>),
+    /// `(album_id, updated_at, MiniArt)`. `updated_at` is the cache-buster the
+    /// fetch URL carried; on `MiniArt::Loaded` it is recorded into
+    /// `album_art_versions` in lockstep with the handle so a later server cover
+    /// change is a version-aware prefetch miss (N17). `MiniArt::Missing` is
+    /// negatively cached; `MiniArt::Transient` records nothing.
+    Loaded(String, Option<String>, MiniArt),
     LargeLoaded(String, Option<image::Handle>),
     LargeArtistLoaded(String, Option<image::Handle>),
     LoadLarge(String),
@@ -280,9 +309,9 @@ pub enum ArtworkMessage {
     CollageBatchReady(CollageTarget, Vec<String>, String, String),
 
     // --- Song Artwork ---
-    /// `(album_id, updated_at, handle)`. See [`ArtworkMessage::Loaded`] — the
-    /// `updated_at` is recorded into `album_art_versions` alongside the handle.
-    SongMiniLoaded(String, Option<String>, Option<image::Handle>),
+    /// `(album_id, updated_at, MiniArt)`. See [`ArtworkMessage::Loaded`] — the
+    /// `updated_at` is recorded into `album_art_versions` on `MiniArt::Loaded`.
+    SongMiniLoaded(String, Option<String>, MiniArt),
 
     // --- Artwork Pane Drag ---
     /// Resize the artwork column via the split handle. `Change` is per-frame

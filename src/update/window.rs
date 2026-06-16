@@ -305,8 +305,6 @@ impl Nokkvi {
     /// Shared by: `handle_artists_loaded`, `handle_artists` (slot list change),
     /// and `prefetch_viewport_artwork` (window resize / view switch).
     pub(crate) fn prefetch_artist_mini_artwork_tasks(&self) -> Task<Message> {
-        use iced::widget::image;
-
         let total = self.library.artists.len();
         if total == 0 {
             return Task::none();
@@ -327,18 +325,16 @@ impl Nokkvi {
                 let vm = albums_vm.clone();
                 tasks.push(Task::perform(
                     async move {
-                        let bytes = vm
-                            .fetch_album_artwork(&art_id, Some(THUMBNAIL_SIZE), None)
-                            .await
-                            .ok();
-                        (id, bytes.map(image::Handle::from_bytes))
+                        let art = crate::app_message::MiniArt::from_fetch(
+                            vm.fetch_album_artwork(&art_id, Some(THUMBNAIL_SIZE), None)
+                                .await,
+                        );
+                        (id, art)
                     },
-                    |(id, handle)| {
+                    |(id, art)| {
                         // Artist art has no album `updated_at`; the id-only
                         // contains() gate above already dedups, so record None.
-                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(
-                            id, None, handle,
-                        ))
+                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(id, None, art))
                     },
                 ));
             }
