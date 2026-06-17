@@ -2,9 +2,11 @@
 //
 // A single post-process pass over the displayed scene (resolve / trail / echo —
 // bound at @group(0), matching the blit bind-group layout). Applies a retro
-// stack scaled by one master `amount`: barrel curve, radial chromatic
-// aberration, scanlines, vignette, film grain, plus a beat zoom-punch. Writes
-// the framebuffer with the same premultiplied-alpha blend as the plain blit.
+// stack scaled by one master `amount`: radial chromatic aberration, scanlines,
+// vignette, film grain, plus a beat zoom-punch. No geometric screen curvature —
+// it is kept 1:1 so the visualizer stays pixel-sharp and snug to the window edge
+// (see fs_crt). Writes the framebuffer with the same premultiplied-alpha blend as
+// the plain blit.
 //
 // Everything is gated to the visualizer's own content (multiplicative effects
 // stay 0 on the premultiplied-transparent background; grain is × alpha) so the
@@ -22,7 +24,6 @@ struct CrtParams {
 @group(1) @binding(0) var<uniform> crt: CrtParams;
 
 const PI: f32 = 3.14159265;
-const CRT_BARREL: f32 = 0.10;
 const CRT_CA: f32 = 0.004;
 const CRT_SCANLINE: f32 = 0.25;
 const CRT_VIGNETTE: f32 = 0.9;
@@ -62,19 +63,24 @@ fn fs_crt(in: VsOut) -> @location(0) vec4<f32> {
     let c = vec2<f32>(0.5, 0.5);
 
     // Beat zoom-punch: pull the image in slightly on the kick.
-    var uv = c + (in.uv - c) * (1.0 - crt.beat * CRT_BEAT_ZOOM * amount);
+    let uv = c + (in.uv - c) * (1.0 - crt.beat * CRT_BEAT_ZOOM * amount);
 
-    // Barrel curve.
-    let d = uv - c;
-    let r2 = dot(d, d);
-    uv = c + d * (1.0 + CRT_BARREL * amount * r2);
+    // No geometric barrel curve. Warping the finished image through the bilinear
+    // blit sampler is inherently soft — magnified taps blend texels — and the only
+    // artifact-free fit (over-scanning to refit the warp inside the frame) zooms
+    // the image ~5% and reads as blur, while clamping the over-scan band smears a
+    // flat edge line and masking it opens a transparent gap. Since sharp + snug +
+    // artifact-free is mutually exclusive with any post-process pixel warp, the
+    // frame is kept 1:1 for pixel-sharp, edge-snug output and the surviving retro
+    // stack (listed in the header) carries the look.
+    let d = uv - c; // radius vector from center; feeds the vignette and the CA split
+    let r2 = dot(d, d); // squared radius
 
-    // Radial chromatic aberration: split R/G/B along the radius.
-    let dir = uv - c;
+    // Radial chromatic aberration: split R/G/B along the radius `d`.
     let ca = CRT_CA * amount;
-    let sr = textureSampleLevel(tex, samp, uv + dir * ca, 0.0);
+    let sr = textureSampleLevel(tex, samp, uv + d * ca, 0.0);
     let sg = textureSampleLevel(tex, samp, uv, 0.0);
-    let sb = textureSampleLevel(tex, samp, uv - dir * ca, 0.0);
+    let sb = textureSampleLevel(tex, samp, uv - d * ca, 0.0);
     var col = vec3<f32>(sr.r, sg.g, sb.b);
     let alpha = sg.a;
 

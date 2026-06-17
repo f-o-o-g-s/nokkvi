@@ -740,8 +740,8 @@ pub struct VisualizerConfig {
     /// Default: 0.0 (off — strong character change)
     pub echo: f32,
 
-    /// CRT / film composite: a retro post-process (chromatic aberration, barrel
-    /// curve, scanlines, vignette, grain, beat zoom-punch), one master amount
+    /// CRT / film composite: a retro post-process (chromatic aberration,
+    /// scanlines, vignette, grain, beat zoom-punch), one master amount
     /// (0.0 = off, 1.0 = full). Opt-in.
     /// Default: 0.0
     pub crt: f32,

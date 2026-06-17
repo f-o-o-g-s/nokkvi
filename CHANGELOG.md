@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The CRT / Film visualizer effect no longer distorts the image at the window edges and now stays pixel-sharp and flush to them.
+
 ### Removed
 
 ## v0.9.2 — 2026-06-15
