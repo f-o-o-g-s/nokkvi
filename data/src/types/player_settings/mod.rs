@@ -221,6 +221,9 @@ pub struct LivePlayerSettings {
     // -- Rating reminder --
     /// Whether the rate-this-track desktop notification is enabled.
     pub rating_reminder_enabled: bool,
+    /// Whether a desktop notification fires when a rating changes via a hotkey
+    /// or the `nokkvi rate` IPC verb.
+    pub rating_change_notification_enabled: bool,
     /// When the rating reminder fires (scrobble-confirmed vs percentage played).
     pub rating_reminder_trigger: RatingReminderTrigger,
     /// For the percentage trigger: fire once this percent of the track has

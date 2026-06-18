@@ -563,12 +563,16 @@ impl Nokkvi {
             iced::Subscription::none()
         };
 
-        // Rating-reminder desktop notifications. Conditionally spawned like the
-        // tray: when `rating_reminder_enabled` is off the subscription leaves
-        // the batch and iced cancels it, closing the command channel and
-        // tearing down the dbus connection. So we never hold a session-bus
-        // connection unless the feature is on.
-        let notifications = if self.settings.rating_reminder_enabled {
+        // Rating desktop notifications (the rate-reminder AND the rate-change
+        // confirmation share one service). Conditionally spawned like the tray:
+        // when BOTH features are off the subscription leaves the batch and iced
+        // cancels it, closing the command channel and tearing down the dbus
+        // connection. So we never hold a session-bus connection unless at least
+        // one feature is on. Each feature still gates its own sends, so the
+        // shared connection only carries the commands the user opted into.
+        let notifications = if self.settings.rating_reminder_enabled
+            || self.settings.rating_change_notification_enabled
+        {
             iced::Subscription::run(services::notifications::run).map(Message::Notification)
         } else {
             iced::Subscription::none()

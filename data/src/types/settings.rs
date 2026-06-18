@@ -305,6 +305,10 @@ pub struct PersistedPlayerSettings {
     /// Whether the rate-this-track desktop notification is enabled (default false).
     #[serde(default)]
     pub rating_reminder_enabled: bool,
+    /// Whether a desktop notification fires when a rating changes via a hotkey
+    /// or the `nokkvi rate` IPC verb (default false).
+    #[serde(default)]
+    pub rating_change_notification_enabled: bool,
     /// When the rating reminder fires (default: on scrobble).
     #[serde(default)]
     pub rating_reminder_trigger: RatingReminderTrigger,
@@ -451,6 +455,7 @@ impl Default for PersistedPlayerSettings {
             show_tray_icon: false,
             close_to_tray: false,
             rating_reminder_enabled: false,
+            rating_change_notification_enabled: false,
             rating_reminder_trigger: RatingReminderTrigger::default(),
             rating_reminder_percent: default_rating_reminder_percent(),
         }

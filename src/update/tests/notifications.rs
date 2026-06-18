@@ -126,3 +126,24 @@ fn scrobble_trigger_silent_in_percentage_mode() {
         "scrobble confirmation must not remind while in percentage mode"
     );
 }
+
+// --- Rate-change confirmation gate ---------------------------------------------
+
+#[test]
+fn notify_rating_changed_is_safe_noop_when_disabled() {
+    let mut app = test_app();
+    app.settings.rating_change_notification_enabled = false;
+    // No dbus connection in tests; the disabled gate must short-circuit
+    // without touching the (absent) connection handle.
+    app.notify_rating_changed("Song", "Artist", 4);
+}
+
+#[test]
+fn notify_rating_changed_is_safe_noop_without_connection() {
+    let mut app = test_app();
+    app.settings.rating_change_notification_enabled = true;
+    // Enabled, but the service never connected (notification_connection is
+    // None) — the send must be skipped, not unwrap a missing handle.
+    assert!(app.notification_connection.is_none());
+    app.notify_rating_changed("Song", "Artist", 4);
+}

@@ -206,6 +206,7 @@ impl SettingsService {
     delegate_setter!(set_bit_perfect, BitPerfectMode);
     delegate_setter!(set_crossfade_duration, u32);
     delegate_setter!(set_rating_reminder_enabled, bool);
+    delegate_setter!(set_rating_change_notification_enabled, bool);
     delegate_setter!(set_rating_reminder_trigger, RatingReminderTrigger);
     delegate_setter!(set_rating_reminder_percent, u32);
     delegate_setter!(set_rewind_on_previous, bool);

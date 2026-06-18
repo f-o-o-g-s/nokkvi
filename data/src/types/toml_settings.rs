@@ -181,6 +181,10 @@ pub struct TomlSettings {
     // -- Rating reminder --
     #[serde(default)]
     pub rating_reminder_enabled: bool,
+    /// Whether to fire a desktop notification when a rating changes via a
+    /// hotkey or the `nokkvi rate` IPC verb (default false).
+    #[serde(default)]
+    pub rating_change_notification_enabled: bool,
     #[serde(default)]
     pub rating_reminder_trigger: RatingReminderTrigger,
     #[serde(default = "default_rating_reminder_percent")]
@@ -300,6 +304,7 @@ impl Default for TomlSettings {
             show_tray_icon: false,
             close_to_tray: false,
             rating_reminder_enabled: false,
+            rating_change_notification_enabled: false,
             rating_reminder_trigger: RatingReminderTrigger::default(),
             rating_reminder_percent: 75,
         }

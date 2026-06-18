@@ -664,6 +664,7 @@ mod tests {
                 "general.scrobbling_enabled",
                 "general.scrobble_threshold",
                 "general.rating_reminder_enabled",
+                "general.rating_change_notification_enabled",
                 "general.quick_add_to_playlist",
                 "general.default_playlist_name",
                 "general.queue_show_default_playlist",
@@ -687,6 +688,7 @@ mod tests {
             "Rating Reminder",
             &[
                 "general.rating_reminder_enabled",
+                "general.rating_change_notification_enabled",
                 "general.rating_reminder_trigger",
                 "general.rating_reminder_percent",
             ],
@@ -703,6 +705,7 @@ mod tests {
             "Rating Reminder",
             &[
                 "general.rating_reminder_enabled",
+                "general.rating_change_notification_enabled",
                 "general.rating_reminder_trigger",
             ],
         );

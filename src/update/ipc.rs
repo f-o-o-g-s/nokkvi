@@ -579,6 +579,13 @@ define_commands! {
             format!("{} - {}", app.playback.title, app.playback.artist)
         };
         app.toast_success(format!("⭐ Rated {display_name}: {new_rating}/5"));
+        // Confirm the change with a desktop notification (opt-in). Unlike the
+        // in-window toast, this only fires on a real transition: `rate` clamps,
+        // so `nokkvi rate +1` at 5/5 (or `rate 3` while already 3) is a no-op
+        // and must not push a "Rating updated" popup announcing no change.
+        if new_rating as u32 != current {
+            app.notify_rating_changed(&app.playback.title, &app.playback.artist, new_rating as u32);
+        }
         let task = app.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
         Ok((task, json!({ "rating": new_rating })))
     });

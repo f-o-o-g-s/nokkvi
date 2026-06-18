@@ -382,6 +382,11 @@ impl Nokkvi {
         );
 
         self.toast_success(format!("⭐ Rated {display_name}: {new_rating}/5"));
+        // Confirm the change with a desktop notification (opt-in) for when the
+        // window is minimized / on another workspace. Fires for songs, albums,
+        // and artists alike — the summary is kind-agnostic. The no-op boundary
+        // press returned early above, so this only runs on a real change.
+        self.notify_rating_changed(&info.name, &info.artist, new_rating);
 
         self.set_item_rating_task(info.id, info.kind, new_rating as usize, current_rating)
     }

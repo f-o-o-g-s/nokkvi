@@ -33,10 +33,17 @@ const NOTIFICATION_APP_ICON: &str = "org.nokkvi.nokkvi";
 const NOTIFICATION_APP_NAME: &str = "Nokkvi";
 /// Summary line of the reminder.
 const NOTIFICATION_SUMMARY: &str = "Rate this track";
+/// Summary line of the rate-change confirmation. Distinct from the reminder so
+/// the two notifications read differently even though they coalesce.
+const NOTIFICATION_RATING_CHANGED_SUMMARY: &str = "Rating updated";
 /// How long (ms) the reminder stays up before the daemon auto-dismisses it.
 /// Generous on purpose — the feature exists to catch a user who has drifted to
 /// another task. Daemons may override this with their own policy.
 const RATING_REMINDER_EXPIRE_MS: i32 = 30_000;
+/// How long (ms) the rate-change confirmation stays up. Shorter than the
+/// reminder: a confirmation is a transient acknowledgement, not a lingering
+/// call to action.
+const RATING_CHANGED_EXPIRE_MS: i32 = 5_000;
 
 /// Hand-rolled proxy for the freedesktop notification spec. zbus generates the
 /// `notify` call from this trait.
@@ -65,6 +72,13 @@ trait Notifications {
 pub(crate) enum NotificationCommand {
     /// Show (or coalesce-replace) the rate-this-track reminder.
     ShowRatingReminder { title: String, artist: String },
+    /// Show (or coalesce-replace) a confirmation of the new rating, fired when
+    /// the user rates via a hotkey or the `nokkvi rate` IPC verb.
+    ShowRatingChanged {
+        title: String,
+        artist: String,
+        rating: u32,
+    },
 }
 
 /// Handle used by the app to push reminders to the notification service.
@@ -83,6 +97,16 @@ impl NotificationConnection {
             .sender
             .send(NotificationCommand::ShowRatingReminder { title, artist });
     }
+
+    /// Show (or coalesce-replace) a confirmation of the new 0..=5 rating for
+    /// the given track.
+    pub(crate) fn show_rating_changed(&self, title: String, artist: String, rating: u32) {
+        let _ = self.sender.send(NotificationCommand::ShowRatingChanged {
+            title,
+            artist,
+            rating,
+        });
+    }
 }
 
 /// Events emitted from the notification service back to the app.
@@ -99,6 +123,22 @@ fn reminder_body(title: &str, artist: &str) -> String {
     } else {
         format!("{title} · {artist}")
     }
+}
+
+/// Build the rate-change confirmation body from the track, its artist, and the
+/// new 0..=5 rating. A `rating` of 0 means the rating was cleared, which reads
+/// as "Rating cleared" rather than "0/5" so an away user does not mistake it
+/// for a never-rated track. The non-zero form pairs a star glyph row with the
+/// explicit `N/5` count: the glyphs give at-a-glance shape, the number stays
+/// unambiguous on daemons that render ★/☆ alike and for screen readers.
+fn rating_changed_body(title: &str, artist: &str, rating: u32) -> String {
+    let tail = reminder_body(title, artist);
+    if rating == 0 {
+        return format!("☆☆☆☆☆ · Rating cleared · {tail}");
+    }
+    let filled = rating.min(5) as usize;
+    let stars: String = "★".repeat(filled) + &"☆".repeat(5 - filled);
+    format!("{stars} · {rating}/5 · {tail}")
 }
 
 /// Run the notification service as an Iced subscription.
@@ -131,21 +171,37 @@ pub(crate) fn run() -> impl Sipper<Never, NotificationEvent> {
         // coalesce — only one is ever on screen.
         let mut live_id = 0u32;
 
-        while let Some(NotificationCommand::ShowRatingReminder { title, artist }) =
-            cmd_rx.recv().await
-        {
-            let body = reminder_body(&title, &artist);
+        while let Some(cmd) = cmd_rx.recv().await {
+            // Each command resolves to its own summary/body/expire; both then
+            // share the single notify call with `live_id` as `replaces_id` so a
+            // fresh reminder or confirmation coalesces over the previous one.
+            let (summary, body, expire) = match cmd {
+                NotificationCommand::ShowRatingReminder { title, artist } => (
+                    NOTIFICATION_SUMMARY,
+                    reminder_body(&title, &artist),
+                    RATING_REMINDER_EXPIRE_MS,
+                ),
+                NotificationCommand::ShowRatingChanged {
+                    title,
+                    artist,
+                    rating,
+                } => (
+                    NOTIFICATION_RATING_CHANGED_SUMMARY,
+                    rating_changed_body(&title, &artist, rating),
+                    RATING_CHANGED_EXPIRE_MS,
+                ),
+            };
             let hints: HashMap<&str, Value> = HashMap::new();
             match proxy
                 .notify(
                     NOTIFICATION_APP_NAME,
                     live_id,
                     NOTIFICATION_APP_ICON,
-                    NOTIFICATION_SUMMARY,
+                    summary,
                     &body,
                     &[],
                     hints,
-                    RATING_REMINDER_EXPIRE_MS,
+                    expire,
                 )
                 .await
             {
@@ -171,5 +227,38 @@ mod tests {
     #[test]
     fn reminder_body_omits_separator_when_artist_blank() {
         assert_eq!(reminder_body("Song", ""), "Song");
+    }
+
+    #[test]
+    fn rating_changed_body_renders_stars_and_count() {
+        assert_eq!(
+            rating_changed_body("Song", "Artist", 4),
+            "★★★★☆ · 4/5 · Song · Artist"
+        );
+    }
+
+    #[test]
+    fn rating_changed_body_full_marks() {
+        assert_eq!(
+            rating_changed_body("Song", "Artist", 5),
+            "★★★★★ · 5/5 · Song · Artist"
+        );
+    }
+
+    #[test]
+    fn rating_changed_body_cleared_reads_as_cleared_not_zero() {
+        assert_eq!(
+            rating_changed_body("Song", "Artist", 0),
+            "☆☆☆☆☆ · Rating cleared · Song · Artist"
+        );
+    }
+
+    #[test]
+    fn rating_changed_body_omits_artist_when_blank() {
+        // An artist item (rated via hotkey) carries an empty artist field.
+        assert_eq!(
+            rating_changed_body("Radiohead", "", 5),
+            "★★★★★ · 5/5 · Radiohead"
+        );
     }
 }

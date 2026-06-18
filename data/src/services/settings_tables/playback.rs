@@ -245,6 +245,29 @@ define_settings! {
                 read_field: |d| d.rating_reminder_enabled,
             },
         },
+        RatingChangeNotificationEnabled {
+            key: "general.rating_change_notification_enabled",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_rating_change_notification_enabled(v),
+            toml_apply: |ts, p| {
+                p.rating_change_notification_enabled = ts.rating_change_notification_enabled;
+            },
+            read: |src, out| {
+                out.rating_change_notification_enabled = src.rating_change_notification_enabled;
+            },
+            write: |ps, ts| {
+                ts.rating_change_notification_enabled = ps.rating_change_notification_enabled;
+            },
+            ui_meta: {
+                label: "Rating Change Notification",
+                category: "Rating Reminder",
+                subtitle: Some(
+                    "Desktop notification with the new star rating when you rate by hotkey or CLI · silent when you click stars in-window",
+                ),
+                default: false,
+                read_field: |d| d.rating_change_notification_enabled,
+            },
+        },
         RatingReminderTriggerKey {
             key: "general.rating_reminder_trigger",
             value_type: Enum,
@@ -421,25 +444,26 @@ mod tests {
             default_playlist_name: "".into(),
             queue_show_default_playlist: false,
             rating_reminder_enabled: false,
+            rating_change_notification_enabled: false,
             rating_reminder_trigger: "On Scrobble".into(),
             rating_reminder_percent: 75,
         }
     }
 
-    /// 11 entries get ui_meta: 4 unconditional Playback rows (crossfade enable,
+    /// 12 entries get ui_meta: 4 unconditional Playback rows (crossfade enable,
     /// crossfade duration, rewind-on-previous, volume normalization), 2
-    /// Scrobbling, 3 Rating Reminder (enable, trigger, percentage), and 2
-    /// Playlists. The 5 conditional AGC/RG knobs and the
+    /// Scrobbling, 4 Rating Reminder (enable, change-notification, trigger,
+    /// percentage), and 2 Playlists. The 5 conditional AGC/RG knobs and the
     /// `default_playlist_name` dialog row stay hand-written; the 6
     /// lifecycle-only entries (queue column visibility, opacity_gradient,
     /// rounded_mode) emit nothing here. The Rating Reminder trigger/percentage
     /// rows are emitted here unconditionally but the UI builder
     /// (`items_playback.rs`) only splices them in when the feature is enabled.
     #[test]
-    fn build_playback_tab_settings_items_emits_twelve_rows() {
+    fn build_playback_tab_settings_items_emits_thirteen_rows() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 12);
+        assert_eq!(entries.len(), 13);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -817,6 +841,7 @@ mod tests {
             default_playlist_name: live.default_playlist_name.clone().into(),
             queue_show_default_playlist: live.queue_show_default_playlist,
             rating_reminder_enabled: live.rating_reminder_enabled,
+            rating_change_notification_enabled: live.rating_change_notification_enabled,
             rating_reminder_trigger: live.rating_reminder_trigger.as_label().into(),
             rating_reminder_percent: i64::from(live.rating_reminder_percent),
         };

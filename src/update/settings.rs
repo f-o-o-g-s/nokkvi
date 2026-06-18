@@ -101,6 +101,7 @@ impl Nokkvi {
             default_playlist_name: self.settings.default_playlist_name.clone().into(),
             queue_show_default_playlist: self.settings.queue_show_default_playlist,
             rating_reminder_enabled: self.settings.rating_reminder_enabled,
+            rating_change_notification_enabled: self.settings.rating_change_notification_enabled,
             rating_reminder_trigger: self.settings.rating_reminder_trigger.as_label().into(),
             rating_reminder_percent: i64::from(self.settings.rating_reminder_percent),
         };

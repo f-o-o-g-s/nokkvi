@@ -125,6 +125,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             icon: REMIND,
         },
         macro_rows.take("general.rating_reminder_enabled"),
+        macro_rows.take("general.rating_change_notification_enabled"),
     ]);
 
     // The timing controls only matter once the reminder is enabled; the

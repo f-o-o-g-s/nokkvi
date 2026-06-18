@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - A Scrollbar setting (Settings → Interface → Slot List) controls how the slot-list scrollbar appears: Always (the default; a permanent track that reserves a column on the right so rows never sit under it), On hover (a fade-in handle that floats over the list), or Hidden (no scrollbar; mouse-wheel scrolling still works).
+- A Rating Change Notification setting (Settings → Playback) sends a desktop notification with the new star rating when you rate a track by hotkey or CLI.
 
 ### Changed
 

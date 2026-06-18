@@ -109,6 +109,13 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "general.scrobbling_enabled" => &["last.fm", "lastfm", "listenbrainz", "play history"],
         "general.scrobble_threshold" => &["last.fm", "lastfm", "play count", "submit point"],
         "general.rating_reminder_enabled" => &["stars", "rate prompt"],
+        "general.rating_change_notification_enabled" => &[
+            "stars",
+            "rating popup",
+            "rate confirmation",
+            "hotkey",
+            "notify",
+        ],
         "general.rating_reminder_trigger" => &["stars", "when to remind", "rate prompt"],
         "general.quick_add_to_playlist" => &["skip dialog", "one click add", "fast add"],
         "general.default_playlist_name" => {

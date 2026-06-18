@@ -85,4 +85,20 @@ impl Nokkvi {
             connection.show_rating_reminder(title, artist);
         }
     }
+
+    /// Fire a rate-change desktop notification for `name` / `artist` set to
+    /// `rating` (0..=5), when the feature is enabled and the notification
+    /// service is connected — a no-op otherwise. Unlike the reminder this has
+    /// no suppression latch: it is driven directly from the hotkey and IPC
+    /// rating handlers, which only call it on an actual change (the hotkey path
+    /// returns early on a no-op boundary press; the IPC path guards on
+    /// `new_rating != current`).
+    pub(crate) fn notify_rating_changed(&self, name: &str, artist: &str, rating: u32) {
+        if !self.settings.rating_change_notification_enabled {
+            return;
+        }
+        if let Some(connection) = &self.notification_connection {
+            connection.show_rating_changed(name.to_string(), artist.to_string(), rating);
+        }
+    }
 }
