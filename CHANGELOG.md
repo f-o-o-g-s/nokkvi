@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The slot list no longer shows a small gray corner artifact at its top-right and bottom-right edges when Rounded Corners mode is on.
+
 ### Removed
 
 ## v0.9.3 — 2026-06-17

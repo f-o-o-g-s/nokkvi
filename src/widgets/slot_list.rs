@@ -424,9 +424,9 @@ impl SlotListSlotStyle {
             // 1 px `theme::border()` hairline as a shared separator. Iced
             // draws borders fully inside the rect, so adjacent rows'
             // borders overlap into one clean line. In rounded mode the
-            // outer list shell owns its `ui_radius_lg()` corners — inside
-            // the shell every row is still flush, so the per-row hairline
-            // continues to read as a single separator.
+            // outer list shell owns the sealed `theme::border()` perimeter
+            // (square corners) — inside the shell every row is still flush,
+            // so the per-row hairline continues to read as a single separator.
             Self {
                 bg_color: Color { a: opacity, ..base },
                 border_color: Color {
@@ -475,10 +475,10 @@ pub(crate) const SLOT_LIST_SLOT_PADDING: f32 = 8.0;
 /// Border radius for slot list slots — always zero.
 ///
 /// Slot rows stay square in both flat and rounded modes. The rounded-mode
-/// list shell (`slot_list_background_container`) keeps its `ui_radius_lg()`
-/// corners and clips the touching row hairlines at its rounded edges via
-/// `clip(true)`, so the outer perimeter still reads as a sealed shell even
-/// though every individual row inside it has 0 px corners.
+/// list shell (`slot_list_background_container`) draws a square
+/// `theme::border()` perimeter and clips the touching row hairlines at its
+/// edges via `clip(true)`, so the outer perimeter still reads as a sealed
+/// shell even though every individual row inside it has 0 px corners.
 pub(crate) fn slot_list_border_radius() -> iced::border::Radius {
     iced::border::Radius::default()
 }
@@ -1935,11 +1935,11 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
 /// Both modes paint a `bg0_hard()` fill behind the slot rows and run
 /// edge-to-edge — no L/R padding (rows align with the view header strip
 /// above) and no bottom padding (the last row meets the player bar with
-/// zero gap). Rounded mode adds an outer `ui_radius_lg()` shell with a
-/// 1 px `theme::border()` outline that clips the touching row hairlines
-/// into a single sealed perimeter. The shell's LEFT corners are kept
-/// square on purpose — see the inline note on the `radius:` field for why
-/// rounding them there bleeds the background behind the shell.
+/// zero gap). Rounded mode adds an outer 1 px `theme::border()` outline
+/// that clips the touching row hairlines into a single sealed perimeter.
+/// The shell's corners are kept square in every mode — see the inline note
+/// on the `radius:` field for why rounding an edge-to-edge shell under
+/// `clip(true)` bleeds the base theme background at the corners.
 pub(crate) fn slot_list_background_container<'a, Message: 'a>(
     slot_list_content: Element<'a, Message>,
 ) -> Element<'a, Message> {
@@ -1952,20 +1952,19 @@ pub(crate) fn slot_list_background_container<'a, Message: 'a>(
                 border: iced::Border {
                     color: theme::border(),
                     width: 1.0,
-                    // Square both LEFT corners. This shell runs edge-to-edge
-                    // and butts flush against the view header strip above it
-                    // and the player bar below it (see this fn's doc comment),
-                    // so a rounded left corner plus `clip(true)` leaves the
-                    // corner wedge outside the arc unpainted — the lighter
-                    // surface sitting behind the shell then bleeds through
-                    // there. Top-left is most visible under the `bg0_soft`
-                    // select-all header bar; bottom-left shows the same wedge
-                    // where the last row meets the player bar. Both RIGHT
-                    // corners are hidden by the slot-list scrollbar, which is
-                    // why only the left edge shows it. Zeroing the left edge
-                    // removes both wedges while the right keeps the
-                    // `ui_radius_lg()` shell rounding. Intentional — not a bug.
-                    radius: theme::ui_radius_lg().left(0.0),
+                    // Square ALL corners. This shell runs edge-to-edge and
+                    // butts flush against the view header strip above it and the
+                    // player bar below it (see this fn's doc comment), so a
+                    // rounded corner plus `clip(true)` leaves the wedge outside
+                    // the arc unpainted — the lighter surface behind the shell
+                    // bleeds through there (reads as gray from the base theme).
+                    // The left corners always showed it; the right corners do
+                    // too — the slot-list scrollbar does NOT reliably cover them
+                    // (the transient bar fades out, and the always-on bar fills
+                    // only its track, not the corner wedge). The scrollbar
+                    // handle keeps its own pill rounding in `scroll_indicator`;
+                    // the shell itself stays square in every mode.
+                    radius: 0.0.into(),
                 },
                 ..Default::default()
             })
