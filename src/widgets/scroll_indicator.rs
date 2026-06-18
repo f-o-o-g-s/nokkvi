@@ -8,7 +8,8 @@
 //! - `Always`: a permanent track + handle that never fades. The caller reserves
 //!   a gutter column (right padding) so the bar never floats over content.
 //! - `Hidden`: nothing is drawn and no gutter is reserved; mouse-wheel scrolling
-//!   still works via the wheel handler that wraps the list upstream.
+//!   still works via the surrounding wheel handler (`wrap_with_scroll`, applied
+//!   around this widget's result by the slot-list view builders).
 
 use iced::{
     Alignment, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme,
@@ -375,6 +376,11 @@ impl<'a, Message: Clone + 'a> From<ScrollbarOverlay<'a, Message>> for Element<'a
 /// Wrap a slot list element with a scroll indicator, honoring the user's
 /// [`ScrollbarVisibility`] setting.
 ///
+/// Call this on the raw content and wrap the RESULT in the wheel `mouse_area`
+/// (`wrap_with_scroll`), not the other way around — the `Always` gutter narrows
+/// the content here, so the wheel handler must stay full-width on the outside
+/// or it would lose wheel events over the reserved gutter.
+///
 /// - `OnHover` (default): a transient overlay handle on the right edge that
 ///   fades in on hover/scroll. The list keeps its full width (Stack, no shift),
 ///   and nothing is drawn when the list fits the viewport.
@@ -382,7 +388,7 @@ impl<'a, Message: Clone + 'a> From<ScrollbarOverlay<'a, Message>> for Element<'a
 ///   reserved on the right (content narrows) so the bar never floats over rows;
 ///   the track stays drawn even when the list fits (the handle is omitted then).
 /// - `Hidden`: returns `inner` untouched — no bar, no gutter. Mouse-wheel
-///   scrolling still works via the wheel handler applied upstream.
+///   scrolling still works via the surrounding wheel handler.
 ///
 /// The handle height is proportional to the visible viewport
 /// (`slot_count / total_items`), and styling uses the app's theme colors.
@@ -407,14 +413,16 @@ pub(crate) fn wrap_with_scroll_indicator<'a, Message: Clone + 'a>(
         return inner;
     }
 
-    let always = matches!(mode, ScrollbarVisibility::Always);
-    let has_overflow = total_items > sl.slot_count && total_items > 0;
-
     // A truly empty list has nothing to show or reserve a column for, in any
     // mode — fall back to plain content (full width, no track).
     if total_items == 0 {
         return inner;
     }
+
+    let always = matches!(mode, ScrollbarVisibility::Always);
+    // `total_items > 0` is guaranteed by the early-return above, so a bare
+    // `>` against the unsigned `slot_count` is sufficient.
+    let has_overflow = total_items > sl.slot_count;
 
     // Transient mode draws nothing when the list fits the viewport. Always mode
     // keeps the reserved gutter + track even when it fits, so the column doesn't

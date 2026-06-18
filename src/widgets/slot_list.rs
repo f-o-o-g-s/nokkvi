@@ -761,14 +761,20 @@ pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
     .width(Length::Fill)
     .height(Length::Fill)
     .into();
-    let inner = wrap_with_scroll(inner, on_scroll_up, on_scroll_down);
-    crate::widgets::scroll_indicator::wrap_with_scroll_indicator(
+    // Reserve the gutter (Always mode) on the content FIRST, then wrap the
+    // whole stack in the wheel `mouse_area`. Order matters: wrapping the
+    // mouse_area first and padding it afterward would shrink the wheel
+    // hit-region, so a wheel over the reserved scrollbar gutter would do
+    // nothing. Wrapping the mouse_area LAST keeps it full-width, so the wheel
+    // works everywhere — including over the permanent track.
+    let indicated = crate::widgets::scroll_indicator::wrap_with_scroll_indicator(
         inner,
         sl,
         total_items,
         row_height,
         on_seek,
-    )
+    );
+    wrap_with_scroll(indicated, on_scroll_up, on_scroll_down)
 }
 
 /// Render a slot list view with scroll support AND drag-and-drop reordering.
@@ -845,14 +851,20 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
         .height(Length::Fill)
         .into();
 
-    let inner = wrap_with_scroll(inner, on_scroll_up, on_scroll_down);
-    crate::widgets::scroll_indicator::wrap_with_scroll_indicator(
+    // Reserve the gutter (Always mode) on the content FIRST, then wrap the
+    // whole stack in the wheel `mouse_area`. Order matters: wrapping the
+    // mouse_area first and padding it afterward would shrink the wheel
+    // hit-region, so a wheel over the reserved scrollbar gutter would do
+    // nothing. Wrapping the mouse_area LAST keeps it full-width, so the wheel
+    // works everywhere — including over the permanent track.
+    let indicated = crate::widgets::scroll_indicator::wrap_with_scroll_indicator(
         inner,
         sl,
         total_items,
         row_height,
         on_seek,
-    )
+    );
+    wrap_with_scroll(indicated, on_scroll_up, on_scroll_down)
 }
 
 /// Build the slot elements for a slot list view.
