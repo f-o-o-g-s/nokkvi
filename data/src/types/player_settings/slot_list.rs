@@ -74,10 +74,11 @@ define_labeled_enum! {
     pub enum ScrollbarVisibility {
         /// Transient: a handle that appears on hover/scroll and fades out,
         /// floating over the list (the original behavior). Reserves no width.
-        #[default]
         OnHover { label: "On hover", wire: "on_hover" },
-        /// Permanent: a visible track + handle that never fades and reserves a
-        /// gutter column on the right, so list rows never sit under the bar.
+        /// Permanent (default): a visible track + handle that never fades and
+        /// reserves a gutter column on the right, so list rows never sit under
+        /// the bar.
+        #[default]
         Always { label: "Always", wire: "always" },
         /// No scrollbar at all — no track, no handle, no reserved gutter.
         /// Mouse-wheel scrolling still works.
@@ -176,9 +177,9 @@ mod tests {
         ] {
             assert_eq!(ScrollbarVisibility::from_label(m.as_label()), m);
         }
-        // Default is the original transient behavior — the picker default and
+        // Default is the always-visible gutter track — the picker default and
         // the ui_meta default literal both depend on this exact label.
-        assert_eq!(ScrollbarVisibility::default(), ScrollbarVisibility::OnHover);
-        assert_eq!(ScrollbarVisibility::OnHover.as_label(), "On hover");
+        assert_eq!(ScrollbarVisibility::default(), ScrollbarVisibility::Always);
+        assert_eq!(ScrollbarVisibility::Always.as_label(), "Always");
     }
 }

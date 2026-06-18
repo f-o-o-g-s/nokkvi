@@ -1219,7 +1219,7 @@ mod sentinel_roundtrip_tests {
             slot_row_height: SlotRowHeight::Spacious, // default Default
             opacity_gradient: false,               // default true
             slot_text_links: false,                // default true
-            scrollbar_visibility: crate::types::player_settings::ScrollbarVisibility::Always, // default On hover
+            scrollbar_visibility: crate::types::player_settings::ScrollbarVisibility::Hidden, // default Always
 
             // Playback / crossfade
             crossfade_enabled: true,             // default false

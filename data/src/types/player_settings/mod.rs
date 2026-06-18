@@ -69,8 +69,9 @@ pub struct LivePlayerSettings {
     pub opacity_gradient: bool,
     /// Whether clickable text links in slot list items are enabled (default: true)
     pub slot_text_links: bool,
-    /// How the slot-list scrollbar is shown (default On hover — the transient
-    /// fade handle). `Always` reserves a permanent gutter; `Hidden` removes it.
+    /// How the slot-list scrollbar is shown (default `Always` — a permanent
+    /// gutter track). `OnHover` is the transient fade handle; `Hidden` removes
+    /// the bar entirely.
     pub scrollbar_visibility: ScrollbarVisibility,
     /// Whether crossfade between tracks is enabled
     pub crossfade_enabled: bool,

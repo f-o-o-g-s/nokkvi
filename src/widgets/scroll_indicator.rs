@@ -3,10 +3,10 @@
 //! Custom widget that overlays a proportionally-sized scrollbar handle on the
 //! right edge of the slot list. Behavior is governed by the user's
 //! [`ScrollbarVisibility`] setting:
-//! - `OnHover` (default): a transient handle that fades in on hover/scroll and
-//!   floats over a Stack — the slot list keeps its full width, no shifting.
-//! - `Always`: a permanent track + handle that never fades. The caller reserves
-//!   a gutter column (right padding) so the bar never floats over content.
+//! - `OnHover`: a transient handle that fades in on hover/scroll and floats over
+//!   a Stack — the slot list keeps its full width, no shifting.
+//! - `Always` (default): a permanent track + handle that never fades. The caller
+//!   reserves a gutter column (right padding) so the bar never floats over content.
 //! - `Hidden`: nothing is drawn and no gutter is reserved; mouse-wheel scrolling
 //!   still works via the surrounding wheel handler (`wrap_with_scroll`, applied
 //!   around this widget's result by the slot-list view builders).
@@ -381,10 +381,10 @@ impl<'a, Message: Clone + 'a> From<ScrollbarOverlay<'a, Message>> for Element<'a
 /// the content here, so the wheel handler must stay full-width on the outside
 /// or it would lose wheel events over the reserved gutter.
 ///
-/// - `OnHover` (default): a transient overlay handle on the right edge that
+/// - `OnHover`: a transient overlay handle on the right edge that
 ///   fades in on hover/scroll. The list keeps its full width (Stack, no shift),
 ///   and nothing is drawn when the list fits the viewport.
-/// - `Always`: a permanent track + handle. A gutter the width of the track is
+/// - `Always` (default): a permanent track + handle. A gutter the width of the track is
 ///   reserved on the right (content narrows) so the bar never floats over rows;
 ///   the track stays drawn even when the list fits (the handle is omitted then).
 /// - `Hidden`: returns `inner` untouched — no bar, no gutter. Mouse-wheel

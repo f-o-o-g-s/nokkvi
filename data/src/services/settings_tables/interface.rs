@@ -206,7 +206,7 @@ define_settings! {
                      Always: a permanent track keeps a column reserved on the right · \
                      Hidden: no scrollbar at all",
                 ),
-                default: "On hover",
+                default: "Always",
                 options: &["On hover", "Always", "Hidden"],
                 read_field: |d| d.scrollbar_visibility.as_ref(),
             },
@@ -512,7 +512,7 @@ mod tests {
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             slot_text_links: true,
-            scrollbar_visibility: "On hover".into(),
+            scrollbar_visibility: "Always".into(),
             font_family: "".into(),
             strip_show_title: true,
             strip_show_artist: true,

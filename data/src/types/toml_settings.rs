@@ -90,10 +90,10 @@ pub struct TomlSettings {
     pub slot_row_height: SlotRowHeight,
     pub opacity_gradient: bool,
     pub slot_text_links: bool,
-    /// How the slot-list scrollbar is shown (default On hover — the transient
-    /// fade handle). `Always` reserves a permanent gutter; `Hidden` removes it.
-    /// Missing keys fill from the container `#[serde(default)]` ->
-    /// `TomlSettings::default()`, the anchor the sparse-strip round-trip is
+    /// How the slot-list scrollbar is shown (default `Always` — a permanent
+    /// gutter track). `OnHover` is the transient fade handle; `Hidden` removes
+    /// the bar entirely. Missing keys fill from the container `#[serde(default)]`
+    /// -> `TomlSettings::default()`, the anchor the sparse-strip round-trip is
     /// pinned against.
     pub scrollbar_visibility: ScrollbarVisibility,
     pub horizontal_volume: bool,

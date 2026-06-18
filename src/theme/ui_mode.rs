@@ -105,7 +105,7 @@ pub(super) static UI_MODE: UiModeFlags = UiModeFlags {
     slot_row_height: AtomicU8::new(SlotRowHeight::Default as u8),
     opacity_gradient: AtomicBool::new(true),
     slot_text_links: AtomicBool::new(true),
-    scrollbar_visibility: AtomicU8::new(ScrollbarVisibility::OnHover as u8),
+    scrollbar_visibility: AtomicU8::new(ScrollbarVisibility::Always as u8),
     horizontal_volume: AtomicBool::new(false),
     autohide_toolbar: AtomicBool::new(false),
     autohide_toolbar_height: AtomicU8::new(6),
@@ -480,7 +480,7 @@ atomic_u8_enum! {
         OnHover,
         Always,
         Hidden,
-    } default OnHover
+    } default Always
 }
 
 /// How the slot-list scrollbar is shown (OnHover / Always / Hidden). Read by
