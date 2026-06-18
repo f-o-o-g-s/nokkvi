@@ -1,12 +1,15 @@
 //! Interface tab setting entries — navigation, lists, player bar, font, and
 //! metadata strip.
 //!
-//! 16 flat rows come from `define_settings!` via
-//! `build_interface_tab_settings_items` (2 Navigation + 5 Slot List + 1
-//! Player Bar + 5 Metadata Strip + 3 Artwork Column: mode dropdown,
-//! `artwork_auto_max_pct` slider, `artwork_vertical_height_pct` slider). The
-//! two auto-hide sub-controls (`autohide_toolbar_height` / `_grip`) are
-//! inserted beneath the Auto-hide Toolbar toggle only while it's enabled.
+//! 18 rows come from `define_settings!` via `build_interface_tab_settings_items`
+//! (2 Navigation + 7 Slot List + 1 Player Bar + 5 Metadata Strip + 3 Artwork
+//! Column: mode dropdown, `artwork_auto_max_pct` slider,
+//! `artwork_vertical_height_pct` slider). The Slot List count includes the
+//! `scrollbar_visibility` dropdown plus the three auto-hide sub-controls
+//! (`autohide_collapsed_appearance` / `autohide_toolbar_height` /
+//! `autohide_toolbar_grip`), which are inserted beneath the Auto-hide Toolbar
+//! toggle only while it's enabled (height + grip only for the Hairline
+//! appearance).
 //! A MiniPlayer-only "Visible Controls" ToggleSet (`__toggle_mini_player_controls`
 //! → the data-only `general.mini_player_show_volume` / `general.mini_player_show_modes`
 //! settings) is hand-inserted beneath the Player Bar row only when
@@ -59,6 +62,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         },
         macro_rows.take("general.slot_row_height"),
         macro_rows.take("general.slot_text_links"),
+        macro_rows.take("general.scrollbar_visibility"),
         macro_rows.take("general.autohide_toolbar"),
         // --- Player Bar ---
         SettingsEntry::Header {

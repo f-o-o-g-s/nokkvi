@@ -588,6 +588,7 @@ mod tests {
                 "general.nav_display_mode",
                 "general.slot_row_height",
                 "general.slot_text_links",
+                "general.scrollbar_visibility",
                 "general.autohide_toolbar",
                 "general.horizontal_volume",
                 "font_family",

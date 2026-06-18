@@ -75,6 +75,8 @@ pub struct InterfaceSettingsData {
     pub mini_player_show_volume: bool,
     pub mini_player_show_modes: bool,
     pub slot_text_links: bool,
+    /// Scrollbar visibility label (On hover / Always / Hidden).
+    pub scrollbar_visibility: Cow<'static, str>,
     pub font_family: Cow<'static, str>,
     pub strip_show_title: bool,
     pub strip_show_artist: bool,
@@ -113,6 +115,7 @@ impl Default for InterfaceSettingsData {
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             slot_text_links: false,
+            scrollbar_visibility: Cow::Borrowed("test-default"),
             font_family: Cow::Borrowed("test-default"),
             strip_show_title: false,
             strip_show_artist: false,

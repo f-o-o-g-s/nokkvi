@@ -65,6 +65,26 @@ define_labeled_enum! {
     }
 }
 
+define_labeled_enum! {
+    /// How the slot-list scrollbar is shown.
+    ///
+    /// Serializes to snake_case strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum ScrollbarVisibility {
+        /// Transient: a handle that appears on hover/scroll and fades out,
+        /// floating over the list (the original behavior). Reserves no width.
+        #[default]
+        OnHover { label: "On hover", wire: "on_hover" },
+        /// Permanent: a visible track + handle that never fades and reserves a
+        /// gutter column on the right, so list rows never sit under the bar.
+        Always { label: "Always", wire: "always" },
+        /// No scrollbar at all — no track, no handle, no reserved gutter.
+        /// Mouse-wheel scrolling still works.
+        Hidden { label: "Hidden", wire: "hidden" },
+    }
+}
+
 impl SlotRowHeight {
     /// Target pixel height for this density level.
     pub fn to_pixels(self) -> u8 {
@@ -145,5 +165,20 @@ mod tests {
         );
         // The picker options + items_interface gating depend on this exact label.
         assert_eq!(CollapsedAppearance::CountStrip.as_label(), "Count strip");
+    }
+
+    #[test]
+    fn scrollbar_visibility_label_roundtrip_and_default() {
+        for m in [
+            ScrollbarVisibility::OnHover,
+            ScrollbarVisibility::Always,
+            ScrollbarVisibility::Hidden,
+        ] {
+            assert_eq!(ScrollbarVisibility::from_label(m.as_label()), m);
+        }
+        // Default is the original transient behavior — the picker default and
+        // the ui_meta default literal both depend on this exact label.
+        assert_eq!(ScrollbarVisibility::default(), ScrollbarVisibility::OnHover);
+        assert_eq!(ScrollbarVisibility::OnHover.as_label(), "On hover");
     }
 }

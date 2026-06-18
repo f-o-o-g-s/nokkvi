@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A Scrollbar setting (Settings → Interface → Slot List) controls how the slot-list scrollbar appears: On hover (the default fade-in handle that floats over the list), Always (a permanent track that reserves a column on the right so rows never sit under it), or Hidden (no scrollbar; mouse-wheel scrolling still works).
+
 ### Changed
 
 ### Fixed

@@ -416,6 +416,14 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_scrollbar_visibility(
+        &mut self,
+        mode: crate::types::player_settings::ScrollbarVisibility,
+    ) -> Result<()> {
+        self.settings.player.scrollbar_visibility = mode;
+        self.save()
+    }
+
     pub fn set_mini_player_show_volume(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.mini_player_show_volume = enabled;
         self.save()
@@ -1211,6 +1219,7 @@ mod sentinel_roundtrip_tests {
             slot_row_height: SlotRowHeight::Spacious, // default Default
             opacity_gradient: false,               // default true
             slot_text_links: false,                // default true
+            scrollbar_visibility: crate::types::player_settings::ScrollbarVisibility::Always, // default On hover
 
             // Playback / crossfade
             crossfade_enabled: true,             // default false
@@ -1422,6 +1431,7 @@ mod sentinel_roundtrip_tests {
         assert_eq!(ui_ps1.slot_row_height, ui_ps2.slot_row_height);
         assert_eq!(ui_ps1.opacity_gradient, ui_ps2.opacity_gradient);
         assert_eq!(ui_ps1.slot_text_links, ui_ps2.slot_text_links);
+        assert_eq!(ui_ps1.scrollbar_visibility, ui_ps2.scrollbar_visibility);
 
         // Playback / crossfade
         assert_eq!(ui_ps1.crossfade_enabled, ui_ps2.crossfade_enabled);

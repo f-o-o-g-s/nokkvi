@@ -62,6 +62,7 @@ impl Nokkvi {
             mini_player_show_volume: crate::theme::mini_player_show_volume(),
             mini_player_show_modes: crate::theme::mini_player_show_modes(),
             slot_text_links: crate::theme::is_slot_text_links(),
+            scrollbar_visibility: crate::theme::scrollbar_visibility().as_label().into(),
             font_family: crate::theme::font_family().into(),
             strip_show_title: crate::theme::strip_show_title(),
             strip_show_artist: crate::theme::strip_show_artist(),

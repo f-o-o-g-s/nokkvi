@@ -7,8 +7,8 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
-            StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
+            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
             VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat,
         },
@@ -92,6 +92,10 @@ pub struct PersistedPlayerSettings {
     /// Whether clickable text links in slot list items are enabled (default: true)
     #[serde(default = "default_true")]
     pub slot_text_links: bool,
+    /// How the slot-list scrollbar is shown (default On hover — the transient
+    /// fade handle). `Always` reserves a permanent gutter; `Hidden` removes it.
+    #[serde(default)]
+    pub scrollbar_visibility: ScrollbarVisibility,
     /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default = "default_true")]
     pub crossfade_enabled: bool,
@@ -387,6 +391,7 @@ impl Default for PersistedPlayerSettings {
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: default_opacity_gradient(),
             slot_text_links: default_true(),
+            scrollbar_visibility: ScrollbarVisibility::default(),
             crossfade_enabled: true,
             bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: default_crossfade_duration_secs(),

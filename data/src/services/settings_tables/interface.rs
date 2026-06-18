@@ -16,8 +16,8 @@ use crate::{
             ARTWORK_AUTO_MAX_PCT_DEFAULT, ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN,
             ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
             ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkStretchFit,
-            CollapsedAppearance, NavDisplayMode, NavLayout, SlotRowHeight, StripClickAction,
-            StripSeparator, TrackInfoDisplay,
+            CollapsedAppearance, NavDisplayMode, NavLayout, ScrollbarVisibility, SlotRowHeight,
+            StripClickAction, StripSeparator, TrackInfoDisplay,
         },
         setting_def::Tab,
         settings_data::InterfaceSettingsData,
@@ -187,6 +187,28 @@ define_settings! {
                 default: "Count strip",
                 options: &["Hairline", "Hidden", "Count strip"],
                 read_field: |d| d.autohide_collapsed_appearance.as_ref(),
+            },
+        },
+        ScrollbarVisibilitySetting {
+            key: "general.scrollbar_visibility",
+            value_type: Enum,
+            setter: |mgr, v: String| {
+                mgr.set_scrollbar_visibility(ScrollbarVisibility::from_label(&v))
+            },
+            toml_apply: |ts, p| p.scrollbar_visibility = ts.scrollbar_visibility,
+            read: |src, out| out.scrollbar_visibility = src.scrollbar_visibility,
+            write: |ps, ts| ts.scrollbar_visibility = ps.scrollbar_visibility,
+            ui_meta: {
+                label: "Scrollbar",
+                category: "Slot List",
+                subtitle: Some(
+                    "On hover: the handle fades in only while you scroll · \
+                     Always: a permanent track keeps a column reserved on the right · \
+                     Hidden: no scrollbar at all",
+                ),
+                default: "On hover",
+                options: &["On hover", "Always", "Hidden"],
+                read_field: |d| d.scrollbar_visibility.as_ref(),
             },
         },
         MiniPlayerShowVolume {
@@ -490,6 +512,7 @@ mod tests {
             mini_player_show_volume: true,
             mini_player_show_modes: true,
             slot_text_links: true,
+            scrollbar_visibility: "On hover".into(),
             font_family: "".into(),
             strip_show_title: true,
             strip_show_artist: true,
@@ -510,17 +533,18 @@ mod tests {
         }
     }
 
-    /// 17 entries get ui_meta — 5 Layout + 4 Slot List (autohide toggle +
-    /// collapsed-appearance + hidden-height + grip) + 1 Views + 4 Metadata
-    /// Strip + 3 Artwork Column (mode dropdown + auto-max-pct slider +
-    /// vertical-height slider). The mini-player show-volume/show-modes toggles
-    /// and the 8 ToggleSet sub-keys (`strip_show_*`, `*_artwork_overlay`) plus
-    /// the conditional `artwork_column_stretch_fit` stay hand-written.
+    /// 18 entries get ui_meta — 5 Layout + 5 Slot List (autohide toggle +
+    /// collapsed-appearance + hidden-height + grip + scrollbar visibility) +
+    /// 1 Views + 4 Metadata Strip + 3 Artwork Column (mode dropdown +
+    /// auto-max-pct slider + vertical-height slider). The mini-player
+    /// show-volume/show-modes toggles and the 8 ToggleSet sub-keys
+    /// (`strip_show_*`, `*_artwork_overlay`) plus the conditional
+    /// `artwork_column_stretch_fit` stay hand-written.
     #[test]
-    fn build_interface_tab_settings_items_emits_seventeen_rows() {
+    fn build_interface_tab_settings_items_emits_eighteen_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 17);
+        assert_eq!(entries.len(), 18);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -717,7 +741,8 @@ mod tests {
         assert!(keys.contains(&"general.autohide_toolbar_height"));
         assert!(keys.contains(&"general.autohide_toolbar_grip"));
         assert!(keys.contains(&"general.autohide_collapsed_appearance"));
-        assert_eq!(keys.len(), 28);
+        assert!(keys.contains(&"general.scrollbar_visibility"));
+        assert_eq!(keys.len(), 29);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated
@@ -822,6 +847,7 @@ mod tests {
             mini_player_show_volume: live.mini_player_show_volume,
             mini_player_show_modes: live.mini_player_show_modes,
             slot_text_links: live.slot_text_links,
+            scrollbar_visibility: live.scrollbar_visibility.as_label().into(),
             font_family: live.font_family.clone().into(),
             strip_show_title: live.strip_show_title,
             strip_show_artist: live.strip_show_artist,

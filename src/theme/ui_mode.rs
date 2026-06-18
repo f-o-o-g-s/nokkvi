@@ -33,6 +33,9 @@ pub(super) struct UiModeFlags {
     pub(super) opacity_gradient: AtomicBool,
     /// Whether clickable text links in slot list items are enabled
     pub(super) slot_text_links: AtomicBool,
+    /// How the slot-list scrollbar is shown (`ScrollbarVisibility` discriminant:
+    /// OnHover / Always / Hidden)
+    pub(super) scrollbar_visibility: AtomicU8,
     /// Whether volume sliders are displayed horizontally in the player bar
     pub(super) horizontal_volume: AtomicBool,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
@@ -102,6 +105,7 @@ pub(super) static UI_MODE: UiModeFlags = UiModeFlags {
     slot_row_height: AtomicU8::new(SlotRowHeight::Default as u8),
     opacity_gradient: AtomicBool::new(true),
     slot_text_links: AtomicBool::new(true),
+    scrollbar_visibility: AtomicU8::new(ScrollbarVisibility::OnHover as u8),
     horizontal_volume: AtomicBool::new(false),
     autohide_toolbar: AtomicBool::new(false),
     autohide_toolbar_height: AtomicU8::new(6),
@@ -466,6 +470,31 @@ pub(crate) fn autohide_collapsed_appearance() -> CollapsedAppearance {
 pub(crate) fn set_autohide_collapsed_appearance(mode: CollapsedAppearance) {
     UI_MODE
         .autohide_collapsed_appearance
+        .store(mode.to_u8(), Ordering::Relaxed);
+}
+
+use nokkvi_data::types::player_settings::ScrollbarVisibility;
+
+atomic_u8_enum! {
+    ScrollbarVisibility {
+        OnHover,
+        Always,
+        Hidden,
+    } default OnHover
+}
+
+/// How the slot-list scrollbar is shown (OnHover / Always / Hidden). Read by
+/// `wrap_with_scroll_indicator` + `ScrollbarOverlay` at draw time.
+#[inline]
+pub(crate) fn scrollbar_visibility() -> ScrollbarVisibility {
+    ScrollbarVisibility::from_u8(UI_MODE.scrollbar_visibility.load(Ordering::Relaxed))
+}
+
+/// Set the slot-list scrollbar visibility mode.
+#[inline]
+pub(crate) fn set_scrollbar_visibility(mode: ScrollbarVisibility) {
+    UI_MODE
+        .scrollbar_visibility
         .store(mode.to_u8(), Ordering::Relaxed);
 }
 

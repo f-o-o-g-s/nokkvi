@@ -12,9 +12,10 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, SlotRowHeight,
-            StripClickAction, TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
-            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
+            NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
+            SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
+            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
+            deserialize_rounded_mode_with_bool_compat,
         },
         view_columns::ViewColumns,
     },
@@ -89,6 +90,12 @@ pub struct TomlSettings {
     pub slot_row_height: SlotRowHeight,
     pub opacity_gradient: bool,
     pub slot_text_links: bool,
+    /// How the slot-list scrollbar is shown (default On hover — the transient
+    /// fade handle). `Always` reserves a permanent gutter; `Hidden` removes it.
+    /// Missing keys fill from the container `#[serde(default)]` ->
+    /// `TomlSettings::default()`, the anchor the sparse-strip round-trip is
+    /// pinned against.
+    pub scrollbar_visibility: ScrollbarVisibility,
     pub horizontal_volume: bool,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
     /// or a sort/search shortcut is used (default true). Missing keys fill from
@@ -253,6 +260,7 @@ impl Default for TomlSettings {
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: false,
             slot_text_links: true,
+            scrollbar_visibility: ScrollbarVisibility::default(),
             horizontal_volume: false,
             autohide_toolbar: true,
             autohide_toolbar_height: 4,
