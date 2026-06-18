@@ -6,16 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- A Scrollbar setting (Settings → Interface → Slot List) controls how the slot-list scrollbar appears: Always (the default; a permanent track that reserves a column on the right so rows never sit under it), On hover (a fade-in handle that floats over the list), or Hidden (no scrollbar; mouse-wheel scrolling still works).
-- A Rating Change Notification setting (Settings → Playback) sends a desktop notification with the new star rating when you rate a track by hotkey or CLI.
-
 ### Changed
 
 ### Fixed
 
-- The slot list no longer shows a small gray corner artifact at its top-right and bottom-right edges when Rounded Corners mode is on.
-
 ### Removed
+
+## v0.9.4 — 2026-06-18
+
+### Added
+
+- A new Scrollbar setting (Settings → Interface → Slot List) shows the slot-list scrollbar Always (default), On hover, or Hidden.
+- A new Rating Change Notification setting (Settings → Playback) shows a desktop notification with the new star count when you rate by hotkey or CLI.
+
+### Fixed
+
+- The slot list no longer shows a small gray corner artifact at its top-right and bottom-right edges when Rounded Corners mode is on.
 
 ## v0.9.3 — 2026-06-17
 
