@@ -850,6 +850,20 @@ impl AudioRenderer {
                 self.bit_perfect_active(),
             );
             self.primary_stream = Some(stream);
+            // Seeking while paused must NOT resume audio. The stream we just
+            // created starts unpaused (its `paused` atomic defaults to false in
+            // StreamingSource), so without this it would immediately play the
+            // seek prebuffer while the engine still reports paused — audible
+            // audio beneath a frozen progress bar / play-pause button. Mirror
+            // pause(): hold the new stream silent at the seek target until the
+            // user resumes. Gated on `self.paused` so seeking while PLAYING is
+            // unaffected.
+            if self.paused
+                && let Some(ref stream) = self.primary_stream
+            {
+                stream.pause();
+                trace!("🔍 [SEEK] paused — re-paused recreated stream to hold at seek target");
+            }
             self.current_stream_bit_perfect = self.bit_perfect_active();
             // Keep current_replay_gain consistent — don't blow it away.
             if let Some(rg) = rg_for_seek {
@@ -1868,6 +1882,41 @@ mod tests {
         // Relaxed but not viable → inert again.
         renderer.pw_volume_active = false;
         assert!(!renderer.crossfade_blocked(&f44, &f96));
+    }
+
+    /// Seeking while PAUSED must keep playback paused and hold the playhead at
+    /// the seek target — never resume. This is the standard media-player
+    /// convention (the WHATWG media element, mpd, mpv et al. leave the paused
+    /// state unchanged on seek).
+    ///
+    /// Scope: this guards the device-free FIELD invariant `seek()` relies on —
+    /// it must not clear `paused` and must record the target in
+    /// `position_offset`, so `position()` reports the held target while paused.
+    /// The stream-level re-pause the fix adds (silencing the recreated output
+    /// stream) is device-bound — `AudioRenderer::new()` leaves `output: None`,
+    /// so no stream is created here — and is owner-verified via `cargo run`.
+    /// `#[tokio::test]` because `new()` needs a running reactor.
+    #[tokio::test]
+    async fn seek_while_paused_holds_playhead_and_stays_paused() {
+        let mut renderer = AudioRenderer::new();
+        renderer.pause();
+        assert!(renderer.paused, "pause() sets the renderer paused flag");
+
+        renderer.seek(5_000);
+
+        assert!(
+            renderer.paused,
+            "seek must NOT clear the paused flag — seeking while paused stays paused"
+        );
+        assert_eq!(
+            renderer.position_offset, 5_000,
+            "seek records the target offset"
+        );
+        assert_eq!(
+            renderer.position(),
+            5_000,
+            "while paused, position reports the held seek target, not an advancing clock"
+        );
     }
 
     const FR: u32 = 44_100 * 2; // 44.1k stereo frame rate

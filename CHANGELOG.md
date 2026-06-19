@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Dragging the progress bar while paused no longer resumes playback; the playhead jumps to the new position and stays paused, keeping the elapsed time, scrub handle, and play button in sync.
+
 ### Removed
 
 ## v0.10.0 — 2026-06-19
