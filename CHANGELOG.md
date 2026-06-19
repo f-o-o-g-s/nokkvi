@@ -6,93 +6,32 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- A new Scope visualizer mode (cycle the visualizer button: Off → Bars → Lines → Scope) draws the time-domain waveform as a circular oscilloscope ring over the now-playing cover art in the Queue, with an optional glowing particle field, beam glow, and its own Settings → Visualizer → Scope section (ring size, sensitivity, fill, glow, particles, and more).
-- The Bars and Lines visualizers can now be drawn over the now-playing cover art instead of the band above the player bar. A new Placement control at the top of Settings → Visualizer → Bars and → Lines picks "over_cover" (on the now-playing cover art in the Queue, while playing — now the default) or "bottom_band" (a band above the player bar, on every view). Each mode is positioned independently. The Visualizer Height setting controls how tall they are over the cover (bottom-anchored), and the surfing boat rides the Lines wave in either placement.
-
 ### Changed
 
-- Motion Trails and Echo are now tuned per visualizer mode. Each mode (Bars, Lines, Scope) has its own Trails and Echo knobs in Settings → Visualizer, replacing the single global pair. Existing global values reset to off; re-enable them per mode.
-
 ### Fixed
-
-- The Queue's Playing-From-Playlist banner now has a divider separating it from the cover art stacked directly above it in a portrait window.
 
 ### Removed
 
-## v0.9.4 — 2026-06-18
+## v0.10.0 — 2026-06-19
 
 ### Added
 
-- A new Scrollbar setting (Settings → Interface → Slot List) shows the slot-list scrollbar Always (default), On hover, or Hidden.
-- A new Rating Change Notification setting (Settings → Playback) shows a desktop notification with the new star count when you rate by hotkey or CLI.
-
-### Fixed
-
-- The slot list no longer shows a small gray corner artifact at its top-right and bottom-right edges when Rounded Corners mode is on.
-
-## v0.9.3 — 2026-06-17
-
-### Fixed
-
-- The CRT / Film visualizer effect no longer distorts the image at the window edges and now stays pixel-sharp and flush to them.
-
-## v0.9.2 — 2026-06-15
-
-### Added
-
-- The login screen now uses a responsive two-panel layout on wide windows that folds into a single centered card on narrow ones.
-- The login form now scrolls when the window is too short to fit it.
-- Login errors now name the problem (wrong username or password, server unreachable, or not a Navidrome server) and highlight the field at fault.
-- The login screen focuses the first empty field automatically, and Enter submits from any field.
-- Nokkvi now fills in the address scheme and trims trailing slashes on the server URL you type.
-- A subtle warning appears when an unencrypted http:// address points at a server outside your local network.
-
-### Fixed
-
-- Pressing Tab on the login screen no longer moves focus the wrong way.
-- Resizing the window no longer cuts off the login form or the Login button.
-- Sharing nokkvi.log for a bug report no longer leaks a reusable Navidrome credential from logged Subsonic request URLs.
-
-## v0.9.1 — 2026-06-15
-
-### Added
-
-- The player-bar Bit-Perfect button now cycles three modes: Off, Strict, and Relaxed.
-- Relaxed Bit-Perfect runs its own crossfade between back-to-back same-rate tracks, hard-cutting the rest.
+- A new Scope visualizer mode draws the audio waveform as a circular oscilloscope ring over the now-playing cover art, cycled after Lines.
+- Scope mode adds a glowing particle field, a luminous beam glow, and a radial fill, tunable in a new Settings → Visualizer → Scope section.
+- Bars and Lines can now be positioned per mode — over the now-playing cover art or in the band above the player bar.
 
 ### Changed
 
-- Switching Bit-Perfect to Strict or Relaxed turns Crossfade off, and turning Crossfade on returns Bit-Perfect to Off.
-- In Relaxed Bit-Perfect mode, only the few-second blend between tracks is not bit-perfect.
+- Bars and Lines now draw over the now-playing cover art by default instead of a band above the player bar.
+- Motion Trails and Echo are now tuned per visualizer mode instead of a single global pair, resetting existing global values to off.
 
 ### Fixed
 
-- Album art now shows in your desktop media controls and on the lock screen for tracks on multi-disc albums, instead of appearing blank.
-- A brief network glitch while loading album art no longer leaves the thumbnail permanently blank.
-- Album covers the server can't resolve now show a placeholder instead of being re-requested on every scroll and playback tick.
-
-## v0.9.0 — 2026-06-15
-
-### Added
-
-- A new Bit-Perfect playback mode sends audio to your DAC untouched, with no EQ, software volume, or limiter.
-- Bit-Perfect mode switches the output device to each track's native sample rate.
-- A now-playing badge reads the real device clock and reports whether playback is bit-perfect, resampled, or unverified.
-
-### Changed
-
-- Hi-res tracks (24-bit and float) now play back at their real bit depth instead of being narrowed to 16-bit.
-- Turning on Crossfade now turns off Bit-Perfect, and vice versa.
-- The crossfade settings now explain that turning crossfade off plays tracks gapless, and that very short tracks always play gapless.
-
-### Fixed
-
-- Turning the visualizer off now releases the CPU it was using during playback.
-- The crossfade duration slider no longer offers values above 12 seconds that silently reset to 12 on the next launch.
-- The Mini Player's thumbnail now shows artwork when you skip to a track not visible in the queue, instead of a gray box.
+- The Queue's Playing-From-Playlist banner now has a divider separating it from the cover art directly above it in a portrait window.
 
 ## Older releases
 
+- **v0.9.x** (2026-06-15 → 2026-06-18, v0.9.0–v0.9.4): [CHANGELOG-0.9.md](./changelog-archive/CHANGELOG-0.9.md)
 - **v0.8.x** (2026-06-14, v0.8.0): [CHANGELOG-0.8.md](./changelog-archive/CHANGELOG-0.8.md)
 - **v0.7.x** (2026-06-07 → 2026-06-10, v0.7.0–v0.7.2): [CHANGELOG-0.7.md](./changelog-archive/CHANGELOG-0.7.md)
 - **v0.6.x** (2026-05-25 → 2026-06-06, v0.6.0–v0.6.10): [CHANGELOG-0.6.md](./changelog-archive/CHANGELOG-0.6.md)
