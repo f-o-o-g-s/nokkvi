@@ -33,6 +33,22 @@ pub(crate) const BOAT_SINK_FRACTION: f32 = 0.18;
 /// without the visible wave face dragging the boat back.
 pub(crate) const BOAT_WRAP_MARGIN_BOAT_WIDTHS: f32 = 1.75;
 
+/// Wrap margin (in `x_ratio` units) for the over-cover boat — when Lines is
+/// drawn over the now-playing cover art instead of the bottom band. The
+/// bottom-band margin is `boat_w · BOAT_WRAP_MARGIN_BOAT_WIDTHS / area_width`,
+/// which needs the panel width; the over-cover panel size is only known at
+/// render time, not in the boat-tick handler. The over-cover boat sizes its
+/// sprite off `min(panel_w, panel_h)` (see `boat_overlay`'s `size_basis`), so
+/// `boat_w / panel_w ≤ BOAT_HEIGHT_FRACTION` — bounded regardless of the panel's
+/// aspect (a tall narrow cover can't make the sprite wider than the column).
+/// That makes the margin a panel-size-independent constant that still clears the
+/// sprite off-screen before wrapping, with no render→handler width plumbing.
+/// (For tiny covers `boat_w` clamps up to `BOAT_MIN_HEIGHT_PX`, raising the
+/// ratio, but the constant still exceeds the `0.5·boat_w/panel_w` clearance
+/// threshold for any realistic column width.)
+pub(crate) const OVER_COVER_WRAP_MARGIN: f32 =
+    BOAT_HEIGHT_FRACTION * BOAT_ASPECT_RATIO * BOAT_WRAP_MARGIN_BOAT_WIDTHS;
+
 /// Anchor sprite height as a fraction of the boat's height. The boat
 /// SVG fills its full 80-unit viewBox; the lucide anchor fills its
 /// 24-unit viewBox; both render at `_h × _h` since both are square in

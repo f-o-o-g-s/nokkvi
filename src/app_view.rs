@@ -794,16 +794,22 @@ impl Nokkvi {
         // Create stack with base layer
         let mut stack = Stack::new().push(base_layer);
 
-        // Add visualizer as overlay if enabled
-        use nokkvi_data::types::player_settings::VisualizationMode;
-        if self.engine.visualization_mode != VisualizationMode::Off
-            && let Some(ref viz) = self.visualizer
-        {
-            // Set mode based on current visualization_mode state
-            let widget_mode = match self.engine.visualization_mode {
-                VisualizationMode::Lines => widgets::visualizer::VisualizationMode::Lines,
-                _ => widgets::visualizer::VisualizationMode::Bars,
-            };
+        // Add the bottom-band visualizer overlay. `resolve_placement` decides
+        // whether the active mode draws here (a band above the player bar) or
+        // over the now-playing cover art: Bars/Lines follow their per-mode
+        // placement setting, Scope always draws over the cover, Off shows
+        // nothing. It is the single source of truth shared with the over-cover
+        // render site below, so the two can never disagree.
+        let bottom_band_mode = {
+            let cfg = self.visualizer_config.read();
+            widgets::visualizer::resolve_placement(
+                self.engine.visualization_mode,
+                cfg.bars.placement,
+                cfg.lines.placement,
+            )
+            .bottom_band
+        };
+        if let (Some(widget_mode), Some(viz)) = (bottom_band_mode, self.visualizer.as_ref()) {
             let viz_with_mode = viz
                 .clone()
                 .mode(widget_mode)
@@ -861,12 +867,15 @@ impl Nokkvi {
             // fixed-size, self-clipping container, so we don't need an
             // outer wrapper here. Insets the same `side_nav_inset` so the
             // boat sails over the visualizer, not the sidebar.
-            if self.boat.visible && self.engine.visualization_mode == VisualizationMode::Lines {
+            if self.boat.visible && widget_mode == widgets::visualizer::VisualizationMode::Lines {
                 let boat_inner = column![
                     container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
                     crate::widgets::boat::boat_overlay::<Message>(
                         &self.boat,
                         visualizer_width,
+                        visualizer_height,
+                        // Bottom band is wide-short, so it sizes the boat off
+                        // the band height (the constraining dimension).
                         visualizer_height,
                         viz_opacity,
                         lines_mirror,
@@ -1281,6 +1290,57 @@ impl Nokkvi {
             show_default_playlist_chip: self.settings.queue_show_default_playlist,
             default_playlist_name: &self.settings.default_playlist_name,
             drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
+            // Over-cover visualizer: clone the live visualizer plus the mode to
+            // draw, when the active mode is placed over the cover (Scope always;
+            // Bars/Lines when their placement is OverCover). `resolve_placement`
+            // is the shared source of truth with the bottom-band site in
+            // `view()`. The queue view also gates on is_playing. Other cases
+            // render nothing here.
+            over_art_visualizer: {
+                let (over_art_mode, height_percent) = {
+                    let cfg = self.visualizer_config.read();
+                    let mode = widgets::visualizer::resolve_placement(
+                        self.engine.visualization_mode,
+                        cfg.bars.placement,
+                        cfg.lines.placement,
+                    )
+                    .over_art;
+                    (mode, cfg.height_percent)
+                };
+                over_art_mode.and_then(|mode| {
+                    self.visualizer
+                        .clone()
+                        .map(|viz| (viz, mode, height_percent))
+                })
+            },
+            // Surfing boat over the cover: only when Lines is the over-cover mode
+            // and the boat is visible (the boat tick sets `visible` from lines
+            // mode + the boat setting, for either placement). `opacity`/`mirror`
+            // mirror what the bottom-band boat overlay is fed. The queue view
+            // applies the same is_playing gate as the ring.
+            over_art_boat: {
+                let (over_art_mode, opacity, mirror) = {
+                    let cfg = self.visualizer_config.read();
+                    let mode = widgets::visualizer::resolve_placement(
+                        self.engine.visualization_mode,
+                        cfg.bars.placement,
+                        cfg.lines.placement,
+                    )
+                    .over_art;
+                    (mode, cfg.opacity, cfg.lines.mirror)
+                };
+                if over_art_mode == Some(widgets::visualizer::VisualizationMode::Lines)
+                    && self.boat.visible
+                {
+                    Some(crate::widgets::base_slot_list_layout::OverCoverBoat {
+                        state: &self.boat,
+                        opacity,
+                        mirror,
+                    })
+                } else {
+                    None
+                }
+            },
         }
     }
 

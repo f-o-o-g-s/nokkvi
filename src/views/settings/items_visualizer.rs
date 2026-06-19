@@ -8,7 +8,7 @@ use super::{
 };
 use crate::visualizer_config::{
     BarsGradientMode, BarsGradientOrientation, BarsPeakGradientMode, BarsPeakMode,
-    LinesGradientMode, LinesStyle, VisualizerConfig, keys,
+    LinesGradientMode, LinesStyle, VisualizerConfig, VisualizerPlacement, keys,
 };
 
 /// Push color entries for one mode (dark or light) into the settings list.
@@ -118,8 +118,9 @@ pub(crate) fn build_visualizer_items(
     const B: &str = "assets/icons/audio-lines.svg";
     const P: &str = "assets/icons/palette.svg";
     const L: &str = "assets/icons/audio-waveform.svg";
+    const SC: &str = "assets/icons/radar.svg";
 
-    let mut e = Vec::with_capacity(40);
+    let mut e = Vec::with_capacity(75);
 
     // --- Frame section (how the visualizer occupies the window) ---
     e.push(SettingsEntry::Header {
@@ -139,8 +140,9 @@ pub(crate) fn build_visualizer_items(
         "Press Enter",
     ));
     e.push(SettingItem::float(
-        SettingMeta::new(keys::HEIGHT_PERCENT, "Visualizer Height", "Frame")
-            .with_subtitle("% of window height, 10–60%"),
+        SettingMeta::new(keys::HEIGHT_PERCENT, "Visualizer Height", "Frame").with_subtitle(
+            "Bars/Lines height: % of the bottom band's window height, or of the cover when placed over it. 10–60%",
+        ),
         config.height_percent as f64,
         d.height_percent as f64,
         0.1,
@@ -181,27 +183,6 @@ pub(crate) fn build_visualizer_items(
             ),
         config.beat_reactivity as f64,
         d.beat_reactivity as f64,
-        0.0,
-        1.0,
-        0.05,
-        "",
-    ));
-    e.push(SettingItem::float(
-        SettingMeta::new(keys::TRAILS, "Motion Trails", "Frame")
-            .with_subtitle("Bars/lines leave a fading after-image. 0 = off"),
-        config.trails as f64,
-        d.trails as f64,
-        0.0,
-        1.0,
-        0.05,
-        "",
-    ));
-    e.push(SettingItem::float(
-        SettingMeta::new(keys::ECHO, "Echo", "Frame").with_subtitle(
-            "Milkdrop feedback: the viz spirals/tunnels into itself, swirling with the bass + beat. 0 = off",
-        ),
-        config.echo as f64,
-        d.echo as f64,
         0.0,
         1.0,
         0.05,
@@ -266,6 +247,14 @@ pub(crate) fn build_visualizer_items(
         label: "Bars",
         icon: B,
     });
+    e.push(SettingItem::enum_val(
+        SettingMeta::new(keys::BARS_PLACEMENT, "Placement", "Bars").with_subtitle(
+            "Where the Bars visualizer is drawn\nbottom_band: a band above the player bar (every view)\nover_cover: on the now-playing cover art (Queue view, while playing)",
+        ),
+        config.bars.placement.as_wire_str(),
+        d.bars.placement.as_wire_str(),
+        VisualizerPlacement::all_wire_strs(),
+    ));
     e.push(SettingItem::bool_val(
         SettingMeta::new(keys::WAVES, "Waves Smoothing", "Bars")
             .with_subtitle(
@@ -472,6 +461,27 @@ pub(crate) fn build_visualizer_items(
         0.05,
         "",
     ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::BARS_TRAILS, "Motion Trails", "Bars")
+            .with_subtitle("Bars leave a fading after-image. 0 = off, 1 = long comet trails"),
+        config.bars.trails as f64,
+        d.bars.trails as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::BARS_ECHO, "Echo", "Bars").with_subtitle(
+            "Milkdrop feedback — the bars spiral and tunnel into themselves with the beat. 0 = off",
+        ),
+        config.bars.echo as f64,
+        d.bars.echo as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
 
     // --- Bar Colors (Dark / Light) ---
     // These keys are theme-file-relative — they write to the active theme file,
@@ -498,6 +508,14 @@ pub(crate) fn build_visualizer_items(
         label: "Lines",
         icon: L,
     });
+    e.push(SettingItem::enum_val(
+        SettingMeta::new(keys::LINES_PLACEMENT, "Placement", "Lines").with_subtitle(
+            "Where the Lines visualizer is drawn\nbottom_band: a band above the player bar (every view)\nover_cover: on the now-playing cover art (Queue view, while playing)",
+        ),
+        config.lines.placement.as_wire_str(),
+        d.lines.placement.as_wire_str(),
+        VisualizerPlacement::all_wire_strs(),
+    ));
     e.push(SettingItem::int(
         SettingMeta::new(keys::LINES_POINT_COUNT, "Point Count", "Lines")
             .with_subtitle("8–512, more = finer detail"),
@@ -597,6 +615,196 @@ pub(crate) fn build_visualizer_items(
             .with_subtitle("Show a small boat that rides the waveform"),
         config.lines.boat,
         d.lines.boat,
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::LINES_TRAILS, "Motion Trails", "Lines")
+            .with_subtitle("The line leaves a fading after-image. 0 = off, 1 = long comet trails"),
+        config.lines.trails as f64,
+        d.lines.trails as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::LINES_ECHO, "Echo", "Lines").with_subtitle(
+            "Milkdrop feedback — the line spirals and tunnels into itself with the beat. 0 = off",
+        ),
+        config.lines.echo as f64,
+        d.lines.echo as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+
+    // --- Scope section (circular oscilloscope) ---
+    e.push(SettingsEntry::Header {
+        label: "Scope",
+        icon: SC,
+    });
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_RADIUS, "Ring Size", "Scope").with_subtitle(
+            "Mean ring radius over the cover. 0.1 = small inner ring, 0.95 = nearly fills the panel",
+        ),
+        config.scope.radius as f64,
+        d.scope.radius as f64,
+        0.1,
+        0.95,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_SENSITIVITY, "Sensitivity", "Scope").with_subtitle(
+            "How hard loud audio swings the ring in and out. 0.5 = subtle, 5 = wild",
+        ),
+        config.scope.sensitivity as f64,
+        d.scope.sensitivity as f64,
+        0.5,
+        5.0,
+        0.1,
+        "×",
+    ));
+    e.push(SettingItem::int(
+        SettingMeta::new(keys::SCOPE_POINT_COUNT, "Point Count", "Scope")
+            .with_subtitle("Points around the ring. 16 = chunky, 512 = finely detailed waveform"),
+        config.scope.point_count as i64,
+        d.scope.point_count as i64,
+        16,
+        512,
+        16,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_LINE_THICKNESS, "Line Thickness", "Scope")
+            .with_subtitle("Ring stroke as % of panel size, 0.5–10%"),
+        config.scope.line_thickness as f64,
+        d.scope.line_thickness as f64,
+        0.005,
+        0.1,
+        0.005,
+        "%",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_FILL_OPACITY, "Fill Opacity", "Scope").with_subtitle(
+            "Radial gradient fill from the ring toward the center. 0 = outline only, 1 = solid rim",
+        ),
+        config.scope.fill_opacity as f64,
+        d.scope.fill_opacity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_GLOW_INTENSITY, "Glow Intensity", "Scope")
+            .with_subtitle("Neon halo around the ring. 0 = disabled, brightens with loudness"),
+        config.scope.glow_intensity as f64,
+        d.scope.glow_intensity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_OUTLINE_THICKNESS, "Outline Thickness", "Scope")
+            .with_subtitle("Darker border behind the ring in pixels, 0 = disabled"),
+        config.scope.outline_thickness as f64,
+        d.scope.outline_thickness as f64,
+        0.0,
+        5.0,
+        0.5,
+        " px",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_OUTLINE_OPACITY, "Outline Opacity", "Scope")
+            .with_subtitle("0.0 = invisible, 1.0 = fully opaque"),
+        config.scope.outline_opacity as f64,
+        d.scope.outline_opacity as f64,
+        0.0,
+        1.0,
+        0.1,
+        "",
+    ));
+    e.push(SettingItem::enum_val(
+        SettingMeta::new(keys::SCOPE_GRADIENT_MODE, "Gradient Mode", "Scope").with_subtitle(
+            "breathing: time-based cycling through gradient palette\nstatic: uses first gradient color only\nposition: color by angle around the ring\nheight: color by amplitude (quiet → loud)\ngradient: angle + amplitude blend (peaks shift palette)",
+        ),
+        config.scope.gradient_mode.as_wire_str(),
+        d.scope.gradient_mode.as_wire_str(),
+        LinesGradientMode::all_wire_strs(),
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_ANIMATION_SPEED, "Animation Speed", "Scope")
+            .with_subtitle("Color cycling speed for the breathing gradient. Lower = slower"),
+        config.scope.animation_speed as f64,
+        d.scope.animation_speed as f64,
+        0.05,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::enum_val(
+        SettingMeta::new(keys::SCOPE_STYLE, "Line Style", "Scope").with_subtitle(
+            "Interpolation around the ring\nsmooth: Catmull-Rom spline (curvy)\nangular: straight segments",
+        ),
+        config.scope.style.as_wire_str(),
+        d.scope.style.as_wire_str(),
+        LinesStyle::all_wire_strs(),
+    ));
+    e.push(SettingItem::bool_val(
+        SettingMeta::new(keys::SCOPE_PARTICLES, "Particles", "Scope")
+            .with_subtitle("Glowing particles drifting out from the ring (NCS-style)"),
+        config.scope.particles,
+        d.scope.particles,
+    ));
+    e.push(SettingItem::int(
+        SettingMeta::new(keys::SCOPE_PARTICLE_COUNT, "Particle Count", "Scope")
+            .with_subtitle("How many particles fill the field. 0 = none, 2048 = dense"),
+        config.scope.particle_count as i64,
+        d.scope.particle_count as i64,
+        0,
+        2048,
+        64,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_PARTICLE_SPEED, "Particle Speed", "Scope")
+            .with_subtitle("How fast particles fly out. 0.1 = lazy drift, 4 = energetic"),
+        config.scope.particle_speed as f64,
+        d.scope.particle_speed as f64,
+        0.1,
+        4.0,
+        0.1,
+        "×",
+    ));
+    e.push(SettingItem::bool_val(
+        SettingMeta::new(keys::SCOPE_BEAM, "Beam Glow", "Scope").with_subtitle(
+            "Additive luminous beam (woscope-style) — the ring glows brighter over the cover. Pair with Glow",
+        ),
+        config.scope.beam,
+        d.scope.beam,
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_TRAILS, "Motion Trails", "Scope")
+            .with_subtitle("The ring leaves a fading after-image. 0 = off, 1 = long comet trails"),
+        config.scope.trails as f64,
+        d.scope.trails as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::float(
+        SettingMeta::new(keys::SCOPE_ECHO, "Echo", "Scope").with_subtitle(
+            "Milkdrop feedback — the ring spirals and tunnels inward with the beat. 0 = off",
+        ),
+        config.scope.echo as f64,
+        d.scope.echo as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
     ));
 
     e

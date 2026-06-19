@@ -17,6 +17,7 @@ use nokkvi_data::audio::spectrum::{self, SpectrumEngine};
 use parking_lot::{Mutex, RwLock};
 use tracing::{debug, trace};
 
+use super::particles::ParticleSystem;
 use crate::visualizer_config::VisualizerConfig;
 
 /// Maximum number of bars the FFT can meaningfully produce for a given sample rate.
@@ -54,6 +55,57 @@ fn interpolate_bars(fft_output: &[f64], visual_count: usize) -> Vec<f64> {
     }
 
     result
+}
+
+/// S16 full-scale magnitude. The audio tap scales each PCM sample by `32767.0`
+/// (`streaming_source.rs`), so dividing by `32768.0` normalizes the waveform to
+/// roughly `[-1.0, 1.0]` (a hair under, by design — leaves headroom).
+const WAVEFORM_FULL_SCALE: f32 = 32768.0;
+
+/// Mix a raw interleaved-stereo PCM chunk (L,R,L,R… in S16-range `f64`, the same
+/// buffer the FFT eats) down to a normalized mono `f32` buffer (~`[-1.0, 1.0]`).
+fn chunk_to_mono(samples: &[f64]) -> Vec<f32> {
+    let frames = samples.len() / 2;
+    let mut out = Vec::with_capacity(frames);
+    for f in 0..frames {
+        let l = samples[f * 2];
+        let r = samples[f * 2 + 1];
+        let mono = ((l + r) * 0.5) as f32 / WAVEFORM_FULL_SCALE;
+        out.push(mono.clamp(-1.0, 1.0));
+    }
+    out
+}
+
+/// Nearest-resample `mono[start..start + window]` to `out_len` points. Indices
+/// clamp to the buffer, so an over-long window simply repeats the last sample.
+fn resample_window(mono: &[f32], start: usize, window: usize, out_len: usize) -> Vec<f32> {
+    if out_len == 0 {
+        return Vec::new();
+    }
+    if window == 0 || mono.is_empty() {
+        return vec![0.0; out_len];
+    }
+    let last = mono.len() - 1;
+    let mut out = Vec::with_capacity(out_len);
+    for j in 0..out_len {
+        let idx = (start + j * window / out_len).min(last);
+        out.push(mono[idx]);
+    }
+    out
+}
+
+/// Build the ring waveform from a raw PCM chunk: mix to mono and resample the
+/// whole chunk to the ring point count, plotted directly around the ring.
+///
+/// Deliberately raw — no phase trigger and no seam closure. The ring shows a
+/// small radius step where it closes at angle 0, because an audio window's
+/// first and last samples are unrelated. Earlier mirror / detrend / taper "seam
+/// fixes" hid that step but smoothed the trace and cost waveform purity; the
+/// true time-domain trace is shown instead.
+fn raw_waveform(samples: &[f64], out_len: usize) -> Vec<f32> {
+    let mono = chunk_to_mono(samples);
+    let frames = mono.len();
+    resample_window(&mono, 0, frames, out_len)
 }
 
 // ========================================
@@ -139,6 +191,16 @@ impl VisualizerTiming {
 struct DisplayBuffers {
     /// Frequency bar values (0.0-1.0 normalized)
     bars: Vec<f64>,
+    /// Time-domain waveform points (signed, ~-1.0..1.0) for the circular
+    /// oscilloscope (Scope mode). Snapshotted from the raw PCM chunk in
+    /// `tick()` instead of the FFT magnitudes. Same length as `bars` so it
+    /// rides the existing `bar_buffer` upload (one point per ring vertex).
+    waveform: Vec<f32>,
+    /// Scope particle field snapshot: two `vec4`s per particle —
+    /// `[x, y, size, alpha, colour_t, _, _, _]` in normalized ring-space (see
+    /// `particles.rs`). Independent of `bar_count` (sized to the particle
+    /// count), so `resize()` leaves it alone.
+    particles: Vec<[f32; 8]>,
     /// Peak bar values (0.0-1.0 normalized) - tracks recent maximums
     peak_bars: Vec<f64>,
     /// Alpha values for each peak (1.0 = visible, 0.0 = hidden) - for fade mode
@@ -153,6 +215,8 @@ impl DisplayBuffers {
     fn new(bar_count: usize) -> Self {
         let s = Self {
             bars: vec![0.0; bar_count],
+            waveform: vec![0.0; bar_count],
+            particles: Vec::new(),
             peak_bars: vec![0.0; bar_count],
             peak_alphas: vec![1.0; bar_count],
             flash_intensities: vec![0.0; bar_count],
@@ -161,23 +225,30 @@ impl DisplayBuffers {
         debug_assert_eq!(s.bars.len(), s.peak_bars.len());
         debug_assert_eq!(s.bars.len(), s.peak_alphas.len());
         debug_assert_eq!(s.bars.len(), s.flash_intensities.len());
+        debug_assert_eq!(s.bars.len(), s.waveform.len());
         s
     }
 
     fn resize(&mut self, bar_count: usize) {
         self.bars = vec![0.0; bar_count];
+        self.waveform = vec![0.0; bar_count];
         self.peak_bars = vec![0.0; bar_count];
         self.peak_alphas = vec![1.0; bar_count];
         self.flash_intensities = vec![0.0; bar_count];
         debug_assert_eq!(self.bars.len(), self.peak_bars.len());
         debug_assert_eq!(self.bars.len(), self.peak_alphas.len());
         debug_assert_eq!(self.bars.len(), self.flash_intensities.len());
+        debug_assert_eq!(self.bars.len(), self.waveform.len());
     }
 
     fn clear(&mut self) {
         for bar in self.bars.iter_mut() {
             *bar = 0.0;
         }
+        for sample in self.waveform.iter_mut() {
+            *sample = 0.0;
+        }
+        self.particles.clear();
         for peak in self.peak_bars.iter_mut() {
             *peak = 0.0;
         }
@@ -449,6 +520,15 @@ pub(crate) struct VisualizerState {
     // === Visualization mode (for mode-specific smoothing) ===
     /// True when in lines mode — skips CPU-side smoothing (lines smooth in GPU shader)
     is_lines_mode: Arc<AtomicBool>,
+    /// True when in scope mode — `tick()` snapshots the raw PCM chunk into
+    /// `display.waveform` (for the circular oscilloscope) and skips CPU
+    /// smoothing of the FFT bars (which Scope doesn't render).
+    is_scope_mode: Arc<AtomicBool>,
+
+    /// Particle field for Scope mode (the NCS-style glowing dust around the
+    /// ring). Simulated each `tick()` while in scope mode; the per-frame GPU
+    /// snapshot is copied into `DisplayBuffers.particles` for upload.
+    particles: Arc<Mutex<ParticleSystem>>,
 
     /// Master feed gate — `false` when the visualizer is toggled Off.
     ///
@@ -612,6 +692,14 @@ impl VisualizerState {
             fft_thread_handle,
             // Visualization mode
             is_lines_mode: Arc::new(AtomicBool::new(false)),
+            is_scope_mode: Arc::new(AtomicBool::new(false)),
+            // Scope particle field — placeholder size/radius; tick() resizes and
+            // drives it from the live [visualizer.scope] config.
+            particles: Arc::new(Mutex::new(ParticleSystem::new(
+                384,
+                0.7,
+                instance_id as u32,
+            ))),
             // Feed gate — on by default; the handler flips it off when Off
             feed_active: Arc::new(AtomicBool::new(true)),
             // Onset envelope
@@ -818,6 +906,13 @@ impl VisualizerState {
 
         if buffer.len() >= chunk_size {
             let process_samples: Vec<f64> = buffer.drain(..chunk_size).collect();
+            let is_scope = self.is_scope_mode.load(Ordering::Relaxed);
+
+            // Scope mode: snapshot the raw PCM chunk as a time-domain waveform —
+            // mixed to mono and resampled to the ring point count, plotted as-is
+            // (no phase trigger, no seam closure) so the trace stays pure. The
+            // FFT below still runs so the glow/beat/band effects stay reactive.
+            let scope_waveform = is_scope.then(|| raw_waveform(&process_samples, visual_count));
 
             // Track processed samples
             {
@@ -834,11 +929,19 @@ impl VisualizerState {
                 let cfg = self.config.read();
                 let (waves, waves_smoothing, monstercat) =
                     (cfg.waves, cfg.waves_smoothing, cfg.monstercat);
+                let (scope_radius, scope_sensitivity, particles_on, particle_count, particle_speed) = (
+                    cfg.scope.radius,
+                    cfg.scope.sensitivity,
+                    cfg.scope.particles,
+                    cfg.scope.particle_count,
+                    cfg.scope.particle_speed,
+                );
                 drop(cfg);
 
                 // Apply smoothing filters on FFT output (before interpolation).
-                // Only in bars mode — lines mode does its own GPU-side Catmull-Rom smoothing.
-                if !self.is_lines_mode.load(Ordering::Relaxed) {
+                // Only in bars mode — lines/scope do their own GPU-side smoothing
+                // (and scope doesn't render the bars at all).
+                if !self.is_lines_mode.load(Ordering::Relaxed) && !is_scope {
                     if waves {
                         waves_filter(&mut fft_output, waves_smoothing as usize);
                     } else if monstercat > 0.0 {
@@ -853,12 +956,57 @@ impl VisualizerState {
                     fft_output
                 };
 
-                // Update display buffers
+                // Scope particle field: advance the (O(n) curl-noise) sim OUTSIDE
+                // the display lock so we never hold `display` while iterating the
+                // pool. The result stays in the system's own capacity-reused
+                // buffer and is copied into `display.particles` below.
+                if is_scope
+                    && particles_on
+                    && let Some(mut psys) = self.particles.try_lock()
+                {
+                    psys.set_count(particle_count, scope_radius);
+                    let energy = self.current_onset_energy();
+                    let beat = self.current_beat_pulse();
+                    // Crest sparks are importance-sampled off the live ring
+                    // waveform (empty until the first scope snapshot lands).
+                    let wave: &[f32] = scope_waveform.as_deref().unwrap_or(&[]);
+                    psys.update(
+                        scope_radius,
+                        energy,
+                        beat,
+                        particle_speed,
+                        wave,
+                        scope_sensitivity,
+                    );
+                }
+
+                // Update display buffers. Copy into the existing buffers in place
+                // (clear + extend retains their capacity) so the 60 Hz tick path
+                // doesn't heap-allocate a fresh Vec every frame.
                 {
                     let Some(mut display) = self.display.try_lock() else {
                         return true; // Skip display update if lock contended
                     };
-                    display.bars = output.clone();
+                    display.bars.clear();
+                    display.bars.extend_from_slice(&output);
+                    if let Some(waveform) = scope_waveform {
+                        // Reuse the buffer's capacity (clear + extend) just like
+                        // `bars` above, rather than move-assigning a fresh Vec —
+                        // both are `visual_count` long, so this is identical in
+                        // result and keeps the display copy alloc-free.
+                        display.waveform.clear();
+                        display.waveform.extend_from_slice(&waveform);
+                    }
+                    // Brief nested lock: the expensive sim already ran above, so
+                    // this only memcpys the snapshot. Only this thread ever locks
+                    // `particles`, so the re-lock is effectively uncontended.
+                    if is_scope
+                        && particles_on
+                        && let Some(psys) = self.particles.try_lock()
+                    {
+                        display.particles.clear();
+                        display.particles.extend_from_slice(psys.gpu_data());
+                    }
                     display.dirty = true;
                     // Re-arm the trail drain budget while audio is live; when it
                     // stops, the budget runs out and the redraw gate idles.
@@ -1102,6 +1250,30 @@ impl VisualizerState {
         self.display.lock().bars.clone()
     }
 
+    /// Time-domain waveform points (signed, ~-1.0..1.0) for Scope mode. Mirrors
+    /// `get_bars()` — returns silence (flat zero) mid-clear so the ring doesn't
+    /// snap to stale audio across track changes.
+    pub(crate) fn get_waveform(&self) -> Vec<f32> {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            let display = self.display.lock();
+            return vec![0.0; display.waveform.len()];
+        }
+        self.display.lock().waveform.clone()
+    }
+
+    /// Scope particle-field snapshot (two `vec4`s per particle). Empty mid-clear
+    /// so the field doesn't flash stale positions across track changes.
+    pub(crate) fn get_particles(&self) -> Vec<[f32; 8]> {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return Vec::new();
+        }
+        self.display.lock().particles.clone()
+    }
+
     /// Fast smoothed spectral-flux envelope, in `[0, ~1]` for typical
     /// music. Lock-free atomic read — safe to call every frame from
     /// the boat handler. Returns `0.0` while the visualizer is
@@ -1179,6 +1351,12 @@ impl VisualizerState {
     /// Lines mode performs its own Catmull-Rom smoothing in the GPU shader.
     pub(crate) fn set_lines_mode(&self, is_lines: bool) {
         self.is_lines_mode.store(is_lines, Ordering::Relaxed);
+    }
+
+    /// Set scope mode so tick() snapshots the raw PCM chunk into the waveform
+    /// buffer (for the circular oscilloscope) and skips CPU bar smoothing.
+    pub(crate) fn set_scope_mode(&self, is_scope: bool) {
+        self.is_scope_mode.store(is_scope, Ordering::Relaxed);
     }
 
     /// Apply config changes by signaling engine reinitialization on the FFT thread.
@@ -1554,6 +1732,50 @@ mod tests {
         assert_eq!(VisualizerTiming::TICK_INTERVAL.as_nanos(), 16_666_666_u128);
         assert!((VisualizerTiming::TICK_INTERVAL_MS_F64 - (1000.0 / 60.0)).abs() < 1e-12);
         assert!((VisualizerTiming::TICK_INTERVAL_SECS_F32 - (1.0 / 60.0)).abs() < 1e-7);
+    }
+
+    #[test]
+    fn chunk_to_mono_mixes_and_normalizes() {
+        // (L=32768, R=0) -> mono 16384 -> ~0.5; (L=-32768, R=-32768) -> -1.0
+        let mono = chunk_to_mono(&[32768.0_f64, 0.0, -32768.0, -32768.0]);
+        assert_eq!(mono.len(), 2);
+        assert!((mono[0] - 0.5).abs() < 1e-3, "got {}", mono[0]);
+        assert!((mono[1] + 1.0).abs() < 1e-3, "got {}", mono[1]);
+        assert!(chunk_to_mono(&[]).is_empty());
+    }
+
+    #[test]
+    fn resample_window_picks_window_and_clamps() {
+        let mono: Vec<f32> = (0..8).map(|i| i as f32).collect();
+        // Window [2..6] resampled to 4 -> samples 2,3,4,5.
+        assert_eq!(resample_window(&mono, 2, 4, 4), vec![2.0, 3.0, 4.0, 5.0]);
+        // Over-long window clamps to the last sample (no panic).
+        let out = resample_window(&mono, 6, 100, 4);
+        assert_eq!(out.len(), 4);
+        assert!(out.iter().all(|&v| (2.0..=7.0).contains(&v)));
+        // Edge cases.
+        assert!(resample_window(&mono, 0, 4, 0).is_empty());
+        assert_eq!(resample_window(&[], 0, 4, 3), vec![0.0; 3]);
+    }
+
+    #[test]
+    fn raw_waveform_resamples_full_chunk() {
+        // Interleaved-stereo input -> mono per-frame average. The raw waveform
+        // resamples the WHOLE chunk to out_len with no trigger, mirror, or
+        // detrend: the endpoints are simply the first and last mono samples, so
+        // the ring closes on whatever step the audio window happens to leave.
+        let samples: Vec<f64> = (0..512)
+            .flat_map(|i| [(i as f64 * 0.1).sin() * 16000.0; 2])
+            .collect();
+        let mono = chunk_to_mono(&samples);
+        let wave = raw_waveform(&samples, 128);
+        assert_eq!(wave.len(), 128);
+        assert!(wave.iter().all(|v| v.is_finite()));
+        // Starts at sample 0 (no trigger offset) and is not forced to close.
+        assert!((wave[0] - mono[0]).abs() < 1e-6, "starts at sample 0");
+        // Edge cases stay safe.
+        assert_eq!(raw_waveform(&[], 64), vec![0.0; 64]);
+        assert!(raw_waveform(&samples, 0).is_empty());
     }
 
     fn fixtures(peak: f64, alpha: f64, velocity: f64) -> (DisplayBuffers, PeakState) {

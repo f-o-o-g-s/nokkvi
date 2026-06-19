@@ -799,7 +799,7 @@ impl QueuePage {
                 })
         });
 
-        use crate::widgets::base_slot_list_layout::single_artwork_panel_with_menu;
+        use crate::widgets::base_slot_list_layout::single_artwork_panel_with_visualizer_and_menu;
 
         // Build artwork column component — determine album_id for refresh action
         let center_album_id: Option<String> = if data.is_playing {
@@ -824,8 +824,26 @@ impl QueuePage {
                 data.overlay.open_menu,
                 QueueMessage::SetOpenMenu,
             );
-        let artwork_content = Some(single_artwork_panel_with_menu(
+        // Over-cover visualizer overlay: only while audio is playing (the same
+        // gate the now-playing cover uses), and only when the active mode is set
+        // to draw over the cover (carried by `over_art_visualizer` — Scope
+        // always, Bars/Lines when their placement is OverCover). Otherwise
+        // `None` → plain cover.
+        let over_art_overlay = if data.is_playing {
+            data.over_art_visualizer.clone()
+        } else {
+            None
+        };
+        // Surfing boat over the cover — same is_playing gate as the ring above.
+        let over_art_boat = if data.is_playing {
+            data.over_art_boat
+        } else {
+            None
+        };
+        let artwork_content = Some(single_artwork_panel_with_visualizer_and_menu(
             center_artwork_handle,
+            over_art_overlay,
+            over_art_boat,
             on_refresh,
             artwork_menu_open,
             artwork_menu_position,

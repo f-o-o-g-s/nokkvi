@@ -2,6 +2,7 @@
 //!
 //! Modular audio visualizer supporting multiple visualization modes.
 
+mod particles;
 mod pipeline;
 pub(crate) mod shader;
 pub(crate) mod state;
@@ -15,6 +16,130 @@ pub(crate) use state::{SharedVisualizerConfig, VisualizerState};
 pub enum VisualizationMode {
     Bars,
     Lines,
+    /// Circular oscilloscope: the time-domain waveform mapped around a ring,
+    /// drawn over the now-playing cover art.
+    Scope,
+}
+
+/// Which render slot the active visualizer occupies. The bottom band (above the
+/// player bar, visible on every view) and the over-cover overlay (the Queue
+/// now-playing panel) are mutually exclusive: at most one field is `Some`, and
+/// both are `None` when the visualizer is `Off`. Each field carries the widget
+/// mode to draw in that slot.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VisualizerSlots {
+    /// Mode to draw in the bottom band, if any.
+    pub bottom_band: Option<VisualizationMode>,
+    /// Mode to draw over the now-playing cover art, if any.
+    pub over_art: Option<VisualizationMode>,
+}
+
+/// Resolve the active engine visualization mode plus the per-mode placement
+/// settings into the two mutually exclusive render slots.
+///
+/// `Scope` always draws over the cover (it has no bottom-band form). `Bars` and
+/// `Lines` follow their own [`VisualizerPlacement`](crate::visualizer_config::VisualizerPlacement)
+/// (`BottomBand` by default, or `OverCover`). `Off` draws nothing. This is the
+/// single source of truth for the render fork in `app_view`, so the two render
+/// sites can never disagree (drawing the same mode twice, or nowhere).
+pub(crate) fn resolve_placement(
+    mode: nokkvi_data::types::player_settings::VisualizationMode,
+    bars_placement: crate::visualizer_config::VisualizerPlacement,
+    lines_placement: crate::visualizer_config::VisualizerPlacement,
+) -> VisualizerSlots {
+    use nokkvi_data::types::player_settings::VisualizationMode as Mode;
+
+    use crate::visualizer_config::VisualizerPlacement;
+
+    let route = |placement, widget_mode| match placement {
+        VisualizerPlacement::BottomBand => VisualizerSlots {
+            bottom_band: Some(widget_mode),
+            over_art: None,
+        },
+        VisualizerPlacement::OverCover => VisualizerSlots {
+            bottom_band: None,
+            over_art: Some(widget_mode),
+        },
+    };
+
+    match mode {
+        Mode::Off => VisualizerSlots::default(),
+        Mode::Scope => VisualizerSlots {
+            bottom_band: None,
+            over_art: Some(VisualizationMode::Scope),
+        },
+        Mode::Bars => route(bars_placement, VisualizationMode::Bars),
+        Mode::Lines => route(lines_placement, VisualizationMode::Lines),
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use nokkvi_data::types::player_settings::VisualizationMode as Mode;
+
+    use super::{VisualizationMode as WidgetMode, resolve_placement};
+    use crate::visualizer_config::VisualizerPlacement::{BottomBand, OverCover};
+
+    /// Exactly one slot is ever `Some` (both `None` only for `Off`). This pins
+    /// the invariant that the active visualizer renders in one place, never two
+    /// and never none-when-on.
+    #[test]
+    fn at_most_one_slot_is_filled() {
+        let placements = [BottomBand, OverCover];
+        for mode in [Mode::Off, Mode::Bars, Mode::Lines, Mode::Scope] {
+            for bars in placements {
+                for lines in placements {
+                    let slots = resolve_placement(mode, bars, lines);
+                    let filled = slots.bottom_band.is_some() as u8 + slots.over_art.is_some() as u8;
+                    let expected = if mode == Mode::Off { 0 } else { 1 };
+                    assert_eq!(
+                        filled, expected,
+                        "mode={mode:?} bars={bars:?} lines={lines:?} filled {filled} slots, expected {expected}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn off_draws_nothing() {
+        let slots = resolve_placement(Mode::Off, OverCover, OverCover);
+        assert_eq!(slots.bottom_band, None);
+        assert_eq!(slots.over_art, None);
+    }
+
+    #[test]
+    fn scope_is_always_over_cover_regardless_of_placement_settings() {
+        // Scope ignores the Bars/Lines placement knobs entirely.
+        for bars in [BottomBand, OverCover] {
+            for lines in [BottomBand, OverCover] {
+                let slots = resolve_placement(Mode::Scope, bars, lines);
+                assert_eq!(slots.over_art, Some(WidgetMode::Scope));
+                assert_eq!(slots.bottom_band, None);
+            }
+        }
+    }
+
+    #[test]
+    fn bars_and_lines_follow_their_own_placement() {
+        // Bars in the band, Lines over the cover — independent per-mode routing.
+        let slots = resolve_placement(Mode::Bars, BottomBand, OverCover);
+        assert_eq!(slots.bottom_band, Some(WidgetMode::Bars));
+        assert_eq!(slots.over_art, None);
+
+        let slots = resolve_placement(Mode::Lines, BottomBand, OverCover);
+        assert_eq!(slots.bottom_band, None);
+        assert_eq!(slots.over_art, Some(WidgetMode::Lines));
+
+        // And the reverse split.
+        let slots = resolve_placement(Mode::Bars, OverCover, BottomBand);
+        assert_eq!(slots.over_art, Some(WidgetMode::Bars));
+        assert_eq!(slots.bottom_band, None);
+
+        let slots = resolve_placement(Mode::Lines, OverCover, BottomBand);
+        assert_eq!(slots.bottom_band, Some(WidgetMode::Lines));
+        assert_eq!(slots.over_art, None);
+    }
 }
 
 /// Default bar width in pixels (fallback when dynamic calculation fails)
@@ -288,16 +413,24 @@ impl Visualizer {
     pub fn mode(mut self, mode: VisualizationMode) -> Self {
         self.mode = mode;
         self.state.set_lines_mode(mode == VisualizationMode::Lines);
+        self.state.set_scope_mode(mode == VisualizationMode::Scope);
 
-        // Only Lines mode resizes here - Bars mode lets width() handle it
-        if mode == VisualizationMode::Lines {
+        // Lines and Scope both render a fixed point count (Catmull-Rom in the
+        // shader); Bars lets width() pick the count from the window size. Scope
+        // reads its own [visualizer.scope] point_count/line_thickness so it can
+        // be tuned independently of Lines (see the per-mode branch below).
+        if mode == VisualizationMode::Lines || mode == VisualizationMode::Scope {
             let cfg = self.config.read();
-            let (config_point_count, config_line_thickness) =
-                (cfg.lines.point_count, cfg.lines.line_thickness);
+            let (config_point_count, config_line_thickness) = if mode == VisualizationMode::Scope {
+                (cfg.scope.point_count, cfg.scope.line_thickness)
+            } else {
+                (cfg.lines.point_count, cfg.lines.line_thickness)
+            };
             drop(cfg);
 
             tracing::trace!(
-                "📊 Lines mode: read config point_count={}, thickness={}",
+                "📊 {:?} mode: read config point_count={}, thickness={}",
+                mode,
                 config_point_count,
                 config_line_thickness
             );
@@ -427,8 +560,8 @@ impl Visualizer {
         }
     }
 
-    /// Construct the 39-field `ShaderParams` from a config snapshot, theme
-    /// colors, and the widget's per-instance state.
+    /// Construct the `ShaderParams` from a config snapshot, theme colors, and
+    /// the widget's per-instance state.
     ///
     /// Sources, by axis:
     /// - `cfg.bars.*` / `cfg.lines.*` / `cfg.opacity` — hot-reloaded TOML
@@ -446,6 +579,54 @@ impl Visualizer {
         cfg: &crate::visualizer_config::VisualizerConfig,
         colors: &crate::visualizer_config::ThemeBarColors,
     ) -> ShaderParams {
+        // Scope reuses the lines_* shader fields but sources its appearance from
+        // its own [visualizer.scope] config so it can be styled independently of
+        // Lines mode. (line_thickness is sourced via self.line_thickness, set in
+        // mode().) scope_radius/scope_sensitivity are scope-only geometry.
+        let is_scope = self.mode == VisualizationMode::Scope;
+
+        // Motion trails / echo are per-mode (each mode tunes its own after-image
+        // and feedback). Only one mode renders at a time, so source the active
+        // mode's values.
+        let (trails, echo) = match self.mode {
+            VisualizationMode::Bars => (cfg.bars.trails, cfg.bars.echo),
+            VisualizationMode::Lines => (cfg.lines.trails, cfg.lines.echo),
+            VisualizationMode::Scope => (cfg.scope.trails, cfg.scope.echo),
+        };
+
+        let (
+            outline_thickness,
+            outline_opacity,
+            animation_speed,
+            gradient_mode,
+            fill_opacity,
+            glow_intensity,
+            style,
+            mirror,
+        ) = if is_scope {
+            (
+                cfg.scope.outline_thickness,
+                cfg.scope.outline_opacity,
+                cfg.scope.animation_speed,
+                cfg.scope.get_gradient_mode_value(),
+                cfg.scope.fill_opacity,
+                cfg.scope.glow_intensity,
+                cfg.scope.get_style_value(),
+                false,
+            )
+        } else {
+            (
+                cfg.lines.outline_thickness,
+                cfg.lines.outline_opacity,
+                cfg.lines.animation_speed,
+                cfg.lines.get_gradient_mode_value(),
+                cfg.lines.fill_opacity,
+                cfg.lines.glow_intensity,
+                cfg.lines.get_style_value(),
+                cfg.lines.mirror,
+            )
+        };
+
         ShaderParams {
             gradient_colors: colors.get_bar_gradient_colors(),
             peak_gradient_colors: colors.get_peak_gradient_colors(),
@@ -471,20 +652,24 @@ impl Visualizer {
             peak_fade_time: cfg.bars.peak_fade_time as f32 / 1000.0,
             bar_depth_3d: cfg.bars.bar_depth_3d,
             global_opacity: cfg.opacity,
-            lines_outline_thickness: cfg.lines.outline_thickness,
-            lines_outline_opacity: cfg.lines.outline_opacity,
-            lines_animation_speed: cfg.lines.animation_speed,
-            lines_gradient_mode: cfg.lines.get_gradient_mode_value(),
-            lines_fill_opacity: cfg.lines.fill_opacity,
-            lines_mirror: cfg.lines.mirror,
-            lines_glow_intensity: cfg.lines.glow_intensity,
-            lines_style: cfg.lines.get_style_value(),
+            lines_outline_thickness: outline_thickness,
+            lines_outline_opacity: outline_opacity,
+            lines_animation_speed: animation_speed,
+            lines_gradient_mode: gradient_mode,
+            lines_fill_opacity: fill_opacity,
+            lines_mirror: mirror,
+            lines_glow_intensity: glow_intensity,
+            lines_style: style,
+            scope_radius: cfg.scope.radius,
+            scope_sensitivity: cfg.scope.sensitivity,
+            scope_particles: cfg.scope.particles,
+            scope_beam: cfg.scope.beam,
             bars_flash_intensity: cfg.bars.flash_intensity,
             bloom_enabled: cfg.bloom,
             bloom_intensity: cfg.bloom_intensity,
             beat_reactivity: cfg.beat_reactivity,
-            trails: cfg.trails,
-            echo: cfg.echo,
+            trails,
+            echo,
             crt: cfg.crt,
         }
     }
@@ -657,20 +842,26 @@ mod wgsl_config_identity_tests {
     fn wgsl_config_blocks_declare_identical_fields() {
         const BARS: &str = include_str!("shaders/bars.wgsl");
         const LINES: &str = include_str!("shaders/lines.wgsl");
+        const SCOPE: &str = include_str!("shaders/scope.wgsl");
         let bars_cfg = extract_config_block(BARS);
         let lines_cfg = extract_config_block(LINES);
+        let scope_cfg = extract_config_block(SCOPE);
         assert_eq!(
             bars_cfg, lines_cfg,
             "WGSL Config blocks in bars.wgsl + lines.wgsl must declare identical fields. \
              The Rust-side VisualizerConfig (shader.rs) is the byte-layout source of truth; \
              both shaders must mirror its field list verbatim or the bytemuck cast UB-fails."
         );
+        assert_eq!(
+            bars_cfg, scope_cfg,
+            "WGSL Config block in scope.wgsl must declare identical fields to bars.wgsl. \
+             All three shaders share the same bytemuck::Pod uniform; a drift reinterprets memory."
+        );
     }
 
     /// Field names of the Rust `VisualizerConfig` (shader.rs), in declaration
-    /// order, with the 2-u32 `_pad` collapsed to a single `_pad` token to match
-    /// how this test normalizes the WGSL `_pad0/_pad1` split. Update this
-    /// list AND shader.rs's const-asserts whenever a config field changes.
+    /// order. Update this list AND shader.rs's const-asserts whenever a config
+    /// field changes.
     const RUST_CONFIG_FIELDS: &[&str] = &[
         "bar_count",
         "mode",
@@ -706,14 +897,13 @@ mod wgsl_config_identity_tests {
         "lines_glow_intensity",
         "lines_style",
         "bars_flash_intensity",
-        "_pad",
+        "scope_radius",
+        "scope_sensitivity",
         "flash_data",
     ];
 
     /// Pull the field-name token from each line of an extracted Config block,
-    /// skipping the `struct Config {` opener + closing `}`, and collapsing the
-    /// consecutive `_pad0/_pad1` lines into a single `_pad` token (the
-    /// Rust struct declares them as one `_pad: [u32; 2]` member).
+    /// skipping the `struct Config {` opener + closing `}`.
     fn wgsl_field_names(block: &str) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for line in block.lines() {
@@ -725,16 +915,7 @@ mod wgsl_config_identity_tests {
             if name.is_empty() {
                 continue;
             }
-            let normalized = if name.starts_with("_pad") {
-                "_pad"
-            } else {
-                name
-            };
-            // Collapse the consecutive _pad members into one token.
-            if normalized == "_pad" && out.last().map(String::as_str) == Some("_pad") {
-                continue;
-            }
-            out.push(normalized.to_string());
+            out.push(name.to_string());
         }
         out
     }
@@ -756,6 +937,108 @@ mod wgsl_config_identity_tests {
              lines.wgsl is checked against bars.wgsl by wgsl_config_blocks_declare_identical_fields, \
              so this transitively covers it."
         );
+    }
+
+    /// Strip `//` line comments + blank lines and trim each remaining line, so
+    /// two shaders' copies of a snippet compare equal when only comments differ.
+    fn normalize_wgsl(src: &str) -> String {
+        src.lines()
+            .map(|line| line.split("//").next().unwrap_or("").trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Extract `fn <name>(…) { … }` (balanced braces) from a WGSL source and
+    /// normalize it. Panics if the function is missing or never closes.
+    fn extract_fn(src: &str, name: &str) -> String {
+        let start = src
+            .find(&format!("fn {name}("))
+            .unwrap_or_else(|| panic!("WGSL missing `fn {name}(`"));
+        let rest = &src[start..];
+        let open = rest
+            .find('{')
+            .unwrap_or_else(|| panic!("`fn {name}` has no opening brace"));
+        let mut depth = 0i32;
+        let mut end = None;
+        for (i, c) in rest[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(open + i + c.len_utf8());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = end.unwrap_or_else(|| panic!("`fn {name}` body never closes"));
+        normalize_wgsl(&rest[..end])
+    }
+
+    /// Extract `const <NAME> … ;` from a WGSL source and normalize it.
+    fn extract_const(src: &str, name: &str) -> String {
+        let start = src
+            .find(&format!("const {name}"))
+            .unwrap_or_else(|| panic!("WGSL missing `const {name}`"));
+        let rest = &src[start..];
+        let end = rest
+            .find(';')
+            .unwrap_or_else(|| panic!("`const {name}` has no `;`"))
+            + 1;
+        normalize_wgsl(&rest[..end])
+    }
+
+    /// scope.wgsl copies the Lines mode's gradient + glow helpers verbatim (WGSL
+    /// has no include mechanism). Nothing else pins those copies, so a future
+    /// edit to one and not the other would silently diverge the two modes' look.
+    /// This asserts each shared helper + constant is byte-identical (comments
+    /// aside) across lines.wgsl and scope.wgsl. If it fails, mirror the change
+    /// from lines.wgsl (the source of truth) into scope.wgsl.
+    #[test]
+    fn wgsl_shared_helpers_match_between_lines_and_scope() {
+        const LINES: &str = include_str!("shaders/lines.wgsl");
+        const SCOPE: &str = include_str!("shaders/scope.wgsl");
+
+        const SHARED_FNS: &[&str] = &[
+            "catmull_rom",
+            "get_gradient_color_animated",
+            "get_gradient_color_static",
+            "get_gradient_color_by_position",
+            "get_gradient_color_by_height",
+            "get_gradient_color_wave",
+            "get_lines_gradient_color",
+            "lines_glow_radius",
+            "lines_glow_extent",
+        ];
+        for name in SHARED_FNS {
+            assert_eq!(
+                extract_fn(LINES, name),
+                extract_fn(SCOPE, name),
+                "WGSL helper `fn {name}` drifted between lines.wgsl and scope.wgsl. \
+                 scope.wgsl copies it verbatim from lines.wgsl; mirror any edit into both."
+            );
+        }
+
+        const SHARED_CONSTS: &[&str] = &[
+            "LINES_PALETTE_SEGMENTS_STATIC",
+            "LINES_PALETTE_SEGMENTS_LOOPED",
+            "LINES_PALETTE_INDEX_TAIL",
+            "LINES_PALETTE_INDEX_MOD",
+            "LINES_GLOW_MIN_RADIUS",
+            "LINES_GLOW_MAX_RADIUS",
+            "LINES_GLOW_EXTENT_MULT",
+            "LINES_BEAT_GLOW",
+        ];
+        for name in SHARED_CONSTS {
+            assert_eq!(
+                extract_const(LINES, name),
+                extract_const(SCOPE, name),
+                "WGSL constant `{name}` drifted between lines.wgsl and scope.wgsl."
+            );
+        }
     }
 }
 
@@ -790,9 +1073,18 @@ mod build_shader_params_tests {
         cfg.lines.mirror = true;
         cfg.lines.glow_intensity = 0.7;
         cfg.bars.flash_intensity = 0.9;
+        // Distinct per-mode trails/echo so the mode-routing assertions below
+        // cannot pass on a wrong source (a Bars/Lines/Scope swap) or on an
+        // always-zero regression.
+        cfg.bars.trails = 0.25;
+        cfg.bars.echo = 0.6;
+        cfg.lines.trails = 0.5;
+        cfg.lines.echo = 0.7;
+        cfg.scope.trails = 0.9;
+        cfg.scope.echo = 0.1;
 
         let shared = Arc::new(RwLock::new(cfg.clone()));
-        let viz = Visualizer::new(64, shared);
+        let viz = Visualizer::new(64, shared.clone());
         let colors = ThemeBarColors::default();
         let params = viz.build_shader_params(&cfg, &colors);
 
@@ -808,6 +1100,24 @@ mod build_shader_params_tests {
         assert!(params.lines_mirror);
         assert!((params.lines_glow_intensity - 0.7).abs() < 1e-6);
         assert!((params.bars_flash_intensity - 0.9).abs() < 1e-6);
+
+        // Per-mode trails/echo routing. A fresh Visualizer defaults to Bars
+        // mode, so it must source the Bars values (not Lines/Scope, not zero).
+        assert!((params.trails - 0.25).abs() < 1e-6);
+        assert!((params.echo - 0.6).abs() < 1e-6);
+
+        // Lines mode must source cfg.lines.*; Scope mode must source cfg.scope.*.
+        let lines_params = Visualizer::new(64, shared.clone())
+            .mode(VisualizationMode::Lines)
+            .build_shader_params(&cfg, &colors);
+        assert!((lines_params.trails - 0.5).abs() < 1e-6);
+        assert!((lines_params.echo - 0.7).abs() < 1e-6);
+
+        let scope_params = Visualizer::new(64, shared)
+            .mode(VisualizationMode::Scope)
+            .build_shader_params(&cfg, &colors);
+        assert!((scope_params.trails - 0.9).abs() < 1e-6);
+        assert!((scope_params.echo - 0.1).abs() < 1e-6);
 
         // colors-routed — peak/bar gradient palettes must be padded to 8.
         assert_eq!(params.gradient_colors.len(), 8);

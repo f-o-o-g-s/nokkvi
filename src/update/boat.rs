@@ -14,7 +14,7 @@ use nokkvi_data::types::player_settings::VisualizationMode;
 use crate::{
     Nokkvi,
     app_message::Message,
-    visualizer_config::LinesStyle,
+    visualizer_config::{LinesStyle, VisualizerPlacement},
     widgets::{
         boat::{self, MusicSignals},
         visualizer::visualizer_area_height,
@@ -45,6 +45,12 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     let in_lines_mode = app.engine.visualization_mode == VisualizationMode::Lines;
     let cfg = app.visualizer_config.read();
     let cfg_boat_on = cfg.lines.boat;
+    // The boat rides the Lines wave in whichever slot it's placed: the bottom
+    // band (every view) or over the now-playing cover art (Queue). The physics
+    // is normalized, so only the off-screen wrap margin differs between the two
+    // — set below from the placement. The over-cover boat is rendered by the
+    // Queue artwork panel; the bottom-band boat by `app_view`.
+    let lines_in_bottom_band = cfg.lines.placement == VisualizerPlacement::BottomBand;
     let angular = cfg.lines.style == LinesStyle::Angular;
     let height_percent = cfg.height_percent;
     let lines_mirror = cfg.lines.mirror;
@@ -103,19 +109,29 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // available, so the buffer can stay elevated for the entire silence).
     let bars = boat::effective_bars(app.playback.playing, &raw_bars);
 
-    // Size the off-screen wrap margin from the live boat sprite width so the
-    // boat clears the visible area before reappearing on the opposite side
-    // (`widgets::boat::BOAT_WRAP_MARGIN_BOAT_WIDTHS` boat-widths of pixel
-    // travel beyond the edge). The visualizer area height is computed by
-    // the same helper `app_view::view()` uses, so the margin tracks any
-    // future scaling-curve changes.
-    let area_width = app.window.width;
-    let area_height = visualizer_area_height(app.window.width, app.window.height, height_percent);
-    let (boat_w, _boat_h) = boat::boat_pixel_size(area_height);
-    app.boat.x_wrap_margin = if area_width > 0.0 {
-        (boat_w * boat::BOAT_WRAP_MARGIN_BOAT_WIDTHS) / area_width
+    // Size the off-screen wrap margin so the boat clears the visible area
+    // before reappearing on the opposite side (`BOAT_WRAP_MARGIN_BOAT_WIDTHS`
+    // boat-widths of pixel travel beyond the edge). The bottom band spans the
+    // full window width, so the margin is derived from the live sprite width vs
+    // that width (the visualizer area height is computed by the same helper
+    // `app_view::view()` uses, so it tracks any future scaling-curve changes).
+    // Over the cover the panel is ~square, so a size-independent constant
+    // applies — see the `else` arm.
+    app.boat.x_wrap_margin = if lines_in_bottom_band {
+        let area_width = app.window.width;
+        let area_height =
+            visualizer_area_height(app.window.width, app.window.height, height_percent);
+        let (boat_w, _boat_h) = boat::boat_pixel_size(area_height);
+        if area_width > 0.0 {
+            (boat_w * boat::BOAT_WRAP_MARGIN_BOAT_WIDTHS) / area_width
+        } else {
+            0.0
+        }
     } else {
-        0.0
+        // Over the cover the panel is ~square, so the wrap margin is a
+        // panel-size-independent constant (the render-time cover width never
+        // reaches this handler). See `OVER_COVER_WRAP_MARGIN`.
+        boat::OVER_COVER_WRAP_MARGIN
     };
 
     // Music signals: tagged BPM (when the current song reports one) +

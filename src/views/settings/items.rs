@@ -206,7 +206,8 @@ mod tests {
                 "Bars",
                 "Bar Colors (Dark)",
                 "Bar Colors (Light)",
-                "Lines"
+                "Lines",
+                "Scope"
             ],
             "Visualizer tab section headers diverge",
         );
@@ -222,8 +223,6 @@ mod tests {
                 vkeys::BLOOM,
                 vkeys::BLOOM_INTENSITY,
                 vkeys::BEAT_REACTIVITY,
-                vkeys::TRAILS,
-                vkeys::ECHO,
                 vkeys::CRT,
             ],
         );
@@ -241,6 +240,7 @@ mod tests {
             &entries,
             "Bars",
             &[
+                vkeys::BARS_PLACEMENT,
                 vkeys::WAVES,
                 vkeys::WAVES_SMOOTHING,
                 vkeys::MONSTERCAT,
@@ -261,6 +261,8 @@ mod tests {
                 vkeys::BARS_PEAK_HEIGHT_RATIO,
                 vkeys::BARS_BAR_DEPTH_3D,
                 vkeys::BARS_FLASH_INTENSITY,
+                vkeys::BARS_TRAILS,
+                vkeys::BARS_ECHO,
             ],
         );
         assert_section_keys(
@@ -289,6 +291,7 @@ mod tests {
             &entries,
             "Lines",
             &[
+                vkeys::LINES_PLACEMENT,
                 vkeys::LINES_POINT_COUNT,
                 vkeys::LINES_LINE_THICKNESS,
                 vkeys::LINES_OUTLINE_THICKNESS,
@@ -300,13 +303,38 @@ mod tests {
                 vkeys::LINES_MIRROR,
                 vkeys::LINES_STYLE,
                 vkeys::LINES_BOAT,
+                vkeys::LINES_TRAILS,
+                vkeys::LINES_ECHO,
+            ],
+        );
+        assert_section_keys(
+            &entries,
+            "Scope",
+            &[
+                vkeys::SCOPE_RADIUS,
+                vkeys::SCOPE_SENSITIVITY,
+                vkeys::SCOPE_POINT_COUNT,
+                vkeys::SCOPE_LINE_THICKNESS,
+                vkeys::SCOPE_FILL_OPACITY,
+                vkeys::SCOPE_GLOW_INTENSITY,
+                vkeys::SCOPE_OUTLINE_THICKNESS,
+                vkeys::SCOPE_OUTLINE_OPACITY,
+                vkeys::SCOPE_GRADIENT_MODE,
+                vkeys::SCOPE_ANIMATION_SPEED,
+                vkeys::SCOPE_STYLE,
+                vkeys::SCOPE_PARTICLES,
+                vkeys::SCOPE_PARTICLE_COUNT,
+                vkeys::SCOPE_PARTICLE_SPEED,
+                vkeys::SCOPE_BEAM,
+                vkeys::SCOPE_TRAILS,
+                vkeys::SCOPE_ECHO,
             ],
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 9 + 4 + 20 + 5 + 5 + 11 = 54. Catches an item landing OUTSIDE the
+        // 7 + 4 + 23 + 5 + 5 + 14 + 17 = 75. Catches an item landing OUTSIDE the
         // pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 54);
+        assert_eq!(count_items(&entries), 75);
     }
 
     #[test]

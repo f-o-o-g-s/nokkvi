@@ -262,6 +262,44 @@ impl LinesStyle {
     }
 }
 
+/// Where a spectrum visualizer mode (Bars / Lines) is drawn on screen.
+///
+/// `OverCover` (the default) draws the visualizer over the now-playing cover art
+/// in the Queue view — the same slot the Scope ring uses — and only while audio
+/// is playing; it's the more striking first impression (the app opens to the
+/// Queue). `BottomBand` is the classic placement: a band across the bottom of
+/// the window, above the player bar, visible on every view. Scope is always
+/// drawn over the cover and has no placement of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum VisualizerPlacement {
+    /// A band across the bottom of the window, above the player bar.
+    BottomBand = 0,
+    /// Over the now-playing cover art (Queue view, while playing). Default — the
+    /// integrated cover look greets a new user on the default Queue view.
+    #[default]
+    OverCover = 1,
+}
+
+impl VisualizerPlacement {
+    /// Every variant in declaration order — pins the settings dropdown order.
+    pub const ALL: &'static [Self] = &[Self::BottomBand, Self::OverCover];
+
+    /// Wire-format string used in `config.toml`.
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::BottomBand => "bottom_band",
+            Self::OverCover => "over_cover",
+        }
+    }
+
+    /// Wire strings for every variant in declaration order.
+    pub fn all_wire_strs() -> Vec<&'static str> {
+        Self::ALL.iter().map(Self::as_wire_str).collect()
+    }
+}
+
 /// Theme-specific bar color configuration (colors only)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -468,6 +506,23 @@ pub struct BarsConfig {
     /// The dynamic layout algorithm will try to fit up to this many bars in the window.
     /// Default: 512, range 16–2048
     pub max_bars: usize,
+
+    /// Motion trails: bars leave a fading after-image (0.0 = off,
+    /// 1.0 = long comet trails). Maps to a per-frame persistence/decay.
+    /// Per-mode (was a single global knob).
+    /// Default: 0.0 (off — it noticeably changes the visualizer's character)
+    pub trails: f32,
+
+    /// Echo (Milkdrop-style zoom/rotate feedback): the bars spiral and tunnel
+    /// into themselves, swirling with the bass/beat (0.0 = off, 1.0 = strong
+    /// persistence). A psychedelic feedback layer; takes over the display when on.
+    /// Default: 0.0 (off — strong character change)
+    pub echo: f32,
+
+    /// Where the Bars visualizer is drawn. See [`VisualizerPlacement`].
+    /// Default: [`VisualizerPlacement::OverCover`] (over the now-playing cover art)
+    #[serde(deserialize_with = "deserialize_or_default")]
+    pub placement: VisualizerPlacement,
 }
 
 impl Default for BarsConfig {
@@ -490,6 +545,9 @@ impl Default for BarsConfig {
             bar_depth_3d: 0.0,
             flash_intensity: 0.6,
             max_bars: 512,
+            trails: 0.0,
+            echo: 0.0,
+            placement: VisualizerPlacement::OverCover,
         }
     }
 }
@@ -567,6 +625,23 @@ pub struct LinesConfig {
     /// Surfing boat: render a small boat that rides the waveform.
     /// Default: true
     pub boat: bool,
+
+    /// Motion trails: the line leaves a fading after-image (0.0 = off,
+    /// 1.0 = long comet trails). Maps to a per-frame persistence/decay.
+    /// Per-mode (was a single global knob).
+    /// Default: 0.0 (off — it noticeably changes the visualizer's character)
+    pub trails: f32,
+
+    /// Echo (Milkdrop-style zoom/rotate feedback): the line spirals and tunnels
+    /// into itself, swirling with the bass/beat (0.0 = off, 1.0 = strong
+    /// persistence). A psychedelic feedback layer; takes over the display when on.
+    /// Default: 0.0 (off — strong character change)
+    pub echo: f32,
+
+    /// Where the Lines visualizer is drawn. See [`VisualizerPlacement`].
+    /// Default: [`VisualizerPlacement::OverCover`] (over the now-playing cover art)
+    #[serde(deserialize_with = "deserialize_or_default")]
+    pub placement: VisualizerPlacement,
 }
 
 impl Default for LinesConfig {
@@ -583,6 +658,9 @@ impl Default for LinesConfig {
             mirror: false,
             style: LinesStyle::Smooth,
             boat: true,
+            trails: 0.0,
+            echo: 0.0,
+            placement: VisualizerPlacement::OverCover,
         }
     }
 }
@@ -594,6 +672,106 @@ impl LinesConfig {
     }
 
     /// Get the style as u32 for shader (0=smooth, 1=angular)
+    pub fn get_style_value(&self) -> u32 {
+        self.style as u32
+    }
+}
+
+/// Scope (circular oscilloscope) mode specific configuration.
+///
+/// Mirrors the Lines appearance knobs (so the time-domain ring can be styled
+/// independently of Lines mode) plus two geometry params unique to the ring:
+/// `radius` (how big the ring sits over the cover) and `sensitivity` (how hard
+/// the waveform swings). Reuses [`LinesGradientMode`] / [`LinesStyle`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ScopeConfig {
+    /// Number of points around the ring (more = finer waveform detail).
+    /// Default: 16 (a chunky, smooth-blobby ring)
+    pub point_count: usize,
+    /// Mean ring radius as a fraction of the available space inside the cover
+    /// (0.1 = tiny inner ring, 0.95 = nearly fills the panel). Default: 0.7
+    pub radius: f32,
+    /// Waveform swing / gain — how far loud audio pushes the ring in and out
+    /// (0.5 = subtle, 5.0 = wild). Default: 1.5
+    pub sensitivity: f32,
+    /// Line thickness as a fraction of the panel size (0.005-0.1). Default: 0.005
+    pub line_thickness: f32,
+    /// Radial gradient fill from the ring toward the center (0.0 = no fill,
+    /// 1.0 = opaque rim). Default: 0.75
+    pub fill_opacity: f32,
+    /// Neon glow halo around the ring (0.0 = disabled, 1.0 = max). Default: 0.75
+    pub glow_intensity: f32,
+    /// Outline thickness in pixels behind the ring (0.0 = disabled). Default: 0.0
+    pub outline_thickness: f32,
+    /// Outline opacity (0.0 = invisible, 1.0 = fully opaque). Default: 0.0
+    pub outline_opacity: f32,
+    /// Gradient color mode. See [`LinesGradientMode`]. Default: Static
+    #[serde(deserialize_with = "deserialize_or_default")]
+    pub gradient_mode: LinesGradientMode,
+    /// Color animation cycle speed for the breathing gradient (0.05-1.0).
+    /// Default: 0.1
+    pub animation_speed: f32,
+    /// Interpolation style around the ring. See [`LinesStyle`]. Default: Smooth
+    #[serde(deserialize_with = "deserialize_or_default")]
+    pub style: LinesStyle,
+    /// Glowing particle field drifting out from the ring (the NCS / Wav2Bar
+    /// look). Default: true
+    pub particles: bool,
+    /// Number of particles in the field (0 disables). Default: 512
+    pub particle_count: usize,
+    /// Particle launch-speed multiplier — how fast they fly out from the ring
+    /// (0.1 = lazy drift, 4.0 = energetic). Default: 1.0
+    pub particle_speed: f32,
+    /// Luminous-beam look: render the ring with additive blending so the glow
+    /// accumulates into a bright neon beam over the cover (woscope-style).
+    /// Default: true
+    pub beam: bool,
+
+    /// Motion trails: the ring leaves a fading after-image (0.0 = off,
+    /// 1.0 = long comet trails). Maps to a per-frame persistence/decay.
+    /// Per-mode (was a single global knob).
+    /// Default: 0.0 (off — it noticeably changes the visualizer's character)
+    pub trails: f32,
+
+    /// Echo (Milkdrop-style zoom/rotate feedback): the ring spirals and tunnels
+    /// inward, swirling with the bass/beat (0.0 = off, 1.0 = strong persistence).
+    /// A psychedelic feedback layer; takes over the display when on.
+    /// Default: 0.25 (a subtle feedback swirl)
+    pub echo: f32,
+}
+
+impl Default for ScopeConfig {
+    fn default() -> Self {
+        Self {
+            point_count: 16,
+            radius: 0.7,
+            sensitivity: 1.5,
+            line_thickness: 0.005,
+            fill_opacity: 0.75,
+            glow_intensity: 0.75,
+            outline_thickness: 0.0,
+            outline_opacity: 0.0,
+            gradient_mode: LinesGradientMode::Static,
+            animation_speed: 0.1,
+            style: LinesStyle::Smooth,
+            particles: true,
+            particle_count: 512,
+            particle_speed: 1.0,
+            beam: true,
+            trails: 0.0,
+            echo: 0.25,
+        }
+    }
+}
+
+impl ScopeConfig {
+    /// Gradient mode as u32 for the shader (matches `LinesGradientMode`).
+    pub fn get_gradient_mode_value(&self) -> u32 {
+        self.gradient_mode as u32
+    }
+
+    /// Interpolation style as u32 for the shader (0=smooth, 1=angular).
     pub fn get_style_value(&self) -> u32 {
         self.style as u32
     }
@@ -624,8 +802,6 @@ pub(crate) mod keys {
     pub(crate) const BLOOM: &str = "visualizer.bloom";
     pub(crate) const BLOOM_INTENSITY: &str = "visualizer.bloom_intensity";
     pub(crate) const BEAT_REACTIVITY: &str = "visualizer.beat_reactivity";
-    pub(crate) const TRAILS: &str = "visualizer.trails";
-    pub(crate) const ECHO: &str = "visualizer.echo";
     pub(crate) const CRT: &str = "visualizer.crt";
 
     // ── Bars ─────────────────────────────────────────────────────────────
@@ -646,6 +822,9 @@ pub(crate) mod keys {
     pub(crate) const BARS_PEAK_HEIGHT_RATIO: &str = "visualizer.bars.peak_height_ratio";
     pub(crate) const BARS_BAR_DEPTH_3D: &str = "visualizer.bars.bar_depth_3d";
     pub(crate) const BARS_FLASH_INTENSITY: &str = "visualizer.bars.flash_intensity";
+    pub(crate) const BARS_TRAILS: &str = "visualizer.bars.trails";
+    pub(crate) const BARS_ECHO: &str = "visualizer.bars.echo";
+    pub(crate) const BARS_PLACEMENT: &str = "visualizer.bars.placement";
 
     // ── Lines ────────────────────────────────────────────────────────────
     pub(crate) const LINES_POINT_COUNT: &str = "visualizer.lines.point_count";
@@ -659,6 +838,28 @@ pub(crate) mod keys {
     pub(crate) const LINES_MIRROR: &str = "visualizer.lines.mirror";
     pub(crate) const LINES_STYLE: &str = "visualizer.lines.style";
     pub(crate) const LINES_BOAT: &str = "visualizer.lines.boat";
+    pub(crate) const LINES_TRAILS: &str = "visualizer.lines.trails";
+    pub(crate) const LINES_ECHO: &str = "visualizer.lines.echo";
+    pub(crate) const LINES_PLACEMENT: &str = "visualizer.lines.placement";
+
+    // ── Scope (circular oscilloscope) ────────────────────────────────────
+    pub(crate) const SCOPE_POINT_COUNT: &str = "visualizer.scope.point_count";
+    pub(crate) const SCOPE_RADIUS: &str = "visualizer.scope.radius";
+    pub(crate) const SCOPE_SENSITIVITY: &str = "visualizer.scope.sensitivity";
+    pub(crate) const SCOPE_LINE_THICKNESS: &str = "visualizer.scope.line_thickness";
+    pub(crate) const SCOPE_FILL_OPACITY: &str = "visualizer.scope.fill_opacity";
+    pub(crate) const SCOPE_GLOW_INTENSITY: &str = "visualizer.scope.glow_intensity";
+    pub(crate) const SCOPE_OUTLINE_THICKNESS: &str = "visualizer.scope.outline_thickness";
+    pub(crate) const SCOPE_OUTLINE_OPACITY: &str = "visualizer.scope.outline_opacity";
+    pub(crate) const SCOPE_GRADIENT_MODE: &str = "visualizer.scope.gradient_mode";
+    pub(crate) const SCOPE_ANIMATION_SPEED: &str = "visualizer.scope.animation_speed";
+    pub(crate) const SCOPE_STYLE: &str = "visualizer.scope.style";
+    pub(crate) const SCOPE_PARTICLES: &str = "visualizer.scope.particles";
+    pub(crate) const SCOPE_PARTICLE_COUNT: &str = "visualizer.scope.particle_count";
+    pub(crate) const SCOPE_PARTICLE_SPEED: &str = "visualizer.scope.particle_speed";
+    pub(crate) const SCOPE_BEAM: &str = "visualizer.scope.beam";
+    pub(crate) const SCOPE_TRAILS: &str = "visualizer.scope.trails";
+    pub(crate) const SCOPE_ECHO: &str = "visualizer.scope.echo";
 }
 
 /// Visualizer configuration loaded from config.toml
@@ -729,17 +930,6 @@ pub struct VisualizerConfig {
     /// Default: 1.0
     pub beat_reactivity: f32,
 
-    /// Motion trails: bars/lines leave a fading after-image (0.0 = off,
-    /// 1.0 = long comet trails). Maps to a per-frame persistence/decay.
-    /// Default: 0.0 (off — it noticeably changes the visualizer's character)
-    pub trails: f32,
-
-    /// Echo (Milkdrop-style zoom/rotate feedback): the visualizer spirals and
-    /// tunnels into itself, swirling with the bass/beat (0.0 = off, 1.0 = strong
-    /// persistence). A psychedelic feedback layer; takes over the display when on.
-    /// Default: 0.0 (off — strong character change)
-    pub echo: f32,
-
     /// CRT / film composite: a retro post-process (chromatic aberration,
     /// scanlines, vignette, grain, beat zoom-punch), one master amount
     /// (0.0 = off, 1.0 = full). Opt-in.
@@ -755,6 +945,11 @@ pub struct VisualizerConfig {
     /// Use [visualizer.lines] in config.toml
     #[serde(default)]
     pub lines: LinesConfig,
+
+    /// Scope (circular oscilloscope) mode specific settings
+    /// Use [visualizer.scope] in config.toml
+    #[serde(default)]
+    pub scope: ScopeConfig,
 }
 
 fn default_auto_sensitivity() -> bool {
@@ -776,11 +971,10 @@ impl Default for VisualizerConfig {
             bloom: true,
             bloom_intensity: 0.6,
             beat_reactivity: 1.0,
-            trails: 0.0,
-            echo: 0.0,
             crt: 0.0,
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
+            scope: ScopeConfig::default(),
         }
     }
 }
@@ -814,6 +1008,8 @@ impl VisualizerConfig {
         self.bars.peak_height_ratio = self.bars.peak_height_ratio.clamp(10, 100);
         self.bars.peak_fall_speed = self.bars.peak_fall_speed.clamp(1, 20);
         self.bars.max_bars = self.bars.max_bars.clamp(16, 2048);
+        self.bars.trails = self.bars.trails.clamp(0.0, 1.0);
+        self.bars.echo = self.bars.echo.clamp(0.0, 1.0);
 
         // Validate lines config
         self.lines.point_count = self.lines.point_count.clamp(8, 512);
@@ -823,6 +1019,23 @@ impl VisualizerConfig {
         self.lines.animation_speed = self.lines.animation_speed.clamp(0.05, 1.0);
         self.lines.fill_opacity = self.lines.fill_opacity.clamp(0.0, 1.0);
         self.lines.glow_intensity = self.lines.glow_intensity.clamp(0.0, 1.0);
+        self.lines.trails = self.lines.trails.clamp(0.0, 1.0);
+        self.lines.echo = self.lines.echo.clamp(0.0, 1.0);
+
+        // Validate scope config.
+        self.scope.point_count = self.scope.point_count.clamp(16, 512);
+        self.scope.radius = self.scope.radius.clamp(0.1, 0.95);
+        self.scope.sensitivity = self.scope.sensitivity.clamp(0.5, 5.0);
+        self.scope.line_thickness = self.scope.line_thickness.clamp(0.005, 0.1);
+        self.scope.fill_opacity = self.scope.fill_opacity.clamp(0.0, 1.0);
+        self.scope.glow_intensity = self.scope.glow_intensity.clamp(0.0, 1.0);
+        self.scope.outline_thickness = self.scope.outline_thickness.clamp(0.0, 5.0);
+        self.scope.outline_opacity = self.scope.outline_opacity.clamp(0.0, 1.0);
+        self.scope.animation_speed = self.scope.animation_speed.clamp(0.05, 1.0);
+        self.scope.particle_count = self.scope.particle_count.min(2048);
+        self.scope.particle_speed = self.scope.particle_speed.clamp(0.1, 4.0);
+        self.scope.trails = self.scope.trails.clamp(0.0, 1.0);
+        self.scope.echo = self.scope.echo.clamp(0.0, 1.0);
 
         // Validate height_percent (10% to 60% — above 60% the visualizer overlaps the player bar)
         self.height_percent = self.height_percent.clamp(0.1, 0.60);
@@ -836,9 +1049,6 @@ impl VisualizerConfig {
         // Validate beat reactivity (0.0–1.0)
         self.beat_reactivity = self.beat_reactivity.clamp(0.0, 1.0);
 
-        // Validate trails (0.0–1.0)
-        self.trails = self.trails.clamp(0.0, 1.0);
-        self.echo = self.echo.clamp(0.0, 1.0);
         self.crt = self.crt.clamp(0.0, 1.0);
     }
 }
@@ -1138,6 +1348,47 @@ mod tests {
         assert_eq!(second_snapshot.bars.bar_spacing, 7.5);
     }
 
+    /// `validate()` clamps the Scope ring point count into `[16, 512]`. The old
+    /// even-only constraint (which existed solely so the mirror seam closed into
+    /// a palindrome) is gone with the seam tuning, so in-range odd values are now
+    /// preserved as-is.
+    #[test]
+    fn validate_clamps_scope_point_count() {
+        // In-range odd values survive untouched (no even-rounding any more).
+        for v in [17usize, 33, 129, 511] {
+            let mut cfg = VisualizerConfig {
+                scope: ScopeConfig {
+                    point_count: v,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            cfg.validate();
+            assert_eq!(cfg.scope.point_count, v, "in-range value {v} was altered");
+        }
+
+        // Out-of-range values clamp to the bounds.
+        let mut low = VisualizerConfig {
+            scope: ScopeConfig {
+                point_count: 3,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        low.validate();
+        assert_eq!(low.scope.point_count, 16);
+
+        let mut high = VisualizerConfig {
+            scope: ScopeConfig {
+                point_count: 9000,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        high.validate();
+        assert_eq!(high.scope.point_count, 512);
+    }
+
     /// Pins the `BarsConfig::get_gradient_mode_value` emitted u32 set so a future agent
     /// who adds a `1`-valued variant fails immediately — `bars.wgsl` has no branch for
     /// `1u` and would silently fall through to the static gradient. See Tier 0 #0.10 in
@@ -1276,6 +1527,26 @@ mod tests {
             let parsed: BarsConfig = toml::from_str(&toml_str).expect("deserialize BarsConfig");
             assert_eq!(parsed.peak_mode, *variant);
         }
+
+        let placement_cases: &[(VisualizerPlacement, &str)] = &[
+            (VisualizerPlacement::BottomBand, "bottom_band"),
+            (VisualizerPlacement::OverCover, "over_cover"),
+        ];
+        for (variant, expected_wire) in placement_cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = BarsConfig {
+                placement: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize BarsConfig");
+            assert!(
+                toml_str.contains(&format!("placement = \"{expected_wire}\"")),
+                "BarsConfig with placement={variant:?} should emit \
+                 `placement = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: BarsConfig = toml::from_str(&toml_str).expect("deserialize BarsConfig");
+            assert_eq!(parsed.placement, *variant);
+        }
     }
 
     /// Round-trip every `LinesConfig` enum variant through TOML.
@@ -1323,6 +1594,26 @@ mod tests {
             let parsed: LinesConfig = toml::from_str(&toml_str).expect("deserialize LinesConfig");
             assert_eq!(parsed.style, *variant);
         }
+
+        let placement_cases: &[(VisualizerPlacement, &str)] = &[
+            (VisualizerPlacement::BottomBand, "bottom_band"),
+            (VisualizerPlacement::OverCover, "over_cover"),
+        ];
+        for (variant, expected_wire) in placement_cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = LinesConfig {
+                placement: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize LinesConfig");
+            assert!(
+                toml_str.contains(&format!("placement = \"{expected_wire}\"")),
+                "LinesConfig with placement={variant:?} should emit \
+                 `placement = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: LinesConfig = toml::from_str(&toml_str).expect("deserialize LinesConfig");
+            assert_eq!(parsed.placement, *variant);
+        }
     }
 
     /// Existing `config.toml` files on disk (pre-Group-G) may have empty
@@ -1339,6 +1630,7 @@ gradient_mode = "shimer"
 gradient_orientation = ""
 peak_gradient_mode = ""
 peak_mode = "unknown_mode"
+placement = "somewhere_else"
 "#;
         let cfg: BarsConfig = toml::from_str(toml_input).expect(
             "BarsConfig must tolerate empty + typo strings instead of rejecting the whole struct",
@@ -1347,6 +1639,7 @@ peak_mode = "unknown_mode"
         assert_eq!(cfg.gradient_orientation, BarsGradientOrientation::default());
         assert_eq!(cfg.peak_gradient_mode, BarsPeakGradientMode::default());
         assert_eq!(cfg.peak_mode, BarsPeakMode::default());
+        assert_eq!(cfg.placement, VisualizerPlacement::default());
     }
 
     #[test]
@@ -1354,12 +1647,35 @@ peak_mode = "unknown_mode"
         let toml_input = r#"
 gradient_mode = ""
 style = "wibbly"
+placement = "nowhere"
 "#;
         let cfg: LinesConfig = toml::from_str(toml_input).expect(
             "LinesConfig must tolerate empty + typo strings instead of rejecting the whole struct",
         );
         assert_eq!(cfg.gradient_mode, LinesGradientMode::default());
         assert_eq!(cfg.style, LinesStyle::default());
+        assert_eq!(cfg.placement, VisualizerPlacement::default());
+    }
+
+    /// Pin the owner-chosen default placement: Bars/Lines draw over the cover by
+    /// default (the app opens to the Queue, so it's the striking first
+    /// impression). The typo-tolerance tests above only compare against
+    /// `default()`, so they wouldn't catch a flip of the `#[default]` back to
+    /// `BottomBand` — this asserts the concrete value.
+    #[test]
+    fn default_placement_is_over_cover() {
+        assert_eq!(
+            VisualizerPlacement::default(),
+            VisualizerPlacement::OverCover
+        );
+        assert_eq!(
+            BarsConfig::default().placement,
+            VisualizerPlacement::OverCover
+        );
+        assert_eq!(
+            LinesConfig::default().placement,
+            VisualizerPlacement::OverCover
+        );
     }
 
     /// Lock the WGSL dispatch contract — the `#[repr(u32)]` discriminants on
@@ -1475,6 +1791,13 @@ style = "wibbly"
         }
         assert_eq!(LinesStyle::ALL.len(), 2);
 
+        for v in VisualizerPlacement::ALL {
+            match v {
+                VisualizerPlacement::BottomBand | VisualizerPlacement::OverCover => {}
+            }
+        }
+        assert_eq!(VisualizerPlacement::ALL.len(), 2);
+
         // Wire strings must be pairwise distinct per enum — duplicates would
         // make the dropdown's selected-value matching ambiguous.
         fn assert_distinct(name: &str, strs: &[&'static str]) {
@@ -1496,6 +1819,7 @@ style = "wibbly"
         assert_distinct("BarsPeakMode", &BarsPeakMode::all_wire_strs());
         assert_distinct("LinesGradientMode", &LinesGradientMode::all_wire_strs());
         assert_distinct("LinesStyle", &LinesStyle::all_wire_strs());
+        assert_distinct("VisualizerPlacement", &VisualizerPlacement::all_wire_strs());
     }
 
     /// Pins each `all_wire_strs()` output to the exact literal vec the
@@ -1521,6 +1845,10 @@ style = "wibbly"
             vec!["breathing", "static", "position", "height", "gradient"],
         );
         assert_eq!(LinesStyle::all_wire_strs(), vec!["smooth", "angular"]);
+        assert_eq!(
+            VisualizerPlacement::all_wire_strs(),
+            vec!["bottom_band", "over_cover"],
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════

@@ -68,6 +68,67 @@ mod boat_tests {
     }
 
     #[test]
+    fn boat_visible_in_both_lines_placements() {
+        use crate::{
+            visualizer_config::VisualizerPlacement,
+            widgets::{
+                boat::{BOAT_WRAP_MARGIN_BOAT_WIDTHS, OVER_COVER_WRAP_MARGIN, boat_pixel_size},
+                visualizer::visualizer_area_height,
+            },
+        };
+
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        app.engine.visualization_mode = VisualizationMode::Lines;
+
+        // Lines in the bottom band (the non-default placement — the shipped
+        // default is OverCover) → the boat surfs the band, with the
+        // window-derived wrap margin (distinct from the over-cover constant).
+        {
+            let mut cfg = app.visualizer_config.write();
+            cfg.lines.placement = VisualizerPlacement::BottomBand;
+        }
+        let _ = app.update(Message::BoatTick(Instant::now()));
+        assert!(
+            app.boat.visible,
+            "boat must show when Lines is placed in the bottom band"
+        );
+        // Pin the bottom-band arm of the x_wrap_margin fork (recomputed from the
+        // same inputs the handler uses), so a regression that wrongly applied the
+        // over-cover constant to the bottom band would fail here.
+        let hp = app.visualizer_config.read().height_percent;
+        let area_h = visualizer_area_height(app.window.width, app.window.height, hp);
+        let expected_band =
+            (boat_pixel_size(area_h).0 * BOAT_WRAP_MARGIN_BOAT_WIDTHS) / app.window.width;
+        assert!(
+            (app.boat.x_wrap_margin - expected_band).abs() < 1e-6,
+            "bottom-band uses the window-derived margin, got {}",
+            app.boat.x_wrap_margin
+        );
+        assert!(
+            (app.boat.x_wrap_margin - OVER_COVER_WRAP_MARGIN).abs() > 1e-6,
+            "bottom-band margin must differ from the over-cover constant"
+        );
+
+        // Move Lines over the cover art → the boat rides the over-cover wave too,
+        // using the panel-size-independent over-cover wrap margin.
+        {
+            let mut cfg = app.visualizer_config.write();
+            cfg.lines.placement = VisualizerPlacement::OverCover;
+        }
+        let _ = app.update(Message::BoatTick(Instant::now()));
+        assert!(
+            app.boat.visible,
+            "boat must also show when Lines is drawn over the cover art"
+        );
+        assert!(
+            (app.boat.x_wrap_margin - OVER_COVER_WRAP_MARGIN).abs() < 1e-6,
+            "over-cover placement uses the constant wrap margin, got {}",
+            app.boat.x_wrap_margin
+        );
+    }
+
+    #[test]
     fn boat_advances_x_ratio_on_tick() {
         let mut app = test_app();
         enable_boat_in_config(&app, true);

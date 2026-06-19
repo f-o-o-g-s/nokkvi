@@ -6,7 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A new Scope visualizer mode (cycle the visualizer button: Off → Bars → Lines → Scope) draws the time-domain waveform as a circular oscilloscope ring over the now-playing cover art in the Queue, with an optional glowing particle field, beam glow, and its own Settings → Visualizer → Scope section (ring size, sensitivity, fill, glow, particles, and more).
+- The Bars and Lines visualizers can now be drawn over the now-playing cover art instead of the band above the player bar. A new Placement control at the top of Settings → Visualizer → Bars and → Lines picks "over_cover" (on the now-playing cover art in the Queue, while playing — now the default) or "bottom_band" (a band above the player bar, on every view). Each mode is positioned independently. The Visualizer Height setting controls how tall they are over the cover (bottom-anchored), and the surfing boat rides the Lines wave in either placement.
+
 ### Changed
+
+- Motion Trails and Echo are now tuned per visualizer mode. Each mode (Bars, Lines, Scope) has its own Trails and Echo knobs in Settings → Visualizer, replacing the single global pair. Existing global values reset to off; re-enable them per mode.
 
 ### Fixed
 

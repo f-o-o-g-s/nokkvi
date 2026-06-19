@@ -1,10 +1,10 @@
-//! Visualization mode (Off / Bars / Lines).
+//! Visualization mode (Off / Bars / Lines / Scope).
 
 use serde::{Deserialize, Serialize};
 
 /// Visualization mode for the audio visualizer.
 ///
-/// Cycles: Off → Bars → Lines → Off via `next()`.
+/// Cycles: Off → Bars → Lines → Scope → Off via `next()`.
 /// Serializes to lowercase strings for redb storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -13,6 +13,9 @@ pub enum VisualizationMode {
     #[default]
     Bars,
     Lines,
+    /// Circular oscilloscope (time-domain waveform) drawn over the now-playing
+    /// cover art. Cycled after Lines.
+    Scope,
 }
 
 impl VisualizationMode {
@@ -21,7 +24,8 @@ impl VisualizationMode {
         match self {
             Self::Off => Self::Bars,
             Self::Bars => Self::Lines,
-            Self::Lines => Self::Off,
+            Self::Lines => Self::Scope,
+            Self::Scope => Self::Off,
         }
     }
 }
@@ -32,6 +36,7 @@ impl std::fmt::Display for VisualizationMode {
             Self::Off => write!(f, "off"),
             Self::Bars => write!(f, "bars"),
             Self::Lines => write!(f, "lines"),
+            Self::Scope => write!(f, "scope"),
         }
     }
 }
@@ -44,7 +49,8 @@ mod tests {
     fn visualization_mode_cycles() {
         assert_eq!(VisualizationMode::Off.next(), VisualizationMode::Bars);
         assert_eq!(VisualizationMode::Bars.next(), VisualizationMode::Lines);
-        assert_eq!(VisualizationMode::Lines.next(), VisualizationMode::Off);
+        assert_eq!(VisualizationMode::Lines.next(), VisualizationMode::Scope);
+        assert_eq!(VisualizationMode::Scope.next(), VisualizationMode::Off);
     }
 
     #[test]
@@ -58,6 +64,7 @@ mod tests {
             VisualizationMode::Off,
             VisualizationMode::Bars,
             VisualizationMode::Lines,
+            VisualizationMode::Scope,
         ];
         for mode in modes {
             let json = serde_json::to_string(&mode).unwrap();
@@ -79,6 +86,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<VisualizationMode>("\"lines\"").unwrap(),
             VisualizationMode::Lines
+        );
+        assert_eq!(
+            serde_json::from_str::<VisualizationMode>("\"scope\"").unwrap(),
+            VisualizationMode::Scope
         );
     }
 }

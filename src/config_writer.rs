@@ -435,6 +435,23 @@ fn strip_to_sparse_doc(doc: &mut DocumentMut) -> Result<()> {
     // Strip matching keys from [visualizer]
     strip_matching_keys(doc, "visualizer", viz_default_doc.as_table());
 
+    // Remove the legacy global `visualizer.trails` / `visualizer.echo`
+    // scalars. They moved into the per-mode sub-tables
+    // (`[visualizer.bars]`/`[lines]`/`[scope]`), so any top-level copy left in a
+    // user's config is an inert orphan — drop it so sparse configs stay clean.
+    // (The per-mode keys live inside the sub-tables, so this only touches the
+    // old top-level scalars.)
+    if let Some(viz) = doc
+        .get_mut("visualizer")
+        .and_then(|v| v.as_table_like_mut())
+    {
+        for legacy in ["trails", "echo"] {
+            if viz.remove(legacy).is_some() {
+                debug!(" [CONFIG WRITER] Removed legacy global visualizer.{legacy} (now per-mode)");
+            }
+        }
+    }
+
     // Remove any leftover [theme] TABLE section from pre-refactor configs.
     // The new architecture uses `theme = "name"` (a string key), NOT a [theme] table.
     // Guard: only remove if it's actually a table, not the string key we need.
@@ -865,6 +882,41 @@ mod tests {
         assert!(
             result.is_err(),
             "Corrupted TOML string should return an error"
+        );
+    }
+
+    /// Legacy configs carried global `visualizer.trails` / `visualizer.echo`
+    /// scalars. The knobs moved into the per-mode sub-tables, so a sparse strip
+    /// must drop the now-inert top-level scalars while leaving the new per-mode
+    /// key (`[visualizer.bars].trails`) untouched.
+    #[test]
+    fn strip_to_sparse_removes_legacy_global_trails_echo() {
+        let input = "\
+[visualizer]
+trails = 0.5
+echo = 0.3
+
+[visualizer.bars]
+trails = 0.6
+";
+        let stripped = super::strip_to_sparse_content(input).expect("strip must succeed");
+        let doc: DocumentMut = stripped.parse().expect("stripped output must parse");
+        let viz = doc["visualizer"]
+            .as_table_like()
+            .expect("[visualizer] table");
+
+        assert!(
+            viz.get("trails").is_none(),
+            "legacy top-level visualizer.trails must be removed, got:\n{stripped}"
+        );
+        assert!(
+            viz.get("echo").is_none(),
+            "legacy top-level visualizer.echo must be removed, got:\n{stripped}"
+        );
+        assert_eq!(
+            doc["visualizer"]["bars"]["trails"].as_float(),
+            Some(0.6),
+            "the per-mode visualizer.bars.trails must survive, got:\n{stripped}"
         );
     }
 }

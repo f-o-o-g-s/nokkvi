@@ -20,6 +20,9 @@ use super::shader::{
 /// is identical, so the helper centralizes the wgpu boilerplate.
 ///
 /// `vs_main` / `fs_main` are the entry points both shaders share.
+// Plumbs the few axes that vary across the bars/lines/scope/particle pipelines;
+// grouping them into a struct would only move the noise to the eight call sites.
+#[allow(clippy::too_many_arguments)]
 fn build_visualizer_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -28,6 +31,7 @@ fn build_visualizer_pipeline(
     msaa: bool,
     label: &'static str,
     format: wgpu::TextureFormat,
+    blend: wgpu::BlendState,
 ) -> wgpu::RenderPipeline {
     let multisample = if msaa {
         wgpu::MultisampleState {
@@ -58,7 +62,7 @@ fn build_visualizer_pipeline(
             entry_point: Some("fs_main"),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -125,6 +129,10 @@ fn build_postprocess_pipeline(
 
 impl VisualizerPipeline {
     pub(crate) const MAX_BARS: usize = 2048;
+    /// Max particles in the Scope particle field (matches the config cap). Each
+    /// is two `vec4<f32>` — (x, y, size, alpha) + (colour_t, _, _, _) — in the
+    /// particle storage buffer.
+    pub(crate) const MAX_PARTICLES: usize = 2048;
 
     pub(crate) fn new(
         device: &wgpu::Device,
@@ -159,6 +167,14 @@ impl VisualizerPipeline {
         let peak_alpha_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("visualizer peak alpha buffer"),
             size: (Self::MAX_BARS * std::mem::size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Create particle buffer (two vec4 per particle: x,y,size,alpha + colour_t,…)
+        let particle_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("visualizer particle buffer"),
+            size: (Self::MAX_PARTICLES * 8 * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -211,6 +227,17 @@ impl VisualizerPipeline {
                     },
                     count: None,
                 },
+                // Particle data (two vec4 per particle, scope mode only)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -234,6 +261,10 @@ impl VisualizerPipeline {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: peak_alpha_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: particle_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -261,6 +292,22 @@ impl VisualizerPipeline {
             ))),
         });
 
+        // Load scope shader (circular oscilloscope)
+        let scope_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer scope shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/scope.wgsl"
+            ))),
+        });
+
+        // Load particle shader (scope particle field)
+        let particle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("visualizer particle shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/particles.wgsl"
+            ))),
+        });
+
         // Create bars render pipeline (no MSAA — fast path for flat mode)
         let bars_pipeline = build_visualizer_pipeline(
             device,
@@ -270,6 +317,7 @@ impl VisualizerPipeline {
             false,
             "visualizer bars pipeline",
             format,
+            wgpu::BlendState::ALPHA_BLENDING,
         );
 
         // Create bars render pipeline with 4x MSAA (for perspective/3D mode)
@@ -281,6 +329,7 @@ impl VisualizerPipeline {
             true,
             "visualizer bars pipeline (MSAA 4x)",
             format,
+            wgpu::BlendState::ALPHA_BLENDING,
         );
 
         // Create lines render pipeline (uses TriangleStrip for thick lines)
@@ -292,6 +341,7 @@ impl VisualizerPipeline {
             false,
             "visualizer lines pipeline",
             format,
+            wgpu::BlendState::ALPHA_BLENDING,
         );
 
         // Create lines render pipeline with 4x MSAA (for perspective/3D mode)
@@ -303,6 +353,91 @@ impl VisualizerPipeline {
             true,
             "visualizer lines pipeline (MSAA 4x)",
             format,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
+
+        // Create scope render pipeline (TriangleStrip ribbon, same as lines)
+        let scope_pipeline = build_visualizer_pipeline(
+            device,
+            &layout,
+            &scope_shader,
+            wgpu::PrimitiveTopology::TriangleStrip,
+            false,
+            "visualizer scope pipeline",
+            format,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
+
+        // Create scope render pipeline with 4x MSAA (effects/offscreen path)
+        let scope_pipeline_msaa = build_visualizer_pipeline(
+            device,
+            &layout,
+            &scope_shader,
+            wgpu::PrimitiveTopology::TriangleStrip,
+            true,
+            "visualizer scope pipeline (MSAA 4x)",
+            format,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
+
+        // Particle pipelines (instanced glowing quads, additive blend so the
+        // dust accumulates into bright spots — the NCS look). TriangleList: 6
+        // verts per particle. One non-MSAA + one MSAA, mirroring the scope.
+        let additive_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        let particle_pipeline = build_visualizer_pipeline(
+            device,
+            &layout,
+            &particle_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            false,
+            "visualizer particle pipeline",
+            format,
+            additive_blend,
+        );
+        let particle_pipeline_msaa = build_visualizer_pipeline(
+            device,
+            &layout,
+            &particle_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            true,
+            "visualizer particle pipeline (MSAA 4x)",
+            format,
+            additive_blend,
+        );
+
+        // Scope beam pipelines: the scope shader rendered with additive blending
+        // (the luminous woscope-style beam). Same TriangleStrip geometry as the
+        // regular scope pipelines — only the blend differs.
+        let scope_pipeline_beam = build_visualizer_pipeline(
+            device,
+            &layout,
+            &scope_shader,
+            wgpu::PrimitiveTopology::TriangleStrip,
+            false,
+            "visualizer scope beam pipeline",
+            format,
+            additive_blend,
+        );
+        let scope_pipeline_beam_msaa = build_visualizer_pipeline(
+            device,
+            &layout,
+            &scope_shader,
+            wgpu::PrimitiveTopology::TriangleStrip,
+            true,
+            "visualizer scope beam pipeline (MSAA 4x)",
+            format,
+            additive_blend,
         );
 
         // --- Blit pipeline for compositing MSAA result onto framebuffer ---
@@ -677,8 +812,15 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             bars_pipeline_msaa,
             lines_pipeline,
             lines_pipeline_msaa,
+            scope_pipeline,
+            scope_pipeline_msaa,
+            particle_pipeline,
+            particle_pipeline_msaa,
+            scope_pipeline_beam,
+            scope_pipeline_beam_msaa,
             uniform_buffer,
             bar_buffer,
+            particle_buffer,
             peak_buffer,
             peak_alpha_buffer,
             bind_group,

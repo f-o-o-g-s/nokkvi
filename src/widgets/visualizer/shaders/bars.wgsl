@@ -20,7 +20,7 @@ struct Uniforms {
 
 struct Config {
     bar_count: u32,
-    mode: u32,  // 0 = bars, 1 = lines
+    mode: u32,  // 0 = bars, 1 = lines, 2 = scope
     border_width: f32,  // In pixels
     peak_enabled: u32,
     peak_thickness: f32,  // In pixels (e.g., 3.0)
@@ -53,8 +53,8 @@ struct Config {
     lines_glow_intensity: f32,     // Lines mode only: glow bloom (0.0 = disabled)
     lines_style: u32,              // Lines mode only: 0=smooth, 1=angular, 2=stepped
     bars_flash_intensity: f32,     // Bars mode: peak-flash bloom strength (0 = off)
-    _pad0: u32,
-    _pad1: u32,
+    scope_radius: f32,             // Scope mode: ring radius fraction (unused here)
+    scope_sensitivity: f32,        // Scope mode: waveform gain (unused here)
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s
     // Up to 2048 bars = 512 vec4s
     flash_data: array<vec4<f32>, 512>,

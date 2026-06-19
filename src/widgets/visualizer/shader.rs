@@ -54,12 +54,17 @@ const ECHO_BASS_ZOOM: f32 = 0.04;
 const ECHO_BASE_ROT: f32 = 0.005;
 const ECHO_BEAT_ROT: f32 = 0.02;
 
+/// Spline samples per ring segment for Scope mode. MUST match `SCOPE_SP` in
+/// `shaders/scope.wgsl` — the CPU vertex count and the shader's vertex indexing
+/// have to agree or the ring drops a segment / overdraws the seam.
+const SCOPE_SAMPLES_PER_SEGMENT: u32 = 12;
+
 /// Configuration passed to the GPU shader
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(16))]
 pub(crate) struct VisualizerConfig {
     pub bar_count: u32,
-    pub mode: u32, // 0 = bars, 1 = lines
+    pub mode: u32, // 0 = bars, 1 = lines, 2 = scope
     pub border_width: f32,
     pub peak_enabled: u32,
     pub peak_thickness: f32,
@@ -92,7 +97,10 @@ pub(crate) struct VisualizerConfig {
     pub lines_glow_intensity: f32, // Lines mode: glow bloom (0.0 = disabled)
     pub lines_style: u32,        // Lines mode: 0=smooth, 1=angular, 2=stepped
     pub bars_flash_intensity: f32, // Bars mode: peak-flash bloom strength (0 = off)
-    pub _pad: [u32; 2],          // Padding for 16-byte alignment before flash_data
+    pub scope_radius: f32,       // Scope mode: mean ring radius as fraction of available space
+    pub scope_sensitivity: f32,  // Scope mode: waveform swing / gain
+    // (scope_radius + scope_sensitivity occupy the 8 bytes that were `_pad`, so
+    // flash_data stays 16-byte aligned at offset 144 — size is unchanged.)
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s for GPU efficiency
     // Up to 2048 bars = 512 vec4s
     pub flash_data: [[f32; 4]; 512], // 2048 bars max
@@ -119,8 +127,8 @@ const _: () = assert!(core::mem::offset_of!(VisualizerConfig, bar_count) == 0);
 const _: () = assert!(core::mem::offset_of!(VisualizerConfig, time) == 40);
 const _: () = assert!(core::mem::offset_of!(VisualizerConfig, lines_style) == 128);
 const _: () = assert!(
-    core::mem::offset_of!(VisualizerConfig, _pad) == 136,
-    "_pad must sit at 136 so flash_data lands on a 16-byte boundary (144)",
+    core::mem::offset_of!(VisualizerConfig, scope_radius) == 136,
+    "scope_radius/scope_sensitivity reuse the old _pad slot (136..144) so flash_data stays 16-byte aligned (144)",
 );
 const _: () = assert!(
     core::mem::offset_of!(VisualizerConfig, flash_data) == 144,
@@ -167,6 +175,14 @@ pub(crate) struct VisualizerPrimitive {
     pub crt_enabled: bool,
     /// CRT amount (0.0-1.0) — master retro intensity, into CrtParams.
     pub crt: f32,
+    /// Scope particle-field snapshot (two `vec4`s per particle), empty unless
+    /// Scope mode + particles are enabled. Uploaded in prepare() and drawn
+    /// (instanced, additive) after the ring.
+    pub particle_data: Vec<[f32; 8]>,
+    /// Number of particles to draw (== `particle_data.len()`, capped at MAX).
+    pub particle_count: u32,
+    /// Scope mode: render the ring additively for the luminous-beam look.
+    pub scope_beam: bool,
 }
 
 /// Shader visualizer parameters grouped for cleaner API
@@ -237,6 +253,15 @@ pub(crate) struct ShaderParams {
     pub lines_glow_intensity: f32,
     /// Lines mode: interpolation style (0=smooth, 1=angular, 2=stepped)
     pub lines_style: u32,
+    /// Scope mode: mean ring radius as a fraction of the available space inside
+    /// the cover (0.1 = tiny, 0.95 = nearly fills the panel)
+    pub scope_radius: f32,
+    /// Scope mode: waveform swing / gain (how hard loud audio pushes the ring)
+    pub scope_sensitivity: f32,
+    /// Scope mode: whether the particle field is enabled (drawn after the ring)
+    pub scope_particles: bool,
+    /// Scope mode: luminous-beam look — render the ring with additive blending
+    pub scope_beam: bool,
     /// Bars mode: peak-flash bloom strength (0.0 = disabled, 1.0 = max)
     pub bars_flash_intensity: f32,
     /// Bloom post-processing enabled (soft additive glow over the whole scene)
@@ -312,6 +337,7 @@ impl VisualizerPrimitive {
             mode: match mode {
                 VisualizationMode::Bars => 0,
                 VisualizationMode::Lines => 1,
+                VisualizationMode::Scope => 2,
             },
             border_width: params.border_width,
             peak_enabled: if params.peak_enabled { 1 } else { 0 },
@@ -345,7 +371,8 @@ impl VisualizerPrimitive {
             lines_glow_intensity: params.lines_glow_intensity,
             lines_style: params.lines_style,
             bars_flash_intensity: params.bars_flash_intensity,
-            _pad: [0; 2],
+            scope_radius: params.scope_radius,
+            scope_sensitivity: params.scope_sensitivity,
             flash_data,
         };
 
@@ -361,6 +388,22 @@ impl VisualizerPrimitive {
         } else {
             0.0
         };
+
+        // Scope particle field: pull the latest snapshot only in Scope mode with
+        // particles enabled (otherwise empty → nothing drawn). Dim by the global
+        // visualizer opacity and cap to the GPU buffer size.
+        let particle_data = if mode == VisualizationMode::Scope && params.scope_particles {
+            let opacity = params.global_opacity.clamp(0.0, 1.0);
+            let mut p = state.get_particles();
+            p.truncate(VisualizerPipeline::MAX_PARTICLES);
+            for particle in &mut p {
+                particle[3] *= opacity; // alpha channel
+            }
+            p
+        } else {
+            Vec::new()
+        };
+        let particle_count = particle_data.len() as u32;
 
         Self {
             gradient_colors: gradient,
@@ -379,6 +422,9 @@ impl VisualizerPrimitive {
             echo: params.echo,
             crt_enabled,
             crt: params.crt,
+            particle_data,
+            particle_count,
+            scope_beam: params.scope_beam,
         }
     }
 }
@@ -389,8 +435,15 @@ pub(crate) struct VisualizerPipeline {
     pub(super) bars_pipeline_msaa: wgpu::RenderPipeline,
     pub(super) lines_pipeline: wgpu::RenderPipeline,
     pub(super) lines_pipeline_msaa: wgpu::RenderPipeline,
+    pub(super) scope_pipeline: wgpu::RenderPipeline,
+    pub(super) scope_pipeline_msaa: wgpu::RenderPipeline,
+    pub(super) particle_pipeline: wgpu::RenderPipeline,
+    pub(super) particle_pipeline_msaa: wgpu::RenderPipeline,
+    pub(super) scope_pipeline_beam: wgpu::RenderPipeline,
+    pub(super) scope_pipeline_beam_msaa: wgpu::RenderPipeline,
     pub(super) uniform_buffer: wgpu::Buffer,
     pub(super) bar_buffer: wgpu::Buffer,
+    pub(super) particle_buffer: wgpu::Buffer,
     pub(super) peak_buffer: wgpu::Buffer,
     pub(super) peak_alpha_buffer: wgpu::Buffer,
     pub(super) bind_group: wgpu::BindGroup,
@@ -551,6 +604,7 @@ impl VisualizerPrimitive {
         bind_group: &wgpu::BindGroup,
         bars_pipeline: &wgpu::RenderPipeline,
         lines_pipeline: &wgpu::RenderPipeline,
+        scope_pipeline: &wgpu::RenderPipeline,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) {
         let bar_count = config.bar_count;
@@ -587,8 +641,42 @@ impl VisualizerPrimitive {
                 let instance_count = if config.lines_mirror != 0 { 6 } else { 3 };
                 render_pass.draw(0..vertices_per_pass, 0..instance_count);
             }
+            2 => {
+                // Scope mode (circular oscilloscope)
+                render_pass.set_pipeline(scope_pipeline);
+
+                // Closed loop: one segment per waveform point, +1 closing sample
+                // to seal the triangle strip. MUST match SCOPE_SP in scope.wgsl.
+                let samples_per_segment = SCOPE_SAMPLES_PER_SEGMENT;
+                let total_samples = bar_count * samples_per_segment;
+                let ring_points = total_samples + 1;
+                let vertices_per_spline_point = 2u32;
+                let vertices_per_pass = ring_points * vertices_per_spline_point;
+
+                // Instance 0 = fill, 1 = outline (under), 2 = main line (on top).
+                render_pass.draw(0..vertices_per_pass, 0..3);
+            }
             _ => {}
         }
+    }
+
+    /// Draw the Scope particle field (instanced glowing quads, additive). No-op
+    /// when there are no particles (every non-scope mode + particles-off).
+    /// Shares the bind group with the bars/lines/scope draw; the additive blend
+    /// lives on the pipeline.
+    fn draw_particles(
+        particle_pipeline: &wgpu::RenderPipeline,
+        bind_group: &wgpu::BindGroup,
+        particle_count: u32,
+        render_pass: &mut wgpu::RenderPass<'_>,
+    ) {
+        if particle_count == 0 {
+            return;
+        }
+        render_pass.set_pipeline(particle_pipeline);
+        render_pass.set_bind_group(0, bind_group, &[]);
+        // 6 vertices per particle (two triangles), one instance per particle.
+        render_pass.draw(0..6, 0..particle_count);
     }
 
     /// Non-MSAA render fallback (when MSAA texture isn't ready yet)
@@ -632,11 +720,23 @@ impl VisualizerPrimitive {
             clip_bounds.height,
         );
 
+        let scope_pipe = if self.scope_beam {
+            &pipeline.scope_pipeline_beam
+        } else {
+            &pipeline.scope_pipeline
+        };
         Self::draw_bars_and_lines(
             &self.config,
             &pipeline.bind_group,
             &pipeline.bars_pipeline,
             &pipeline.lines_pipeline,
+            scope_pipe,
+            &mut render_pass,
+        );
+        Self::draw_particles(
+            &pipeline.particle_pipeline,
+            &pipeline.bind_group,
+            self.particle_count,
             &mut render_pass,
         );
     }
@@ -667,8 +767,14 @@ impl shader::Primitive for VisualizerPrimitive {
         let fresh_peaks = self.state.get_peak_bars();
         let fresh_peak_alphas = self.state.get_peak_alphas();
 
-        // Convert to f32 for GPU
-        let bar_data: Vec<f32> = fresh_bars.iter().map(|&v| v as f32).collect();
+        // Convert to f32 for GPU. Scope mode uploads the signed time-domain
+        // waveform into the same storage buffer the bars/lines shaders read as
+        // `bar_data` — scope.wgsl interprets the entries as signed (-1..1).
+        let bar_data: Vec<f32> = if self.config.mode == 2 {
+            self.state.get_waveform()
+        } else {
+            fresh_bars.iter().map(|&v| v as f32).collect()
+        };
         let peak_data: Vec<f32> = fresh_peaks.iter().map(|&v| v as f32).collect();
         let peak_alpha_data: Vec<f32> = fresh_peak_alphas.iter().map(|&v| v as f32).collect();
 
@@ -720,6 +826,16 @@ impl shader::Primitive for VisualizerPrimitive {
             0,
             bytemuck::cast_slice(&peak_alpha_padded),
         );
+
+        // Update particle data (Scope mode; only the first particle_count entries
+        // are read by the draw, so no padding is needed).
+        if !self.particle_data.is_empty() {
+            queue.write_buffer(
+                &pipeline.particle_buffer,
+                0,
+                bytemuck::cast_slice(&self.particle_data),
+            );
+        }
 
         // Create/resize offscreen targets if perspective/3D, bloom, trails, OR
         // echo are active (all need the resolve texture; bloom adds the half-res
@@ -1079,11 +1195,23 @@ impl shader::Primitive for VisualizerPrimitive {
             return false;
         }
 
+        let scope_pipe = if self.scope_beam {
+            &pipeline.scope_pipeline_beam
+        } else {
+            &pipeline.scope_pipeline
+        };
         Self::draw_bars_and_lines(
             &self.config,
             &pipeline.bind_group,
             &pipeline.bars_pipeline,
             &pipeline.lines_pipeline,
+            scope_pipe,
+            render_pass,
+        );
+        Self::draw_particles(
+            &pipeline.particle_pipeline,
+            &pipeline.bind_group,
+            self.particle_count,
             render_pass,
         );
         true
@@ -1142,11 +1270,23 @@ impl shader::Primitive for VisualizerPrimitive {
             render_pass.set_viewport(0.0, 0.0, tex_w as f32, tex_h as f32, 0.0, 1.0);
             render_pass.set_scissor_rect(0, 0, tex_w, tex_h);
 
+            let scope_pipe = if self.scope_beam {
+                &pipeline.scope_pipeline_beam_msaa
+            } else {
+                &pipeline.scope_pipeline_msaa
+            };
             Self::draw_bars_and_lines(
                 &self.config,
                 &pipeline.bind_group,
                 &pipeline.bars_pipeline_msaa,
                 &pipeline.lines_pipeline_msaa,
+                scope_pipe,
+                &mut render_pass,
+            );
+            Self::draw_particles(
+                &pipeline.particle_pipeline_msaa,
+                &pipeline.bind_group,
+                self.particle_count,
                 &mut render_pass,
             );
         }
@@ -1534,7 +1674,7 @@ mod layout_tests {
 
     #[test]
     fn flash_data_is_sixteen_byte_aligned() {
-        assert_eq!(core::mem::offset_of!(VisualizerConfig, _pad), 136);
+        assert_eq!(core::mem::offset_of!(VisualizerConfig, scope_radius), 136);
         assert_eq!(core::mem::offset_of!(VisualizerConfig, flash_data) % 16, 0);
     }
 }

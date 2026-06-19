@@ -130,7 +130,7 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "accent.primary" => &["highlight", "brand color", "theme color"],
         "border" => &["outline", "divider", "hairline"],
 
-        // ── Visualizer · Frame / Signal / Bars / Lines ───────────────────────
+        // ── Visualizer · Frame / Signal / Bars / Lines / Scope ───────────────
         "visualizer.height_percent" => &["size"],
         "visualizer.noise_reduction" => &["smoothing", "denoise"],
         "visualizer.lower_cutoff_freq" => &["bass", "low frequency", "highpass"],
@@ -139,7 +139,7 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "visualizer.bloom" => &["glow", "halo", "neon", "emissive", "shine"],
         "visualizer.bloom_intensity" => &["glow strength", "halo", "neon", "bloom amount"],
         "visualizer.beat_reactivity" => &["pump", "beat", "bass drop", "punch", "kick", "pulse"],
-        "visualizer.trails" => &[
+        "visualizer.bars.trails" | "visualizer.lines.trails" | "visualizer.scope.trails" => &[
             "motion blur",
             "persistence",
             "echo",
@@ -147,13 +147,23 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
             "comet",
             "afterimage",
         ],
-        "visualizer.echo" => &[
+        "visualizer.bars.echo" | "visualizer.lines.echo" | "visualizer.scope.echo" => &[
             "milkdrop",
             "feedback",
             "spiral",
             "tunnel",
             "psychedelic",
             "warp",
+        ],
+        "visualizer.bars.placement" | "visualizer.lines.placement" => &[
+            "position",
+            "location",
+            "where",
+            "bottom band",
+            "player bar",
+            "over cover",
+            "cover art",
+            "album art",
         ],
         "visualizer.crt" => &[
             "retro",
@@ -192,6 +202,15 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "visualizer.lines.style" => &["smooth", "angular", "curve", "interpolation"],
         "visualizer.lines.mirror" => &["symmetric", "oscilloscope", "reflect"],
         "visualizer.lines.boat" => &["surf", "rider", "easter egg"],
+        "visualizer.scope.radius" => &["oscilloscope", "circular", "ring", "ring size", "diameter"],
+        "visualizer.scope.sensitivity" => &["oscilloscope", "gain", "waveform swing", "amplitude"],
+        "visualizer.scope.point_count" => &["resolution", "detail", "samples", "vertices"],
+        "visualizer.scope.particles" => &["sparks", "dust", "embers", "particle field", "stars"],
+        "visualizer.scope.particle_count" => &["sparks", "dust", "density", "number of particles"],
+        "visualizer.scope.particle_speed" => &["sparks", "dust", "drift", "flow speed"],
+        "visualizer.scope.glow_intensity" => &["neon", "halo", "bloom", "glow", "luminous"],
+        "visualizer.scope.beam" => &["beam", "neon", "glow", "halo", "trace glow"],
+        "visualizer.scope.style" => &["smooth", "angular", "curve", "interpolation"],
 
         _ => &[],
     }

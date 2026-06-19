@@ -335,13 +335,66 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
 pub(crate) fn single_artwork_panel<'a, Message: 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
 ) -> Element<'a, Message> {
+    single_artwork_panel_inner(artwork_handle, None, None)
+}
+
+/// Surfing-boat overlay for the over-cover Lines visualizer. Carries a borrow of
+/// the live [`BoatState`](crate::widgets::boat::BoatState) plus the visual params
+/// the boat needs (global visualizer `opacity` + the Lines `mirror` flag).
+/// `Some` only when Lines is drawn over the cover and the boat is visible; the
+/// physics ticks in `update::boat` regardless of placement, so the position is
+/// already live. The boat is inert (emits no messages, event-transparent), so it
+/// composes under the artwork context menu exactly like the visualizer ring.
+#[derive(Clone, Copy)]
+pub(crate) struct OverCoverBoat<'a> {
+    pub state: &'a crate::widgets::boat::BoatState,
+    pub opacity: f32,
+    pub mirror: bool,
+}
+
+/// Like [`single_artwork_panel`], but stacks the active visualizer over the
+/// cover when `over_art` is `Some`. The tuple carries the cloned [`Visualizer`]
+/// plus which widget mode to draw (`Scope` ring, `Bars`, or `Lines`) — the
+/// over-cover placement option for Bars/Lines reuses this same slot the Scope
+/// ring uses. The visualizer is event-transparent (its `shader::Program::update`
+/// only requests redraws), so a wrapping context menu still receives the
+/// artwork right-click.
+///
+/// In the square (Auto / Native) layouts the visualizer fills the square cover.
+/// In the stretched (non-square) layouts the cover fills the column edge to
+/// edge and the visualizer fills the whole panel too. The Scope ring sizes off
+/// `min(w, h)` so it stays a true centered circle regardless of aspect, while
+/// the particle dust fades out at the real panel edges instead of being clipped
+/// at a sub-square boundary. Bars/Lines are bottom-anchored (they map to the
+/// full rectangle); Bars additionally recompute their bar layout against the
+/// panel width so they fit the column rather than the window.
+///
+/// When `boat` is `Some` (Lines over the cover, boat visible) the surfing boat
+/// is stacked above the ring, riding the over-cover wave just as it rides the
+/// bottom band.
+///
+/// The `f32` in `over_art` is the Visualizer Height fraction: Bars/Lines occupy
+/// that fraction of the cover height, bottom-anchored (so cover art stays visible
+/// above), matching the bottom-band height knob. Scope ignores it — its ring is
+/// centered and sized by `scope.radius`, filling the panel.
+///
+/// [`Visualizer`]: crate::widgets::visualizer::Visualizer
+fn single_artwork_panel_inner<'a, Message: 'a>(
+    artwork_handle: Option<&'a iced::widget::image::Handle>,
+    over_art: Option<(
+        crate::widgets::visualizer::Visualizer,
+        crate::widgets::visualizer::VisualizationMode,
+        f32,
+    )>,
+    boat: Option<OverCoverBoat<'a>>,
+) -> Element<'a, Message> {
     if theme::artwork_column_mode().is_stretched() {
         let fit = match theme::artwork_column_stretch_fit() {
             ArtworkStretchFit::Cover => ContentFit::Cover,
             ArtworkStretchFit::Fill => ContentFit::Fill,
         };
         return iced::widget::responsive(move |size| {
-            use iced::widget::{container, image, text};
+            use iced::widget::{container, image, stack, text};
 
             let content: Element<'_, Message> = if let Some(handle) = artwork_handle {
                 image(handle.clone())
@@ -360,22 +413,100 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a>(
                     .into()
             };
 
-            container(content)
+            let cover = container(content)
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))
                 .style(|_theme| container::Style {
                     background: Some(artwork_outer_bg().into()),
                     ..Default::default()
-                })
+                });
+
+            // Overlay the active visualizer across the FULL (non-square) cover,
+            // not a centered square. For Scope the shader sizes the ring off
+            // `min(w, h)` in pixel space, so it stays a true circle centered in
+            // the panel regardless of aspect; letting the visualizer fill the
+            // whole rect means the particle dust fades out at the real panel
+            // edges instead of being hard-clipped (scissored) at a sub-square
+            // boundary. Bars/Lines instead honor the Visualizer Height setting:
+            // they occupy `height_percent` of the cover height, bottom-anchored
+            // (cover art shows above) — the same knob the bottom band uses. Bars
+            // also recompute their bar layout from the panel width.
+            let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
+                let is_scope = *mode == crate::widgets::visualizer::VisualizationMode::Scope;
+                let band_h = if is_scope {
+                    size.height
+                } else {
+                    (size.height * *height_percent).clamp(0.0, size.height)
+                };
+                let top_pad = (size.height - band_h).max(0.0);
+
+                let mut configured = viz.clone().mode(*mode);
+                // Bars recompute their bar layout from the actual panel width
+                // (the bottom-band path feeds the window width, which over a
+                // narrow column overflows and scissor-clips). Lines/Scope use a
+                // fixed point count, so no width hint is needed.
+                if *mode == crate::widgets::visualizer::VisualizationMode::Bars {
+                    configured = configured.width(size.width);
+                }
+                let ring = configured.view::<Message>();
+                let ring_layer: Element<'_, Message> = if is_scope {
+                    container(ring)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                } else {
+                    column![
+                        container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
+                        container(ring)
+                            .width(Length::Fill)
+                            .height(Length::Fixed(band_h)),
+                    ]
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+                };
+                let mut layers = stack![cover, ring_layer];
+                // Surfing boat over the Lines wave, confined to the same bottom
+                // band so it rides the rendered waveform. Inert + event-
+                // transparent, so it never steals the artwork right-click.
+                if let Some(b) = &boat
+                    && *mode == crate::widgets::visualizer::VisualizationMode::Lines
+                {
+                    // Size the boat off min(width, band) so its width can't exceed
+                    // a narrow band — keeps the over-cover wrap-margin constant
+                    // valid; the band's bottom is the boat's waterline.
+                    let boat_el = crate::widgets::boat::boat_overlay::<Message>(
+                        b.state,
+                        size.width,
+                        band_h,
+                        size.width.min(band_h),
+                        b.opacity,
+                        b.mirror,
+                    );
+                    let boat_layer = column![
+                        container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
+                        container(boat_el)
+                            .width(Length::Fill)
+                            .height(Length::Fixed(band_h)),
+                    ]
+                    .width(Length::Fill)
+                    .height(Length::Fill);
+                    layers = layers.push(boat_layer);
+                }
+                layers.into()
+            } else {
+                cover.into()
+            };
+            panel
         })
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
     }
 
-    // Square (Auto / AlwaysNative) — original behavior.
+    // Square (Auto / AlwaysNative) — original behavior, plus the optional ring.
     iced::widget::responsive(move |size| {
-        use iced::widget::{container, image, text};
+        use iced::widget::{container, image, stack, text};
 
         let square_size = size.width.min(size.height).max(0.0);
 
@@ -396,17 +527,127 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a>(
                 .into()
         };
 
-        container(content)
+        let cover = container(content)
             .width(Length::Fixed(square_size))
             .height(Length::Fixed(square_size))
             .style(|_theme| container::Style {
                 background: Some(artwork_outer_bg().into()),
                 ..Default::default()
-            })
+            });
+
+        // Overlay the active visualizer over the cover square. Scope fills the
+        // square (centered ring). Bars/Lines honor the Visualizer Height setting:
+        // they occupy `height_percent` of the square, bottom-anchored (cover art
+        // shows above) — the same knob the bottom band uses.
+        let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
+            let is_scope = *mode == crate::widgets::visualizer::VisualizationMode::Scope;
+            let band_h = if is_scope {
+                square_size
+            } else {
+                (square_size * *height_percent).clamp(0.0, square_size)
+            };
+            let top_pad = (square_size - band_h).max(0.0);
+
+            let mut configured = viz.clone().mode(*mode);
+            if *mode == crate::widgets::visualizer::VisualizationMode::Bars {
+                configured = configured.width(square_size);
+            }
+            let ring = configured.view::<Message>();
+            let ring_layer: Element<'_, Message> = if is_scope {
+                container(ring)
+                    .width(Length::Fixed(square_size))
+                    .height(Length::Fixed(square_size))
+                    .into()
+            } else {
+                column![
+                    container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
+                    container(ring)
+                        .width(Length::Fixed(square_size))
+                        .height(Length::Fixed(band_h)),
+                ]
+                .width(Length::Fixed(square_size))
+                .height(Length::Fixed(square_size))
+                .into()
+            };
+            let mut layers = stack![cover, ring_layer];
+            // Surfing boat over the Lines wave, confined to the same bottom band
+            // so it rides the rendered waveform. Inert + transparent.
+            if let Some(b) = &boat
+                && *mode == crate::widgets::visualizer::VisualizationMode::Lines
+            {
+                // Sprite basis = min(square_size, band): on a short band the boat
+                // sizes off the band height, keeping the wrap-margin constant valid.
+                let boat_el = crate::widgets::boat::boat_overlay::<Message>(
+                    b.state,
+                    square_size,
+                    band_h,
+                    square_size.min(band_h),
+                    b.opacity,
+                    b.mirror,
+                );
+                let boat_layer = column![
+                    container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
+                    container(boat_el)
+                        .width(Length::Fixed(square_size))
+                        .height(Length::Fixed(band_h)),
+                ]
+                .width(Length::Fixed(square_size))
+                .height(Length::Fixed(square_size));
+                layers = layers.push(boat_layer);
+            }
+            layers.into()
+        } else {
+            cover.into()
+        };
+        panel
     })
     .width(Length::Shrink)
     .height(Length::Shrink)
     .into()
+}
+
+/// Artwork panel with the active visualizer overlaid on the cover (when
+/// `over_art` is `Some`) plus the standard "Refresh Artwork" right-click menu.
+/// Used by the Queue now-playing panel for the over-cover visualizer placement
+/// (the Scope ring always, and Bars/Lines when their placement is `OverCover`).
+/// The tuple carries the cloned visualizer and which widget mode to draw; `boat`
+/// adds the surfing-boat overlay on top when Lines rides over the cover.
+pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone + 'a>(
+    artwork_handle: Option<&'a iced::widget::image::Handle>,
+    over_art: Option<(
+        crate::widgets::visualizer::Visualizer,
+        crate::widgets::visualizer::VisualizationMode,
+        f32,
+    )>,
+    boat: Option<OverCoverBoat<'a>>,
+    on_refresh: Option<Message>,
+    is_open: bool,
+    open_position: Option<iced::Point>,
+    on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
+) -> Element<'a, Message> {
+    let panel = single_artwork_panel_inner(artwork_handle, over_art, boat);
+
+    if let Some(refresh_msg) = on_refresh {
+        use crate::widgets::context_menu::{context_menu, menu_button};
+
+        context_menu(
+            panel,
+            vec![()],
+            move |_entry, _length| {
+                menu_button(
+                    Some("assets/icons/refresh-cw.svg"),
+                    "Refresh Artwork",
+                    refresh_msg.clone(),
+                )
+            },
+            is_open,
+            open_position,
+            on_open_change,
+        )
+        .into()
+    } else {
+        panel
+    }
 }
 
 /// Create a single-image artwork panel with an optional right-click context menu.

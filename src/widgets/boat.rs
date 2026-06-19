@@ -68,7 +68,8 @@
 mod boat_physics;
 pub(crate) use boat_physics::{
     ANCHOR_HEIGHT_MULTIPLE_OF_BOAT, BOAT_SINK_FRACTION, BOAT_WRAP_MARGIN_BOAT_WIDTHS, BoatState,
-    MusicSignals, boat_pixel_size, effective_bars, rope_stroke_for, step, wave_baseline_and_scale,
+    MusicSignals, OVER_COVER_WRAP_MARGIN, boat_pixel_size, effective_bars, rope_stroke_for, step,
+    wave_baseline_and_scale,
 };
 use iced::{
     Color, Element, Event, Length, Point, Rectangle, Size, Vector,
@@ -331,10 +332,21 @@ where
 /// `renderer.with_layer(self.viewport, ...)` with the full window viewport,
 /// so a parent `container.clip(true)` is silently ignored and the boat
 /// would draw over neighbouring overlays (the player bar).
+///
+/// `size_basis` is the dimension the boat sprite is scaled off (via
+/// [`boat_pixel_size`]). For the bottom band that is the band height (a
+/// wide-short strip, so height is the constraining dimension). Over the cover
+/// it is `min(width, height)`: the cover can be tall and narrow, and sizing off
+/// the height there would make the sprite wider than the panel — so it would
+/// fail to clear the visible area before the off-screen wrap fires (a seam pop).
+/// Sizing off the smaller dimension keeps the sprite width bounded by the panel
+/// width, which is what makes the over-cover wrap margin a valid constant.
+/// `area_width` / `area_height` still set the boat's position and wave baseline.
 pub(crate) fn boat_overlay<'a, M: 'a>(
     state: &BoatState,
     area_width: f32,
     area_height: f32,
+    size_basis: f32,
     opacity: f32,
     mirror: bool,
 ) -> Element<'a, M> {
@@ -361,7 +373,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
             .into_bytes();
             svg::Handle::from_memory(bytes)
         });
-    let (boat_w, boat_h) = boat_pixel_size(area_height);
+    let (boat_w, boat_h) = boat_pixel_size(size_basis);
 
     // The boat SVG carries a padded viewBox so a `MAX_TILT` rotation
     // doesn't clip the rotated bounding box's corners. Scale the iced

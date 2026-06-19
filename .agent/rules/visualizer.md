@@ -21,7 +21,9 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 **Render path:** non-MSAA fast path by default; switches to **4× MSAA → resolve → blit** when perspective lean is active (the `has_perspective` flag on `VisualizerPrimitive`, set from `bar_depth_3d > 0.001`, gates the path per-frame).
 
-`VisualizationMode` enum (`data/src/types/player_settings/visualizer.rs`): `Off`, `Bars`, `Lines` (cycled by the player-bar toggle). `MIN_BAR_COUNT = 4`; bar width interpolates between `bar_width_min` and `bar_width_max` over a 400→2560px window range.
+`VisualizationMode` enum (`data/src/types/player_settings/visualizer.rs`): `Off`, `Bars`, `Lines`, `Scope` (cycled by the player-bar toggle).  `MIN_BAR_COUNT = 4`; bar width interpolates between `bar_width_min` and `bar_width_max` over a 400→2560px window range.
+
+**Placement.** Bars and Lines each carry a `VisualizerPlacement` (`OverCover` default / `BottomBand`) in `src/visualizer_config.rs` (per-mode field on `BarsConfig` / `LinesConfig`, follows the same `ALL`/`as_wire_str()`/pin-test enum convention as the others). `BottomBand` draws a band above the player bar (every view); `OverCover` draws over the now-playing cover art in the Queue, while playing — the slot the Scope ring uses (Scope is always over-cover, with no placement of its own). Over the cover, Bars/Lines honor the `Visualizer Height` setting (`height_percent`) as a bottom-anchored fraction of the cover height; Scope fills the panel (its ring sizes off `scope.radius`). `widgets::visualizer::resolve_placement(mode, bars_placement, lines_placement) -> VisualizerSlots { bottom_band, over_art }` is the single source of truth for the render fork (the two slots are mutually exclusive); `app_view` calls it for both the bottom-band overlay and the over-cover (`single_artwork_panel_inner`) render sites. The surfing boat rides the Lines wave in either placement — the bottom band (`app_view`) or over the cover (the Queue artwork panel, via `OverCoverBoat`).
 
 ## Bars Mode
 
