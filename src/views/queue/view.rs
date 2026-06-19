@@ -23,31 +23,67 @@ use crate::{
 
 /// Compact height of the read-only playlist "Playing From" banner.
 pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
+/// Resolve the artwork layout the queue's slot list will render for the given
+/// window — shared by the playlist strip's width math and its top-separator
+/// gate. `resolve_artwork_layout` reads only the window dimensions, the
+/// show-artwork flag, and the display-mode atomics, so `slot_list_chrome` /
+/// `elevated` are irrelevant here and neutral values are fine.
+fn playlist_strip_artwork_layout(
+    window_width: f32,
+    window_height: f32,
+) -> Option<crate::widgets::base_slot_list_layout::ArtworkLayout> {
+    use crate::widgets::base_slot_list_layout::{BaseSlotListLayoutConfig, resolve_artwork_layout};
+    resolve_artwork_layout(&BaseSlotListLayoutConfig {
+        window_width,
+        window_height,
+        show_artwork_column: true,
+        slot_list_chrome: 0.0,
+        elevated: false,
+    })
+}
+
 /// Width available to the expanded playlist strip's content — the song-list
 /// column, i.e. the content pane minus the horizontal artwork column when one
 /// is shown. Vertical / hidden artwork leave the strip full-width. The comment
 /// wraps within this width, so sizing the detail block to it (rather than to
 /// the full pane) is what keeps the meta row from being clipped.
 fn playlist_strip_band_width(window_width: f32, window_height: f32) -> f32 {
-    use crate::widgets::base_slot_list_layout::{
-        ArtworkOrientation, BaseSlotListLayoutConfig, resolve_artwork_layout,
-    };
-    // `resolve_artwork_layout` only reads the window dimensions, the
-    // show-artwork flag, and the display-mode atomics — `slot_list_chrome` /
-    // `elevated` are irrelevant here, so neutral values are fine.
-    let cfg = BaseSlotListLayoutConfig {
-        window_width,
-        window_height,
-        show_artwork_column: true,
-        slot_list_chrome: 0.0,
-        elevated: false,
-    };
-    match resolve_artwork_layout(&cfg) {
+    use crate::widgets::base_slot_list_layout::ArtworkOrientation;
+    match playlist_strip_artwork_layout(window_width, window_height) {
         Some(layout) if matches!(layout.orientation, ArtworkOrientation::Horizontal) => {
             (window_width - layout.extent).max(120.0)
         }
         _ => window_width,
     }
+}
+
+/// Whether the read-only "Playing From" banner needs a top hairline separating
+/// it from a large album-artwork column stacked directly above it.
+///
+/// The banner is a full-bleed accent wash with no top margin, so in the
+/// Auto-mode portrait fallback it runs flush against the artwork panel above it
+/// with no visual break — that's the case this hairline fixes. Every other
+/// layout already reads as separated: Horizontal / hidden artwork places the
+/// banner below the nav chrome, the regular view header carries its own top
+/// margin, and the opt-in Always-Vertical* modes render a 6px drag-handle bar
+/// between the artwork and the chrome. That handle is exactly what
+/// [`ArtworkColumnMode::is_vertical`] gates in `vertical_layout`, so excluding
+/// those modes scopes the hairline to the genuinely-flush handle-less case.
+fn playlist_strip_needs_top_separator(
+    playlist_loaded: bool,
+    window_width: f32,
+    window_height: f32,
+) -> bool {
+    use crate::widgets::base_slot_list_layout::ArtworkOrientation;
+    // Always-Vertical* modes resolve to Vertical too but separate the banner
+    // with their drag handle — skip them so only the flush Auto fallback fires.
+    if !playlist_loaded || crate::theme::artwork_column_mode().is_vertical() {
+        return false;
+    }
+    matches!(
+        playlist_strip_artwork_layout(window_width, window_height),
+        Some(layout) if matches!(layout.orientation, ArtworkOrientation::Vertical)
+    )
 }
 
 /// Lay out the hover-expanded detail block: clamp the comment to at most
@@ -207,10 +243,13 @@ impl QueuePage {
                 },
             );
 
-        // Both branches produce the same `column![extra, sep, header]` shape so
-        // iced's positional reconciler keeps the search `text_input::Id` stable
-        // across the playlist-context / read-only toggle. With no playlist loaded
-        // `extra` and `sep` are zero-sized `Space` placeholders.
+        // `extra`, `sep`, and the `top_sep` built below are the three leading
+        // children of the final `column![top_sep, extra, sep, header]` (assembled
+        // after the banner). Each collapses to a zero-sized `Space` placeholder
+        // when inactive, so the column is ALWAYS a 4-child shape — iced's
+        // positional reconciler then keeps the search `text_input::Id` (inside
+        // `header`, the trailing child) stable across the playlist-context /
+        // read-only / orientation toggles.
         let extra: Element<'a, QueueMessage> = if let Some(ref ctx) = data.playlist_context_info {
             // Read-only "Playing From" banner (Direction 2). Renders only while a
             // playlist is loaded for playback. Hovering the band reveals a detail
@@ -482,7 +521,28 @@ impl QueuePage {
                 .height(Length::Fixed(0.0))
                 .into()
         };
-        let header: Element<'a, QueueMessage> = column![extra, sep, header].into();
+        // Top hairline above the banner — only when a large album-artwork column
+        // is stacked flush directly above it (the Auto-mode portrait fallback;
+        // see `playlist_strip_needs_top_separator`). Every other layout already
+        // reads as separated. Kept as a fourth column child (zero-`Space` when
+        // absent) so the `column![top_sep, extra, sep, header]` shape — and the
+        // search `text_input::Id` inside `header` — stay positionally stable
+        // across the playlist / orientation toggles. Its 1 px is folded into
+        // `chrome_height` below so the vertical slot-list pinning math stays exact.
+        let needs_top_sep = playlist_strip_needs_top_separator(
+            data.playlist_context_info.is_some(),
+            data.window_width,
+            data.window_height,
+        );
+        let top_sep: Element<'a, QueueMessage> = if needs_top_sep {
+            crate::theme::horizontal_separator(1.0)
+        } else {
+            Space::new()
+                .width(Length::Shrink)
+                .height(Length::Fixed(0.0))
+                .into()
+        };
+        let header: Element<'a, QueueMessage> = column![top_sep, extra, sep, header].into();
 
         // Compose with the tri-state "select all" header bar when the
         // multi-select column is on. The bar's tri-state derives from the
@@ -502,14 +562,20 @@ impl QueuePage {
         };
         let select_header_visible = self.column_visibility.select;
         let chrome_height = if data.playlist_context_info.is_some() {
-            // Compact "Playing From" banner + 1px separator, plus the detail
-            // block height when the strip is hover-expanded (grow-in-flow).
+            // Compact "Playing From" banner + 1px bottom separator, plus the
+            // detail block height when the strip is hover-expanded
+            // (grow-in-flow), plus the 1px top hairline when a vertical artwork
+            // column sits directly above the banner. The top hairline must be
+            // counted here so the vertical layout pins the slot-list rect with
+            // the exact chrome height it renders — otherwise the column overflows
+            // by 1px and clips the last slot.
             let strip = if data.playlist_strip_expanded {
                 PLAYLIST_STRIP_COMPACT_H + playlist_detail_h
             } else {
                 PLAYLIST_STRIP_COMPACT_H
             };
-            chrome_height_with_header(toolbar_collapsed) + strip + 1.0
+            let top_sep_h = if needs_top_sep { 1.0 } else { 0.0 };
+            chrome_height_with_header(toolbar_collapsed) + strip + 1.0 + top_sep_h
         } else {
             chrome_height_with_select_header(toolbar_collapsed, select_header_visible)
         };
@@ -779,7 +845,22 @@ impl QueuePage {
 
 #[cfg(test)]
 mod tests {
-    use super::playlist_strip_detail;
+    use super::{
+        playlist_strip_band_width, playlist_strip_detail, playlist_strip_needs_top_separator,
+    };
+
+    /// Both top-separator / band-width tests mutate the artwork-column-mode
+    /// atomics that `resolve_artwork_layout` reads. Take the crate-wide theme
+    /// lock so they serialize against every other atomic-mutating test family.
+    fn with_auto_artwork_mode() -> parking_lot::MutexGuard<'static, ()> {
+        use nokkvi_data::types::player_settings::ArtworkColumnMode;
+        let guard = crate::theme::THEME_MODE_LOCK.lock();
+        crate::theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
+        // Match the resolver tests' default so the portrait/landscape dims below
+        // resolve deterministically regardless of any earlier test's writes.
+        crate::theme::set_artwork_auto_max_pct(0.40);
+        guard
+    }
 
     // 1 line: 1*16 + 8 (gap) + 20 (meta) + 9 (bottom) = 53.
     const ONE_LINE_H: f32 = 53.0;
@@ -832,5 +913,62 @@ mod tests {
             "a comment within the 5-line budget keeps its full text"
         );
         assert_eq!(display.chars().count(), 300);
+    }
+
+    #[test]
+    fn top_separator_only_for_auto_portrait_fallback_with_playlist() {
+        use nokkvi_data::types::player_settings::ArtworkColumnMode;
+        let _g = with_auto_artwork_mode();
+        // 530 × 1430 → Auto resolves to a Vertical (portrait) artwork column
+        // stacked flush above the banner, so it needs the top hairline.
+        assert!(
+            playlist_strip_needs_top_separator(true, 530.0, 1430.0),
+            "Auto portrait fallback + playlist loaded → banner needs a top hairline"
+        );
+        // No playlist loaded → no banner at all → never a separator.
+        assert!(
+            !playlist_strip_needs_top_separator(false, 530.0, 1430.0),
+            "no playlist → no banner → no hairline regardless of layout"
+        );
+        // 1920 × 1080 → Horizontal artwork (side column); the banner sits below
+        // the nav chrome and already reads as separated.
+        assert!(
+            !playlist_strip_needs_top_separator(true, 1920.0, 1080.0),
+            "horizontal artwork → no top hairline"
+        );
+        // 766 × 1370 → portrait but the artwork hides (would letterbox), so
+        // nothing large sits above the banner.
+        assert!(
+            !playlist_strip_needs_top_separator(true, 766.0, 1370.0),
+            "portrait with hidden artwork → no top hairline"
+        );
+        // Always-Vertical* modes also resolve to Vertical, but render a drag
+        // handle between the artwork and the banner — that handle separates
+        // them, so the hairline stays scoped to the handle-less Auto fallback.
+        crate::theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        assert!(
+            !playlist_strip_needs_top_separator(true, 530.0, 1430.0),
+            "Always-Vertical mode has a drag handle separating the banner → no hairline"
+        );
+        // Leave the shared atomic back at the default for sibling test families.
+        crate::theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
+    }
+
+    #[test]
+    fn band_width_excludes_only_the_horizontal_artwork_column() {
+        let _g = with_auto_artwork_mode();
+        // Horizontal: the strip's content band is the pane minus the artwork
+        // column, so it's narrower than the full window.
+        let horizontal = playlist_strip_band_width(1920.0, 1080.0);
+        assert!(
+            horizontal > 0.0 && horizontal < 1920.0,
+            "horizontal artwork narrows the strip band, got {horizontal}"
+        );
+        // Vertical: artwork stacks above, leaving the strip full-width.
+        let vertical = playlist_strip_band_width(530.0, 1430.0);
+        assert!(
+            (vertical - 530.0).abs() < 1e-3,
+            "vertical artwork leaves the strip full-width, got {vertical}"
+        );
     }
 }

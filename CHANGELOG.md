@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The Queue's Playing-From-Playlist banner now has a divider separating it from the cover art stacked directly above it in a portrait window.
+
 ### Removed
 
 ## v0.9.4 — 2026-06-18
