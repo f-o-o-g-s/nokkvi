@@ -244,6 +244,61 @@ fn compute_watermarks(frame_rate: u32, crossfade_ms: u64) -> (usize, usize) {
     (high, low)
 }
 
+/// Periodic stream-health observability for the primary decode loop.
+/// Observability only — no control flow. Fires at most once every 5 s and
+/// emits a debug line ONLY on anomaly (an underrun was recorded or at least
+/// one empty/invalid buffer was seen since the last reset); silent ticks are
+/// noise.
+///
+/// `last_heartbeat` and `empty_buffer_count` are SHARED with the decode loop
+/// (the heartbeat clock is reused by the loop's 10 s liveness trace, and the
+/// counter is incremented by the sibling empty-buffer branch), so both are
+/// taken by `&mut`: this helper reads the heartbeat gate, then on fire resets
+/// the counter to 0 and the heartbeat to now — exactly as the inlined block
+/// did. Passing either by value would silently break heartbeat cadence and
+/// latch the anomaly gate forever.
+///
+/// Takes the renderer's parking_lot mutex briefly to snapshot buffer/underrun
+/// stats and drops the guard before logging — no `.await`, no lock held across
+/// a suspension point.
+fn log_stream_health(
+    renderer: &PlMutex<AudioRenderer>,
+    frame_rate: u32,
+    crossfade_ms: u64,
+    last_heartbeat: &mut std::time::Instant,
+    empty_buffer_count: &mut u64,
+) {
+    if last_heartbeat.elapsed().as_secs() < 5 {
+        return;
+    }
+    let guard = renderer.lock();
+    let buffered = guard.buffer_count();
+    let (ur_count, ur_peak, ur_total) = guard.underrun_stats();
+    drop(guard);
+    // Emit only on anomaly — silent ticks are noise.
+    if ur_count > 0 || *empty_buffer_count > 0 {
+        // Pure + cheap recompute (fires at most every 5s,
+        // and only on anomaly).
+        let (high_watermark, low_watermark) = compute_watermarks(frame_rate, crossfade_ms);
+        let frame_rate_f = frame_rate.max(1) as f32;
+        let sec_rem = buffered as f32 / frame_rate_f;
+        let peak_ms = ur_peak as f32 * 1000.0 / frame_rate_f;
+        tracing::debug!(
+            "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | EmptyBufs: {} | HW: {} LW: {}",
+            buffered,
+            sec_rem,
+            ur_count,
+            peak_ms,
+            ur_total,
+            *empty_buffer_count,
+            high_watermark,
+            low_watermark,
+        );
+    }
+    *empty_buffer_count = 0;
+    *last_heartbeat = std::time::Instant::now();
+}
+
 /// What a decode loop should do this iteration about ring-buffer backpressure.
 /// Mirrors the renderer's `RebufferAction` pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -974,35 +1029,13 @@ impl CustomAudioEngine {
                         }
                     }
 
-                    if last_heartbeat.elapsed().as_secs() >= 5 {
-                        let guard = renderer.lock();
-                        let buffered = guard.buffer_count();
-                        let (ur_count, ur_peak, ur_total) = guard.underrun_stats();
-                        drop(guard);
-                        // Emit only on anomaly — silent ticks are noise.
-                        if ur_count > 0 || empty_buffer_count > 0 {
-                            // Pure + cheap recompute (fires at most every 5s,
-                            // and only on anomaly).
-                            let (high_watermark, low_watermark) =
-                                compute_watermarks(frame_rate, cf_ms);
-                            let frame_rate_f = frame_rate.max(1) as f32;
-                            let sec_rem = buffered as f32 / frame_rate_f;
-                            let peak_ms = ur_peak as f32 * 1000.0 / frame_rate_f;
-                            tracing::debug!(
-                                "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | EmptyBufs: {} | HW: {} LW: {}",
-                                buffered,
-                                sec_rem,
-                                ur_count,
-                                peak_ms,
-                                ur_total,
-                                empty_buffer_count,
-                                high_watermark,
-                                low_watermark,
-                            );
-                        }
-                        empty_buffer_count = 0;
-                        last_heartbeat = std::time::Instant::now();
-                    }
+                    log_stream_health(
+                        &renderer,
+                        frame_rate,
+                        cf_ms,
+                        &mut last_heartbeat,
+                        &mut empty_buffer_count,
+                    );
                 } else if is_eof {
                     // =========================================================
                     // RADIO STREAM EOF: connection dropped or server closed.
