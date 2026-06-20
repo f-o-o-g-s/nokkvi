@@ -509,6 +509,173 @@ fn should_attempt_gapless_swap(
     !renderer_crossfade_armed && !renderer_crossfade_active
 }
 
+/// Outcome of an inline EOF gapless-swap attempt (`try_gapless_swap`). The five
+/// variants are the five mutually-exclusive exit paths of the original inline
+/// block; the caller branches on them so each path's side effects stay explicit.
+///
+/// Only `Swapped` actually advanced to the next track. The caller MUST clear its
+/// loop-local `backpressure_active` latch on `Swapped` ONLY (the new track's
+/// freshly-emptied ring would otherwise inherit a stale "backpressured" latch and
+/// take an unwarranted sleep before the next decode). Every other variant left
+/// the primary decoder untouched and put any taken decoder BACK in the slot, so
+/// the caller falls through to the EOF-signal path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GaplessSwapOutcome {
+    /// The next decoder was installed as the primary decoder: source generation
+    /// bumped (`bump_for_gapless`, the SOLE decode-loop bump), the slot cleared,
+    /// transition info populated, and the completion callback fired. The caller
+    /// clears `backpressure_active` and `continue`s the decode loop with no gap.
+    Swapped,
+    /// Nothing was staged (`!slot.is_prepared()`) — no swap possible.
+    NotPrepared,
+    /// The staged decoder's format didn't match the live stream's (or the
+    /// RG-track gain differs): the decoder was put BACK in the slot for a later
+    /// retry / the renderer's crossfade trigger.
+    FormatMismatch,
+    /// A crossfade is armed or active, so the renderer's position-based trigger
+    /// owns the transition: the staged decoder was put BACK so that trigger can
+    /// take it.
+    CrossfadeActive,
+    /// The slot claimed `prepared` but its decoder was missing — the stale
+    /// `prepared` flag was cleared.
+    DecoderMissing,
+}
+
+/// Inline EOF gapless swap: when the primary decoder hits EOF on a finite
+/// stream, try to swap the prepared next-track decoder straight into the primary
+/// slot so the decode loop continues with NO gap. Extracted verbatim from the
+/// decode loop; see `GaplessSwapOutcome` for the five exit paths.
+///
+/// Lock discipline (preserved exactly): the caller has ALREADY dropped the
+/// primary `decoder_guard` and passes `current_format` (snapshotted from it) by
+/// value. This function then takes the `gapless` slot lock (OUTER) and, while
+/// holding it, briefly takes the sync `renderer` lock (INNER) for the swap-allow
+/// / crossfade-state read — slot-outer / renderer-inner nesting. On the success
+/// path it drops the slot lock BEFORE locking the primary `decoder`, then bumps
+/// `source_generation` (the SOLE decode-loop bump, AFTER the decoder install and
+/// BEFORE the renderer position reset), resets the renderer, stores the
+/// transition info, and fires the completion callback. The `renderer` lock is a
+/// `parking_lot` (sync) mutex and is always scoped + dropped before any `.await`.
+#[allow(clippy::too_many_arguments)]
+async fn try_gapless_swap(
+    decoder: &tokio::sync::Mutex<AudioDecoder>,
+    renderer: &PlMutex<AudioRenderer>,
+    gapless: &tokio::sync::Mutex<GaplessSlot>,
+    gapless_info: &tokio::sync::Mutex<Option<GaplessTransitionInfo>>,
+    source_generation: &SourceGeneration,
+    completion_callback: &Option<Arc<dyn Fn(bool) + Send + Sync>>,
+    current_format: &AudioFormat,
+) -> GaplessSwapOutcome {
+    let mut slot = gapless.lock().await;
+    if !slot.is_prepared() {
+        drop(slot);
+        GaplessSwapOutcome::NotPrepared
+    } else if let Some(next_dec) = slot.decoder.take() {
+        // Hold the slot lock through the format check + ownership
+        // transition so `prepared` and `decoder` flip atomically.
+        let next_fmt = next_dec.format().clone();
+        let formats_match = current_format.is_valid()
+            && next_fmt.is_valid()
+            && current_format.sample_rate() == next_fmt.sample_rate()
+            && current_format.channel_count() == next_fmt.channel_count();
+        // RG-track mode: the live stream's amplify factor is baked
+        // at create time; deny gapless when the next track needs a
+        // different gain.
+        let (rg_allows_swap, cf_armed, cf_active) = {
+            let r = renderer.lock();
+            (
+                r.gapless_swap_allowed(),
+                r.is_crossfade_armed(),
+                r.is_crossfade_active(),
+            )
+        };
+        if !rg_allows_swap {
+            tracing::debug!("🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap");
+        }
+
+        // Crossfade owns the transition: when a crossfade is
+        // armed or active, the inline gapless swap stands down
+        // (should_attempt_gapless_swap) so the renderer's
+        // position-based trigger fires the configured fade. This
+        // decouples the decoded cushion (BASE_HIGH=120, ~1.1s)
+        // from the crossfade lead; reverting the gate would let a
+        // cushion >= the crossfade duration re-strand a phantom
+        // crossfade (the dead-air bug).
+        if formats_match && rg_allows_swap && should_attempt_gapless_swap(cf_armed, cf_active) {
+            let next_duration = next_dec.duration();
+            let next_source_url = std::mem::take(&mut slot.source);
+            let next_codec = next_dec.live_codec();
+            slot.prepared = false;
+            drop(slot); // release before locking decoder + renderer
+
+            // Swap into primary decoder
+            *decoder.lock().await = next_dec;
+
+            // Increment source generation for stale callback detection
+            source_generation.bump_for_gapless();
+
+            // Reset renderer position for the new track and
+            // promote the staged crossfade RG to "current"
+            // (since we're keeping the same stream, the
+            // amplify factor is already correct — we just
+            // need our bookkeeping to reflect the new track).
+            {
+                let mut r = renderer.lock();
+                r.reset_position();
+                r.reset_finished_called();
+                r.adopt_pending_crossfade_replay_gain();
+            }
+
+            // Store transition info for the engine to pick up
+            {
+                let mut info = gapless_info.lock().await;
+                *info = Some(GaplessTransitionInfo {
+                    source: next_source_url,
+                    duration: next_duration,
+                    format: next_fmt,
+                    codec: next_codec,
+                });
+            }
+
+            // Fire completion callback so the UI updates
+            // (queue advances, track info refreshes)
+            if let Some(cb) = completion_callback {
+                cb(false);
+            }
+
+            tracing::info!("🎵 [DECODE LOOP] Gapless transition — continuing decode loop");
+            GaplessSwapOutcome::Swapped
+        } else {
+            let crossfade_owns = !should_attempt_gapless_swap(cf_armed, cf_active);
+            if crossfade_owns {
+                tracing::debug!(
+                    "🔀 [DECODE LOOP] Crossfade armed/active — deferring transition to the renderer trigger (skipping inline gapless)"
+                );
+            } else {
+                tracing::debug!(
+                    "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
+                    current_format,
+                    next_fmt
+                );
+            }
+            // Put the decoder back so a future swap can retry,
+            // or so the renderer's crossfade trigger can take it.
+            slot.decoder = Some(next_dec);
+            drop(slot);
+            if crossfade_owns {
+                GaplessSwapOutcome::CrossfadeActive
+            } else {
+                GaplessSwapOutcome::FormatMismatch
+            }
+        }
+    } else {
+        // Slot said prepared but decoder was missing — clear.
+        slot.prepared = false;
+        drop(slot);
+        GaplessSwapOutcome::DecoderMissing
+    }
+}
+
 /// Thread-safe slot holding an optional metadata string with non-blocking
 /// reset (B11 fix — `reset` must never block the audio hot path) and a
 /// blocking writer for decoder-init updates that must land before the next
@@ -1192,123 +1359,23 @@ impl CustomAudioEngine {
                     let current_format = decoder_guard.format().clone();
                     drop(decoder_guard); // release primary decoder lock
 
-                    let did_gapless = {
-                        let mut slot = gapless.lock().await;
-                        if !slot.is_prepared() {
-                            drop(slot);
-                            false
-                        } else if let Some(next_dec) = slot.decoder.take() {
-                            // Hold the slot lock through the format check + ownership
-                            // transition so `prepared` and `decoder` flip atomically.
-                            let next_fmt = next_dec.format().clone();
-                            let formats_match = current_format.is_valid()
-                                && next_fmt.is_valid()
-                                && current_format.sample_rate() == next_fmt.sample_rate()
-                                && current_format.channel_count() == next_fmt.channel_count();
-                            // RG-track mode: the live stream's amplify factor is baked
-                            // at create time; deny gapless when the next track needs a
-                            // different gain.
-                            let (rg_allows_swap, cf_armed, cf_active) = {
-                                let r = renderer.lock();
-                                (
-                                    r.gapless_swap_allowed(),
-                                    r.is_crossfade_armed(),
-                                    r.is_crossfade_active(),
-                                )
-                            };
-                            if !rg_allows_swap {
-                                tracing::debug!(
-                                    "🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap"
-                                );
-                            }
+                    let swap_outcome = try_gapless_swap(
+                        &decoder,
+                        &renderer,
+                        &gapless,
+                        &gapless_info,
+                        &source_generation,
+                        &completion_callback,
+                        &current_format,
+                    )
+                    .await;
 
-                            // Crossfade owns the transition: when a crossfade is
-                            // armed or active, the inline gapless swap stands down
-                            // (should_attempt_gapless_swap) so the renderer's
-                            // position-based trigger fires the configured fade. This
-                            // decouples the decoded cushion (BASE_HIGH=120, ~1.1s)
-                            // from the crossfade lead; reverting the gate would let a
-                            // cushion >= the crossfade duration re-strand a phantom
-                            // crossfade (the dead-air bug).
-                            if formats_match
-                                && rg_allows_swap
-                                && should_attempt_gapless_swap(cf_armed, cf_active)
-                            {
-                                let next_duration = next_dec.duration();
-                                let next_source_url = std::mem::take(&mut slot.source);
-                                let next_codec = next_dec.live_codec();
-                                slot.prepared = false;
-                                drop(slot); // release before locking decoder + renderer
-
-                                // Swap into primary decoder
-                                *decoder.lock().await = next_dec;
-
-                                // Increment source generation for stale callback detection
-                                source_generation.bump_for_gapless();
-
-                                // Reset renderer position for the new track and
-                                // promote the staged crossfade RG to "current"
-                                // (since we're keeping the same stream, the
-                                // amplify factor is already correct — we just
-                                // need our bookkeeping to reflect the new track).
-                                {
-                                    let mut r = renderer.lock();
-                                    r.reset_position();
-                                    r.reset_finished_called();
-                                    r.adopt_pending_crossfade_replay_gain();
-                                }
-
-                                // Store transition info for the engine to pick up
-                                {
-                                    let mut info = gapless_info.lock().await;
-                                    *info = Some(GaplessTransitionInfo {
-                                        source: next_source_url,
-                                        duration: next_duration,
-                                        format: next_fmt,
-                                        codec: next_codec,
-                                    });
-                                }
-
-                                // Fire completion callback so the UI updates
-                                // (queue advances, track info refreshes)
-                                if let Some(ref cb) = completion_callback {
-                                    cb(false);
-                                }
-
-                                tracing::info!(
-                                    "🎵 [DECODE LOOP] Gapless transition — continuing decode loop"
-                                );
-                                backpressure_active = false;
-                                true
-                            } else {
-                                if !should_attempt_gapless_swap(cf_armed, cf_active) {
-                                    tracing::debug!(
-                                        "🔀 [DECODE LOOP] Crossfade armed/active — deferring transition to the renderer trigger (skipping inline gapless)"
-                                    );
-                                } else {
-                                    tracing::debug!(
-                                        "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
-                                        current_format,
-                                        next_fmt
-                                    );
-                                }
-                                // Put the decoder back so a future swap can retry,
-                                // or so the renderer's crossfade trigger can take it.
-                                slot.decoder = Some(next_dec);
-                                drop(slot);
-                                false
-                            }
-                        } else {
-                            // Slot said prepared but decoder was missing — clear.
-                            slot.prepared = false;
-                            drop(slot);
-                            false
-                        }
-                    };
-
-                    if did_gapless {
-                        // Successfully swapped — continue the decode loop
-                        // with the new decoder (no gap!)
+                    if swap_outcome == GaplessSwapOutcome::Swapped {
+                        // Successfully swapped — the new track's ring starts empty,
+                        // so clear the loop-local backpressure latch (it would
+                        // otherwise inflict an unwarranted sleep on the fresh track),
+                        // then continue the decode loop with the new decoder (no gap!)
+                        backpressure_active = false;
                         continue;
                     }
 
@@ -3095,6 +3162,335 @@ mod tests {
         assert!(slot.decoder.is_none());
         assert!(slot.source.is_empty());
         assert!(!slot.prepared);
+    }
+
+    /// A valid stereo format used as both the "live stream" format and the
+    /// staged next-track format in the success path so the gapless equality gate
+    /// (`is_valid` + sample_rate + channel_count) clears.
+    fn matching_format() -> AudioFormat {
+        AudioFormat::new(crate::audio::SampleFormat::F32, 44_100, 2)
+    }
+
+    /// Build a decoder whose `format()` is the given (valid) format, with an
+    /// identifiable duration + live codec so the success path's
+    /// `GaplessTransitionInfo` can be asserted field-by-field.
+    fn staged_decoder(format: AudioFormat, duration_ms: u64, codec: &str) -> AudioDecoder {
+        let mut dec = fresh_decoder();
+        dec.set_format_for_test(format);
+        dec.set_duration_for_test(duration_ms);
+        dec.set_live_codec_for_test(Some(codec.to_string()));
+        dec
+    }
+
+    /// Install a completion-callback counter on the engine. The returned Arc
+    /// counts how many times the callback fired (the gapless success path fires
+    /// it exactly once with `is_loop=false`).
+    fn install_callback_counter(engine: &mut CustomAudioEngine) -> Arc<AtomicU32> {
+        let counter = Arc::new(AtomicU32::new(0));
+        let c = counter.clone();
+        engine.completion_callback = Some(Arc::new(move |is_loop: bool| {
+            // Gapless always advances to a NEW track — never a loop.
+            assert!(
+                !is_loop,
+                "gapless completion callback must fire with is_loop=false"
+            );
+            c.fetch_add(1, Ordering::SeqCst);
+        }));
+        counter
+    }
+
+    /// S9 characterization — NotPrepared: an empty slot (nothing staged) yields
+    /// `NotPrepared`, fires no callback, and leaves the source generation
+    /// untouched (no `bump_for_gapless`).
+    #[tokio::test]
+    async fn try_gapless_swap_not_prepared() {
+        let mut engine = CustomAudioEngine::new();
+        let cb_count = install_callback_counter(&mut engine);
+        let gen_before = engine.source_generation();
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::NotPrepared);
+        assert_eq!(
+            cb_count.load(Ordering::SeqCst),
+            0,
+            "no callback on NotPrepared"
+        );
+        assert_eq!(
+            engine.source_generation(),
+            gen_before,
+            "NotPrepared must not bump the source generation"
+        );
+        assert!(
+            engine.gapless_transition_info.lock().await.is_none(),
+            "NotPrepared must not populate transition info"
+        );
+    }
+
+    /// S9 characterization — Swapped (the success path): a matching-format staged
+    /// decoder is installed, the source generation advances by exactly one
+    /// (`bump_for_gapless`), the slot is cleared, the transition info is populated
+    /// from the staged decoder, and the completion callback fires once.
+    #[tokio::test]
+    async fn try_gapless_swap_success() {
+        let mut engine = CustomAudioEngine::new();
+        let cb_count = install_callback_counter(&mut engine);
+
+        // A fresh renderer reports `gapless_swap_allowed() == true` and no
+        // crossfade armed/active, so the matching-format slot swaps cleanly.
+        let current_format = matching_format();
+
+        // Stage the next track with an identifiable URL / duration / codec.
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(staged_decoder(matching_format(), 222_000, "flac"));
+            slot.source = "http://example.test/next-gapless".to_string();
+            slot.prepared = true;
+        }
+
+        let gen_before = engine.source_generation();
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.source_generation,
+            &engine.completion_callback,
+            &current_format,
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::Swapped);
+        assert_eq!(
+            engine.source_generation(),
+            gen_before + 1,
+            "Swapped must bump the source generation by exactly one (bump_for_gapless)"
+        );
+        assert_eq!(
+            cb_count.load(Ordering::SeqCst),
+            1,
+            "Swapped must fire the completion callback exactly once"
+        );
+
+        // Slot fully cleared: decoder taken, prepared flipped off, source drained.
+        {
+            let slot = engine.gapless.lock().await;
+            assert!(
+                slot.decoder.is_none(),
+                "Swapped must take the staged decoder"
+            );
+            assert!(!slot.prepared, "Swapped must clear the prepared flag");
+            assert!(
+                slot.source.is_empty(),
+                "Swapped must drain the staged source"
+            );
+        }
+
+        // Transition info populated from the staged decoder.
+        let info = engine
+            .gapless_transition_info
+            .lock()
+            .await
+            .clone()
+            .expect("Swapped must populate transition info");
+        assert_eq!(info.source, "http://example.test/next-gapless");
+        assert_eq!(info.duration, 222_000);
+        assert_eq!(info.format, matching_format());
+        assert_eq!(info.codec.as_deref(), Some("flac"));
+
+        // The staged decoder is now the primary decoder (format carried over).
+        assert_eq!(
+            engine.decoder.lock().await.format(),
+            &matching_format(),
+            "Swapped must install the staged decoder as the primary decoder"
+        );
+    }
+
+    /// S9 characterization — FormatMismatch: a staged decoder whose format does
+    /// NOT match the live stream is put BACK in the slot (`prepared` stays true)
+    /// for a later retry, no generation bump, no callback.
+    #[tokio::test]
+    async fn try_gapless_swap_format_mismatch_puts_decoder_back() {
+        let mut engine = CustomAudioEngine::new();
+        let cb_count = install_callback_counter(&mut engine);
+
+        // Live stream is 44.1k stereo; staged track is 96k stereo — mismatch.
+        let current_format = matching_format();
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(staged_decoder(
+                AudioFormat::new(crate::audio::SampleFormat::F32, 96_000, 2),
+                180_000,
+                "flac",
+            ));
+            slot.source = "http://example.test/next-mismatch".to_string();
+            slot.prepared = true;
+        }
+        let gen_before = engine.source_generation();
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.source_generation,
+            &engine.completion_callback,
+            &current_format,
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::FormatMismatch);
+        assert_eq!(
+            engine.source_generation(),
+            gen_before,
+            "FormatMismatch must not bump the source generation"
+        );
+        assert_eq!(
+            cb_count.load(Ordering::SeqCst),
+            0,
+            "no callback on FormatMismatch"
+        );
+        // Decoder put BACK; slot still prepared with its source intact.
+        let slot = engine.gapless.lock().await;
+        assert!(
+            slot.decoder.is_some(),
+            "FormatMismatch must put the staged decoder BACK for a later retry"
+        );
+        assert!(slot.prepared, "FormatMismatch must leave prepared set");
+        assert_eq!(slot.source, "http://example.test/next-mismatch");
+    }
+
+    /// S9 characterization — CrossfadeActive: when the renderer reports a
+    /// crossfade armed (or active), the inline swap stands down and puts the
+    /// staged decoder BACK so the renderer's position-based trigger can take it.
+    /// No generation bump, no callback.
+    #[tokio::test]
+    async fn try_gapless_swap_crossfade_active_puts_decoder_back() {
+        let mut engine = CustomAudioEngine::new();
+        let cb_count = install_callback_counter(&mut engine);
+
+        // Arm the renderer's crossfade via the engine's positive-arm path so
+        // `is_crossfade_armed()` returns true. (Mirrors
+        // `store_prepared_decoder_arms_crossfade_with_outgoing_track_duration`.)
+        engine.crossfade_enabled = true;
+        engine.crossfade_duration_ms = 5_000;
+        engine.duration = 200_000;
+        let mut arming_dec = fresh_decoder();
+        arming_dec.set_duration_for_test(180_000);
+        engine
+            .store_prepared_decoder(arming_dec, "http://example.test/armer".to_string(), None)
+            .await;
+        assert!(
+            engine.renderer.lock().is_crossfade_armed(),
+            "precondition: renderer crossfade must be armed",
+        );
+
+        // Now stage a FORMAT-MATCHING decoder so the ONLY thing standing the swap
+        // down is the armed crossfade (not a format mismatch).
+        let current_format = matching_format();
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(staged_decoder(matching_format(), 200_000, "flac"));
+            slot.source = "http://example.test/next-during-crossfade".to_string();
+            slot.prepared = true;
+        }
+        let gen_before = engine.source_generation();
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.source_generation,
+            &engine.completion_callback,
+            &current_format,
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::CrossfadeActive);
+        assert_eq!(
+            engine.source_generation(),
+            gen_before,
+            "CrossfadeActive must not bump the source generation"
+        );
+        assert_eq!(
+            cb_count.load(Ordering::SeqCst),
+            0,
+            "no callback on CrossfadeActive"
+        );
+        let slot = engine.gapless.lock().await;
+        assert!(
+            slot.decoder.is_some(),
+            "CrossfadeActive must put the staged decoder BACK for the renderer trigger"
+        );
+        assert!(slot.prepared, "CrossfadeActive must leave prepared set");
+    }
+
+    /// S9 characterization — prepared-but-decoder-missing (torn slot): the slot
+    /// claims `prepared` but holds no decoder. `is_prepared()` requires BOTH the
+    /// flag AND the decoder, so it returns false and the function short-circuits
+    /// to `NotPrepared` — the `DecoderMissing` arm (the `take()`-returns-`None`
+    /// branch) is defensive and unreachable while `is_prepared()` gates entry.
+    /// This pins `is_prepared()` as the authoritative gate so a stale `prepared`
+    /// flag alone never triggers a phantom swap (no generation bump, no callback),
+    /// and that the original inline block's torn-slot semantics survive the
+    /// extraction.
+    #[tokio::test]
+    async fn try_gapless_swap_prepared_but_decoder_missing() {
+        let mut engine = CustomAudioEngine::new();
+        let cb_count = install_callback_counter(&mut engine);
+
+        // Torn slot: prepared set, but no decoder. `is_prepared()` is false, so
+        // the function returns NotPrepared (the prepared+no-decoder combination
+        // can't reach the take()-else arm because is_prepared() gates it). This
+        // pins that `is_prepared()` is the authoritative gate, so a stale
+        // `prepared` flag alone never triggers a phantom swap.
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = None;
+            slot.source = "http://example.test/torn".to_string();
+            slot.prepared = true;
+            assert!(
+                !slot.is_prepared(),
+                "prepared flag alone is not is_prepared()"
+            );
+        }
+        let gen_before = engine.source_generation();
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+        )
+        .await;
+
+        // is_prepared() short-circuits to NotPrepared; the DecoderMissing arm is
+        // reachable only if a future edit loosens that gate. Either way, no swap.
+        assert_eq!(outcome, GaplessSwapOutcome::NotPrepared);
+        assert_eq!(
+            engine.source_generation(),
+            gen_before,
+            "a torn prepared-but-no-decoder slot must not bump the generation"
+        );
+        assert_eq!(
+            cb_count.load(Ordering::SeqCst),
+            0,
+            "no callback on the torn-slot path"
+        );
     }
 
     /// Characterization (S2): `consume_gapless_transition` performs EIGHT

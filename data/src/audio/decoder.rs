@@ -1198,6 +1198,22 @@ impl AudioDecoder {
         self.duration = duration_ms;
     }
 
+    /// Test-only: stamp the reported audio format without going through
+    /// `init`/`open_input` (which need real network/file I/O). Lets the engine
+    /// gapless-swap characterization test build decoders whose `format()` is
+    /// `valid()` and matches, so the inline swap's format-equality gate clears.
+    #[cfg(test)]
+    pub fn set_format_for_test(&mut self, format: AudioFormat) {
+        self.format = format;
+    }
+
+    /// Test-only: stamp the live codec string so the gapless-swap
+    /// characterization test can assert it propagates into `GaplessTransitionInfo`.
+    #[cfg(test)]
+    pub fn set_live_codec_for_test(&mut self, codec: Option<String>) {
+        self.live_codec = codec;
+    }
+
     /// Check if decoder is initialized
     pub fn is_initialized(&self) -> bool {
         self.initialized
