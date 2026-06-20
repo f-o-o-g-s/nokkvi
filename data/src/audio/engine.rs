@@ -1433,6 +1433,17 @@ impl CustomAudioEngine {
         );
     }
 
+    /// Whether crossfade arming is eligible at all: the user's Crossfade toggle
+    /// is on, OR bit-perfect Relaxed (which runs its own same-rate crossfade even
+    /// though its mutually-exclusive Crossfade toggle is off). This is only the
+    /// coarse eligibility core shared by the three trigger sites; per-transition
+    /// vetoes (duration, idle phase, `crossfade_blocked` format gate) stay at
+    /// their respective call sites.
+    fn crossfade_eligible(&self) -> bool {
+        self.crossfade_enabled
+            || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed
+    }
+
     /// Re-arm the renderer crossfade against an already-prepared next track,
     /// no-op when nothing is prepared, crossfade is ineligible, or the format
     /// pair can't crossfade (the renderer's `arm_crossfade` gate decides the
@@ -1440,9 +1451,7 @@ impl CustomAudioEngine {
     /// the incoming duration from the existing prepared slot rather than a fresh
     /// decoder, so a seek doesn't need a re-prep to restore the armed trigger.
     async fn rearm_crossfade_if_prepared(&mut self) {
-        let crossfade_eligible = self.crossfade_enabled
-            || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed;
-        if !crossfade_eligible || self.crossfade_duration_ms == 0 {
+        if !self.crossfade_eligible() || self.crossfade_duration_ms == 0 {
             return;
         }
         let incoming_duration = {
@@ -1523,9 +1532,7 @@ impl CustomAudioEngine {
         // `crossfade_blocked` gate then decides per-transition (Relaxed crossfades
         // only a same-format change; Strict, which never reaches here, would
         // hard-cut all).
-        let crossfade_armed = self.crossfade_enabled
-            || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed;
-        if crossfade_armed && self.crossfade_duration_ms > 0 {
+        if self.crossfade_eligible() && self.crossfade_duration_ms > 0 {
             self.renderer.lock().arm_crossfade(
                 self.crossfade_duration_ms,
                 &self.next_format,
@@ -2252,9 +2259,9 @@ impl CustomAudioEngine {
         // Crossfade is eligible when the Crossfade toggle is on OR under Relaxed
         // bit-perfect (which self-crossfades same-rate tracks). Mirror the
         // `store_prepared_decoder` arm condition so both triggers agree.
-        let crossfade_eligible = self.crossfade_enabled
-            || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed;
-        if !self.crossfade_phase.is_idle() || !crossfade_eligible || self.crossfade_duration_ms == 0
+        if !self.crossfade_phase.is_idle()
+            || !self.crossfade_eligible()
+            || self.crossfade_duration_ms == 0
         {
             return false;
         }
@@ -2771,6 +2778,34 @@ mod tests {
             !engine.renderer.lock().is_crossfade_armed(),
             "no prepared next track means nothing to re-arm"
         );
+    }
+
+    /// Table test for the shared `crossfade_eligible` predicate: eligible when
+    /// the Crossfade toggle is on OR bit-perfect Relaxed; ineligible otherwise.
+    /// In particular Strict (with the toggle off) must be `false` — Strict is not
+    /// Relaxed and hard-cuts everything.
+    #[tokio::test]
+    async fn crossfade_eligible_table() {
+        use crate::types::player_settings::BitPerfectMode;
+        let cases = [
+            // (crossfade_enabled, bit_perfect_mode, expected)
+            (false, BitPerfectMode::Off, false),
+            (false, BitPerfectMode::Strict, false),
+            (false, BitPerfectMode::Relaxed, true),
+            (true, BitPerfectMode::Off, true),
+            (true, BitPerfectMode::Strict, true),
+            (true, BitPerfectMode::Relaxed, true),
+        ];
+        for (enabled, mode, expected) in cases {
+            let mut engine = CustomAudioEngine::new();
+            engine.crossfade_enabled = enabled;
+            engine.bit_perfect_mode = mode;
+            assert_eq!(
+                engine.crossfade_eligible(),
+                expected,
+                "crossfade_eligible(enabled={enabled}, mode={mode:?}) should be {expected}"
+            );
+        }
     }
 
     #[test]
