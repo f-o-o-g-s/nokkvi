@@ -2648,6 +2648,84 @@ mod tests {
         );
     }
 
+    /// OutgoingFinished finalize: once the outgoing decoder has hit EOF the
+    /// phase is `OutgoingFinished` and `try_finalize_crossfade` finalizes
+    /// unconditionally (the `(OutgoingFinished, _) => true` arm), regardless of
+    /// the eof/renderer_fade_active inputs. This is the only `try_finalize`
+    /// arm the other crossfade tests don't exercise.
+    ///
+    /// Critically, the injected decoder is `Some(fresh_decoder())`, NOT `None`:
+    /// `finalize_crossfade_engine` `take()`s the inner Option, and a `None`
+    /// would short-circuit the whole promotion block — skipping
+    /// `accept_internal_swap()` and giving false coverage. With `Some`, the
+    /// promotion runs end to end:
+    ///   * phase → Idle,
+    ///   * `last_transition_was_crossfade` set true (read-reset exactly once),
+    ///   * `accept_internal_swap()` is a NO-OP, so `source_generation()` is
+    ///     UNCHANGED across the finalize (the crossfade is an intentional
+    ///     transition, not a user skip — a stray bump here would invalidate the
+    ///     just-promoted incoming source's in-flight render/visualizer
+    ///     callbacks).
+    #[tokio::test]
+    async fn outgoing_finished_finalizes_and_marks_crossfade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_phase = CrossfadePhase::OutgoingFinished {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        let gen_before = engine.source_generation();
+
+        // eof/renderer_fade_active are irrelevant in OutgoingFinished — it
+        // always finalizes. Pass the "least likely to finalize" inputs to prove
+        // the arm, not the inputs, drove the decision.
+        let finalized = engine.try_finalize_crossfade(false, true).await;
+
+        assert!(
+            finalized,
+            "OutgoingFinished must finalize unconditionally, regardless of eof / renderer_fade_active"
+        );
+        assert!(
+            engine.crossfade_phase.is_idle(),
+            "finalize must clear the engine-side crossfade phase"
+        );
+        assert_eq!(
+            engine.source_generation(),
+            gen_before,
+            "accept_internal_swap is a no-op: the internal crossfade promotion must NOT bump the source generation"
+        );
+        assert!(
+            engine.take_last_transition_was_crossfade(),
+            "finalize must record the advance as a crossfade transition"
+        );
+        // take_* read-resets, so the flag is now false: a second read must NOT
+        // still report a crossfade (otherwise it would leak into the next
+        // gapless transition's log label).
+        assert!(
+            !engine.take_last_transition_was_crossfade(),
+            "the crossfade-transition flag must read-reset after a single take"
+        );
+    }
+
+    /// `decode_buffer_size` characterization for full-precision F32 stereo
+    /// (8 bytes/frame): one ~100ms chunk is `0.1s * sample_rate * 8`, clamped
+    /// to [4096, 65_536]. The 96k case lands at 76_800 raw and must clamp DOWN
+    /// to the 65_536 ceiling — a clamp-unaware expectation (76_800) would
+    /// wrongly fail, and a lower ceiling would silently shrink hi-res reads and
+    /// force the decode loop to run more iterations to keep pace.
+    #[test]
+    fn decode_buffer_size_f32_stereo_clamps_at_ceiling() {
+        use crate::audio::format::SampleFormat;
+
+        let buf = |rate: u32| decode_buffer_size(&AudioFormat::new(SampleFormat::F32, rate, 2));
+
+        // 0.1s * 44100 * 8 = 35_280 (within range, unclamped)
+        assert_eq!(buf(44_100), 35_280);
+        // 0.1s * 48000 * 8 = 38_400 (within range, unclamped)
+        assert_eq!(buf(48_000), 38_400);
+        // 0.1s * 96000 * 8 = 76_800 → clamped to the 65_536 ceiling
+        assert_eq!(buf(96_000), 65_536);
+    }
+
     /// Counterpart guard: while the renderer's fade is STILL ACTIVE, an
     /// on_renderer_finished with eof=false (e.g. transient outgoing-ring
     /// starvation mid-fade) must NOT finalize early.
