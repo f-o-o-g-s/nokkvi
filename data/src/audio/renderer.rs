@@ -1567,6 +1567,20 @@ impl AudioRenderer {
         matches!(self.crossfade_state, CrossfadeState::Armed { .. })
     }
 
+    /// The OUTGOING track duration stored when the crossfade was armed, or
+    /// `None` if not currently `Armed`. Test-only: lets the engine's arm tests
+    /// pin that `track_duration_ms` (the 3rd `arm_crossfade` arg) and the
+    /// incoming duration (the 4th) did not get transposed.
+    #[cfg(test)]
+    pub fn armed_track_duration_ms(&self) -> Option<u64> {
+        match self.crossfade_state {
+            CrossfadeState::Armed {
+                track_duration_ms, ..
+            } => Some(track_duration_ms),
+            _ => None,
+        }
+    }
+
     // =========================================================================
     // Render loop (called periodically from engine render thread)
     // =========================================================================

@@ -1189,6 +1189,15 @@ impl AudioDecoder {
         self.duration
     }
 
+    /// Test-only: stamp the reported track duration without going through
+    /// `init`/`open_input` (which need real network/file I/O). Lets engine arm
+    /// tests build a prepared decoder whose `duration()` clears the renderer's
+    /// `MIN_CROSSFADE_TRACK_MS` gate.
+    #[cfg(test)]
+    pub fn set_duration_for_test(&mut self, duration_ms: u64) {
+        self.duration = duration_ms;
+    }
+
     /// Check if decoder is initialized
     pub fn is_initialized(&self) -> bool {
         self.initialized

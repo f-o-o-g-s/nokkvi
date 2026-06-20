@@ -1444,6 +1444,26 @@ impl CustomAudioEngine {
             || self.bit_perfect_mode == crate::types::player_settings::BitPerfectMode::Relaxed
     }
 
+    /// Arm the renderer crossfade trigger from the engine's current crossfade
+    /// settings against an incoming track of `incoming_duration_ms`.
+    ///
+    /// Reads `crossfade_duration_ms` / `next_format` / `duration` (the OUTGOING
+    /// track's duration) from `&self` and hands them, with `incoming_duration_ms`
+    /// last, to [`AudioRenderer::arm_crossfade`] in a single statement so the
+    /// sync `parking_lot` guard is born and dropped without ever straddling an
+    /// `.await`. Callers keep both the eligibility (`crossfade_eligible`) and the
+    /// non-zero-duration guards at their own sites; this helper does no gating and
+    /// does not touch `self.gapless`. The renderer's own `crossfade_blocked` /
+    /// min-duration gates decide whether the arm actually takes.
+    fn arm_renderer_crossfade(&self, incoming_duration_ms: u64) {
+        self.renderer.lock().arm_crossfade(
+            self.crossfade_duration_ms,
+            &self.next_format,
+            self.duration,
+            incoming_duration_ms,
+        );
+    }
+
     /// Re-arm the renderer crossfade against an already-prepared next track,
     /// no-op when nothing is prepared, crossfade is ineligible, or the format
     /// pair can't crossfade (the renderer's `arm_crossfade` gate decides the
@@ -1464,12 +1484,7 @@ impl CustomAudioEngine {
         let Some(incoming_duration) = incoming_duration else {
             return;
         };
-        self.renderer.lock().arm_crossfade(
-            self.crossfade_duration_ms,
-            &self.next_format,
-            self.duration,
-            incoming_duration,
-        );
+        self.arm_renderer_crossfade(incoming_duration);
     }
 
     /// Atomic three-step: stash ReplayGain → set source. The caller still
@@ -1533,12 +1548,7 @@ impl CustomAudioEngine {
         // only a same-format change; Strict, which never reaches here, would
         // hard-cut all).
         if self.crossfade_eligible() && self.crossfade_duration_ms > 0 {
-            self.renderer.lock().arm_crossfade(
-                self.crossfade_duration_ms,
-                &self.next_format,
-                self.duration,
-                incoming_duration,
-            );
+            self.arm_renderer_crossfade(incoming_duration);
         }
     }
 
@@ -2777,6 +2787,44 @@ mod tests {
         assert!(
             !engine.renderer.lock().is_crossfade_armed(),
             "no prepared next track means nothing to re-arm"
+        );
+    }
+
+    /// Positive arm path through `store_prepared_decoder` (Site B): an eligible
+    /// mode with a long-enough next track must actually ARM the renderer, and the
+    /// OUTGOING track duration (`self.duration`) must land in the Armed state's
+    /// `track_duration_ms` — NOT the incoming track's duration. The two
+    /// `arm_crossfade` duration args are both `u64`, so a transposition compiles
+    /// and clears the symmetric min-duration gate (both ≥ 10s here); only this
+    /// asymmetric check (200_000 ≠ 15_000) catches it. The renderer defaults to
+    /// bit-perfect Off, so `crossfade_blocked` is bypassed and the arm takes.
+    #[tokio::test]
+    async fn store_prepared_decoder_arms_crossfade_with_outgoing_track_duration() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade_enabled = true;
+        engine.crossfade_duration_ms = 5_000;
+        // Outgoing (current) track duration — the 3rd arm_crossfade arg.
+        engine.duration = 200_000;
+
+        // Incoming next track: a DIFFERENT non-zero duration, both it and the
+        // outgoing track clear the renderer's 10s minimum.
+        let mut decoder = fresh_decoder();
+        decoder.set_duration_for_test(15_000);
+
+        engine
+            .store_prepared_decoder(decoder, "http://example.test/next".to_string(), None)
+            .await;
+
+        let renderer = engine.renderer.lock();
+        assert!(
+            renderer.is_crossfade_armed(),
+            "an eligible mode with a long-enough next track must arm the crossfade"
+        );
+        assert_eq!(
+            renderer.armed_track_duration_ms(),
+            Some(200_000),
+            "the OUTGOING track duration (self.duration) must land in track_duration_ms, \
+             not the incoming 15_000 — guards against transposing the two u64 arm args"
         );
     }
 
