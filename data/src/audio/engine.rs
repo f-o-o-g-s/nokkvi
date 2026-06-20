@@ -220,6 +220,70 @@ const RADIO_JITTER_PREBUFFER_MS: u64 = 5000;
 /// (arm_crossfade) in lockstep.
 const DEFAULT_CROSSFADE_DURATION_MS: u64 = 5000;
 
+/// The lock-free channels the decode loop reads/writes (and that the renderer
+/// shares for crossfade/EOF gating). Bundled so the cross-thread wiring lives in
+/// one place and `clone_for_decode_loop()` hands the spawned task exactly these
+/// Arcs (same identity, never a freshly-allocated look-alike).
+///
+/// Membership is deliberately exactly the atomics cloned into the primary decode
+/// task. `live_sample_rate` is intentionally NOT here: it is written purely from
+/// engine self-methods (never cloned into the loop), so it is not a decode-loop
+/// channel and stays a direct field on `CustomAudioEngine`.
+struct DecodeLoopChannels {
+    /// Incremented on every source change. Shared with the renderer so
+    /// completion callbacks can detect staleness (e.g. manual skip raced
+    /// with track-end) without needing the engine lock.
+    source_generation: SourceGeneration,
+    /// Set by the decode loop when the primary decoder reaches EOF.
+    /// Shared with the renderer to gate crossfade trigger: prevents false
+    /// triggers from transiently empty buffers after a seek.
+    decoder_eof: Arc<AtomicBool>,
+    /// Set by the decode loop to the cached stream type. Shared with the renderer
+    /// so the mid-track network rebuffer only runs on FINITE (seekable) streams.
+    stream_is_infinite: Arc<AtomicBool>,
+    /// Lock-free crossfade duration for the decode loop's dynamic backpressure.
+    /// Updated by `set_crossfade_duration()`, read by the spawned decode task.
+    crossfade_duration_shared: Arc<AtomicU64>,
+    /// Live compressed bitrate from decoder (updated per-packet in decode loop).
+    live_bitrate: Arc<AtomicU32>,
+}
+
+/// The subset of `DecodeLoopChannels` cloned into one spawned decode task,
+/// produced by `clone_for_decode_loop()`. Keeping the clone in one method
+/// guarantees the task gets the SAME Arcs the engine and renderer hold — a
+/// fresh `Arc::new(...)` here would lint clean yet silently break EOF/crossfade.
+struct ClonedDecodeLoopChannels {
+    source_generation: SourceGeneration,
+    decoder_eof: Arc<AtomicBool>,
+    stream_is_infinite: Arc<AtomicBool>,
+    crossfade_duration_shared: Arc<AtomicU64>,
+    live_bitrate: Arc<AtomicU32>,
+}
+
+impl DecodeLoopChannels {
+    fn new() -> Self {
+        Self {
+            source_generation: SourceGeneration::new(),
+            decoder_eof: Arc::new(AtomicBool::new(false)),
+            stream_is_infinite: Arc::new(AtomicBool::new(false)),
+            crossfade_duration_shared: Arc::new(AtomicU64::new(DEFAULT_CROSSFADE_DURATION_MS)),
+            live_bitrate: Arc::new(AtomicU32::new(0)),
+        }
+    }
+
+    /// Clone the Arcs the primary decode loop captures. Identity-preserving by
+    /// construction (`.clone()` on each Arc, never a new allocation).
+    fn clone_for_decode_loop(&self) -> ClonedDecodeLoopChannels {
+        ClonedDecodeLoopChannels {
+            source_generation: self.source_generation.clone(),
+            decoder_eof: self.decoder_eof.clone(),
+            stream_is_infinite: self.stream_is_infinite.clone(),
+            crossfade_duration_shared: self.crossfade_duration_shared.clone(),
+            live_bitrate: self.live_bitrate.clone(),
+        }
+    }
+}
+
 /// Compute backpressure watermarks `(high, low)` in interleaved SAMPLES, scaled
 /// to the stream's `frame_rate` (`sample_rate * channels`) so the cushion is a
 /// constant TIME at any rate. Shared by the primary and crossfade decode loops.
@@ -768,9 +832,6 @@ pub struct CustomAudioEngine {
     // Seeking flag - prevents EOF detection during seek
     seeking: Arc<AtomicBool>,
 
-    // Live compressed bitrate from decoder (updated per-packet in decode loop)
-    live_bitrate: Arc<AtomicU32>,
-
     // Live sample rate from decoder (updated when format is set, atomic for threading consistency)
     live_sample_rate: Arc<AtomicU32>,
 
@@ -778,22 +839,10 @@ pub struct CustomAudioEngine {
     render_thread: Option<std::thread::JoinHandle<()>>,
     render_running: Arc<AtomicBool>,
 
-    /// Incremented on every source change. Shared with the renderer so
-    /// completion callbacks can detect staleness (e.g. manual skip raced
-    /// with track-end) without needing the engine lock.
-    source_generation: SourceGeneration,
-
-    /// Set by the decode loop when the primary decoder reaches EOF.
-    /// Shared with the renderer to gate crossfade trigger: prevents false
-    /// triggers from transiently empty buffers after a seek.
-    decoder_eof: Arc<AtomicBool>,
-    /// Set by the decode loop to the cached stream type. Shared with the renderer
-    /// so the mid-track network rebuffer only runs on FINITE (seekable) streams.
-    stream_is_infinite: Arc<AtomicBool>,
-
-    /// Lock-free crossfade duration for the decode loop's dynamic backpressure.
-    /// Updated by `set_crossfade_duration()`, read by the spawned decode task.
-    crossfade_duration_shared: Arc<AtomicU64>,
+    /// Lock-free channels the decode loop reads/writes, with the renderer-shared
+    /// subset (`source_generation` / `decoder_eof` / `stream_is_infinite`)
+    /// installed into the renderer by `set_engine_link`. See `DecodeLoopChannels`.
+    channels: DecodeLoopChannels,
 
     // ---- Crossfade state ----
     /// Current crossfade phase + per-phase data (decoder + incoming source
@@ -849,12 +898,8 @@ impl CustomAudioEngine {
             seeking: Arc::new(AtomicBool::new(false)),
             render_thread: None,
             render_running: Arc::new(AtomicBool::new(false)),
-            live_bitrate: Arc::new(AtomicU32::new(0)),
             live_sample_rate: Arc::new(AtomicU32::new(0)),
-            source_generation: SourceGeneration::new(),
-            decoder_eof: Arc::new(AtomicBool::new(false)),
-            stream_is_infinite: Arc::new(AtomicBool::new(false)),
-            crossfade_duration_shared: Arc::new(AtomicU64::new(DEFAULT_CROSSFADE_DURATION_MS)),
+            channels: DecodeLoopChannels::new(),
             crossfade_phase: CrossfadePhase::Idle,
             crossfade_enabled: false,
             bit_perfect_mode: crate::types::player_settings::BitPerfectMode::Off,
@@ -891,9 +936,9 @@ impl CustomAudioEngine {
         // During `AudioDecoder::new`, Symphonia's probe reads the first chunk of the stream synchronously.
         // If this stream contains ICY metadata, the callback fires during `new()` and populates `live_icy_metadata`.
         // If we reset this to `None` after `new()`, we will permanently discard the first stream title!
-        self.live_bitrate.store(0, Ordering::Relaxed);
+        self.channels.live_bitrate.store(0, Ordering::Relaxed);
         self.live_sample_rate.store(0, Ordering::Relaxed);
-        self.decoder_eof.store(false, Ordering::Release);
+        self.channels.decoder_eof.store(false, Ordering::Release);
         self.live_icy_metadata.reset();
         // Non-blocking like the icy_metadata reset above: stale codec data
         // is acceptable here, and `set_source` must not block on UI readers.
@@ -908,7 +953,7 @@ impl CustomAudioEngine {
         self.position = 0;
 
         self.source = source;
-        self.source_generation.bump_for_user_action();
+        self.channels.source_generation.bump_for_user_action();
         trace!(" AudioEngine: source set successfully");
     }
 
@@ -1134,16 +1179,19 @@ impl CustomAudioEngine {
     fn start_decoding_loop(&mut self) {
         let decoder = self.decoder.clone();
         let renderer = self.renderer.clone();
-        let live_bitrate = self.live_bitrate.clone();
-        let decoder_eof = self.decoder_eof.clone();
-        let stream_is_infinite_arc = self.stream_is_infinite.clone();
-        let crossfade_duration_shared = self.crossfade_duration_shared.clone();
+        // Same-identity clone of the decode-loop channels (never a fresh Arc).
+        let ClonedDecodeLoopChannels {
+            source_generation,
+            decoder_eof,
+            stream_is_infinite: stream_is_infinite_arc,
+            crossfade_duration_shared,
+            live_bitrate,
+        } = self.channels.clone_for_decode_loop();
 
         // Gapless: pass next-track state so the decode loop can swap inline
         let gapless = self.gapless.clone();
         let completion_callback = self.completion_callback.clone();
         let gapless_info = self.gapless_transition_info.clone();
-        let source_generation = self.source_generation.clone();
         let reconnect_url = self.source.clone();
 
         // Capture the renderer's consume-notify so the write-retry loop can
@@ -1152,7 +1200,7 @@ impl CustomAudioEngine {
         let consumed_notify = renderer.lock().consumed_notify().clone();
 
         // Clear EOF flag — this decoder is starting fresh
-        self.decoder_eof.store(false, Ordering::Release);
+        self.channels.decoder_eof.store(false, Ordering::Release);
 
         // Increment decode generation — invalidates any previous decode loop.
         // Each loop captures its generation at spawn time and exits when
@@ -1465,7 +1513,7 @@ impl CustomAudioEngine {
         self.paused = false;
         self.position = 0;
         self.duration = 0;
-        self.live_bitrate.store(0, Ordering::Relaxed);
+        self.channels.live_bitrate.store(0, Ordering::Relaxed);
         self.live_sample_rate.store(0, Ordering::Relaxed);
         self.state = PlaybackState::Stopped;
     }
@@ -1497,7 +1545,7 @@ impl CustomAudioEngine {
         self.cancel_crossfade().await;
 
         // Clear EOF — decoder will restart from seek position
-        self.decoder_eof.store(false, Ordering::Release);
+        self.channels.decoder_eof.store(false, Ordering::Release);
 
         self.decode_loop.supersede();
 
@@ -1775,7 +1823,9 @@ impl CustomAudioEngine {
     pub fn set_crossfade_duration(&mut self, duration_secs: u32) {
         let ms = duration_secs as u64 * 1000;
         self.crossfade_duration_ms = ms;
-        self.crossfade_duration_shared.store(ms, Ordering::Relaxed);
+        self.channels
+            .crossfade_duration_shared
+            .store(ms, Ordering::Relaxed);
     }
 
     /// Whether crossfade is enabled
@@ -1953,7 +2003,7 @@ impl CustomAudioEngine {
         self.cancel_crossfade().await;
         // The abandoned incoming source is being thrown away; invalidate any of
         // its in-flight completion callbacks.
-        self.source_generation.bump_for_user_action();
+        self.channels.source_generation.bump_for_user_action();
         // Skip the stalled track via the standard end-of-track machinery.
         self.on_decoder_finished().await;
     }
@@ -2031,7 +2081,7 @@ impl CustomAudioEngine {
             // Intentional no-op (was: "Don't increment source_generation here")
             // — the crossfade was an intentional transition, not a user-
             // initiated skip.
-            self.source_generation.accept_internal_swap();
+            self.channels.source_generation.accept_internal_swap();
 
             // Restart the primary decode loop with the new decoder
             self.start_decoding_loop();
@@ -2056,7 +2106,7 @@ impl CustomAudioEngine {
     ) {
         let decoder = decoder_arc;
         let renderer = self.renderer.clone();
-        let crossfade_duration_shared = self.crossfade_duration_shared.clone();
+        let crossfade_duration_shared = self.channels.crossfade_duration_shared.clone();
 
         tokio::spawn(async move {
             trace!("🔀 [CROSSFADE DECODE] Loop started");
@@ -2243,13 +2293,13 @@ impl CustomAudioEngine {
 
     /// Get live compressed bitrate in kbps (updated per-packet from decoder)
     pub fn live_bitrate(&self) -> u32 {
-        self.live_bitrate.load(Ordering::Relaxed)
+        self.channels.live_bitrate.load(Ordering::Relaxed)
     }
 
     /// Current source generation (incremented on every `set_source` call).
     /// Used by the renderer's stale-callback guard.
     pub fn source_generation(&self) -> u64 {
-        self.source_generation.current()
+        self.channels.source_generation.current()
     }
 
     /// Clear the prepared next-track decoder and all associated state.
@@ -2337,9 +2387,9 @@ impl CustomAudioEngine {
         let mut renderer = self.renderer.lock();
         renderer.set_engine_link(
             engine,
-            self.source_generation.clone(),
-            self.decoder_eof.clone(),
-            self.stream_is_infinite.clone(),
+            self.channels.source_generation.clone(),
+            self.channels.decoder_eof.clone(),
+            self.channels.stream_is_infinite.clone(),
         );
     }
 
@@ -2708,6 +2758,45 @@ impl CustomAudioEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Wiring interlock for `DecodeLoopChannels`: after `set_engine_reference`
+    /// installs the renderer link, the engine and the renderer must share the
+    /// SAME `source_generation` / `decoder_eof` / `stream_is_infinite` handles —
+    /// not equal-valued but separately-allocated look-alikes. A fresh
+    /// `Arc::new(...)` on either side would compile, lint, and format clean yet
+    /// silently break crossfade/EOF gating (the renderer would watch a flag the
+    /// decode loop never writes). `Arc::ptr_eq` is the only check that catches it.
+    ///
+    /// `#[tokio::test]`: `CustomAudioEngine::new()` builds the renderer, which
+    /// captures `tokio::runtime::Handle::current()` at construction.
+    #[tokio::test]
+    async fn set_engine_link_shares_decode_loop_channel_identity() {
+        let mut engine = CustomAudioEngine::new();
+        // The back-reference is irrelevant to the atomic wiring; a dangling weak
+        // is sufficient because this test only inspects shared-handle identity.
+        engine.set_engine_reference(Weak::new());
+
+        let renderer = engine.renderer.lock();
+
+        assert!(
+            engine
+                .channels
+                .source_generation
+                .ptr_eq(renderer.source_generation_handle()),
+            "engine and renderer must share the SAME source_generation Arc"
+        );
+        assert!(
+            Arc::ptr_eq(&engine.channels.decoder_eof, renderer.decoder_eof_handle()),
+            "engine and renderer must share the SAME decoder_eof Arc"
+        );
+        assert!(
+            Arc::ptr_eq(
+                &engine.channels.stream_is_infinite,
+                renderer.stream_is_infinite_handle()
+            ),
+            "engine and renderer must share the SAME stream_is_infinite Arc"
+        );
+    }
 
     /// The decoder now emits full-precision f32 (`RawSampleBuffer::<f32>`) and
     /// `decoded_bytes_to_f32` must reinterpret those bytes losslessly. This pins
@@ -3213,7 +3302,7 @@ mod tests {
             &engine.renderer,
             &engine.gapless,
             &engine.gapless_transition_info,
-            &engine.source_generation,
+            &engine.channels.source_generation,
             &engine.completion_callback,
             &matching_format(),
         )
@@ -3264,7 +3353,7 @@ mod tests {
             &engine.renderer,
             &engine.gapless,
             &engine.gapless_transition_info,
-            &engine.source_generation,
+            &engine.channels.source_generation,
             &engine.completion_callback,
             &current_format,
         )
@@ -3343,7 +3432,7 @@ mod tests {
             &engine.renderer,
             &engine.gapless,
             &engine.gapless_transition_info,
-            &engine.source_generation,
+            &engine.channels.source_generation,
             &engine.completion_callback,
             &current_format,
         )
@@ -3411,7 +3500,7 @@ mod tests {
             &engine.renderer,
             &engine.gapless,
             &engine.gapless_transition_info,
-            &engine.source_generation,
+            &engine.channels.source_generation,
             &engine.completion_callback,
             &current_format,
         )
@@ -3472,7 +3561,7 @@ mod tests {
             &engine.renderer,
             &engine.gapless,
             &engine.gapless_transition_info,
-            &engine.source_generation,
+            &engine.channels.source_generation,
             &engine.completion_callback,
             &matching_format(),
         )

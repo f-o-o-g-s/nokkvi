@@ -1581,6 +1581,29 @@ impl AudioRenderer {
         }
     }
 
+    /// Renderer's copy of the engine-shared `source_generation`. The wiring
+    /// interlock test compares its identity against the engine's via
+    /// `SourceGeneration::ptr_eq` to prove `set_engine_link` shared (not cloned
+    /// a fresh) counter.
+    #[cfg(test)]
+    pub fn source_generation_handle(&self) -> &SourceGeneration {
+        &self.source_generation
+    }
+
+    /// Renderer's copy of the engine-shared `decoder_eof` Arc, for the wiring
+    /// interlock test's `Arc::ptr_eq` identity check.
+    #[cfg(test)]
+    pub fn decoder_eof_handle(&self) -> &Arc<AtomicBool> {
+        &self.decoder_eof
+    }
+
+    /// Renderer's copy of the engine-shared `stream_is_infinite` Arc, for the
+    /// wiring interlock test's `Arc::ptr_eq` identity check.
+    #[cfg(test)]
+    pub fn stream_is_infinite_handle(&self) -> &Arc<AtomicBool> {
+        &self.stream_is_infinite
+    }
+
     // =========================================================================
     // Render loop (called periodically from engine render thread)
     // =========================================================================

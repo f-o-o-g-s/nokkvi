@@ -75,6 +75,15 @@ impl SourceGeneration {
     pub fn current(&self) -> u64 {
         self.counter.load(Ordering::Acquire)
     }
+
+    /// True when `self` and `other` wrap the SAME underlying `Arc<AtomicU64>`
+    /// (shared identity, not just equal counter values). Used by the engine ↔
+    /// renderer wiring interlock test to prove `set_engine_link` installed the
+    /// engine's own counter rather than a fresh look-alike.
+    #[cfg(test)]
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.counter, &other.counter)
+    }
 }
 
 #[cfg(test)]
