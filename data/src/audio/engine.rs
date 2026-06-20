@@ -339,6 +339,100 @@ fn radio_jitter_prebuffer_step(
     }
 }
 
+/// Outcome of the radio-reconnect loop, returned to the decode loop so the
+/// caller owns the `continue 'decode_loop` / `break` control flow (the helper
+/// stays a plain `async fn` with no labeled-break visibility).
+///
+/// EOF-store semantics are SACRED and asymmetric:
+/// - `GaveUp` HAS ALREADY stored `decoder_eof = true` inside the helper (the
+///   reconnect exhausted its retries; the renderer must learn the radio is
+///   dead). Forgetting this store leaves the radio permanently silent.
+/// - `Superseded` does NOT store EOF and the caller must `break` immediately: a
+///   newer decode loop (user skip/stop) owns the source now, so storing EOF
+///   here would be attributed to the new track and end it prematurely
+///   (stale-EOF-skips-next-track bug).
+/// - `Reconnected` resumes the SAME decode loop: the caller resets the
+///   stream-type / jitter latches and `continue 'decode_loop`s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RadioReconnectOutcome {
+    /// Re-init succeeded; resume decoding (caller re-arms latches + continues).
+    Reconnected,
+    /// A newer decode loop superseded this one; abort WITHOUT storing EOF.
+    Superseded,
+    /// Retries exhausted; EOF already stored. Caller exits the decode loop.
+    GaveUp,
+}
+
+/// Radio reconnect loop: the infinite-stream EOF path (connection dropped /
+/// server closed). Takes the live `decoder_guard` BY VALUE and drops it BEFORE
+/// the first backoff sleep — holding the primary decoder lock across the sleep
+/// would deadlock the UI tick (which reads position/duration via
+/// `decoder.lock()`). The drop-before-sleep is therefore structural and cannot
+/// be reordered by a future edit.
+///
+/// Backoff is `2^min(retry, 4)` seconds, up to `MAX_RETRIES` attempts. Each
+/// iteration re-checks `decode_gen.current() == my_gen` first and aborts
+/// (`Superseded`) if a user skip/stop spawned a newer loop, BEFORE consuming a
+/// retry or touching the `reconnect_url` re-init — so a superseded loop never
+/// stores EOF. See `RadioReconnectOutcome` for the EOF-store contract.
+async fn radio_reconnect_loop(
+    decoder: &tokio::sync::Mutex<AudioDecoder>,
+    decoder_guard: tokio::sync::MutexGuard<'_, AudioDecoder>,
+    decode_gen: &DecodeLoopHandle,
+    my_gen: u64,
+    decoder_eof: &AtomicBool,
+    reconnect_url: &str,
+) -> RadioReconnectOutcome {
+    tracing::warn!("📻 [DECODE LOOP] Radio stream dropped, attempting reconnect...");
+    // CRITICAL: Drop decoder_guard BEFORE sleeping!
+    // Holding this lock during the backoff would deadlock the UI tick
+    // (which reads position/duration via decoder.lock()).
+    drop(decoder_guard);
+
+    let mut retry_count = 0u32;
+    const MAX_RETRIES: u32 = 5;
+
+    loop {
+        // Abort reconnect if source changed (user skipped/stopped)
+        if decode_gen.current() != my_gen {
+            tracing::debug!("📻 [RECONNECT] Aborted — generation superseded");
+            return RadioReconnectOutcome::Superseded;
+        }
+        retry_count += 1;
+        if retry_count > MAX_RETRIES {
+            tracing::error!(
+                "📻 [RECONNECT] Failed after {} attempts, giving up",
+                MAX_RETRIES
+            );
+            decoder_eof.store(true, Ordering::Release);
+            return RadioReconnectOutcome::GaveUp;
+        }
+        let backoff = std::time::Duration::from_secs(1u64 << retry_count.min(4));
+        tracing::debug!(
+            "📻 [RECONNECT] Attempt {}/{} in {:?}",
+            retry_count,
+            MAX_RETRIES,
+            backoff
+        );
+        tokio::time::sleep(backoff).await;
+
+        // Re-acquire decoder lock for re-init
+        let mut dec = decoder.lock().await;
+        match dec.init(reconnect_url).await {
+            Ok(()) => {
+                tracing::info!("📻 [RECONNECT] Success!");
+                drop(dec);
+                return RadioReconnectOutcome::Reconnected;
+            }
+            Err(e) => {
+                tracing::debug!("📻 [RECONNECT] Failed: {}", e);
+                drop(dec);
+                // Continue retry loop
+            }
+        }
+    }
+}
+
 /// What a decode loop should do this iteration about ring-buffer backpressure.
 /// Mirrors the renderer's `RebufferAction` pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1067,62 +1161,29 @@ impl CustomAudioEngine {
                     // Skip gapless transition — radio has no "next track".
                     // =========================================================
                     if is_infinite {
-                        tracing::warn!(
-                            "📻 [DECODE LOOP] Radio stream dropped, attempting reconnect..."
-                        );
-                        // CRITICAL: Drop decoder_guard BEFORE sleeping!
-                        // Holding this lock during the backoff would deadlock the UI tick
-                        // (which reads position/duration via decoder.lock()).
-                        drop(decoder_guard);
-
-                        let mut retry_count = 0u32;
-                        const MAX_RETRIES: u32 = 5;
-
-                        loop {
-                            // Abort reconnect if source changed (user skipped/stopped)
-                            if decode_gen.current() != my_gen {
-                                tracing::debug!("📻 [RECONNECT] Aborted — generation superseded");
-                                break;
+                        match radio_reconnect_loop(
+                            &decoder,
+                            decoder_guard,
+                            &decode_gen,
+                            my_gen,
+                            &decoder_eof,
+                            &reconnect_url,
+                        )
+                        .await
+                        {
+                            RadioReconnectOutcome::Reconnected => {
+                                // Reset stream-type check so jitter buffer and
+                                // backpressure caching are re-evaluated
+                                stream_type_checked = false;
+                                radio_music_jitter_filled = false;
+                                continue 'decode_loop;
                             }
-                            retry_count += 1;
-                            if retry_count > MAX_RETRIES {
-                                tracing::error!(
-                                    "📻 [RECONNECT] Failed after {} attempts, giving up",
-                                    MAX_RETRIES
-                                );
-                                decoder_eof.store(true, Ordering::Release);
+                            // Either exhausted (EOF already stored by the helper)
+                            // or generation superseded (no EOF store) — exit.
+                            RadioReconnectOutcome::GaveUp | RadioReconnectOutcome::Superseded => {
                                 break;
-                            }
-                            let backoff =
-                                std::time::Duration::from_secs(1u64 << retry_count.min(4));
-                            tracing::debug!(
-                                "📻 [RECONNECT] Attempt {}/{} in {:?}",
-                                retry_count,
-                                MAX_RETRIES,
-                                backoff
-                            );
-                            tokio::time::sleep(backoff).await;
-
-                            // Re-acquire decoder lock for re-init
-                            let mut dec = decoder.lock().await;
-                            match dec.init(&reconnect_url).await {
-                                Ok(()) => {
-                                    tracing::info!("📻 [RECONNECT] Success!");
-                                    // Reset stream-type check so jitter buffer and
-                                    // backpressure caching are re-evaluated
-                                    stream_type_checked = false;
-                                    radio_music_jitter_filled = false;
-                                    drop(dec);
-                                    continue 'decode_loop;
-                                }
-                                Err(e) => {
-                                    tracing::debug!("📻 [RECONNECT] Failed: {}", e);
-                                    drop(dec);
-                                    // Continue retry loop
-                                }
                             }
                         }
-                        break; // Exit decode loop (either exhausted or generation superseded)
                     }
 
                     // =========================================================
