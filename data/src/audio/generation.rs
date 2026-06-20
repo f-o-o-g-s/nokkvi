@@ -76,3 +76,106 @@ impl SourceGeneration {
         self.counter.load(Ordering::Acquire)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `bump_for_user_action` advances `current()` by exactly 1, from whatever
+    /// non-default generation the counter currently holds.
+    #[test]
+    fn bump_for_user_action_advances_current_by_one() {
+        let src_gen = SourceGeneration::new();
+        // Seed a distinctive, non-default generation so the assertion is a
+        // relative delta rather than a "0 -> 1" tautology.
+        src_gen.bump_for_user_action();
+        src_gen.bump_for_gapless();
+        let before = src_gen.current();
+
+        let returned = src_gen.bump_for_user_action();
+
+        assert_eq!(
+            src_gen.current(),
+            before + 1,
+            "bump_for_user_action must advance current() by exactly 1"
+        );
+        assert_eq!(
+            returned,
+            before + 1,
+            "bump_for_user_action must return the new generation"
+        );
+    }
+
+    /// `bump_for_gapless` advances `current()` by exactly 1 — it is the sole
+    /// decode-loop bump and must move the shared counter forward.
+    #[test]
+    fn bump_for_gapless_advances_current_by_one() {
+        let src_gen = SourceGeneration::new();
+        // Seed a distinctive, non-default generation.
+        src_gen.bump_for_gapless();
+        src_gen.bump_for_user_action();
+        src_gen.bump_for_gapless();
+        let before = src_gen.current();
+
+        let returned = src_gen.bump_for_gapless();
+
+        assert_eq!(
+            src_gen.current(),
+            before + 1,
+            "bump_for_gapless must advance current() by exactly 1"
+        );
+        assert_eq!(
+            returned,
+            before + 1,
+            "bump_for_gapless must return the new generation"
+        );
+    }
+
+    /// `accept_internal_swap` is the crossfade-finalize no-op: it must leave
+    /// `current()` UNCHANGED. Bumping here would re-break the consume+shuffle
+    /// replay guard, so this asserts before == after, never a bump.
+    #[test]
+    fn accept_internal_swap_leaves_current_unchanged() {
+        let src_gen = SourceGeneration::new();
+        // Seed a distinctive, non-default generation so "unchanged" is a real
+        // observation, not the initial 0.
+        src_gen.bump_for_user_action();
+        src_gen.bump_for_gapless();
+        src_gen.bump_for_user_action();
+        let before = src_gen.current();
+
+        src_gen.accept_internal_swap();
+
+        assert_eq!(
+            src_gen.current(),
+            before,
+            "accept_internal_swap must be a no-op and leave current() unchanged"
+        );
+    }
+
+    /// The counter is a shared `Arc<AtomicU64>`: a bump through one clone is
+    /// observable through another, and `accept_internal_swap` on either clone
+    /// leaves both readings unchanged.
+    #[test]
+    fn current_is_shared_across_clones() {
+        let src_gen = SourceGeneration::new();
+        let clone = src_gen.clone();
+        clone.bump_for_user_action();
+        let before = src_gen.current();
+
+        clone.accept_internal_swap();
+        assert_eq!(
+            src_gen.current(),
+            before,
+            "accept_internal_swap must not move the shared counter for any clone"
+        );
+
+        let returned = clone.bump_for_gapless();
+        assert_eq!(
+            src_gen.current(),
+            before + 1,
+            "a bump on one clone is visible through another"
+        );
+        assert_eq!(returned, before + 1);
+    }
+}
