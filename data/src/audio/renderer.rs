@@ -1581,6 +1581,52 @@ impl AudioRenderer {
         }
     }
 
+    /// Force the renderer into an `Active` crossfade state for tests, WITHOUT a
+    /// real audio output (`start_crossfade` needs `self.output`, which the unit
+    /// tests don't build). Wires a detached ring buffer to a throwaway
+    /// `StreamingSource`, which the caller MUST keep alive for the duration of
+    /// the test so the stream handle's shared atomics stay valid. Used by the
+    /// engine's `is_crossfade_live` window test (engine phase Idle + renderer
+    /// Active ⇒ live).
+    #[cfg(test)]
+    pub fn force_crossfade_active_for_test(
+        &mut self,
+    ) -> crate::audio::streaming_source::StreamingSource {
+        use std::num::NonZero;
+
+        use ringbuf::{HeapRb, traits::Split};
+        let rb = HeapRb::<f32>::new(crate::audio::RING_BUFFER_CAPACITY);
+        let (producer, consumer) = rb.split();
+        let viz: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(None));
+        let (source, handle) = crate::audio::streaming_source::StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(48_000).expect("48000 is nonzero"),
+            viz,
+            0.0,
+            None,
+            Arc::new(Notify::new()),
+            false,
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            false,
+        );
+        let stream = crate::audio::ActiveStream {
+            producer,
+            handle,
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        self.crossfade_state = CrossfadeState::Active {
+            stream,
+            started_at: std::time::Instant::now(),
+            duration_ms: 1_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+        };
+        source
+    }
+
     /// Renderer's copy of the engine-shared `source_generation`. The wiring
     /// interlock test compares its identity against the engine's via
     /// `SourceGeneration::ptr_eq` to prove `set_engine_link` shared (not cloned
