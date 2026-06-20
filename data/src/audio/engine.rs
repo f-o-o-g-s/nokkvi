@@ -2817,6 +2817,137 @@ mod tests {
         assert!(!slot.prepared);
     }
 
+    /// Characterization (S2): `consume_gapless_transition` performs EIGHT
+    /// writes when the in-memory gapless slot holds an `Some(info)`. This pins
+    /// every one so a decomposition that drops a write — especially the two
+    /// most-droppable, `gapless.lock().source.clear()` and the
+    /// `live_sample_rate` store — fails loudly instead of silently regressing
+    /// gapless metadata pickup.
+    ///
+    /// Each field is pre-seeded to a DISTINCT non-default sentinel that differs
+    /// from the value the consume writes, so every assertion can genuinely fail.
+    /// `playing` stays false (fresh-engine default) so the cleared `position`
+    /// is read straight from the private field rather than the renderer-gated
+    /// `position()` branch.
+    #[tokio::test]
+    async fn consume_gapless_transition_applies_all_eight_writes() {
+        let mut engine = CustomAudioEngine::new();
+
+        // The info the decode loop staged, with identifiable values.
+        let staged_format = AudioFormat::new(crate::audio::SampleFormat::F32, 96_000, 2);
+        *engine.gapless_transition_info.lock().await = Some(GaplessTransitionInfo {
+            source: "http://example.test/incoming-gapless".to_string(),
+            duration: 222_222,
+            format: staged_format.clone(),
+            codec: Some("flac-incoming".to_string()),
+        });
+
+        // Pre-seed every destination to a DIFFERENT sentinel so each of the
+        // eight writes is observable (not masked by an already-equal value).
+        engine.source = "http://example.test/STALE-current".to_string();
+        engine.duration = 111_111;
+        engine.position = 77_777; // must be cleared to 0
+        engine.current_format = AudioFormat::new(crate::audio::SampleFormat::S16, 44_100, 2);
+        engine.live_codec_name.set(Some("mp3-stale".to_string()));
+        engine.next_source = "http://example.test/STALE-next".to_string();
+        engine.gapless.lock().await.source = "http://example.test/STALE-slot".to_string();
+        engine.live_sample_rate.store(44_100, Ordering::Relaxed);
+        // Keep playing=false so `position` is read from the private field.
+        engine.playing = false;
+
+        engine.consume_gapless_transition().await;
+
+        // 1. source <- info.source
+        assert_eq!(
+            engine.source, "http://example.test/incoming-gapless",
+            "source must be replaced with the staged gapless source",
+        );
+        // 2. duration <- info.duration
+        assert_eq!(
+            engine.duration, 222_222,
+            "duration must be replaced with the staged duration",
+        );
+        // 3. position <- 0 (read the private field; engine is not playing)
+        assert_eq!(
+            engine.position, 0,
+            "position must reset to 0 on gapless pickup",
+        );
+        // 4. current_format <- info.format
+        assert_eq!(
+            engine.current_format, staged_format,
+            "current_format must be replaced with the staged format",
+        );
+        // 5. live_codec_name <- info.codec
+        assert_eq!(
+            engine.live_codec(),
+            Some("flac-incoming".to_string()),
+            "live codec must be replaced with the staged codec",
+        );
+        // 6. next_source cleared
+        assert!(
+            engine.next_source.is_empty(),
+            "next_source must be cleared on gapless pickup",
+        );
+        // 7. gapless slot source cleared (most-droppable write A)
+        assert!(
+            engine.gapless.lock().await.source.is_empty(),
+            "gapless slot source must be cleared on gapless pickup",
+        );
+        // 8. live_sample_rate <- current_format.sample_rate() (most-droppable B)
+        assert_eq!(
+            engine.live_sample_rate.load(Ordering::Relaxed),
+            96_000,
+            "live_sample_rate must be stored from the new current_format",
+        );
+    }
+
+    /// Characterization (S2): the `None` path. With an EMPTY
+    /// `gapless_transition_info` slot, `consume_gapless_transition` is a no-op —
+    /// every engine field it would otherwise overwrite is left untouched. This
+    /// pins that the `if let Some(info)` guard genuinely gates all eight writes.
+    #[tokio::test]
+    async fn consume_gapless_transition_none_path_is_noop() {
+        let mut engine = CustomAudioEngine::new();
+
+        // Slot is None by default on a fresh engine; assert that and leave it.
+        assert!(
+            engine.gapless_transition_info.lock().await.is_none(),
+            "precondition: no staged transition",
+        );
+
+        // Distinctive pre-state that the no-op must preserve verbatim.
+        engine.source = "http://example.test/keep-current".to_string();
+        engine.duration = 333_333;
+        engine.position = 44_444;
+        engine.current_format = AudioFormat::new(crate::audio::SampleFormat::S24, 88_200, 2);
+        engine.live_codec_name.set(Some("opus-keep".to_string()));
+        engine.next_source = "http://example.test/keep-next".to_string();
+        engine.gapless.lock().await.source = "http://example.test/keep-slot".to_string();
+        engine.live_sample_rate.store(88_200, Ordering::Relaxed);
+        engine.playing = false;
+
+        engine.consume_gapless_transition().await;
+
+        assert_eq!(engine.source, "http://example.test/keep-current");
+        assert_eq!(engine.duration, 333_333);
+        assert_eq!(
+            engine.position, 44_444,
+            "position must be untouched on the None path"
+        );
+        assert_eq!(
+            engine.current_format,
+            AudioFormat::new(crate::audio::SampleFormat::S24, 88_200, 2),
+        );
+        assert_eq!(engine.live_codec(), Some("opus-keep".to_string()));
+        assert_eq!(engine.next_source, "http://example.test/keep-next");
+        assert_eq!(
+            engine.gapless.lock().await.source,
+            "http://example.test/keep-slot",
+            "gapless slot source must be untouched on the None path",
+        );
+        assert_eq!(engine.live_sample_rate.load(Ordering::Relaxed), 88_200);
+    }
+
     // -----------------------------------------------------------------------
     // F3: pause-aware decode-loop — consumed_notify unit tests
     //
