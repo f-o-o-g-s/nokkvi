@@ -299,6 +299,46 @@ fn log_stream_health(
     *last_heartbeat = std::time::Instant::now();
 }
 
+/// Radio jitter prebuffer step: on the initial (re)connect of an infinite
+/// stream, keep the renderer paused until ~`RADIO_JITTER_PREBUFFER_MS` of audio
+/// has accumulated, then start playback exactly once.
+///
+/// `radio_music_jitter_filled` is the SHARED latch the reconnect path resets to
+/// `false`, so it is taken by `&mut`: the helper flips it `true` on fill, and a
+/// later radio reconnect clears it to re-arm the prebuffer. Passing it by value
+/// would desync the latch from the reset and leave a silent gap after a radio
+/// reconnect.
+///
+/// Pause-continuously-until-full is preserved: this runs every decoded chunk
+/// while the buffer is short of the target and re-issues `pause()` each time, so
+/// a racing front-end `engine.play()` cannot unpause the stream prematurely —
+/// there is no run-once guard or hoist short-circuiting that re-pause.
+fn radio_jitter_prebuffer_step(
+    renderer: &PlMutex<AudioRenderer>,
+    frame_rate: u32,
+    is_infinite: bool,
+    radio_music_jitter_filled: &mut bool,
+) {
+    // Radio jitter buffer: initial prebuffer only, then never pause.
+    // SomaFM sends at exactly 1.0× realtime, so the buffer level
+    // will hover near the consumption rate. Pausing playback to
+    // re-buffer causes audible gaps — instead, let transient
+    // underruns produce natural silence via try_pop().unwrap_or(0.0).
+    if is_infinite && !*radio_music_jitter_filled {
+        let buffered_samples = renderer.lock().buffer_count();
+        let jitter_target = samples_for_duration(frame_rate, RADIO_JITTER_PREBUFFER_MS);
+        if buffered_samples < jitter_target {
+            // Enforce pause continuously until full. This prevents front-end
+            // UI events (like `engine.play()`) from unpausing prematurely.
+            renderer.lock().pause();
+        } else {
+            tracing::info!("📻 [DECODE LOOP] Pre-buffered 5+ seconds of radio, starting playback.");
+            *radio_music_jitter_filled = true;
+            renderer.lock().start();
+        }
+    }
+}
+
 /// What a decode loop should do this iteration about ring-buffer backpressure.
 /// Mirrors the renderer's `RebufferAction` pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1007,27 +1047,12 @@ impl CustomAudioEngine {
                         }
                     }
 
-                    // Radio jitter buffer: initial prebuffer only, then never pause.
-                    // SomaFM sends at exactly 1.0× realtime, so the buffer level
-                    // will hover near the consumption rate. Pausing playback to
-                    // re-buffer causes audible gaps — instead, let transient
-                    // underruns produce natural silence via try_pop().unwrap_or(0.0).
-                    if is_infinite && !radio_music_jitter_filled {
-                        let buffered_samples = renderer.lock().buffer_count();
-                        let jitter_target =
-                            samples_for_duration(frame_rate, RADIO_JITTER_PREBUFFER_MS);
-                        if buffered_samples < jitter_target {
-                            // Enforce pause continuously until full. This prevents front-end
-                            // UI events (like `engine.play()`) from unpausing prematurely.
-                            renderer.lock().pause();
-                        } else {
-                            tracing::info!(
-                                "📻 [DECODE LOOP] Pre-buffered 5+ seconds of radio, starting playback."
-                            );
-                            radio_music_jitter_filled = true;
-                            renderer.lock().start();
-                        }
-                    }
+                    radio_jitter_prebuffer_step(
+                        &renderer,
+                        frame_rate,
+                        is_infinite,
+                        &mut radio_music_jitter_filled,
+                    );
 
                     log_stream_health(
                         &renderer,
