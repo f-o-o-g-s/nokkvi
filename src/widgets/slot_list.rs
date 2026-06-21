@@ -630,6 +630,10 @@ pub(crate) struct SlotListConfig {
     pub cull_empty: bool,
     /// The global keyboard modifiers state (for shift/ctrl clicking)
     pub modifiers: iced::keyboard::Modifiers,
+    /// When false, the per-slot hover/press color wash is suppressed (the press
+    /// scale-down still fires). Used by the theme-picker swatch list, where the
+    /// active-theme accent wash would muddy rows painted in their own palette.
+    pub hover_wash: bool,
 }
 
 impl Default for SlotListConfig {
@@ -641,6 +645,7 @@ impl Default for SlotListConfig {
             chrome_height: chrome_height_with_header(false),
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
+            hover_wash: true,
         }
     }
 }
@@ -700,12 +705,20 @@ impl SlotListConfig {
             chrome_height,
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
+            hover_wash: true,
         }
     }
 
     /// Builder method to set global keyboard modifiers for slot interactions
     pub(crate) fn with_modifiers(mut self, modifiers: iced::keyboard::Modifiers) -> Self {
         self.modifiers = modifiers;
+        self
+    }
+
+    /// Suppress the per-slot hover/press color wash. For lists whose rows are
+    /// painted in their own (non-active-theme) colors, where the wash clashes.
+    pub(crate) fn without_hover_wash(mut self) -> Self {
+        self.hover_wash = false;
         self
     }
 
@@ -991,6 +1004,7 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
             crate::widgets::hover_overlay::HoverOverlay::new(slot_element)
                 .border_radius(slot_list_border_radius())
                 .flash_at(flash)
+                .wash_enabled(config.hover_wash)
                 .into();
 
         let wrapped = if let Some(cb) = on_hover.as_ref() {
@@ -2170,6 +2184,7 @@ mod tests {
             center_slot: 0,
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
+            hover_wash: true,
         };
 
         let row_height = config.row_height();
@@ -2190,6 +2205,7 @@ mod tests {
             center_slot: 4,
             cull_empty: false,
             modifiers: iced::keyboard::Modifiers::default(),
+            hover_wash: true,
         };
 
         let row_height = config.row_height();

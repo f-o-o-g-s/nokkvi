@@ -55,6 +55,10 @@ pub(crate) struct HoverOverlay<'a, Message, Theme = iced::Theme, Renderer = iced
     /// contrasting neutral hover pigment instead of the accent wash, which
     /// over an accent fill would be a near-no-op.
     on_accent_surface: bool,
+    /// When `false`, the hover/press color wash is suppressed (the press
+    /// scale-down still fires). Used by per-theme swatch rows, where the
+    /// active-theme accent wash would clash with each row's own palette.
+    wash_enabled: bool,
 }
 
 impl<'a, Message, Theme, Renderer> HoverOverlay<'a, Message, Theme, Renderer>
@@ -68,7 +72,16 @@ where
             border_radius: crate::theme::ui_border_radius(),
             flash_at: None,
             on_accent_surface: false,
+            wash_enabled: true,
         }
+    }
+
+    /// Suppress the hover/press color wash (the press scale-down still fires).
+    /// For surfaces painted in a foreign palette where the active-theme wash
+    /// muddies the colors — e.g. the theme-picker swatch rows.
+    pub(crate) fn wash_enabled(mut self, yes: bool) -> Self {
+        self.wash_enabled = yes;
+        self
     }
 
     /// Set the border radius of the hover overlay quad.
@@ -252,7 +265,7 @@ where
         // contrasting neutral pigment (`hover_tint_on_accent`) is used so
         // accent-over-accent doesn't vanish. The overlay's own alpha makes the
         // live composite equal `lerp(surface, pigment, alpha)`.
-        if is_hovered || is_pressed {
+        if (is_hovered || is_pressed) && self.wash_enabled {
             let base = if self.on_accent_surface {
                 crate::theme::hover_tint_on_accent()
             } else {

@@ -1097,20 +1097,6 @@ pub(crate) fn render_font_slot<'a>(
 // Theme Sub-List Slot Rendering
 // ============================================================================
 
-/// Linear blend `a → b` by `t ∈ [0, 1]`, opaque. Used only for the theme
-/// picker's center-row cursor tint (nudging a row's own bg toward its own
-/// accent). [`theme::blend_toward`] is `pub(super)` to the theme module, so a
-/// local copy keeps this self-contained.
-fn lerp_color(a: Color, b: Color, t: f32) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    Color {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: 1.0,
-    }
-}
-
 /// Render a single row in the theme picker sub-list, painted in that theme's
 /// OWN palette so the list reads as a live swatch preview (the color analog of
 /// the font picker drawing each name in its own typeface). All colors come
@@ -1193,40 +1179,30 @@ pub(crate) fn render_theme_slot<'a>(
     .align_y(Alignment::Center)
     .height(Length::Fill);
 
-    // Cursor stripe + row background in the THEME's own colors (not the active
-    // theme's, unlike `with_cursor_stripe`). The center row tints its bg toward
-    // its own accent so the cursor reads inside every palette.
-    let stripe_color = if ctx.is_center {
-        accent
+    // The interior is ALWAYS the theme's pure bg — no highlight FILL that would
+    // muddy the swatch (the previous accent/fg tint, plus the slot list's
+    // active-theme hover wash, clashed with each row's own palette). Selection
+    // is an accent RING around the row — the canonical "selected color"
+    // affordance in a swatch grid. The center-anchored list also pins the
+    // selected row to the middle and the "Enter ↵" hint reinforces it, so the
+    // ring is reinforcement, not the sole cue (the hover wash is disabled for
+    // this list via `SlotListConfig::without_hover_wash`).
+    let border = if ctx.is_center {
+        Border {
+            color: accent,
+            width: 2.0,
+            radius: theme::ui_radius_xs(),
+        }
     } else {
-        Color::TRANSPARENT
+        Border::default()
     };
-    let stripe = container(Space::new())
-        .width(Length::Fixed(3.0))
-        .height(Length::Fill)
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(stripe_color.into()),
-            ..Default::default()
-        });
-    // Center-row fill: a small step TOWARD the theme's own foreground, so the
-    // cursor row reads as a perceptible elevation on EVERY palette. (A tint
-    // toward accent is imperceptible when accent ≈ bg — e.g. pale-gold light
-    // themes — whereas fg always contrasts bg by construction.) The accent left
-    // stripe still supplies the accent cue.
-    let row_bg = if ctx.is_center {
-        lerp_color(bg, fg, 0.12)
-    } else {
-        bg
-    };
-    let row_body = row![stripe, container(content).width(Length::Fill)]
-        .height(Length::Fill)
-        .width(Length::Fill);
-    let body = container(row_body)
+    let body = container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .clip(true)
         .style(move |_: &iced::Theme| container::Style {
-            background: Some(row_bg.into()),
+            background: Some(bg.into()),
+            border,
             ..Default::default()
         });
 

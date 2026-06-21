@@ -768,7 +768,11 @@ impl SettingsPage {
                 .center(Length::Fill)
                 .into()
         } else {
-            let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
+            // No hover wash: the active-theme accent wash would muddy rows
+            // painted in their own palette. Selection is shown by the per-row
+            // accent ring in `render_theme_slot` instead.
+            let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome)
+                .without_hover_wash();
             let rows_owned = tsw.filtered_rows.clone();
 
             slot_list::slot_list_view_with_scroll(
