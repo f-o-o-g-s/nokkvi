@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- New built-in **Firmium** theme: warm gold on near-black with a terminal/monospace mood, ported from the Firmium music client's default look. The visualizer matches the gold accent (a honey-gold gradient), and song-rating stars are blue so they stay legible against the gold UI and selection highlights. Firmium ships no light mode, so light mode is an original neutral-grey companion that keeps the gold as the only warm accent.
+- New built-in **Firmium** theme: warm gold on near-black with a terminal/monospace mood, ported from the Firmium music client's default look. The visualizer matches the gold accent (a light gold gradient), and song-rating stars use a darker gold so they stay legible against the light-gold selection and now-playing highlights. Firmium ships no light mode, so light mode is an original neutral-grey companion that keeps the gold as the only warm accent.
 
 ### Changed
 

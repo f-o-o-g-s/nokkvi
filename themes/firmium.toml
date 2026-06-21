@@ -3,11 +3,11 @@
 # strictly dark, so its three-step near-black ladder is expanded to Nokkvi's
 # five background/foreground levels, and success/warning (which Firmium has no
 # precedent for) are invented to sit beside the gold. The visualizer matches
-# the gold accent — a honey-gold gradient (deep bronze rising to the accent)
-# capped with bright warm-white peaks. Because the UI is so gold-dominant,
-# rating stars use blue (gold's complement, nodding to Firmium's gold+purple
-# logo brand) so a song's star count stays legible on near-black rows AND on
-# the gold now-playing / selection highlights.
+# the gold accent — a light gold gradient (the accent brightening to a pale
+# gold at the tips) capped with bright warm-white peaks. The now-playing /
+# selection highlight fills are light gold, so rating stars use a DARKER gold
+# (DarkGoldenrod) that reads as dark-on-light against those fills while still
+# showing on the near-black rows — keeping the whole theme in the gold family.
 #
 # Firmium has NO light mode, so [light] below is an original companion — the
 # "Greige Inverse": dark Firmium folded across the luminance axis. A strictly
@@ -57,11 +57,11 @@ bright = "#F0B255"
 base = "#E59A2E"
 
 [dark.star]
-bright = "#4F90DE"
-base = "#4F90DE"
+bright = "#B8860B"
+base = "#B8860B"
 
 [dark.visualizer]
-bar_gradient_colors = ["#6E4A10", "#8A6018", "#A87826", "#C39238", "#DBAE55", "#E8C97E"]
+bar_gradient_colors = ["#E5C274", "#E8C97E", "#EBD089", "#EED796", "#F1DDA6", "#F4E4BA"]
 border_color = "#0A0A0A"
 border_opacity = 1.0
 led_border_opacity = 1.0
@@ -105,12 +105,12 @@ bright = "#D08A1E"
 base = "#A85A0E"
 
 [light.star]
-bright = "#2D6CB8"
-base = "#2D6CB8"
+bright = "#7A5210"
+base = "#7A5210"
 
 [light.visualizer]
-bar_gradient_colors = ["#6E4A10", "#86591A", "#9E6E22", "#B5832E", "#C79A3A", "#D8AF58"]
+bar_gradient_colors = ["#C79A3A", "#CFA547", "#D7AF57", "#DEB969", "#E4C27D", "#EBCB8E"]
 border_color = "#FFFFFF"
 border_opacity = 0.35
 led_border_opacity = 1.0
-peak_gradient_colors = ["#5E3C08", "#8A5A12", "#5E3C08", "#8A5A12", "#5E3C08", "#8A5A12"]
+peak_gradient_colors = ["#8A5E12", "#A8761C", "#8A5E12", "#A8761C", "#8A5E12", "#A8761C"]
