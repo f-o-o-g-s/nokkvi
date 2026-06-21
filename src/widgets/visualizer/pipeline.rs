@@ -12,7 +12,7 @@ use super::shader::{
 /// Build one of the four bars/lines × default/MSAA render pipelines.
 ///
 /// The four sites in `VisualizerPipeline::new` differ only along four axes:
-/// `topology` (TriangleList for bars, TriangleStrip for lines), `msaa`
+/// `topology` (TriangleList everywhere — bars, lines, scope), `msaa`
 /// (default vs 4× MSAA), `shader` (bars.wgsl vs lines.wgsl module), and
 /// `label` (for debug introspection). Everything else — pipeline layout,
 /// vertex/fragment entry points, `ALPHA_BLENDING` blend state, color
@@ -332,12 +332,15 @@ impl VisualizerPipeline {
             wgpu::BlendState::ALPHA_BLENDING,
         );
 
-        // Create lines render pipeline (uses TriangleStrip for thick lines)
+        // Create lines render pipeline. TriangleList: the SDF stroke emits one
+        // miter-tiled quad (6 verts) per dense spline segment — quads tile on the
+        // join bisector so they never overlap (no double-composite seam) and the
+        // ribbon can't self-intersect (see lines.wgsl).
         let lines_pipeline = build_visualizer_pipeline(
             device,
             &layout,
             &lines_shader,
-            wgpu::PrimitiveTopology::TriangleStrip,
+            wgpu::PrimitiveTopology::TriangleList,
             false,
             "visualizer lines pipeline",
             format,
@@ -349,19 +352,19 @@ impl VisualizerPipeline {
             device,
             &layout,
             &lines_shader,
-            wgpu::PrimitiveTopology::TriangleStrip,
+            wgpu::PrimitiveTopology::TriangleList,
             true,
             "visualizer lines pipeline (MSAA 4x)",
             format,
             wgpu::BlendState::ALPHA_BLENDING,
         );
 
-        // Create scope render pipeline (TriangleStrip ribbon, same as lines)
+        // Create scope render pipeline (TriangleList miter-quads, same as lines)
         let scope_pipeline = build_visualizer_pipeline(
             device,
             &layout,
             &scope_shader,
-            wgpu::PrimitiveTopology::TriangleStrip,
+            wgpu::PrimitiveTopology::TriangleList,
             false,
             "visualizer scope pipeline",
             format,
@@ -373,7 +376,7 @@ impl VisualizerPipeline {
             device,
             &layout,
             &scope_shader,
-            wgpu::PrimitiveTopology::TriangleStrip,
+            wgpu::PrimitiveTopology::TriangleList,
             true,
             "visualizer scope pipeline (MSAA 4x)",
             format,
@@ -417,13 +420,13 @@ impl VisualizerPipeline {
         );
 
         // Scope beam pipelines: the scope shader rendered with additive blending
-        // (the luminous woscope-style beam). Same TriangleStrip geometry as the
+        // (the luminous woscope-style beam). Same TriangleList geometry as the
         // regular scope pipelines — only the blend differs.
         let scope_pipeline_beam = build_visualizer_pipeline(
             device,
             &layout,
             &scope_shader,
-            wgpu::PrimitiveTopology::TriangleStrip,
+            wgpu::PrimitiveTopology::TriangleList,
             false,
             "visualizer scope beam pipeline",
             format,
@@ -433,7 +436,7 @@ impl VisualizerPipeline {
             device,
             &layout,
             &scope_shader,
-            wgpu::PrimitiveTopology::TriangleStrip,
+            wgpu::PrimitiveTopology::TriangleList,
             true,
             "visualizer scope beam pipeline (MSAA 4x)",
             format,
@@ -683,6 +686,16 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             format,
             "visualizer bloom blur V pipeline",
         );
+        // Horizontal blur without the threshold — drives the wide-glow iterations.
+        let bloom_blur_h_pipeline = build_postprocess_pipeline(
+            device,
+            &bloom_layout,
+            &bloom_shader,
+            ("vs_main", "fs_blur_h"),
+            wgpu::BlendState::REPLACE,
+            format,
+            "visualizer bloom blur H pipeline",
+        );
         let bloom_composite_pipeline = build_postprocess_pipeline(
             device,
             &bloom_layout,
@@ -835,6 +848,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             format,
             bloom_bright_pipeline,
             bloom_blur_v_pipeline,
+            bloom_blur_h_pipeline,
             bloom_composite_pipeline,
             bloom_bind_group_layout,
             bloom_uniform_buffer,

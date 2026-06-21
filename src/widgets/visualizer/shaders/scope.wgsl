@@ -93,27 +93,26 @@ const LINES_PALETTE_INDEX_MOD: u32 = 8u;
 const LINES_GLOW_MIN_RADIUS: f32 = 3.0;
 const LINES_GLOW_MAX_RADIUS: f32 = 10.0;
 const LINES_GLOW_EXTENT_MULT: f32 = 2.5;
-const LINES_BEAT_GLOW: f32 = 0.7;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
-    @location(1) distance_to_center: f32,
-    @location(2) is_outline: f32,
-    @location(3) normalized_x: f32,  // Position around the ring (0..1)
-    @location(4) amplitude: f32,     // |deviation| from the silence radius (0..1)
-    @location(5) is_fill: f32,       // Always 0 in scope mode (no fill pass)
+    @location(1) frag_pos: vec2<f32>,  // Canvas-space pixel position (interpolated → SDF input)
+    @location(2) is_outline: f32,  // 1.0 = outline, 0.0 = main line
+    @location(3) is_fill: f32,  // 1.0 = fill pass, 0.0 = line/outline pass
+    @location(4) @interpolate(flat) seg_a: vec2<f32>,  // This quad's ring segment start (canvas px)
+    @location(5) @interpolate(flat) seg_b: vec2<f32>,  // This quad's ring segment end (canvas px)
 }
 
 fn dead_output() -> VertexOutput {
     var output: VertexOutput;
     output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
     output.color = vec4<f32>(0.0);
-    output.distance_to_center = 0.0;
+    output.frag_pos = vec2<f32>(0.0);
     output.is_outline = 0.0;
-    output.normalized_x = 0.0;
-    output.amplitude = 0.0;
     output.is_fill = 0.0;
+    output.seg_a = vec2<f32>(0.0);
+    output.seg_b = vec2<f32>(0.0);
     return output;
 }
 
@@ -255,6 +254,69 @@ fn ring_point(i: i32, point_count: i32, center: vec2<f32>, base_r: f32, dev_r: f
     return vec3<f32>(pos.x, pos.y, value);
 }
 
+// ---------- SDF stroke helpers (verbatim from lines.wgsl) ----------
+fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+fn corner_to_quad(corner: u32) -> i32 {
+    var idx = array<i32, 6>(0, 1, 2, 2, 1, 3);
+    return idx[corner];
+}
+
+fn joint_miter(dir1: vec2<f32>, dir2: vec2<f32>, n_ref: vec2<f32>) -> vec3<f32> {
+    let n1 = vec2<f32>(-dir1.y, dir1.x);
+    let n2 = vec2<f32>(-dir2.y, dir2.x);
+    var m = n1 + n2;
+    if (length(m) < 1e-4) {
+        // Segments nearly anti-parallel: fall back to a butt cap on the ref normal.
+        return vec3<f32>(n_ref.x, n_ref.y, 1.0);
+    }
+    m = normalize(m);
+    let factor = 1.0 / max(dot(m, n_ref), 0.1);
+    return vec3<f32>(m.x, m.y, factor);
+}
+
+// Dense ring-curve point in canvas pixels for a dense ring-sample index
+// (SCOPE_SP samples per control-point segment), with the aspect stretch applied.
+// Returns (x, y, amplitude): amplitude is recovered from the ISOTROPIC radius
+// (before the stretch) so the height/wave gradients still track loudness. The
+// closed loop wraps through ring_point (value mod point_count, angle from the
+// unwrapped index), so any index — negative or past the end — is valid; floor
+// division keeps the (segment, t) decomposition correct for negative indices.
+fn scope_dense_point(
+    ring_idx: i32,
+    point_count: i32,
+    center: vec2<f32>,
+    base_r: f32,
+    dev_r: f32,
+    aspect_scale: vec2<f32>,
+) -> vec3<f32> {
+    let seg = i32(floor(f32(ring_idx) / f32(SCOPE_SP)));
+    let samp = ring_idx - seg * SCOPE_SP;
+    let t = f32(samp) / f32(SCOPE_SP);
+
+    let p0 = ring_point(seg - 1, point_count, center, base_r, dev_r).xy;
+    let p1 = ring_point(seg, point_count, center, base_r, dev_r).xy;
+    let p2 = ring_point(seg + 1, point_count, center, base_r, dev_r).xy;
+    let p3 = ring_point(seg + 2, point_count, center, base_r, dev_r).xy;
+
+    var cp: vec2<f32>;
+    if (uniforms.config.lines_style == 1u) {
+        cp = mix(p1, p2, t);
+    } else {
+        cp = catmull_rom(p0, p1, p2, p3, t);
+    }
+
+    let iso_radius = length(cp - center);
+    let amp = clamp(abs(iso_radius - base_r) / max(dev_r, 0.0001), 0.0, 1.0);
+    let stretched = center + (cp - center) * aspect_scale;
+    return vec3<f32>(stretched.x, stretched.y, amp);
+}
+
 @vertex
 fn vs_main(
     @builtin(vertex_index) vertex_index: u32,
@@ -281,20 +343,18 @@ fn vs_main(
     let outline_extra = uniforms.config.lines_outline_thickness;
     let aa_padding = 1.5;
 
-    // Closed loop: one segment per point, +1 closing sample to seal the strip.
+    // Closed loop: `total_samples` dense segments around the ring (segment i
+    // joins dense sample i -> i+1, wrapping back to sample 0 to seal the ring).
+    // One miter-tiled quad (6 verts, TriangleList) per segment — adjacent quads
+    // share miter corners on the join bisector so they tile with no overlap or
+    // gap, and a self-intersecting ribbon fold is impossible.
     let total_samples = point_count * SCOPE_SP;
-    let ring_points = total_samples + 1;
-    let vertices_per_pass = u32(ring_points) * 2u;
-    if (vertex_index >= vertices_per_pass) {
+    let seg_idx = i32(vertex_index / 6u);
+    let corner = vertex_index % 6u;
+    if (seg_idx >= total_samples) {
         return dead_output();
     }
-
-    let ring_idx = i32(vertex_index / 2u);
-    let is_even_vertex = (vertex_index % 2u) == 0u;
-
-    let segment_index = ring_idx / SCOPE_SP;
-    let sample_in_segment = ring_idx % SCOPE_SP;
-    let t = f32(sample_in_segment) / f32(SCOPE_SP);
+    let ci = corner_to_quad(corner);
 
     let center = ring_center();
     let avail = ring_available_radius();
@@ -302,110 +362,103 @@ fn vs_main(
     let base_r = avail * radius_frac;
     let dev_r = avail * (1.0 - radius_frac);
 
-    // Control points around the ring (indices wrap for the closed loop).
-    let p0v = ring_point(segment_index - 1, point_count, center, base_r, dev_r);
-    let p1v = ring_point(segment_index, point_count, center, base_r, dev_r);
-    let p2v = ring_point(segment_index + 1, point_count, center, base_r, dev_r);
-    let p3v = ring_point(segment_index + 2, point_count, center, base_r, dev_r);
-    let p0 = p0v.xy;
-    let p1 = p1v.xy;
-    let p2 = p2v.xy;
-    let p3 = p3v.xy;
-
-    var current_point: vec2<f32>;
-    var prev_point: vec2<f32>;
-    var next_point: vec2<f32>;
-
-    let line_style = uniforms.config.lines_style;
-    if (line_style == 1u) {
-        // Angular: straight segments between points.
-        current_point = mix(p1, p2, t);
-        let t_prev_a = max(t - 0.01, 0.0);
-        let t_next_a = min(t + 0.01, 1.0);
-        prev_point = mix(p1, p2, t_prev_a);
-        next_point = mix(p1, p2, t_next_a);
-    } else {
-        // Smooth (default): Catmull-Rom spline.
-        current_point = catmull_rom(p0, p1, p2, p3, t);
-        let t_prev_s = max(t - 0.01, 0.0);
-        let t_next_s = min(t + 0.01, 1.0);
-        prev_point = catmull_rom(p0, p1, p2, p3, t_prev_s);
-        next_point = catmull_rom(p0, p1, p2, p3, t_next_s);
-    }
-
-    // Position around the ring (0..1) for the position/wave gradient sweep.
-    let normalized_x = clamp(f32(ring_idx) / f32(total_samples), 0.0, 1.0);
-
-    // Amplitude = |deviation| from the silence radius, recovered from the
-    // current radius so the height/wave gradients track loudness.
-    let cur_radius = length(current_point - center);
-    let amplitude = clamp(abs(cur_radius - base_r) / max(dev_r, 0.0001), 0.0, 1.0);
-
-    let gradient_color = get_lines_gradient_color(uniforms.config.time, normalized_x, amplitude);
-
-    // Stretch the ring to fill a non-square panel: map the min(w, h) circle out
-    // to the full width/height so it follows the cover's aspect ratio instead of
-    // sitting in a centered square. Square panels have scale == (1, 1) and are
-    // byte-identical to before. Amplitude/color above were recovered from the
-    // isotropic radius, so only the geometry from here on is stretched; thickness
-    // is applied afterward in this stretched space, so the stroke stays a uniform
-    // pixel width all the way around the ellipse.
     let aspect_min_dim = min(uniforms.viewport.z, uniforms.viewport.w);
     let aspect_scale = vec2<f32>(
         uniforms.viewport.z / aspect_min_dim,
         uniforms.viewport.w / aspect_min_dim,
     );
-    current_point = center + (current_point - center) * aspect_scale;
-    prev_point = center + (prev_point - center) * aspect_scale;
-    next_point = center + (next_point - center) * aspect_scale;
 
-    // Fill pass: triangle strip from the ring (rim) to the center, with a radial
-    // alpha fade — colored at the rim, transparent at the center — so the ring
-    // reads as a filled gradient "wave" (the circular analog of Lines' fill).
+    // Curve points around this ring segment (canvas px, aspect-stretched). The
+    // closed loop wraps, so prev/next neighbours are always valid — every joint
+    // is a real miter (no caps). dp_*.z carries the (pre-stretch) amplitude.
+    let dp_a = scope_dense_point(seg_idx, point_count, center, base_r, dev_r, aspect_scale);
+    let dp_b = scope_dense_point(seg_idx + 1, point_count, center, base_r, dev_r, aspect_scale);
+    let p_prev = scope_dense_point(seg_idx - 1, point_count, center, base_r, dev_r, aspect_scale).xy;
+    let p_a = dp_a.xy;
+    let p_b = dp_b.xy;
+    let p_next = scope_dense_point(seg_idx + 2, point_count, center, base_r, dev_r, aspect_scale).xy;
+
+    // Per-endpoint gradient color: position around the ring (0..1) + amplitude.
+    let nx_a = clamp(f32(seg_idx) / f32(total_samples), 0.0, 1.0);
+    let nx_b = clamp(f32(seg_idx + 1) / f32(total_samples), 0.0, 1.0);
+    let col_a = get_lines_gradient_color(uniforms.config.time, nx_a, dp_a.z);
+    let col_b = get_lines_gradient_color(uniforms.config.time, nx_b, dp_b.z);
+
+    // === FILL PASS: pie slice from the rim to the center, with a radial alpha
+    // fade (colored at the rim, transparent at the center). corners 0=rim_a,
+    // 2=rim_b, 1/3=center — the quad's two triangles tile into a wedge. ===
     if (is_fill_pass) {
         var fill_point: vec2<f32>;
-        var fill_color = gradient_color;
-        if (is_even_vertex) {
-            fill_point = current_point;
+        var fill_color: vec4<f32>;
+        if (ci == 0) {
+            fill_point = p_a;
+            fill_color = col_a;
+            fill_color.a *= uniforms.config.lines_fill_opacity;
+        } else if (ci == 2) {
+            fill_point = p_b;
+            fill_color = col_b;
             fill_color.a *= uniforms.config.lines_fill_opacity;
         } else {
             fill_point = center;
+            fill_color = col_a;
             fill_color.a = 0.0;
         }
         let ndc_fill = pixel_to_ndc(fill_point.x, fill_point.y);
         output.position = vec4<f32>(ndc_fill.x, ndc_fill.y, 0.0, 1.0);
         output.color = fill_color;
-        output.distance_to_center = 0.0;
+        output.frag_pos = fill_point;
         output.is_outline = 0.0;
-        output.normalized_x = normalized_x;
-        output.amplitude = amplitude;
         output.is_fill = 1.0;
+        output.seg_a = p_a;
+        output.seg_b = p_b;
         return output;
     }
 
-    // Perpendicular thickening (same ribbon math as lines.wgsl).
-    var tangent = next_point - prev_point;
-    let tangent_len = length(tangent);
-    if (tangent_len > 0.001) {
-        tangent = tangent / tangent_len;
-    } else {
-        tangent = vec2<f32>(1.0, 0.0);
-    }
-    let perp = vec2<f32>(-tangent.y, tangent.x);
-
+    // === LINE / OUTLINE PASS: miter-tiled quad + SDF coverage ===
+    // Tight stroke: core + AA pad only. The glow is the post-process bloom of
+    // this crisp ring, so the geometry is NOT widened by the glow extent.
     let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, is_outline_pass);
-    // Widen only the main pass for the glow halo; the outline stays tight.
-    let pass_glow_extent = select(lines_glow_extent(), 0.0, is_outline_pass);
-    let extended_half_thickness = actual_half_thickness + aa_padding + pass_glow_extent;
+    let r = actual_half_thickness + aa_padding;
+
+    let ab = p_b - p_a;
+    if (length(ab) < 1e-4) {
+        return dead_output();
+    }
+    let dir_ab = normalize(ab);
+    let n_ab = vec2<f32>(-dir_ab.y, dir_ab.x);
+
+    var dir_prev = dir_ab;
+    let dpv = p_a - p_prev;
+    if (length(dpv) > 1e-4) {
+        dir_prev = normalize(dpv);
+    }
+    var dir_next = dir_ab;
+    let dnv = p_next - p_b;
+    if (length(dnv) > 1e-4) {
+        dir_next = normalize(dnv);
+    }
+
+    let mA = joint_miter(dir_prev, dir_ab, n_ab);
+    let mB = joint_miter(dir_ab, dir_next, n_ab);
+    let a_plus = p_a + mA.xy * (r * mA.z);
+    let a_minus = p_a - mA.xy * (r * mA.z);
+    let b_plus = p_b + mB.xy * (r * mB.z);
+    let b_minus = p_b - mB.xy * (r * mB.z);
 
     var offset_point: vec2<f32>;
-    var dist_to_center: f32;
-    if (is_even_vertex) {
-        offset_point = current_point + perp * extended_half_thickness;
-        dist_to_center = extended_half_thickness;
+    var vert_color: vec4<f32>;
+    if (ci == 0) {
+        offset_point = a_plus;
+        vert_color = col_a;
+    } else if (ci == 1) {
+        offset_point = a_minus;
+        vert_color = col_a;
+    } else if (ci == 2) {
+        offset_point = b_plus;
+        vert_color = col_b;
     } else {
-        offset_point = current_point - perp * extended_half_thickness;
-        dist_to_center = -extended_half_thickness;
+        offset_point = b_minus;
+        vert_color = col_b;
     }
 
     var color: vec4<f32>;
@@ -414,18 +467,17 @@ fn vs_main(
         outline_color.a *= uniforms.config.lines_outline_opacity;
         color = outline_color;
     } else {
-        color = gradient_color;
+        color = vert_color;
     }
 
     let ndc = pixel_to_ndc(offset_point.x, offset_point.y);
-
     output.position = vec4<f32>(ndc.x, ndc.y, 0.0, 1.0);
     output.color = color;
-    output.distance_to_center = dist_to_center;
+    output.frag_pos = offset_point;
     output.is_outline = select(0.0, 1.0, is_outline_pass);
-    output.normalized_x = normalized_x;
-    output.amplitude = amplitude;
     output.is_fill = 0.0;
+    output.seg_a = p_a;
+    output.seg_b = p_b;
 
     return output;
 }
@@ -447,24 +499,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let is_outline = input.is_outline > 0.5;
     let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, is_outline);
 
-    let dist = abs(input.distance_to_center);
+    // True Euclidean distance to the ring-segment centerline (round joins/caps
+    // for free; no fold possible). Crisp core ONLY — the neon halo is the
+    // post-process bloom of this thin ring (bloom.wgsl), driven by the scope
+    // glow setting, so there is no in-shader halo to spike or facet at sharp
+    // radial excursions.
+    let dist = sd_segment(input.frag_pos, input.seg_a, input.seg_b);
     let core = smoothstep(actual_half_thickness + 0.75, actual_half_thickness - 0.75, dist);
 
-    var coverage = core;
-
-    // Neon glow halo (main pass only), flaring with loudness + beat — identical
-    // to lines.wgsl, expressed in distance-from-centerline so it ports directly.
-    let glow_strength = uniforms.config.lines_glow_intensity;
-    if (glow_strength > 0.001 && !is_outline) {
-        let beyond = max(dist - actual_half_thickness, 0.0);
-        let halo = exp(-beyond / lines_glow_radius());
-        let energy = clamp(uniforms.config.average_energy, 0.0, 1.0);
-        let beat_flare = 1.0 + uniforms.audio.x * LINES_BEAT_GLOW;
-        let halo_coverage = halo * glow_strength * (0.45 + 0.55 * energy) * beat_flare;
-        coverage = max(core, halo_coverage);
-    }
-
-    color.a *= coverage;
+    color.a *= core;
     color.a *= uniforms.config.global_opacity;
 
     return color;

@@ -98,6 +98,15 @@ fn fs_blur_v(in: VsOut) -> @location(0) vec4<f32> {
     return blur_axis(in.uv, vec2<f32>(0.0, 1.0));
 }
 
+// Horizontal blur WITHOUT the threshold (half-res bloom -> half-res bloom). Used
+// by the wide-glow iterations: after the bright/threshold pass has extracted the
+// glow, each extra (H, V) iteration just re-blurs the half-res buffer to widen
+// the halo while staying smooth. Steps 1 half-res texel/tap to match fs_blur_v.
+@fragment
+fn fs_blur_h(in: VsOut) -> @location(0) vec4<f32> {
+    return blur_axis(in.uv, vec2<f32>(1.0, 0.0));
+}
+
 // Pass 3: additive composite of the glow over the scene, scaled by intensity.
 // Paired with a One/One blend state on the framebuffer target.
 @fragment

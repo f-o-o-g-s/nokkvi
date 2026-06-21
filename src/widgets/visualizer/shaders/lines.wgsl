@@ -1,7 +1,16 @@
 // Visualizer Lines Shader
-// GPU-accelerated smooth antialiased line rendering with Catmull-Rom spline interpolation
-// Antialiasing technique from: https://www.shadertoy.com/view/4dcfW8
-// Uses instanced rendering: instance 0 = outline, instance 1 = main line
+// GPU-accelerated smooth antialiased line rendering with Catmull-Rom spline interpolation.
+//
+// The stroke is built as a chain of MITER-TILED per-segment quads (TriangleList):
+// each dense spline segment emits one quad whose end-edges meet the neighbouring
+// quads exactly on the join bisector, so the quads tile WITHOUT overlap or gap
+// and the ribbon can never self-intersect. Coverage is an analytic signed-distance
+// field — `sd_segment(frag_pos, seg_a, seg_b)` — so round joins/caps fall out for
+// free. This shader draws ONLY the thin crisp stroke; the neon glow is the
+// separable-blur BLOOM of this line (bloom.wgsl), which is smooth and eases off
+// at sharp tips — an in-shader analytic halo instead spiked or faceted at bends.
+// AA technique from: https://www.shadertoy.com/view/4dcfW8 ; sdSegment from IQ
+// (https://iquilezles.org/articles/distfunctions2d/).
 //
 // ⚠️  Config struct layout MUST match VisualizerConfig in shader.rs byte-for-byte.
 //     If you add/remove/reorder fields, update ALL THREE locations:
@@ -75,27 +84,33 @@ const LINES_PALETTE_SEGMENTS_LOOPED: f32 = 8.0;
 const LINES_PALETTE_INDEX_TAIL: u32 = 7u;
 const LINES_PALETTE_INDEX_MOD: u32 = 8u;
 
+// Dense spline samples per data segment. SINGLE source of truth: `vs_main` (the
+// per-quad vertex walk) and `dense_point` (the curve decomposition) MUST agree,
+// and shader.rs::draw_bars_and_lines hardcodes the matching `16` for the CPU
+// draw count (see the "MUST match" comment there).
+const LINES_SAMPLES_PER_SEGMENT: i32 = 16;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
-    @location(1) distance_to_center: f32,  // Distance from center line for antialiasing
+    @location(1) frag_pos: vec2<f32>,  // Canvas-space pixel position (interpolated → SDF input)
     @location(2) is_outline: f32,  // 1.0 = outline, 0.0 = main line
-    @location(3) normalized_x: f32,  // Horizontal position (0.0 = left, 1.0 = right)
-    @location(4) amplitude: f32,  // Point amplitude (0.0 = silent, 1.0 = max)
-    @location(5) is_fill: f32,  // 1.0 = fill pass, 0.0 = line/outline pass
+    @location(3) is_fill: f32,  // 1.0 = fill pass, 0.0 = line/outline pass
+    @location(4) @interpolate(flat) seg_a: vec2<f32>,  // This quad's segment start (canvas px)
+    @location(5) @interpolate(flat) seg_b: vec2<f32>,  // This quad's segment end (canvas px)
 }
 
 // Helper: create a "dead" (offscreen) vertex output for early-return paths
-// (insufficient points, fill disabled, vertex-index out of bounds).
+// (insufficient points, fill disabled, degenerate/out-of-range segment).
 fn dead_output() -> VertexOutput {
     var output: VertexOutput;
     output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
     output.color = vec4<f32>(0.0);
-    output.distance_to_center = 0.0;
+    output.frag_pos = vec2<f32>(0.0);
     output.is_outline = 0.0;
-    output.normalized_x = 0.0;
-    output.amplitude = 0.0;
     output.is_fill = 0.0;
+    output.seg_a = vec2<f32>(0.0);
+    output.seg_b = vec2<f32>(0.0);
     return output;
 }
 
@@ -107,19 +122,18 @@ fn pixel_to_ndc(pixel_x: f32, pixel_y: f32) -> vec2<f32> {
     return vec2<f32>(ndc_x, ndc_y);
 }
 
-// ---------- Neon glow constants/helpers ----------
-// Exponential emissive halo beyond the main stroke. The falloff radius scales
-// with intensity (stronger glow is also wider); EXTENT_MULT sets how far the
-// line geometry is widened in vs_main so the exp tail has fragments to draw
-// into instead of being clipped to the quad. The vertical expansion budget
-// (`max_expansion`) folds in `lines_glow_extent()` so the halo has room at the
-// canvas edges too — turning glow on therefore reserves a little headroom.
+// ---------- Glow constants/helpers ----------
+// The Lines glow is NOT drawn in this shader. The line is rendered as a thin,
+// crisp SDF stroke; its neon halo is produced by the separable-blur BLOOM
+// post-process (bloom.wgsl), driven from `lines_glow_intensity` (see
+// `draw_bars_and_lines` / the bloom wiring in shader.rs). An in-shader analytic
+// halo round-capped at sharp vertices (glow spikes) or faceted when made
+// anisotropic; a true blur is smooth and eases off at sharp tips. `lines_glow_*`
+// survives only to reserve vertical headroom (so the blurred halo has room at
+// the canvas edges) — see `get_point` / `dense_point`.
 const LINES_GLOW_MIN_RADIUS: f32 = 3.0;
 const LINES_GLOW_MAX_RADIUS: f32 = 10.0;
 const LINES_GLOW_EXTENT_MULT: f32 = 2.5;
-
-// Beat flare: extra glow halo brightness on a full kick (uniforms.audio.x).
-const LINES_BEAT_GLOW: f32 = 0.7;
 
 // Halo exp-falloff radius (px) for the current intensity.
 fn lines_glow_radius() -> f32 {
@@ -237,7 +251,7 @@ fn get_lines_gradient_color(time: f32, normalized_x: f32, amplitude: f32) -> vec
 fn catmull_rom(p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, t: f32) -> vec2<f32> {
     let t2 = t * t;
     let t3 = t2 * t;
-    
+
     return 0.5 * (
         (2.0 * p1) +
         (-p0 + p2) * t +
@@ -250,13 +264,13 @@ fn catmull_rom(p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, t: f3
 fn get_point(idx: i32, point_count: i32, canvas_width: f32, canvas_height: f32) -> vec2<f32> {
     let clamped_idx = clamp(idx, 0, point_count - 1);
     let value = bar_data[u32(clamped_idx)];
-    
+
     // Clamp value to 0-1 range (CAVA auto-sensitivity can produce values > 1.0)
     let clamped_value = clamp(value, 0.0, 1.0);
-    
+
     // X position: evenly distributed across width
     let x = f32(clamped_idx) / f32(point_count - 1) * canvas_width;
-    
+
     // Y position depends on mirror mode
     let line_thickness = max(uniforms.config.line_thickness, 2.0);
     let outline_extra = uniforms.config.lines_outline_thickness;
@@ -276,7 +290,7 @@ fn get_point(idx: i32, point_count: i32, canvas_width: f32, canvas_height: f32) 
         let drawable_height = canvas_height - max_expansion;
         y = canvas_height - (clamped_value * drawable_height);
     }
-    
+
     return vec2<f32>(x, y);
 }
 
@@ -288,20 +302,121 @@ fn get_fill_baseline(canvas_height: f32) -> f32 {
     return canvas_height;
 }
 
+// ---------- SDF stroke helpers ----------
+
+// Unsigned distance from point `p` to the segment [a, b] (IQ's sdSegment).
+// Beyond either endpoint the field becomes distance-to-that-endpoint, i.e. a
+// circular cap — which is exactly the round join when two segments share an
+// endpoint, so no join geometry or miter math is needed for the *coverage*.
+fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+// Map a 0..5 triangle-list vertex index onto the four corners of a quad.
+// Two triangles, (0,1,2) and (2,1,3), over corners {0,1,2,3}.
+fn corner_to_quad(corner: u32) -> i32 {
+    var idx = array<i32, 6>(0, 1, 2, 2, 1, 3);
+    return idx[corner];
+}
+
+// Amplitude (0 silent → 1 loud) recovered from a curve point's Y, matching the
+// legacy ribbon's mapping so the height/wave gradients are unchanged.
+fn point_amplitude(p: vec2<f32>, canvas_height: f32) -> f32 {
+    let line_thickness = max(uniforms.config.line_thickness, 2.0);
+    let outline_extra = uniforms.config.lines_outline_thickness;
+    let aa_padding = 1.5;
+    let max_exp = ((line_thickness * 0.5) + outline_extra + aa_padding) * 4.0 + lines_glow_extent();
+    if (uniforms.config.lines_mirror == 1u) {
+        let center_y = canvas_height * 0.5;
+        return clamp(abs(center_y - p.y) / (center_y - max_exp * 0.5), 0.0, 1.0);
+    }
+    let draw_h = canvas_height - max_exp;
+    return clamp((canvas_height - p.y) / draw_h, 0.0, 1.0);
+}
+
+// Curve point in canvas pixels for a dense spline-sample index (16 samples per
+// data segment). Includes the post-spline centerline Y-clamp that keeps the
+// stroke inside the canvas (matches the legacy ribbon's clamp band). The
+// mirror-PASS reflection is applied by the caller, not here.
+fn dense_point(dense_idx: i32, point_count: i32, cw: f32, ch: f32) -> vec2<f32> {
+    let sps = LINES_SAMPLES_PER_SEGMENT;
+    let num_segments = point_count - 1;
+    let total = num_segments * sps + 1;
+    let di = clamp(dense_idx, 0, total - 1);
+    let seg = di / sps;
+    let samp = di % sps;
+    let t = f32(samp) / f32(sps);
+
+    var cp: vec2<f32>;
+    if (di >= total - 1 || seg >= num_segments) {
+        cp = get_point(point_count - 1, point_count, cw, ch);
+    } else {
+        let p0 = get_point(seg - 1, point_count, cw, ch);
+        let p1 = get_point(seg,     point_count, cw, ch);
+        let p2 = get_point(seg + 1, point_count, cw, ch);
+        let p3 = get_point(seg + 2, point_count, cw, ch);
+        if (uniforms.config.lines_style == 1u) {
+            // Angular: straight segments between data points.
+            cp = mix(p1, p2, t);
+        } else {
+            // Smooth (default): Catmull-Rom spline.
+            cp = catmull_rom(p0, p1, p2, p3, t);
+        }
+    }
+
+    // Post-spline centerline clamp (the legacy ribbon clamped current/prev/next
+    // here). Offsets/miters below are deliberately NOT clamped — iced scissors
+    // the pass to the clip bounds, so halo overflow is clipped on the GPU.
+    let line_thickness = max(uniforms.config.line_thickness, 2.0);
+    let outline_extra = uniforms.config.lines_outline_thickness;
+    let aa_padding = 1.5;
+    let max_expansion = (line_thickness * 0.5) + outline_extra + aa_padding + lines_glow_extent();
+    if (uniforms.config.lines_mirror == 1u) {
+        let center_y = ch * 0.5;
+        cp.y = clamp(cp.y, max_expansion, center_y);
+    } else {
+        cp.y = clamp(cp.y, max_expansion, ch);
+    }
+    return cp;
+}
+
+// Join geometry: given the unit directions of the two segments meeting at a
+// joint (both pointing along the polyline) and the unit normal of the segment
+// being extruded, return (miter_normal.xy, length_factor). The corner sits at
+// `joint ± miter_normal * R * factor`; because adjacent quads share the same
+// miter normal AND factor at a joint, their corners coincide exactly → the
+// quads tile with no overlap (no double-composite seam) and no gap (no notch).
+// `factor = 1/cos(half-angle)`, floored so a near-180° reversal can't blow up.
+fn joint_miter(dir1: vec2<f32>, dir2: vec2<f32>, n_ref: vec2<f32>) -> vec3<f32> {
+    let n1 = vec2<f32>(-dir1.y, dir1.x);
+    let n2 = vec2<f32>(-dir2.y, dir2.x);
+    var m = n1 + n2;
+    if (length(m) < 1e-4) {
+        // Segments nearly anti-parallel: fall back to a butt cap on the ref normal.
+        return vec3<f32>(n_ref.x, n_ref.y, 1.0);
+    }
+    m = normalize(m);
+    let factor = 1.0 / max(dot(m, n_ref), 0.1);
+    return vec3<f32>(m.x, m.y, factor);
+}
+
 @vertex
 fn vs_main(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32
 ) -> VertexOutput {
     var output: VertexOutput;
-    
+
     let point_count = i32(uniforms.config.bar_count);
     let line_thickness = max(uniforms.config.line_thickness, 2.0);
     let half_thickness = line_thickness * 0.5;
     let viewport = uniforms.viewport;
     let canvas_width = viewport.z;
     let canvas_height = viewport.w;
-    
+
     // Instance layout:
     // 0=fill(top), 1=outline(top), 2=main(top)
     // 3=fill(mirror), 4=outline(mirror), 5=main(mirror)
@@ -310,219 +425,165 @@ fn vs_main(
     let is_fill_pass = base_instance == 0u;
     let is_outline_pass = base_instance == 1u;
     // base_instance 2 = main line pass
-    
+
     if (point_count < 2) {
         return dead_output();
     }
-
-    // If fill is disabled, discard fill pass vertices
     if (is_fill_pass && uniforms.config.lines_fill_opacity < 0.001) {
         return dead_output();
     }
-    
-    // Spline interpolation: 16 samples per segment for smoother curves
-    let samples_per_segment = 16;
+
+    // Dense polyline: one quad per dense segment (LINES_SAMPLES_PER_SEGMENT per
+    // data segment), so `dense_point` and this walk share one divisor.
+    let samples_per_segment = LINES_SAMPLES_PER_SEGMENT;
     let num_segments = point_count - 1;
-    let total_spline_points = num_segments * samples_per_segment + 1;
-    
-    // Each spline point needs 2 vertices (left/right for line, curve/bottom for fill)
-    let vertices_per_spline = 2;
-    let vertices_per_pass = u32(total_spline_points) * u32(vertices_per_spline);
-    
-    if (vertex_index >= vertices_per_pass) {
+    let num_dense_segments = num_segments * samples_per_segment;
+
+    let seg_idx = i32(vertex_index / 6u);
+    let corner = vertex_index % 6u;
+    if (seg_idx >= num_dense_segments) {
         return dead_output();
     }
-    
-    // Which spline point is this vertex for?
-    let spline_point_index = vertex_index / 2u;
-    let is_even_vertex = (vertex_index % 2u) == 0u;
-    
-    // Calculate which segment and t value within segment
-    let segment_index = i32(spline_point_index) / samples_per_segment;
-    let sample_in_segment = i32(spline_point_index) % samples_per_segment;
-    let t = f32(sample_in_segment) / f32(samples_per_segment);
-    
-    // Handle the final point
-    var current_point: vec2<f32>;
-    var next_point: vec2<f32>;
-    var prev_point: vec2<f32>;
-    
-    if (i32(spline_point_index) >= total_spline_points - 1) {
-        current_point = get_point(point_count - 1, point_count, canvas_width, canvas_height);
-        prev_point = get_point(point_count - 2, point_count, canvas_width, canvas_height);
-        next_point = current_point;
-    } else if (segment_index >= num_segments) {
-        current_point = get_point(point_count - 1, point_count, canvas_width, canvas_height);
-        prev_point = get_point(point_count - 2, point_count, canvas_width, canvas_height);
-        next_point = current_point;
-    } else {
-        let p0 = get_point(segment_index - 1, point_count, canvas_width, canvas_height);
-        let p1 = get_point(segment_index, point_count, canvas_width, canvas_height);
-        let p2 = get_point(segment_index + 1, point_count, canvas_width, canvas_height);
-        let p3 = get_point(segment_index + 2, point_count, canvas_width, canvas_height);
-        
-        let line_style = uniforms.config.lines_style;
-        if (line_style == 1u) {
-            // Angular: straight line segments between data points
-            current_point = mix(p1, p2, t);
-            let t_prev_a = max(t - 0.01, 0.0);
-            let t_next_a = min(t + 0.01, 1.0);
-            prev_point = mix(p1, p2, t_prev_a);
-            next_point = mix(p1, p2, t_next_a);
-        } else {
-            // Smooth (default): Catmull-Rom spline
-            current_point = catmull_rom(p0, p1, p2, p3, t);
-            let t_prev_s = max(t - 0.01, 0.0);
-            let t_next_s = min(t + 0.01, 1.0);
-            prev_point = catmull_rom(p0, p1, p2, p3, t_prev_s);
-            next_point = catmull_rom(p0, p1, p2, p3, t_next_s);
-        }
-    }
-    
-    // Clamp Y coordinates after spline interpolation
-    let outline_extra = uniforms.config.lines_outline_thickness;
-    let aa_padding = 1.5;
-    let max_expansion = half_thickness + outline_extra + aa_padding + lines_glow_extent();
-    if (uniforms.config.lines_mirror == 1u) {
-        let center_y = canvas_height * 0.5;
-        current_point.y = clamp(current_point.y, max_expansion, center_y);
-        prev_point.y = clamp(prev_point.y, max_expansion, center_y);
-        next_point.y = clamp(next_point.y, max_expansion, center_y);
-    } else {
-        current_point.y = clamp(current_point.y, max_expansion, canvas_height);
-        prev_point.y = clamp(prev_point.y, max_expansion, canvas_height);
-        next_point.y = clamp(next_point.y, max_expansion, canvas_height);
-    }
-    
-    // Mirror pass: flip Y coordinates around center line
+    let ci = corner_to_quad(corner);
+
+    // Curve points around this segment (canvas space), then mirror-pass flip.
+    var p_prev = dense_point(seg_idx - 1, point_count, canvas_width, canvas_height);
+    var p_a = dense_point(seg_idx, point_count, canvas_width, canvas_height);
+    var p_b = dense_point(seg_idx + 1, point_count, canvas_width, canvas_height);
+    var p_next = dense_point(seg_idx + 2, point_count, canvas_width, canvas_height);
+
     if (is_mirror_pass) {
-        let center_y = canvas_height * 0.5;
-        current_point.y = 2.0 * center_y - current_point.y;
-        prev_point.y = 2.0 * center_y - prev_point.y;
-        next_point.y = 2.0 * center_y - next_point.y;
+        let cy = canvas_height * 0.5;
+        p_prev.y = 2.0 * cy - p_prev.y;
+        p_a.y = 2.0 * cy - p_a.y;
+        p_b.y = 2.0 * cy - p_b.y;
+        p_next.y = 2.0 * cy - p_next.y;
     }
-    
-    // Calculate normalized x position (0.0 = left, 1.0 = right)
-    let normalized_x = clamp(current_point.x / canvas_width, 0.0, 1.0);
-    
-    // Calculate amplitude from the current point's Y position
-    let outline_extra_val = uniforms.config.lines_outline_thickness;
-    let aa_pad_val = 1.5;
-    let max_exp_val = ((line_thickness * 0.5) + outline_extra_val + aa_pad_val) * 4.0 + lines_glow_extent();
-    let draw_h = canvas_height - max_exp_val;
-    var amplitude: f32;
-    if (uniforms.config.lines_mirror == 1u) {
-        let center_y = canvas_height * 0.5;
-        // For mirror pass, amplitude is distance from center (works for both halves)
-        amplitude = clamp(abs(center_y - current_point.y) / (center_y - max_exp_val * 0.5), 0.0, 1.0);
-    } else {
-        amplitude = clamp((canvas_height - current_point.y) / draw_h, 0.0, 1.0);
-    }
-    
-    // Get gradient color for this vertex
-    let gradient_color = get_lines_gradient_color(uniforms.config.time, normalized_x, amplitude);
-    
-    // === FILL PASS: triangle strip from curve to baseline ===
+
+    // Per-endpoint gradient color + amplitude (interpolated across the quad).
+    let nx_a = clamp(p_a.x / canvas_width, 0.0, 1.0);
+    let nx_b = clamp(p_b.x / canvas_width, 0.0, 1.0);
+    let amp_a = point_amplitude(p_a, canvas_height);
+    let amp_b = point_amplitude(p_b, canvas_height);
+    let col_a = get_lines_gradient_color(uniforms.config.time, nx_a, amp_a);
+    let col_b = get_lines_gradient_color(uniforms.config.time, nx_b, amp_b);
+
+    // === FILL PASS: trapezoid from curve to baseline (flat, no SDF) ===
     if (is_fill_pass) {
-        let fill_baseline = get_fill_baseline(canvas_height);
+        let baseline = get_fill_baseline(canvas_height);
+        // corners: 0=A_curve, 1=A_base, 2=B_curve, 3=B_base
         var fill_point: vec2<f32>;
-        
-        if (is_even_vertex) {
-            // Even vertex = on the curve
-            fill_point = current_point;
+        var fill_color: vec4<f32>;
+        if (ci == 0) {
+            fill_point = p_a;
+            fill_color = col_a;
+        } else if (ci == 1) {
+            fill_point = vec2<f32>(p_a.x, baseline);
+            fill_color = col_a;
+        } else if (ci == 2) {
+            fill_point = p_b;
+            fill_color = col_b;
         } else {
-            // Odd vertex = at the baseline (bottom or center)
-            fill_point = vec2<f32>(current_point.x, fill_baseline);
+            fill_point = vec2<f32>(p_b.x, baseline);
+            fill_color = col_b;
         }
-        
-        let ndc = pixel_to_ndc(fill_point.x, fill_point.y);
-        
-        var fill_color = gradient_color;
         fill_color.a *= uniforms.config.lines_fill_opacity;
-        
+
+        let ndc = pixel_to_ndc(fill_point.x, fill_point.y);
         output.position = vec4<f32>(ndc.x, ndc.y, 0.0, 1.0);
         output.color = fill_color;
-        output.distance_to_center = 0.0;
+        output.frag_pos = fill_point;
         output.is_outline = 0.0;
-        output.normalized_x = normalized_x;
-        output.amplitude = amplitude;
         output.is_fill = 1.0;
+        output.seg_a = p_a;
+        output.seg_b = p_b;
         return output;
     }
-    
-    // === LINE / OUTLINE PASS ===
-    // Calculate perpendicular direction for line thickness
-    var tangent = next_point - prev_point;
-    let tangent_len = length(tangent);
-    if (tangent_len > 0.001) {
-        tangent = tangent / tangent_len;
-    } else {
-        tangent = vec2<f32>(1.0, 0.0);
-    }
-    
-    let perp = vec2<f32>(-tangent.y, tangent.x);
-    
-    // Determine thickness based on outline vs main line
+
+    // === LINE / OUTLINE PASS: miter-tiled quad + SDF coverage ===
+    let outline_extra = uniforms.config.lines_outline_thickness;
+    let aa_padding = 1.5;
+    // Tight stroke: just the core width + AA pad. The glow is the post-process
+    // bloom of this crisp line, so the geometry is NOT widened by the glow extent
+    // (widening round-capped into spikes at sharp tips).
     let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, is_outline_pass);
-    
-    // Widen ONLY the main line pass for the glow halo; the dark outline pass
-    // keeps its tight footprint (it never glows in the fragment shader).
-    let pass_glow_extent = select(lines_glow_extent(), 0.0, is_outline_pass);
-    let extended_half_thickness = actual_half_thickness + aa_padding + pass_glow_extent;
-    
-    // Offset vertex to left or right of center line
-    var offset_point: vec2<f32>;
-    var dist_to_center: f32;
-    if (is_even_vertex) {
-        offset_point = current_point + perp * extended_half_thickness;
-        dist_to_center = extended_half_thickness;
-    } else {
-        offset_point = current_point - perp * extended_half_thickness;
-        dist_to_center = -extended_half_thickness;
+    let r = actual_half_thickness + aa_padding;
+
+    let ab = p_b - p_a;
+    if (length(ab) < 1e-4) {
+        return dead_output();
     }
-    
-    // NOTE: deliberately NOT clamping offset_point.y here. iced sets the
-    // shader pass's viewport to the widget bounds and its scissor rect to the
-    // clip bounds (see iced_wgpu primitive docs), so overflow is clipped on
-    // the GPU. Per-vertex clamping would pin one edge of the ribbon while
-    // leaving the other free, shifting the interpolated centerline — which
-    // desyncs the wide glow-main pass from the narrow outline pass near the
-    // canvas edges (the thin offset line + triangular wedge artifacts).
-    
-    // Calculate color
+    let dir_ab = normalize(ab);
+    let n_ab = vec2<f32>(-dir_ab.y, dir_ab.x);
+
+    // Directions into each joint (fall back to the segment's own direction at
+    // the polyline's endpoints, giving a butt cap there).
+    var dir_prev = dir_ab;
+    let dpv = p_a - p_prev;
+    if (length(dpv) > 1e-4) {
+        dir_prev = normalize(dpv);
+    }
+    var dir_next = dir_ab;
+    let dnv = p_next - p_b;
+    if (length(dnv) > 1e-4) {
+        dir_next = normalize(dnv);
+    }
+
+    let mA = joint_miter(dir_prev, dir_ab, n_ab);
+    let mB = joint_miter(dir_ab, dir_next, n_ab);
+    let a_plus = p_a + mA.xy * (r * mA.z);
+    let a_minus = p_a - mA.xy * (r * mA.z);
+    let b_plus = p_b + mB.xy * (r * mB.z);
+    let b_minus = p_b - mB.xy * (r * mB.z);
+
+    // corners: 0=a_plus, 1=a_minus, 2=b_plus, 3=b_minus
+    var offset_point: vec2<f32>;
+    var vert_color: vec4<f32>;
+    if (ci == 0) {
+        offset_point = a_plus;
+        vert_color = col_a;
+    } else if (ci == 1) {
+        offset_point = a_minus;
+        vert_color = col_a;
+    } else if (ci == 2) {
+        offset_point = b_plus;
+        vert_color = col_b;
+    } else {
+        offset_point = b_minus;
+        vert_color = col_b;
+    }
+
     var color: vec4<f32>;
     if (is_outline_pass) {
         var outline_color = uniforms.border_color;
         outline_color.a *= uniforms.config.lines_outline_opacity;
         color = outline_color;
     } else {
-        color = gradient_color;
+        color = vert_color;
     }
-    
-    // Convert to NDC
+
     let ndc = pixel_to_ndc(offset_point.x, offset_point.y);
-    
     output.position = vec4<f32>(ndc.x, ndc.y, 0.0, 1.0);
     output.color = color;
-    output.distance_to_center = dist_to_center;
+    output.frag_pos = offset_point;
     output.is_outline = select(0.0, 1.0, is_outline_pass);
-    output.normalized_x = normalized_x;
-    output.amplitude = amplitude;
     output.is_fill = 0.0;
-    
+    output.seg_a = p_a;
+    output.seg_b = p_b;
+
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var color = input.color;
-    
+
     // Fill pass: no antialiasing needed, just use the fill color directly
     if (input.is_fill > 0.5) {
         color.a *= uniforms.config.global_opacity;
         return color;
     }
-    
+
     // Line/outline pass: antialiased rendering
     let line_thickness = max(uniforms.config.line_thickness, 2.0);
     let half_thickness = line_thickness * 0.5;
@@ -531,30 +592,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let is_outline = input.is_outline > 0.5;
     let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, is_outline);
 
-    let dist = abs(input.distance_to_center);
+    // True Euclidean distance to the stroke centerline segment. Because adjacent
+    // quads tile on the join bisector, every fragment belongs to exactly one
+    // quad, and sd_segment's endpoint behavior rounds the joins for free — a
+    // self-intersecting ribbon fold is geometrically impossible here. This is the
+    // crisp core ONLY; the neon halo is the post-process bloom of this line
+    // (bloom.wgsl), so there is no in-shader glow to spike or facet at bends.
+    let dist = sd_segment(input.frag_pos, input.seg_a, input.seg_b);
     let core = smoothstep(actual_half_thickness + 0.75, actual_half_thickness - 0.75, dist);
 
-    var coverage = core;
-
-    // Neon glow: an exponential emissive halo beyond the main stroke (the dark
-    // outline pass is skipped so it stays crisp). Same gradient color as the
-    // line; alpha-blended over the dark visualizer backdrop it reads as a tube
-    // of light. Brightens with overall loudness (`average_energy`) so loud
-    // passages flare — and since that signal stops changing when audio pauses,
-    // the glow simply holds steady rather than animating, so no redraw-gate
-    // change is needed for this effect.
-    let glow_strength = uniforms.config.lines_glow_intensity;
-    if (glow_strength > 0.001 && !is_outline) {
-        let beyond = max(dist - actual_half_thickness, 0.0);
-        let halo = exp(-beyond / lines_glow_radius());
-        let energy = clamp(uniforms.config.average_energy, 0.0, 1.0);
-        // Flare the halo on each kick (uniforms.audio.x = beat_pulse).
-        let beat_flare = 1.0 + uniforms.audio.x * LINES_BEAT_GLOW;
-        let halo_coverage = halo * glow_strength * (0.45 + 0.55 * energy) * beat_flare;
-        coverage = max(core, halo_coverage);
-    }
-
-    color.a *= coverage;
+    color.a *= core;
     color.a *= uniforms.config.global_opacity;
 
     return color;

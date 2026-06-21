@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Lines and Scope visualizers no longer show triangular spikes or glow artifacts at sharp peaks and bends. The stroke is now drawn as an analytic distance field with proper rounded joins (so it can never fold on itself), and the neon glow comes from a smooth post-process bloom instead of an in-shader halo that distorted at sharp turns.
 - With Shuffle on, clicking a track to play while stopped or paused now reshuffles the queue behind it instead of stopping after one song.
 - Dragging the progress bar while paused no longer resumes playback; the playhead jumps to the new position and stays paused, keeping the elapsed time, scrub handle, and play button in sync.
 

@@ -25,6 +25,26 @@ fn get_elapsed_time() -> f32 {
 /// dark background and faint AA edges don't haze.
 const BLOOM_THRESHOLD: f32 = 0.35;
 
+/// Lines-mode glow is produced by blooming the thin crisp stroke (the analytic
+/// in-shader halo spiked at sharp vertices). This maps the line's
+/// `lines_glow_intensity` (0..1) onto the bloom composite strength — >1 so a full
+/// glow reads as a strong neon halo through the half-res, soft-knee bloom.
+const LINES_GLOW_BLOOM_GAIN: f32 = 3.2;
+
+/// Number of separable-blur iterations for the Lines glow (the effect bloom uses
+/// 1). Each extra iteration re-blurs the already-smooth half-res buffer, widening
+/// the halo (~√N) while staying smooth — the streak-free way to make a thin line
+/// glow reach far. Higher = wider/softer; cheap (half-res fullscreen passes).
+const LINES_GLOW_BLUR_ITERATIONS: u32 = 4;
+
+/// Bloom brightness cutoff for the Lines glow — much lower than the effect's
+/// `BLOOM_THRESHOLD`. The effect's high cutoff (so dark backdrops don't haze)
+/// makes the thin line glow SPOTTY: the half-res blur dilutes it on steep/diagonal
+/// stretches below the cutoff, so only the brightest crests glow. The line scene
+/// is transparent except the stroke itself, so a near-zero cutoff lets the whole
+/// line glow evenly without hazing anything.
+const LINES_GLOW_BLOOM_THRESHOLD: f32 = 0.06;
+
 /// Pixel format for the motion-trail accumulator. It MUST be a float format,
 /// not the 8-bit surface format: a multiplicative per-frame fade (`trail *=
 /// decay`) on an 8-bit UNORM target has a rounding fixed point — `round(v *
@@ -158,6 +178,12 @@ pub(crate) struct VisualizerPrimitive {
     pub bloom_enabled: bool,
     /// Bloom glow strength (0.0-1.0), uploaded to the bloom uniform in prepare()
     pub bloom_intensity: f32,
+    /// Separable-blur iterations. >1 re-blurs the half-res buffer to widen the
+    /// halo smoothly; the Lines glow uses several, the effect bloom uses 1.
+    pub bloom_blur_iterations: u32,
+    /// Bloom brightness cutoff. The Lines glow uses a near-zero cutoff so the
+    /// whole thin line glows evenly; the effect keeps the higher BLOOM_THRESHOLD.
+    pub bloom_threshold: f32,
     /// Beat reactivity (0.0-1.0) — scales how hard effects pump on beat/bass
     pub beat_reactivity: f32,
     /// Whether motion trails are active (routes through the offscreen path so
@@ -377,7 +403,42 @@ impl VisualizerPrimitive {
         };
 
         let has_perspective = params.bar_depth_3d > 0.001;
-        let bloom_enabled = params.bloom_enabled && params.bloom_intensity > 0.001;
+        // Lines AND Scope glow by blooming the thin crisp stroke (the in-shader
+        // analytic halo spiked / faceted at sharp bends). Auto-route both through
+        // the bloom path, driven by the stroke's own glow setting and independent
+        // of the user's global Bloom effect; if both are on, take the stronger.
+        // (For Scope, params.lines_glow_intensity carries cfg.scope.glow_intensity.)
+        let effect_bloom = params.bloom_enabled && params.bloom_intensity > 0.001;
+        let stroke_glow = matches!(mode, VisualizationMode::Lines | VisualizationMode::Scope)
+            && params.lines_glow_intensity > 0.001;
+        let stroke_bloom_intensity = if stroke_glow {
+            LINES_GLOW_BLOOM_GAIN * params.lines_glow_intensity
+        } else {
+            0.0
+        };
+        let bloom_enabled = effect_bloom || stroke_glow;
+        let bloom_intensity = if effect_bloom {
+            params.bloom_intensity.max(stroke_bloom_intensity)
+        } else {
+            stroke_bloom_intensity
+        };
+        // The stroke glow wants a wider halo than the tight effect-bloom default
+        // so it reads as neon escaping the thin stroke; it widens via extra blur
+        // iterations (smooth), not a wider per-tap step (which streaks across the
+        // thin stroke). The effect bloom keeps a single blur.
+        let bloom_blur_iterations = if stroke_glow {
+            LINES_GLOW_BLUR_ITERATIONS
+        } else {
+            1
+        };
+        // The stroke glow uses a near-zero brightness cutoff so the whole thin
+        // stroke glows evenly (the effect's high cutoff makes it spotty); the
+        // effect bloom keeps BLOOM_THRESHOLD so dark backdrops don't haze.
+        let bloom_threshold = if stroke_glow {
+            LINES_GLOW_BLOOM_THRESHOLD
+        } else {
+            BLOOM_THRESHOLD
+        };
         // Map the trails amount to a per-frame decay. Any non-zero amount maps
         // into a visible range (short 0.6 → long 0.92); 0 disables entirely.
         let trails_enabled = params.trails > 0.001;
@@ -414,7 +475,9 @@ impl VisualizerPrimitive {
             state: state.clone(),
             has_perspective,
             bloom_enabled,
-            bloom_intensity: params.bloom_intensity,
+            bloom_intensity,
+            bloom_blur_iterations,
+            bloom_threshold,
             beat_reactivity: params.beat_reactivity,
             trails_enabled,
             trails_decay,
@@ -465,6 +528,9 @@ pub(crate) struct VisualizerPipeline {
     pub(super) bloom_bright_pipeline: wgpu::RenderPipeline,
     /// half-res bloom -> half-res bloom (vertical blur)
     pub(super) bloom_blur_v_pipeline: wgpu::RenderPipeline,
+    /// half-res bloom -> half-res bloom (horizontal blur, no threshold) — used by
+    /// the wide-glow iterations to re-blur the buffer without re-thresholding.
+    pub(super) bloom_blur_h_pipeline: wgpu::RenderPipeline,
     /// half-res bloom -> framebuffer (additive composite, One/One blend)
     pub(super) bloom_composite_pipeline: wgpu::RenderPipeline,
     /// Bind group layout for bloom passes (texture + sampler + BloomParams uniform)
@@ -628,14 +694,16 @@ impl VisualizerPrimitive {
                 render_pass.draw(0..(total_quads * vertices_per_bar), 0..1);
             }
             1 => {
-                // Lines mode
+                // Lines mode (SDF stroke: one miter-tiled quad per dense segment).
                 render_pass.set_pipeline(lines_pipeline);
 
+                // MUST match `samples_per_segment` in lines.wgsl (the 6-verts-per-
+                // dense-segment TriangleList draw the shader walks via vertex_index).
                 let samples_per_segment = 16u32;
                 let num_segments = bar_count.saturating_sub(1);
-                let total_spline_points = num_segments * samples_per_segment + 1;
-                let vertices_per_spline_point = 2u32;
-                let vertices_per_pass = total_spline_points * vertices_per_spline_point;
+                let num_dense_segments = num_segments * samples_per_segment;
+                let vertices_per_quad = 6u32; // two triangles per dense segment
+                let vertices_per_pass = num_dense_segments * vertices_per_quad;
 
                 // Mirror mode doubles the instances (3 top + 3 bottom reflection)
                 let instance_count = if config.lines_mirror != 0 { 6 } else { 3 };
@@ -645,13 +713,14 @@ impl VisualizerPrimitive {
                 // Scope mode (circular oscilloscope)
                 render_pass.set_pipeline(scope_pipeline);
 
-                // Closed loop: one segment per waveform point, +1 closing sample
-                // to seal the triangle strip. MUST match SCOPE_SP in scope.wgsl.
+                // Closed loop: one miter-tiled quad (6 verts) per dense ring
+                // segment; segment i joins dense sample i -> i+1, wrapping back to
+                // sample 0 to seal the ring. MUST match SCOPE_SP / the 6-vert walk
+                // in scope.wgsl.
                 let samples_per_segment = SCOPE_SAMPLES_PER_SEGMENT;
                 let total_samples = bar_count * samples_per_segment;
-                let ring_points = total_samples + 1;
-                let vertices_per_spline_point = 2u32;
-                let vertices_per_pass = ring_points * vertices_per_spline_point;
+                let vertices_per_quad = 6u32;
+                let vertices_per_pass = total_samples * vertices_per_quad;
 
                 // Instance 0 = fill, 1 = outline (under), 2 = main line (on top).
                 render_pass.draw(0..vertices_per_pass, 0..3);
@@ -1115,7 +1184,7 @@ impl shader::Primitive for VisualizerPrimitive {
             let intensity = self.bloom_intensity * (dip_base + pump);
             let bloom_params = BloomParams {
                 intensity,
-                threshold: BLOOM_THRESHOLD,
+                threshold: self.bloom_threshold,
                 _pad: [0.0; 2],
             };
             queue.write_buffer(
@@ -1308,24 +1377,41 @@ impl shader::Primitive for VisualizerPrimitive {
             _ => None,
         };
 
-        if let Some((bloom_a_view, bloom_b_view, bg_scene, bg_a, _)) = bloom_views {
+        if let Some((bloom_a_view, bloom_b_view, bg_scene, bg_a, bg_b)) = bloom_views {
             let bw = (pipeline.msaa_size.0 / 2).max(1);
             let bh = (pipeline.msaa_size.1 / 2).max(1);
 
-            for (label, view, blur_pipeline, bind_group) in [
-                (
-                    "visualizer bloom bright/H pass",
-                    bloom_a_view,
-                    &pipeline.bloom_bright_pipeline,
-                    bg_scene,
-                ),
-                (
-                    "visualizer bloom blur V pass",
-                    bloom_b_view,
-                    &pipeline.bloom_blur_v_pipeline,
-                    bg_a,
-                ),
-            ] {
+            // Separable-blur ping-pong (allocation-free). Pass 0 is the bright/H
+            // + soft-knee threshold extract (resolve -> a); thereafter odd passes
+            // are a plain V blur (a -> b) and even passes a plain H blur (b -> a),
+            // re-blurring the half-res buffer to widen the halo smoothly without
+            // re-thresholding — the streak-free way to make a thin line reach far.
+            // 2 passes per iteration; the result always ends in bloom_b (sampled by
+            // the composite via bg_b).
+            let total_passes = 2 * self.bloom_blur_iterations;
+            for pass_i in 0..total_passes {
+                let (label, view, blur_pipeline, bind_group) = if pass_i == 0 {
+                    (
+                        "visualizer bloom bright/H pass",
+                        bloom_a_view,
+                        &pipeline.bloom_bright_pipeline,
+                        bg_scene,
+                    )
+                } else if pass_i % 2 == 1 {
+                    (
+                        "visualizer bloom blur V pass",
+                        bloom_b_view,
+                        &pipeline.bloom_blur_v_pipeline,
+                        bg_a,
+                    )
+                } else {
+                    (
+                        "visualizer bloom blur H pass",
+                        bloom_a_view,
+                        &pipeline.bloom_blur_h_pipeline,
+                        bg_b,
+                    )
+                };
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some(label),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {

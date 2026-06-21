@@ -715,6 +715,21 @@ mod wgsl_helper_tests {
     const BARS: &str = include_str!("shaders/bars.wgsl");
     const LINES: &str = include_str!("shaders/lines.wgsl");
 
+    /// Bars, lines, AND scope all emit miter-tiled per-quad TriangleLists now (6
+    /// verts/segment via corner_to_quad). A pipeline left on TriangleStrip stitches
+    /// those quad verts into one continuous strip → a garbage web of triangles
+    /// (the bug the scope port shipped with until the pipelines were flipped). No
+    /// geometry pipeline should bind TriangleStrip; this fails fast if one does.
+    #[test]
+    fn visualizer_geometry_pipelines_are_triangle_list() {
+        const PIPELINE_RS: &str = include_str!("pipeline.rs");
+        assert!(
+            !PIPELINE_RS.contains("PrimitiveTopology::TriangleStrip"),
+            "a visualizer geometry pipeline still binds TriangleStrip — bars/lines/scope \
+             all emit TriangleList miter-quads, so a strip topology renders garbage",
+        );
+    }
+
     #[test]
     fn bars_wgsl_brightness_and_led_helpers_are_defined() {
         assert!(
@@ -803,6 +818,88 @@ mod wgsl_helper_tests {
         assert!(
             LINES.contains("const LINES_PALETTE_INDEX_MOD: u32 = 8u;"),
             "lines.wgsl is missing LINES_PALETTE_INDEX_MOD const",
+        );
+    }
+
+    /// The line stroke is an analytic signed-distance field over miter-tiled
+    /// per-segment quads (TriangleList), NOT the legacy join-less fixed-width
+    /// ribbon that self-intersected at sharp bends (the triangular-spike bug).
+    /// Pin the load-bearing pieces so a future edit can't silently regress to
+    /// the folding ribbon.
+    #[test]
+    fn lines_wgsl_uses_sdf_stroke_not_folding_ribbon() {
+        assert!(
+            LINES.contains("fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32"),
+            "lines.wgsl is missing the sd_segment distance primitive",
+        );
+        assert!(
+            LINES.contains("fn joint_miter("),
+            "lines.wgsl is missing joint_miter — the bisector tiling that keeps \
+             per-segment quads non-overlapping (no double-composite seam)",
+        );
+        // The fragment must derive coverage from the true distance-to-segment,
+        // not the old interpolated `distance_to_center` perpendicular varying
+        // (which degenerated into spikes at folds).
+        assert!(
+            LINES.contains("sd_segment(input.frag_pos, input.seg_a, input.seg_b)"),
+            "lines.wgsl fragment is not computing coverage from sd_segment",
+        );
+        assert!(
+            !LINES.contains("distance_to_center"),
+            "lines.wgsl still references distance_to_center — the folding-ribbon \
+             coverage path the SDF stroke replaced",
+        );
+        // The Lines glow is the post-process BLOOM of the thin crisp stroke, not
+        // an in-shader halo: the analytic halo round-capped into spikes at sharp
+        // vertices (and faceted when made anisotropic). So the geometry must NOT
+        // be widened by the glow extent, and the fragment must draw no halo.
+        assert!(
+            !LINES.contains("pass_glow_extent"),
+            "lines.wgsl still widens the stroke geometry by the glow extent — the \
+             glow is bloom-driven now, the stroke must stay thin",
+        );
+        assert!(
+            LINES.contains("color.a *= core;") && !LINES.contains("halo_coverage"),
+            "lines.wgsl fragment still draws an in-shader glow halo — the line is \
+             the crisp core only; its glow is the post-process bloom now",
+        );
+        // 6 verts per dense segment (two triangles) × a SINGLE samples/segment
+        // const shared by vs_main + dense_point: MUST match the
+        // `vertices_per_quad` / `samples_per_segment` literals in
+        // shader.rs::draw_bars_and_lines or the shader walks past its geometry.
+        assert!(
+            LINES.contains("vertex_index / 6u")
+                && LINES.contains("const LINES_SAMPLES_PER_SEGMENT: i32 = 16;"),
+            "lines.wgsl vertex walk drifted from 6 verts/quad × 16 samples/segment",
+        );
+    }
+
+    /// Scope got the same SDF-stroke + bloom-glow rework as Lines (closed ring).
+    /// Pin its load-bearing pieces too, and the CPU↔GPU vertex-count interlock:
+    /// scope walks 6 verts/segment over SCOPE_SP samples, and shader.rs's scope
+    /// draw must agree (total_samples * 6). A drift renders a garbage ring.
+    #[test]
+    fn scope_wgsl_uses_sdf_stroke_not_folding_ribbon() {
+        const SCOPE: &str = include_str!("shaders/scope.wgsl");
+        assert!(
+            SCOPE.contains("fn sd_segment(") && SCOPE.contains("fn joint_miter("),
+            "scope.wgsl is missing the SDF-stroke helpers (sd_segment / joint_miter)",
+        );
+        assert!(
+            SCOPE.contains("sd_segment(input.frag_pos, input.seg_a, input.seg_b)"),
+            "scope.wgsl fragment is not computing coverage from sd_segment",
+        );
+        assert!(
+            !SCOPE.contains("distance_to_center") && !SCOPE.contains("halo_coverage"),
+            "scope.wgsl still references the folding-ribbon / in-shader-halo path \
+             the SDF stroke + bloom glow replaced",
+        );
+        // 6 verts/segment × SCOPE_SP=12: MUST match shader.rs::draw_bars_and_lines'
+        // scope branch (total_samples * 6 over SCOPE_SAMPLES_PER_SEGMENT) or the
+        // shader walks past its geometry.
+        assert!(
+            SCOPE.contains("vertex_index / 6u") && SCOPE.contains("const SCOPE_SP: i32 = 12;"),
+            "scope.wgsl vertex walk drifted from 6 verts/quad × SCOPE_SP=12 samples/segment",
         );
     }
 }
@@ -1012,6 +1109,10 @@ mod wgsl_config_identity_tests {
             "get_lines_gradient_color",
             "lines_glow_radius",
             "lines_glow_extent",
+            // SDF-stroke helpers, copied verbatim into both shaders.
+            "sd_segment",
+            "corner_to_quad",
+            "joint_miter",
         ];
         for name in SHARED_FNS {
             assert_eq!(
@@ -1030,7 +1131,6 @@ mod wgsl_config_identity_tests {
             "LINES_GLOW_MIN_RADIUS",
             "LINES_GLOW_MAX_RADIUS",
             "LINES_GLOW_EXTENT_MULT",
-            "LINES_BEAT_GLOW",
         ];
         for name in SHARED_CONSTS {
             assert_eq!(
