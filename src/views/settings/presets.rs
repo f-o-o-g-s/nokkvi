@@ -36,16 +36,6 @@ pub(crate) fn apply_theme(stem: &str) -> Result<()> {
     Ok(())
 }
 
-/// Restore a built-in theme to its original defaults.
-///
-/// Overwrites the user's theme file with the compiled-in version,
-/// then reloads. Only works for built-in themes.
-pub(crate) fn restore_theme(stem: &str) -> Result<()> {
-    theme_loader::restore_builtin(stem)?;
-    debug!(" [PRESETS] Restored built-in theme: {stem}");
-    Ok(())
-}
-
 /// Get the currently active theme stem name.
 pub(crate) fn active_theme_stem() -> String {
     theme_loader::read_theme_name_from_config()

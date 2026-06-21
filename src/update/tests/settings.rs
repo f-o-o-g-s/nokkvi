@@ -859,10 +859,10 @@ fn queue_and_songs_dropdown_order_is_pinned() {
 //
 // The Hotkeys tab "Restore Defaults" row uses the key `__restore_all_hotkeys`,
 // which is parsed by `SentinelKind::from_key` and routed into
-// `handle_restore_defaults` via the typed dispatch. That function must early-return
-// `OpenResetHotkeysDialog` for the all-hotkeys sentinel rather than falling
-// through to the HexColor scan path (which is intended for color-group resets
-// like `__restore_bg` / `__restore_accent`).
+// `handle_restore_defaults` via the typed dispatch. That function returns
+// `OpenResetHotkeysDialog` for the all-hotkeys sentinel and
+// `OpenResetVisualizerDialog` for `__restore_visualizer`. (Per-color theme
+// restores were removed — theme colors are edited in the theme TOML file.)
 
 #[test]
 fn handle_restore_defaults_all_hotkeys_opens_reset_dialog() {
@@ -895,37 +895,6 @@ fn handle_restore_defaults_visualizer_opens_reset_dialog() {
     );
 }
 
-#[test]
-fn handle_restore_defaults_theme_returns_restore_color_group() {
-    // Non-regression: __restore_theme must still return RestoreColorGroup
-    // (with empty entries — the side effect is on-disk restore via presets).
-    use crate::views::settings::SettingsAction;
-
-    let mut app = test_app();
-    let action = app.settings_page.handle_restore_defaults("__restore_theme");
-
-    assert!(
-        matches!(action, SettingsAction::RestoreColorGroup { .. }),
-        "__restore_theme must route to RestoreColorGroup, got {action:?}"
-    );
-}
-
-#[test]
-fn handle_restore_defaults_color_group_with_no_cached_entries_returns_none() {
-    // Non-regression: when called with a generic __restore_* color key
-    // (e.g. __restore_bg) and no HexColor entries cached, the function
-    // returns SettingsAction::None — the HexColor scan path is preserved.
-    use crate::views::settings::SettingsAction;
-
-    let mut app = test_app();
-    let action = app.settings_page.handle_restore_defaults("__restore_bg");
-
-    assert!(
-        matches!(action, SettingsAction::None),
-        "__restore_bg with no cached HexColor entries must return None, got {action:?}"
-    );
-}
-
 // ============================================================================
 // Sentinel-key dispatch characterization
 // ============================================================================
@@ -934,9 +903,6 @@ fn handle_restore_defaults_color_group_with_no_cached_entries_returns_none() {
 // SentinelKind cannot silently change observable routing. They cover:
 //
 //   * `SentinelKind::from_key` parsing for each registered sentinel,
-//   * `handle_restore_defaults` with a populated `cached_entries` for
-//     `__restore_bg` — exercises the HexColor scan path that returns a
-//     non-empty `RestoreColorGroup`,
 //   * the explicit non-sentinel-ness of `__toggle_*` keys (regular
 //     ToggleSet keys that must NOT parse into `SentinelKind`).
 //
@@ -961,47 +927,6 @@ fn sentinel_toggle_keys_are_not_sentinels() {
 
     assert_eq!(SentinelKind::from_key("__toggle_artwork_overlays"), None);
     assert_eq!(SentinelKind::from_key("__toggle_strip_fields"), None);
-}
-
-#[test]
-fn handle_restore_defaults_bg_with_cached_entries_returns_non_empty_group() {
-    // When `cached_entries` contains HexColor items in the "Background
-    // Colors" category, __restore_bg must collect them into
-    // `RestoreColorGroup { entries }` with a non-empty Vec.
-    use nokkvi_data::types::setting_item::{SettingItem, SettingMeta};
-
-    use crate::views::settings::SettingsAction;
-
-    let mut app = test_app();
-
-    // Seed cached_entries with the __restore_bg row + a HexColor row in the
-    // same "Background Colors" category. The category match drives the
-    // scan inside `handle_restore_defaults`.
-    let restore_meta = SettingMeta::new("__restore_bg", "⟲ Restore Defaults", "Background Colors");
-    let color_meta = SettingMeta::new(
-        "dark.background.hard",
-        "BG hard (dark)",
-        "Background Colors",
-    );
-    app.settings_page.cached_entries = vec![
-        SettingItem::text(restore_meta, "Press Enter", "Press Enter"),
-        SettingItem::hex_color(color_meta, "#000000", "#1d2021"),
-    ];
-
-    let action = app.settings_page.handle_restore_defaults("__restore_bg");
-
-    match action {
-        SettingsAction::RestoreColorGroup { entries } => {
-            assert_eq!(
-                entries.len(),
-                1,
-                "__restore_bg must collect the one HexColor entry in its category"
-            );
-            assert_eq!(entries[0].0, "dark.background.hard");
-            assert_eq!(entries[0].1, "#1d2021");
-        }
-        other => panic!("expected RestoreColorGroup, got {other:?}"),
-    }
 }
 
 #[test]
@@ -1253,17 +1178,6 @@ fn light_mode_write_rebuilds_cached_entries_against_new_atomic() {
         }
         other => panic!("general.light_mode must be an Enum entry, got {other:?}"),
     }
-    // Stale entries also bake the wrong palette prefix into every theme
-    // color row, silently routing color edits to the previous mode's
-    // [dark]/[light] section.
-    assert!(
-        app.settings_page.cached_entries.iter().any(|e| matches!(
-            e,
-            crate::views::settings::items::SettingsEntry::Item(item)
-                if item.key.starts_with("light.")
-        )),
-        "theme color rows must carry the new mode's `light.` key prefix"
-    );
 
     // Restore both the persisted config value and the global atomic.
     let _ = app.dispatch_settings_side_effect(SettingsSideEffect::SetLightModeAtomic(prior_config));

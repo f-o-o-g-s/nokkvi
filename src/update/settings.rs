@@ -258,22 +258,6 @@ impl Nokkvi {
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
-            crate::views::SettingsAction::RestoreColorGroup { entries } => {
-                self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
-                for (key, default_hex) in &entries {
-                    let value =
-                        crate::views::settings::items::SettingValue::HexColor(default_hex.clone());
-                    // Color keys are theme-file-relative (e.g. dark.background.hard)
-                    if let Err(e) = crate::config_writer::ConfigKey::theme_scalar(key.clone())
-                        .write(&value, None)
-                    {
-                        tracing::warn!(" [SETTINGS] Failed to restore default for {key}: {e}");
-                    }
-                }
-                crate::theme::reload_theme();
-                self.settings_page.config_dirty = true;
-                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
-            }
             crate::views::SettingsAction::WriteFontFamily(family) => {
                 self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
                 // Font is now an app-level setting, not part of the theme

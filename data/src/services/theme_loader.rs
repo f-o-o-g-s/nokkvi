@@ -286,10 +286,11 @@ pub fn builtin_theme_stems() -> Vec<&'static str> {
 /// Restore a built-in theme by overwriting the user's copy with the original.
 ///
 /// Returns `Err` if the theme is not a built-in. Routes through `write_atomic`,
-/// which suppresses the watcher's reload event — safe because the UI caller
-/// chain (`presets::restore_theme` → `RestoreColorGroup` handler in
-/// `src/update/settings.rs`) calls `crate::theme::reload_theme()` directly
-/// after the write, so the visual hot-reload still fires.
+/// which records the write in the internal-write registry so the file watcher
+/// suppresses the reload event it would otherwise fire; a caller that wants the
+/// visual hot-reload must trigger it explicitly after the write. (No production
+/// caller today — the GUI theme-restore action was removed in favor of editing
+/// the theme TOML directly; retained as a tested utility.)
 pub fn restore_builtin(name: &str) -> Result<()> {
     let registry = builtin_registry();
     let content = registry

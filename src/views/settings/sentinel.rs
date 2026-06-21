@@ -9,12 +9,6 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SentinelKind {
     Logout,
-    RestoreTheme,
-    RestoreBg,
-    RestoreFg,
-    RestoreAccent,
-    RestoreSemantic,
-    RestoreBorder,
     RestoreVisualizer,
     RestoreAllHotkeys,
 }
@@ -26,12 +20,6 @@ impl SentinelKind {
     pub(crate) fn from_key(key: &str) -> Option<Self> {
         match key {
             "__action_logout" => Some(Self::Logout),
-            "__restore_theme" => Some(Self::RestoreTheme),
-            "__restore_bg" => Some(Self::RestoreBg),
-            "__restore_fg" => Some(Self::RestoreFg),
-            "__restore_accent" => Some(Self::RestoreAccent),
-            "__restore_semantic" => Some(Self::RestoreSemantic),
-            "__restore_border" => Some(Self::RestoreBorder),
             "__restore_visualizer" => Some(Self::RestoreVisualizer),
             "__restore_all_hotkeys" => Some(Self::RestoreAllHotkeys),
             _ => None,
@@ -43,12 +31,6 @@ impl SentinelKind {
     pub(crate) fn to_key(&self) -> String {
         match self {
             Self::Logout => "__action_logout".to_string(),
-            Self::RestoreTheme => "__restore_theme".to_string(),
-            Self::RestoreBg => "__restore_bg".to_string(),
-            Self::RestoreFg => "__restore_fg".to_string(),
-            Self::RestoreAccent => "__restore_accent".to_string(),
-            Self::RestoreSemantic => "__restore_semantic".to_string(),
-            Self::RestoreBorder => "__restore_border".to_string(),
             Self::RestoreVisualizer => "__restore_visualizer".to_string(),
             Self::RestoreAllHotkeys => "__restore_all_hotkeys".to_string(),
         }
@@ -63,12 +45,6 @@ mod tests {
     fn from_key_roundtrip() {
         for k in [
             SentinelKind::Logout,
-            SentinelKind::RestoreTheme,
-            SentinelKind::RestoreBg,
-            SentinelKind::RestoreFg,
-            SentinelKind::RestoreAccent,
-            SentinelKind::RestoreSemantic,
-            SentinelKind::RestoreBorder,
             SentinelKind::RestoreVisualizer,
             SentinelKind::RestoreAllHotkeys,
         ] {

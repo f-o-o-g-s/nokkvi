@@ -446,11 +446,6 @@ pub(crate) enum SettingsAction {
         stem: String,
         display_name: String,
     },
-    /// Restore all colors in a group to their defaults
-    RestoreColorGroup {
-        /// Vec of (toml_key, default_hex) pairs to reset
-        entries: Vec<(String, String)>,
-    },
     /// Focus the hex editor text input
     FocusHexInput,
     /// Focus the settings search input
@@ -819,18 +814,12 @@ impl SettingsPage {
                                 Some(sentinel::SentinelKind::Logout) => {
                                     return SettingsAction::Logout;
                                 }
-                                // Restore-defaults sentinels (including
-                                // `__restore_all_hotkeys`) — funnel through
-                                // `handle_restore_defaults`, which owns the
-                                // per-sentinel routing.
+                                // Reset sentinels (visualizer settings + all
+                                // hotkeys) — funnel through
+                                // `handle_restore_defaults`, which opens the
+                                // matching confirmation dialog.
                                 Some(
-                                    sentinel::SentinelKind::RestoreTheme
-                                    | sentinel::SentinelKind::RestoreBg
-                                    | sentinel::SentinelKind::RestoreFg
-                                    | sentinel::SentinelKind::RestoreAccent
-                                    | sentinel::SentinelKind::RestoreSemantic
-                                    | sentinel::SentinelKind::RestoreBorder
-                                    | sentinel::SentinelKind::RestoreVisualizer
+                                    sentinel::SentinelKind::RestoreVisualizer
                                     | sentinel::SentinelKind::RestoreAllHotkeys,
                                 ) => {
                                     return self.handle_restore_defaults(key_ref.as_ref());
@@ -1162,89 +1151,21 @@ impl SettingsPage {
         self.refresh_entries(data);
     }
 
-    /// Collect (key, default_hex) pairs for a __restore_* group key.
-    /// Walks the cached entries and collects all HexColor items in the same category.
-    ///
-    /// Sentinel-specific branches run before the generic HexColor scan so that
-    /// keys without color entries (e.g. `__restore_all_hotkeys`) still route to
-    /// the right action — every `__restore_*` sentinel in
-    /// `EditActivate` funnels through here, so this function is the single
-    /// source of truth for restore-defaults routing.
+    /// Route the two surviving reset sentinels to their confirmation dialogs.
+    /// Per-color theme restores were removed — theme colors are edited directly
+    /// in the theme TOML file, so there is no GUI "restore color group" path
+    /// anymore. (The visualizer/hotkeys resets reset config values, not files.)
     pub(crate) fn handle_restore_defaults(&mut self, restore_key: &str) -> SettingsAction {
-        // Typed dispatch on the restore sentinels with dedicated side-effects.
-        // The color-group sentinels (Bg / Fg / Accent / Semantic) fall through
-        // to the HexColor scan below — they share the same category-scoped
-        // collection logic.
-        if let Some(kind) = sentinel::SentinelKind::from_key(restore_key) {
-            match kind {
-                // __restore_all_hotkeys opens the reset-hotkeys confirmation
-                // dialog. The Hotkeys tab has no HexColor entries, so the
-                // generic scan below would otherwise fall through to
-                // `SettingsAction::None`.
-                sentinel::SentinelKind::RestoreAllHotkeys => {
-                    return SettingsAction::OpenResetHotkeysDialog;
-                }
-                // __restore_theme restores the active built-in theme on disk.
-                sentinel::SentinelKind::RestoreTheme => {
-                    let stem = presets::active_theme_stem();
-                    if let Err(e) = presets::restore_theme(&stem) {
-                        tracing::warn!(" [SETTINGS] Failed to restore theme '{stem}': {e}");
-                    }
-                    return SettingsAction::RestoreColorGroup { entries: vec![] };
-                }
-                // __restore_visualizer opens a confirmation dialog.
-                sentinel::SentinelKind::RestoreVisualizer => {
-                    return SettingsAction::OpenResetVisualizerDialog;
-                }
-                // Color-group sentinels — fall through to the HexColor scan.
-                sentinel::SentinelKind::RestoreBg
-                | sentinel::SentinelKind::RestoreFg
-                | sentinel::SentinelKind::RestoreAccent
-                | sentinel::SentinelKind::RestoreSemantic
-                | sentinel::SentinelKind::RestoreBorder => {}
-                // Non-restore sentinels reach this function only via the
-                // public API; ignore them defensively.
-                sentinel::SentinelKind::Logout => {
-                    return SettingsAction::None;
-                }
+        match sentinel::SentinelKind::from_key(restore_key) {
+            Some(sentinel::SentinelKind::RestoreAllHotkeys) => {
+                SettingsAction::OpenResetHotkeysDialog
             }
+            Some(sentinel::SentinelKind::RestoreVisualizer) => {
+                SettingsAction::OpenResetVisualizerDialog
+            }
+            // Logout / unknown keys reach here only via the public API; ignore.
+            _ => SettingsAction::None,
         }
-
-        // Find the category that this __restore key belongs to
-        let category = self.cached_entries.iter().find_map(|e| {
-            if let SettingsEntry::Item(item) = e
-                && item.key.as_ref() == restore_key
-            {
-                return Some(item.category);
-            }
-            None
-        });
-
-        if let Some(category) = category {
-            let entries: Vec<(String, String)> = self
-                .cached_entries
-                .iter()
-                .filter_map(|e| {
-                    // Defense-in-depth `starts_with("__")`: skip any sentinel
-                    // (registered or not) when collecting color entries.
-                    if let SettingsEntry::Item(item) = e
-                        && item.category == category
-                        && !item.key.starts_with("__")
-                        && !item.key.is_empty()
-                        && let SettingValue::HexColor(_) = &item.value
-                        && let SettingValue::HexColor(def) = &item.default
-                    {
-                        return Some((item.key.to_string(), def.clone()));
-                    }
-                    None
-                })
-                .collect();
-
-            if !entries.is_empty() {
-                return SettingsAction::RestoreColorGroup { entries };
-            }
-        }
-        SettingsAction::None
     }
 
     /// Auto-enter edit mode on the center item if not already editing.

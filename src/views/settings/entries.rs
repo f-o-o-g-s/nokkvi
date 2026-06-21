@@ -96,7 +96,6 @@ impl SettingsPage {
             ),
             SettingsTab::Theme => items::build_theme_items(
                 &data.theme_file,
-                &data.active_theme_stem,
                 data.rounded_mode,
                 data.opacity_gradient,
                 data.is_light_mode,

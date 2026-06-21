@@ -32,10 +32,7 @@ pub(crate) fn header_labels(entries: &[SettingsEntry]) -> Vec<&'static str> {
 /// Locate the slice of entries belonging to a given header (header
 /// inclusive, up to but excluding the next header). Panics naming the
 /// missing header.
-pub(crate) fn section_slice<'a>(
-    entries: &'a [SettingsEntry],
-    header_label: &str,
-) -> &'a [SettingsEntry] {
+fn section_slice<'a>(entries: &'a [SettingsEntry], header_label: &str) -> &'a [SettingsEntry] {
     let start = entries
         .iter()
         .position(|e| matches!(e, SettingsEntry::Header { label, .. } if *label == header_label))
@@ -45,31 +42,6 @@ pub(crate) fn section_slice<'a>(
         .position(|e| matches!(e, SettingsEntry::Header { .. }))
         .map_or(entries.len(), |i| start + 1 + i);
     &entries[start..after]
-}
-
-/// Derive the runtime palette prefix (`"dark"` or `"light"`) from the
-/// first theme-prefixed row's key. `build_theme_items` reads a global atomic
-/// (`crate::theme::is_light_mode()`) once per call, so within a single
-/// call the prefix is stable — but other tests in the suite can flip the
-/// atomic between runs. Reading the prefix from the resulting entries
-/// avoids racing with concurrent mutators.
-pub(crate) fn palette_prefix_from(entries: &[SettingsEntry]) -> &str {
-    entries
-        .iter()
-        .find_map(|e| match e {
-            SettingsEntry::Item(item) => {
-                let k = item.key.as_ref();
-                if k.starts_with("dark.") {
-                    Some("dark")
-                } else if k.starts_with("light.") {
-                    Some("light")
-                } else {
-                    None
-                }
-            }
-            SettingsEntry::Header { .. } => None,
-        })
-        .unwrap_or_else(|| panic!("no theme-prefixed row found in entries"))
 }
 
 /// Assert the section under `header_label` carries exactly the `expected`

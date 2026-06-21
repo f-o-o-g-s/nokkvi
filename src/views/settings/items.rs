@@ -116,10 +116,7 @@ mod tests {
     use super::{
         super::{
             sentinel::SentinelKind,
-            test_support::{
-                assert_section_keys, extract_keys, header_labels, palette_prefix_from,
-                section_slice,
-            },
+            test_support::{assert_section_keys, extract_keys, header_labels},
         },
         *,
     };
@@ -464,26 +461,17 @@ mod tests {
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
         let entries = build_theme_items(
             &theme,
-            "everforest",
             nokkvi_data::types::player_settings::RoundedMode::Off,
             true,
             false,
         );
 
-        // Chrome Border is its own section so the 1 px hairline gets a
-        // Restore Defaults sentinel like every other color group.
+        // The inline per-color editors were stripped (theme colors are edited
+        // in the theme TOML file now), so the Theme tab is just the mode/display
+        // toggles plus the theme-picker opener.
         assert_eq!(
             header_labels(&entries),
-            vec![
-                "Mode",
-                "Display",
-                "Select Theme",
-                "Background Colors",
-                "Foreground Colors",
-                "Accent Colors",
-                "Semantic Colors",
-                "Chrome Border"
-            ],
+            vec!["Mode", "Display", "Select Theme"],
             "Theme tab section headers diverge",
         );
 
@@ -494,41 +482,13 @@ mod tests {
             &["general.rounded_mode", "general.opacity_gradient"],
         );
 
-        // Chrome Border: restore sentinel + the single prefix-dependent
-        // border row. `build_theme_items` reads the global light-mode atomic,
-        // so derive the prefix from the entries instead of hardcoding "dark".
-        let prefix = palette_prefix_from(&entries);
-        let restore_border = SentinelKind::RestoreBorder.to_key();
-        let border_key = format!("{prefix}.border");
-        assert_section_keys(
-            &entries,
-            "Chrome Border",
-            &[restore_border.as_str(), border_key.as_str()],
-        );
-
-        // Select Theme is now exactly two rows: the restore-defaults sentinel
-        // and the "Browse Themes…" opener that launches the theme picker modal.
-        // The long inline preset list moved into that modal, so the count is no
-        // longer machine-dependent.
-        let select_keys = extract_keys(&section_slice(&entries, "Select Theme")[1..]);
-        let restore_theme = SentinelKind::RestoreTheme.to_key();
-        assert_eq!(
-            select_keys,
-            vec![restore_theme.as_str(), "__theme_picker"],
-            "Select Theme should be the restore sentinel + the theme-picker opener",
-        );
+        // Select Theme is a single row: the "Browse Themes…" opener that
+        // launches the modal picker (no restore sentinel, no inline list).
+        assert_section_keys(&entries, "Select Theme", &["__theme_picker"]);
         assert_eq!(
             entry_on_activate(&entries, "__theme_picker"),
             Some(ActivateKind::ThemePicker),
             "the Browse Themes opener must carry ActivateKind::ThemePicker",
-        );
-
-        // The four color sections are exactly pinned in items_theme.rs's own
-        // tests — keep one coarse backstop here instead of duplicating them.
-        let item_count = count_items(&entries);
-        assert!(
-            item_count >= 24,
-            "Expected at least 24 theme items (6 bg + 6 fg + 5 accent + 8 semantic + 1 border + mode/display/picker), got {item_count}",
         );
     }
 
@@ -1066,7 +1026,6 @@ mod tests {
         ));
         all_entries.extend(crate::views::settings::items_theme::build_theme_items(
             &theme,
-            "everforest",
             nokkvi_data::types::player_settings::RoundedMode::Off,
             true,
             false,
