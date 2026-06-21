@@ -6,11 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Picking a theme now opens a searchable modal where each row is painted in that theme's own colors — a live color preview.
+
 ### Changed
 
 ### Fixed
 
 ### Removed
+
+- The inline per-color theme editors in Settings → Theme; edit a theme's colors directly in the theme's TOML file instead.
 
 ## v0.10.1 — 2026-06-21
 
