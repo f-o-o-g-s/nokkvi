@@ -51,7 +51,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Pre-volume visualizer samples**: visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.
 - **Track-completion lock**: the navigator releases its lock across engine I/O during track completion — do not re-introduce a held lock.
 - **ReplayGain stash**: prefer `engine.load_track_with_rg(url, rg, expected_duration_ms)` — the atomic pair that stashes ReplayGain on the renderer and then calls `set_source(url, expected_duration_ms)` so a load can't be interleaved. Use `set_pending_crossfade_replay_gain()` for the crossfade decoder before its stream is built.
-- **Repeat track replay**: `on_track_finished` natively supports repeat-track via seek-to-start. Manual skip (next/prev) bypasses repeat-track.
+- **Repeat track replay**: `on_track_finished` natively supports repeat-track by re-loading the same row — it returns `TrackTransitionPlan::LoadFresh` (reload from the stream URL) or `PlayPrepared` (the gapless-prepared decoder), not a seek-to-start. Manual skip (next/prev) bypasses repeat-track (`get_next_song` in `services/queue/navigation.rs`).
 
 ## Config & Persistence
 

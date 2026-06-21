@@ -83,7 +83,7 @@ cargo build --release                        # release build
 | Store | What | How |
 |-------|------|-----|
 | `config.toml` | User preferences (general, interface, playback, hotkeys, views, visualizer behavior, font, artwork resolution, library page size, normalization, tray, etc.) | Hot-reloadable via `SettingsManager` + `config_writer.rs`. `verbose_config` writes all defaults |
-| Theme files | Named `.toml` in `~/.config/nokkvi/themes/` | Palette + visualizer colors. **22 built-in**. `config.toml` stores `theme = "name"` |
+| Theme files | Named `.toml` in `~/.config/nokkvi/themes/` | Palette + visualizer colors. **23 built-in**. `config.toml` stores `theme = "name"` |
 | redb | Queue, session tokens (JWT + Subsonic credential) | Via `state_storage.rs`, `services/queue/`, `credentials.rs`. **No password on disk** — JWT auto-refreshes, expired JWT drops to login |
 | Credentials | Server URL, username | In `config.toml`. Password never persists |
 

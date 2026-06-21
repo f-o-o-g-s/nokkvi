@@ -13,11 +13,11 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 ## Module Structure
 
-- `widgets/visualizer/mod.rs` — `Visualizer` Iced widget glue (its `view()` wraps a `ShaderVisualizer` in `iced::widget::shader`); `build_shader_params(...)` constructs the 39-field `ShaderParams` from a config snapshot, theme palette, and viewport
+- `widgets/visualizer/mod.rs` — `Visualizer` Iced widget glue (its `view()` wraps a `ShaderVisualizer` in `iced::widget::shader`); `build_shader_params(...)` constructs the 42-field `ShaderParams` from a config snapshot, theme palette, and viewport
 - `widgets/visualizer/state.rs` — `VisualizerState` runtime (audio callback, FFT pipeline, peak/effect state, display buffers); `VisualizerTiming` is a zero-sized struct holding the per-frame tick constants (`TICK_RATE_HZ = 60`, `TICK_INTERVAL`, and ms/secs variants) all derived from one rate
 - `widgets/visualizer/pipeline.rs` — `MAX_BARS = 2048`, GPU buffers, `VisualizerPipeline::new` (the struct itself is declared in `shader.rs`)
 - `widgets/visualizer/shader.rs` — `ShaderParams` struct, `ShaderVisualizer` (the `shader::Program` impl), render dispatch, MSAA texture cache, blit shader
-- `widgets/visualizer/shaders/bars.wgsl`, `lines.wgsl` — share a `Config` struct that must mirror the bytemuck-Pod GPU uniform `VisualizerConfig` (`shader.rs`, NOT `ShaderParams` — that is a CPU-side grouping struct with a different field list) verbatim; a drift is silent memory reinterpretation. Interlocks: const-asserts in `shader.rs` pin alignment (16), size (8336), and key offsets; `wgsl_config_field_names_match_rust_struct` in `mod.rs` pins the WGSL field names against the Rust struct. Update all three together when changing a config field.
+- `widgets/visualizer/shaders/bars.wgsl`, `lines.wgsl`, `scope.wgsl` — each declares a `Config` struct that must mirror the bytemuck-Pod GPU uniform `VisualizerConfig` (`shader.rs`, NOT `ShaderParams` — that is a CPU-side grouping struct with a different field list) verbatim; a drift is silent memory reinterpretation. Interlocks: const-asserts in `shader.rs` pin alignment (16), size (8336), and key offsets; `wgsl_config_field_names_match_rust_struct` in `mod.rs` pins the WGSL field names against the Rust struct, and `wgsl_config_blocks_declare_identical_fields` pins bars/lines/scope against each other. Update all four (shader.rs + the three shaders) together when changing a config field.
 
 **Render path:** non-MSAA fast path by default; switches to **4× MSAA → resolve → blit** when perspective lean is active (the `has_perspective` flag on `VisualizerPrimitive`, set from `bar_depth_3d > 0.001`, gates the path per-frame).
 
@@ -44,7 +44,7 @@ Key settings: `point_count` (8–512), `line_thickness`, `outline_thickness`, `f
 
 ## Configuration
 
-- Behavior under `[visualizer]`, `[visualizer.bars]`, `[visualizer.lines]` in `config.toml`
+- Behavior under `[visualizer]`, `[visualizer.bars]`, `[visualizer.lines]`, `[visualizer.scope]` in `config.toml`
 - Colors under `[dark.visualizer]` / `[light.visualizer]` in active theme file: `bar_gradient_colors`, `peak_gradient_colors`, `border_color`, `border_opacity`, `led_border_opacity`
 
 ## Runtime

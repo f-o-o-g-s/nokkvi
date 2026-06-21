@@ -47,8 +47,8 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 | Volume Slider | `volume_slider.rs` | Vertical/horizontal, `SliderVariant` |
 | View Header | `view_header.rs` | Sort selector, search bar, shuffle, center-on-playing, columns dropdown. Opt-in auto-hide toolbar: `ViewHeaderConfig.collapsed` renders a collapsed strip per `CollapsedAppearance` instead of the full toolbar; `on_hover_enter`/`on_hover_exit` wrap the header in a hover-reveal `mouse_area`, `on_dropdown_open`/`on_dropdown_close` keep it revealed while the sort dropdown is open |
 | Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding, `base_slot_list_empty_state()` |
-| Scroll Indicator | `scroll_indicator.rs` | Transient scrollbar overlay, `wrap_with_scroll_indicator()`, drag-to-seek |
-| Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale + external `flash_at()`. Default radius = `ui_border_radius()` |
+| Scroll Indicator | `scroll_indicator.rs` | `wrap_with_scroll_indicator()` + drag-to-seek, gated on the `ScrollbarVisibility` setting (`theme::scrollbar_visibility()`): `OnHover` = transient handle that fades in on hover/scroll; `Always` (default) = permanent track + handle, the wrapper reserves a right-edge gutter so the bar never floats over content; `Hidden` = nothing drawn, no gutter (wheel still scrolls) |
+| Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale + external `flash_at()`. Default radius = `ui_border_radius()`. `wash_enabled(false)` suppresses the hover/press color wash (press scale-down still fires) — used by foreign-palette rows like the theme-picker swatches; `on_accent_surface(true)` swaps the accent wash for a contrasting neutral pigment over already-`accent_bright()`-filled surfaces |
 | Track Info Strip | `track_info_strip.rs` | Now-playing metadata. `build_now_playing_segments` returns `Vec<String>` (title / artist / album fragments + separators) that the merged-mode marquee concats |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
 | Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `StripContextEntry` (the queue's `QueueContextEntry` lives in `src/views/queue/mod.rs`). Wrap helpers: `wrap_library_row` / `wrap_similar_row` (slot rows), `wrap_strip_context_menu` (the three now-playing strip placements — player-bar, top strip, merged nav-bar; takes `StripContextAction` / `SetOpenMenu` variant constructors as fn pointers, returns the bare strip when radio is active) |
@@ -58,7 +58,7 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 | Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box` |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
 | EQ Modal | `eq_modal.rs` | 10-band EQ overlay with preset picker (`update/eq_modal.rs`). State lives on `Nokkvi.eq_modal: EqModalState` (extracted as a sibling struct so the EQ overlay doesn't drift WindowState fields) |
-| Slot List Page | `slot_list_page.rs` | `SlotListPageState` + unified `SlotListPageMessage` dispatcher |
+| Slot List Page | `slot_list_page.rs` | `SlotListPageState` + unified `SlotListPageMessage` dispatcher. (`SlotListConfig` lives in `slot_list.rs`; its `hover_wash: bool` field — default `true`, cleared via `.without_hover_wash()` — forwards to each row's `HoverOverlay::wash_enabled`, used by the theme picker so swatch rows keep their own palette) |
 | Slot List View | `slot_list_view.rs` | Scroll-position state owned by the view (decoupled from `SlotListPageState`) |
 | Visualizer | `visualizer/` | Pipeline + shader + wgsl modules (see `.agent/rules/visualizer.md`) |
 | Drag Column | `drag_column.rs` | In-queue drag-and-drop reorder (multi-selection batch aware) |
@@ -88,6 +88,8 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 
 `theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, and `default_playlist_picker` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
 
+The settings **font + theme pickers** are the exception: they share their own chrome via `render_picker_modal()` (`src/views/settings/view.rs`) — a dimmed backdrop (press → Escape, wheel → slot Up/Down) behind a centered `bg0_hard()` + 1.5 px `accent()` panel with an X-back title bar, a search bar, and a caller-built slot-list body. `render_font_modal` / `render_theme_modal` differ only in title/placeholder/search-input-id and their row renderer; the theme picker passes `.without_hover_wash()` so each row stays in its own palette (selection shows via a per-row accent ring).
+
 ## Nav Bars
 
 - **Top** (`nav_bar.rs`): tabs + format stats + hamburger. Metadata only when `TrackInfoDisplay::TopBar`. Progressive collapsing (album <900, artist <750, title <600). `flat_tab_container_style` paints the full-cell `accent_bright()` active fill; the right-edge indicator strip from the pre-redesign was removed. `NAV_TABS` is the single source of truth for which tabs render — `NAV_TABS[i] == NavView::ALL[i]` is pinned by a runtime test.
@@ -102,6 +104,8 @@ Single source of truth: `chrome_height_with_header(collapsed_header: bool)`, `th
 
 `SlotListRowContext` bundles per-slot args. `SlotListRowMetrics` derives sizes from active `slot_row_height()`. Center slot gets `flash_at`. Clickable stars (`slot_list_star_rating()`) and hearts (`slot_list_favorite_icon()`). Top-packing when items < slot_count. Multi-selection highlight via `selected_indices` (always shown); the fallback *center* highlight is what's suppressed during an active Ctrl/Shift modifier hold or while a multi-selection exists.
 
+The list **shell** (`slot_list_background_container`) runs edge-to-edge (rows touch the header strip above + player bar below). Rounded mode adds a 1 px `theme::border()` outline that seals the touching row hairlines, but the shell's corners stay **square in every mode** — a rounded corner under `clip(true)` would leave the base theme background bleeding through the unpainted wedge (the scrollbar doesn't reliably cover it).
+
 **Always derive static-icon color via `slot_list_static_icon_color(style, fallback, opacity)`** when embedding a tinted SVG / text / pill inside a row renderer (lock glyphs, sub-index labels, empty heart/star outlines, radio-tower icons, etc.). On opaque-fill highlight rows (`style.forces_legible_text` — selected / highlighted / centered) it returns the row's forced-legible `style.text_color` (contrast-guarded `Color::BLACK` or `Color::WHITE` via `theme::legible_text_on()`, ≥ 4.58:1 against any fill); otherwise the `fallback` color with `opacity` applied to its alpha. The icon thus stays readable against the highlight fill in lockstep with the row's text. Hardcoding a `theme::fg*()` color in a row renderer breaks contrast under selection.
 
 ## SVG Icons (`embedded_svg.rs`)
@@ -110,4 +114,4 @@ Top-level module. The lookup table is **generated by `build.rs`** from the conte
 
 ## HoverOverlay + native buttons
 
-`HoverOverlay::new(button)` works in some places — e.g. `player_bar.rs:842` (inside `player_control_button`) actively wraps a `button` and the hover/press visual fires correctly because commit `d2f22a0` added `shell.request_redraw()` to `HoverOverlay::update`. The canonical pattern is still `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells (slot rows, header icons, modal-icon buttons), but the absolute "never wraps a button" framing in older notes is too strict.
+`HoverOverlay::new(button)` works in some places — e.g. `player_bar.rs:845` (inside `player_control_button`) actively wraps a `button` and the hover/press visual fires correctly because commit `d2f22a0` added `shell.request_redraw()` to `HoverOverlay::update`. The canonical pattern is still `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells (slot rows, header icons, modal-icon buttons), but the absolute "never wraps a button" framing in older notes is too strict.

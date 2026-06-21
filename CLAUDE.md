@@ -22,7 +22,7 @@ cargo +nightly fmt --all -- --check          # format check
 
 CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build). All must pass before merging. `rustfmt.toml` uses unstable features (`imports_granularity = "Crate"`, `group_imports = "StdExternalCrate"`), which is why nightly is required.
 
-System dependencies (Arch): `pacman -S pipewire fontconfig pkgconf cmake`. The audio engine links against `libpipewire-0.3` at build time; `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.5 ships no native Opus decoder — see GH#3).
+System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake`. The audio engine links against `libpipewire-0.3` at build time; `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.5 ships no native Opus decoder — see GH#3).
 
 Per-user data follows the XDG Base Directory Specification, split across two roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`) and `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`). The log file is truncated on every launch. A one-time migration in `AppService::new()` moves the legacy in-config `app.redb` to the state dir on first run.
 
@@ -151,7 +151,7 @@ For the full set of rules and patterns, see `.agent/rules/` (loaded contextually
 - `backend-services.md` — services, persistence, queue system
 - `ui-views.md` — slot list views, expansion, browsing panel, modals
 - `widgets.md` — widget catalog, layout constants, shared menu/modal chrome modules, SVG icons
-- `visualizer.md` — FFT pipeline, shaders, Bars/Lines + effects
+- `visualizer.md` — FFT pipeline, shaders, Bars/Lines/Scope + effects
 - `settings-view.md` — settings module structure, persistent sidebar layout, SettingValue types
 - `gotchas.md` — full list of the subtle pitfalls
 - `new-feature-checklist.md` — end-to-end checklist for new features

@@ -68,4 +68,4 @@ Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessa
 
 ## Reference Codebases
 
-External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `alsa-lib`, `feishin`, `firmium`, `fooyin`, `gelly`, `iced`, `iced-apps`, `iced-book`, `iced-docs`, `lookas`, `lucide` (icons), `mimalloc`, `mimalloc-rust`, `mpd`, `mpris`, `mpv`, `navidrome`, `nocturne`, `pipewire`, `rmpc`, `rmpc-docs`, `rodio`, `symphonia`, `wireplumber`.
+External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `alsa-lib`, `bevy-audioviz`, `circular-audio-wave`, `feishin`, `ferrosonic`, `firmium`, `fooyin`, `gelly`, `glsl-app`, `iced`, `iced-apps`, `iced-book`, `iced-docs`, `lookas`, `lucide` (icons), `mimalloc`, `mimalloc-rust`, `mpd`, `mpris`, `mpv`, `navidrome`, `ncs-spectrum-glava`, `nocturne`, `pipewire`, `rmpc`, `rmpc-docs`, `rodio`, `symphonia`, `wav2bar`, `wavejs`, `wireplumber`, `woscope`.
