@@ -2,9 +2,12 @@
 # near-black, a terminal/monospace mood. Firmium ships only nine colors and is
 # strictly dark, so its three-step near-black ladder is expanded to Nokkvi's
 # five background/foreground levels, and success/warning (which Firmium has no
-# precedent for) are invented to sit beside the gold. Firmium's gold+purple
-# brand (logo gradient #E8C97E -> #863BFF, purple visualizer triad) lives in the
-# visualizer: purple bars crowned with gold peaks.
+# precedent for) are invented to sit beside the gold. The visualizer matches
+# the gold accent — a honey-gold gradient (deep bronze rising to the accent)
+# capped with bright warm-white peaks. Because the UI is so gold-dominant,
+# rating stars use blue (gold's complement, nodding to Firmium's gold+purple
+# logo brand) so a song's star count stays legible on near-black rows AND on
+# the gold now-playing / selection highlights.
 #
 # Firmium has NO light mode, so [light] below is an original companion — the
 # "Greige Inverse": dark Firmium folded across the luminance axis. A strictly
@@ -54,15 +57,15 @@ bright = "#F0B255"
 base = "#E59A2E"
 
 [dark.star]
-bright = "#E8C97E"
-base = "#E8C97E"
+bright = "#4F90DE"
+base = "#4F90DE"
 
 [dark.visualizer]
-bar_gradient_colors = ["#5533CC", "#6948E5", "#7C5CFF", "#9372FF", "#AA88FF", "#C2A6FF"]
+bar_gradient_colors = ["#6E4A10", "#8A6018", "#A87826", "#C39238", "#DBAE55", "#E8C97E"]
 border_color = "#0A0A0A"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#E8C97E", "#F5E2AC", "#E8C97E", "#F5E2AC", "#E8C97E", "#F5E2AC"]
+peak_gradient_colors = ["#FFF6E2", "#FFF6E2", "#FFF6E2", "#FFF6E2", "#FFF6E2", "#FFF6E2"]
 
 [light]
 border = "#D2D2D2"
@@ -102,12 +105,12 @@ bright = "#D08A1E"
 base = "#A85A0E"
 
 [light.star]
-bright = "#E8C97E"
-base = "#C79A3A"
+bright = "#2D6CB8"
+base = "#2D6CB8"
 
 [light.visualizer]
-bar_gradient_colors = ["#5B3FD0", "#6E4FEC", "#8366FF", "#9A82FF", "#B49EFF", "#CBBBFF"]
+bar_gradient_colors = ["#6E4A10", "#86591A", "#9E6E22", "#B5832E", "#C79A3A", "#D8AF58"]
 border_color = "#FFFFFF"
 border_opacity = 0.35
 led_border_opacity = 1.0
-peak_gradient_colors = ["#C79A3A", "#8366FF", "#C79A3A", "#8366FF", "#C79A3A", "#8366FF"]
+peak_gradient_colors = ["#5E3C08", "#8A5A12", "#5E3C08", "#8A5A12", "#5E3C08", "#8A5A12"]
