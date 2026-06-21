@@ -68,6 +68,7 @@ impl<'a> SettingMeta<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivateKind {
     FontPicker,
+    ThemePicker,
     TextInputDialog,
     PlaylistPicker,
 }

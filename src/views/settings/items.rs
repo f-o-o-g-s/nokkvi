@@ -506,33 +506,29 @@ mod tests {
             &[restore_border.as_str(), border_key.as_str()],
         );
 
-        // Select Theme stays count-flexible: presets::all_themes() reads the
-        // user themes dir, so the preset row count is machine-dependent. Pin
-        // the restore sentinel first; every following row must be a
-        // __preset_N sentinel.
+        // Select Theme is now exactly two rows: the restore-defaults sentinel
+        // and the "Browse Themes…" opener that launches the theme picker modal.
+        // The long inline preset list moved into that modal, so the count is no
+        // longer machine-dependent.
         let select_keys = extract_keys(&section_slice(&entries, "Select Theme")[1..]);
         let restore_theme = SentinelKind::RestoreTheme.to_key();
         assert_eq!(
-            select_keys.first().copied(),
-            Some(restore_theme.as_str()),
-            "Select Theme must lead with the restore sentinel",
+            select_keys,
+            vec![restore_theme.as_str(), "__theme_picker"],
+            "Select Theme should be the restore sentinel + the theme-picker opener",
         );
-        for key in &select_keys[1..] {
-            assert!(
-                matches!(
-                    SentinelKind::from_key(key),
-                    Some(SentinelKind::PresetTheme(_))
-                ),
-                "Select Theme row '{key}' should be a __preset_N sentinel",
-            );
-        }
+        assert_eq!(
+            entry_on_activate(&entries, "__theme_picker"),
+            Some(ActivateKind::ThemePicker),
+            "the Browse Themes opener must carry ActivateKind::ThemePicker",
+        );
 
         // The four color sections are exactly pinned in items_theme.rs's own
         // tests — keep one coarse backstop here instead of duplicating them.
         let item_count = count_items(&entries);
         assert!(
             item_count >= 24,
-            "Expected at least 24 theme items (6 bg + 6 fg + 5 accent + 8 semantic + 1 border + themes/rounded), got {item_count}",
+            "Expected at least 24 theme items (6 bg + 6 fg + 5 accent + 8 semantic + 1 border + mode/display/picker), got {item_count}",
         );
     }
 

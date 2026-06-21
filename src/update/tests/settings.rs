@@ -934,7 +934,6 @@ fn handle_restore_defaults_color_group_with_no_cached_entries_returns_none() {
 // SentinelKind cannot silently change observable routing. They cover:
 //
 //   * `SentinelKind::from_key` parsing for each registered sentinel,
-//   * `__preset_N` numeric index extraction (drives `ApplyPreset`),
 //   * `handle_restore_defaults` with a populated `cached_entries` for
 //     `__restore_bg` — exercises the HexColor scan path that returns a
 //     non-empty `RestoreColorGroup`,
@@ -951,26 +950,6 @@ fn sentinel_action_logout_parses_to_logout() {
     assert_eq!(
         SentinelKind::from_key("__action_logout"),
         Some(SentinelKind::Logout)
-    );
-}
-
-#[test]
-fn sentinel_preset_zero_extracts_index() {
-    use crate::views::settings::sentinel::SentinelKind;
-
-    assert_eq!(
-        SentinelKind::from_key("__preset_0"),
-        Some(SentinelKind::PresetTheme(0))
-    );
-}
-
-#[test]
-fn sentinel_preset_seven_extracts_index() {
-    use crate::views::settings::sentinel::SentinelKind;
-
-    assert_eq!(
-        SentinelKind::from_key("__preset_7"),
-        Some(SentinelKind::PresetTheme(7))
     );
 }
 

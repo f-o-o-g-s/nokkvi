@@ -4,7 +4,7 @@
 //! Extracted from mod.rs to reduce file size.
 
 use iced::{
-    Alignment, Border, Element, Length, Padding,
+    Alignment, Border, Color, Element, Length, Padding,
     font::{Font, Weight},
     widget::{Space, button, column, container, row, svg, text},
 };
@@ -86,6 +86,123 @@ impl FontSubListState {
                 .collect();
         }
         // Reset slot list to top when filter changes
+        self.slot_list = SlotListView::new();
+    }
+}
+
+/// Resolved preview colors for a single theme row — the theme's OWN palette,
+/// not the active theme's. Computed once when the picker opens (see
+/// [`ThemeSubListState::new`]) and never in the render path, because
+/// [`theme_loader::load_theme`](nokkvi_data::services::theme_loader::load_theme)
+/// does disk IO + a TOML parse per theme.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ThemePreviewColors {
+    /// Row background — the theme's `background.default` (`bg0`).
+    pub bg: Color,
+    /// Row text — the theme's `foreground.bright` (`fg0`), authored legible on `bg`.
+    pub fg: Color,
+    /// Accent swatch + cursor stripe — the theme's `accent.bright`.
+    pub accent: Color,
+}
+
+/// One row in the theme picker: identity plus the pre-resolved colors used to
+/// paint the row in that theme's own palette. Bundling colors WITH the row
+/// (rather than a parallel `stem -> colors` map) keeps the filtered list from
+/// ever drifting out of sync with its preview data.
+#[derive(Debug, Clone)]
+pub(crate) struct ThemeRow {
+    /// Theme filename stem (the apply key).
+    pub stem: String,
+    /// Human-readable theme name.
+    pub display_name: String,
+    /// Whether the theme has a built-in counterpart.
+    pub is_builtin: bool,
+    /// Whether this is the currently-applied theme.
+    pub is_active: bool,
+    /// Pre-resolved preview colors for this theme.
+    pub preview: ThemePreviewColors,
+}
+
+/// State for the theme picker sub-list — mirrors [`FontSubListState`], but each
+/// row previews its own palette (see [`ThemeRow`]). Selection reuses the
+/// existing apply path via [`SettingsAction::ApplyPreset`].
+#[derive(Debug, Clone)]
+pub(crate) struct ThemeSubListState {
+    /// All discovered theme rows (unfiltered), colors pre-resolved at open.
+    pub all_rows: Vec<ThemeRow>,
+    /// Current search/filter query.
+    pub search_query: String,
+    /// Filtered rows — what the slot list displays.
+    pub filtered_rows: Vec<ThemeRow>,
+    /// Sub-slot list navigation state.
+    pub slot_list: SlotListView,
+    /// Parent detail-pane offset to restore on exit.
+    pub parent_offset: usize,
+}
+
+impl ThemeSubListState {
+    /// Build the picker state, resolving every discovered theme's preview
+    /// colors ONCE here (disk read + TOML parse), so the render path only ever
+    /// reads the cached [`ThemePreviewColors`]. Previews use the app's current
+    /// mode (dark/light) — what selecting the theme would actually produce.
+    pub(super) fn new(parent_offset: usize) -> Self {
+        use nokkvi_data::services::theme_loader;
+
+        use crate::theme_config::ResolvedTheme;
+
+        let active = super::presets::active_theme_stem();
+        let light = crate::theme::is_light_mode();
+
+        let rows: Vec<ThemeRow> = super::presets::all_themes()
+            .into_iter()
+            .map(|info| {
+                let file = theme_loader::load_theme(&info.stem);
+                let palette = if light { &file.light } else { &file.dark };
+                let resolved = ResolvedTheme::from_theme_palette(palette);
+                ThemeRow {
+                    is_active: info.stem == active,
+                    stem: info.stem,
+                    display_name: info.display_name,
+                    is_builtin: info.is_builtin,
+                    preview: ThemePreviewColors {
+                        bg: resolved.bg0,
+                        fg: resolved.fg0,
+                        accent: resolved.accent_bright,
+                    },
+                }
+            })
+            .collect();
+
+        // Open centered on the active theme so the user's current selection is
+        // the initial cursor (each row already carries `is_active`).
+        let mut slot_list = SlotListView::new();
+        if let Some(active_idx) = rows.iter().position(|r| r.is_active) {
+            slot_list.set_offset(active_idx, rows.len());
+        }
+
+        Self {
+            filtered_rows: rows.clone(),
+            all_rows: rows,
+            search_query: String::new(),
+            slot_list,
+            parent_offset,
+        }
+    }
+
+    /// Refilter rows by case-insensitive substring on the display name,
+    /// resetting the slot list to the top (mirrors [`FontSubListState::refilter`]).
+    pub(super) fn refilter(&mut self) {
+        if self.search_query.is_empty() {
+            self.filtered_rows = self.all_rows.clone();
+        } else {
+            let query = self.search_query.to_lowercase();
+            self.filtered_rows = self
+                .all_rows
+                .iter()
+                .filter(|r| r.display_name.to_lowercase().contains(&query))
+                .cloned()
+                .collect();
+        }
         self.slot_list = SlotListView::new();
     }
 }
@@ -202,7 +319,7 @@ impl SettingsPage {
             | SettingsMessage::EditSetFraction(_)
             | SettingsMessage::ResetToDefault
             | SettingsMessage::HotkeyCaptured(_, _)
-            | SettingsMessage::FontSearchChanged(_)
+            | SettingsMessage::SubListSearchChanged(_)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
             | SettingsMessage::ToggleSetToggle(_)
@@ -254,7 +371,7 @@ impl SettingsPage {
                 }
                 SettingsAction::None
             }
-            SettingsMessage::FontSearchChanged(query) => {
+            SettingsMessage::SubListSearchChanged(query) => {
                 fsw.search_query = query;
                 fsw.refilter();
                 SettingsAction::None
@@ -266,6 +383,77 @@ impl SettingsPage {
                 SettingsAction::None
             }
             // Not applicable in font sub-list:
+            SettingsMessage::EditLeft
+            | SettingsMessage::EditRight
+            | SettingsMessage::EditSetValue(_)
+            | SettingsMessage::EditSetFraction(_)
+            | SettingsMessage::ResetToDefault
+            | SettingsMessage::HexInputChanged(_)
+            | SettingsMessage::HexInputSubmit
+            | SettingsMessage::HotkeyCaptured(_, _)
+            | SettingsMessage::SearchChanged(_)
+            | SettingsMessage::ToggleSearch
+            | SettingsMessage::ToggleSetToggle(_)
+            | SettingsMessage::SidebarUp
+            | SettingsMessage::SidebarDown
+            | SettingsMessage::SidebarSetOffset(_, _)
+            | SettingsMessage::SidebarClickItem(_)
+            | SettingsMessage::JumpToSection(_) => SettingsAction::None,
+        }
+    }
+
+    /// Handle messages when in theme sub-list (theme picker) mode. Mirrors
+    /// [`Self::update_font_sub_list`]; selection reuses the existing
+    /// [`SettingsAction::ApplyPreset`] apply path, keyed by the row's stem (no
+    /// positional index to drift through the search filter).
+    pub(super) fn update_theme_sub_list(&mut self, message: SettingsMessage) -> SettingsAction {
+        let tsw = match self.theme_sub_list.as_mut() {
+            Some(s) => s,
+            None => return SettingsAction::None,
+        };
+        let total = tsw.filtered_rows.len().max(1);
+
+        match message {
+            SettingsMessage::SlotListUp => {
+                tsw.slot_list.move_up(total);
+                SettingsAction::None
+            }
+            SettingsMessage::SlotListDown => {
+                tsw.slot_list.move_down(total);
+                SettingsAction::None
+            }
+            SettingsMessage::SlotListSetOffset(offset, _)
+            | SettingsMessage::SlotListClickItem(offset) => {
+                tsw.slot_list.set_offset(offset, total);
+                SettingsAction::None
+            }
+            SettingsMessage::EditActivate => {
+                // Apply the centered theme by stem — read straight from the
+                // filtered row, so search filtering can't misroute the choice.
+                if let Some(center_idx) = tsw.slot_list.get_center_item_index(total)
+                    && let Some(row) = tsw.filtered_rows.get(center_idx)
+                {
+                    let stem = row.stem.clone();
+                    let display_name = row.display_name.clone();
+                    let parent_offset = tsw.parent_offset;
+                    self.theme_sub_list = None;
+                    self.restore_parent_offset(parent_offset);
+                    return SettingsAction::ApplyPreset { stem, display_name };
+                }
+                SettingsAction::None
+            }
+            SettingsMessage::SubListSearchChanged(query) => {
+                tsw.search_query = query;
+                tsw.refilter();
+                SettingsAction::None
+            }
+            SettingsMessage::Escape => {
+                let parent_offset = tsw.parent_offset;
+                self.theme_sub_list = None;
+                self.restore_parent_offset(parent_offset);
+                SettingsAction::None
+            }
+            // Not applicable in theme sub-list:
             SettingsMessage::EditLeft
             | SettingsMessage::EditRight
             | SettingsMessage::EditSetValue(_)

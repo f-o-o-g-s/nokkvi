@@ -7,7 +7,7 @@
 use nokkvi_data::types::{player_settings::RoundedMode, theme_file::ThemeFile};
 
 use super::{
-    items::{SettingItem, SettingMeta, SettingsEntry},
+    items::{ActivateKind, SettingItem, SettingMeta, SettingsEntry},
     sentinel::SentinelKind,
 };
 
@@ -164,8 +164,6 @@ pub(crate) fn build_theme_items(
     opacity_gradient: bool,
     is_light_mode: bool,
 ) -> Vec<SettingsEntry> {
-    use super::presets;
-
     const P: &str = "assets/icons/palette.svg";
     const PR: &str = "assets/icons/swatch-book.svg";
     let mut e = Vec::new();
@@ -245,26 +243,19 @@ pub(crate) fn build_theme_items(
         .with_theme_key(),
     );
 
-    // List all discovered themes
-    let themes = presets::all_themes();
-    for (i, info) in themes.iter().enumerate() {
-        let key = SentinelKind::PresetTheme(i as u32).to_key();
-        let suffix = if info.stem == active_stem {
-            " ● active"
-        } else {
-            ""
-        };
-        let label = format!("{}{suffix}", info.display_name);
-        let sub = if info.is_builtin {
-            "Built-in"
-        } else {
-            "Custom"
-        };
-        e.push(
-            SettingItem::text(SettingMeta::new(key, &label, "Select Theme"), sub, "")
-                .with_theme_key(),
-        );
-    }
+    // Theme selection now lives in a modal swatch picker (each row painted in
+    // its own palette) rather than a long inline list. This single opener row
+    // launches it; the current theme name is shown as the row value.
+    e.push(
+        SettingItem::text(
+            SettingMeta::new("__theme_picker", "Browse Themes…", "Select Theme")
+                .with_subtitle("Preview and pick a theme"),
+            &theme.name,
+            &theme.name,
+        )
+        .with_enter_hint()
+        .with_activate(ActivateKind::ThemePicker),
+    );
 
     // ── Background Colors ────────────────────────────────────────────
     push_color_section!(

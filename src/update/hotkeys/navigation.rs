@@ -380,7 +380,11 @@ impl Nokkvi {
         // Settings has its own search — must be checked before current_view_page_mut()
         // which would incorrectly route to the browsing panel's page when it's open
         // with browser focus (same priority pattern as handle_clear_search).
-        if self.current_view == View::Settings && self.settings_page.font_sub_list.is_some() {
+        if self.current_view == View::Settings && self.settings_page.theme_sub_list.is_some() {
+            // Theme picker is open — focus its search field
+            return iced::widget::operation::focus(crate::views::settings::THEME_SEARCH_INPUT_ID);
+        } else if self.current_view == View::Settings && self.settings_page.font_sub_list.is_some()
+        {
             // Font picker is open — focus its search field
             return iced::widget::operation::focus(crate::views::settings::FONT_SEARCH_INPUT_ID);
         } else if self.current_view == View::Settings {

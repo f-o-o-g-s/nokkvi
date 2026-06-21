@@ -11,7 +11,7 @@ use iced::{
 };
 
 use super::{
-    SettingsMessage,
+    SettingsMessage, ThemeRow,
     items::{SettingItem, SettingValue},
 };
 use crate::{
@@ -1080,6 +1080,157 @@ pub(crate) fn render_font_slot<'a>(
 
     let body = with_cursor_stripe(content.into(), ctx.is_center);
     let with_separator = row_with_bottom_separator(body, ctx.is_center);
+
+    button(with_separator)
+        .on_press(if ctx.is_center {
+            SettingsMessage::EditActivate
+        } else {
+            SettingsMessage::SlotListClickItem(ctx.item_index)
+        })
+        .style(transparent_button_style)
+        .padding(0)
+        .width(Length::Fill)
+        .into()
+}
+
+// ============================================================================
+// Theme Sub-List Slot Rendering
+// ============================================================================
+
+/// Linear blend `a → b` by `t ∈ [0, 1]`, opaque. Used only for the theme
+/// picker's center-row cursor tint (nudging a row's own bg toward its own
+/// accent). [`theme::blend_toward`] is `pub(super)` to the theme module, so a
+/// local copy keeps this self-contained.
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: 1.0,
+    }
+}
+
+/// Render a single row in the theme picker sub-list, painted in that theme's
+/// OWN palette so the list reads as a live swatch preview (the color analog of
+/// the font picker drawing each name in its own typeface). All colors come
+/// pre-resolved on the [`ThemeRow`] — never loaded here.
+pub(crate) fn render_theme_slot<'a>(
+    ctx: &SlotRenderContext<'_>,
+    row: &ThemeRow,
+) -> Element<'a, SettingsMessage> {
+    let label_size =
+        nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
+            * ctx.scale_factor;
+    let hint_size =
+        nokkvi_data::utils::scale::calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
+            * ctx.scale_factor;
+
+    let bg = row.preview.bg;
+    let fg = row.preview.fg;
+    let accent = row.preview.accent;
+
+    // Theme name in its own foreground; the active theme gets a marker.
+    let name = if row.is_active {
+        format!("{} ● active", row.display_name)
+    } else {
+        row.display_name.clone()
+    };
+    let name_widget = slot_list::slot_list_text(name, label_size, fg).font(Font {
+        weight: Weight::Bold,
+        ..theme::ui_font()
+    });
+
+    let subtitle = if row.is_builtin { "Built-in" } else { "Custom" };
+    let subtitle_widget =
+        slot_list::slot_list_text(subtitle.to_string(), hint_size, scale_alpha_local(fg, 0.6));
+
+    // Accent swatch — always visible, so the accent reads independently of the
+    // cursor. Thin fg-tinted border keeps it defined even when accent ≈ bg.
+    let swatch = container(Space::new())
+        .width(Length::Fixed(14.0))
+        .height(Length::Fixed(14.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(accent.into()),
+            border: Border {
+                color: scale_alpha_local(fg, 0.35),
+                width: 1.0,
+                radius: theme::ui_radius_xs(),
+            },
+            ..Default::default()
+        });
+    let swatch_col = container(swatch)
+        .height(Length::Fill)
+        .align_y(Alignment::Center);
+
+    let hint_text = if ctx.is_center { "Enter ↵" } else { "" };
+    // Muted foreground (matching the font picker), not raw accent — a raw-accent
+    // hint vanishes on themes whose accent sits near the background (e.g. a
+    // pale-gold light theme).
+    let hint_widget = slot_list::slot_list_text(hint_text, hint_size, scale_alpha_local(fg, 0.6));
+
+    let label_col = container(column![name_widget, subtitle_widget].spacing(2))
+        .width(Length::FillPortion(70))
+        .height(Length::Fill)
+        .clip(true)
+        .align_y(Alignment::Center);
+
+    let hint_col = container(hint_widget)
+        .width(Length::FillPortion(30))
+        .height(Length::Fill)
+        .clip(true)
+        .align_y(Alignment::Center)
+        .align_x(Alignment::End)
+        .padding(Padding::new(0.0).right(12.0));
+
+    let content = row![
+        Space::new().width(Length::Fixed(12.0)),
+        swatch_col,
+        label_col,
+        hint_col,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .height(Length::Fill);
+
+    // Cursor stripe + row background in the THEME's own colors (not the active
+    // theme's, unlike `with_cursor_stripe`). The center row tints its bg toward
+    // its own accent so the cursor reads inside every palette.
+    let stripe_color = if ctx.is_center {
+        accent
+    } else {
+        Color::TRANSPARENT
+    };
+    let stripe = container(Space::new())
+        .width(Length::Fixed(3.0))
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(stripe_color.into()),
+            ..Default::default()
+        });
+    // Center-row fill: a small step TOWARD the theme's own foreground, so the
+    // cursor row reads as a perceptible elevation on EVERY palette. (A tint
+    // toward accent is imperceptible when accent ≈ bg — e.g. pale-gold light
+    // themes — whereas fg always contrasts bg by construction.) The accent left
+    // stripe still supplies the accent cue.
+    let row_bg = if ctx.is_center {
+        lerp_color(bg, fg, 0.12)
+    } else {
+        bg
+    };
+    let row_body = row![stripe, container(content).width(Length::Fill)]
+        .height(Length::Fill)
+        .width(Length::Fill);
+    let body = container(row_body)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .clip(true)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(row_bg.into()),
+            ..Default::default()
+        });
+
+    let with_separator = row_with_bottom_separator(body.into(), ctx.is_center);
 
     button(with_separator)
         .on_press(if ctx.is_center {

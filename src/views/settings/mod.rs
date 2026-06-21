@@ -32,7 +32,11 @@ pub(crate) mod test_support;
 mod view;
 
 use items::{ActivateKind, SettingValue, SettingsEntry};
-pub(crate) use sub_lists::{FontSubListState, SubListState};
+// Only named by the theme-picker handler tests; the render path reads
+// `ThemeRow::preview` fields without naming the type.
+#[cfg(test)]
+pub(crate) use sub_lists::ThemePreviewColors;
+pub(crate) use sub_lists::{FontSubListState, SubListState, ThemeRow, ThemeSubListState};
 
 /// Normalize and validate a hex color string.
 /// Ensures the value starts with `#` and contains exactly 6 hex digits.
@@ -366,8 +370,10 @@ pub enum SettingsMessage {
     ResetToDefault,
     /// Raw key event forwarded during hotkey capture mode
     HotkeyCaptured(iced::keyboard::Key, iced::keyboard::Modifiers),
-    /// Font search query changed (typing in font picker sub-list)
-    FontSearchChanged(String),
+    /// Sub-list search query changed (typing in the font OR theme picker
+    /// sub-list search box). Only one sub-list is open at a time, so the active
+    /// sub-list handler owns the meaning.
+    SubListSearchChanged(String),
     /// Settings search query changed (typing in main settings search bar)
     SearchChanged(String),
     /// Toggle search overlay on/off (triggered by `/` key)
@@ -433,8 +439,13 @@ pub(crate) enum SettingsAction {
         index: usize,
         hex_color: String,
     },
-    /// Apply a preset theme by index
-    ApplyPreset(usize),
+    /// Apply a preset theme. Carries the theme's stem (apply key) and display
+    /// name (for the confirmation toast) so the root handler never re-indexes
+    /// `all_themes()` — there is no positional index to drift.
+    ApplyPreset {
+        stem: String,
+        display_name: String,
+    },
     /// Restore all colors in a group to their defaults
     RestoreColorGroup {
         /// Vec of (toml_key, default_hex) pairs to reset
@@ -525,6 +536,9 @@ pub(super) const FONT_SEARCH_BAR_HEIGHT: f32 = 40.0;
 /// Unique text_input ID for the font picker search field (for hotkey focus)
 pub(crate) const FONT_SEARCH_INPUT_ID: &str = "settings_font_search";
 
+/// Unique text_input ID for the theme picker search field (for hotkey focus)
+pub(crate) const THEME_SEARCH_INPUT_ID: &str = "settings_theme_search";
+
 /// Unique text_input ID for the main settings search field
 pub(crate) const SETTINGS_SEARCH_INPUT_ID: &str = "settings_search";
 
@@ -558,6 +572,9 @@ pub struct SettingsPage {
     pub(crate) sub_list: Option<SubListState>,
     /// Sub-list state for font family selection (None = main settings slot list)
     pub(crate) font_sub_list: Option<FontSubListState>,
+    /// Sub-list state for theme selection (None = main settings slot list).
+    /// Mutually exclusive with `font_sub_list` — only one picker opens at a time.
+    pub(crate) theme_sub_list: Option<ThemeSubListState>,
     /// Hotkey capture state — which action is waiting for a key press
     pub(crate) capturing_hotkey: Option<HotkeyAction>,
     /// Conflict label with timestamp for auto-dismiss (displayed when capture hits a conflict)
@@ -591,6 +608,7 @@ impl SettingsPage {
             cached_entries: Vec::new(),
             sub_list: None,
             font_sub_list: None,
+            theme_sub_list: None,
             capturing_hotkey: None,
             conflict_label: None,
             hex_input: String::new(),
@@ -702,6 +720,15 @@ impl SettingsPage {
             return SettingsAction::None;
         }
 
+        // ── Theme sub-list mode: delegate to theme sub-list handler ──
+        if self.theme_sub_list.is_some() {
+            tracing::debug!(
+                " [SETTINGS] Theme sub-list active, delegating {:?}",
+                message
+            );
+            return self.update_theme_sub_list(message);
+        }
+
         // ── Font sub-list mode: delegate to font sub-list handler ──
         if self.font_sub_list.is_some() {
             tracing::debug!(" [SETTINGS] Font sub-list active, delegating {:?}", message);
@@ -792,9 +819,6 @@ impl SettingsPage {
                                 Some(sentinel::SentinelKind::Logout) => {
                                     return SettingsAction::Logout;
                                 }
-                                Some(sentinel::SentinelKind::PresetTheme(idx)) => {
-                                    return SettingsAction::ApplyPreset(idx as usize);
-                                }
                                 // Restore-defaults sentinels (including
                                 // `__restore_all_hotkeys`) — funnel through
                                 // `handle_restore_defaults`, which owns the
@@ -865,6 +889,11 @@ impl SettingsPage {
                                                 let fonts = self.system_fonts().to_vec();
                                                 self.font_sub_list = Some(FontSubListState::new(
                                                     fonts,
+                                                    self.slot_list.viewport_offset,
+                                                ));
+                                            }
+                                            Some(ActivateKind::ThemePicker) => {
+                                                self.theme_sub_list = Some(ThemeSubListState::new(
                                                     self.slot_list.viewport_offset,
                                                 ));
                                             }
@@ -1049,7 +1078,7 @@ impl SettingsPage {
                 SettingsAction::None
             }
             // These messages are only handled in sub-list mode or capture mode
-            SettingsMessage::HotkeyCaptured(_, _) | SettingsMessage::FontSearchChanged(_) => {
+            SettingsMessage::HotkeyCaptured(_, _) | SettingsMessage::SubListSearchChanged(_) => {
                 SettingsAction::None
             }
             SettingsMessage::SearchChanged(query) => {
@@ -1175,7 +1204,7 @@ impl SettingsPage {
                 | sentinel::SentinelKind::RestoreBorder => {}
                 // Non-restore sentinels reach this function only via the
                 // public API; ignore them defensively.
-                sentinel::SentinelKind::Logout | sentinel::SentinelKind::PresetTheme(_) => {
+                sentinel::SentinelKind::Logout => {
                     return SettingsAction::None;
                 }
             }

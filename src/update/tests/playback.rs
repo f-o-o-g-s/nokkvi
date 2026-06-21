@@ -917,6 +917,278 @@ fn settings_edit_activate_font_family_opens_font_sub_list() {
     );
 }
 
+/// Three synthetic theme rows for the theme-picker handler tests. Built
+/// in-memory (no disk read) so the apply/search/escape behavior is
+/// deterministic regardless of whether the test env has seeded theme files.
+fn make_theme_rows() -> Vec<crate::views::settings::ThemeRow> {
+    use iced::Color;
+
+    use crate::views::settings::{ThemePreviewColors, ThemeRow};
+
+    let mk = |stem: &str, name: &str, active: bool| ThemeRow {
+        stem: stem.to_string(),
+        display_name: name.to_string(),
+        is_builtin: true,
+        is_active: active,
+        preview: ThemePreviewColors {
+            bg: Color::BLACK,
+            fg: Color::WHITE,
+            accent: Color::from_rgb(0.2, 0.6, 0.8),
+        },
+    };
+
+    vec![
+        mk("alpha", "Alpha", false),
+        mk("bravo", "Bravo", true),
+        mk("charlie", "Charlie", false),
+    ]
+}
+
+/// Open the theme picker on `page` with the given rows, centered on `center_idx`.
+fn open_theme_picker(
+    page: &mut crate::views::SettingsPage,
+    rows: Vec<crate::views::settings::ThemeRow>,
+    center_idx: usize,
+) {
+    use crate::{views::settings::ThemeSubListState, widgets::SlotListView};
+
+    let total = rows.len();
+    let mut slot_list = SlotListView::new();
+    slot_list.set_offset(center_idx, total);
+    page.theme_sub_list = Some(ThemeSubListState {
+        filtered_rows: rows.clone(),
+        all_rows: rows,
+        search_query: String::new(),
+        slot_list,
+        parent_offset: 0,
+    });
+}
+
+#[test]
+fn settings_edit_activate_browse_themes_opens_theme_sub_list() {
+    use crate::views::settings::{SettingsAction, SettingsMessage, SettingsTab};
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    page.active_category = SettingsTab::Theme;
+    page.refresh_entries(&data);
+    focus_settings_key(&mut page, "__theme_picker");
+
+    let action = page.update(SettingsMessage::EditActivate, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Theme picker activation returns None and mutates state, got {action:?}"
+    );
+    assert!(
+        page.theme_sub_list.is_some(),
+        "theme picker sub-list should open after activating the Browse Themes row"
+    );
+}
+
+#[test]
+fn theme_sub_list_activate_returns_applypreset_for_centered_row() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    // Center on "Bravo" (index 1) — NOT the first row, so a filtered/positional
+    // bug would surface the wrong theme.
+    open_theme_picker(&mut page, make_theme_rows(), 1);
+
+    let action = page.update(SettingsMessage::EditActivate, &data);
+    assert!(
+        matches!(
+            action,
+            SettingsAction::ApplyPreset { ref stem, ref display_name }
+                if stem == "bravo" && display_name == "Bravo"
+        ),
+        "centered row activate should apply that row's theme by stem, got {action:?}"
+    );
+    assert!(
+        page.theme_sub_list.is_none(),
+        "activating a theme should close the picker"
+    );
+}
+
+#[test]
+fn theme_sub_list_search_filters_rows() {
+    use crate::views::settings::SettingsMessage;
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    open_theme_picker(&mut page, make_theme_rows(), 0);
+
+    let _ = page.update(
+        SettingsMessage::SubListSearchChanged("char".to_string()),
+        &data,
+    );
+
+    let tsw = page
+        .theme_sub_list
+        .as_ref()
+        .expect("theme picker stays open while searching");
+    assert_eq!(tsw.search_query, "char");
+    assert_eq!(
+        tsw.filtered_rows.len(),
+        1,
+        "only Charlie matches the query 'char'"
+    );
+    assert_eq!(tsw.filtered_rows[0].stem, "charlie");
+}
+
+#[test]
+fn theme_sub_list_escape_closes_picker() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    open_theme_picker(&mut page, make_theme_rows(), 0);
+
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(matches!(action, SettingsAction::None));
+    assert!(
+        page.theme_sub_list.is_none(),
+        "Escape should close the theme picker"
+    );
+}
+
+#[test]
+fn theme_sub_list_nav_moves_cursor() {
+    use crate::views::settings::SettingsMessage;
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    open_theme_picker(&mut page, make_theme_rows(), 0);
+
+    let offset = |p: &crate::views::SettingsPage| {
+        p.theme_sub_list
+            .as_ref()
+            .expect("picker open")
+            .slot_list
+            .viewport_offset
+    };
+
+    let _ = page.update(SettingsMessage::SlotListDown, &data);
+    assert_eq!(offset(&page), 1, "Down moves the picker cursor down one");
+    let _ = page.update(SettingsMessage::SlotListDown, &data);
+    assert_eq!(offset(&page), 2);
+    let _ = page.update(SettingsMessage::SlotListUp, &data);
+    assert_eq!(offset(&page), 1, "Up moves it back");
+}
+
+#[test]
+fn theme_sub_list_click_recenters_then_activates() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    // Start centered on index 0; a non-center click recenters (no apply yet).
+    open_theme_picker(&mut page, make_theme_rows(), 0);
+
+    let click = page.update(SettingsMessage::SlotListClickItem(2), &data);
+    assert!(
+        matches!(click, SettingsAction::None),
+        "clicking a non-center row recenters without applying, got {click:?}"
+    );
+    assert!(
+        page.theme_sub_list.is_some(),
+        "the picker stays open after a recenter click"
+    );
+
+    // A second activate on the now-centered row applies that theme.
+    let action = page.update(SettingsMessage::EditActivate, &data);
+    assert!(
+        matches!(
+            action,
+            SettingsAction::ApplyPreset { ref stem, .. } if stem == "charlie"
+        ),
+        "activate after recenter should apply the clicked theme, got {action:?}"
+    );
+}
+
+#[test]
+fn font_sub_list_search_filters_after_rename() {
+    use crate::{
+        views::settings::{FontSubListState, SettingsMessage},
+        widgets::SlotListView,
+    };
+
+    // Guards the shared `SubListSearchChanged` rename: the FONT picker's search
+    // must still filter after the variant was renamed from `FontSearchChanged`.
+    let mut page = crate::views::SettingsPage::new();
+    let data = make_settings_view_data();
+
+    let fonts = vec![
+        "Iced Default (SansSerif)".to_string(),
+        "DejaVu Sans Mono".to_string(),
+        "Arial".to_string(),
+    ];
+    page.font_sub_list = Some(FontSubListState {
+        filtered_fonts: fonts.clone(),
+        all_fonts: fonts,
+        search_query: String::new(),
+        slot_list: SlotListView::new(),
+        parent_offset: 0,
+    });
+
+    let _ = page.update(
+        SettingsMessage::SubListSearchChanged("mono".to_string()),
+        &data,
+    );
+
+    let fsw = page
+        .font_sub_list
+        .as_ref()
+        .expect("font picker stays open while searching");
+    assert_eq!(fsw.search_query, "mono");
+    assert_eq!(
+        fsw.filtered_fonts,
+        vec!["DejaVu Sans Mono".to_string()],
+        "case-insensitive substring filter keeps only the mono font"
+    );
+}
+
+#[test]
+fn settings_nav_routes_to_theme_picker_not_background() {
+    use crate::views::settings::SettingsMessage;
+
+    // Regression: the nav fast path in `handle_settings` must skip when the
+    // theme picker is open, or Up/Down scrolls the dimmed background list
+    // instead of moving the picker cursor.
+    let mut app = test_app();
+    let _ = app.handle_switch_view(crate::View::Settings);
+    assert!(
+        !app.settings_page.cached_entries.is_empty(),
+        "entering Settings populates the entry cache (so the fast-path guard's \
+         non-empty check is satisfied and only the picker check can gate it)"
+    );
+
+    open_theme_picker(&mut app.settings_page, make_theme_rows(), 0);
+    let bg_offset_before = app.settings_page.slot_list.viewport_offset;
+
+    let _ = app.handle_settings(SettingsMessage::SlotListDown);
+
+    let tsw = app
+        .settings_page
+        .theme_sub_list
+        .as_ref()
+        .expect("picker stays open");
+    assert_eq!(
+        tsw.slot_list.viewport_offset, 1,
+        "nav must move the theme picker cursor"
+    );
+    assert_eq!(
+        app.settings_page.slot_list.viewport_offset, bg_offset_before,
+        "the dimmed background settings list must NOT scroll while the picker is open"
+    );
+}
+
 // ============================================================================
 // I22 — song-change fallback uses the finished song's own duration
 // ============================================================================

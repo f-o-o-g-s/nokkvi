@@ -17,7 +17,6 @@ pub(crate) enum SentinelKind {
     RestoreBorder,
     RestoreVisualizer,
     RestoreAllHotkeys,
-    PresetTheme(u32),
 }
 
 impl SentinelKind {
@@ -35,10 +34,7 @@ impl SentinelKind {
             "__restore_border" => Some(Self::RestoreBorder),
             "__restore_visualizer" => Some(Self::RestoreVisualizer),
             "__restore_all_hotkeys" => Some(Self::RestoreAllHotkeys),
-            k => k
-                .strip_prefix("__preset_")
-                .and_then(|s| s.parse::<u32>().ok())
-                .map(Self::PresetTheme),
+            _ => None,
         }
     }
 
@@ -55,7 +51,6 @@ impl SentinelKind {
             Self::RestoreBorder => "__restore_border".to_string(),
             Self::RestoreVisualizer => "__restore_visualizer".to_string(),
             Self::RestoreAllHotkeys => "__restore_all_hotkeys".to_string(),
-            Self::PresetTheme(i) => format!("__preset_{i}"),
         }
     }
 }
@@ -76,8 +71,6 @@ mod tests {
             SentinelKind::RestoreBorder,
             SentinelKind::RestoreVisualizer,
             SentinelKind::RestoreAllHotkeys,
-            SentinelKind::PresetTheme(0),
-            SentinelKind::PresetTheme(42),
         ] {
             assert_eq!(SentinelKind::from_key(&k.to_key()), Some(k));
         }

@@ -174,6 +174,7 @@ impl Nokkvi {
             && !self.settings_page.cached_entries.is_empty()
             && self.settings_page.sub_list.is_none()
             && self.settings_page.font_sub_list.is_none()
+            && self.settings_page.theme_sub_list.is_none()
             && self.settings_page.toggle_cursor.is_none()
             && self.settings_page.editing_index.is_none()
         {
@@ -244,25 +245,16 @@ impl Nokkvi {
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
-            crate::views::SettingsAction::ApplyPreset(preset_index) => {
-                let themes = crate::views::settings::presets::all_themes();
-                if let Some(info) = themes.get(preset_index) {
-                    if let Err(e) = crate::views::settings::presets::apply_theme(&info.stem) {
-                        tracing::warn!(
-                            " [SETTINGS] Failed to apply theme '{}': {e}",
-                            info.display_name
-                        );
-                        self.toast_warn(format!(
-                            "Failed to apply theme '{}': {e}",
-                            info.display_name
-                        ));
-                    } else {
-                        tracing::info!(" [SETTINGS] Applied theme: {}", info.display_name);
-                        // Reload theme immediately (watcher suppresses internal writes)
-                        crate::theme::reload_theme();
-                        self.settings_page.config_dirty = true;
-                        self.toast_success(format!("Applied theme: {}", info.display_name));
-                    }
+            crate::views::SettingsAction::ApplyPreset { stem, display_name } => {
+                if let Err(e) = crate::views::settings::presets::apply_theme(&stem) {
+                    tracing::warn!(" [SETTINGS] Failed to apply theme '{display_name}': {e}");
+                    self.toast_warn(format!("Failed to apply theme '{display_name}': {e}"));
+                } else {
+                    tracing::info!(" [SETTINGS] Applied theme: {display_name}");
+                    // Reload theme immediately (watcher suppresses internal writes)
+                    crate::theme::reload_theme();
+                    self.settings_page.config_dirty = true;
+                    self.toast_success(format!("Applied theme: {display_name}"));
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
