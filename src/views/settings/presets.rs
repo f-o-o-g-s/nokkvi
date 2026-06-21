@@ -12,12 +12,12 @@ use tracing::debug;
 // Theme Discovery
 // ============================================================================
 
-/// Discover all available themes from `~/.config/nokkvi/themes/`.
-///
-/// Returns metadata sorted by display name. Safe to call from the UI —
-/// falls back to an empty list on errors.
-pub(crate) fn all_themes() -> Vec<ThemeInfo> {
-    theme_loader::discover_themes().unwrap_or_else(|e| {
+/// Discover all available themes from `~/.config/nokkvi/themes/`, paired with
+/// each theme's parsed [`ThemeFile`] (one read + parse each), sorted by display
+/// name. Safe to call from the UI — falls back to an empty list on errors. The
+/// theme picker needs per-theme colors for its swatch preview.
+pub(crate) fn all_theme_files() -> Vec<(ThemeInfo, nokkvi_data::types::theme_file::ThemeFile)> {
+    theme_loader::discover_theme_files().unwrap_or_else(|e| {
         tracing::warn!("Failed to discover themes: {e}");
         Vec::new()
     })

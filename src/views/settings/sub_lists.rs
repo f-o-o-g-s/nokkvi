@@ -146,17 +146,16 @@ impl ThemeSubListState {
     /// reads the cached [`ThemePreviewColors`]. Previews use the app's current
     /// mode (dark/light) — what selecting the theme would actually produce.
     pub(super) fn new(parent_offset: usize) -> Self {
-        use nokkvi_data::services::theme_loader;
-
         use crate::theme_config::ResolvedTheme;
 
         let active = super::presets::active_theme_stem();
         let light = crate::theme::is_light_mode();
 
-        let rows: Vec<ThemeRow> = super::presets::all_themes()
+        // Discover + parse each theme file ONCE here (never in the render path),
+        // resolving its preview colors for the app's current mode.
+        let rows: Vec<ThemeRow> = super::presets::all_theme_files()
             .into_iter()
-            .map(|info| {
-                let file = theme_loader::load_theme(&info.stem);
+            .map(|(info, file)| {
                 let palette = if light { &file.light } else { &file.dark };
                 let resolved = ResolvedTheme::from_theme_palette(palette);
                 ThemeRow {

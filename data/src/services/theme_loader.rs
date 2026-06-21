@@ -119,7 +119,7 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
 
 /// Lazy map from stem → TOML content for O(1) lookup.
 /// Built once (on first access) via `LazyLock` to avoid reconstructing the
-/// `HashMap` every time `load_builtin_theme()` or `discover_themes()` is called.
+/// `HashMap` every time `load_builtin_theme()` or `discover_theme_files()` is called.
 fn builtin_registry() -> &'static HashMap<&'static str, &'static str> {
     use std::sync::LazyLock;
     static REGISTRY: LazyLock<HashMap<&'static str, &'static str>> =
@@ -179,10 +179,14 @@ pub fn seed_builtin_themes() -> Result<()> {
 // Discovery
 // ============================================================================
 
-/// Scan the themes directory and return metadata for every `.toml` file found.
+/// Scan the themes directory and return metadata **plus the parsed `ThemeFile`**
+/// for every readable `.toml`, sorted alphabetically by display name.
 ///
-/// Themes are sorted alphabetically by display name.
-pub fn discover_themes() -> Result<Vec<ThemeInfo>> {
+/// Each file is read and parsed exactly once. The theme picker pairs each
+/// theme's metadata with its palette for the swatch preview; resolving the two
+/// separately (discovery for names, then a follow-up [`load_theme`] per stem)
+/// would read and parse every file a second time.
+pub fn discover_theme_files() -> Result<Vec<(ThemeInfo, ThemeFile)>> {
     let themes_dir = get_themes_dir()?;
     let registry = builtin_registry();
     let mut themes = Vec::new();
@@ -203,10 +207,9 @@ pub fn discover_themes() -> Result<Vec<ThemeInfo>> {
             None => continue,
         };
 
-        // Read display name from the file (fast: only parse the `name` field)
-        let display_name = match std::fs::read_to_string(&path) {
+        let file = match std::fs::read_to_string(&path) {
             Ok(content) => match ThemeFile::load(&content) {
-                Ok(tf) => tf.name,
+                Ok(tf) => tf,
                 Err(e) => {
                     warn!(theme = %stem, error = %e, "Skipping malformed theme file");
                     continue;
@@ -218,15 +221,16 @@ pub fn discover_themes() -> Result<Vec<ThemeInfo>> {
             }
         };
 
-        themes.push(ThemeInfo {
+        let info = ThemeInfo {
             is_builtin: registry.contains_key(stem.as_str()),
+            display_name: file.name.clone(),
             stem,
-            display_name,
             path,
-        });
+        };
+        themes.push((info, file));
     }
 
-    themes.sort_by(|a, b| {
+    themes.sort_by(|(a, _), (b, _)| {
         a.display_name
             .to_lowercase()
             .cmp(&b.display_name.to_lowercase())
@@ -647,10 +651,9 @@ mod tests {
     /// the same payload through the same helper against a temp path proves the
     /// internal-write registry records the (path, content-hash) for theme
     /// restores. If the helper is silently swapped for a non-suppressing
-    /// `std::fs::write`, this assertion catches it — and the UI's
-    /// `RestoreColorGroup` handler at
-    /// `src/update/settings.rs:244` would then race a spurious watcher event
-    /// against its own `reload_theme()` call.
+    /// `std::fs::write`, this assertion catches it — any caller relying on the
+    /// suppression would otherwise race a spurious watcher event against its
+    /// own `reload_theme()` call.
     #[test]
     fn restore_builtin_payload_records_internal_write() {
         let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();

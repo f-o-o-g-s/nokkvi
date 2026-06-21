@@ -105,13 +105,13 @@ impl SettingsPage {
         // Theme / font picker overlays on top of either layout. Only one
         // sub-list is ever open at a time (theme takes precedence).
         if let Some(tsw) = &self.theme_sub_list {
-            let modal = self.render_theme_modal(tsw, window_height, font);
+            let modal = self.render_theme_modal(tsw, window_height);
             stack![base, modal]
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()
         } else if let Some(fsw) = &self.font_sub_list {
-            let modal = self.render_font_modal(fsw, window_height, font);
+            let modal = self.render_font_modal(fsw, window_height);
             stack![base, modal]
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -498,369 +498,260 @@ impl SettingsPage {
             .into()
     }
 
-    /// Render the font picker as a modal overlay — dimmed backdrop + centered panel.
-    ///
-    /// Replaces the old full-view-replacement approach so the user keeps
-    /// visual context of the underlying settings panel.
+    /// Render the font picker as a modal overlay (dimmed backdrop + centered
+    /// panel) so the user keeps visual context of the settings panel. All
+    /// chrome is shared with the theme picker via [`render_picker_modal`]; only
+    /// the slot-list body (each font name drawn in its own typeface) differs.
     fn render_font_modal<'a>(
         &'a self,
         fsw: &'a super::FontSubListState,
         window_height: f32,
-        _font: Font,
     ) -> Element<'a, SettingsMessage> {
-        use super::{
-            FONT_SEARCH_INPUT_ID,
-            rendering::{SlotRenderContext, render_font_slot},
-        };
+        use super::rendering::{SlotRenderContext, render_font_slot};
 
-        let search_query = fsw.search_query.clone();
-
-        // ── Modal dimensions ──
-        // The modal floats on top of the settings panel.
-        // Use 70% of window height for the modal, minus chrome (breadcrumb + search bar).
-        let modal_height = window_height * 0.70;
-        let modal_chrome = BREADCRUMB_HEIGHT + FONT_SEARCH_BAR_HEIGHT;
-
-        // ── Title bar (replaces breadcrumb) ──
-        let title_bar = {
-            let dim_color = theme::fg4();
-            let active_color = theme::fg0();
-            let label_size = 13.0;
-
-            let back_icon_size = label_size;
-            let back_btn = button(
-                embedded_svg::svg_widget("assets/icons/x.svg")
-                    .width(Length::Fixed(back_icon_size))
-                    .height(Length::Fixed(back_icon_size))
-                    .style(move |_theme, _status| svg::Style {
-                        color: Some(dim_color),
-                    }),
-            )
-            .on_press(SettingsMessage::Escape)
-            .style(transparent_button_style)
-            .padding(Padding::new(2.0));
-
-            let content = row![
-                Space::new().width(Length::Fixed(12.0)),
-                text("Font Family")
-                    .size(label_size)
-                    .font(Font {
-                        weight: Weight::Bold,
-                        ..theme::ui_font()
-                    })
-                    .color(active_color),
-                Space::new().width(Length::Fill),
-                back_btn,
-                Space::new().width(Length::Fixed(12.0)),
-            ]
-            .align_y(Alignment::Center)
-            .height(Length::Fixed(BREADCRUMB_HEIGHT));
-
-            container(content).width(Length::Fill)
-        };
-
-        // ── Search bar ──
-        let search_bar = {
-            let input = crate::widgets::search_bar::search_bar(
-                &search_query,
-                "Type to filter fonts...",
-                FONT_SEARCH_INPUT_ID,
-                SettingsMessage::SubListSearchChanged,
-                Some(crate::theme::settings_search_input_style),
-            );
-            container(input)
-                .width(Length::Fill)
-                .height(Length::Fixed(FONT_SEARCH_BAR_HEIGHT))
-                .padding(Padding::new(4.0).left(12.0).right(12.0))
-        };
-
-        // ── Font slot list or empty state ──
-        let main_area: Element<'a, SettingsMessage> = if fsw.filtered_fonts.is_empty() {
-            container(
-                text("No fonts match the search query")
-                    .size(14)
-                    .color(theme::fg4()),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center(Length::Fill)
-            .into()
-        } else {
-            let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
-            let fonts_owned = fsw.filtered_fonts.clone();
-
-            slot_list::slot_list_view_with_scroll(
-                &fsw.slot_list,
-                &fonts_owned,
-                &config,
-                SettingsMessage::SlotListUp,
-                SettingsMessage::SlotListDown,
-                super::settings_seek_to(fonts_owned.len()),
-                None,
-                move |font_name, ctx| {
-                    let ctx = SlotRenderContext {
-                        item_index: ctx.item_index,
-                        is_center: ctx.is_center,
-                        opacity: 1.0,
-                        row_height: ctx.row_height,
-                        scale_factor: ctx.scale_factor,
-                        is_capturing: false,
-                        conflict_text: None,
-                        toggle_cursor: None,
-                    };
-                    render_font_slot(&ctx, font_name)
-                },
-            )
-        };
-
-        // ── Modal panel ──
-        let modal_bg = theme::bg0_hard();
-        let modal_border = theme::accent();
-        let modal_radius = theme::ui_border_radius();
-
-        let modal_panel = container(
-            column![title_bar, search_bar, main_area]
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .width(Length::FillPortion(5))
-        .height(Length::Fixed(modal_height))
-        .clip(true)
-        .padding(Padding::new(4.0))
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(modal_bg.into()),
-            border: Border {
-                color: modal_border,
-                width: 1.5,
-                radius: modal_radius,
+        render_picker_modal(
+            "Font Family",
+            "Type to filter fonts...",
+            super::FONT_SEARCH_INPUT_ID,
+            &fsw.search_query,
+            window_height,
+            |modal_height, modal_chrome| {
+                if fsw.filtered_fonts.is_empty() {
+                    return picker_empty_state("No fonts match the search query");
+                }
+                let config =
+                    slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome);
+                slot_list::slot_list_view_with_scroll(
+                    &fsw.slot_list,
+                    &fsw.filtered_fonts,
+                    &config,
+                    SettingsMessage::SlotListUp,
+                    SettingsMessage::SlotListDown,
+                    super::settings_seek_to(fsw.filtered_fonts.len()),
+                    None,
+                    |font_name, ctx| {
+                        let ctx = SlotRenderContext {
+                            item_index: ctx.item_index,
+                            is_center: ctx.is_center,
+                            opacity: 1.0,
+                            row_height: ctx.row_height,
+                            scale_factor: ctx.scale_factor,
+                            is_capturing: false,
+                            conflict_text: None,
+                            toggle_cursor: None,
+                        };
+                        render_font_slot(&ctx, font_name)
+                    },
+                )
             },
-            ..Default::default()
-        });
-
-        // ── Centered modal with spacers ──
-        let modal_row = row![
-            Space::new().width(Length::FillPortion(1)),
-            modal_panel,
-            Space::new().width(Length::FillPortion(1)),
-        ]
-        .width(Length::Fill)
-        .align_y(Alignment::Center);
-
-        // ── Semi-transparent backdrop (click sends Escape to dismiss) ──
-        let backdrop_color = Color {
-            a: 0.55,
-            ..Color::BLACK
-        };
-
-        let backdrop = mouse_area(
-            container(modal_row)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .style(move |_: &iced::Theme| container::Style {
-                    background: Some(backdrop_color.into()),
-                    ..Default::default()
-                }),
         )
-        .on_press(SettingsMessage::Escape)
-        .on_scroll(|delta| {
-            let y = match delta {
-                iced::mouse::ScrollDelta::Lines { y, .. } => y,
-                iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-            };
-            if y > 0.0 {
-                SettingsMessage::SlotListUp
-            } else {
-                SettingsMessage::SlotListDown
-            }
-        });
-
-        backdrop.into()
     }
 
-    /// Theme picker modal — a sibling of [`Self::render_font_modal`] with the
-    /// same chrome (hand-rolled `bg0_hard` panel + accent border, centered
-    /// `FillPortion(5)` panel, dimmed backdrop that dismisses on press and
-    /// forwards the wheel). The difference is the row renderer: each row is
-    /// painted in its OWN theme's palette (see [`render_theme_slot`]), so
-    /// scrolling the list IS a live preview.
+    /// Theme picker modal — a sibling of [`Self::render_font_modal`] sharing the
+    /// same chrome via [`render_picker_modal`]. The difference is the row
+    /// renderer: each row is painted in its OWN theme's palette (see
+    /// [`render_theme_slot`]) and the hover wash is disabled so those colors
+    /// stay true, so scrolling the list IS a live preview.
     fn render_theme_modal<'a>(
         &'a self,
         tsw: &'a super::ThemeSubListState,
         window_height: f32,
-        _font: Font,
     ) -> Element<'a, SettingsMessage> {
-        use super::{
-            THEME_SEARCH_INPUT_ID,
-            rendering::{SlotRenderContext, render_theme_slot},
-        };
+        use super::rendering::{SlotRenderContext, render_theme_slot};
 
-        let search_query = tsw.search_query.clone();
-
-        let modal_height = window_height * 0.70;
-        let modal_chrome = BREADCRUMB_HEIGHT + FONT_SEARCH_BAR_HEIGHT;
-
-        // ── Title bar ──
-        let title_bar = {
-            let dim_color = theme::fg4();
-            let active_color = theme::fg0();
-            let label_size = 13.0;
-
-            let back_icon_size = label_size;
-            let back_btn = button(
-                embedded_svg::svg_widget("assets/icons/x.svg")
-                    .width(Length::Fixed(back_icon_size))
-                    .height(Length::Fixed(back_icon_size))
-                    .style(move |_theme, _status| svg::Style {
-                        color: Some(dim_color),
-                    }),
-            )
-            .on_press(SettingsMessage::Escape)
-            .style(transparent_button_style)
-            .padding(Padding::new(2.0));
-
-            let content = row![
-                Space::new().width(Length::Fixed(12.0)),
-                text("Themes")
-                    .size(label_size)
-                    .font(Font {
-                        weight: Weight::Bold,
-                        ..theme::ui_font()
-                    })
-                    .color(active_color),
-                Space::new().width(Length::Fill),
-                back_btn,
-                Space::new().width(Length::Fixed(12.0)),
-            ]
-            .align_y(Alignment::Center)
-            .height(Length::Fixed(BREADCRUMB_HEIGHT));
-
-            container(content).width(Length::Fill)
-        };
-
-        // ── Search bar ──
-        let search_bar = {
-            let input = crate::widgets::search_bar::search_bar(
-                &search_query,
-                "Type to filter themes...",
-                THEME_SEARCH_INPUT_ID,
-                SettingsMessage::SubListSearchChanged,
-                Some(crate::theme::settings_search_input_style),
-            );
-            container(input)
-                .width(Length::Fill)
-                .height(Length::Fixed(FONT_SEARCH_BAR_HEIGHT))
-                .padding(Padding::new(4.0).left(12.0).right(12.0))
-        };
-
-        // ── Theme slot list or empty state ──
-        let main_area: Element<'a, SettingsMessage> = if tsw.filtered_rows.is_empty() {
-            // Distinguish "your search matched nothing" from "discovery returned
-            // zero themes" (the latter only when reading the themes dir fails).
-            let empty_msg = if tsw.search_query.is_empty() {
-                "No themes found"
-            } else {
-                "No themes match the search query"
-            };
-            container(text(empty_msg).size(14).color(theme::fg4()))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .into()
-        } else {
-            // No hover wash: the active-theme accent wash would muddy rows
-            // painted in their own palette. Selection is shown by the per-row
-            // accent ring in `render_theme_slot` instead.
-            let config = slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome)
-                .without_hover_wash();
-            let rows_owned = tsw.filtered_rows.clone();
-
-            slot_list::slot_list_view_with_scroll(
-                &tsw.slot_list,
-                &rows_owned,
-                &config,
-                SettingsMessage::SlotListUp,
-                SettingsMessage::SlotListDown,
-                super::settings_seek_to(rows_owned.len()),
-                None,
-                move |row, ctx| {
-                    let ctx = SlotRenderContext {
-                        item_index: ctx.item_index,
-                        is_center: ctx.is_center,
-                        opacity: 1.0,
-                        row_height: ctx.row_height,
-                        scale_factor: ctx.scale_factor,
-                        is_capturing: false,
-                        conflict_text: None,
-                        toggle_cursor: None,
+        render_picker_modal(
+            "Themes",
+            "Type to filter themes...",
+            super::THEME_SEARCH_INPUT_ID,
+            &tsw.search_query,
+            window_height,
+            |modal_height, modal_chrome| {
+                if tsw.filtered_rows.is_empty() {
+                    // Distinguish "search matched nothing" from "discovery
+                    // returned zero themes" (only when the themes dir fails).
+                    let msg = if tsw.search_query.is_empty() {
+                        "No themes found"
+                    } else {
+                        "No themes match the search query"
                     };
-                    render_theme_slot(&ctx, row)
-                },
-            )
-        };
-
-        // ── Modal panel ──
-        let modal_bg = theme::bg0_hard();
-        let modal_border = theme::accent();
-        let modal_radius = theme::ui_border_radius();
-
-        let modal_panel = container(
-            column![title_bar, search_bar, main_area]
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .width(Length::FillPortion(5))
-        .height(Length::Fixed(modal_height))
-        .clip(true)
-        .padding(Padding::new(4.0))
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(modal_bg.into()),
-            border: Border {
-                color: modal_border,
-                width: 1.5,
-                radius: modal_radius,
+                    return picker_empty_state(msg);
+                }
+                // No hover wash: the active-theme accent wash would muddy rows
+                // painted in their own palette (selection shows via the per-row
+                // accent ring in `render_theme_slot`).
+                let config =
+                    slot_list::SlotListConfig::with_dynamic_slots(modal_height, modal_chrome)
+                        .without_hover_wash();
+                slot_list::slot_list_view_with_scroll(
+                    &tsw.slot_list,
+                    &tsw.filtered_rows,
+                    &config,
+                    SettingsMessage::SlotListUp,
+                    SettingsMessage::SlotListDown,
+                    super::settings_seek_to(tsw.filtered_rows.len()),
+                    None,
+                    |row, ctx| {
+                        let ctx = SlotRenderContext {
+                            item_index: ctx.item_index,
+                            is_center: ctx.is_center,
+                            opacity: 1.0,
+                            row_height: ctx.row_height,
+                            scale_factor: ctx.scale_factor,
+                            is_capturing: false,
+                            conflict_text: None,
+                            toggle_cursor: None,
+                        };
+                        render_theme_slot(&ctx, row)
+                    },
+                )
             },
-            ..Default::default()
-        });
+        )
+    }
+}
 
-        let modal_row = row![
-            Space::new().width(Length::FillPortion(1)),
-            modal_panel,
-            Space::new().width(Length::FillPortion(1)),
-        ]
+/// Centered dim-text body for a picker modal's empty state.
+fn picker_empty_state<'a>(msg: &'static str) -> Element<'a, SettingsMessage> {
+    container(text(msg).size(14).color(theme::fg4()))
         .width(Length::Fill)
-        .align_y(Alignment::Center);
+        .height(Length::Fill)
+        .center(Length::Fill)
+        .into()
+}
 
-        let backdrop_color = Color {
-            a: 0.55,
-            ..Color::BLACK
-        };
+/// Shared chrome for the settings picker modals (font + theme): a dimmed
+/// backdrop (Escape on press, wheel → slot Up/Down) behind a centered panel
+/// with a title bar (X back-button), a search bar, and the caller's body.
+///
+/// The two pickers differ only in their title/placeholder/search-input-id and
+/// their slot-list body, so this keeps the scaffolding in one place. `build_body`
+/// receives the computed `(modal_height, modal_chrome)` so its slot-list config
+/// matches the panel height; it borrows the picker state directly (no per-frame
+/// clone of the row list or the search query).
+fn render_picker_modal<'a>(
+    title: &'static str,
+    placeholder: &'static str,
+    search_input_id: &'static str,
+    search_query: &'a str,
+    window_height: f32,
+    build_body: impl FnOnce(f32, f32) -> Element<'a, SettingsMessage>,
+) -> Element<'a, SettingsMessage> {
+    // The modal floats over the settings panel at 70% of window height, minus
+    // chrome (breadcrumb-height title bar + search bar).
+    let modal_height = window_height * 0.70;
+    let modal_chrome = BREADCRUMB_HEIGHT + FONT_SEARCH_BAR_HEIGHT;
+    let main_area = build_body(modal_height, modal_chrome);
 
-        let backdrop = mouse_area(
-            container(modal_row)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .style(move |_: &iced::Theme| container::Style {
-                    background: Some(backdrop_color.into()),
-                    ..Default::default()
+    // ── Title bar (X back-button on the right) ──
+    let title_bar = {
+        let dim_color = theme::fg4();
+        let label_size = 13.0;
+        let back_btn = button(
+            embedded_svg::svg_widget("assets/icons/x.svg")
+                .width(Length::Fixed(label_size))
+                .height(Length::Fixed(label_size))
+                .style(move |_theme, _status| svg::Style {
+                    color: Some(dim_color),
                 }),
         )
         .on_press(SettingsMessage::Escape)
-        .on_scroll(|delta| {
-            let y = match delta {
-                iced::mouse::ScrollDelta::Lines { y, .. } => y,
-                iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-            };
-            if y > 0.0 {
-                SettingsMessage::SlotListUp
-            } else {
-                SettingsMessage::SlotListDown
-            }
-        });
+        .style(transparent_button_style)
+        .padding(Padding::new(2.0));
 
-        backdrop.into()
-    }
+        let content = row![
+            Space::new().width(Length::Fixed(12.0)),
+            text(title)
+                .size(label_size)
+                .font(Font {
+                    weight: Weight::Bold,
+                    ..theme::ui_font()
+                })
+                .color(theme::fg0()),
+            Space::new().width(Length::Fill),
+            back_btn,
+            Space::new().width(Length::Fixed(12.0)),
+        ]
+        .align_y(Alignment::Center)
+        .height(Length::Fixed(BREADCRUMB_HEIGHT));
+
+        container(content).width(Length::Fill)
+    };
+
+    // ── Search bar ──
+    let search_bar = {
+        let input = crate::widgets::search_bar::search_bar(
+            search_query,
+            placeholder,
+            search_input_id,
+            SettingsMessage::SubListSearchChanged,
+            Some(crate::theme::settings_search_input_style),
+        );
+        container(input)
+            .width(Length::Fill)
+            .height(Length::Fixed(FONT_SEARCH_BAR_HEIGHT))
+            .padding(Padding::new(4.0).left(12.0).right(12.0))
+    };
+
+    // ── Panel (bg0_hard fill + accent border; matches the sibling picker, not
+    //    the shared `modal_frame_style` used by the other dialogs) ──
+    let modal_bg = theme::bg0_hard();
+    let modal_border = theme::accent();
+    let modal_radius = theme::ui_border_radius();
+    let modal_panel = container(
+        column![title_bar, search_bar, main_area]
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .width(Length::FillPortion(5))
+    .height(Length::Fixed(modal_height))
+    .clip(true)
+    .padding(Padding::new(4.0))
+    .style(move |_: &iced::Theme| container::Style {
+        background: Some(modal_bg.into()),
+        border: Border {
+            color: modal_border,
+            width: 1.5,
+            radius: modal_radius,
+        },
+        ..Default::default()
+    });
+
+    // ── Centered panel + dimmed backdrop (press → Escape, wheel → Up/Down) ──
+    let modal_row = row![
+        Space::new().width(Length::FillPortion(1)),
+        modal_panel,
+        Space::new().width(Length::FillPortion(1)),
+    ]
+    .width(Length::Fill)
+    .align_y(Alignment::Center);
+
+    let backdrop_color = Color {
+        a: 0.55,
+        ..Color::BLACK
+    };
+
+    mouse_area(
+        container(modal_row)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(backdrop_color.into()),
+                ..Default::default()
+            }),
+    )
+    .on_press(SettingsMessage::Escape)
+    .on_scroll(|delta| {
+        let y = match delta {
+            iced::mouse::ScrollDelta::Lines { y, .. } => y,
+            iced::mouse::ScrollDelta::Pixels { y, .. } => y,
+        };
+        if y > 0.0 {
+            SettingsMessage::SlotListUp
+        } else {
+            SettingsMessage::SlotListDown
+        }
+    })
+    .into()
 }
 
 /// Narrow-variant category chip: pill-shaped, icon + name only (no

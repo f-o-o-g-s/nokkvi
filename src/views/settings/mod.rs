@@ -440,8 +440,8 @@ pub(crate) enum SettingsAction {
         hex_color: String,
     },
     /// Apply a preset theme. Carries the theme's stem (apply key) and display
-    /// name (for the confirmation toast) so the root handler never re-indexes
-    /// `all_themes()` — there is no positional index to drift.
+    /// name (for the confirmation toast) so the root handler applies by stem
+    /// directly — there is no positional index into the theme list to drift.
     ApplyPreset {
         stem: String,
         display_name: String,
