@@ -327,10 +327,13 @@ impl Nokkvi {
 
         // Detail-pane nav (Tab / Backspace / click / scrollbar seek): chain
         // a scroll task so the focused row stays in view. The sidebar and
-        // sub-list paths skip this — only the right pane needs auto-scroll.
+        // sub-list paths skip this — only the right pane needs auto-scroll
+        // (an open picker would otherwise re-scroll the dimmed background pane
+        // on every cursor move).
         if is_detail_nav
             && self.settings_page.sub_list.is_none()
             && self.settings_page.font_sub_list.is_none()
+            && self.settings_page.theme_sub_list.is_none()
         {
             Task::batch([task, self.detail_pane_scroll_task()])
         } else {
