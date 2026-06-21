@@ -729,6 +729,24 @@ impl PlaybackController {
         Ok(())
     }
 
+    /// Whether a play-from-here click should re-anchor the shuffle order
+    /// (start a fresh shuffle headed by the clicked track) instead of
+    /// repositioning into the existing order — true when the engine is not
+    /// actively producing audio (`Stopped` or `Paused`).
+    ///
+    /// A click in either state begins playback fresh: `load_play_and_set_current`
+    /// always calls `engine.play()`, and a `Paused` engine tears down and
+    /// restarts on a new source exactly like `Stopped`, so repositioning into a
+    /// spent order there would reproduce the tail dead-end. Only an actively
+    /// `Playing` engine is a true mid-session listen whose upcoming order must
+    /// be preserved. Trade-off: clicking the row of the already-paused track
+    /// also reshuffles next-up (otherwise a no-op resume), which is the intended
+    /// "fresh start" semantics; resuming via the transport play button does not
+    /// route through here and is unaffected.
+    fn should_reanchor_for_play(state: crate::audio::engine::PlaybackState) -> bool {
+        !matches!(state, crate::audio::engine::PlaybackState::Playing)
+    }
+
     /// Play an already-queued song addressed by its per-row `entry_id`.
     ///
     /// Drift-immune sibling of [`Self::play_song_from_queue`]: the
@@ -739,6 +757,16 @@ impl PlaybackController {
     /// clicked.
     pub async fn play_entry_from_queue(&self, entry_id: u64) -> Result<()> {
         let queue_manager = self.queue_service.queue_manager();
+
+        // Under shuffle, a click that STARTS a new session re-anchors the play
+        // order so the chosen track heads a fresh shuffle — otherwise
+        // repositioning into a spent order can strand the user at its tail
+        // (clicking the last shuffle slot would play once and stop). Scope
+        // lives in `should_reanchor_for_play`. Snapshot on the
+        // engine's own lock, dropped before the queue lock — the engine lock is
+        // never nested under the qm lock.
+        let starting_fresh =
+            Self::should_reanchor_for_play(self.audio_engine.lock().await.state());
 
         // 0+1. Record history, resolve entry_id, reposition — all under
         //      one qm lock so the resolution is atomic with the reposition.
@@ -765,7 +793,13 @@ impl PlaybackController {
                     "play_entry_from_queue: song_id missing at queue position {queue_index}"
                 )
             })?;
-            let effect = qm.reposition_to_index(Some(queue_index));
+            let effect = if starting_fresh {
+                // Re-anchor under shuffle (no-op reshuffle when shuffle is off,
+                // so this stays a plain reposition for sequential playback).
+                qm.reanchor_shuffle_to_index(queue_index)
+            } else {
+                qm.reposition_to_index(Some(queue_index))
+            };
             qm.save_order()?;
             (song_id, effect)
         };
@@ -983,7 +1017,28 @@ impl PlaybackController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::engine::CustomAudioEngine;
+    use crate::audio::engine::{CustomAudioEngine, PlaybackState};
+
+    /// Locks the play-from-here re-anchor gate contract across every engine
+    /// state: a stopped OR paused engine starts a fresh shuffle; only an
+    /// actively playing listen keeps the plain reposition (so its upcoming
+    /// order isn't re-randomized). Guards against a refactor silently flipping
+    /// the `matches!` or swapping in the (differently-scoped) `engine_is_playing()`.
+    #[test]
+    fn reanchor_gate_reanchors_unless_playing() {
+        assert!(
+            PlaybackController::should_reanchor_for_play(PlaybackState::Stopped),
+            "Stopped must re-anchor (fresh shuffle)"
+        );
+        assert!(
+            PlaybackController::should_reanchor_for_play(PlaybackState::Paused),
+            "Paused must re-anchor — a click there restarts playback fresh"
+        );
+        assert!(
+            !PlaybackController::should_reanchor_for_play(PlaybackState::Playing),
+            "Playing must keep plain reposition (mid-session listen)"
+        );
+    }
 
     /// Regression test for the strong-Arc cycle introduced by `set_completion_callback`.
     ///

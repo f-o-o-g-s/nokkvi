@@ -758,6 +758,47 @@ impl QueueManager {
         tx.commit_no_save()
     }
 
+    /// "Play from here" that begins a NEW playback session: reposition onto
+    /// `index` and, under shuffle, re-anchor the play order so the chosen
+    /// track becomes the head of a fresh shuffle (every remaining track
+    /// reshuffled behind it).
+    ///
+    /// A plain [`Self::reposition_to_index`] only moves the playhead inside
+    /// the EXISTING order, so clicking a track that happens to sit at the
+    /// tail of a spent shuffle plays once and stops (the dead-end the engine
+    /// reports as "No next song available"). Re-anchoring guarantees a manual
+    /// pick under shuffle can never strand the user at the end of the order.
+    ///
+    /// With shuffle OFF the order is identity and this is exactly
+    /// [`Self::reposition_to_index`] — no reshuffle. Intended for the
+    /// play-from-here path when the engine is stopped; mid-session jumps keep
+    /// using `reposition_to_index` so the upcoming order isn't re-randomized
+    /// out from under an active listen.
+    pub fn reanchor_shuffle_to_index(&mut self, index: usize) -> NextTrackResetEffect {
+        let mut tx = self.write();
+        tx.queue.current_index = Some(index);
+        tx.sync_current_order_to_index();
+        // A valid in-range `index` always resolves to an order slot (order[] is
+        // a full permutation of 0..len), so current_order is Some here. If it
+        // were None, shuffle_order would fall to its no-anchor branch and leave
+        // the clicked track unanchored — re-creating the dead-end. Surface that
+        // contract violation in tests rather than shipping a silent regression.
+        debug_assert!(
+            tx.queue.current_order.is_some() || tx.queue.song_ids.is_empty(),
+            "reanchor_shuffle_to_index: index {index} absent from order[] — \
+             current_order desynced; caller must pass an in-range song_ids index"
+        );
+        if tx.queue.shuffle {
+            // Re-anchor: `shuffle_order` moves `current_order` (now the
+            // clicked track) to order[0] and Fisher-Yates shuffles the rest,
+            // so the chosen track plays first and every other track follows in
+            // a fresh random order. Identity orders (shuffle off) are left
+            // untouched above — this branch is skipped.
+            tx.shuffle_order();
+        }
+        tx.commit_no_save()
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Queue Item Operations
     // ══════════════════════════════════════════════════════════════════════
@@ -1077,6 +1118,92 @@ pub(crate) mod tests {
         qm.pool.insert_many(songs);
         qm.replace_song_ids_for_test(ids, current_index);
         (qm, temp)
+    }
+
+    // ── reanchor_shuffle_to_index (play-from-here under shuffle) ──
+
+    /// Baseline / regression: a plain reposition onto the LAST slot of a
+    /// shuffle order dead-ends — peek returns None. This is the exact bug the
+    /// re-anchor fixes (Razrushitelniy Krug at order[15], repeat/consume off).
+    #[test]
+    fn reposition_onto_last_shuffle_slot_dead_ends() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = true;
+        // song_ids[0] ("a") sits at the LAST order slot.
+        qm.queue.order = vec![1, 2, 3, 0];
+
+        let _ = qm.reposition_to_index(Some(0));
+        assert_eq!(qm.queue.current_order, Some(3));
+        assert!(
+            qm.peek_next_song().is_none(),
+            "last shuffle slot with repeat/consume off has no next track"
+        );
+    }
+
+    /// Re-anchoring on play-from-here makes the clicked track the head of a
+    /// fresh shuffle: it lands at order[0], current_order is 0, every track is
+    /// still present, and there IS a next track (the dead-end is gone).
+    #[test]
+    fn reanchor_shuffle_makes_clicked_track_head_and_has_next() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = true;
+        // Clicked song_ids[0] ("a") starts at the LAST order slot — the exact
+        // dead-end position.
+        qm.queue.order = vec![1, 2, 3, 0];
+
+        let _ = qm.reanchor_shuffle_to_index(0);
+
+        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.queue.current_order, Some(0));
+        assert_eq!(qm.queue.order[0], 0, "clicked track anchored at head");
+
+        // Order is still a full permutation of every song index — no track
+        // dropped, none duplicated.
+        let mut sorted = qm.queue.order.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, vec![0, 1, 2, 3]);
+
+        // No dead-end: a next track now exists.
+        assert!(
+            qm.peek_next_song().is_some(),
+            "re-anchored shuffle must have a next track"
+        );
+    }
+
+    /// With shuffle OFF, re-anchor is a plain reposition: the identity order
+    /// is untouched and no reshuffle happens.
+    #[test]
+    fn reanchor_with_shuffle_off_is_plain_reposition() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        // shuffle stays off; order is identity [0, 1, 2, 3].
+
+        let _ = qm.reanchor_shuffle_to_index(2);
+
+        assert_eq!(qm.queue.current_index, Some(2));
+        assert_eq!(qm.queue.current_order, Some(2));
+        assert_eq!(
+            qm.queue.order,
+            vec![0, 1, 2, 3],
+            "identity order must be untouched when shuffle is off"
+        );
     }
 
     #[test]

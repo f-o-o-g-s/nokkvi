@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- With Shuffle on, clicking a track to play while stopped or paused now reshuffles the queue behind it instead of stopping after one song.
 - Dragging the progress bar while paused no longer resumes playback; the playhead jumps to the new position and stays paused, keeping the elapsed time, scrub handle, and play button in sync.
 
 ### Removed
