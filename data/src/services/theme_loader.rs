@@ -64,6 +64,10 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
         content: include_str!("../../../themes/ember.toml"),
     },
     BuiltinTheme {
+        stem: "firmium",
+        content: include_str!("../../../themes/firmium.toml"),
+    },
+    BuiltinTheme {
         stem: "ferra",
         content: include_str!("../../../themes/ferra.toml"),
     },
@@ -521,7 +525,7 @@ mod tests {
     #[test]
     fn test_all_builtin_themes_parse() {
         let registry = builtin_registry();
-        assert_eq!(registry.len(), 22, "Expected 22 built-in themes");
+        assert_eq!(registry.len(), 23, "Expected 23 built-in themes");
 
         for builtin in BUILTIN_THEMES {
             let theme = ThemeFile::load(builtin.content).unwrap_or_else(|e| {
@@ -548,7 +552,7 @@ mod tests {
     #[test]
     fn test_seed_and_discover() {
         let (_tmp, themes) = seed_to_temp();
-        assert_eq!(themes.len(), 22);
+        assert_eq!(themes.len(), 23);
         assert!(themes.iter().all(|t| t.is_builtin));
 
         // Check the new default and a legacy builtin

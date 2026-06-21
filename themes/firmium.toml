@@ -1,0 +1,113 @@
+# Firmium — ported from the Firmium music client's default look: warm gold on
+# near-black, a terminal/monospace mood. Firmium ships only nine colors and is
+# strictly dark, so its three-step near-black ladder is expanded to Nokkvi's
+# five background/foreground levels, and success/warning (which Firmium has no
+# precedent for) are invented to sit beside the gold. Firmium's gold+purple
+# brand (logo gradient #E8C97E -> #863BFF, purple visualizer triad) lives in the
+# visualizer: purple bars crowned with gold peaks.
+#
+# Firmium has NO light mode, so [light] below is an original companion — the
+# "Greige Inverse": dark Firmium folded across the luminance axis. A strictly
+# neutral light-grey ladder under neutral dark-grey ink keeps the gold as the
+# single warm event in the UI, mirroring the dark theme's discipline. On a light
+# canvas the accent roles flip — primary deepens to antique gold #C79A3A (which
+# reads as link/label text) while the canonical pale gold #E8C97E becomes the
+# louder bright. Designed and adversarially verified against Nokkvi's contrast
+# gauntlet by a multi-agent design panel.
+name = "Firmium"
+
+[dark]
+border = "#2A2A2A"
+
+[dark.background]
+default = "#0F0F0F"
+hard = "#0A0A0A"
+level1 = "#1A1A1A"
+level2 = "#242424"
+level3 = "#2E2E2E"
+soft = "#0F0F0F"
+
+[dark.foreground]
+bright = "#F0F0F0"
+level1 = "#CFCFCF"
+level2 = "#A8A8A8"
+level3 = "#888888"
+level4 = "#6A6A6A"
+
+[dark.accent]
+border_light = "#E8C97E"
+bright = "#F0D99A"
+now_playing = "#F0D99A"
+primary = "#E8C97E"
+selected = "#302B20"
+
+[dark.danger]
+bright = "#E87A7A"
+base = "#E06060"
+
+[dark.success]
+bright = "#9EC79C"
+base = "#8BB58A"
+
+[dark.warning]
+bright = "#F0B255"
+base = "#E59A2E"
+
+[dark.star]
+bright = "#E8C97E"
+base = "#E8C97E"
+
+[dark.visualizer]
+bar_gradient_colors = ["#5533CC", "#6948E5", "#7C5CFF", "#9372FF", "#AA88FF", "#C2A6FF"]
+border_color = "#0A0A0A"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#E8C97E", "#F5E2AC", "#E8C97E", "#F5E2AC", "#E8C97E", "#F5E2AC"]
+
+[light]
+border = "#D2D2D2"
+
+[light.background]
+default = "#F0F0F0"
+hard = "#FFFFFF"
+level1 = "#E6E6E6"
+level2 = "#DADADA"
+level3 = "#CFCFCF"
+soft = "#F0F0F0"
+
+[light.foreground]
+bright = "#1A1A1A"
+level1 = "#2E2E2E"
+level2 = "#4A4A4A"
+level3 = "#6A6A6A"
+level4 = "#8C8C8C"
+
+[light.accent]
+border_light = "#E6CF96"
+bright = "#E8C97E"
+now_playing = "#C79A3A"
+primary = "#C79A3A"
+selected = "#E8C97E"
+
+[light.danger]
+bright = "#E06060"
+base = "#C0392B"
+
+[light.success]
+bright = "#6FA36C"
+base = "#4F7A4D"
+
+[light.warning]
+bright = "#D08A1E"
+base = "#A85A0E"
+
+[light.star]
+bright = "#E8C97E"
+base = "#C79A3A"
+
+[light.visualizer]
+bar_gradient_colors = ["#5B3FD0", "#6E4FEC", "#8366FF", "#9A82FF", "#B49EFF", "#CBBBFF"]
+border_color = "#FFFFFF"
+border_opacity = 0.35
+led_border_opacity = 1.0
+peak_gradient_colors = ["#C79A3A", "#8366FF", "#C79A3A", "#8366FF", "#C79A3A", "#8366FF"]
