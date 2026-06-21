@@ -706,7 +706,7 @@ pub struct ScopeConfig {
     pub outline_thickness: f32,
     /// Outline opacity (0.0 = invisible, 1.0 = fully opaque). Default: 0.0
     pub outline_opacity: f32,
-    /// Gradient color mode. See [`LinesGradientMode`]. Default: Static
+    /// Gradient color mode. See [`LinesGradientMode`]. Default: Height
     #[serde(deserialize_with = "deserialize_or_default")]
     pub gradient_mode: LinesGradientMode,
     /// Color animation cycle speed for the breathing gradient (0.05-1.0).
@@ -753,7 +753,7 @@ impl Default for ScopeConfig {
             glow_intensity: 0.35,
             outline_thickness: 0.0,
             outline_opacity: 0.0,
-            gradient_mode: LinesGradientMode::Static,
+            gradient_mode: LinesGradientMode::Height,
             animation_speed: 0.1,
             style: LinesStyle::Smooth,
             particles: true,

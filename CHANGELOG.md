@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The Scope visualizer now defaults to a height-based gradient instead of a static (flat) color.
+
 ### Fixed
 
 ### Removed
