@@ -6,21 +6,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- New built-in **Firmium** theme: warm gold on near-black with a terminal/monospace mood, ported from the Firmium music client's default look. The visualizer matches the gold accent (a light gold gradient), and song-rating stars use a darker gold so they stay legible against the light-gold selection and now-playing highlights. Firmium ships no light mode, so light mode is an original neutral-grey companion that keeps the gold as the only warm accent.
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.10.1 — 2026-06-21
+
+### Added
+
+- New built-in **Firmium** theme: warm gold on near-black with a terminal/monospace mood (ported from the Firmium client), plus an original neutral-grey light companion.
 
 ### Changed
 
-- Scope echo now warps only the ring, so the particle field stays crisp instead of getting smeared by the feedback.
+- The Scope particle field now stays crisp during echo instead of smearing into the feedback trail.
 - Retuned the default Scope look: stronger echo, fewer and slower particles, a thinner ring, and softer glow and fill.
 
 ### Fixed
 
-- Lines and Scope visualizers no longer show triangular spikes or glow artifacts at sharp peaks and bends. The stroke is now drawn as an analytic distance field with proper rounded joins (so it can never fold on itself), and the neon glow comes from a smooth post-process bloom instead of an in-shader halo that distorted at sharp turns.
+- The Lines and Scope visualizers no longer show triangular spikes or glow artifacts at sharp peaks and bends.
 - With Shuffle on, clicking a track to play while stopped or paused now reshuffles the queue behind it instead of stopping after one song.
-- Dragging the progress bar while paused no longer resumes playback; the playhead jumps to the new position and stays paused, keeping the elapsed time, scrub handle, and play button in sync.
+- Dragging the progress bar while paused now seeks without resuming playback.
 - The Scope Particle Speed slider now changes the dust's whole-field motion across its full range, not just the initial launch.
-
-### Removed
 
 ## v0.10.0 — 2026-06-19
 
