@@ -720,8 +720,9 @@ pub struct ScopeConfig {
     pub particles: bool,
     /// Number of particles in the field (0 disables). Default: 512
     pub particle_count: usize,
-    /// Particle launch-speed multiplier — how fast they fly out from the ring
-    /// (0.1 = lazy drift, 4.0 = energetic). Default: 1.0
+    /// Particle speed multiplier — scales both the launch kick AND the ongoing
+    /// curl-swirl drift, so the whole field moves faster/slower (0.1 = lazy
+    /// drift, 4.0 = energetic). Default: 1.0
     pub particle_speed: f32,
     /// Luminous-beam look: render the ring with additive blending so the glow
     /// accumulates into a bright neon beam over the cover (woscope-style).
@@ -747,20 +748,20 @@ impl Default for ScopeConfig {
             point_count: 16,
             radius: 0.7,
             sensitivity: 1.5,
-            line_thickness: 0.005,
-            fill_opacity: 0.75,
-            glow_intensity: 0.75,
+            line_thickness: 0.01,
+            fill_opacity: 0.5,
+            glow_intensity: 0.35,
             outline_thickness: 0.0,
             outline_opacity: 0.0,
             gradient_mode: LinesGradientMode::Static,
             animation_speed: 0.1,
             style: LinesStyle::Smooth,
             particles: true,
-            particle_count: 512,
-            particle_speed: 1.0,
+            particle_count: 192,
+            particle_speed: 0.5,
             beam: true,
             trails: 0.0,
-            echo: 0.25,
+            echo: 1.0,
         }
     }
 }

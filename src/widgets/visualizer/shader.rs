@@ -515,6 +515,10 @@ pub(crate) struct VisualizerPipeline {
     pub(super) msaa_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Widget-sized resolve target (MSAA resolves here, then blitted to framebuffer)
     pub(super) resolve_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// Widget-sized resolve of the RING ONLY (no particles). Only rendered when
+    /// echo is active; it is the scene the echo feedback loop warps, so the dust
+    /// stays out of the warp and is re-drawn fresh on the display instead.
+    pub(super) ring_only_texture: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Bind group for the blit pass (references resolve_texture + sampler)
     pub(super) blit_bind_group: Option<wgpu::BindGroup>,
     /// Pipeline for blitting the resolve texture onto the framebuffer
@@ -955,6 +959,27 @@ impl shader::Primitive for VisualizerPrimitive {
                 });
                 let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
+                // Ring-only resolve target — same format as `resolve`, used solely
+                // as the echo feedback scene so particles stay out of the warp loop
+                // (see the echo pass + the ring-only render pass in render()).
+                let ring_only_tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("visualizer ring-only resolve texture"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: pipeline.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let ring_only_view =
+                    ring_only_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
                 // Bind group for blit pass (references resolve texture + sampler)
                 let blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("visualizer blit bind group"),
@@ -1122,7 +1147,10 @@ impl shader::Primitive for VisualizerPrimitive {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&resolve_view),
+                            // Ring only (not resolve): keeps particles out of the
+                            // warp feedback. The ring-only pass in render() fills
+                            // this every frame echo is active.
+                            resource: wgpu::BindingResource::TextureView(&ring_only_view),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -1155,6 +1183,7 @@ impl shader::Primitive for VisualizerPrimitive {
 
                 pipeline.msaa_texture = Some((msaa_tex, msaa_view));
                 pipeline.resolve_texture = Some((resolve_tex, resolve_view));
+                pipeline.ring_only_texture = Some((ring_only_tex, ring_only_view));
                 pipeline.blit_bind_group = Some(blit_bind_group);
                 pipeline.bloom_texture_a = Some((bloom_a, bloom_a_view));
                 pipeline.bloom_texture_b = Some((bloom_b, bloom_b_view));
@@ -1357,6 +1386,52 @@ impl shader::Primitive for VisualizerPrimitive {
                 &pipeline.bind_group,
                 self.particle_count,
                 &mut render_pass,
+            );
+        }
+
+        // Pass 1b (echo only): render the RING ONLY into the ring-only resolve.
+        // The echo feedback loop warps + persists this texture, so drawing the
+        // ring without the particle field keeps the dust OUT of the warp (the
+        // particles are re-drawn fresh on the display after the echo pass). The
+        // MSAA scratch is reused (its store is Discard), so this just re-clears
+        // and redraws the ring into it. No-op cost-wise when echo is off.
+        if self.echo_enabled
+            && let Some((_, ring_only_view)) = &pipeline.ring_only_texture
+        {
+            let mut ring_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("visualizer ring-only (echo scene) pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa_view,
+                    depth_slice: None,
+                    resolve_target: Some(ring_only_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            let (tex_w, tex_h) = pipeline.msaa_size;
+            ring_pass.set_viewport(0.0, 0.0, tex_w as f32, tex_h as f32, 0.0, 1.0);
+            ring_pass.set_scissor_rect(0, 0, tex_w, tex_h);
+
+            let scope_pipe = if self.scope_beam {
+                &pipeline.scope_pipeline_beam_msaa
+            } else {
+                &pipeline.scope_pipeline_msaa
+            };
+            // Ring/bars/lines only — deliberately NO draw_particles here.
+            Self::draw_bars_and_lines(
+                &self.config,
+                &pipeline.bind_group,
+                &pipeline.bars_pipeline_msaa,
+                &pipeline.lines_pipeline_msaa,
+                scope_pipe,
+                &mut ring_pass,
             );
         }
 
@@ -1635,6 +1710,51 @@ impl shader::Primitive for VisualizerPrimitive {
                 blit_pass.set_bind_group(0, display_bg, &[]);
             }
             blit_pass.draw(0..3, 0..1); // Single fullscreen triangle
+        }
+
+        // Echo redraws the particle field here, fresh on top of the warped
+        // ring feedback. The echo scene is ring-only (Pass 1b), so the dust never
+        // enters the warp loop; this pass puts it back on the display un-smeared.
+        // Drawn before the bloom composite so the dust sits UNDER its own glow,
+        // matching the non-echo layering (where particles live in the resolve the
+        // bloom composites over). Gated on echo so the non-echo path is untouched
+        // (particles already ride the resolve into the blit there).
+        if self.echo_enabled && self.particle_count > 0 {
+            let mut particle_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("visualizer echo fresh-particle pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            let (tex_w, tex_h) = pipeline.msaa_size;
+            particle_pass.set_viewport(
+                clip_bounds.x as f32,
+                clip_bounds.y as f32,
+                tex_w as f32,
+                tex_h as f32,
+                0.0,
+                1.0,
+            );
+            particle_pass.set_scissor_rect(clip_bounds.x, clip_bounds.y, width, height);
+            // Non-MSAA particle pipeline (targets the surface format) — the dust
+            // is soft radial falloff, so it needs no multisampling.
+            Self::draw_particles(
+                &pipeline.particle_pipeline,
+                &pipeline.bind_group,
+                self.particle_count,
+                &mut particle_pass,
+            );
         }
 
         // Pass 3: additively composite the blurred bloom over the scene.

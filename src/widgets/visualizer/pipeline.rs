@@ -840,6 +840,7 @@ fn fs_fade(in: VertexOut) -> @location(0) vec4f {
             max_bars: Self::MAX_BARS,
             msaa_texture: None,
             resolve_texture: None,
+            ring_only_texture: None,
             blit_bind_group: None,
             blit_pipeline,
             blit_bind_group_layout,

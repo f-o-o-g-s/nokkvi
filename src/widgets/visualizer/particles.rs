@@ -362,7 +362,11 @@ impl ParticleSystem {
         sensitivity: f32,
     ) {
         let t = self.frame as f32 * CURL_TIME;
-        let flow = CURL_STRENGTH * (1.0 + energy); // swirl intensifies with the music
+        // Swirl intensifies with the music AND scales with the user's speed
+        // setting, so `particle_speed` governs the ongoing drift — not just the
+        // launch kick (which damps away). Without this, the unscaled swirl floors
+        // the slider's low end and the setting reads as doing almost nothing.
+        let flow = CURL_STRENGTH * (1.0 + energy) * speed_mul;
         let ctx = SpawnCtx {
             ring_radius,
             energy,
@@ -515,6 +519,34 @@ mod tests {
                 "color_t tracks the spawn azimuth: ang={ang} from_color_t={want}"
             );
         }
+    }
+
+    #[test]
+    fn particle_speed_scales_field_velocity() {
+        // `particle_speed` must visibly change how fast the dust MOVES, not just
+        // the launch kick (which damps away) — so it scales the ongoing curl
+        // swirl too. Same seed + same audio, two speeds: the faster setting must
+        // leave the field moving clearly quicker. Deterministic (fixed seed).
+        let mean_speed = |sys: &ParticleSystem| -> f32 {
+            let n = sys.particles.len().max(1) as f32;
+            sys.particles
+                .iter()
+                .map(|p| (p.vx * p.vx + p.vy * p.vy).sqrt())
+                .sum::<f32>()
+                / n
+        };
+        // Identical seed → identical starting pool; only `speed_mul` differs.
+        let mut slow = ParticleSystem::new(256, RING, 2024);
+        let mut fast = ParticleSystem::new(256, RING, 2024);
+        for _ in 0..12 {
+            slow.update(RING, 0.5, 0.0, 0.5, &[], 1.0);
+            fast.update(RING, 0.5, 0.0, 4.0, &[], 1.0);
+        }
+        let (sv, fv) = (mean_speed(&slow), mean_speed(&fast));
+        assert!(
+            fv > sv * 1.3,
+            "higher particle_speed must move the field faster: fast={fv}, slow={sv}"
+        );
     }
 
     #[test]
