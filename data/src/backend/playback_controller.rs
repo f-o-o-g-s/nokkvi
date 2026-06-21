@@ -765,8 +765,7 @@ impl PlaybackController {
         // lives in `should_reanchor_for_play`. Snapshot on the
         // engine's own lock, dropped before the queue lock — the engine lock is
         // never nested under the qm lock.
-        let starting_fresh =
-            Self::should_reanchor_for_play(self.audio_engine.lock().await.state());
+        let starting_fresh = Self::should_reanchor_for_play(self.audio_engine.lock().await.state());
 
         // 0+1. Record history, resolve entry_id, reposition — all under
         //      one qm lock so the resolution is atomic with the reposition.
