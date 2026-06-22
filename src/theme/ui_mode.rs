@@ -36,6 +36,8 @@ pub(super) struct UiModeFlags {
     /// How the slot-list scrollbar is shown (`ScrollbarVisibility` discriminant:
     /// OnHover / Always / Hidden)
     pub(super) scrollbar_visibility: AtomicU8,
+    /// Which icon family the UI renders (`IconSet` discriminant: Lucide / Phosphor)
+    pub(super) icon_set: AtomicU8,
     /// Whether volume sliders are displayed horizontally in the player bar
     pub(super) horizontal_volume: AtomicBool,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
@@ -106,6 +108,7 @@ pub(super) static UI_MODE: UiModeFlags = UiModeFlags {
     opacity_gradient: AtomicBool::new(true),
     slot_text_links: AtomicBool::new(true),
     scrollbar_visibility: AtomicU8::new(ScrollbarVisibility::Always as u8),
+    icon_set: AtomicU8::new(IconSet::Phosphor as u8),
     horizontal_volume: AtomicBool::new(false),
     autohide_toolbar: AtomicBool::new(false),
     autohide_toolbar_height: AtomicU8::new(6),
@@ -496,6 +499,40 @@ pub(crate) fn set_scrollbar_visibility(mode: ScrollbarVisibility) {
     UI_MODE
         .scrollbar_visibility
         .store(mode.to_u8(), Ordering::Relaxed);
+}
+
+use nokkvi_data::types::player_settings::IconSet;
+
+atomic_u8_enum! {
+    IconSet {
+        Lucide,
+        Phosphor,
+    } default Phosphor
+}
+
+/// Which icon family the UI renders (Lucide / Phosphor). Read by
+/// `embedded_svg::get_svg` on every icon lookup; the default Phosphor set
+/// remaps each Lucide path through `NAME_MAP`, while the non-default Lucide set
+/// short-circuits with a single atomic load and no remap.
+#[inline]
+pub(crate) fn icon_set() -> IconSet {
+    IconSet::from_u8(UI_MODE.icon_set.load(Ordering::Relaxed))
+}
+
+/// Set the active icon set (call when the user changes the setting).
+///
+/// On an actual change, bumps `theme_generation()` so theme-derived caches
+/// that depend on the set rebuild — notably the boat's anchor sprite, which
+/// `themed_anchor_svg()` renders as the Phosphor or Lucide anchor. Guarded by a
+/// swap-and-compare so the unconditional `set_icon_set` on every
+/// `PlayerSettingsLoaded` doesn't churn caches when the value is unchanged.
+#[inline]
+pub(crate) fn set_icon_set(set: IconSet) {
+    let prev = UI_MODE.icon_set.swap(set.to_u8(), Ordering::Relaxed);
+    if prev != set.to_u8() {
+        crate::theme::bump_theme_generation();
+        debug!(" Icon set changed: icon_set={}", set.as_label());
+    }
 }
 
 /// Returns true if the mini-player bar shows the volume slider (mini-player

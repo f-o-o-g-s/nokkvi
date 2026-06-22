@@ -27,6 +27,31 @@ define_labeled_enum! {
     }
 }
 
+define_labeled_enum! {
+    /// Which icon family the UI renders its glyphs from.
+    ///
+    /// `Phosphor` is the default — the Phosphor family (Regular weight, with
+    /// the transport + rating glyphs forced to the Fill weight so the play
+    /// button and rating stars still read solid). `Lucide` is the alternate:
+    /// the thin stroked outlines on a 24px grid that the app originally
+    /// shipped. The boat/anchor doodad art stays Lucide-tuned regardless of
+    /// this knob.
+    ///
+    /// Serializes to snake_case strings in `config.toml` and the redb-backed
+    /// `PersistedPlayerSettings`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum IconSet {
+        /// The original thin-outline alternate. The icons that ship under
+        /// `assets/icons/`.
+        Lucide { label: "Lucide", wire: "lucide" },
+        /// Default. Phosphor glyphs (`assets/icons-phosphor/`), Regular weight +
+        /// forced Fill for the filled transport/rating glyphs.
+        #[default]
+        Phosphor { label: "Phosphor", wire: "phosphor" },
+    }
+}
+
 /// Field-level shim used by `#[serde(deserialize_with = ...)]` on the
 /// `rounded_mode` fields of [`PersistedPlayerSettings`] and [`TomlSettings`].
 ///
@@ -110,5 +135,28 @@ mod tests {
     #[test]
     fn from_label_unknown_falls_back_to_default() {
         assert_eq!(RoundedMode::from_label("Nonsense"), RoundedMode::On);
+    }
+
+    #[test]
+    fn icon_set_label_roundtrip_and_default() {
+        for set in [IconSet::Lucide, IconSet::Phosphor] {
+            assert_eq!(IconSet::from_label(set.as_label()), set);
+        }
+        // Phosphor is the shipped default; the ui_meta default literal and the
+        // settings projection both depend on this.
+        assert_eq!(IconSet::default(), IconSet::Phosphor);
+        assert_eq!(IconSet::Phosphor.as_label(), "Phosphor");
+    }
+
+    #[test]
+    fn icon_set_serializes_to_snake_case_wire() {
+        assert_eq!(
+            serde_json::to_string(&IconSet::Lucide).unwrap(),
+            "\"lucide\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IconSet::Phosphor).unwrap(),
+            "\"phosphor\""
+        );
     }
 }

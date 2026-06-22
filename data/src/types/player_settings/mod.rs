@@ -75,6 +75,9 @@ pub struct LivePlayerSettings {
     /// gutter track). `OnHover` is the transient fade handle; `Hidden` removes
     /// the bar entirely.
     pub scrollbar_visibility: ScrollbarVisibility,
+    /// Which icon family the UI renders (default `Phosphor`). `Lucide` is the
+    /// original thin-outline alternate.
+    pub icon_set: IconSet,
     /// Whether crossfade between tracks is enabled
     pub crossfade_enabled: bool,
     /// Bit-perfect output mode (Off / Strict / Relaxed). Strict and Relaxed

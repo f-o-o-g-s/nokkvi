@@ -179,14 +179,14 @@ const NAV_DIVIDER_HEIGHT: f32 = 22.0;
 /// Ordered list of navigation tabs — single source of truth shared with `side_nav_bar`.
 /// Each entry: (label, icon_path, NavView).
 pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
-    ("Queue", "assets/icons/list-music.svg", NavView::Queue),
+    ("Queue", "assets/icons/music-4.svg", NavView::Queue),
     ("Albums", "assets/icons/disc-3.svg", NavView::Albums),
     ("Artists", "assets/icons/mic.svg", NavView::Artists),
     ("Songs", "assets/icons/music.svg", NavView::Songs),
     ("Genres", "assets/icons/tags.svg", NavView::Genres),
     (
         "Playlists",
-        "assets/icons/file-music.svg",
+        "assets/icons/list-music.svg",
         NavView::Playlists,
     ),
     (

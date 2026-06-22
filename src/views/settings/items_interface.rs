@@ -1,10 +1,10 @@
 //! Interface tab setting entries — navigation, lists, player bar, font, and
 //! metadata strip.
 //!
-//! 18 rows come from `define_settings!` via `build_interface_tab_settings_items`
-//! (2 Navigation + 7 Slot List + 1 Player Bar + 5 Metadata Strip + 3 Artwork
-//! Column: mode dropdown, `artwork_auto_max_pct` slider,
-//! `artwork_vertical_height_pct` slider). The Slot List count includes the
+//! 19 rows come from `define_settings!` via `build_interface_tab_settings_items`
+//! (2 Navigation + 7 Slot List + 1 Player Bar + 1 Font & Icons (`icon_set`) +
+//! 5 Metadata Strip + 3 Artwork Column: mode dropdown, `artwork_auto_max_pct`
+//! slider, `artwork_vertical_height_pct` slider). The Slot List count includes the
 //! `scrollbar_visibility` dropdown plus the three auto-hide sub-controls
 //! (`autohide_collapsed_appearance` / `autohide_toolbar_height` /
 //! `autohide_toolbar_grip`), which are inserted beneath the Auto-hide Toolbar
@@ -72,19 +72,21 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         macro_rows.take("general.horizontal_volume"),
         // The MiniPlayer-only "Visible Controls" ToggleSet is conditionally
         // appended below (only in MiniPlayer mode) — see the trailing block.
-        // --- Font (theme-routed; hand-written) ---
+        // --- Font & Icons (font row theme-routed + hand-written; icon set is a
+        //     macro row) ---
         SettingsEntry::Header {
-            label: "Font",
+            label: "Font & Icons",
             icon: FONT,
         },
         SettingItem::text(
-            SettingMeta::new("font_family", "Font Family", "Font")
+            SettingMeta::new("font_family", "Font Family", "Font & Icons")
                 .with_subtitle("Enter to browse installed fonts"),
             font_display,
             "(system default)",
         )
         .with_enter_hint()
         .with_activate(ActivateKind::FontPicker),
+        macro_rows.take("general.icon_set"),
         // --- Metadata Strip ---
         SettingsEntry::Header {
             label: "Metadata Strip",

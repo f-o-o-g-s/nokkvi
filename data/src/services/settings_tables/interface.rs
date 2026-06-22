@@ -16,8 +16,8 @@ use crate::{
             ARTWORK_AUTO_MAX_PCT_DEFAULT, ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN,
             ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
             ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkStretchFit,
-            CollapsedAppearance, NavDisplayMode, NavLayout, ScrollbarVisibility, SlotRowHeight,
-            StripClickAction, StripSeparator, TrackInfoDisplay,
+            CollapsedAppearance, IconSet, NavDisplayMode, NavLayout, ScrollbarVisibility,
+            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
         },
         setting_def::Tab,
         settings_data::InterfaceSettingsData,
@@ -209,6 +209,25 @@ define_settings! {
                 default: "Always",
                 options: &["On hover", "Always", "Hidden"],
                 read_field: |d| d.scrollbar_visibility.as_ref(),
+            },
+        },
+        IconSetSetting {
+            key: "general.icon_set",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_icon_set(IconSet::from_label(&v)),
+            toml_apply: |ts, p| p.icon_set = ts.icon_set,
+            read: |src, out| out.icon_set = src.icon_set,
+            write: |ps, ts| ts.icon_set = ps.icon_set,
+            ui_meta: {
+                label: "Icon Set",
+                category: "Appearance",
+                subtitle: Some(
+                    "Phosphor: the default solid glyphs (a nod to Claude) · \
+                     Lucide: the original thin-outline alternate",
+                ),
+                default: "Phosphor",
+                options: &["Phosphor", "Lucide"],
+                read_field: |d| d.icon_set.as_ref(),
             },
         },
         MiniPlayerShowVolume {
@@ -513,6 +532,7 @@ mod tests {
             mini_player_show_modes: true,
             slot_text_links: true,
             scrollbar_visibility: "Always".into(),
+            icon_set: "Phosphor".into(),
             font_family: "".into(),
             strip_show_title: true,
             strip_show_artist: true,
@@ -533,18 +553,18 @@ mod tests {
         }
     }
 
-    /// 18 entries get ui_meta — 5 Layout + 5 Slot List (autohide toggle +
+    /// 19 entries get ui_meta — 5 Layout + 5 Slot List (autohide toggle +
     /// collapsed-appearance + hidden-height + grip + scrollbar visibility) +
-    /// 1 Views + 4 Metadata Strip + 3 Artwork Column (mode dropdown +
-    /// auto-max-pct slider + vertical-height slider). The mini-player
-    /// show-volume/show-modes toggles and the 8 ToggleSet sub-keys
+    /// 1 Views + 1 Appearance (icon set) + 4 Metadata Strip + 3 Artwork Column
+    /// (mode dropdown + auto-max-pct slider + vertical-height slider). The
+    /// mini-player show-volume/show-modes toggles and the 8 ToggleSet sub-keys
     /// (`strip_show_*`, `*_artwork_overlay`) plus the conditional
     /// `artwork_column_stretch_fit` stay hand-written.
     #[test]
-    fn build_interface_tab_settings_items_emits_eighteen_rows() {
+    fn build_interface_tab_settings_items_emits_nineteen_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 18);
+        assert_eq!(entries.len(), 19);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -742,7 +762,8 @@ mod tests {
         assert!(keys.contains(&"general.autohide_toolbar_grip"));
         assert!(keys.contains(&"general.autohide_collapsed_appearance"));
         assert!(keys.contains(&"general.scrollbar_visibility"));
-        assert_eq!(keys.len(), 29);
+        assert!(keys.contains(&"general.icon_set"));
+        assert_eq!(keys.len(), 30);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated
@@ -848,6 +869,7 @@ mod tests {
             mini_player_show_modes: live.mini_player_show_modes,
             slot_text_links: live.slot_text_links,
             scrollbar_visibility: live.scrollbar_visibility.as_label().into(),
+            icon_set: live.icon_set.as_label().into(),
             font_family: live.font_family.clone().into(),
             strip_show_title: live.strip_show_title,
             strip_show_artist: live.strip_show_artist,

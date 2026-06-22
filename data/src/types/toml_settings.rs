@@ -11,8 +11,8 @@ use crate::{
     types::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
-            CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
+            CollapsedAppearance, EnterBehavior, IconSet, LibraryPageSize, NavDisplayMode,
+            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
             SlotRowHeight, StripClickAction, TrackInfoDisplay, VerboseConfig, VisualizationMode,
             VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
@@ -98,6 +98,9 @@ pub struct TomlSettings {
     /// -> `TomlSettings::default()`, the anchor the sparse-strip round-trip is
     /// pinned against.
     pub scrollbar_visibility: ScrollbarVisibility,
+    /// Which icon family the UI renders (default `Phosphor`). Missing keys fill
+    /// from the container `#[serde(default)]` -> `TomlSettings::default()`.
+    pub icon_set: IconSet,
     pub horizontal_volume: bool,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
     /// or a sort/search shortcut is used (default true). Missing keys fill from
@@ -267,6 +270,7 @@ impl Default for TomlSettings {
             opacity_gradient: false,
             slot_text_links: true,
             scrollbar_visibility: ScrollbarVisibility::default(),
+            icon_set: IconSet::default(),
             horizontal_volume: false,
             autohide_toolbar: true,
             autohide_toolbar_height: 4,

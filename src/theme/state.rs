@@ -55,6 +55,15 @@ pub(crate) fn theme_generation() -> u64 {
     THEME_GENERATION.load(Ordering::Relaxed)
 }
 
+/// Advance the theme generation, invalidating every theme-derived cache that
+/// snapshots `theme_generation()` (e.g. the boat's substituted SVG handles).
+/// Used by non-palette mutations whose result the caches still depend on —
+/// currently the icon-set switch, which changes the boat's anchor sprite.
+#[inline]
+pub(crate) fn bump_theme_generation() {
+    THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
 /// Reload theme from theme file (hot-reload support).
 /// Call this when the theme file or `theme` key in config.toml changes.
 pub(crate) fn reload_theme() {

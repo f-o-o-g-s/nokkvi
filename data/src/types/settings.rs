@@ -6,8 +6,8 @@ use crate::{
         hotkey_config::HotkeyConfig,
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
-            CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
+            CollapsedAppearance, EnterBehavior, IconSet, LibraryPageSize, NavDisplayMode,
+            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
             SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VerboseConfig,
             VisualizationMode, VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
@@ -97,6 +97,11 @@ pub struct PersistedPlayerSettings {
     /// the bar entirely.
     #[serde(default)]
     pub scrollbar_visibility: ScrollbarVisibility,
+    /// Which icon family the UI renders (default `Phosphor`). Missing keys fill
+    /// from `IconSet::default()` (Phosphor), so configs without the key adopt
+    /// Phosphor on upgrade; pick `Lucide` to keep the original outline set.
+    #[serde(default)]
+    pub icon_set: IconSet,
     /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default = "default_true")]
     pub crossfade_enabled: bool,
@@ -401,6 +406,7 @@ impl Default for PersistedPlayerSettings {
             opacity_gradient: default_opacity_gradient(),
             slot_text_links: default_true(),
             scrollbar_visibility: ScrollbarVisibility::default(),
+            icon_set: IconSet::default(),
             crossfade_enabled: true,
             bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: default_crossfade_duration_secs(),

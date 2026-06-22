@@ -557,7 +557,7 @@ mod tests {
                 "Navigation",
                 "Slot List",
                 "Player Bar",
-                "Font",
+                "Font & Icons",
                 "Metadata Strip",
                 "Artwork Overlays",
                 "Artwork Column"
@@ -576,6 +576,7 @@ mod tests {
                 "general.autohide_toolbar",
                 "general.horizontal_volume",
                 "font_family",
+                "general.icon_set",
                 "general.track_info_display",
                 "__toggle_strip_fields",
                 "general.strip_merged_mode",

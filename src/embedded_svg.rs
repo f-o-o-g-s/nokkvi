@@ -7,18 +7,221 @@
 //! See `build.rs::generate_embedded_svg_table` for the generator.
 
 use iced::{Color, widget::svg};
+use nokkvi_data::types::player_settings::IconSet;
 use tracing::warn;
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/embedded_svg_generated.rs"));
 }
 
+/// Lucide-stem → Phosphor file mapping for the alternate icon set.
+///
+/// Keys are the Lucide icon stems every view references (the file name under
+/// `assets/icons/` without the `.svg`); values are the full path of the
+/// hand-picked Phosphor equivalent under `assets/icons-phosphor/`. Almost all
+/// use the Phosphor **Regular** weight (Light read too thin next to Lucide's
+/// 2px stroke); the filled transport + rating glyphs (`play`, `pause`,
+/// `skip-back`, `skip-forward`, `heart-filled`, `star-filled`) deliberately
+/// resolve to the **Fill** weight so the play button and rating stars still
+/// read solid.
+///
+/// Generated from `local/phosphor-investigation/iconmap.py` and pinned by the
+/// `icon_name_map_*` tests below: every key must be a real Lucide icon on disk
+/// and every value must be an embedded Phosphor file. The list is kept sorted
+/// by key so a `binary_search_by_key` lookup stays valid.
+const NAME_MAP: &[(&str, &str)] = &[
+    ("anchor", "assets/icons-phosphor/anchor-regular.svg"),
+    ("arrow-down", "assets/icons-phosphor/arrow-down-regular.svg"),
+    (
+        "arrow-down-to-line",
+        "assets/icons-phosphor/arrow-line-down-regular.svg",
+    ),
+    ("arrow-up", "assets/icons-phosphor/arrow-up-regular.svg"),
+    (
+        "arrow-up-to-line",
+        "assets/icons-phosphor/arrow-line-up-regular.svg",
+    ),
+    ("audio-lines", "assets/icons-phosphor/waveform-regular.svg"),
+    (
+        "audio-waveform",
+        "assets/icons-phosphor/wave-sine-regular.svg",
+    ),
+    ("binary", "assets/icons-phosphor/binary-regular.svg"),
+    ("blend", "assets/icons-phosphor/intersect-regular.svg"),
+    ("calendar", "assets/icons-phosphor/calendar-regular.svg"),
+    ("check", "assets/icons-phosphor/check-regular.svg"),
+    (
+        "chevron-down",
+        "assets/icons-phosphor/caret-down-regular.svg",
+    ),
+    (
+        "chevron-left",
+        "assets/icons-phosphor/caret-left-regular.svg",
+    ),
+    (
+        "chevron-right",
+        "assets/icons-phosphor/caret-right-regular.svg",
+    ),
+    ("chevron-up", "assets/icons-phosphor/caret-up-regular.svg"),
+    ("circle", "assets/icons-phosphor/circle-regular.svg"),
+    (
+        "circle-play",
+        "assets/icons-phosphor/play-circle-regular.svg",
+    ),
+    ("clock", "assets/icons-phosphor/clock-regular.svg"),
+    ("cog", "assets/icons-phosphor/gear-six-regular.svg"),
+    (
+        "columns-3-cog",
+        "assets/icons-phosphor/sliders-horizontal-regular.svg",
+    ),
+    ("combine", "assets/icons-phosphor/arrows-merge-regular.svg"),
+    ("compass", "assets/icons-phosphor/compass-regular.svg"),
+    ("cookie", "assets/icons-phosphor/cookie-regular.svg"),
+    ("copy", "assets/icons-phosphor/copy-regular.svg"),
+    ("database", "assets/icons-phosphor/database-regular.svg"),
+    ("disc-3", "assets/icons-phosphor/disc-regular.svg"),
+    (
+        "ellipsis-vertical",
+        "assets/icons-phosphor/dots-three-vertical-regular.svg",
+    ),
+    ("file-music", "assets/icons-phosphor/file-audio-regular.svg"),
+    (
+        "folder-open",
+        "assets/icons-phosphor/folder-open-regular.svg",
+    ),
+    ("globe", "assets/icons-phosphor/globe-regular.svg"),
+    ("hard-drive", "assets/icons-phosphor/hard-drive-regular.svg"),
+    ("heart", "assets/icons-phosphor/heart-regular.svg"),
+    ("heart-filled", "assets/icons-phosphor/heart-fill.svg"),
+    ("info", "assets/icons-phosphor/info-regular.svg"),
+    ("keyboard", "assets/icons-phosphor/keyboard-regular.svg"),
+    ("layout-grid", "assets/icons-phosphor/grid-four-regular.svg"),
+    ("library", "assets/icons-phosphor/books-regular.svg"),
+    ("library-big", "assets/icons-phosphor/books-regular.svg"),
+    ("list", "assets/icons-phosphor/list-regular.svg"),
+    ("list-end", "assets/icons-phosphor/queue-regular.svg"),
+    ("list-filter", "assets/icons-phosphor/funnel-regular.svg"),
+    (
+        "list-minus",
+        "assets/icons-phosphor/stack-minus-regular.svg",
+    ),
+    ("list-music", "assets/icons-phosphor/playlist-regular.svg"),
+    ("list-plus", "assets/icons-phosphor/list-plus-regular.svg"),
+    (
+        "list-tree",
+        "assets/icons-phosphor/tree-structure-regular.svg",
+    ),
+    ("locate", "assets/icons-phosphor/crosshair-regular.svg"),
+    ("lock", "assets/icons-phosphor/lock-regular.svg"),
+    ("lock-open", "assets/icons-phosphor/lock-open-regular.svg"),
+    ("log-out", "assets/icons-phosphor/sign-out-regular.svg"),
+    ("menu", "assets/icons-phosphor/list-regular.svg"),
+    ("mic", "assets/icons-phosphor/microphone-regular.svg"),
+    ("monitor", "assets/icons-phosphor/monitor-regular.svg"),
+    ("mouse-pointer", "assets/icons-phosphor/cursor-regular.svg"),
+    ("music", "assets/icons-phosphor/music-note-regular.svg"),
+    ("music-4", "assets/icons-phosphor/queue-regular.svg"),
+    ("palette", "assets/icons-phosphor/palette-regular.svg"),
+    (
+        "panel-right-open",
+        "assets/icons-phosphor/sidebar-regular.svg",
+    ),
+    (
+        "panels-top-left",
+        "assets/icons-phosphor/layout-regular.svg",
+    ),
+    ("pause", "assets/icons-phosphor/pause-fill.svg"),
+    ("pencil", "assets/icons-phosphor/pencil-simple-regular.svg"),
+    (
+        "pencil-line",
+        "assets/icons-phosphor/pencil-simple-line-regular.svg",
+    ),
+    ("pin", "assets/icons-phosphor/push-pin-regular.svg"),
+    ("play", "assets/icons-phosphor/play-fill.svg"),
+    ("plus", "assets/icons-phosphor/plus-regular.svg"),
+    ("radar", "assets/icons-phosphor/target-regular.svg"),
+    (
+        "radio-tower",
+        "assets/icons-phosphor/cell-tower-regular.svg",
+    ),
+    (
+        "refresh-cw",
+        "assets/icons-phosphor/arrows-clockwise-regular.svg",
+    ),
+    ("repeat-1", "assets/icons-phosphor/repeat-once-regular.svg"),
+    ("repeat-2", "assets/icons-phosphor/repeat-regular.svg"),
+    (
+        "rotate-ccw",
+        "assets/icons-phosphor/arrow-counter-clockwise-regular.svg",
+    ),
+    ("save", "assets/icons-phosphor/floppy-disk-regular.svg"),
+    (
+        "search",
+        "assets/icons-phosphor/magnifying-glass-regular.svg",
+    ),
+    ("settings", "assets/icons-phosphor/gear-regular.svg"),
+    ("shuffle", "assets/icons-phosphor/shuffle-regular.svg"),
+    ("skip-back", "assets/icons-phosphor/skip-back-fill.svg"),
+    (
+        "skip-forward",
+        "assets/icons-phosphor/skip-forward-fill.svg",
+    ),
+    (
+        "sliders-horizontal",
+        "assets/icons-phosphor/faders-horizontal-regular.svg",
+    ),
+    (
+        "sliders-vertical",
+        "assets/icons-phosphor/faders-regular.svg",
+    ),
+    ("sparkles", "assets/icons-phosphor/sparkle-regular.svg"),
+    ("star", "assets/icons-phosphor/star-regular.svg"),
+    ("star-filled", "assets/icons-phosphor/star-fill.svg"),
+    ("sun-moon", "assets/icons-phosphor/circle-half-regular.svg"),
+    ("swatch-book", "assets/icons-phosphor/swatches-regular.svg"),
+    ("tags", "assets/icons-phosphor/tag-regular.svg"),
+    ("trash-2", "assets/icons-phosphor/trash-regular.svg"),
+    ("type", "assets/icons-phosphor/text-aa-regular.svg"),
+    (
+        "unfold-vertical",
+        "assets/icons-phosphor/arrows-out-line-vertical-regular.svg",
+    ),
+    ("user-round", "assets/icons-phosphor/user-regular.svg"),
+    ("x", "assets/icons-phosphor/x-regular.svg"),
+];
+
+/// Resolve a Lucide icon path to its Phosphor equivalent path, if one exists.
+/// Takes the full `assets/icons/<stem>.svg` path and returns the mapped
+/// `assets/icons-phosphor/<file>.svg` path. `None` for paths outside the
+/// Lucide namespace or stems without a mapping.
+fn phosphor_path(lucide_path: &str) -> Option<&'static str> {
+    let stem = lucide_path
+        .strip_prefix("assets/icons/")?
+        .strip_suffix(".svg")?;
+    NAME_MAP
+        .binary_search_by_key(&stem, |(k, _)| k)
+        .ok()
+        .map(|i| NAME_MAP[i].1)
+}
+
 /// Get the SVG content for a given icon path.
+///
+/// When the active icon set is Phosphor (the default), a Lucide path is first
+/// remapped to its Phosphor equivalent ([`phosphor_path`]); a mapped-but-missing
+/// Phosphor file falls through to the Lucide content (graceful, not the play.svg
+/// fallback). Selecting the Lucide set skips the remap (one atomic load) and
+/// uses the direct lookup.
 ///
 /// Returns `play.svg` as the fallback when the path is unregistered. The
 /// fallback path is the silent failure mode that the test
 /// `all_svg_paths_in_source_are_registered` exists to catch.
 pub(crate) fn get_svg(path: &str) -> &'static str {
+    if crate::theme::icon_set() == IconSet::Phosphor
+        && let Some(ph) = phosphor_path(path)
+        && let Some(content) = generated::lookup(ph)
+    {
+        return content;
+    }
     if let Some(content) = generated::lookup(path) {
         return content;
     }
@@ -258,25 +461,41 @@ pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool, vertical_flip:
 /// lands at ~0.5 px — same visual weight as the boat outline.
 const ANCHOR_STROKE_WIDTH_SVG_UNITS: f32 = 1.4;
 
-/// Return the themed lucide-anchor body as standalone SVG, no rope.
+/// Return the themed anchor body as standalone SVG, no rope. Follows the
+/// active icon set: the Lucide stroked anchor by default-art, or the Phosphor
+/// filled anchor when the Phosphor set is active.
 ///
 /// The rope is rendered separately as a curved canvas path in
 /// `widgets/boat.rs` so it can sway naturally with the wave action; this
 /// helper provides only the static anchor sprite that hangs at the
 /// rope's bottom end.
 ///
-/// Stroke uses the active visualizer theme's `border_color` /
-/// `border_opacity`, same source as the lines-mode wave outline and the
-/// boat outline, so every part of the doodad (boat, rope, anchor) shares
-/// one palette. Cache invalidation lives on `BoatState`, keyed against
-/// `theme_generation()` so a light/dark flip or palette swap rebuilds
-/// the handle on the next render.
+/// Either way the anchor uses the active visualizer theme's `border_color` /
+/// `border_opacity`, same source as the lines-mode wave outline and the boat
+/// outline, so every part of the doodad (boat, rope, anchor) shares one
+/// palette — the Lucide anchor *strokes* with it (open path), the Phosphor
+/// anchor *fills* with it (solid glyph). Cache invalidation lives on
+/// `BoatState`, keyed against `theme_generation()`; a light/dark flip, palette
+/// swap, or icon-set change ([`set_icon_set`](crate::theme::set_icon_set) bumps
+/// the generation) rebuilds the handle on the next render. The boat renders the
+/// handle with no color override, so the baked color is what shows.
 pub(crate) fn themed_anchor_svg() -> String {
     let viz = crate::theme::get_visualizer_colors_dark();
     let stroke = viz.border_color;
     let opacity = viz.border_opacity;
-    let stroke_w = ANCHOR_STROKE_WIDTH_SVG_UNITS;
 
+    if crate::theme::icon_set() == IconSet::Phosphor {
+        // The Phosphor anchor is a filled glyph with no open stroke to recolor,
+        // so theme it by replacing its `currentColor` fill with the visualizer
+        // border color + opacity. `get_svg` remaps the Lucide path to the
+        // Phosphor anchor file (we are already in the Phosphor branch).
+        return get_svg("assets/icons/anchor.svg").replace(
+            "fill=\"currentColor\"",
+            &format!("fill=\"{stroke}\" fill-opacity=\"{opacity}\""),
+        );
+    }
+
+    let stroke_w = ANCHOR_STROKE_WIDTH_SVG_UNITS;
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" \
          fill=\"none\" stroke=\"{stroke}\" stroke-opacity=\"{opacity}\" \
@@ -289,15 +508,22 @@ pub(crate) fn themed_anchor_svg() -> String {
     )
 }
 
-/// Vertical fraction of the anchor sprite where the ring (rope
-/// attachment point) sits. The lucide anchor's ring is a small circle
-/// at viewBox y=4 with radius 2, so the top of the ring is at y=2 in
-/// the 24-unit viewBox. The rope canvas hooks its bottom endpoint to
-/// this fraction of the sprite's display height so the rope visually
-/// reaches the top of the ring, regardless of how the renderer sizes
-/// the sprite.
+/// Vertical fraction of the anchor sprite where the ring (rope attachment
+/// point) sits — follows the active icon set, since the two anchors put their
+/// eye at different heights in different-sized viewBoxes. The rope canvas hooks
+/// its bottom endpoint to this fraction of the sprite's display height so it
+/// reaches the top of the ring regardless of how the renderer sizes the sprite.
+///
+/// - Lucide: the ring is a circle at viewBox y=4 radius 2 in a 24-unit box, so
+///   its top is at y=2 → `2/24`.
+/// - Phosphor: the eye is a radius-16 ring centered at (128, 56) in the
+///   256-unit box, so its top edge is at y=40 → `40/256`.
 pub(crate) fn anchor_svg_ring_top_fraction() -> f32 {
-    2.0 / 24.0
+    if crate::theme::icon_set() == IconSet::Phosphor {
+        40.0 / 256.0
+    } else {
+        2.0 / 24.0
+    }
 }
 
 #[cfg(test)]
@@ -374,26 +600,32 @@ mod tests {
         );
     }
 
-    /// Verify the generator's KNOWN_PATHS list matches the on-disk contents
-    /// of `assets/icons/`. Cheap re-confirmation that build-time codegen
-    /// observed every file the test sees at runtime.
-    #[test]
-    fn generated_paths_match_assets_dir() {
-        let icons_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("icons");
-        let mut on_disk: Vec<String> = std::fs::read_dir(&icons_dir)
-            .expect("read assets/icons")
+    /// Read every `.svg` stem-path under one `assets/<dir>/` namespace as
+    /// full relative paths (e.g. `assets/icons/play.svg`).
+    fn on_disk_svgs(rel_dir: &str) -> Vec<String> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel_dir);
+        std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read {rel_dir}: {e}"))
             .filter_map(|entry| {
                 let path = entry.ok()?.path();
                 if path.extension().is_some_and(|e| e == "svg") {
                     let name = path.file_name()?.to_str()?.to_owned();
-                    Some(format!("assets/icons/{name}"))
+                    Some(format!("{rel_dir}/{name}"))
                 } else {
                     None
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    /// Verify the generator's KNOWN_PATHS list matches the on-disk contents of
+    /// BOTH icon namespaces (`assets/icons/` + `assets/icons-phosphor/`). Cheap
+    /// re-confirmation that build-time codegen observed every file the test
+    /// sees at runtime.
+    #[test]
+    fn generated_paths_match_assets_dir() {
+        let mut on_disk: Vec<String> = on_disk_svgs("assets/icons");
+        on_disk.extend(on_disk_svgs("assets/icons-phosphor"));
         on_disk.sort();
 
         let mut known: Vec<String> = generated::KNOWN_PATHS
@@ -404,8 +636,145 @@ mod tests {
 
         assert_eq!(
             on_disk, known,
-            "generated KNOWN_PATHS drifted from assets/icons/ contents — rebuild"
+            "generated KNOWN_PATHS drifted from assets/icons{{,-phosphor}}/ contents — rebuild"
         );
+    }
+
+    /// The Phosphor `NAME_MAP` must be sorted by Lucide stem so the
+    /// `binary_search_by_key` in `phosphor_path` is valid.
+    #[test]
+    fn icon_name_map_is_sorted_by_key() {
+        assert!(
+            NAME_MAP.windows(2).all(|w| w[0].0 < w[1].0),
+            "NAME_MAP must be strictly sorted by lucide stem (binary_search relies on it)"
+        );
+    }
+
+    /// Every Lucide icon on disk must have a Phosphor mapping, so selecting the
+    /// Phosphor set never silently leaves a glyph un-remapped. Catches a new
+    /// `assets/icons/*.svg` landing without a corresponding `NAME_MAP` row.
+    #[test]
+    fn icon_name_map_covers_every_lucide_icon() {
+        let mapped: BTreeSet<&str> = NAME_MAP.iter().map(|(k, _)| *k).collect();
+        let mut missing: Vec<String> = Vec::new();
+        for full in on_disk_svgs("assets/icons") {
+            let stem = full
+                .strip_prefix("assets/icons/")
+                .and_then(|f| f.strip_suffix(".svg"))
+                .unwrap();
+            if !mapped.contains(stem) {
+                missing.push(stem.to_string());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "Lucide icons with no Phosphor mapping (add a NAME_MAP row):\n{}",
+            missing
+                .iter()
+                .map(|p| format!("  - {p}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    /// Every Phosphor target in `NAME_MAP` must be an embedded file (resolve to
+    /// real content via `lookup`, not the fallback). Catches a typo'd Phosphor
+    /// filename or a file that was never copied into `assets/icons-phosphor/`.
+    #[test]
+    fn icon_name_map_targets_all_ship() {
+        let mut missing: Vec<&str> = Vec::new();
+        for (_, ph) in NAME_MAP {
+            if generated::lookup(ph).is_none() {
+                missing.push(ph);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "NAME_MAP targets not present in assets/icons-phosphor/:\n{}",
+            missing
+                .iter()
+                .map(|p| format!("  - {p}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    /// The filled transport + rating glyphs must resolve to the Phosphor FILL
+    /// weight, so the play button and rating stars stay solid (an outline
+    /// play/star would read as a regression). The rest stay on Regular.
+    #[test]
+    fn icon_name_map_forces_fill_weight_for_filled_glyphs() {
+        for stem in [
+            "play",
+            "pause",
+            "skip-back",
+            "skip-forward",
+            "heart-filled",
+            "star-filled",
+        ] {
+            let ph = phosphor_path(&format!("assets/icons/{stem}.svg"))
+                .unwrap_or_else(|| panic!("{stem} must map to a Phosphor file"));
+            assert!(
+                ph.ends_with("-fill.svg"),
+                "{stem} must use the Phosphor Fill weight, got {ph}"
+            );
+        }
+    }
+
+    /// `phosphor_path` resolves a Lucide path to its mapped Phosphor path and
+    /// declines paths outside the Lucide namespace.
+    #[test]
+    fn phosphor_path_resolves_and_rejects() {
+        assert_eq!(
+            phosphor_path("assets/icons/chevron-down.svg"),
+            Some("assets/icons-phosphor/caret-down-regular.svg"),
+        );
+        // Already a Phosphor path → not remapped again.
+        assert_eq!(
+            phosphor_path("assets/icons-phosphor/caret-down-regular.svg"),
+            None
+        );
+        // Unknown Lucide stem → no mapping.
+        assert_eq!(phosphor_path("assets/icons/does-not-exist.svg"), None);
+    }
+
+    /// The composed `get_svg()` remap is what every rendered icon actually goes
+    /// through, yet the tests above only assert the pure pieces (NAME_MAP +
+    /// `phosphor_path`). Pin the branch end-to-end: under Phosphor a Lucide path
+    /// returns the mapped Phosphor bytes; under Lucide the same path returns the
+    /// Lucide bytes. Guards against a silent revert-to-Lucide or an inverted
+    /// condition that fmt, clippy, and every other test would pass (the sibling
+    /// `every_known_path_resolves_to_unique_content` only checks `!= FALLBACK`,
+    /// which a wholesale revert would survive). Holds `THEME_MODE_LOCK` (the
+    /// process-global theme-atomic serializer) and restores the icon set so no
+    /// sibling test observes a leaked value.
+    #[test]
+    fn get_svg_honors_active_icon_set() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let original = crate::theme::icon_set();
+
+        let lucide_play = generated::lookup("assets/icons/play.svg").unwrap();
+        let phosphor_play = generated::lookup("assets/icons-phosphor/play-fill.svg").unwrap();
+        assert_ne!(
+            lucide_play, phosphor_play,
+            "fixture sanity: the Lucide and Phosphor play glyphs must differ"
+        );
+
+        crate::theme::set_icon_set(IconSet::Phosphor);
+        assert_eq!(
+            get_svg("assets/icons/play.svg"),
+            phosphor_play,
+            "Phosphor set must remap play -> play-fill"
+        );
+
+        crate::theme::set_icon_set(IconSet::Lucide);
+        assert_eq!(
+            get_svg("assets/icons/play.svg"),
+            lucide_play,
+            "Lucide set must return the Lucide play bytes (no remap)"
+        );
+
+        crate::theme::set_icon_set(original);
     }
 
     /// The boat must STRUCTURALLY transform the master's group stroke: recolor
@@ -683,14 +1052,18 @@ mod tests {
         );
     }
 
-    /// The themed anchor SVG must carry the **dark** visualizer border color
-    /// and opacity as its stroke. Same accessor as `themed_boat_svg`, so the
-    /// boat and its anchor stay mode-stable together.
+    /// The Lucide anchor SVG must carry the **dark** visualizer border color
+    /// and opacity as its STROKE. Same accessor as `themed_boat_svg`, so the
+    /// boat and its anchor stay mode-stable together. Pins the Lucide set
+    /// (Phosphor is the default and fills instead of strokes).
     #[test]
-    fn themed_anchor_svg_uses_theme_stroke() {
+    fn themed_anchor_svg_lucide_uses_theme_stroke() {
         let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let orig = crate::theme::icon_set();
+        crate::theme::set_icon_set(IconSet::Lucide);
         let viz = crate::theme::get_visualizer_colors_dark();
         let out = themed_anchor_svg();
+        crate::theme::set_icon_set(orig);
         assert!(
             out.contains(&format!("stroke=\"{}\"", viz.border_color)),
             "anchor stroke must come from the dark visualizer border_color \
@@ -703,12 +1076,16 @@ mod tests {
         );
     }
 
-    /// The themed anchor SVG must include the four lucide-anchor sub-paths
+    /// The Lucide anchor SVG must include the four lucide-anchor sub-paths
     /// (vertical shaft, curved hook, cross-bar, ring). Proves the lucide
     /// anchor body was inlined fully and not truncated.
     #[test]
-    fn themed_anchor_svg_includes_all_lucide_paths() {
+    fn themed_anchor_svg_lucide_includes_all_paths() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let orig = crate::theme::icon_set();
+        crate::theme::set_icon_set(IconSet::Lucide);
         let out = themed_anchor_svg();
+        crate::theme::set_icon_set(orig);
         assert!(
             out.contains("M12 6v16"),
             "anchor shaft path must be present"
@@ -724,21 +1101,61 @@ mod tests {
         );
     }
 
-    /// The renderer hooks the rope's bottom endpoint to the top of the
-    /// anchor's ring, derived from `anchor_svg_ring_top_fraction()`. The
-    /// fraction must place the rope at the top of the ring (y=2 in the
-    /// 24-unit viewBox) — neither at the ring's center nor at the top
-    /// of the viewBox.
+    /// When the Phosphor set is active, the anchor is the Phosphor FILLED glyph
+    /// themed via its `fill` (not a stroke), and carries none of the Lucide
+    /// inline path data. The rope still has an eye to hook (the `M112,56` ring
+    /// arc from the phosphor anchor).
     #[test]
-    fn anchor_svg_ring_top_fraction_lands_at_ring_top() {
-        let f = anchor_svg_ring_top_fraction();
-        // Within the 24-unit viewBox, y=2 (top of the ring) corresponds
-        // to a fraction of 2/24 ≈ 0.0833. y=4 (ring center) would be
-        // 0.166; y=0 (top of viewBox) would be 0.0.
+    fn themed_anchor_svg_phosphor_fills_with_theme_color() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let orig = crate::theme::icon_set();
+        crate::theme::set_icon_set(IconSet::Phosphor);
+        let viz = crate::theme::get_visualizer_colors_dark();
+        let out = themed_anchor_svg();
+        crate::theme::set_icon_set(orig);
         assert!(
-            (f - 2.0 / 24.0).abs() < 1e-6,
-            "ring-top fraction must be 2/24 (top of the ring circle), \
-             got {f}"
+            out.contains(&format!(
+                "fill=\"{}\" fill-opacity=\"{}\"",
+                viz.border_color, viz.border_opacity
+            )),
+            "phosphor anchor must fill with the dark visualizer border color + opacity (got: {out})"
+        );
+        assert!(
+            !out.contains("fill=\"currentColor\""),
+            "the currentColor fill must be replaced by the themed fill"
+        );
+        assert!(
+            !out.contains("M12 6v16"),
+            "phosphor anchor must NOT carry the Lucide inline path data"
+        );
+        assert!(
+            out.contains("M112,56"),
+            "phosphor anchor body (incl. its eye ring) must be present"
+        );
+    }
+
+    /// The rope hooks the top of the anchor's ring via
+    /// `anchor_svg_ring_top_fraction()`, which follows the active set: the
+    /// Lucide ring top is y=2 in a 24-box (2/24); the Phosphor eye top is y=40
+    /// in a 256-box (40/256). Neither is the ring center or the viewBox top.
+    #[test]
+    fn anchor_ring_top_fraction_is_icon_set_aware() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let orig = crate::theme::icon_set();
+
+        crate::theme::set_icon_set(IconSet::Lucide);
+        let lucide_f = anchor_svg_ring_top_fraction();
+        crate::theme::set_icon_set(IconSet::Phosphor);
+        let phosphor_f = anchor_svg_ring_top_fraction();
+        crate::theme::set_icon_set(orig);
+
+        assert!(
+            (lucide_f - 2.0 / 24.0).abs() < 1e-6,
+            "Lucide ring-top fraction must be 2/24, got {lucide_f}"
+        );
+        assert!(
+            (phosphor_f - 40.0 / 256.0).abs() < 1e-6,
+            "Phosphor ring-top fraction must be 40/256, got {phosphor_f}"
         );
     }
 

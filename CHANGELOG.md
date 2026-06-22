@@ -7,11 +7,15 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Picking a theme now opens a searchable modal where each row is painted in that theme's own colors — a live color preview.
+- New Icon Set setting (Interface → Font & Icons) switches the UI between Phosphor and Lucide glyphs.
 
 ### Changed
 
 - The Scope visualizer now defaults to a height-based gradient instead of a static (flat) color.
 - Verbose Config is now a three-way choice (On, Off, or Clean); Clean writes a sparse config.toml with no auto-added comments.
+- The UI now uses Phosphor icons by default; choose Lucide in Settings to keep the original thin-outline set.
+- The Queue and Playlists nav tabs now have dedicated icons (a queue glyph for Queue, a playlist glyph for Playlists).
+- The surfing-boat doodad's anchor now follows the icon set: a filled Phosphor anchor, or the stroked Lucide one.
 
 ### Fixed
 

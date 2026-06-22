@@ -1922,6 +1922,9 @@ impl Nokkvi {
         // Apply slot-list scrollbar visibility from persisted settings
         crate::theme::set_scrollbar_visibility(settings.scrollbar_visibility);
 
+        // Apply icon set from persisted settings
+        crate::theme::set_icon_set(settings.icon_set);
+
         // Apply horizontal volume mode from persisted settings
         crate::theme::set_horizontal_volume(settings.horizontal_volume);
 
