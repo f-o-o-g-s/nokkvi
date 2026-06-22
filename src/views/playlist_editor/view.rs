@@ -297,20 +297,14 @@ impl PlaylistEditorState {
             "EDITING PLAYLIST"
         };
         let eyebrow = iced::widget::text(eyebrow_label)
-            .font(iced::font::Font {
-                weight: iced::font::Weight::Semibold,
-                ..crate::theme::ui_font()
-            })
+            .font(crate::theme::weighted_ui_font(iced::font::Weight::Semibold))
             .size(9.5)
             .color(accent)
             .wrapping(iced::widget::text::Wrapping::None);
 
         let name_input = iced::widget::text_input("Playlist name", &data.name)
             .on_input(EditorMessage::NameChanged)
-            .font(iced::font::Font {
-                weight: iced::font::Weight::Bold,
-                ..crate::theme::ui_font()
-            })
+            .font(crate::theme::weighted_ui_font(iced::font::Weight::Bold))
             .size(14)
             .width(Length::Fill)
             .padding([2, 4])

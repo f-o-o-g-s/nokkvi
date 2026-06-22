@@ -1576,10 +1576,7 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
     };
 
     let title_font = if is_bold {
-        iced::Font {
-            weight: iced::font::Weight::Bold,
-            ..theme::ui_font()
-        }
+        theme::weighted_ui_font(iced::font::Weight::Bold)
     } else {
         theme::ui_font()
     };

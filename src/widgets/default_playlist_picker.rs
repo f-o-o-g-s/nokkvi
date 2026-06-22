@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Border, Element, Length, Padding,
-    font::{Font, Weight},
+    font::Weight,
     widget::{Space, button, column, container, image, mouse_area, row, svg, text},
 };
 use nokkvi_data::{
@@ -163,10 +163,7 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
         Space::new().width(Length::Fixed(12.0)),
         text("Default Playlist")
             .size(label_size)
-            .font(Font {
-                weight: Weight::Bold,
-                ..theme::ui_font()
-            })
+            .font(theme::weighted_ui_font(Weight::Bold))
             .color(active_color),
         Space::new().width(Length::Fill),
         close_btn,
@@ -377,10 +374,7 @@ fn render_picker_slot<'a>(
 
     let title = text(entry.label().to_string())
         .size(14.0)
-        .font(Font {
-            weight,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(weight))
         .color(label_color)
         .wrapping(iced::widget::text::Wrapping::None);
 

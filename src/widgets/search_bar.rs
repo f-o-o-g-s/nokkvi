@@ -1,6 +1,6 @@
 use iced::{
     Alignment, Element, Length,
-    font::{Font, Weight},
+    font::Weight,
     widget::{container, mouse_area, stack, text_input},
 };
 
@@ -70,10 +70,7 @@ pub(crate) fn search_bar<'a, Message: Clone + 'a>(
             left: 32.0,
         })
         .size(12.0)
-        .font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(Weight::Medium))
         .style(style.unwrap_or(flat_search_input_style));
 
     // Left magnifying glass icon

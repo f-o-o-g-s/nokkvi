@@ -126,10 +126,7 @@ pub(crate) fn about_modal_overlay<'a>(
     // ── Header: [Nokkvi  ·····  📋  X] ──────────────────────────
     let title_text = text("Nokkvi")
         .size(20.0)
-        .font(iced::font::Font {
-            weight: iced::font::Weight::Bold,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
         .color(theme::accent_bright());
 
     let close_button: Element<'_, AboutModalMessage> = modal_icon_button(
@@ -173,10 +170,7 @@ pub(crate) fn about_modal_overlay<'a>(
 
     let tagline = text("A sturdy hull for the endless stream.")
         .size(14.0)
-        .font(iced::font::Font {
-            weight: iced::font::Weight::Bold,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
         .color(theme::fg1());
 
     let description = text("A Rust/Iced desktop client for Navidrome music servers")

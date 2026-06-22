@@ -23,7 +23,7 @@
 
 use iced::{
     Alignment, Border, Color, Element, Length, Padding,
-    font::{Font, Weight},
+    font::Weight,
     widget::{button, container, row, text, text::Wrapping},
 };
 
@@ -161,10 +161,7 @@ where
     };
     let label = text(option.display.to_uppercase())
         .size(params.font_size)
-        .font(Font {
-            weight: label_weight,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(label_weight))
         .color(label_color)
         .wrapping(Wrapping::None);
 

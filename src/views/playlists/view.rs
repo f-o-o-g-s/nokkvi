@@ -308,10 +308,7 @@ impl PlaylistsPage {
                 let mut col = column![
                     text(playlist.name.clone())
                         .size(24)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..theme::ui_font()
-                        })
+                        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
                         .color(theme::fg0()),
                 ]
                 .spacing(4)

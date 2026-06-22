@@ -110,10 +110,7 @@ pub(crate) fn eq_modal_overlay<'a>(
     // ── Header ──────────────────────────────────────────────────
     let title_text = text("Equalizer")
         .size(20.0)
-        .font(iced::font::Font {
-            weight: iced::font::Weight::Bold,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
         .color(theme::accent_bright());
     // Icon-only button helper — view header pattern:
     // mouse_area(HoverOverlay(container(svg).center()))
@@ -350,10 +347,7 @@ pub(crate) fn eq_modal_overlay<'a>(
             text("Save Preset")
                 .size(16.0)
                 .color(theme::accent_bright())
-                .font(iced::font::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..theme::ui_font()
-                }),
+                .font(theme::weighted_ui_font(iced::font::Weight::Bold)),
             name_input,
             ok_button,
             cancel_button,

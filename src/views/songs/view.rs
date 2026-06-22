@@ -491,10 +491,7 @@ impl SongsPage {
                 let mut col = column![
                     text(song.title.clone())
                         .size(20)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..theme::ui_font()
-                        })
+                        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
                         .color(theme::fg0()),
                     text(song.artist.clone())
                         .size(16)

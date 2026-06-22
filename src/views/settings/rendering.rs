@@ -70,10 +70,7 @@ fn highlighted_label<'a>(
     let seg = |s: String, color: Color, w: Weight| {
         text(s)
             .size(size)
-            .font(Font {
-                weight: w,
-                ..theme::ui_font()
-            })
+            .font(theme::weighted_ui_font(w))
             .color(color)
             .wrapping(Wrapping::None)
     };
@@ -152,10 +149,8 @@ fn render_badge<'a>(
     let badge_size = font_size * 0.95;
 
     let mut chip = container(
-        slot_list::slot_list_text(display_text, badge_size, text_color).font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        }),
+        slot_list::slot_list_text(display_text, badge_size, text_color)
+            .font(theme::weighted_ui_font(Weight::Medium)),
     )
     .padding(Padding::new(4.0).left(10.0).right(10.0))
     .style(move |_theme| container::Style {
@@ -188,10 +183,7 @@ fn render_hex_editor<'a>(
         .on_submit(SettingsMessage::HexInputSubmit)
         .size(font_size)
         .width(Length::Fill)
-        .font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        });
+        .font(theme::weighted_ui_font(Weight::Medium));
 
     let preview_color = crate::theme_config::parse_hex_color(hex_input).unwrap_or_else(theme::fg4);
     let preview_swatch = container(Space::new())
@@ -786,10 +778,8 @@ fn hotkey_idle_badge<'a>(
     const MIN_WIDTH: f32 = 96.0;
 
     let badge = container(
-        slot_list::slot_list_text(combo.to_string(), badge_size, text_color).font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        }),
+        slot_list::slot_list_text(combo.to_string(), badge_size, text_color)
+            .font(theme::weighted_ui_font(Weight::Medium)),
     )
     .width(Length::Shrink)
     .align_x(Alignment::Center)
@@ -832,10 +822,8 @@ fn hotkey_capture_badge<'a>(
     };
 
     let mut body = row![
-        slot_list::slot_list_text(label.to_string(), badge_size, text_color).font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        }),
+        slot_list::slot_list_text(label.to_string(), badge_size, text_color)
+            .font(theme::weighted_ui_font(Weight::Medium)),
     ]
     .align_y(Alignment::Center);
 
@@ -934,10 +922,8 @@ pub(crate) fn render_color_slot<'a>(
     let position_label = format!("Color {} of {}", ctx.item_index + 1, total_colors);
     let label_col = container(
         column![
-            slot_list::slot_list_text(position_label, label_size, label_color).font(Font {
-                weight: Weight::Bold,
-                ..theme::ui_font()
-            }),
+            slot_list::slot_list_text(position_label, label_size, label_color)
+                .font(theme::weighted_ui_font(Weight::Bold)),
             slot_list::slot_list_text(parent_label.to_string(), position_size, subtext_color),
         ]
         .spacing(2),
@@ -991,28 +977,6 @@ pub(crate) fn render_color_slot<'a>(
 // Font Sub-List Slot Rendering
 // ============================================================================
 
-/// Cache of Font objects for preview rendering.
-/// `Family::name()` handles interning internally; we cache the `Font` to
-/// avoid re-locking the global `FxHashSet` on every frame.
-fn preview_font(name: &str) -> Font {
-    use std::{collections::HashMap, sync::LazyLock};
-
-    use parking_lot::Mutex;
-
-    static CACHE: LazyLock<Mutex<HashMap<String, Font>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
-
-    let cache = CACHE.lock();
-    if let Some(&font) = cache.get(name) {
-        return font;
-    }
-    drop(cache);
-
-    let font = Font::with_family(iced::font::Family::name(name));
-    CACHE.lock().insert(name.to_string(), font);
-    font
-}
-
 /// Render a single slot in the font picker sub-list. Same flat row chrome as
 /// the main slot list (cursor stripe + bottom border separator) so the font
 /// modal feels like an extension of the settings panel rather than a separate
@@ -1037,17 +1001,19 @@ pub(crate) fn render_font_slot<'a>(
 
     let is_default = font_name.starts_with("Iced Default");
 
-    // Font name rendered in its own typeface for preview.
-    let preview = if is_default {
-        Font::DEFAULT
-    } else {
-        preview_font(font_name)
-    };
-    let name_widget = slot_list::slot_list_text(font_name.to_string(), label_size, label_color)
-        .font(Font {
+    // Font name rendered in its own typeface for preview. The weight is
+    // down-graded per-family so single-weight fonts (e.g. Departure Mono)
+    // preview in their own face instead of falling back to a generic Bold.
+    let name_font = if is_default {
+        Font {
             weight: Weight::Bold,
-            ..preview
-        });
+            ..Font::DEFAULT
+        }
+    } else {
+        theme::weighted_font_for_family(font_name, Weight::Bold)
+    };
+    let name_widget =
+        slot_list::slot_list_text(font_name.to_string(), label_size, label_color).font(name_font);
 
     let hint_text = if ctx.is_center { "Enter ↵" } else { "" };
     let hint_widget = slot_list::slot_list_text(hint_text, hint_size, subtext_color);
@@ -1122,10 +1088,8 @@ pub(crate) fn render_theme_slot<'a>(
     } else {
         row.display_name.clone()
     };
-    let name_widget = slot_list::slot_list_text(name, label_size, fg).font(Font {
-        weight: Weight::Bold,
-        ..theme::ui_font()
-    });
+    let name_widget =
+        slot_list::slot_list_text(name, label_size, fg).font(theme::weighted_ui_font(Weight::Bold));
 
     let subtitle = if row.is_builtin { "Built-in" } else { "Custom" };
     let subtitle_widget =
@@ -1255,10 +1219,7 @@ pub(crate) fn render_detail_header<'a>(
 
     let label_widget = text(label_text)
         .size(font_size)
-        .font(Font {
-            weight: Weight::Bold,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(Weight::Bold))
         .color(theme::fg1())
         .wrapping(Wrapping::None);
 

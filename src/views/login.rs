@@ -442,10 +442,7 @@ impl LoginPage {
             .color(theme::fg0())
             .width(Length::Fill)
             .align_x(Alignment::Center)
-            .font(iced::font::Font {
-                weight: iced::font::Weight::Bold,
-                ..theme::ui_font()
-            });
+            .font(theme::weighted_ui_font(iced::font::Weight::Bold));
 
         let subtitle = text("A sturdy hull for the endless stream.")
             .size(14)

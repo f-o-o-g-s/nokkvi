@@ -6,7 +6,7 @@
 use iced::{
     Alignment, Color, Element, Length, Theme,
     advanced::svg::Handle,
-    font::{Font, Weight},
+    font::Weight,
     mouse::ScrollDelta,
     widget::{Svg, button, column, container, mouse_area, row, svg, text, tooltip},
 };
@@ -855,10 +855,9 @@ fn mode_text_toggle(
     active: bool,
     tooltip_text: &str,
 ) -> Element<'static, PlayerBarMessage> {
-    let label_widget = text(label).size(10.0).font(Font {
-        weight: Weight::Bold,
-        ..theme::ui_font()
-    });
+    let label_widget = text(label)
+        .size(10.0)
+        .font(theme::weighted_ui_font(Weight::Bold));
     let inner = fixed_centered(label_widget.into(), mode_button_width(), MODE_BUTTON_HEIGHT);
     let btn = button(inner)
         .padding(0)
@@ -1060,10 +1059,7 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
             let weight = if bold { Weight::Bold } else { Weight::Medium };
             text(value)
                 .size(12.0)
-                .font(Font {
-                    weight,
-                    ..theme::ui_font()
-                })
+                .font(theme::weighted_ui_font(weight))
                 .color(color)
                 .width(Length::Fill)
                 .wrapping(iced::widget::text::Wrapping::None)

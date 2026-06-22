@@ -531,10 +531,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                     bounds: Size::new(item_bounds.width, item_bounds.height),
                     size: MENU_TEXT_SIZE.into(),
                     line_height: iced::advanced::text::LineHeight::default(),
-                    font: iced::font::Font {
-                        weight: iced::font::Weight::Medium,
-                        ..theme::ui_font()
-                    },
+                    font: theme::weighted_ui_font(iced::font::Weight::Medium),
                     align_x: alignment::Horizontal::Left.into(),
                     align_y: alignment::Vertical::Center,
                     shaping: iced::advanced::text::Shaping::default(),

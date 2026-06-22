@@ -17,7 +17,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Vector,
-    font::{Font, Weight},
+    font::Weight,
     widget::{Space, canvas, column, container, mouse_area, row},
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
@@ -151,10 +151,7 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
             position: Point::new(0.0, 0.0),
             color: self.color,
             size: iced::Pixels(12.0),
-            font: Font {
-                weight: Weight::Bold,
-                ..theme::ui_font()
-            },
+            font: theme::weighted_ui_font(Weight::Bold),
             align_x: iced::alignment::Horizontal::Center.into(),
             align_y: iced::alignment::Vertical::Center,
             ..Default::default()

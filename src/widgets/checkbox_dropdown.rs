@@ -472,10 +472,7 @@ where
 fn dropdown_header_row<'a, Message: 'a>(label: &str, counter: &str) -> Element<'a, Message> {
     let label_text = text(label.to_string())
         .size(MENU_TEXT_SIZE)
-        .font(iced::font::Font {
-            weight: iced::font::Weight::Bold,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
         .color(theme::fg0());
 
     let counter_text = text(counter.to_string())

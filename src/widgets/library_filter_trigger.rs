@@ -330,10 +330,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
                         bounds: Size::new(text_bounds.width, text_bounds.height),
                         size: COUNT_TEXT_SIZE.into(),
                         line_height: iced::advanced::text::LineHeight::default(),
-                        font: iced::font::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..theme::ui_font()
-                        },
+                        font: theme::weighted_ui_font(iced::font::Weight::Bold),
                         align_x: alignment::Horizontal::Left.into(),
                         align_y: alignment::Vertical::Center,
                         shaping: iced::advanced::text::Shaping::default(),

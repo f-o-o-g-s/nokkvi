@@ -83,10 +83,7 @@ impl BrowsingPanel {
             }
 
             let label = text(label_str)
-                .font(iced::font::Font {
-                    weight: iced::font::Weight::Medium,
-                    ..theme::ui_font()
-                })
+                .font(theme::weighted_ui_font(iced::font::Weight::Medium))
                 .size(12)
                 .color(if view == self.active_view {
                     theme::fg0()

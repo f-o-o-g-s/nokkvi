@@ -7,7 +7,7 @@
 
 use iced::{
     Alignment, Element, Length,
-    font::{Font, Weight},
+    font::Weight,
     widget::{container, mouse_area, row, space, text, tooltip},
 };
 
@@ -134,10 +134,7 @@ pub(crate) fn bit_perfect_badge_widget<'a, M: 'a>(
     let (label, color) = bit_perfect_badge(status, holder)?;
     let badge = text(label)
         .size(10.0)
-        .font(Font {
-            weight: Weight::Bold,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(Weight::Bold))
         .color(color_for(color))
         .wrapping(text::Wrapping::None);
     // The badge's hover tooltip is the "blocker diagnostic": it explains why
@@ -218,10 +215,7 @@ where
     row_in = row_in.push(
         text(radio_name.to_string())
             .size(12.0)
-            .font(Font {
-                weight: Weight::Bold,
-                ..theme::ui_font()
-            })
+            .font(theme::weighted_ui_font(Weight::Bold))
             .color(strip_text(theme::fg2())),
     );
 
@@ -275,10 +269,7 @@ pub(crate) fn info_field_widget<'a, M: 'static>(
 ) -> Element<'a, M> {
     let label_widget = text(label)
         .size(10.0)
-        .font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(Weight::Medium))
         .color(theme::fg4())
         .wrapping(text::Wrapping::None);
 
@@ -407,10 +398,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         info_row = info_row.push(
             text(left.clone())
                 .size(10.0)
-                .font(Font {
-                    weight: Weight::Medium,
-                    ..theme::ui_font()
-                })
+                .font(theme::weighted_ui_font(Weight::Medium))
                 .color(strip_text(theme::fg3()))
                 .wrapping(text::Wrapping::None),
         );
@@ -525,10 +513,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         info_row = info_row.push(
             text(right.clone())
                 .size(10.0)
-                .font(Font {
-                    weight: Weight::Medium,
-                    ..theme::ui_font()
-                })
+                .font(theme::weighted_ui_font(Weight::Medium))
                 .color(strip_text(theme::fg3()))
                 .wrapping(text::Wrapping::None),
         );
@@ -570,10 +555,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
     let format_text = |s: String| {
         text(s)
             .size(10.0)
-            .font(Font {
-                weight: Weight::Medium,
-                ..theme::ui_font()
-            })
+            .font(theme::weighted_ui_font(Weight::Medium))
             .color(strip_text(theme::fg3()))
             .wrapping(text::Wrapping::None)
     };

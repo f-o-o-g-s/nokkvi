@@ -237,10 +237,7 @@ impl ArtistsPage {
                 let mut col = column![
                     text(artist.name.clone())
                         .size(24)
-                        .font(iced::Font {
-                            weight: iced::font::Weight::Bold,
-                            ..theme::ui_font()
-                        })
+                        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
                         .color(theme::fg0()),
                 ]
                 .spacing(4)
@@ -306,10 +303,7 @@ impl ArtistsPage {
                             text("Read more on Last.fm")
                                 .size(11)
                                 .color(theme::accent_bright())
-                                .font(iced::Font {
-                                    weight: iced::font::Weight::Bold,
-                                    ..theme::ui_font()
-                                }),
+                                .font(theme::weighted_ui_font(iced::font::Weight::Bold)),
                         )
                         .on_press(ArtistsMessage::OpenExternalUrl(url.clone()))
                         .padding(iced::Padding {

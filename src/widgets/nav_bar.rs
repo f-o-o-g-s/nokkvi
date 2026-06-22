@@ -7,7 +7,7 @@
 
 use iced::{
     Alignment, Background, Border, Element, Length,
-    font::{Font, Weight},
+    font::Weight,
     widget::{Space, column, container, mouse_area, row, text, text::Wrapping},
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
@@ -352,10 +352,7 @@ fn tab_content<'a>(
         NavDisplayMode::TextOnly => container(
             text(label.to_uppercase())
                 .size(text_size)
-                .font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                })
+                .font(theme::weighted_ui_font(Weight::Bold))
                 .align_x(iced::alignment::Horizontal::Center)
                 .wrapping(iced::widget::text::Wrapping::None)
                 .width(Length::Fill),
@@ -376,10 +373,7 @@ fn tab_content<'a>(
                 colored_icon(icon_path, icon_size, text_color),
                 text(label.to_uppercase())
                     .size(text_size)
-                    .font(Font {
-                        weight: Weight::Bold,
-                        ..theme::ui_font()
-                    })
+                    .font(theme::weighted_ui_font(Weight::Bold))
                     .wrapping(iced::widget::text::Wrapping::None),
             ]
             .spacing(4)
@@ -774,10 +768,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             container(
                 text("No track loaded")
                     .size(13.0)
-                    .font(Font {
-                        weight: Weight::Semibold,
-                        ..theme::ui_font()
-                    })
+                    .font(theme::weighted_ui_font(Weight::Semibold))
                     .color(theme::fg4())
                     .wrapping(Wrapping::None),
             )
@@ -963,10 +954,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     fmt_sep(),
                     text(combined)
                         .size(10.0)
-                        .font(Font {
-                            weight: Weight::Medium,
-                            ..theme::ui_font()
-                        })
+                        .font(theme::weighted_ui_font(Weight::Medium))
                         .color(nav_strip_text(theme::fg3()))
                         .wrapping(Wrapping::None),
                 ];

@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Single-weight fonts (such as pixel fonts) now display correctly for bold and medium UI text instead of falling back to a generic serif/sans.
+
 ### Removed
 
 - The inline per-color theme editors in Settings → Theme; edit a theme's colors directly in the theme's TOML file instead.

@@ -5,7 +5,7 @@
 
 use iced::{
     Alignment, Border, Color, Element, Length, Padding,
-    font::{Font, Weight},
+    font::Weight,
     widget::{Space, button, column, container, row, svg, text},
 };
 
@@ -541,10 +541,7 @@ impl SettingsPage {
         let title = text(label_for_title)
             .size(13.0)
             .color(theme::fg0())
-            .font(Font {
-                weight: Weight::Bold,
-                ..theme::ui_font()
-            });
+            .font(theme::weighted_ui_font(Weight::Bold));
         let back_btn = button(
             embedded_svg::svg_widget("assets/icons/x.svg")
                 .width(Length::Fixed(13.0))

@@ -11,7 +11,7 @@
 
 use iced::{
     Alignment, Border, Color, Element, Length, Padding,
-    font::{Font, Weight},
+    font::Weight,
     widget::{Space, button, column, container, mouse_area, row, stack, svg, text},
 };
 use nokkvi_data::utils::fuzzy;
@@ -154,10 +154,10 @@ impl SettingsPage {
     /// Sidebar header: "Settings" title + relocated search input. Search
     /// always renders so its `text_input` id survives across renders.
     fn render_sidebar_header(&self) -> Element<'_, SettingsMessage> {
-        let title = text("Settings").size(15.0).color(theme::fg0()).font(Font {
-            weight: Weight::Bold,
-            ..theme::ui_font()
-        });
+        let title = text("Settings")
+            .size(15.0)
+            .color(theme::fg0())
+            .font(theme::weighted_ui_font(Weight::Bold));
 
         let search_input = crate::widgets::search_bar::search_bar(
             &self.search_query,
@@ -235,10 +235,10 @@ impl SettingsPage {
                     .style(move |_, _| svg::Style {
                         color: Some(theme::fg2()),
                     }),
-                text("Esc").size(10.0).color(theme::fg0()).font(Font {
-                    weight: Weight::Medium,
-                    ..theme::ui_font()
-                }),
+                text("Esc")
+                    .size(10.0)
+                    .color(theme::fg0())
+                    .font(theme::weighted_ui_font(Weight::Medium)),
             ]
             .spacing(6)
             .align_y(Alignment::Center),
@@ -661,10 +661,7 @@ fn render_picker_modal<'a>(
             Space::new().width(Length::Fixed(12.0)),
             text(title)
                 .size(label_size)
-                .font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                })
+                .font(theme::weighted_ui_font(Weight::Bold))
                 .color(theme::fg0()),
             Space::new().width(Length::Fill),
             back_btn,
@@ -799,14 +796,11 @@ fn render_narrow_chip<'a>(
     let label = text(tab.label())
         .size(text_size)
         .color(text_color)
-        .font(Font {
-            weight: if is_active {
-                Weight::Bold
-            } else {
-                Weight::Medium
-            },
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(if is_active {
+            Weight::Bold
+        } else {
+            Weight::Medium
+        }))
         .wrapping(iced::widget::text::Wrapping::None);
 
     // Inner container claims the chip's full content area and centers
@@ -898,14 +892,14 @@ fn render_sidebar_row<'a>(
         ..Default::default()
     });
 
-    let name = text(tab.label()).size(14.0).color(name_color).font(Font {
-        weight: if is_active {
+    let name = text(tab.label())
+        .size(14.0)
+        .color(name_color)
+        .font(theme::weighted_ui_font(if is_active {
             Weight::Bold
         } else {
             Weight::Medium
-        },
-        ..theme::ui_font()
-    });
+        }));
     let blurb = text(tab.description())
         .size(10.0)
         .color(theme::fg3())
@@ -1089,10 +1083,7 @@ fn render_section_pill<'a>(
     let label_widget = text(label.to_uppercase())
         .size(11.0)
         .color(theme::fg1())
-        .font(Font {
-            weight: Weight::Bold,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(Weight::Bold))
         .wrapping(iced::widget::text::Wrapping::None);
 
     let content = row![icon, label_widget]

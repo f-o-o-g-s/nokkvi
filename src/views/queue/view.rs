@@ -305,18 +305,12 @@ impl QueuePage {
             // Eyebrow + name stack; clip so a long name can't shove the right
             // cluster off-screen (same overflow guard the old bar relied on).
             let eyebrow = iced::widget::text("PLAYING FROM PLAYLIST")
-                .font(iced::font::Font {
-                    weight: iced::font::Weight::Semibold,
-                    ..crate::theme::ui_font()
-                })
+                .font(crate::theme::weighted_ui_font(iced::font::Weight::Semibold))
                 .size(9.5)
                 .color(accent)
                 .wrapping(iced::widget::text::Wrapping::None);
             let name = iced::widget::text(ctx.name.clone())
-                .font(iced::font::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..crate::theme::ui_font()
-                })
+                .font(crate::theme::weighted_ui_font(iced::font::Weight::Bold))
                 .size(14)
                 .color(crate::theme::fg0())
                 .wrapping(iced::widget::text::Wrapping::None);

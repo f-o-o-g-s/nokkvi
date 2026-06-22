@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use iced::{
     Alignment, Element, Length,
-    font::{Font, Weight},
+    font::Weight,
     widget::{container, mouse_area, pick_list, row, text},
 };
 // Re-export SortMode from data crate (canonical definition)
@@ -308,10 +308,7 @@ pub(crate) fn view_header<
         container(
             text(current_view.to_string())
                 .size(12.0)
-                .font(Font {
-                    weight: Weight::Medium,
-                    ..theme::ui_font()
-                })
+                .font(theme::weighted_ui_font(Weight::Medium))
                 .color(theme::fg0())
                 .wrapping(iced::widget::text::Wrapping::None)
                 .ellipsis(iced::widget::text::Ellipsis::End),
@@ -353,10 +350,7 @@ pub(crate) fn view_header<
         .on_select(select_handler)
         .width(Length::Shrink)
         .text_size(12.0)
-        .font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        })
+        .font(theme::weighted_ui_font(Weight::Medium))
         .padding([8, 12])
         .style(move |_theme, status| pick_list::Style {
             text_color: theme::fg0(),
@@ -484,10 +478,7 @@ pub(crate) fn view_header<
     let count_cell: Element<'a, Message> = container(
         text(count_text)
             .size(12.0)
-            .font(Font {
-                weight: Weight::Medium,
-                ..theme::ui_font()
-            })
+            .font(theme::weighted_ui_font(Weight::Medium))
             .color(theme::fg2())
             .width(Length::Shrink),
     )

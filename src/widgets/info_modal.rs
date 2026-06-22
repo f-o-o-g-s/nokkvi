@@ -307,10 +307,7 @@ pub(crate) fn info_modal_overlay<'a>(
             container(
                 text(glyph_text)
                     .size(VALUE_SIZE + 2.0)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..theme::ui_font()
-                    })
+                    .font(theme::weighted_ui_font(iced::font::Weight::Bold))
                     .color(glyph_color),
             )
             .padding(iced::Padding {
