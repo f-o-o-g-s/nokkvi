@@ -50,12 +50,13 @@ pub(crate) const OVER_COVER_WRAP_MARGIN: f32 =
     BOAT_HEIGHT_FRACTION * BOAT_ASPECT_RATIO * BOAT_WRAP_MARGIN_BOAT_WIDTHS;
 
 /// Anchor sprite height as a fraction of the boat's height. The boat
-/// SVG fills its full 80-unit viewBox; the lucide anchor fills its
-/// 24-unit viewBox; both render at `_h × _h` since both are square in
-/// content. With the rope drawn separately on the canvas (no rope
-/// inside the SVG), the anchor sprite is purely the lucide icon —
-/// scale by feel: 0.6 × boat_h reads as a clearly recognizable
-/// doodad without rivaling the boat hull for visual weight.
+/// SVG fills its full 80-unit viewBox; the anchor fills its own square
+/// viewBox (24-unit Lucide or 256-unit Phosphor); both render at
+/// `_h × _h` since both are square in content. With the rope drawn
+/// separately on the canvas (no rope inside the SVG), the anchor sprite
+/// is purely the active-set anchor icon — scale by feel: 0.6 × boat_h
+/// reads as a clearly recognizable doodad without rivaling the boat hull
+/// for visual weight.
 pub(crate) const ANCHOR_HEIGHT_MULTIPLE_OF_BOAT: f32 = 0.6;
 
 /// Absolute pixel floor on the boat sprite's height. Without this,
@@ -470,10 +471,11 @@ pub(crate) struct MusicSignals {
 ///   a ±17° tilt range, that's ~140 entries at the worst case — ~3 KB
 ///   each in iced's bitmap atlas, so ~400 KB worst-case footprint per
 ///   theme.
-/// - `anchor_handle` is a single themed lucide-anchor SVG handle (no
-///   rotation — the rope's swing lives on the canvas, not in the
-///   sprite). Rebuilt only on theme change, sharing `handle_generation`
-///   with the boat cache so a single bump invalidates both atomically.
+/// - `anchor_handle` is a single themed anchor SVG handle for the active
+///   icon set (no rotation — the rope's swing lives on the canvas, not in
+///   the sprite). Rebuilt on a theme OR icon-set change, sharing
+///   `handle_generation` with the boat cache so a single bump invalidates
+///   both atomically.
 /// - `handle_generation` is the `theme::theme_generation()` snapshot taken
 ///   at the time the cache was last populated. When the global counter
 ///   advances — any path that runs `theme::reload_theme()` or

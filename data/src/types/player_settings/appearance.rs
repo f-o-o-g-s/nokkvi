@@ -34,8 +34,9 @@ define_labeled_enum! {
     /// the transport + rating glyphs forced to the Fill weight so the play
     /// button and rating stars still read solid). `Lucide` is the alternate:
     /// the thin stroked outlines on a 24px grid that the app originally
-    /// shipped. The boat/anchor doodad art stays Lucide-tuned regardless of
-    /// this knob.
+    /// shipped. The boat hull and rope are bespoke art (unaffected by this
+    /// knob), but the doodad's anchor follows the set — filled Phosphor or
+    /// stroked Lucide.
     ///
     /// Serializes to snake_case strings in `config.toml` and the redb-backed
     /// `PersistedPlayerSettings`.

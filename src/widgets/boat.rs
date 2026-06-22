@@ -482,7 +482,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         // Anchor sprite sized as a fraction of the boat — small enough
         // that it reads as a doodad rather than a second focal point.
         let anchor_total_h = boat_h * ANCHOR_HEIGHT_MULTIPLE_OF_BOAT;
-        let anchor_total_w = anchor_total_h; // lucide anchor's viewBox is square
+        let anchor_total_w = anchor_total_h; // the anchor's viewBox is square (24² Lucide / 256² Phosphor)
         let anchor_left_x = state.anchor_drop_x * area_width - anchor_total_w * 0.5;
         let anchor_top_y = baseline_y - anchor_total_h;
 
