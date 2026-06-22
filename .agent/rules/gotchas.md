@@ -62,7 +62,9 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 
 ## Assets & Icons
 
-- **Auto-generated SVG lookup**: `assets/icons/*.svg` is enumerated at build time by `build.rs`, generating `OUT_DIR/embedded_svg_generated.rs`. Adding/removing an icon is just dropping the file. Unknown paths still silently fall back to `play.svg` with a warn log — the test `all_svg_paths_in_source_are_registered` (`cargo test --bin nokkvi -- embedded_svg`) catches typos in path strings.
+- **Auto-generated SVG lookup**: BOTH icon namespaces — `assets/icons/*.svg` (Lucide, the paths every view references) and `assets/icons-phosphor/*.svg` (the alternate set) — are enumerated at build time by `build.rs`, generating `OUT_DIR/embedded_svg_generated.rs` (one `lookup()` keyed by full path + `KNOWN_PATHS`). Adding/removing an icon is just dropping the file in either dir.
+- **Selectable icon set remaps in `get_svg`** (`src/embedded_svg.rs`): when the active set is Phosphor (the **default**), `get_svg(path)` first runs `phosphor_path()` (binary-searches the sorted `NAME_MAP` Lucide-stem → Phosphor-file table) and returns the mapped Phosphor bytes. A mapped-but-MISSING Phosphor file falls through **gracefully to the Lucide content** (not the play.svg fallback). The Lucide set skips the remap entirely. Only a genuinely **unknown** path hits the silent `play.svg` fallback (with a warn log). The filled transport/rating glyphs (`play`, `pause`, `skip-back`, `skip-forward`, `heart-filled`, `star-filled`) deliberately map to the Phosphor **Fill** weight; the rest use Regular.
+- **`cargo test --bin nokkvi -- embedded_svg`** runs the guard suite: `all_svg_paths_in_source_are_registered` catches typo'd path strings; `generated_paths_match_assets_dir` re-confirms codegen saw both dirs; the `icon_name_map_*` tests pin the `NAME_MAP` (sorted, covers every Lucide icon, every Phosphor target ships, Fill weight for the filled glyphs); `get_svg_honors_active_icon_set` pins the remap end-to-end.
 
 ## Artwork
 

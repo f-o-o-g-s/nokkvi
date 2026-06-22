@@ -34,9 +34,10 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] **Playlist edit guard**: `guard_play_action()` on every play handler
 - [ ] **HasCommonAction**: implement on the action enum if the view has SearchChanged/SortModeChanged/SortOrderChanged
 - [ ] **Single-active overlay menu**: hamburger / kebab / dropdown / context menus bubble `Message::SetOpenMenu(Some(OpenMenu::…))` instead of owning local `is_open` state
-- [ ] **Icons**: drop SVGs into `assets/icons/` — `build.rs` regenerates the lookup table; no manual registration
+- [ ] **Icons**: drop the Lucide SVG into `assets/icons/` — `build.rs` walks both `assets/icons/` and `assets/icons-phosphor/` and regenerates the lookup table (no manual `const`/match edits). Phosphor is the **default** icon set, so if a view references the new stem, also add a `NAME_MAP` entry (Lucide stem → Phosphor path) in `src/embedded_svg.rs` and ship the matching file under `assets/icons-phosphor/`; otherwise `get_svg()` silently falls through to the Lucide glyph under the default set. A path referenced in code but missing on disk falls back to `play.svg` — `cargo test --bin nokkvi -- embedded_svg` catches it
 
 ## Verification
 - [ ] **TDD**: write tests for observable state mutations *before* implementing handlers (`update/tests/{area}.rs` or the per-area `tests_*.rs` siblings; `test_app()` from `src/test_helpers.rs`)
-- [ ] `cargo +nightly fmt --all`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` clean
+- [ ] **All four CI gates clean** (CI fails any of them): `cargo +nightly fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace`, `cargo build --release`
+- [ ] **Changelog**: add a user-facing entry under `## [Unreleased]` in `CHANGELOG.md` (the `/commit` skill refreshes it in the same commit; `docs-changelog-sync.yml` rebuilds the docs site on CHANGELOG changes)
 - [ ] Manual: happy path + edge cases + stable widget tree (root widget type unchanged across renders)

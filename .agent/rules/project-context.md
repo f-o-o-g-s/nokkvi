@@ -45,7 +45,7 @@ Root routing in `update/mod.rs` dispatches `Message::Albums(msg)` → `albums_pa
 
 ## Message Architecture
 
-Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `NavigationMessage`, `FindMessage`, `SplitViewMessage`, `CrossPaneDragMessage`, `ToastMessage`. Cross-cutting variants stay flat. See `src/app_message.rs`.
+Root `Message` is namespaced: `NavigationMessage`, `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `LibraryMessage`, `SlotListMessage` (some variants carry `View`), `RouletteMessage`, `FindMessage`, `SplitViewMessage`, `EditorMessage`, `CrossPaneDragMessage`, `ToastMessage`. Per-domain backend loader results get their own carriers too (`AlbumsLoaderMessage` / `ArtistsLoaderMessage` / `SongsLoaderMessage` / `GenresLoaderMessage` / `PlaylistsLoaderMessage` / `QueueLoaderMessage`). Per-view component messages (`views::AlbumsMessage`, etc.) and cross-cutting concerns stay flat. See `src/app_message.rs`.
 
 ## Pages on `Nokkvi`
 
@@ -68,4 +68,4 @@ Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessa
 
 ## Reference Codebases
 
-External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `alsa-lib`, `bevy-audioviz`, `circular-audio-wave`, `feishin`, `ferrosonic`, `firmium`, `fooyin`, `gelly`, `glsl-app`, `iced`, `iced-apps`, `iced-book`, `iced-docs`, `lookas`, `lucide` (icons), `mimalloc`, `mimalloc-rust`, `mpd`, `mpris`, `mpv`, `navidrome`, `ncs-spectrum-glava`, `nocturne`, `pipewire`, `rmpc`, `rmpc-docs`, `rodio`, `symphonia`, `wav2bar`, `wavejs`, `wireplumber`, `woscope`.
+External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `alsa-lib`, `bevy-audioviz`, `circular-audio-wave`, `feishin`, `ferrosonic`, `firmium`, `fooyin`, `gelly`, `glsl-app`, `iced`, `iced_anim`, `iced-apps`, `iced-book`, `iced-docs`, `lookas`, `lucide` (icons), `mimalloc`, `mimalloc-rust`, `mpd`, `mpris`, `mpv`, `navidrome`, `ncs-spectrum-glava`, `nocturne`, `phosphor-icons` (icons), `pipewire`, `rmpc`, `rmpc-docs`, `rodio`, `symphonia`, `wav2bar`, `wavejs`, `wireplumber`, `woscope`.

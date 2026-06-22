@@ -13,11 +13,11 @@ views/settings/
 ├── entries.rs          — Entry building / filtering / cross-tab search
 ├── items.rs            — Re-exports `SettingValue` / `SettingMeta` / `SettingItem` / `SettingsEntry` from the data crate, plus the `MacroRows::{new, take, finish}` helper used by the per-tab builders. Every builder ends with `macro_rows.finish()` (debug-panics naming any un-taken key; warns in release); conditional rows follow the take-unconditionally-push-conditionally convention so consumption is data-independent. Construct `SettingMeta` via `SettingMeta::new(key, label, category).with_subtitle(...)`
 ├── items_general.rs    — Library, Display, Behavior, Window & Tray, Advanced, Account
-├── items_interface.rs  — Navigation, Slot List, Player Bar, Font, Metadata Strip, Artwork Overlays, Artwork Column
+├── items_interface.rs  — Navigation, Slot List, Player Bar, Font & Icons (`icon_set` set picker), Metadata Strip, Artwork Overlays, Artwork Column
 ├── items_playback.rs   — Transitions, Volume Normalization, Scrobbling, Rating Reminder, Playlists
 ├── items_hotkeys.rs    — Per-category hotkey entries
 ├── items_theme.rs      — Mode, Display, and the Select-Theme picker opener only. Theme COLORS are edited directly in each theme's TOML file (`~/.config/nokkvi/themes/`), not in the GUI — `build_theme_items` emits a single `__theme_picker` row (`ActivateKind::ThemePicker`) whose value is the current theme name
-├── items_visualizer.rs — Frame, Signal, Bars, Bar Colors (Dark/Light), Lines
+├── items_visualizer.rs — Frame, Signal, Bars (incl. the Bar Colors Dark/Light `ColorArray` rows), Lines, Scope
 ├── sub_lists.rs        — Three sub-list states: `SubListState` (color gradient editor — in-place detail-pane replacement) + `FontSubListState` (font picker — modal overlay) + `ThemeSubListState` (theme picker — modal overlay; each `ThemeRow` carries pre-resolved `ThemePreviewColors` so the render path never does disk IO, selecting via `SettingsAction::ApplyPreset { stem, display_name }`)
 ├── presets.rs          — Theme discovery + apply: `all_theme_files()` (→ `Vec<(ThemeInfo, ThemeFile)>` via `theme_loader::discover_theme_files`, for the picker swatches), `apply_theme(stem)` (writes `theme = "stem"` to config.toml), `active_theme_stem()`
 ├── rendering.rs        — Slot rendering: detail-row chrome, headers, items, colors, hotkey badges, toggle sets, plus `render_theme_slot` (paints each theme picker row in that theme's OWN palette via `ThemeRow.preview`)
