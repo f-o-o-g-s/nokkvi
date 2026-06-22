@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - The Scope visualizer now defaults to a height-based gradient instead of a static (flat) color.
+- Verbose Config is now a three-way choice (On, Off, or Clean); Clean writes a sparse config.toml with no auto-added comments.
 
 ### Fixed
 

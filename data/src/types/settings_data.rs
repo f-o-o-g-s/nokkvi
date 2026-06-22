@@ -30,7 +30,8 @@ pub struct GeneralSettingsData {
     pub auto_follow_playing: bool,
     pub enter_behavior: Cow<'static, str>,
     pub local_music_path: Cow<'static, str>,
-    pub verbose_config: bool,
+    /// Verbose-config mode label ("On" / "Off" / "Clean").
+    pub verbose_config: Cow<'static, str>,
     pub library_page_size: Cow<'static, str>,
     pub artwork_resolution: Cow<'static, str>,
     pub show_album_artists_only: bool,
@@ -49,7 +50,7 @@ impl Default for GeneralSettingsData {
             auto_follow_playing: false,
             enter_behavior: Cow::Borrowed("test-default"),
             local_music_path: Cow::Borrowed("test-default"),
-            verbose_config: false,
+            verbose_config: Cow::Borrowed("test-default"),
             library_page_size: Cow::Borrowed("test-default"),
             artwork_resolution: Cow::Borrowed("test-default"),
             show_album_artists_only: false,
@@ -214,9 +215,9 @@ mod tests {
         assert_eq!(data.local_music_path.as_ref(), "test-default");
         assert_eq!(data.library_page_size.as_ref(), "test-default");
         assert_eq!(data.artwork_resolution.as_ref(), "test-default");
+        assert_eq!(data.verbose_config.as_ref(), "test-default");
         assert!(!data.stable_viewport);
         assert!(!data.auto_follow_playing);
-        assert!(!data.verbose_config);
         assert!(!data.show_album_artists_only);
         assert!(!data.suppress_library_refresh_toasts);
         assert!(!data.show_tray_icon);

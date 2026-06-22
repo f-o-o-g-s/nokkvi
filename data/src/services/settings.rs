@@ -872,8 +872,11 @@ impl SettingsManager {
         }
     }
 
-    pub fn set_verbose_config(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.verbose_config = enabled;
+    pub fn set_verbose_config(
+        &mut self,
+        mode: crate::types::player_settings::VerboseConfig,
+    ) -> Result<()> {
+        self.settings.player.verbose_config = mode;
         // Only persist to redb — the UI handler writes all TOML sections
         // in a single atomic pass to avoid racing with write_full_theme_and_visualizer.
         self.save_redb_only()
@@ -892,8 +895,11 @@ impl SettingsManager {
         self.save()
     }
 
+    /// Whether the TOML section writers should emit every key (including
+    /// unchanged defaults) rather than pruning to the non-default set. True
+    /// only for `VerboseConfig::On`; both `Off` and `Clean` write sparse.
     pub(crate) fn is_verbose_config(&self) -> bool {
-        self.settings.player.verbose_config
+        self.settings.player.verbose_config.writes_all_defaults()
     }
 
     // -------------------------------------------------------------------------
@@ -1272,11 +1278,11 @@ mod sentinel_roundtrip_tests {
             }],
 
             // Verbose / library
-            verbose_config: true,                            // default false
-            library_page_size: LibraryPageSize::Massive,     // default Default
-            artwork_resolution: ArtworkResolution::Original, // default Default
-            show_album_artists_only: false,                  // default true
-            suppress_library_refresh_toasts: true,           // default false
+            verbose_config: crate::types::player_settings::VerboseConfig::On, // default Off
+            library_page_size: LibraryPageSize::Massive,                      // default Default
+            artwork_resolution: ArtworkResolution::Original,                  // default Default
+            show_album_artists_only: false,                                   // default true
+            suppress_library_refresh_toasts: true,                            // default false
 
             // Per-view columns — nested exhaustive literal (no
             // `..Default::default()`) so a new column added to `ViewColumns`

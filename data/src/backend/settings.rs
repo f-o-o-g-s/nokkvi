@@ -23,8 +23,8 @@ use crate::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, EnterBehavior, LibraryPageSize, LivePlayerSettings,
             NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
-            VolumeNormalizationMode,
+            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VerboseConfig,
+            VisualizationMode, VolumeNormalizationMode,
         },
         queue_sort_mode::QueueSortMode,
         sort_mode::SortMode,
@@ -337,7 +337,7 @@ impl SettingsService {
         set_replay_gain_prevent_clipping, bool
     );
 
-    delegate_setter!(set_verbose_config, bool);
+    delegate_setter!(set_verbose_config, VerboseConfig);
 
     // =========================================================================
     // Multi-arg setters (kept inline)

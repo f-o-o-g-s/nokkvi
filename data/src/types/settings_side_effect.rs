@@ -9,7 +9,7 @@
 //! `on_dispatch:` closure, and add a match arm in
 //! `dispatch_settings_side_effect` to run the iced-side work.
 
-use crate::types::toast::ToastLevel;
+use crate::types::{player_settings::VerboseConfig, toast::ToastLevel};
 
 #[derive(Debug, Clone)]
 pub enum SettingsSideEffect {
@@ -27,8 +27,10 @@ pub enum SettingsSideEffect {
     /// `general.show_album_artists_only` so the visible artist filter
     /// reflects the new toggle without a manual refresh.
     LoadArtists,
-    /// Trigger the UI-crate verbose-config writer chain: write the full TOML
-    /// (or strip-to-sparse), emit a result toast, then ask the manager to
-    /// flush every TOML section in one pass via `write_all_toml_public`.
-    WriteVerboseConfig { enabled: bool },
+    /// Trigger the UI-crate verbose-config writer chain: expand to full TOML
+    /// (`On`), strip to sparse keeping comments (`Off`), or strip to sparse and
+    /// remove the auto-added `[visualizer]` comments (`Clean`); emit a result
+    /// toast, then ask the manager to flush every TOML section in one pass via
+    /// `write_all_toml_public`.
+    WriteVerboseConfig { mode: VerboseConfig },
 }

@@ -19,7 +19,11 @@
 
 use nokkvi_data::{
     services::settings_tables::SettingsSideEffect,
-    types::{player_settings::LivePlayerSettings, toast::ToastLevel, view_columns::ViewColumns},
+    types::{
+        player_settings::{LivePlayerSettings, VerboseConfig},
+        toast::ToastLevel,
+        view_columns::ViewColumns,
+    },
 };
 
 use crate::test_helpers::*;
@@ -129,16 +133,17 @@ fn side_effect_set_light_mode_atomic_does_not_push_a_toast() {
 }
 
 #[test]
-fn side_effect_write_verbose_config_enable_emits_success_toast() {
-    // `WriteVerboseConfig { enabled: true }` writes the [visualizer]
+fn side_effect_write_verbose_config_on_emits_success_toast() {
+    // `WriteVerboseConfig { mode: On }` writes the [visualizer]
     // section to `config.toml`. In a unit test the working directory points
     // at the repo, so the write may fail (file permissions / not present);
     // either way one toast (success or warn) MUST be pushed so the user
     // gets feedback.
     let mut app = test_app();
 
-    let _task =
-        app.dispatch_settings_side_effect(SettingsSideEffect::WriteVerboseConfig { enabled: true });
+    let _task = app.dispatch_settings_side_effect(SettingsSideEffect::WriteVerboseConfig {
+        mode: VerboseConfig::On,
+    });
 
     assert_eq!(
         app.toast.toasts.len(),
@@ -153,11 +158,34 @@ fn side_effect_write_verbose_config_enable_emits_success_toast() {
 }
 
 #[test]
-fn side_effect_write_verbose_config_disable_emits_success_toast() {
+fn side_effect_write_verbose_config_off_emits_success_toast() {
     let mut app = test_app();
 
-    let _task = app
-        .dispatch_settings_side_effect(SettingsSideEffect::WriteVerboseConfig { enabled: false });
+    let _task = app.dispatch_settings_side_effect(SettingsSideEffect::WriteVerboseConfig {
+        mode: VerboseConfig::Off,
+    });
+
+    assert_eq!(
+        app.toast.toasts.len(),
+        1,
+        "verbose_config toggle must push exactly one toast (success or warn)"
+    );
+    let level = app.toast.toasts[0].level;
+    assert!(
+        matches!(level, ToastLevel::Success | ToastLevel::Warning),
+        "expected Success or Warning, got {level:?}"
+    );
+}
+
+#[test]
+fn side_effect_write_verbose_config_clean_emits_success_toast() {
+    // `Clean` strips defaults AND the auto-added comments. Like the other two,
+    // exactly one feedback toast must surface regardless of write success.
+    let mut app = test_app();
+
+    let _task = app.dispatch_settings_side_effect(SettingsSideEffect::WriteVerboseConfig {
+        mode: VerboseConfig::Clean,
+    });
 
     assert_eq!(
         app.toast.toasts.len(),

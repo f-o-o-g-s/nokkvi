@@ -13,9 +13,9 @@ use crate::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
             NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
+            SlotRowHeight, StripClickAction, TrackInfoDisplay, VerboseConfig, VisualizationMode,
             VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
-            deserialize_rounded_mode_with_bool_compat,
+            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
         view_columns::ViewColumns,
     },
@@ -32,8 +32,10 @@ pub struct TomlSettings {
     pub start_view: String,
     pub enter_behavior: EnterBehavior,
     pub local_music_path: String,
-    /// When true, all settings (including defaults) are written to config.toml
-    pub verbose_config: bool,
+    /// How config.toml is written (full / sparse-with-comments / sparse-clean).
+    /// Legacy bool values load via the compat shim (`true` → On, `false` → Off).
+    #[serde(deserialize_with = "deserialize_verbose_config_with_bool_compat")]
+    pub verbose_config: VerboseConfig,
     pub library_page_size: LibraryPageSize,
     pub artwork_resolution: ArtworkResolution,
     pub show_album_artists_only: bool,
@@ -239,7 +241,7 @@ impl Default for TomlSettings {
             start_view: "Queue".to_string(),
             enter_behavior: EnterBehavior::default(),
             local_music_path: String::new(),
-            verbose_config: false,
+            verbose_config: VerboseConfig::default(),
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: true,

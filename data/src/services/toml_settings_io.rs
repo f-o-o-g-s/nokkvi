@@ -378,7 +378,11 @@ volume_normalization = true
         let section = doc.get("settings").unwrap();
         let settings: crate::types::toml_settings::TomlSettings =
             section.clone().try_into().unwrap();
-        assert!(settings.verbose_config);
+        // `verbose_config = true` in the input loads via the bool-compat shim.
+        assert_eq!(
+            settings.verbose_config,
+            crate::types::player_settings::VerboseConfig::On
+        );
     }
 
     #[test]
@@ -421,16 +425,16 @@ volume_normalization = true
 
     #[test]
     fn test_settings_roundtrip_verbose_config_flag() {
-        use crate::types::toml_settings::TomlSettings;
+        use crate::types::{player_settings::VerboseConfig, toml_settings::TomlSettings};
 
         let settings = TomlSettings {
-            verbose_config: true,
+            verbose_config: VerboseConfig::On,
             ..Default::default()
         };
 
-        // Serialize → parse → verify flag survives
+        // Serialize → parse → verify the mode survives the enum wire round-trip.
         let toml_str = toml::to_string_pretty(&settings).unwrap();
         let roundtrip: TomlSettings = toml::from_str(&toml_str).unwrap();
-        assert!(roundtrip.verbose_config);
+        assert_eq!(roundtrip.verbose_config, VerboseConfig::On);
     }
 }

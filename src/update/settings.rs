@@ -38,7 +38,7 @@ impl Nokkvi {
             auto_follow_playing: self.settings.auto_follow_playing,
             enter_behavior: self.settings.enter_behavior.as_label().into(),
             local_music_path: self.settings.local_music_path.clone().into(),
-            verbose_config: self.settings.verbose_config,
+            verbose_config: self.settings.verbose_config.as_label().into(),
             library_page_size: self.settings.library_page_size.as_label().into(),
             artwork_resolution: self.settings.artwork_resolution.as_label().into(),
             show_album_artists_only: self.settings.show_album_artists_only,
@@ -413,7 +413,16 @@ impl Nokkvi {
         let is_theme = key.is_theme();
         let key_str = key.as_str().to_string();
 
-        if let Err(e) = key.write(&value, description.as_deref()) {
+        // In `Clean` verbose-config mode the writer adds no `# description`
+        // comments (only `[visualizer]` keys carry them — theme writes never
+        // pass a comment). `On`/`Off` keep the documentation.
+        let comment = if self.settings.verbose_config.writes_comments() {
+            description.as_deref()
+        } else {
+            None
+        };
+
+        if let Err(e) = key.write(&value, comment) {
             tracing::warn!(" [SETTINGS] Failed to write config: {e}");
             self.toast_warn(format!("Failed to save setting: {e}"));
         } else if is_theme {
@@ -739,27 +748,42 @@ impl Nokkvi {
                 Task::none()
             }
             SettingsSideEffect::LoadArtists => Task::done(Message::LoadArtists),
-            SettingsSideEffect::WriteVerboseConfig { enabled } => {
+            SettingsSideEffect::WriteVerboseConfig { mode } => {
+                use nokkvi_data::types::player_settings::VerboseConfig;
                 // The redb side has already been persisted by the macro's
                 // setter (`set_verbose_config` → `save_redb_only`). We only
                 // own the synchronous TOML write/strip + the deferred
                 // `write_all_toml_public` flush.
-                if enabled {
-                    use crate::visualizer_config::SharedVisualizerConfigExt;
-                    let viz_config = self.visualizer_config.snapshot();
-                    if let Err(e) = crate::config_writer::write_full_visualizer(&viz_config) {
-                        tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
-                        self.toast_warn(format!("Failed to write verbose config: {e}"));
-                    } else {
-                        self.toast_success("Config expanded — all defaults written".to_string());
+                match mode {
+                    VerboseConfig::On => {
+                        use crate::visualizer_config::SharedVisualizerConfigExt;
+                        let viz_config = self.visualizer_config.snapshot();
+                        if let Err(e) = crate::config_writer::write_full_visualizer(&viz_config) {
+                            tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
+                            self.toast_warn(format!("Failed to write verbose config: {e}"));
+                        } else {
+                            self.toast_success(
+                                "Config expanded — all defaults written".to_string(),
+                            );
+                        }
                     }
-                } else if let Err(e) = crate::config_writer::strip_to_sparse() {
-                    tracing::warn!(" [SETTINGS] Failed to strip config: {e}");
-                    self.toast_warn(format!("Failed to strip config: {e}"));
-                } else {
-                    self.toast_success(
-                        "Config stripped — only non-default values remain".to_string(),
-                    );
+                    // `Off` keeps the descriptive comments; `Clean` strips them.
+                    VerboseConfig::Off | VerboseConfig::Clean => {
+                        let clear_comments = matches!(mode, VerboseConfig::Clean);
+                        if let Err(e) = crate::config_writer::strip_to_sparse(clear_comments) {
+                            tracing::warn!(" [SETTINGS] Failed to strip config: {e}");
+                            self.toast_warn(format!("Failed to strip config: {e}"));
+                        } else if clear_comments {
+                            self.toast_success(
+                                "Config minimized — non-default values only, no comments"
+                                    .to_string(),
+                            );
+                        } else {
+                            self.toast_success(
+                                "Config stripped — only non-default values remain".to_string(),
+                            );
+                        }
+                    }
                 }
 
                 self.shell_spawn(

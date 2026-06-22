@@ -11,6 +11,7 @@ mod navigation;
 mod playback;
 mod slot_list;
 mod strip;
+mod verbose;
 mod visualizer;
 
 pub use appearance::*;
@@ -20,6 +21,7 @@ pub use navigation::*;
 pub use playback::*;
 pub use slot_list::*;
 pub use strip::*;
+pub use verbose::*;
 pub use visualizer::*;
 
 use crate::audio::eq::EQ_BAND_COUNT;
@@ -166,8 +168,8 @@ pub struct LivePlayerSettings {
     pub eq_gains: [f32; EQ_BAND_COUNT],
     /// User-created custom EQ presets.
     pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
-    /// When true, all settings (including defaults) are written to config.toml.
-    pub verbose_config: bool,
+    /// How config.toml is written (full / sparse-with-comments / sparse-clean).
+    pub verbose_config: VerboseConfig,
     /// Library page size controls how many items are fetched at once.
     pub library_page_size: LibraryPageSize,
     /// Artwork resolution for the large artwork panel.

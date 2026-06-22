@@ -11,7 +11,9 @@
 //! fields that previously lived on `WindowState`.
 
 use nokkvi_data::types::{
-    player_settings::{ArtworkResolution, EnterBehavior, LibraryPageSize, LivePlayerSettings},
+    player_settings::{
+        ArtworkResolution, EnterBehavior, LibraryPageSize, LivePlayerSettings, VerboseConfig,
+    },
     settings::PersistedPlayerSettings,
 };
 
@@ -145,7 +147,7 @@ fn handle_player_settings_loaded_replaces_settings_substruct() {
         default_playlist_name: "Favourites".to_string(),
         quick_add_to_playlist: true,
         queue_show_default_playlist: true,
-        verbose_config: true,
+        verbose_config: VerboseConfig::On,
         artwork_resolution: ArtworkResolution::High,
         ..LivePlayerSettings::default()
     };
@@ -168,7 +170,7 @@ fn handle_player_settings_loaded_replaces_settings_substruct() {
     assert_eq!(app.settings.default_playlist_name, "Favourites");
     assert!(app.settings.quick_add_to_playlist);
     assert!(app.settings.queue_show_default_playlist);
-    assert!(app.settings.verbose_config);
+    assert_eq!(app.settings.verbose_config, VerboseConfig::On);
     assert_eq!(app.settings.artwork_resolution, ArtworkResolution::High);
 }
 
@@ -182,7 +184,7 @@ fn build_settings_view_data_reads_from_substruct() {
     app.settings.suppress_library_refresh_toasts = true;
     app.settings.show_tray_icon = true;
     app.settings.close_to_tray = true;
-    app.settings.verbose_config = true;
+    app.settings.verbose_config = VerboseConfig::On;
     app.settings.local_music_path = "/media/lib".to_string();
     app.settings.scrobbling_enabled = false;
     app.settings.scrobble_threshold = 0.33;
@@ -200,7 +202,7 @@ fn build_settings_view_data_reads_from_substruct() {
     assert!(data.general.suppress_library_refresh_toasts);
     assert!(data.general.show_tray_icon);
     assert!(data.general.close_to_tray);
-    assert!(data.general.verbose_config);
+    assert_eq!(data.general.verbose_config.as_ref(), "On");
     assert_eq!(data.general.local_music_path.as_ref(), "/media/lib");
 
     // PlaybackSettingsData reflects substruct values

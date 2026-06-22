@@ -395,8 +395,11 @@ pub(crate) fn write_full_visualizer(
 /// Strip `[visualizer]` section back to sparse mode by removing
 /// keys whose values match the default configuration.
 ///
-/// Used when verbose_config mode is disabled to clean up the config file.
-pub(crate) fn strip_to_sparse() -> Result<()> {
+/// Used when verbose_config mode is disabled to clean up the config file. When
+/// `clear_comments` is true (the `Clean` mode), the auto-added `# description`
+/// comments above the surviving `[visualizer]` keys are also stripped, leaving
+/// a bare key/value file the user can annotate themselves.
+pub(crate) fn strip_to_sparse(clear_comments: bool) -> Result<()> {
     let config_path =
         nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
 
@@ -406,22 +409,22 @@ pub(crate) fn strip_to_sparse() -> Result<()> {
         return Ok(());
     }
 
-    edit_existing_toml_doc(&config_path, strip_to_sparse_doc)
+    edit_existing_toml_doc(&config_path, |doc| strip_to_sparse_doc(doc, clear_comments))
 }
 
 /// Thin parse wrapper over [`strip_to_sparse_doc`], kept for content-level
 /// testing (e.g. corrupted-config input) — production routes through
 /// `edit_existing_toml_doc` above.
 #[cfg(test)]
-fn strip_to_sparse_content(content: &str) -> Result<String> {
+fn strip_to_sparse_content(content: &str, clear_comments: bool) -> Result<String> {
     let mut doc: DocumentMut = content
         .parse::<DocumentMut>()
         .context("Failed to parse config.toml as TOML")?;
-    strip_to_sparse_doc(&mut doc)?;
+    strip_to_sparse_doc(&mut doc, clear_comments)?;
     Ok(doc.to_string())
 }
 
-fn strip_to_sparse_doc(doc: &mut DocumentMut) -> Result<()> {
+fn strip_to_sparse_doc(doc: &mut DocumentMut, clear_comments: bool) -> Result<()> {
     // Build default reference for visualizer (no theme — theme is separate files)
     let default_viz = crate::visualizer_config::VisualizerConfig::default();
 
@@ -463,7 +466,61 @@ fn strip_to_sparse_doc(doc: &mut DocumentMut) -> Result<()> {
         debug!(" [CONFIG WRITER] Removed leftover [theme] table section from config.toml");
     }
 
+    if clear_comments {
+        strip_visualizer_comments(doc)?;
+    }
+
     debug!(" [CONFIG WRITER] Stripped [visualizer] to sparse (verbose off)");
+    Ok(())
+}
+
+/// Remove the auto-added `# description` comments from inside the
+/// `[visualizer]` section while preserving the key/value pairs that survived
+/// the default-strip (non-default scalars, per-mode sub-tables, and any
+/// user-added keys). Used by the `Clean` verbose-config mode.
+///
+/// Comments are stripped by round-tripping ONLY the `[visualizer]` item through
+/// the plain `toml::Value` model — which carries no decor — and re-inserting
+/// the cleanly re-serialized result. Scoping the round-trip to `[visualizer]`
+/// (rather than the whole document) preserves any comments the user keeps in
+/// other sections or at the top of the file. The original `[visualizer]` header
+/// decor (a user comment written directly above the header, plus the blank-line
+/// separator from the previous section) is captured and re-applied, since the
+/// freshly-serialized replacement carries no leading decor of its own.
+fn strip_visualizer_comments(doc: &mut DocumentMut) -> Result<()> {
+    let Some(viz) = doc.get("visualizer").cloned() else {
+        return Ok(());
+    };
+
+    // The whitespace/comment block ABOVE the `[visualizer]` header lives in the
+    // header's leading decor prefix — NOT inside the section body — so the
+    // value round-trip below would otherwise discard it. Capture it first.
+    let header_prefix = viz.as_table().and_then(|t| t.decor().prefix()).cloned();
+
+    // Isolate [visualizer] in its own document, render to text (comments
+    // included), then parse as a decor-free `toml::Value` and re-serialize —
+    // dropping every in-section comment while keeping the values and nested
+    // tables.
+    let mut isolated = DocumentMut::new();
+    isolated.insert("visualizer", viz);
+    let value: toml::Value = toml::from_str(&isolated.to_string())
+        .context("re-parse [visualizer] for comment stripping")?;
+    let clean_text =
+        toml::to_string_pretty(&value).context("serialize comment-free [visualizer]")?;
+    let clean_doc: DocumentMut = clean_text
+        .parse()
+        .context("parse comment-free [visualizer]")?;
+
+    if let Some(clean_viz) = clean_doc.get("visualizer") {
+        let mut new_item = clean_viz.clone();
+        // Re-attach the original header decor so a user comment above
+        // `[visualizer]` (and the section separator) survives.
+        if let (Some(prefix), Some(tbl)) = (header_prefix, new_item.as_table_mut()) {
+            tbl.decor_mut().set_prefix(prefix);
+        }
+        doc.insert("visualizer", new_item);
+        debug!(" [CONFIG WRITER] Cleared [visualizer] comments (clean mode)");
+    }
     Ok(())
 }
 
@@ -878,11 +935,148 @@ mod tests {
     #[test]
     fn test_sparse_strip_corrupted_config() {
         // If we feed corrupted config content directly to `strip_to_sparse_content`, it fails cleanly.
-        let result = super::strip_to_sparse_content("garbage [ \0");
+        let result = super::strip_to_sparse_content("garbage [ \0", false);
         assert!(
             result.is_err(),
             "Corrupted TOML string should return an error"
         );
+    }
+
+    /// Clean mode (`clear_comments = true`) must drop the auto-added
+    /// `# description` comments above `[visualizer]` keys while preserving the
+    /// non-default VALUES; Off mode (`clear_comments = false`) keeps them.
+    #[test]
+    fn clean_mode_strips_visualizer_comments_but_keeps_values() {
+        let input = "\
+[visualizer.bars]
+# Trail persistence
+trails = 0.6
+";
+        // Off mode: the comment survives alongside the value.
+        let kept = super::strip_to_sparse_content(input, false).expect("strip (off)");
+        assert!(kept.contains('#'), "Off mode must keep comments:\n{kept}");
+        assert!(kept.contains("trails = 0.6"), "value preserved:\n{kept}");
+
+        // Clean mode: comment gone, value intact, output still valid TOML.
+        let cleaned = super::strip_to_sparse_content(input, true).expect("strip (clean)");
+        assert!(
+            !cleaned.contains('#'),
+            "Clean mode must drop comments:\n{cleaned}"
+        );
+        let doc: DocumentMut = cleaned.parse().expect("clean output parses");
+        assert_eq!(
+            doc["visualizer"]["bars"]["trails"].as_float(),
+            Some(0.6),
+            "the non-default value must survive comment stripping:\n{cleaned}"
+        );
+    }
+
+    /// Clean mode must preserve non-default scalars and user-added keys under
+    /// `[visualizer]` while dropping only comments. (Color sub-tables that
+    /// survive the default-strip are likewise carried through unchanged — see
+    /// the dedicated array-preservation test below.)
+    #[test]
+    fn clean_mode_preserves_scalars_and_user_keys() {
+        let input = "\
+[visualizer.bars]
+# auto comment on trails
+trails = 0.6
+custom_user_key = \"hello\"
+";
+        let cleaned = super::strip_to_sparse_content(input, true).expect("strip (clean)");
+        assert!(!cleaned.contains('#'), "comments must be gone:\n{cleaned}");
+        let doc: DocumentMut = cleaned.parse().expect("parses");
+        assert_eq!(
+            doc["visualizer"]["bars"]["trails"].as_float(),
+            Some(0.6),
+            "non-default scalar survives"
+        );
+        assert_eq!(
+            doc["visualizer"]["bars"]["custom_user_key"].as_str(),
+            Some("hello"),
+            "user-added key survives"
+        );
+    }
+
+    /// A color sub-table under `[visualizer]` that is NOT compared away by the
+    /// default-strip (here a top-level user-added one) must keep its array
+    /// intact through Clean's comment round-trip — only the comment is dropped.
+    #[test]
+    fn clean_mode_preserves_color_arrays() {
+        let input = "\
+[visualizer.palette]
+# user palette
+gradient = [\"#ff0000\", \"#00ff00\", \"#0000ff\"]
+";
+        let cleaned = super::strip_to_sparse_content(input, true).expect("strip (clean)");
+        // The `#` in `#ff0000` hex literals is not a comment — assert against
+        // the comment text specifically.
+        assert!(
+            !cleaned.contains("user palette"),
+            "comment must be gone:\n{cleaned}"
+        );
+        let doc: DocumentMut = cleaned.parse().expect("parses");
+        let arr = doc["visualizer"]["palette"]["gradient"]
+            .as_array()
+            .expect("gradient is array");
+        assert_eq!(arr.len(), 3, "user color array preserved fully:\n{cleaned}");
+    }
+
+    /// Comment stripping is scoped to `[visualizer]` — comments the user keeps
+    /// in OTHER sections (or at the top of the file) survive Clean mode, since
+    /// those sections are never surgically commented by the GUI.
+    #[test]
+    fn clean_mode_preserves_comments_outside_visualizer() {
+        let input = "\
+# my hand-written note
+[player]
+foo = 1
+
+[visualizer.bars]
+# auto comment
+trails = 0.6
+";
+        let cleaned = super::strip_to_sparse_content(input, true).expect("strip (clean)");
+        assert!(
+            cleaned.contains("# my hand-written note"),
+            "user comments outside [visualizer] must survive:\n{cleaned}"
+        );
+        assert!(
+            !cleaned.contains("# auto comment"),
+            "the [visualizer] auto comment must be gone:\n{cleaned}"
+        );
+    }
+
+    /// Regression: a user comment written on the line DIRECTLY above the
+    /// `[visualizer]` header lives in that header's leading decor prefix (not in
+    /// the section body), and Clean mode must keep it — only the auto-added
+    /// in-section key comments are dropped. The blank-line separator from the
+    /// previous section rides along in the same prefix and must also survive.
+    #[test]
+    fn clean_mode_preserves_comment_directly_above_visualizer_header() {
+        let input = "\
+[player]
+foo = 1
+
+# section: visualizer tuning
+[visualizer]
+waves = true
+# auto comment on noise_reduction
+noise_reduction = 0.42
+";
+        let cleaned = super::strip_to_sparse_content(input, true).expect("strip (clean)");
+        assert!(
+            cleaned.contains("# section: visualizer tuning"),
+            "a user comment directly above [visualizer] must survive:\n{cleaned}"
+        );
+        assert!(
+            !cleaned.contains("# auto comment"),
+            "the in-section auto comment must be gone:\n{cleaned}"
+        );
+        // Values intact, output still valid TOML.
+        let doc: DocumentMut = cleaned.parse().expect("parses");
+        assert_eq!(doc["visualizer"]["noise_reduction"].as_float(), Some(0.42));
+        assert_eq!(doc["visualizer"]["waves"].as_bool(), Some(true));
     }
 
     /// Legacy configs carried global `visualizer.trails` / `visualizer.echo`
@@ -899,7 +1093,7 @@ echo = 0.3
 [visualizer.bars]
 trails = 0.6
 ";
-        let stripped = super::strip_to_sparse_content(input).expect("strip must succeed");
+        let stripped = super::strip_to_sparse_content(input, false).expect("strip must succeed");
         let doc: DocumentMut = stripped.parse().expect("stripped output must parse");
         let viz = doc["visualizer"]
             .as_table_like()

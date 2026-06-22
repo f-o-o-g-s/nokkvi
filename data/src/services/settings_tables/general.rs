@@ -16,7 +16,7 @@
 use crate::{
     define_settings,
     types::{
-        player_settings::{ArtworkResolution, EnterBehavior, LibraryPageSize},
+        player_settings::{ArtworkResolution, EnterBehavior, LibraryPageSize, VerboseConfig},
         setting_def::Tab,
         settings_data::GeneralSettingsData,
         settings_side_effect::SettingsSideEffect,
@@ -273,20 +273,29 @@ define_settings! {
         // `dispatch_settings_side_effect` in `update/settings.rs`.
         VerboseConfig {
             key: "general.verbose_config",
-            value_type: Bool,
-            setter: |mgr, v: bool| mgr.set_verbose_config(v),
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_verbose_config(VerboseConfig::from_label(&v)),
             toml_apply: |ts, p| p.verbose_config = ts.verbose_config,
             read: |src, out| out.verbose_config = src.verbose_config,
             write: |ps, ts| ts.verbose_config = ps.verbose_config,
-            on_dispatch: |v: bool| SettingsSideEffect::WriteVerboseConfig { enabled: v },
+            on_dispatch: |v: String| SettingsSideEffect::WriteVerboseConfig {
+                mode: VerboseConfig::from_label(&v),
+            },
             ui_meta: {
                 label: "Verbose Config",
                 category: "Application",
                 subtitle: Some(
-                    "Write all settings to config.toml, including unchanged defaults",
+                    "How config.toml is written · On: every setting incl. defaults · \
+                     Off: only changed settings, with comments · \
+                     Clean: only changed settings, no comments",
                 ),
-                default: false,
-                read_field: |d| d.verbose_config,
+                default: "Off",
+                // Ordered as a verbosity gradient (most → default → least
+                // output), NOT default-first — the badge row reads On | Off |
+                // Clean to mirror the user's mental model. Intentional; leave
+                // as-is through convention syncs.
+                options: &["On", "Off", "Clean"],
+                read_field: |d| d.verbose_config.as_ref(),
             },
         },
     ]
@@ -503,7 +512,7 @@ mod tests {
         ps.local_music_path = "/tmp/test_lib".to_string();
         ps.show_album_artists_only = false;
         ps.artwork_resolution = ArtworkResolution::Ultra;
-        ps.verbose_config = true;
+        ps.verbose_config = VerboseConfig::On;
 
         // Seed the destination with `light_mode = true` so we can confirm the
         // no-op `write:` closure does NOT stomp it.
@@ -525,7 +534,7 @@ mod tests {
         assert_eq!(ts.local_music_path, "/tmp/test_lib");
         assert!(!ts.show_album_artists_only);
         assert_eq!(ts.artwork_resolution, ArtworkResolution::Ultra);
-        assert!(ts.verbose_config);
+        assert_eq!(ts.verbose_config, VerboseConfig::On);
         assert!(
             ts.light_mode,
             "light_mode entry declares a no-op write — must NOT stomp ts.light_mode",
@@ -686,7 +695,7 @@ mod tests {
             auto_follow_playing: true,
             enter_behavior: "Play All".into(),
             local_music_path: "".into(),
-            verbose_config: false,
+            verbose_config: "Off".into(),
             library_page_size: "Default (500)".into(),
             artwork_resolution: "Default (1000px)".into(),
             show_album_artists_only: true,
@@ -750,20 +759,26 @@ mod tests {
     #[test]
     fn dispatch_general_verbose_config_emits_write_side_effect() {
         let (mut mgr, _tmp) = make_test_manager();
-        assert!(!mgr.get_player_settings().verbose_config);
+        assert_eq!(mgr.get_player_settings().verbose_config, VerboseConfig::Off);
 
         let result = dispatch_general_tab_setting(
             "general.verbose_config",
-            SettingValue::Bool(true),
+            SettingValue::Enum {
+                val: "Clean".to_string(),
+                options: vec![],
+            },
             &mut mgr,
         );
 
         match result {
-            Some(Ok(SettingsSideEffect::WriteVerboseConfig { enabled: true })) => {}
-            other => panic!("expected WriteVerboseConfig {{ enabled: true }}, got {other:?}"),
+            Some(Ok(SettingsSideEffect::WriteVerboseConfig {
+                mode: VerboseConfig::Clean,
+            })) => {}
+            other => panic!("expected WriteVerboseConfig {{ mode: Clean }}, got {other:?}"),
         }
-        assert!(
+        assert_eq!(
             mgr.get_player_settings().verbose_config,
+            VerboseConfig::Clean,
             "setter must run synchronously even though the TOML write defers to the UI handler"
         );
     }
@@ -803,7 +818,7 @@ mod tests {
             auto_follow_playing: live.auto_follow_playing,
             enter_behavior: live.enter_behavior.as_label().into(),
             local_music_path: live.local_music_path.clone().into(),
-            verbose_config: live.verbose_config,
+            verbose_config: live.verbose_config.as_label().into(),
             library_page_size: live.library_page_size.as_label().into(),
             artwork_resolution: live.artwork_resolution.as_label().into(),
             show_album_artists_only: live.show_album_artists_only,

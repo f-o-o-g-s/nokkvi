@@ -8,9 +8,9 @@ use crate::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
             NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
-            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
-            deserialize_rounded_mode_with_bool_compat,
+            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VerboseConfig,
+            VisualizationMode, VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
+            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -230,9 +230,13 @@ pub struct PersistedPlayerSettings {
     /// User-created custom EQ presets.
     #[serde(default)]
     pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
-    /// When true, all settings (including defaults) are written to config.toml
-    #[serde(default)]
-    pub verbose_config: bool,
+    /// How config.toml is written (full / sparse-with-comments / sparse-clean).
+    /// Legacy bool records load via the compat shim (`true` → On, `false` → Off).
+    #[serde(
+        default,
+        deserialize_with = "deserialize_verbose_config_with_bool_compat"
+    )]
+    pub verbose_config: VerboseConfig,
     /// Library page size controls how many items are fetched at once.
     #[serde(default)]
     pub library_page_size: LibraryPageSize,
@@ -437,7 +441,7 @@ impl Default for PersistedPlayerSettings {
             eq_enabled: false,
             eq_gains: default_eq_gains(),
             custom_eq_presets: Vec::new(),
-            verbose_config: false,
+            verbose_config: VerboseConfig::default(),
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: default_true(),
