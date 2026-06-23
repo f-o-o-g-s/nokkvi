@@ -150,12 +150,11 @@ impl Nokkvi {
                         .iter()
                         .find(|p| p.id == playlist_id)
                         .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
+                    let shuffle = self.activate_shuffle_directive(false, false);
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move {
-                            shell
-                                .add_playlist_and_play(&playlist_id, OneShotShuffle::None)
-                                .await
+                            shell.add_playlist_and_play(&playlist_id, shuffle).await
                         },
                         format!("Playing '{name}'"),
                         "append playlist and play",
@@ -170,12 +169,9 @@ impl Nokkvi {
                     .find(|p| p.id == playlist_id)
                     .map(crate::state::ActivePlaylistContext::from_playlist);
                 self.persist_active_playlist_info();
+                let shuffle = self.activate_shuffle_directive(false, false);
                 return self.shell_action_task(
-                    move |shell| async move {
-                        shell
-                            .play_playlist(&playlist_id, OneShotShuffle::None)
-                            .await
-                    },
+                    move |shell| async move { shell.play_playlist(&playlist_id, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play playlist",
                 );
@@ -225,10 +221,11 @@ impl Nokkvi {
                     .find(|p| p.id == playlist_id)
                     .map(crate::state::ActivePlaylistContext::from_playlist);
                 self.persist_active_playlist_info();
+                let shuffle = self.activate_shuffle_directive(false, true);
                 return self.shell_action_task(
                     move |shell| async move {
                         shell
-                            .play_playlist_from_track(&playlist_id, track_idx, OneShotShuffle::None)
+                            .play_playlist_from_track(&playlist_id, track_idx, shuffle)
                             .await
                     },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),

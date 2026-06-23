@@ -1052,6 +1052,26 @@ impl Nokkvi {
     /// toast (no navigation) because it lives in the browsing panel where
     /// the user is already viewing the queue — Similar does not call this
     /// helper.
+    /// Resolve the one-shot Shuffle Play directive for a plain activate
+    /// (Enter / click), honoring the `enter_shuffle` setting. `force_shuffle`
+    /// (Ctrl+Enter) overrides the setting; `anchored` pins a clicked expansion
+    /// track at index 0.
+    pub(crate) fn activate_shuffle_directive(
+        &self,
+        force_shuffle: bool,
+        anchored: bool,
+    ) -> OneShotShuffle {
+        if force_shuffle || self.settings.enter_shuffle {
+            if anchored {
+                OneShotShuffle::AnchorFirst
+            } else {
+                OneShotShuffle::Full
+            }
+        } else {
+            OneShotShuffle::None
+        }
+    }
+
     pub(crate) fn play_batch_task(
         &mut self,
         payload: nokkvi_data::types::batch::BatchPayload,

@@ -222,19 +222,17 @@ impl Nokkvi {
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
                     self.clear_active_playlist();
                     let name = genre_name.clone();
+                    let shuffle = self.activate_shuffle_directive(false, false);
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell.add_genre_and_play(&name, OneShotShuffle::None).await
-                        },
+                        move |shell| async move { shell.add_genre_and_play(&name, shuffle).await },
                         format!("Playing '{genre_name}'"),
                         "append genre and play",
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with genre
+                let shuffle = self.activate_shuffle_directive(false, false);
                 return self.shell_action_task(
-                    move |shell| async move {
-                        shell.play_genre(&genre_name, OneShotShuffle::None).await
-                    },
+                    move |shell| async move { shell.play_genre(&genre_name, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play genre",
                 );
@@ -269,10 +267,9 @@ impl Nokkvi {
                         "add album to queue from genre",
                     );
                 }
+                let shuffle = self.activate_shuffle_directive(false, false);
                 return self.shell_action_task(
-                    move |shell| async move {
-                        shell.play_album(&album_id, OneShotShuffle::None).await
-                    },
+                    move |shell| async move { shell.play_album(&album_id, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play album from genre",
                 );

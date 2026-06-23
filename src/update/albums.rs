@@ -442,22 +442,22 @@ impl Nokkvi {
                 {
                     let id = album.id.clone();
                     let name = album.name.clone();
+                    let shuffle = self.activate_shuffle_directive(false, false);
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell.add_album_and_play(&id, OneShotShuffle::None).await
-                        },
+                        move |shell| async move { shell.add_album_and_play(&id, shuffle).await },
                         format!("Playing '{name}'"),
                         "append album and play",
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with album (PlaySingle = PlayAll for albums)
+                let shuffle = self.activate_shuffle_directive(false, false);
                 return self.play_entity_task(
                     &self.library.albums,
                     &album_id_str,
                     "album",
                     |a| a.id.clone(),
-                    |shell, id| async move { shell.play_album(&id, OneShotShuffle::None).await },
+                    move |shell, id| async move { shell.play_album(&id, shuffle).await },
                 );
             }
             AlbumsAction::AddBatchToQueue(payload) => {
@@ -572,10 +572,11 @@ impl Nokkvi {
                     }
                     return Task::none();
                 }
+                let shuffle = self.activate_shuffle_directive(false, true);
                 return self.shell_action_task(
                     move |shell| async move {
                         shell
-                            .play_album_from_track(&album_id, track_idx, OneShotShuffle::None)
+                            .play_album_from_track(&album_id, track_idx, shuffle)
                             .await
                     },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),

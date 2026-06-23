@@ -317,22 +317,22 @@ impl Nokkvi {
                 {
                     let id = artist.id.clone();
                     let name = artist.name.clone();
+                    let shuffle = self.activate_shuffle_directive(false, false);
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell.add_artist_and_play(&id, OneShotShuffle::None).await
-                        },
+                        move |shell| async move { shell.add_artist_and_play(&id, shuffle).await },
                         format!("Playing '{name}'"),
                         "append artist and play",
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with artist (PlaySingle = PlayAll for artists)
+                let shuffle = self.activate_shuffle_directive(false, false);
                 return self.play_entity_task(
                     &self.library.artists,
                     &artist_id_str,
                     "artist",
                     |a| a.id.clone(),
-                    |shell, id| async move { shell.play_artist(&id, OneShotShuffle::None).await },
+                    move |shell, id| async move { shell.play_artist(&id, shuffle).await },
                 );
             }
             ArtistsAction::PlayBatchShuffled(payload) => {
@@ -365,8 +365,9 @@ impl Nokkvi {
                         "add album to queue",
                     );
                 }
+                let shuffle = self.activate_shuffle_directive(false, false);
                 return self.shell_action_task(
-                    move |shell| async move { shell.play_album(&album_id, OneShotShuffle::None).await },
+                    move |shell| async move { shell.play_album(&album_id, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play album",
                 );

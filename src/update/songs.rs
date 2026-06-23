@@ -286,10 +286,14 @@ impl Nokkvi {
                             // Clear playlist context
                             self.clear_active_playlist();
 
-                            // Phase 1: Play immediately with loaded songs
+                            // Phase 1: Play immediately with loaded songs. When
+                            // Shuffle Play is active, shuffle the loaded buffer and
+                            // suppress Phase 2 — appending later pages in server
+                            // order would break the shuffled order.
+                            let shuffle = self.activate_shuffle_directive(false, false);
                             let play_task = self.shell_task(
                                 move |shell| async move {
-                                    shell.play_songs(songs, index, OneShotShuffle::None).await
+                                    shell.play_songs(songs, index, shuffle).await
                                 },
                                 |result| match result {
                                     Ok(()) => Message::Navigation(NavigationMessage::SwitchView(
@@ -308,7 +312,8 @@ impl Nokkvi {
                             );
 
                             // Phase 2: Background-fetch remaining pages and append to queue
-                            if needs_more {
+                            // (suppressed under one-shot shuffle — see Phase 1).
+                            if needs_more && !shuffle.shuffles() {
                                 // Set loading target so queue header shows "X of Y songs"
                                 self.library.queue_loading_target = Some(total_count);
                                 // Increment generation so any stale chain from a previous play self-cancels

@@ -309,6 +309,49 @@ fn play_batch_task_clears_active_playlist() {
     );
 }
 
+/// The plain-activate (Enter/click) shuffle directive resolves from the
+/// `enter_shuffle` setting, with `force_shuffle` (Ctrl+Enter) overriding it and
+/// `anchored` selecting AnchorFirst. This is the observable seam the play
+/// handlers consult (the wrapper directive itself is closure-buried).
+#[test]
+fn activate_shuffle_directive_resolves_from_setting_and_force() {
+    use nokkvi_data::types::OneShotShuffle;
+
+    let mut app = test_app();
+
+    // Setting off, no force → linear.
+    app.settings.enter_shuffle = false;
+    assert_eq!(
+        app.activate_shuffle_directive(false, false),
+        OneShotShuffle::None
+    );
+    assert_eq!(
+        app.activate_shuffle_directive(false, true),
+        OneShotShuffle::None
+    );
+
+    // Setting off, force (Ctrl+Enter) → shuffle; anchored pins index 0.
+    assert_eq!(
+        app.activate_shuffle_directive(true, false),
+        OneShotShuffle::Full
+    );
+    assert_eq!(
+        app.activate_shuffle_directive(true, true),
+        OneShotShuffle::AnchorFirst
+    );
+
+    // Setting on → plain activate shuffles.
+    app.settings.enter_shuffle = true;
+    assert_eq!(
+        app.activate_shuffle_directive(false, false),
+        OneShotShuffle::Full
+    );
+    assert_eq!(
+        app.activate_shuffle_directive(false, true),
+        OneShotShuffle::AnchorFirst
+    );
+}
+
 #[test]
 fn redirect_play_invokes_insert_and_consumes_position() {
     // Browsing panel open with a drag-drop position → insert branch, AND
