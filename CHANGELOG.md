@@ -6,17 +6,27 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- New **Shuffle Play**: right-click any album, artist, genre, playlist, or song (or a multi-selection) and choose **Shuffle Play** — or press **Ctrl+Enter** on the focused item — to replace the queue with those tracks in a fresh random order and play from the top. It is a one-shot shuffle: the player-bar shuffle mode is left untouched.
-- New **Shuffle Play on Enter** setting (Settings → General → Behavior). When on, pressing Enter or clicking a collection plays it in a fresh random order instead of list order; off by default, so the usual linear behavior is unchanged.
-
 ### Changed
-
-- Selecting items in the library now uses an accent border ring instead of a solid fill highlight, matching the theme picker's selection style. The text color no longer changes, and the now-playing row keeps its filled, glowing highlight.
-- New installs now default the visualizer height to 40% of the window (up from 25%); existing configs keep their value.
 
 ### Fixed
 
 ### Removed
+
+## v0.11.1 — 2026-06-23
+
+### Added
+
+- New **Shuffle Play**: right-click any album, artist, genre, playlist, song, or multi-selection — or press **Ctrl+Enter** — to replace the queue with those tracks in a fresh random order, leaving the player-bar shuffle mode untouched.
+- New **Shuffle Play on Enter** setting (Settings → General → Behavior): when on, pressing Enter or clicking a collection plays it in a fresh random order instead of list order.
+
+### Changed
+
+- Selected library rows now show an accent border ring instead of a solid fill highlight, matching the theme picker's selection style.
+- New installs now default the visualizer to 40% of the window height, up from 25%.
+
+### Fixed
+
+- Playing a filtered Songs view no longer appends tracks from outside the filter as the rest of the queue loads in the background.
 
 ## v0.11.0 — 2026-06-22
 
