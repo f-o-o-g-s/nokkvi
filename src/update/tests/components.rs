@@ -306,7 +306,7 @@ fn play_batch_task_clears_active_playlist() {
     let payload = nokkvi_data::types::batch::BatchPayload::new().with_item(
         nokkvi_data::types::batch::BatchItem::Album("a1".to_string()),
     );
-    let _task = app.play_batch_task(payload, nokkvi_data::types::OneShotShuffle::None);
+    let _task = app.play_batch_task(payload, false);
 
     assert!(
         app.active_playlist_info.is_none(),

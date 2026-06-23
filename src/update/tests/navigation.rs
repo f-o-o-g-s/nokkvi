@@ -810,6 +810,45 @@ fn genres_ctrl_enter_forces_shuffle_on_centered_genre() {
     }
 }
 
+/// The headline F2 seam: a multi-select **plain** Enter (`ActivateCenter(false)`)
+/// must emit `PlayBatch(payload, false)` carrying the whole selection — the
+/// `false` is what lets the root handler honor the `enter_shuffle` setting via
+/// `activate_shuffle_directive`. The force=true path is covered by the genres
+/// ctrl-enter / context-menu tests and the resolver itself by
+/// `activate_shuffle_directive_resolves_from_setting_and_force`; this pins the
+/// otherwise-untested `false` producer arm against a silent regression.
+#[test]
+fn albums_multiselect_plain_enter_emits_unforced_play_batch() {
+    use crate::widgets::SlotListPageMessage;
+
+    let mut app = test_app();
+    let albums = vec![
+        make_album("a1", "One", "Artist"),
+        make_album("a2", "Two", "Artist"),
+        make_album("a3", "Three", "Artist"),
+    ];
+    app.library.albums.set_from_vec(albums.clone());
+    // Multi-select two albums, then plain Enter.
+    app.albums_page.common.slot_list.selected_indices = [0usize, 2].into_iter().collect();
+
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
+        albums.len(),
+        &albums,
+    );
+    match action {
+        crate::views::AlbumsAction::PlayBatch(payload, force) => {
+            assert_eq!(
+                payload.items.len(),
+                2,
+                "both selected albums ride the batch"
+            );
+            assert!(!force, "plain Enter must NOT force shuffle (force = false)");
+        }
+        other => panic!("Expected PlayBatch(_, false) action, got {other:?}"),
+    }
+}
+
 // ============================================================================
 // Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (2-tier views)
 // ============================================================================

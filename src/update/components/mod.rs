@@ -1075,8 +1075,12 @@ impl Nokkvi {
     pub(crate) fn play_batch_task(
         &mut self,
         payload: nokkvi_data::types::batch::BatchPayload,
-        shuffle: OneShotShuffle,
+        force: bool,
     ) -> Task<Message> {
+        // Multi-select / context-menu batches are always unanchored (no clicked
+        // track to pin), so resolve the one-shot directive centrally here — all
+        // five library views then share a single force→shuffle contract.
+        let shuffle = self.activate_shuffle_directive(force, false);
         let len = payload.items.len();
         debug!(" Playing batch of {} items (shuffle={:?})", len, shuffle);
         self.clear_active_playlist();

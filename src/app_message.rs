@@ -791,6 +791,10 @@ pub enum Message {
         sort_mode: String,
         sort_order: String,
         search_query: Option<String>,
+        /// Active library filter (e.g. arrived via `NavigateAndFilter`) so the
+        /// background-appended pages match the filtered population the user is
+        /// viewing, not the whole library.
+        filter: Option<nokkvi_data::types::filter::LibraryFilter>,
         offset: usize,
         total_count: usize,
         generation: u64,

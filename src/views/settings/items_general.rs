@@ -9,7 +9,7 @@
 //!   6. Account  — read-only server URL + username mirrors and the logout
 //!      dialog sentinel
 //!
-//! 12 of the 15 visible rows come from `define_settings!` via the
+//! 13 of the 16 visible rows come from `define_settings!` via the
 //! macro-emitted `build_general_tab_settings_items` helper. Section headers
 //! and the read-only Account section (server URL, username, logout dialog
 //! sentinel) stay hand-written here — the dialog row uses the special

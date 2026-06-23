@@ -11,11 +11,16 @@ impl Nokkvi {
     /// Each invocation fetches one page, appends it to the queue, refreshes the UI,
     /// and (if more pages remain) emits the next `ProgressiveQueueAppendPage` message.
     /// A generation counter guards against stale chains from superseded play actions.
+    // Mirrors the `ProgressiveQueueAppendPage` message fields 1:1 (sort/search/filter
+    // + paging cursor + generation) — a params struct would just shuffle the same
+    // values through an extra type for this single-caller internal handler.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn handle_progressive_queue_append_page(
         &mut self,
         sort_mode: String,
         sort_order: String,
         search_query: Option<String>,
+        filter: Option<nokkvi_data::types::filter::LibraryFilter>,
         offset: usize,
         total_count: usize,
         generation: u64,
@@ -33,6 +38,7 @@ impl Nokkvi {
         let search_q = search_query.clone();
         let sort_m = sort_mode.clone();
         let sort_o = sort_order.clone();
+        let filter_c = filter.clone();
         let page_size = self.settings.library_page_size.to_usize();
         let fetch_task = self.shell_task(
             move |shell| async move {
@@ -43,7 +49,7 @@ impl Nokkvi {
                         Some(&sort_m),
                         Some(&sort_o),
                         search_q.as_deref(),
-                        None,
+                        filter_c.as_ref(),
                         &library_ids,
                         offset,
                         page_size,
@@ -74,6 +80,7 @@ impl Nokkvi {
                             sort_mode,
                             sort_order,
                             search_query,
+                            filter,
                             offset: new_offset,
                             total_count,
                             generation,

@@ -286,9 +286,9 @@ impl Nokkvi {
                             // re-randomized pages). Only needed when not everything is
                             // loaded yet; otherwise Phase 1 below already has the full set.
                             if shuffle.shuffles() && needs_more {
-                                let sort_mode = sort_mode.clone();
-                                let sort_order = sort_order.clone();
-                                let search_query = search_query.clone();
+                                // This branch always returns, so the Phase-2 consumers
+                                // below are unreachable here — move the sort/search
+                                // originals into the closure instead of cloning.
                                 // Preserve the active library filter (e.g. arrived via
                                 // NavigateAndFilter) so the full-resolve shuffles the
                                 // FILTERED population, not the whole library.
@@ -376,6 +376,7 @@ impl Nokkvi {
                                     sort_mode,
                                     sort_order,
                                     search_query,
+                                    filter: self.songs_page.common.active_filter.clone(),
                                     offset: loaded_count,
                                     total_count,
                                     generation,
@@ -438,8 +439,7 @@ impl Nokkvi {
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                let shuffle = self.activate_shuffle_directive(force, false);
-                return self.play_batch_task(payload, shuffle);
+                return self.play_batch_task(payload, force);
             }
             SongsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(

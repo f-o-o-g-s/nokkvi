@@ -465,8 +465,7 @@ impl Nokkvi {
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                let shuffle = self.activate_shuffle_directive(force, false);
-                return self.play_batch_task(payload, shuffle);
+                return self.play_batch_task(payload, force);
             }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {
                 if let Ok(index) = album_id_str.parse::<usize>() {

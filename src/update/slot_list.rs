@@ -43,7 +43,9 @@ impl Nokkvi {
                 SlotListMessage::NavigateDown => {
                     self.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListDown)
                 }
-                SlotListMessage::ActivateCenter => self
+                // Inside the picker, Ctrl+Enter has no shuffle meaning — treat it
+                // like plain Enter (confirm the selection) rather than swallowing it.
+                SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled => self
                     .handle_default_playlist_picker(DefaultPlaylistPickerMessage::ActivateCenter),
                 _ => Task::none(),
             };

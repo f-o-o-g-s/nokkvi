@@ -337,8 +337,7 @@ impl Nokkvi {
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                let shuffle = self.activate_shuffle_directive(force, false);
-                return self.play_batch_task(payload, shuffle);
+                return self.play_batch_task(payload, force);
             }
             ArtistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
