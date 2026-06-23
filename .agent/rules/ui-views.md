@@ -32,11 +32,11 @@ Shared by every slot-list view: search query, scroll position, focus index. Visi
 
 ### Root-level SlotListMessage (keyboard + scrollbar)
 
-`SlotListMessage` in `app_message.rs` carries global slot-list actions dispatched by hotkeys and scrollbar timers: `NavigateUp`, `NavigateDown`, `SetOffset(usize)`, `ActivateCenter`, `ToggleSortOrder`, `ScrollbarFadeComplete(View, u64)`, `SeekSettled(View, u64)`. Root dispatch is in `handle_slot_list_message` (`update/slot_list.rs`). Each hotkey arm fans out to a per-view `Message::Albums(AlbumsMessage::SlotList(SlotListPageMessage::NavigateUp))` (and so on for every view), so the actual state mutation is always done by the per-view update handler.
+`SlotListMessage` in `app_message.rs` carries global slot-list actions dispatched by hotkeys and scrollbar timers: `NavigateUp`, `NavigateDown`, `SetOffset(usize)`, `ActivateCenter`, `ActivateCenterShuffled` (Ctrl+Enter — force one-shot Shuffle Play of the centered item/selection), `ToggleSortOrder`, `ScrollbarFadeComplete(View, u64)`, `SeekSettled(View, u64)`. Root dispatch is in `handle_slot_list_message` (`update/slot_list.rs`). Each hotkey arm fans out to a per-view `Message::Albums(AlbumsMessage::SlotList(SlotListPageMessage::NavigateUp))` (and so on for every view), so the actual state mutation is always done by the per-view update handler.
 
 ### Per-view SlotList(SlotListPageMessage) carrier
 
-Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` variant (e.g., `AlbumsMessage::SlotList(…)`, `SongsMessage::SlotList(…)`). `SlotListPageMessage` (in `widgets/slot_list_page.rs`) enumerates all slot-list actions: `NavigateUp`, `NavigateDown`, `SetOffset(usize, Modifiers)`, `ScrollSeek(usize)`, `ActivateCenter`, `ClickPlay(usize)`, `SelectionToggle(usize)`, `SelectAllToggle`, `AddCenterToQueue`, `RefreshViewData`, `CenterOnPlaying`, `SearchQueryChanged(String)`, `SearchFocused(bool)`, `SortModeSelected(SortMode)`, `ToggleSortOrder`, `HoverEnterSlot(HoveredSlot)`, `HoverExitSlot(HoveredSlot)`, `ToolbarHoverEnter`, `ToolbarHoverExit`, `ToolbarDropdownToggled(bool)`. The slot-hover variants are published by per-slot `mouse_area::on_enter` / `on_exit` and land on `SlotListView::hovered_slot` (via `SlotHoverCallback` in `widgets/slot_list.rs`) so cross-pane drag resolves "cursor over which slot" structurally rather than from chrome math; `HoverExitSlot` is idempotent (only clears when its payload still matches). The three `Toolbar*` variants drive the auto-hide toolbar's reveal-lock state (see SlotListPageState above).
+Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` variant (e.g., `AlbumsMessage::SlotList(…)`, `SongsMessage::SlotList(…)`). `SlotListPageMessage` (in `widgets/slot_list_page.rs`) enumerates all slot-list actions: `NavigateUp`, `NavigateDown`, `SetOffset(usize, Modifiers)`, `ScrollSeek(usize)`, `ActivateCenter(bool)` (`true` forces a one-shot Shuffle Play; `false` honors the `enter_shuffle` setting), `ClickPlay(usize)`, `SelectionToggle(usize)`, `SelectAllToggle`, `AddCenterToQueue`, `RefreshViewData`, `CenterOnPlaying`, `SearchQueryChanged(String)`, `SearchFocused(bool)`, `SortModeSelected(SortMode)`, `ToggleSortOrder`, `HoverEnterSlot(HoveredSlot)`, `HoverExitSlot(HoveredSlot)`, `ToolbarHoverEnter`, `ToolbarHoverExit`, `ToolbarDropdownToggled(bool)`. The slot-hover variants are published by per-slot `mouse_area::on_enter` / `on_exit` and land on `SlotListView::hovered_slot` (via `SlotHoverCallback` in `widgets/slot_list.rs`) so cross-pane drag resolves "cursor over which slot" structurally rather than from chrome math; `HoverExitSlot` is idempotent (only clears when its payload still matches). The three `Toolbar*` variants drive the auto-hide toolbar's reveal-lock state (see SlotListPageState above).
 
 **Non-expansion views** (Songs, Queue, Radios, Similar) call `self.common.handle(msg, total)` → `SlotListPageAction`, then map the action to their `*Action` enum. `SlotListPageState::handle()` is the unified dispatcher.
 
@@ -76,7 +76,7 @@ Each `define_view_columns!` entry has the form `Variant("Label"): field = defaul
 
 ## Browsing Panel (Split-View)
 
-Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`, `Genres`, `Similar`. Reuses existing page structs. `PaneFocus` toggled via Tab. Play actions blocked via `guard_play_action()`.
+Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`, `Genres`, `Similar`. Reuses existing page structs. `PaneFocus` toggled via Tab.
 
 **Cross-pane drag** state lives in the `Nokkvi.cross_pane_drag: state::CrossPaneDragUi` cluster (active drag + press tracking + pending drop position; manual `Default` keeps `selection_count` at 1). Batch support: `cross_pane_drag.selection_count` tracks single vs multi-selection batch. Drag threshold 5 px. Center index snapshotted at press time.
 
@@ -106,7 +106,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-
 - `dispatch_view_chrome<M: HasViewChrome>(handler, msg, view)` — run at the top of every `handle_*` function. Returns `Some(task)` for `SetOpenMenu` / `Roulette` intercepts (caller returns immediately); returns `None` for normal page actions (after triggering the appropriate SFX).
 
 **`update/components/`** (directory module: `mod.rs` + `artwork_prefetch.rs`) — shared action helpers:
-- `guard_play_action` — split-view + playlist-edit conflict guard
+- `guard_play_action` — pre-play hook that transitions radio playback back to queue mode (returns `None` to let the play proceed; retains an `Option` return so a future block condition could short-circuit a play — the former playlist-edit block was removed)
 - `set_item_rating_task`, `star_item_task`, `radio_mutation_task`
 - `handle_common_view_action` — applies generic Search/Sort/Navigate actions to non-Queue library views; called from each view's handler after the page `update()` returns a `CommonViewAction`
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)

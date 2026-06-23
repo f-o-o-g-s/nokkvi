@@ -39,7 +39,7 @@ trigger: always_on
 - **View render output**: keep the root widget type stable across renders (always a `Column`, etc.) — changing it destroys `text_input` focus.
 - **Search**: fire queries immediately on text change (no debounce).
 - **Visualizer FFT thread**: `try_lock()` only. Only the main render thread may use `lock()`.
-- **Play actions**: call `guard_play_action()` at the top of every play handler (split-view + playlist-edit conflict guard).
+- **Play actions**: call `guard_play_action()` at the top of every play handler — it transitions any active radio playback back to queue mode so the upcoming queue play leaves the app in queue mode (it retains a no-op `Option<Task>` hook for a possible future block).
 - **Border radii**: use the role-appropriate scale helpers `ui_radius_xs/sm/md/lg/pill` from `src/theme/radius.rs` (mode-gated; player chrome uses the `*_player` variants), not hardcoded values. `ui_border_radius()` is the legacy single-radius value kept for back-compat — new code calls the scale helper directly. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
 - **Single-active overlay menus**: hamburger / kebab / checkbox-dropdown / context menus bubble `Message::SetOpenMenu(...)` to root rather than owning local `is_open` state.
 

@@ -59,7 +59,7 @@ Key shared infrastructure:
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged/SortModeChanged/SortOrderChanged dispatch. Handled centrally by `handle_common_view_action()` in `update/components/`.
 - `impl_expansion_update!` macro — deduplicates inline expansion handling.
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
-- Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (block plays during playlist edit / split-view conflicts), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components/mod.rs`.
+- Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (pre-play hook: transition radio playback back to queue mode; retains a no-op `Option` return so a future block could short-circuit a play), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components/mod.rs`.
 
 Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage`, `NavigationMessage`, `FindMessage`, `SplitViewMessage`, `CrossPaneDragMessage`, `ToastMessage`). Flat variants remain only for cross-cutting concerns. See `src/app_message.rs`.
 
@@ -139,7 +139,7 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 - **Filtered queue indices**: when a search is active, slot-list indices are relative to `filtered_songs`. Always map through the filtered view before doing queue mutations.
 - **Queue navigation**: use `peek_next_song()` → `PeekedQueue::transition()` for transitions. Use `reposition_to_index()` ONLY for non-transition updates like play-from-here.
 - **`HoverOverlay`**: canonical pattern is `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells. Wrapping a native `button` works in some places (after `HoverOverlay::update` started issuing `request_redraw`), but reach for the canonical `mouse_area + container` pattern first.
-- **`guard_play_action()` at the top of every play handler** — protects against split-view + playlist-edit conflicts.
+- **`guard_play_action()` at the top of every play handler** — transitions radio playback back to queue mode so the upcoming queue play leaves the app in queue mode; returns `None` to let the play proceed (the `Option` is a retained future-block hook).
 - **Config-watcher feedback loops**: the file watcher suppresses its own write reflections via a `(path, content-hash)` registry (`was_internal_write` in `data/src/utils/paths.rs`), but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
 - **Database lock on re-login**: `StateStorage` is cached on `Nokkvi.cached_storage` and reused via `AppService::new_with_storage()` — redb holds an exclusive lock so a fresh open after logout will fail. Stop the engine + `TaskManager` on logout.
 - **`CenterOnPlaying` (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path instead.
