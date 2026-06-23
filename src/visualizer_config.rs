@@ -909,7 +909,7 @@ pub struct VisualizerConfig {
     pub higher_cutoff_freq: u32,
 
     /// Visualizer height as percentage of window height (0.1-1.0).
-    /// Default: 0.25 (25%)
+    /// Default: 0.40 (40%)
     pub height_percent: f32,
 
     /// Overall visualizer opacity (0.0 = invisible, 1.0 = fully opaque).
@@ -967,7 +967,7 @@ impl Default for VisualizerConfig {
             monstercat: 1.0,
             lower_cutoff_freq: 20,
             higher_cutoff_freq: 10000,
-            height_percent: 0.25,
+            height_percent: 0.40,
             opacity: 1.0,
             bloom: true,
             bloom_intensity: 0.6,

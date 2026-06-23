@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- New installs now default the visualizer height to 40% of the window (up from 25%); existing configs keep their value.
+
 ### Fixed
 
 ### Removed
