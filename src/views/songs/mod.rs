@@ -140,12 +140,14 @@ pub enum SongsAction {
     RefreshViewData,                                        // trigger reload
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload), // Batch payload
     PlayBatch(nokkvi_data::types::batch::BatchPayload),     // Play immediately
-    AddToPlaylist(String),                                  // song_id - add to playlist dialog
+    /// Replace the queue with the selection/clicked item, shuffled once, and play.
+    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
+    AddToPlaylist(String), // song_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
-    ShowInFolder(String),        // relative path - open containing folder
-    RefreshArtwork(String),      // album_id - refresh artwork from server
+    ShowInFolder(String),  // relative path - open containing folder
+    RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (id, label) - Find similar to this song
-    TopSongs(String, String),    // (artist, label) - Find top songs by artist
+    TopSongs(String, String), // (artist, label) - Find top songs by artist
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand this album

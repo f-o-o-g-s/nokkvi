@@ -386,7 +386,14 @@ impl Nokkvi {
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                return self.play_batch_task(payload);
+                return self.play_batch_task(payload, OneShotShuffle::None);
+            }
+            SongsAction::PlayBatchShuffled(payload) => {
+                self.songs_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_batch_task(payload, OneShotShuffle::Full);
             }
             SongsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(

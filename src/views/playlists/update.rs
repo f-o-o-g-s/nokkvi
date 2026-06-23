@@ -253,7 +253,9 @@ impl PlaylistsPage {
 
                     if matches!(
                         entry,
-                        LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist
+                        LibraryContextEntry::ShufflePlay
+                            | LibraryContextEntry::AddToQueue
+                            | LibraryContextEntry::AddToPlaylist
                     ) {
                         let target_indices = self.common.get_batch_target_indices(clicked_idx);
                         let payload =
@@ -272,6 +274,9 @@ impl PlaylistsPage {
                             });
 
                         match entry {
+                            LibraryContextEntry::ShufflePlay => {
+                                return (Task::none(), PlaylistsAction::PlayBatchShuffled(payload));
+                            }
                             LibraryContextEntry::AddToQueue => {
                                 return (Task::none(), PlaylistsAction::AddBatchToQueue(payload));
                             }

@@ -311,7 +311,9 @@ impl AlbumsPage {
                     use crate::widgets::context_menu::LibraryContextEntry;
 
                     match entry {
-                        LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
+                        LibraryContextEntry::ShufflePlay
+                        | LibraryContextEntry::AddToQueue
+                        | LibraryContextEntry::AddToPlaylist => {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);
                             let payload =
                                 super::super::expansion::build_batch_payload(target_indices, |i| {
@@ -329,6 +331,9 @@ impl AlbumsPage {
                                 });
 
                             match entry {
+                                LibraryContextEntry::ShufflePlay => {
+                                    (Task::none(), AlbumsAction::PlayBatchShuffled(payload))
+                                }
                                 LibraryContextEntry::AddToQueue => {
                                     (Task::none(), AlbumsAction::AddBatchToQueue(payload))
                                 }

@@ -43,6 +43,9 @@ use crate::{
 /// Queue view has its own `QueueContextEntry` with queue-specific actions.
 #[derive(Debug, Clone, Copy)]
 pub enum LibraryContextEntry {
+    /// Replace the queue with this collection/selection in a fresh random order
+    /// and play from the top (one-shot Shuffle Play; never touches shuffle mode).
+    ShufflePlay,
     AddToQueue,
     AddToPlaylist,
     Separator,
@@ -60,6 +63,7 @@ pub enum LibraryContextEntry {
 /// Standard library context menu entries list.
 pub(crate) fn library_entries() -> Vec<LibraryContextEntry> {
     vec![
+        LibraryContextEntry::ShufflePlay,
         LibraryContextEntry::AddToQueue,
         LibraryContextEntry::AddToPlaylist,
         LibraryContextEntry::Separator,
@@ -70,6 +74,7 @@ pub(crate) fn library_entries() -> Vec<LibraryContextEntry> {
 /// Library context menu entries with "Show in File Manager" (Songs, Albums, Artists views).
 pub(crate) fn library_entries_with_folder() -> Vec<LibraryContextEntry> {
     vec![
+        LibraryContextEntry::ShufflePlay,
         LibraryContextEntry::AddToQueue,
         LibraryContextEntry::AddToPlaylist,
         LibraryContextEntry::Separator,
@@ -81,6 +86,7 @@ pub(crate) fn library_entries_with_folder() -> Vec<LibraryContextEntry> {
 /// Library context menu entries for Songs view (includes FindSimilar/TopSongs).
 pub(crate) fn song_entries_with_folder() -> Vec<LibraryContextEntry> {
     vec![
+        LibraryContextEntry::ShufflePlay,
         LibraryContextEntry::AddToQueue,
         LibraryContextEntry::AddToPlaylist,
         LibraryContextEntry::Separator,
@@ -94,6 +100,7 @@ pub(crate) fn song_entries_with_folder() -> Vec<LibraryContextEntry> {
 /// Library context menu entries for Artists view (includes TopSongs + FindSimilar).
 pub(crate) fn artist_entries_with_folder() -> Vec<LibraryContextEntry> {
     vec![
+        LibraryContextEntry::ShufflePlay,
         LibraryContextEntry::AddToQueue,
         LibraryContextEntry::AddToPlaylist,
         LibraryContextEntry::Separator,
@@ -128,6 +135,11 @@ pub(crate) fn library_entry_view<'a, Message: Clone + 'a>(
     on_action: impl Fn(LibraryContextEntry) -> Message,
 ) -> Element<'a, Message> {
     match entry {
+        LibraryContextEntry::ShufflePlay => menu_button(
+            Some("assets/icons/shuffle.svg"),
+            "Shuffle Play",
+            on_action(LibraryContextEntry::ShufflePlay),
+        ),
         LibraryContextEntry::AddToQueue => menu_button(
             Some("assets/icons/list-plus.svg"),
             "Add to Queue",

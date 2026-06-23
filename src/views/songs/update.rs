@@ -148,6 +148,9 @@ impl SongsPage {
 
                 if let Some(song) = songs.get(clicked_idx) {
                     match entry {
+                        LibraryContextEntry::ShufflePlay => {
+                            (Task::none(), SongsAction::PlayBatchShuffled(payload))
+                        }
                         LibraryContextEntry::AddToQueue => {
                             (Task::none(), SongsAction::AddBatchToQueue(payload))
                         }

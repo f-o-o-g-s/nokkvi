@@ -468,7 +468,14 @@ impl Nokkvi {
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                return self.play_batch_task(payload);
+                return self.play_batch_task(payload, OneShotShuffle::None);
+            }
+            AlbumsAction::PlayBatchShuffled(payload) => {
+                self.albums_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_batch_task(payload, OneShotShuffle::Full);
             }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {
                 if let Ok(index) = album_id_str.parse::<usize>() {

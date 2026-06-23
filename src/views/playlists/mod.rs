@@ -152,6 +152,8 @@ pub enum PlaylistsMessage {
 #[derive(Debug, Clone)]
 pub enum PlaylistsAction {
     PlayPlaylist(String), // playlist_id - clear queue and play all songs in playlist
+    /// Replace the queue with the selection/clicked item, shuffled once, and play.
+    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     ExpandPlaylist(String), // playlist_id - load tracks for expansion
     PlayPlaylistFromTrack(String, usize), // playlist_id, track_index - play from clicked track

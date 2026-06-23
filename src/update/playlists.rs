@@ -180,6 +180,13 @@ impl Nokkvi {
                     "play playlist",
                 );
             }
+            views::PlaylistsAction::PlayBatchShuffled(payload) => {
+                self.playlists_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_batch_task(payload, OneShotShuffle::Full);
+            }
             views::PlaylistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }

@@ -752,6 +752,35 @@ fn genres_context_menu_show_in_folder_on_child_album() {
     }
 }
 
+/// Context-menu "Shuffle Play" must route through the batched branch and emit
+/// `PlayBatchShuffled` — guards the `_`-fallthrough silent-no-op risk in the
+/// guard-based views (the compiler does NOT force this arm).
+#[test]
+fn genres_context_menu_shuffle_play_emits_play_batch_shuffled() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ContextMenuAction(
+            0, // clicked genre (no selection → single-item batch)
+            crate::widgets::context_menu::LibraryContextEntry::ShufflePlay,
+        ),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::PlayBatchShuffled(payload) => {
+            assert_eq!(
+                payload.items.len(),
+                1,
+                "a single clicked genre yields a one-item batch"
+            );
+        }
+        other => panic!("Expected PlayBatchShuffled action, got {other:?}"),
+    }
+}
+
 // ============================================================================
 // Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (2-tier views)
 // ============================================================================

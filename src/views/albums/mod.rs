@@ -148,6 +148,8 @@ pub enum AlbumsMessage {
 pub enum AlbumsAction {
     PlayAlbum(String), // album_id - clear queue and play
     PlayBatch(nokkvi_data::types::batch::BatchPayload),
+    /// Replace the queue with the selection/clicked item, shuffled once, and play.
+    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     LoadLargeArtwork(String), // center_idx as string
     CenterOnPlaying,

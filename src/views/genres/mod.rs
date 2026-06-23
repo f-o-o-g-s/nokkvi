@@ -131,6 +131,8 @@ pub enum GenresMessage {
 #[derive(Debug, Clone)]
 pub enum GenresAction {
     PlayGenre(String), // genre_id - clear queue and play all songs in genre
+    /// Replace the queue with the selection/clicked item, shuffled once, and play.
+    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     PlayAlbum(String), // album_id - play child album
     /// Expand genre inline — root should load albums (genre_name, genre_id)

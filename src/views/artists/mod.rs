@@ -143,6 +143,8 @@ pub enum ArtistsMessage {
 #[derive(Debug, Clone)]
 pub enum ArtistsAction {
     PlayArtist(String), // artist_id - clear queue and play all songs
+    /// Replace the queue with the selection/clicked item, shuffled once, and play.
+    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     PlayAlbum(String),    // album_id - play child album
     StarArtist(String),   // artist_id - star the artist

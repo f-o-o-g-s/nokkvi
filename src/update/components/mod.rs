@@ -1055,12 +1055,13 @@ impl Nokkvi {
     pub(crate) fn play_batch_task(
         &mut self,
         payload: nokkvi_data::types::batch::BatchPayload,
+        shuffle: OneShotShuffle,
     ) -> Task<Message> {
         let len = payload.items.len();
-        debug!(" Playing batch of {} items", len);
+        debug!(" Playing batch of {} items (shuffle={:?})", len, shuffle);
         self.clear_active_playlist();
         self.shell_task(
-            move |shell| async move { shell.play_batch(payload, OneShotShuffle::None).await },
+            move |shell| async move { shell.play_batch(payload, shuffle).await },
             move |result| match result {
                 Ok(()) => Message::Navigation(crate::app_message::NavigationMessage::SwitchView(
                     crate::View::Queue,

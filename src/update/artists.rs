@@ -335,6 +335,13 @@ impl Nokkvi {
                     |shell, id| async move { shell.play_artist(&id, OneShotShuffle::None).await },
                 );
             }
+            ArtistsAction::PlayBatchShuffled(payload) => {
+                self.artists_page
+                    .common
+                    .slot_list
+                    .clear_selection_indices_only();
+                return self.play_batch_task(payload, OneShotShuffle::Full);
+            }
             ArtistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }

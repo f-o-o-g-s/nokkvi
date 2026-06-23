@@ -258,6 +258,9 @@ impl SimilarPage {
                             ),
                         ),
                         LibraryContextEntry::Separator => (Task::none(), SimilarAction::None),
+                        // Shuffle Play is intentionally omitted from the Similar/Top Songs
+                        // menu (use the batch "Replace Queue with All Found" instead).
+                        LibraryContextEntry::ShufflePlay => (Task::none(), SimilarAction::None),
                     }
                 } else {
                     (Task::none(), SimilarAction::None)
