@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Selecting items in the library now uses an accent border ring instead of a solid fill highlight, matching the theme picker's selection style. The text color no longer changes, and the now-playing row keeps its filled, glowing highlight.
 - New installs now default the visualizer height to 40% of the window (up from 25%); existing configs keep their value.
 
 ### Fixed

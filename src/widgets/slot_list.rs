@@ -154,7 +154,8 @@ impl SlotListRowContext {
 /// smooth at any display refresh rate. Tune here to change the speed.
 pub(crate) const GLOW_PERIOD_SECS: f32 = 3.4;
 
-// The now-playing row is a NORMAL full-bleed slot (same fill as selection). Two
+// The now-playing row is a NORMAL full-bleed slot (the same loud fill as the
+// drag-preview ghost; in-list selection is border-only and has no fill). Two
 // in-bounds overlays give it life: a pulsing INNER GLOW at the top & bottom
 // edges and a travelling SHIMMER sheen sweeping across. Both are gated on
 // `glow_seed`, derived from the theme accent, and painted by [`glow_overlay`].
@@ -312,11 +313,15 @@ pub(crate) struct SlotListSlotStyle {
     pub text_color: Color,
     pub subtext_color: Color,
     pub hover_text_color: Color,
-    /// `true` on the opaque-fill highlight rows (now-playing / expanded and
-    /// selected / center), where every glyph — index, empty star/heart
-    /// outlines, lock — must use the row's forced-legible `text_color` instead
-    /// of a muted theme color that would wash out against the accent fill.
+    /// `true` on the opaque loud-fill rows — the now-playing row, expanded-parent
+    /// headers, and the floating drag-preview ghost — where every glyph (index,
+    /// empty star/heart outlines, lock) must use the row's forced-legible
+    /// `text_color` instead of a muted theme color that would wash out against
+    /// the accent fill. A border-only selection (see [`for_slot`]) is NOT one of
+    /// these: it keeps the normal row's theme text, so this stays `false` for it.
     /// Read by [`slot_list_static_icon_color`].
+    ///
+    /// [`for_slot`]: SlotListSlotStyle::for_slot
     pub forces_legible_text: bool,
     /// `Some(fill)` ONLY on the actively-playing row (queue now-playing). The
     /// gate + accent source for the breathing glow: [`glow_overlay`] reads it to
@@ -336,9 +341,10 @@ impl SlotListSlotStyle {
     ///
     /// `is_highlighted` covers BOTH the now-playing queue row and expanded-parent
     /// headers (albums/artists/playlists/genres). `is_playing` narrows that to
-    /// the actually-playing track: it picks the unified selection fill and arms
-    /// the breathing ring, while expanded parents (`is_highlighted` without
-    /// `is_playing`) keep the calmer static `playing_fill()`.
+    /// the actually-playing track: it picks the loud accent fill (shared with the
+    /// drag-preview ghost) and arms the breathing glow, while expanded parents
+    /// (`is_highlighted` without `is_playing`) keep the calmer static
+    /// `playing_fill()`.
     ///
     /// `depth` controls hierarchy-based background darkening for expanded slots:
     /// 0 = parent/root (no darkening), 1 = child, 2 = grandchild.
@@ -353,11 +359,11 @@ impl SlotListSlotStyle {
     ) -> Self {
         if is_highlighted {
             // Now-playing (queue) row OR an expanded-parent header. The
-            // now-playing row is UNIFIED with the loved selection fill and
-            // breathes; an expanded-parent header keeps the calmer
-            // `playing_fill()` and stays static. Both still get guaranteed-
-            // legible forced text, recomputed on the depth-darkened bg so
-            // nested rows never push text into the fill.
+            // now-playing row wears the loud accent fill (shared with the
+            // drag-preview ghost) and breathes; an expanded-parent header keeps
+            // the calmer `playing_fill()` and stays static. Both still get
+            // guaranteed-legible forced text, recomputed on the depth-darkened bg
+            // so nested rows never push text into the fill.
             let fill = if is_playing {
                 theme::selected_fill_resolved()
             } else {
@@ -371,8 +377,9 @@ impl SlotListSlotStyle {
             let txt = theme::legible_text_on(bg);
             // The actively-playing row wears NO ring — its breathing glow +
             // shimmer overlay (see `glow_overlay`) is the sole distinguisher, so
-            // the fill alone matches selection and the motion sets it apart.
-            // Expanded-parent headers keep the max-contrast highlight ring.
+            // the loud fill plus the motion set it apart from a quiet
+            // border-only selection. Expanded-parent headers keep the
+            // max-contrast highlight ring.
             let (border_color, border_width) = if is_playing {
                 (Color::TRANSPARENT, 0.0)
             } else {
@@ -391,62 +398,102 @@ impl SlotListSlotStyle {
                 // header shares the highlight branch but stays static.
                 glow_seed: if is_playing { Some(bg) } else { None },
             }
-        } else if is_selected || (is_center && !has_multi_selection) {
-            // Selected item, or center slot when there is NO explicit
-            // multi-selection. Derived fill + guaranteed-legible forced text;
-            // the center slot gets a max-contrast ring, plain selection a
-            // subtler one (both perceptible against the fill on every theme).
-            let fill = theme::selected_fill_resolved();
-            let txt = theme::legible_text_on(fill);
-            Self {
-                bg_color: fill,
-                border_color: theme::highlight_border(fill, if is_center { 1.0 } else { 0.55 }),
-                border_width: 2.0,
-                border_radius: slot_list_border_radius(),
-                text_color: txt,
-                subtext_color: txt,
-                hover_text_color: txt,
-                forces_legible_text: true,
-                glow_seed: None,
-            }
-        // Removed redundant else if is_center branch as it matches the default fallback exactly
         } else {
-            // Regular slot with opacity fade (both background and text).
+            // A regular slot, OR a selection — which is now just a regular slot
+            // plus an accent ring. A "selection" is the multi-selected rows AND
+            // the lone click/keyboard cursor when no multi-selection is active.
+            //
+            // BORDER-ONLY selection, mirroring the theme picker swatch list
+            // (`render_theme_slot`): the selected row keeps a normal row's
+            // background + theme text colors, and a 2 px accent RING is the sole
+            // cue — so a slot-list selection reads exactly like a selection in
+            // the theme modal. The loud unified fill is reserved for the
+            // now-playing row (handled above) and the drag-preview ghost
+            // ([`drag_preview`]); folding selection back into the regular branch
+            // keeps the two looks from drifting (selection == regular + ring).
+            //
+            // [`drag_preview`]: SlotListSlotStyle::drag_preview
+            let is_selection = is_selected || (is_center && !has_multi_selection);
+            // A selection is IMMUNE to the opacity gradient — exactly like the
+            // now-playing / expanded rows above. Its accent ring is the SOLE cue,
+            // so fading it with an off-center row would drop it below the contrast
+            // floor and the selection could vanish; a plain row still fades.
+            let row_alpha = if is_selection { 1.0 } else { opacity };
             // Per-depth background steps along the theme's elevation ramp so
-            // nested expansion rows stay distinguishable from each other and
-            // from the focused row's `selected_fill_resolved()` fill.
+            // nested expansion rows stay distinguishable from each other.
             let base = match depth {
                 0 => theme::bg0(),
                 1 => theme::bg1(),
                 _ => theme::bg2(),
             };
-            // Flat redesign: rows touch (`SLOT_SPACING == 0`) and use the
-            // 1 px `theme::border()` hairline as a shared separator. Iced
-            // draws borders fully inside the rect, so adjacent rows'
-            // borders overlap into one clean line. In rounded mode the
-            // outer list shell owns the sealed `theme::border()` perimeter
-            // (square corners) — inside the shell every row is still flush,
-            // so the per-row hairline continues to read as a single separator.
+            // Unselected rows touch (`SLOT_SPACING == 0`) and use the 1 px
+            // `theme::border()` hairline as a shared separator. Iced draws
+            // borders fully inside the rect, so adjacent rows' hairlines overlap
+            // into one clean line. In rounded mode the outer list shell owns the
+            // sealed `theme::border()` perimeter (square corners) — inside the
+            // shell every row is still flush, so the per-row hairline continues
+            // to read as a single separator. A selected row swaps that hairline
+            // for the louder 2 px accent ring.
+            let (border_color, border_width) = if is_selection {
+                // Contrast-floored accent ring (see `theme::selection_ring_on`):
+                // the raw theme accent on most themes, nudged toward `base`'s
+                // contrasting extreme only where the accent would sit too close
+                // to the row bg to see. Kept at FULL alpha (the ring never fades
+                // with the gradient) so it always clears the contrast floor.
+                (theme::selection_ring_on(base), 2.0)
+            } else {
+                (
+                    Color {
+                        a: opacity,
+                        ..theme::border()
+                    },
+                    1.0,
+                )
+            };
             Self {
-                bg_color: Color { a: opacity, ..base },
-                border_color: Color {
-                    a: opacity,
-                    ..theme::border()
+                bg_color: Color {
+                    a: row_alpha,
+                    ..base
                 },
-                border_width: 1.0,
+                border_color,
+                border_width,
                 border_radius: slot_list_border_radius(),
                 text_color: Color {
-                    a: opacity,
+                    a: row_alpha,
                     ..theme::fg0()
                 },
                 subtext_color: Color {
-                    a: opacity,
+                    a: row_alpha,
                     ..theme::fg4()
                 },
                 hover_text_color: theme::accent_bright(),
                 forces_legible_text: false,
                 glow_seed: None,
             }
+        }
+    }
+
+    /// Bold style for a floating drag-preview ghost: the loud unified selection
+    /// fill, guaranteed-legible forced text, and a max-contrast ring, so the
+    /// dragged row reads clearly as "grabbed" while it floats over arbitrary
+    /// content. This is deliberately NOT the quiet in-list selection look (which
+    /// is a border-only accent ring — see [`for_slot`]): a drag ghost wants to
+    /// shout, an in-list selection wants to whisper.
+    ///
+    /// [`for_slot`]: SlotListSlotStyle::for_slot
+    pub(crate) fn drag_preview() -> Self {
+        let fill = theme::selected_fill_resolved();
+        let txt = theme::legible_text_on(fill);
+        Self {
+            bg_color: fill,
+            border_color: theme::highlight_border(fill, 1.0),
+            border_width: 2.0,
+            border_radius: slot_list_border_radius(),
+            text_color: txt,
+            subtext_color: txt,
+            hover_text_color: txt,
+            forces_legible_text: true,
+            glow_seed: None,
         }
     }
 
@@ -2360,44 +2407,49 @@ mod tests {
         assert_eq!(hl.hover_text_color, hl.text_color);
         assert_eq!(hl.subtext_color, hl.text_color);
 
-        // Selected slot -> same forced-legible-ink rule against its own fill.
+        // Selected slot -> BORDER-ONLY (theme-modal style): no forced ink. It
+        // keeps the normal row's theme text + bright-accent hover, exactly like
+        // an unselected row — only the border changes (see
+        // `selection_is_border_only_accent_ring`).
         let sel = SlotListSlotStyle::for_slot(false, false, false, true, false, 1.0, 0);
-        assert_eq!(sel.text_color, crate::theme::legible_text_on(sel.bg_color));
-        assert_eq!(sel.hover_text_color, sel.text_color);
+        assert_eq!(sel.text_color, crate::theme::fg0());
+        assert_eq!(sel.subtext_color, crate::theme::fg4());
+        assert_eq!(sel.hover_text_color, crate::theme::accent_bright());
+        assert!(!sel.forces_legible_text);
 
-        // Static glyphs (index, empty star/heart outlines, lock) must follow
-        // the forced text on highlight rows — not a muted theme fallback that
-        // would wash out against the fill.
+        // Static glyphs (index, empty star/heart outlines, lock) follow the
+        // forced text on the loud-fill highlight rows...
         assert!(hl.forces_legible_text);
-        assert!(sel.forces_legible_text);
         assert_eq!(
             slot_list_static_icon_color(hl, crate::theme::fg4(), 1.0),
             hl.text_color
         );
-        assert_eq!(
-            slot_list_static_icon_color(sel, crate::theme::fg4(), 1.0),
-            sel.text_color
-        );
-        // A normal row keeps the muted fallback rather than the row text color.
+        // ...but a normal row AND a border-only selection keep the muted
+        // fallback rather than the row text color.
         assert!(!style.forces_legible_text);
         assert_ne!(
             slot_list_static_icon_color(style, crate::theme::fg4(), 1.0),
             style.text_color
         );
+        assert_ne!(
+            slot_list_static_icon_color(sel, crate::theme::fg4(), 1.0),
+            sel.text_color
+        );
     }
 
-    /// Now-playing rows (`is_playing`) wear the unified selection fill, seed the
+    /// Now-playing rows (`is_playing`) wear the loud accent fill (now shared with
+    /// the drag-preview ghost, NOT the border-only in-list selection), seed the
     /// breathing glow, and carry NO ring (the glow is their sole distinguisher).
     /// Expanded-parent headers share the `is_highlighted` branch but stay static
     /// — calmer `playing_fill`, no glow, and they KEEP the highlight ring.
     #[test]
-    fn now_playing_unifies_fill_and_seeds_glow() {
+    fn now_playing_wears_loud_fill_and_seeds_glow() {
         // Actively-playing row: is_highlighted + is_playing.
         let playing = SlotListSlotStyle::for_slot(false, true, true, false, false, 1.0, 0);
         assert_eq!(
             playing.bg_color,
             crate::theme::selected_fill_resolved(),
-            "now-playing fill must be unified with the selection fill"
+            "now-playing fill must be the loud accent fill (shared with the drag-preview ghost)"
         );
         assert_eq!(
             playing.glow_seed,
@@ -2435,6 +2487,117 @@ mod tests {
         assert_eq!(selected.border_width, 2.0, "selection keeps its ring");
         let normal = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 0);
         assert_eq!(normal.glow_seed, None);
+    }
+
+    /// A selection — multi-selected rows AND the lone click/keyboard cursor —
+    /// is a BORDER-ONLY affordance, mirroring the theme picker swatch list
+    /// (`render_theme_slot`): the row keeps a normal row's background + theme
+    /// text, and the ONLY change is a 2 px accent ring. No loud fill, no forced
+    /// ink, no glow — so a slot-list selection reads exactly like a selection in
+    /// the theme modal. (The now-playing row keeps its loud fill — see
+    /// `now_playing_wears_loud_fill_and_seeds_glow`.)
+    #[test]
+    fn selection_is_border_only_accent_ring() {
+        let normal = SlotListSlotStyle::for_slot(false, false, false, false, false, 1.0, 0);
+        let multi_selected = SlotListSlotStyle::for_slot(false, false, false, true, false, 1.0, 0);
+        let lone_cursor = SlotListSlotStyle::for_slot(true, false, false, false, false, 1.0, 0);
+
+        for sel in [multi_selected, lone_cursor] {
+            // Background + text are identical to a normal row — selection
+            // touches neither (the whole point: it reads like the theme modal).
+            assert_eq!(sel.bg_color, normal.bg_color);
+            assert_eq!(sel.text_color, normal.text_color);
+            assert_eq!(sel.subtext_color, normal.subtext_color);
+            assert_eq!(sel.hover_text_color, normal.hover_text_color);
+            assert!(!sel.forces_legible_text);
+            assert_eq!(sel.glow_seed, None);
+            // The sole cue: a 2 px accent ring (vs the normal 1 px hairline),
+            // contrast-floored against the row bg so it is never invisible.
+            assert_eq!(sel.border_width, 2.0);
+            assert_eq!(
+                sel.border_color,
+                Color {
+                    a: 1.0,
+                    ..crate::theme::selection_ring_on(crate::theme::bg0())
+                }
+            );
+        }
+    }
+
+    /// A floating drag-preview ghost deliberately keeps the BOLD loud-fill look
+    /// (not the quiet in-list border-only selection ring), so the dragged row
+    /// shouts over whatever content it floats above.
+    #[test]
+    fn drag_preview_keeps_bold_fill() {
+        let ghost = SlotListSlotStyle::drag_preview();
+        assert_eq!(ghost.bg_color, crate::theme::selected_fill_resolved());
+        assert_eq!(
+            ghost.text_color,
+            crate::theme::legible_text_on(ghost.bg_color)
+        );
+        assert!(ghost.forces_legible_text);
+        assert_eq!(ghost.border_width, 2.0);
+        assert_eq!(ghost.glow_seed, None);
+    }
+
+    /// The change's core promise: a now-playing row's loud fill + glow (and an
+    /// expanded-parent header's fill + ring) survive UNCHANGED even when that
+    /// same row is also part of a multi-selection. In real use a row is routinely
+    /// both at once (e.g. clicking the currently-playing track). Pinned because
+    /// correctness rests SOLELY on the `is_highlighted` branch winning over the
+    /// selection branch — a reorder would silently strip the now-playing look and
+    /// no other test would catch it.
+    #[test]
+    fn now_playing_and_parent_win_over_selection() {
+        // Now-playing AND selected (with an active multi-selection) renders
+        // identically to a plain now-playing row.
+        let playing_only = SlotListSlotStyle::for_slot(false, true, true, false, false, 1.0, 0);
+        let playing_selected = SlotListSlotStyle::for_slot(true, true, true, true, true, 1.0, 0);
+        assert_eq!(playing_selected.bg_color, playing_only.bg_color);
+        assert_eq!(playing_selected.glow_seed, playing_only.glow_seed);
+        assert_eq!(playing_selected.border_width, playing_only.border_width);
+        assert_eq!(
+            playing_selected.forces_legible_text,
+            playing_only.forces_legible_text
+        );
+
+        // Expanded-parent header AND selected keeps its loud `playing_fill` + 2px
+        // ring — it is NOT downgraded to the border-only selection look.
+        let parent_only = SlotListSlotStyle::for_slot(false, true, false, false, false, 1.0, 0);
+        let parent_selected = SlotListSlotStyle::for_slot(true, true, false, true, true, 1.0, 0);
+        assert_eq!(parent_only.bg_color, crate::theme::playing_fill());
+        assert_eq!(parent_selected.bg_color, parent_only.bg_color);
+        assert_eq!(parent_selected.border_color, parent_only.border_color);
+        assert_eq!(
+            parent_selected.forces_legible_text,
+            parent_only.forces_legible_text
+        );
+    }
+
+    /// Two contracts of the border-only selection branch: (1) a selection is
+    /// IMMUNE to the opacity gradient — its accent ring (the sole cue), bg, and
+    /// text all stay fully opaque even on an off-center, faded row, so the ring
+    /// never drops below the contrast floor (the now-playing / expanded rows are
+    /// immune the same way); and (2) the lone keyboard cursor yields its ring to
+    /// an active explicit multi-selection, falling back to the plain 1px hairline.
+    #[test]
+    fn selection_is_opaque_under_gradient_and_yields_to_multi_selection() {
+        // (1) A selected row asked to render at a faded opacity ignores it: ring,
+        // bg, and text all stay fully opaque so the selection can never fade out.
+        let faded_selected = SlotListSlotStyle::for_slot(false, false, false, true, false, 0.3, 0);
+        assert_eq!(faded_selected.border_color.a, 1.0);
+        assert_eq!(faded_selected.bg_color.a, 1.0);
+        assert_eq!(faded_selected.text_color.a, 1.0);
+        assert_eq!(faded_selected.border_width, 2.0);
+        // A plain row at the same opacity DOES fade (the gradient still applies).
+        let faded_plain = SlotListSlotStyle::for_slot(false, false, false, false, false, 0.3, 0);
+        assert!((faded_plain.bg_color.a - 0.3).abs() < 1e-6);
+
+        // (2) Center cursor amid an active multi-selection (and not itself
+        // selected) is a plain row again — 1px hairline, no 2px ring.
+        let cursor_amid_multi =
+            SlotListSlotStyle::for_slot(true, false, false, false, true, 1.0, 0);
+        assert_eq!(cursor_amid_multi.border_width, 1.0);
     }
 
     /// The inner glow's edge alpha breathes between its min and max over a
@@ -2504,6 +2667,10 @@ mod tests {
         SlotListSlotStyle::for_slot(true, false, false, false, false, 1.0, depth).bg_color
     }
 
+    fn focused_ring(depth: u8) -> iced::Color {
+        SlotListSlotStyle::for_slot(true, false, false, false, false, 1.0, depth).border_color
+    }
+
     #[test]
     fn unfocused_bg_at_depth_zero_uses_bg0() {
         let style_bg = unfocused_bg(0);
@@ -2567,15 +2734,25 @@ mod tests {
         );
     }
 
-    /// The keyboard-focused row must keep a constant fill across depths so the
-    /// focus highlight is identifiable regardless of how deep the user navigates.
+    /// The keyboard-focused row is a BORDER-ONLY selection (theme-modal style):
+    /// the accent RING — not the fill — marks focus, and it stays PERCEPTIBLE at
+    /// every depth because its color is contrast-floored against that depth's bg
+    /// (`selection_ring_on`). The fill itself tracks the normal per-depth
+    /// elevation ramp (selection == normal row + ring), so a focused deep row
+    /// stays tonally consistent with its siblings.
     #[test]
-    fn focused_bg_constant_across_depths() {
-        let d0 = focused_bg(0);
-        let d1 = focused_bg(1);
-        let d2 = focused_bg(2);
-        assert_eq!((d0.r, d0.g, d0.b), (d1.r, d1.g, d1.b));
-        assert_eq!((d1.r, d1.g, d1.b), (d2.r, d2.g, d2.b));
+    fn focused_ring_is_contrast_floored_and_fill_follows_ramp() {
+        for depth in 0u8..=2 {
+            let bg = match depth {
+                0 => crate::theme::bg0(),
+                1 => crate::theme::bg1(),
+                _ => crate::theme::bg2(),
+            };
+            // Ring = the contrast-floored accent for THIS depth's bg.
+            assert_eq!(focused_ring(depth), crate::theme::selection_ring_on(bg));
+            // Fill = the normal row's bg at this depth (no separate fill).
+            assert_eq!(focused_bg(depth), unfocused_bg(depth));
+        }
     }
 
     // ========================================================================

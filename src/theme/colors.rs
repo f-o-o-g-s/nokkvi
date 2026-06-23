@@ -349,11 +349,41 @@ pub(crate) fn legible_text_on(fill: Color) -> Color {
 
 /// A visible ring for an opaque highlight chip: blends `fill` toward its own
 /// forced text color (the guaranteed-contrasting extreme), so the border is
-/// always perceptible against the fill regardless of theme. `strength` 1.0 =
-/// max-contrast ring (center / playing); ~0.55 = subtler ring (plain selected).
+/// always perceptible against the fill regardless of theme. Every current caller
+/// (the now-playing / expanded-parent rows and the drag-preview ghost) passes
+/// `strength` 1.0 for a max-contrast ring; lower strengths give a subtler ring.
+/// In-list selection no longer uses this — it is border-only over the plain row
+/// bg, with a contrast-floored accent ring (see [`selection_ring_on`]).
 #[inline]
 pub(crate) fn highlight_border(fill: Color, strength: f32) -> Color {
     blend_toward(fill, legible_text_on(fill), strength)
+}
+
+/// Minimum WCAG non-text / UI-component contrast (3:1) kept between the in-list
+/// selection ring and the row background it is drawn on. A border-only selection
+/// has no fill swap or text recolor to fall back on, so the ring is the SOLE cue
+/// and must clear this floor on every theme — unlike the theme picker swatch list
+/// it mirrors, which leans on an always-visible swatch + center-anchor + hint.
+pub(super) const SELECTION_RING_MIN_CONTRAST: f32 = 3.0;
+
+/// Resolve the in-list selection ring color for a row whose background is `bg`.
+/// Starts from `accent_bright` (so the ring reads as "the theme accent", exactly
+/// like the theme picker swatch list) and only nudges it toward `bg`'s
+/// contrasting extreme when the raw accent sits too close to `bg` to register as
+/// a thin 2 px ring — so a selection is never invisible on a low-contrast theme
+/// (e.g. Firmium light's near-bg gold, Kanagawa-Dragon dark's near-bg navy). On
+/// the great majority of themes the accent already clears the floor and is
+/// returned unchanged. Pure in its inputs so the all-themes gauntlet can sweep
+/// it; [`selection_ring_on`] is the live-theme wrapper.
+pub(super) fn selection_ring(accent_bright: Color, bg: Color) -> Color {
+    legible_against(accent_bright, bg, SELECTION_RING_MIN_CONTRAST)
+}
+
+/// Live-theme [`selection_ring`]: the contrast-floored accent ring for a selected
+/// slot drawn over background `bg` (the row's per-depth `bg0`/`bg1`/`bg2`).
+#[inline]
+pub(crate) fn selection_ring_on(bg: Color) -> Color {
+    selection_ring(accent_bright(), bg)
 }
 
 /// Resolve the `(now_playing, selected)` fill pair from the accent tokens,
@@ -426,7 +456,10 @@ pub(crate) fn playing_fill() -> Color {
     resolve_highlight_fills(accent(), accent_bright(), bg0_hard()).0
 }
 
-/// Selected / center slot fill — derived, distinctness-resolved.
+/// Loud accent fill for the now-playing row and the drag-preview ghost —
+/// derived, distinctness-resolved. (Despite the historical name, in-list
+/// selection is now border-only and does NOT use this; see
+/// [`selection_ring_on`].)
 #[inline]
 pub(crate) fn selected_fill_resolved() -> Color {
     resolve_highlight_fills(accent(), accent_bright(), bg0_hard()).1

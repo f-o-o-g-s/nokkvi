@@ -418,9 +418,10 @@ impl Nokkvi {
                 .into(),
         };
 
-        // Wrap in center-slot styled container
+        // Wrap in the bold drag-preview ghost style (loud fill + legible text +
+        // ring) — NOT the quiet border-only in-list selection look.
         use crate::widgets::slot_list::SlotListSlotStyle;
-        let style = SlotListSlotStyle::for_slot(true, false, false, false, false, 1.0, 0);
+        let style = SlotListSlotStyle::drag_preview();
 
         // For multi-selection drags, overlay a count badge
         if selection_count > 1 {
@@ -491,7 +492,7 @@ impl Nokkvi {
             slot_list_text_column,
         };
 
-        let style = SlotListSlotStyle::for_slot(true, false, false, false, false, 1.0, 0);
+        let style = SlotListSlotStyle::drag_preview();
         let row_height = 64.0_f32;
         let artwork_size = (row_height - 16.0).max(32.0);
         let title_size = calculate_font_size(16.0, row_height, 1.0);

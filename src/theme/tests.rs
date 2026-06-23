@@ -134,8 +134,10 @@ fn forced_text_reads_on_every_highlight_fill() {
     }
 }
 
-/// Now-playing and selected fills stay perceptibly distinct on every shipped
-/// theme/mode, so a playing row and a cursor row are tellable apart at once.
+/// The two derived highlight fills stay perceptibly distinct on every shipped
+/// theme/mode, so a now-playing row (`selected_fill`) and an expanded-parent
+/// header (`playing_fill`) are tellable apart when nested together. (In-list
+/// selection is border-only now and uses neither fill.)
 #[test]
 fn playing_and_selected_fills_stay_distinct() {
     for (name, mode, t) in all_builtin_palettes() {
@@ -150,7 +152,8 @@ fn playing_and_selected_fills_stay_distinct() {
 
 /// The distinctness separator never inverts the hierarchy: when playing
 /// starts darker than selected, the resolved playing fill stays no lighter
-/// than the resolved selected fill (cursor = loud/bright, playing = ambient).
+/// than the resolved selected fill (now-playing = loud/bright, expanded-parent
+/// header = ambient).
 #[test]
 fn playing_fill_does_not_invert_hierarchy() {
     for (name, mode, t) in all_builtin_palettes() {
@@ -164,9 +167,11 @@ fn playing_fill_does_not_invert_hierarchy() {
     }
 }
 
-/// The highlight border is perceptible against its fill at both strengths
-/// (regression for the old center-slot border that matched the fill 1:1 on
-/// the 17 themes that didn't customize `selected`).
+/// The highlight border is perceptible against its fill. Production passes
+/// `strength` 1.0 (now-playing / expanded-parent rows + the drag-preview ghost);
+/// the lower-strength case is a generic mid-strength sanity check on the helper.
+/// (Regression for the old center-slot border that matched the fill 1:1 on the
+/// 17 themes that didn't customize `selected`.)
 #[test]
 fn highlight_border_contrasts_its_fill() {
     for (name, mode, t) in all_builtin_palettes() {
@@ -179,6 +184,26 @@ fn highlight_border_contrasts_its_fill() {
             assert!(
                 contrast_ratio(highlight_border(fill, 0.55), fill) > 1.05,
                 "{name}/{mode} {which} subtle border indistinct from fill"
+            );
+        }
+    }
+}
+
+/// The in-list selection RING clears the UI-component contrast floor against the
+/// row background at every depth on every shipped theme/mode. A border-only
+/// selection has no fill or text fallback, so an invisible ring would mean an
+/// invisible selection — this is the systemic guard (cf. the near-bg accents on
+/// Firmium light and Kanagawa-Dragon dark that a raw-accent ring would hide).
+#[test]
+fn selection_ring_clears_contrast_floor_on_every_theme() {
+    for (name, mode, t) in all_builtin_palettes() {
+        for (depth, bg) in [("bg0", t.bg0), ("bg1", t.bg1), ("bg2", t.bg2)] {
+            let ring = selection_ring(t.accent_bright, bg);
+            let cr = contrast_ratio(ring, bg);
+            assert!(
+                cr >= SELECTION_RING_MIN_CONTRAST - 1e-3,
+                "{name}/{mode} selection ring on {depth} only reached {cr:.2}:1 \
+                 (floor {SELECTION_RING_MIN_CONTRAST})"
             );
         }
     }
