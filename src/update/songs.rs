@@ -254,14 +254,6 @@ impl Nokkvi {
                             // CRITICAL FIX: Use the already-displayed songs list directly.
                             // Re-fetching would return a different random order for "random" sort mode,
                             // causing the wrong song to play. Convert SongUIViewData -> Song.
-                            let songs: Vec<nokkvi_data::types::song::Song> = self
-                                .library
-                                .songs
-                                .iter()
-                                .cloned()
-                                .map(|ui| ui.into())
-                                .collect();
-
                             // Capture pagination state for progressive queue building
                             let loaded_count = self.library.songs.loaded_count();
                             let total_count = self.library.songs.total_count();
@@ -286,11 +278,63 @@ impl Nokkvi {
                             // Clear playlist context
                             self.clear_active_playlist();
 
-                            // Phase 1: Play immediately with loaded songs. When
-                            // Shuffle Play is active, shuffle the loaded buffer and
-                            // suppress Phase 2 — appending later pages in server
-                            // order would break the shuffled order.
                             let shuffle = self.activate_shuffle_directive(force, false);
+
+                            // Resolve-full (Q3): shuffling the whole Songs view fetches
+                            // the COMPLETE filtered list in one request, then shuffles it,
+                            // so the queue is a uniform shuffle of the entire library —
+                            // not just the loaded buffer. A single (un-paged) request keeps
+                            // a "random" server sort internally consistent (no dup/gap from
+                            // re-randomized pages). Only needed when not everything is
+                            // loaded yet; otherwise Phase 1 below already has the full set.
+                            if shuffle.shuffles() && needs_more {
+                                let sort_mode = sort_mode.clone();
+                                let sort_order = sort_order.clone();
+                                let search_query = search_query.clone();
+                                return self.shell_task(
+                                    move |shell| async move {
+                                        let library_ids = shell.active_library_ids_vec();
+                                        let all = shell
+                                            .songs()
+                                            .load_raw_songs_page_with_libraries(
+                                                Some(&sort_mode),
+                                                Some(&sort_order),
+                                                search_query.as_deref(),
+                                                None,
+                                                &library_ids,
+                                                0,
+                                                total_count,
+                                            )
+                                            .await?;
+                                        shell.play_songs(all, 0, OneShotShuffle::Full).await
+                                    },
+                                    |result| match result {
+                                        Ok(()) => Message::Navigation(
+                                            NavigationMessage::SwitchView(View::Queue),
+                                        ),
+                                        Err(e) => {
+                                            error!(" Failed to shuffle-play all songs: {}", e);
+                                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                                nokkvi_data::types::toast::Toast::new(
+                                                    format!("Failed to shuffle songs: {e}"),
+                                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                                ),
+                                            ))
+                                        }
+                                    },
+                                );
+                            }
+
+                            // Phase 1: Play immediately with the loaded buffer. When
+                            // shuffling with everything already loaded, this shuffles the
+                            // full set; Phase 2 stays suppressed under shuffle.
+                            let songs: Vec<nokkvi_data::types::song::Song> = self
+                                .library
+                                .songs
+                                .iter()
+                                .cloned()
+                                .map(|ui| ui.into())
+                                .collect();
                             let play_task = self.shell_task(
                                 move |shell| async move {
                                     shell.play_songs(songs, index, shuffle).await
@@ -311,8 +355,9 @@ impl Nokkvi {
                                 },
                             );
 
-                            // Phase 2: Background-fetch remaining pages and append to queue
-                            // (suppressed under one-shot shuffle — see Phase 1).
+                            // Phase 2: Background-fetch remaining pages and append to queue.
+                            // Only the non-shuffle path reaches here — shuffle + needs_more
+                            // already took the resolve-full branch above.
                             if needs_more && !shuffle.shuffles() {
                                 // Set loading target so queue header shows "X of Y songs"
                                 self.library.queue_loading_target = Some(total_count);
