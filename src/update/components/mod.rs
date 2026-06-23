@@ -117,13 +117,15 @@ impl Nokkvi {
         }
     }
 
-    /// Guard a play action against playlist edit mode.
+    /// Pre-play hook for every Play* handler: transition radio playback back to
+    /// queue mode so the upcoming queue play leaves the app in queue mode.
+    /// Returns `None` to let the play proceed.
     ///
-    /// Universal block/transition checks every Play* handler needs:
-    /// returns `Some(Task::none())` with a warning toast when in playlist
-    /// edit mode (play would replace the queue being edited), or transitions
-    /// radio playback back to queue mode when active. Returns `None` to let
-    /// the caller proceed.
+    /// Retained as an `Option` so a future block condition could short-circuit a
+    /// play. The former playlist-edit block was removed: the playlist editor
+    /// (`View::PlaylistEditor`) owns a track buffer fully decoupled from the live
+    /// queue, so a play can no longer disturb an edit session — blocking it served
+    /// no purpose and only navigated the user out of the editor.
     ///
     /// Play actions that **replace queue contents** (album/artist/genre/
     /// playlist/song/batch/roulette) should additionally call
@@ -131,17 +133,12 @@ impl Nokkvi {
     /// the playback pointer within the existing queue (`PlaySong` inside the
     /// queue view) must NOT — doing so clears the loaded-playlist header.
     pub(crate) fn guard_play_action(&mut self) -> Option<Task<Message>> {
-        if self.playlist_editor.is_some() {
-            self.toast_warn("Cannot play — would replace the playlist being edited");
-            return Some(Task::none());
-        }
-        // NOTE from Claude: The plan says "Stop radio if active — transition back
-        // to queue mode". The play action that follows will stop the engine anyway.
-        // Blocking here with a toast prevents the user from ever resuming queue
-        // playback while a radio stream is active — which defeats the purpose.
+        // Transition radio → queue so the upcoming queue play leaves the app in
+        // queue mode. (Blocking here would prevent ever resuming queue playback
+        // while a radio stream is active — which defeats the purpose.) The engine
+        // stop is handled by the play action that follows.
         if self.active_playback.is_radio() {
             self.active_playback = crate::state::ActivePlayback::Queue;
-            // Engine stop is handled by the play action that follows
         }
         None
     }

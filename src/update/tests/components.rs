@@ -132,7 +132,7 @@ fn clear_active_playlist_resets_strip_expansion() {
 }
 
 #[test]
-fn guard_play_action_blocks_during_playlist_edit() {
+fn guard_play_action_does_not_block_during_playlist_edit() {
     let mut app = test_app();
     app.active_playlist_info = Some(make_playlist_ctx());
     app.playlist_editor = Some(crate::state::PlaylistEditorState::new(
@@ -147,10 +147,15 @@ fn guard_play_action_blocks_during_playlist_edit() {
 
     let blocked = app.guard_play_action();
 
-    assert!(blocked.is_some(), "edit-mode plays must be blocked");
+    // The editor owns a buffer decoupled from the live queue, so a play can no
+    // longer disturb an edit — the guard lets it proceed.
+    assert!(
+        blocked.is_none(),
+        "edit-mode plays are no longer blocked (decoupled editor buffer)"
+    );
     assert!(
         app.active_playlist_info.is_some(),
-        "the blocked guard must not mutate playlist context either"
+        "the guard must not mutate playlist context"
     );
 }
 
@@ -473,15 +478,14 @@ fn play_playlist_from_track_clears_stale_queue_loading_target() {
 }
 
 #[test]
-fn play_playlist_from_track_blocked_during_edit_preserves_context() {
+fn play_playlist_from_track_during_edit_proceeds_and_sets_banner() {
     use nokkvi_data::types::playlist_edit::PlaylistEditState;
 
     use crate::state::PlaylistEditorState;
 
     let mut app = test_app();
     seed_expanded_playlist_centered_on_child(&mut app);
-    let banner = make_playlist_ctx();
-    app.active_playlist_info = Some(banner.clone());
+    app.active_playlist_info = Some(make_playlist_ctx());
     app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
         "pl_42".into(),
         "Sunday Set".into(),
@@ -492,11 +496,13 @@ fn play_playlist_from_track_blocked_during_edit_preserves_context() {
 
     activate_center_on_playlists(&mut app);
 
+    // The editor's buffer is decoupled from the queue, so a play is no longer
+    // blocked during an edit — it proceeds and re-points the banner at the played
+    // playlist, exactly like the no-edit case.
     assert_eq!(
-        app.active_playlist_info.as_ref(),
-        Some(&banner),
-        "an edit-mode-blocked from-track play must early-return and leave the banner context \
-         untouched (never overwrite it with the played playlist)"
+        app.active_playlist_info.as_ref().map(|ctx| ctx.id.as_str()),
+        Some("p1"),
+        "an edit-mode from-track play now proceeds and sets the banner to the played playlist"
     );
 }
 
