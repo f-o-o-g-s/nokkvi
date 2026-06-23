@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- New **Shuffle Play**: right-click any album, artist, genre, playlist, or song (or a multi-selection) and choose **Shuffle Play** to replace the queue with those tracks in a fresh random order and play from the top. It is a one-shot shuffle — the player-bar shuffle mode is left untouched.
+- New **Shuffle Play on Enter** setting (Settings → General → Application). When on, pressing Enter or clicking a collection plays it in a fresh random order instead of list order; off by default, so the usual linear behavior is unchanged.
+
 ### Changed
 
 - Selecting items in the library now uses an accent border ring instead of a solid fill highlight, matching the theme picker's selection style. The text color no longer changes, and the now-playing row keeps its filled, glowing highlight.
