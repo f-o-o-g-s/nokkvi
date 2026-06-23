@@ -4,7 +4,7 @@
 //! and SimilarSongsLoaded response processing with generation counter.
 
 use iced::Task;
-use nokkvi_data::types::ItemKind;
+use nokkvi_data::types::{ItemKind, OneShotShuffle};
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -40,7 +40,9 @@ impl Nokkvi {
                 let len = payload.items.len();
                 debug!(" Playing batch of {} similar items", len);
                 self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.play_batch(payload).await },
+                    move |shell| async move {
+                        shell.play_batch(payload, OneShotShuffle::None).await
+                    },
                     format!("Playing batch of {len} items"),
                     "play similar batch",
                 )

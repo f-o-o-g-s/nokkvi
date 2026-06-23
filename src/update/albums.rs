@@ -1,7 +1,10 @@
 //! Album data loading and component message handlers
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
+use nokkvi_data::{
+    backend::albums::AlbumUIViewData,
+    types::{ItemKind, OneShotShuffle},
+};
 use tracing::debug;
 
 use crate::{
@@ -441,7 +444,9 @@ impl Nokkvi {
                     let name = album.name.clone();
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_album_and_play(&id).await },
+                        move |shell| async move {
+                            shell.add_album_and_play(&id, OneShotShuffle::None).await
+                        },
                         format!("Playing '{name}'"),
                         "append album and play",
                     );
@@ -452,7 +457,7 @@ impl Nokkvi {
                     &album_id_str,
                     "album",
                     |a| a.id.clone(),
-                    |shell, id| async move { shell.play_album(&id).await },
+                    |shell, id| async move { shell.play_album(&id, OneShotShuffle::None).await },
                 );
             }
             AlbumsAction::AddBatchToQueue(payload) => {
@@ -561,7 +566,11 @@ impl Nokkvi {
                     return Task::none();
                 }
                 return self.shell_action_task(
-                    move |shell| async move { shell.play_album_from_track(&album_id, track_idx).await },
+                    move |shell| async move {
+                        shell
+                            .play_album_from_track(&album_id, track_idx, OneShotShuffle::None)
+                            .await
+                    },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play album from track",
                 );

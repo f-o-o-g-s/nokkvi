@@ -21,7 +21,7 @@
 //! - Playback orchestration → `AppService`
 //! - Artwork prefetching → the `artwork_prefetch` submodule (re-exported here)
 use iced::Task;
-use nokkvi_data::types::{ItemKind, error::NokkviError};
+use nokkvi_data::types::{ItemKind, OneShotShuffle, error::NokkviError};
 use tracing::{debug, error, info};
 
 use crate::{
@@ -1060,7 +1060,7 @@ impl Nokkvi {
         debug!(" Playing batch of {} items", len);
         self.clear_active_playlist();
         self.shell_task(
-            move |shell| async move { shell.play_batch(payload).await },
+            move |shell| async move { shell.play_batch(payload, OneShotShuffle::None).await },
             move |result| match result {
                 Ok(()) => Message::Navigation(crate::app_message::NavigationMessage::SwitchView(
                     crate::View::Queue,

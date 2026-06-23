@@ -1,7 +1,7 @@
 //! Genre data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::backend::genres::GenreUIViewData;
+use nokkvi_data::{backend::genres::GenreUIViewData, types::OneShotShuffle};
 use tracing::debug;
 
 use crate::{
@@ -223,14 +223,18 @@ impl Nokkvi {
                     self.clear_active_playlist();
                     let name = genre_name.clone();
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_genre_and_play(&name).await },
+                        move |shell| async move {
+                            shell.add_genre_and_play(&name, OneShotShuffle::None).await
+                        },
                         format!("Playing '{genre_name}'"),
                         "append genre and play",
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with genre
                 return self.shell_action_task(
-                    move |shell| async move { shell.play_genre(&genre_name).await },
+                    move |shell| async move {
+                        shell.play_genre(&genre_name, OneShotShuffle::None).await
+                    },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play genre",
                 );
@@ -259,7 +263,9 @@ impl Nokkvi {
                     );
                 }
                 return self.shell_action_task(
-                    move |shell| async move { shell.play_album(&album_id).await },
+                    move |shell| async move {
+                        shell.play_album(&album_id, OneShotShuffle::None).await
+                    },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play album from genre",
                 );

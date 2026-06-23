@@ -1,7 +1,10 @@
 //! Artist data loading and component message handlers
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::artists::ArtistUIViewData, types::ItemKind};
+use nokkvi_data::{
+    backend::artists::ArtistUIViewData,
+    types::{ItemKind, OneShotShuffle},
+};
 use tracing::debug;
 
 use crate::{
@@ -316,7 +319,9 @@ impl Nokkvi {
                     let name = artist.name.clone();
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_artist_and_play(&id).await },
+                        move |shell| async move {
+                            shell.add_artist_and_play(&id, OneShotShuffle::None).await
+                        },
                         format!("Playing '{name}'"),
                         "append artist and play",
                     );
@@ -327,7 +332,7 @@ impl Nokkvi {
                     &artist_id_str,
                     "artist",
                     |a| a.id.clone(),
-                    |shell, id| async move { shell.play_artist(&id).await },
+                    |shell, id| async move { shell.play_artist(&id, OneShotShuffle::None).await },
                 );
             }
             ArtistsAction::AddBatchToQueue(payload) => {
@@ -354,7 +359,7 @@ impl Nokkvi {
                     );
                 }
                 return self.shell_action_task(
-                    move |shell| async move { shell.play_album(&album_id).await },
+                    move |shell| async move { shell.play_album(&album_id, OneShotShuffle::None).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play album",
                 );

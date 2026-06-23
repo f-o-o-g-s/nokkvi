@@ -24,7 +24,10 @@ use crate::{
         songs::SongsService,
     },
     services::{state_storage::ACTIVE_LIBRARY_IDS_KEY, task_manager::TaskManager},
-    types::{library::Library, queue_sort_mode::QueueSortMode, song_source::SongSource},
+    types::{
+        library::Library, one_shot_shuffle::OneShotShuffle, queue_sort_mode::QueueSortMode,
+        song_source::SongSource,
+    },
 };
 
 /// AppService — Application-level orchestration and state management.
@@ -323,24 +326,50 @@ impl AppService {
     /// Never holds the engine lock — `NextTrackResetEffect` discharge stays
     /// inside the orchestrator verbs.
     async fn dispatch(&self, source: SongSource, verb: QueueVerb) -> Result<()> {
+        self.dispatch_shuffled(source, verb, OneShotShuffle::None)
+            .await
+    }
+
+    /// [`Self::dispatch`] plus an optional one-shot permutation of the resolved
+    /// list.
+    ///
+    /// The shuffle is applied to the detached `Vec<Song>` AFTER resolution and
+    /// BEFORE the queue verb runs; it NEVER writes the persistent shuffle MODE
+    /// (`queue.shuffle`), so the player-bar indicator stays off (the firmium-trap
+    /// guard). A shuffled list is always played from index 0 — `AnchorFirst` has
+    /// pre-pinned the intended track there — so any caller-supplied
+    /// `StartPosition::Index` is ignored under shuffle.
+    async fn dispatch_shuffled(
+        &self,
+        source: SongSource,
+        verb: QueueVerb,
+        shuffle: OneShotShuffle,
+    ) -> Result<()> {
         // `resolve` consumes the source — capture the log label and the
         // empty-resolution message first.
         let label = source.log_label();
         let empty_msg = source.empty_error_message();
-        let songs = self.library_orchestrator().resolve(source).await?;
+        let mut songs = self.library_orchestrator().resolve(source).await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!(empty_msg));
         }
+        // One-shot permutation of the detached list (no-op for `None`).
+        shuffle.apply(&mut songs);
         let count = songs.len();
         match verb {
             QueueVerb::Play(position) => {
-                let start = match position {
-                    StartPosition::First => 0,
-                    // `play_songs_from_index` clamps with `.min(len - 1)`,
-                    // identical to the wrappers' former pre-clamps.
-                    StartPosition::Index(index) => index,
-                    // Safe post-guard: `songs` is non-empty.
-                    StartPosition::Random => rand::random_range(0..songs.len()),
+                let start = if shuffle.shuffles() {
+                    // The list is already permuted; play from the top.
+                    0
+                } else {
+                    match position {
+                        StartPosition::First => 0,
+                        // `play_songs_from_index` clamps with `.min(len - 1)`,
+                        // identical to the wrappers' former pre-clamps.
+                        StartPosition::Index(index) => index,
+                        // Safe post-guard: `songs` is non-empty.
+                        StartPosition::Random => rand::random_range(0..songs.len()),
+                    }
                 };
                 self.queue_orchestrator().play(songs, start).await?;
             }
@@ -354,8 +383,8 @@ impl AppService {
             QueueVerb::PlayNext => self.queue_orchestrator().play_next(songs).await?,
         }
         debug!(
-            "Queue dispatch: {:?} of {} song(s) from {}",
-            verb, count, label
+            "Queue dispatch: {:?} of {} song(s) from {} (shuffle={:?})",
+            verb, count, label, shuffle
         );
         Ok(())
     }
@@ -363,10 +392,11 @@ impl AppService {
     /// Play an album by ID.
     ///
     /// Loads all songs in the album, sets queue, and starts playback.
-    pub async fn play_album(&self, album_id: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn play_album(&self, album_id: &str, shuffle: OneShotShuffle) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Album(album_id.to_owned()),
             QueueVerb::Play(StartPosition::First),
+            shuffle,
         )
         .await
     }
@@ -374,10 +404,36 @@ impl AppService {
     /// Play an album starting from a specific track index.
     ///
     /// Loads all songs in the album, sets queue, and starts playback from `track_idx`.
-    pub async fn play_album_from_track(&self, album_id: &str, track_idx: usize) -> Result<()> {
-        self.dispatch(
+    pub async fn play_album_from_track(
+        &self,
+        album_id: &str,
+        track_idx: usize,
+        shuffle: OneShotShuffle,
+    ) -> Result<()> {
+        if shuffle == OneShotShuffle::AnchorFirst {
+            // Resolve here so the clicked track can be pinned at index 0 before
+            // the tail is shuffled — `dispatch` resolves internally and cannot
+            // relocate it.
+            let mut songs = self
+                .library_orchestrator()
+                .resolve(SongSource::Album(album_id.to_owned()))
+                .await?;
+            if !songs.is_empty() {
+                let idx = track_idx.min(songs.len() - 1);
+                songs.swap(0, idx);
+            }
+            return self
+                .dispatch_shuffled(
+                    SongSource::Preloaded(songs),
+                    QueueVerb::Play(StartPosition::First),
+                    OneShotShuffle::AnchorFirst,
+                )
+                .await;
+        }
+        self.dispatch_shuffled(
             SongSource::Album(album_id.to_owned()),
             QueueVerb::Play(StartPosition::Index(track_idx)),
+            shuffle,
         )
         .await
     }
@@ -385,10 +441,11 @@ impl AppService {
     /// Play all songs by an artist.
     ///
     /// Loads all songs by this artist, sets queue, and starts playback.
-    pub async fn play_artist(&self, artist_id: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn play_artist(&self, artist_id: &str, shuffle: OneShotShuffle) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Artist(artist_id.to_owned()),
             QueueVerb::Play(StartPosition::First),
+            shuffle,
         )
         .await
     }
@@ -396,10 +453,11 @@ impl AppService {
     /// Play all songs in a genre.
     ///
     /// Loads all songs in this genre, sets queue, and starts playback.
-    pub async fn play_genre(&self, genre_name: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn play_genre(&self, genre_name: &str, shuffle: OneShotShuffle) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Genre(genre_name.to_owned()),
             QueueVerb::Play(StartPosition::First),
+            shuffle,
         )
         .await
     }
@@ -428,10 +486,11 @@ impl AppService {
     /// Play all songs in a playlist.
     ///
     /// Loads all songs in this playlist, sets queue, and starts playback.
-    pub async fn play_playlist(&self, playlist_id: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn play_playlist(&self, playlist_id: &str, shuffle: OneShotShuffle) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Playlist(playlist_id.to_owned()),
             QueueVerb::Play(StartPosition::First),
+            shuffle,
         )
         .await
     }
@@ -443,10 +502,30 @@ impl AppService {
         &self,
         playlist_id: &str,
         track_idx: usize,
+        shuffle: OneShotShuffle,
     ) -> Result<()> {
-        self.dispatch(
+        if shuffle == OneShotShuffle::AnchorFirst {
+            // Pin the clicked track at index 0 before the tail is shuffled.
+            let mut songs = self
+                .library_orchestrator()
+                .resolve(SongSource::Playlist(playlist_id.to_owned()))
+                .await?;
+            if !songs.is_empty() {
+                let idx = track_idx.min(songs.len() - 1);
+                songs.swap(0, idx);
+            }
+            return self
+                .dispatch_shuffled(
+                    SongSource::Preloaded(songs),
+                    QueueVerb::Play(StartPosition::First),
+                    OneShotShuffle::AnchorFirst,
+                )
+                .await;
+        }
+        self.dispatch_shuffled(
             SongSource::Playlist(playlist_id.to_owned()),
             QueueVerb::Play(StartPosition::Index(track_idx)),
+            shuffle,
         )
         .await
     }
@@ -517,10 +596,14 @@ impl AppService {
         &self,
         songs: Vec<crate::types::song::Song>,
         start_index: usize,
+        shuffle: OneShotShuffle,
     ) -> Result<()> {
-        self.dispatch(
+        // Under `Full` the supplied `start_index` is ignored (dispatch plays the
+        // permuted list from the top); `None` preserves the click-to-play index.
+        self.dispatch_shuffled(
             SongSource::Preloaded(songs),
             QueueVerb::Play(StartPosition::Index(start_index)),
+            shuffle,
         )
         .await
     }
@@ -553,9 +636,19 @@ impl AppService {
     /// Add a single song to the queue and immediately start playing it.
     ///
     /// Used by `EnterBehavior::AppendAndPlay` — preserves existing queue.
-    pub async fn add_song_and_play(&self, song: crate::types::song::Song) -> Result<()> {
-        self.dispatch(SongSource::Preloaded(vec![song]), QueueVerb::EnqueueAndPlay)
-            .await
+    pub async fn add_song_and_play(
+        &self,
+        song: crate::types::song::Song,
+        shuffle: OneShotShuffle,
+    ) -> Result<()> {
+        // Single song — shuffle is a no-op, but the param keeps the caller
+        // uniform with the multi-song append paths.
+        self.dispatch_shuffled(
+            SongSource::Preloaded(vec![song]),
+            QueueVerb::EnqueueAndPlay,
+            shuffle,
+        )
+        .await
     }
 
     /// Add a single song to the queue by ID (loads from album first).
@@ -594,37 +687,53 @@ impl AppService {
     // =========================================================================
 
     /// Append an album's songs to the queue and start playing the first one.
-    pub async fn add_album_and_play(&self, album_id: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn add_album_and_play(&self, album_id: &str, shuffle: OneShotShuffle) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Album(album_id.to_owned()),
             QueueVerb::EnqueueAndPlay,
+            shuffle,
         )
         .await
     }
 
     /// Append an artist's songs to the queue and start playing the first one.
-    pub async fn add_artist_and_play(&self, artist_id: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn add_artist_and_play(
+        &self,
+        artist_id: &str,
+        shuffle: OneShotShuffle,
+    ) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Artist(artist_id.to_owned()),
             QueueVerb::EnqueueAndPlay,
+            shuffle,
         )
         .await
     }
 
     /// Append a genre's songs to the queue and start playing the first one.
-    pub async fn add_genre_and_play(&self, genre_name: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn add_genre_and_play(
+        &self,
+        genre_name: &str,
+        shuffle: OneShotShuffle,
+    ) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Genre(genre_name.to_owned()),
             QueueVerb::EnqueueAndPlay,
+            shuffle,
         )
         .await
     }
 
     /// Append a playlist's songs to the queue and start playing the first one.
-    pub async fn add_playlist_and_play(&self, playlist_id: &str) -> Result<()> {
-        self.dispatch(
+    pub async fn add_playlist_and_play(
+        &self,
+        playlist_id: &str,
+        shuffle: OneShotShuffle,
+    ) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Playlist(playlist_id.to_owned()),
             QueueVerb::EnqueueAndPlay,
+            shuffle,
         )
         .await
     }
@@ -760,10 +869,15 @@ impl AppService {
     }
 
     /// Play a batch. Replaces the current queue and starts playing.
-    pub async fn play_batch(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        self.dispatch(
+    pub async fn play_batch(
+        &self,
+        batch: crate::types::batch::BatchPayload,
+        shuffle: OneShotShuffle,
+    ) -> Result<()> {
+        self.dispatch_shuffled(
             SongSource::Batch(batch),
             QueueVerb::Play(StartPosition::First),
+            shuffle,
         )
         .await
     }

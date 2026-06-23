@@ -1,7 +1,7 @@
 //! Playlist data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::backend::playlists::PlaylistUIViewData;
+use nokkvi_data::{backend::playlists::PlaylistUIViewData, types::OneShotShuffle};
 use tracing::{debug, info};
 
 use crate::{
@@ -152,7 +152,11 @@ impl Nokkvi {
                         .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_playlist_and_play(&playlist_id).await },
+                        move |shell| async move {
+                            shell
+                                .add_playlist_and_play(&playlist_id, OneShotShuffle::None)
+                                .await
+                        },
                         format!("Playing '{name}'"),
                         "append playlist and play",
                     );
@@ -167,7 +171,11 @@ impl Nokkvi {
                     .map(crate::state::ActivePlaylistContext::from_playlist);
                 self.persist_active_playlist_info();
                 return self.shell_action_task(
-                    move |shell| async move { shell.play_playlist(&playlist_id).await },
+                    move |shell| async move {
+                        shell
+                            .play_playlist(&playlist_id, OneShotShuffle::None)
+                            .await
+                    },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play playlist",
                 );
@@ -213,7 +221,7 @@ impl Nokkvi {
                 return self.shell_action_task(
                     move |shell| async move {
                         shell
-                            .play_playlist_from_track(&playlist_id, track_idx)
+                            .play_playlist_from_track(&playlist_id, track_idx, OneShotShuffle::None)
                             .await
                     },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),

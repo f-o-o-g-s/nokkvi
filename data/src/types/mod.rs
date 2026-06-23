@@ -17,6 +17,7 @@ pub mod item_kind;
 pub mod labeled_enum;
 pub mod library;
 pub mod next_track_reset;
+pub mod one_shot_shuffle;
 pub mod paged_buffer;
 pub mod player_settings;
 pub mod playlist;
@@ -46,6 +47,7 @@ pub mod view_preferences;
 pub use accessors::{HasId, Named};
 pub use item_kind::ItemKind;
 pub use next_track_reset::NextTrackResetEffect;
+pub use one_shot_shuffle::OneShotShuffle;
 pub use song_source::SongSource;
 
 pub fn deserialize_starred<'de, D>(deserializer: D) -> Result<bool, D::Error>

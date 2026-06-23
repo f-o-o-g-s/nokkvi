@@ -1,7 +1,10 @@
 //! Song data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::{backend::songs::SongUIViewData, types::ItemKind};
+use nokkvi_data::{
+    backend::songs::SongUIViewData,
+    types::{ItemKind, OneShotShuffle},
+};
 use tracing::{debug, error};
 
 use crate::{
@@ -214,7 +217,9 @@ impl Nokkvi {
                             let song: nokkvi_data::types::song::Song = song.clone().into();
                             self.clear_active_playlist();
                             let play_task = self.shell_task(
-                                move |shell| async move { shell.play_songs(vec![song], 0).await },
+                                move |shell| async move {
+                                    shell.play_songs(vec![song], 0, OneShotShuffle::None).await
+                                },
                                 |result| match result {
                                     Ok(()) => Message::Navigation(NavigationMessage::SwitchView(
                                         View::Queue,
@@ -237,7 +242,9 @@ impl Nokkvi {
                             let song: nokkvi_data::types::song::Song = song.clone().into();
                             let title = song.title.clone();
                             return self.shell_fire_and_forget_task(
-                                move |shell| async move { shell.add_song_and_play(song).await },
+                                move |shell| async move {
+                                    shell.add_song_and_play(song, OneShotShuffle::None).await
+                                },
                                 format!("Playing '{title}'"),
                                 "append and play song",
                             );
@@ -281,7 +288,9 @@ impl Nokkvi {
 
                             // Phase 1: Play immediately with loaded songs
                             let play_task = self.shell_task(
-                                move |shell| async move { shell.play_songs(songs, index).await },
+                                move |shell| async move {
+                                    shell.play_songs(songs, index, OneShotShuffle::None).await
+                                },
                                 |result| match result {
                                     Ok(()) => Message::Navigation(NavigationMessage::SwitchView(
                                         View::Queue,

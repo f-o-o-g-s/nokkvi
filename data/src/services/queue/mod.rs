@@ -1120,6 +1120,44 @@ pub(crate) mod tests {
         (qm, temp)
     }
 
+    /// Firmium-trap guard (one-shot Shuffle Play): permuting the list with
+    /// [`OneShotShuffle`] and handing it to `set_queue` must NEVER flip the
+    /// persistent shuffle MODE flag (`queue.shuffle`) — in either preset state —
+    /// and must preserve the exact song multiset. The one-shot directive operates
+    /// only on a detached `Vec<Song>`; it has no access to the mode flag.
+    #[test]
+    fn one_shot_shuffle_into_set_queue_never_flips_mode_flag() {
+        use std::collections::BTreeSet;
+
+        use rand::{SeedableRng, rngs::StdRng};
+
+        use crate::types::one_shot_shuffle::OneShotShuffle;
+
+        let expected: BTreeSet<String> = ["a", "b", "c", "d", "e", "f", "g", "h"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        for preset in [false, true] {
+            let mut songs: Vec<Song> = expected.iter().map(|id| make_test_song(id)).collect();
+            OneShotShuffle::Full.apply_with(&mut songs, &mut StdRng::seed_from_u64(11));
+
+            let (mut qm, _t) = make_test_manager(Vec::new(), None);
+            qm.queue.shuffle = preset;
+            let _ = qm.set_queue(songs, Some(0)).expect("set_queue");
+
+            assert_eq!(
+                qm.queue.shuffle, preset,
+                "a one-shot shuffle must not write the persistent shuffle mode flag (preset={preset})"
+            );
+            let got: BTreeSet<String> = qm.queue.song_ids.iter().cloned().collect();
+            assert_eq!(
+                got, expected,
+                "the shuffled queue preserves the song multiset"
+            );
+        }
+    }
+
     // ── reanchor_shuffle_to_index (play-from-here under shuffle) ──
 
     /// Baseline / regression: a plain reposition onto the LAST slot of a
