@@ -41,6 +41,7 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "general.show_album_artists_only" => &["compilation", "featured", "guest artists"],
         "general.start_view" => &["home", "startup", "landing page", "default page"],
         "general.enter_behavior" => &["return key", "double click", "activate"],
+        "general.enter_shuffle" => &["random", "shuffle play", "randomize", "mix"],
         "general.auto_follow_playing" => &["autoscroll", "jump to current", "center on track"],
         "general.stable_viewport" => &["no scroll", "click to select", "anchor", "in place"],
         "general.suppress_library_refresh_toasts" => {

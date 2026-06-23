@@ -31,6 +31,7 @@ pub struct TomlSettings {
     // -- Application --
     pub start_view: String,
     pub enter_behavior: EnterBehavior,
+    pub enter_shuffle: bool,
     pub local_music_path: String,
     /// How config.toml is written (full / sparse-with-comments / sparse-clean).
     /// Legacy bool values load via the compat shim (`true` → On, `false` → Off).
@@ -243,6 +244,7 @@ impl Default for TomlSettings {
         Self {
             start_view: "Queue".to_string(),
             enter_behavior: EnterBehavior::default(),
+            enter_shuffle: false,
             local_music_path: String::new(),
             verbose_config: VerboseConfig::default(),
             library_page_size: LibraryPageSize::default(),

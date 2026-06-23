@@ -37,6 +37,7 @@ impl Nokkvi {
             stable_viewport: self.settings.stable_viewport,
             auto_follow_playing: self.settings.auto_follow_playing,
             enter_behavior: self.settings.enter_behavior.as_label().into(),
+            enter_shuffle: self.settings.enter_shuffle,
             local_music_path: self.settings.local_music_path.clone().into(),
             verbose_config: self.settings.verbose_config.as_label().into(),
             library_page_size: self.settings.library_page_size.as_label().into(),

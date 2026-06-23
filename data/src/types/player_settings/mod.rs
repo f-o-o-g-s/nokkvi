@@ -55,6 +55,8 @@ pub struct LivePlayerSettings {
     pub auto_follow_playing: bool,
     /// What Enter does in the Songs view
     pub enter_behavior: EnterBehavior,
+    /// Whether plain Enter/click layers a one-shot Shuffle Play on top of `enter_behavior`
+    pub enter_shuffle: bool,
     /// Local filesystem prefix to prepend to song paths for file manager (empty = not configured)
     pub local_music_path: String,
     /// Whether rounded corners mode is enabled

@@ -85,6 +85,23 @@ define_settings! {
                 read_field: |d| d.enter_behavior.as_ref(),
             },
         },
+        EnterShuffle {
+            key: "general.enter_shuffle",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_enter_shuffle(v),
+            toml_apply: |ts, p| p.enter_shuffle = ts.enter_shuffle,
+            read: |src, out| out.enter_shuffle = src.enter_shuffle,
+            write: |ps, ts| ts.enter_shuffle = ps.enter_shuffle,
+            ui_meta: {
+                label: "Shuffle Play on Enter",
+                category: "Application",
+                subtitle: Some(
+                    "On: Enter/click plays the collection in a fresh random order · Off: plays in list order",
+                ),
+                default: false,
+                read_field: |d| d.enter_shuffle,
+            },
+        },
         LibraryPageSize {
             key: "general.library_page_size",
             value_type: Enum,
@@ -339,6 +356,22 @@ mod tests {
 
         assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
         assert!(!mgr.get_player_settings().stable_viewport);
+    }
+
+    #[test]
+    fn dispatch_general_enter_shuffle_persists_via_setter() {
+        let (mut mgr, _tmp) = make_test_manager();
+        // Default is `false`; flip to `true` and confirm the setter ran.
+        assert!(!mgr.get_player_settings().enter_shuffle);
+
+        let result = dispatch_general_tab_setting(
+            "general.enter_shuffle",
+            SettingValue::Bool(true),
+            &mut mgr,
+        );
+
+        assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
+        assert!(mgr.get_player_settings().enter_shuffle);
     }
 
     #[test]
@@ -694,6 +727,7 @@ mod tests {
             stable_viewport: true,
             auto_follow_playing: true,
             enter_behavior: "Play All".into(),
+            enter_shuffle: false,
             local_music_path: "".into(),
             verbose_config: "Off".into(),
             library_page_size: "Default (500)".into(),
@@ -706,13 +740,13 @@ mod tests {
     }
 
     /// Macro-emitted helper returns one entry per ui_meta-bearing setting.
-    /// 12 of the 13 declared keys carry ui_meta — light_mode does not (it
-    /// renders on the Theme tab, not General), so the helper emits 12 rows.
+    /// 13 of the 14 declared keys carry ui_meta — light_mode does not (it
+    /// renders on the Theme tab, not General), so the helper emits 13 rows.
     #[test]
     fn build_general_tab_settings_items_emits_one_row_per_ui_meta_entry() {
         let data = default_general_data();
         let entries = build_general_tab_settings_items(&data);
-        assert_eq!(entries.len(), 12);
+        assert_eq!(entries.len(), 13);
         // Every emitted entry is a Item, never a Header — section headers
         // live in the UI crate's hand-written builder.
         for e in &entries {
@@ -817,6 +851,7 @@ mod tests {
             stable_viewport: live.stable_viewport,
             auto_follow_playing: live.auto_follow_playing,
             enter_behavior: live.enter_behavior.as_label().into(),
+            enter_shuffle: live.enter_shuffle,
             local_music_path: live.local_music_path.clone().into(),
             verbose_config: live.verbose_config.as_label().into(),
             library_page_size: live.library_page_size.as_label().into(),

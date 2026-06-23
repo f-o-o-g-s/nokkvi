@@ -263,6 +263,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_enter_shuffle(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.enter_shuffle = enabled;
+        self.save()
+    }
+
     pub fn set_show_album_artists_only(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.show_album_artists_only = enabled;
         self.save()
@@ -1227,6 +1232,7 @@ mod sentinel_roundtrip_tests {
             stable_viewport: false,           // default true
             auto_follow_playing: false,       // default true
             enter_behavior: EnterBehavior::AppendAndPlay, // default PlayAll
+            enter_shuffle: true,              // default false
             local_music_path: "/tmp/sentinel/music".to_string(),
             rounded_mode: RoundedMode::PlayerOnly, // default On
             nav_layout: NavLayout::Side,           // default Top

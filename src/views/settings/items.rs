@@ -524,6 +524,7 @@ mod tests {
                 "general.start_view",
                 "general.suppress_library_refresh_toasts",
                 "general.enter_behavior",
+                "general.enter_shuffle",
                 "general.stable_viewport",
                 "general.auto_follow_playing",
                 "general.show_tray_icon",

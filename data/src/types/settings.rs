@@ -60,6 +60,11 @@ pub struct PersistedPlayerSettings {
     /// What Enter does when activating items (default: PlayAll)
     #[serde(default)]
     pub enter_behavior: EnterBehavior,
+    /// Whether plain Enter/click layers a one-shot Shuffle Play on top of
+    /// `enter_behavior` (default: false). Distinct from the persistent shuffle
+    /// MODE — it never writes `queue.shuffle`.
+    #[serde(default)]
+    pub enter_shuffle: bool,
     /// Local filesystem prefix for the music library (default: empty = not configured).
     /// Joined with the server-relative song path to form an absolute local path.
     /// e.g. "/music/Library" for local Navidrome, or "/mnt/nas/music" for NFS mounts.
@@ -397,6 +402,7 @@ impl Default for PersistedPlayerSettings {
             stable_viewport: default_stable_viewport(),
             auto_follow_playing: default_auto_follow_playing(),
             enter_behavior: EnterBehavior::default(),
+            enter_shuffle: false,
             local_music_path: String::new(),
             rounded_mode: RoundedMode::On,
             nav_layout: NavLayout::default(),

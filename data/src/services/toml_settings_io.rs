@@ -333,6 +333,7 @@ crossfade_duration_secs = 12
 crossfade_enabled = true
 custom_eq_presets = []
 enter_behavior = "play_all"
+enter_shuffle = false
 eq_enabled = true
 eq_gains = [
     4.0,

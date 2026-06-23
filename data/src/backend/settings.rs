@@ -183,6 +183,7 @@ impl SettingsService {
     delegate_setter!(set_scrobble_threshold, f64);
     delegate_setter!(set_start_view, &str);
     delegate_setter!(set_stable_viewport, bool);
+    delegate_setter!(set_enter_shuffle, bool);
     delegate_setter!(set_show_album_artists_only, bool);
     delegate_setter!(set_suppress_library_refresh_toasts, bool);
     delegate_setter!(set_show_tray_icon, bool);

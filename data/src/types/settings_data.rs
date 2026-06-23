@@ -29,6 +29,7 @@ pub struct GeneralSettingsData {
     pub stable_viewport: bool,
     pub auto_follow_playing: bool,
     pub enter_behavior: Cow<'static, str>,
+    pub enter_shuffle: bool,
     pub local_music_path: Cow<'static, str>,
     /// Verbose-config mode label ("On" / "Off" / "Clean").
     pub verbose_config: Cow<'static, str>,
@@ -49,6 +50,7 @@ impl Default for GeneralSettingsData {
             stable_viewport: false,
             auto_follow_playing: false,
             enter_behavior: Cow::Borrowed("test-default"),
+            enter_shuffle: false,
             local_music_path: Cow::Borrowed("test-default"),
             verbose_config: Cow::Borrowed("test-default"),
             library_page_size: Cow::Borrowed("test-default"),
