@@ -82,7 +82,7 @@ impl AlbumsPage {
                             self.expansion
                                 .handle_set_offset(offset, albums, &mut self.common);
                             self.update(
-                                AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter),
+                                AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
                                 total_items,
                                 albums,
                             )
@@ -101,9 +101,7 @@ impl AlbumsPage {
                             self.common.handle_select_all_toggle(flattened);
                             (Task::none(), AlbumsAction::None)
                         }
-                        SlotListPageMessage::ActivateCenter
-                        | SlotListPageMessage::ActivateCenterShuffled => {
-                            let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
+                        SlotListPageMessage::ActivateCenter(force) => {
                             let total = self.expansion.flattened_len(albums);
                             let center_idx = self.common.get_center_item_index(total);
                             let target_indices = self
@@ -132,14 +130,7 @@ impl AlbumsPage {
                                         }
                                     })
                                     .fold(BatchPayload::new(), |p, item| p.with_item(item));
-                                return (
-                                    Task::none(),
-                                    if force {
-                                        AlbumsAction::PlayBatchShuffled(payload)
-                                    } else {
-                                        AlbumsAction::PlayBatch(payload)
-                                    },
-                                );
+                                return (Task::none(), AlbumsAction::PlayBatch(payload, force));
                             }
 
                             if let Some(center_idx) = center_idx {
@@ -342,7 +333,7 @@ impl AlbumsPage {
 
                             match entry {
                                 LibraryContextEntry::ShufflePlay => {
-                                    (Task::none(), AlbumsAction::PlayBatchShuffled(payload))
+                                    (Task::none(), AlbumsAction::PlayBatch(payload, true))
                                 }
                                 LibraryContextEntry::AddToQueue => {
                                     (Task::none(), AlbumsAction::AddBatchToQueue(payload))

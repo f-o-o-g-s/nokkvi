@@ -143,8 +143,9 @@ pub enum ArtistsMessage {
 #[derive(Debug, Clone)]
 pub enum ArtistsAction {
     PlayArtist(String, bool), // (artist_id, force_shuffle) - replace queue and play
-    /// Replace the queue with the selection/clicked item, shuffled once, and play.
-    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
+    /// Replace the queue with the selection/clicked item and play. `true` shuffles
+    /// the batch once (context-menu Shuffle Play); `false` honors `enter_shuffle`.
+    PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     PlayAlbum(String, bool), // (album_id, force_shuffle) - play child album
     StarArtist(String),      // artist_id - star the artist

@@ -171,11 +171,11 @@ fn songs_slot_list_message_wraps_in_songs_variant() {
     let app = test_app();
     let msg = app
         .songs_page
-        .slot_list_message(SlotListPageMessage::ActivateCenter);
+        .slot_list_message(SlotListPageMessage::ActivateCenter(false));
     assert!(matches!(
         msg,
         Message::Songs(views::SongsMessage::SlotList(
-            SlotListPageMessage::ActivateCenter
+            SlotListPageMessage::ActivateCenter(false)
         ))
     ));
 }
@@ -213,11 +213,11 @@ fn queue_slot_list_message_wraps_in_queue_variant() {
     let app = test_app();
     let msg = app
         .queue_page
-        .slot_list_message(SlotListPageMessage::ActivateCenter);
+        .slot_list_message(SlotListPageMessage::ActivateCenter(false));
     assert!(matches!(
         msg,
         Message::Queue(views::QueueMessage::SlotList(
-            SlotListPageMessage::ActivateCenter
+            SlotListPageMessage::ActivateCenter(false)
         ))
     ));
 }

@@ -415,7 +415,9 @@ impl Nokkvi {
                 common.handle_set_offset(target_idx, total_items);
                 common.slot_list.flash_center();
                 Task::done(
-                    page.slot_list_message(crate::widgets::SlotListPageMessage::ActivateCenter),
+                    page.slot_list_message(crate::widgets::SlotListPageMessage::ActivateCenter(
+                        false,
+                    )),
                 )
             }
         }

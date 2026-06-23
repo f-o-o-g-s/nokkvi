@@ -287,11 +287,7 @@ impl Nokkvi {
         if target_view == Some(View::Settings) {
             return Task::done(Message::Settings(views::SettingsMessage::EditActivate));
         }
-        let activate = if shuffled {
-            crate::widgets::SlotListPageMessage::ActivateCenterShuffled
-        } else {
-            crate::widgets::SlotListPageMessage::ActivateCenter
-        };
+        let activate = crate::widgets::SlotListPageMessage::ActivateCenter(shuffled);
         self.current_view_page()
             .map_or_else(Task::none, |p| Task::done(p.slot_list_message(activate)))
     }

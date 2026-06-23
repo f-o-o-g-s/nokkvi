@@ -2067,7 +2067,7 @@ pub(crate) fn primary_slot_click_message(
     if modifiers.control() || modifiers.shift() {
         SlotListPageMessage::SetOffset(item_index, modifiers)
     } else if is_center {
-        SlotListPageMessage::ActivateCenter
+        SlotListPageMessage::ActivateCenter(false)
     } else if stable_viewport {
         SlotListPageMessage::SetOffset(item_index, modifiers)
     } else {
@@ -2770,7 +2770,7 @@ mod tests {
     fn primary_click_center_no_mods_activates_center() {
         // Arm 2: is_center beats stable_viewport, plays in place.
         let m = primary_slot_click_message(5, true, Modifiers::default(), true);
-        assert!(matches!(m, SlotListPageMessage::ActivateCenter));
+        assert!(matches!(m, SlotListPageMessage::ActivateCenter(false)));
     }
 
     #[test]
@@ -2876,7 +2876,7 @@ mod tests {
         // by noting the helper has no is_center input — same call regardless.
         let m = highlight_only_slot_click_message(0, Modifiers::default());
         assert!(
-            !matches!(m, SlotListPageMessage::ActivateCenter),
+            !matches!(m, SlotListPageMessage::ActivateCenter(_)),
             "highlight-only must never dispatch ActivateCenter"
         );
         assert!(
@@ -2992,7 +2992,7 @@ mod tests {
     fn child_click_center_no_mods_matches_primary() {
         assert!(matches!(
             child_click_routing(5, true, Modifiers::default(), true),
-            SlotListPageMessage::ActivateCenter
+            SlotListPageMessage::ActivateCenter(false)
         ));
     }
 

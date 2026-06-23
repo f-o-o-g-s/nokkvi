@@ -101,7 +101,7 @@ impl ArtistsPage {
                         let len = self.expansion.flattened_len(artists);
                         self.common.handle_set_offset(offset, len);
                         self.update(
-                            ArtistsMessage::SlotList(SlotListPageMessage::ActivateCenter),
+                            ArtistsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
                             total_items,
                             artists,
                         )
@@ -116,9 +116,7 @@ impl ArtistsPage {
                         self.common.handle_select_all_toggle(flattened);
                         (Task::none(), ArtistsAction::None)
                     }
-                    SlotListPageMessage::ActivateCenter
-                    | SlotListPageMessage::ActivateCenterShuffled => {
-                        let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
+                    SlotListPageMessage::ActivateCenter(force) => {
                         let total = self.expansion.flattened_len(artists);
                         if let Some(center_idx) = self.common.get_center_item_index(total) {
                             self.common.slot_list.flash_center();
@@ -273,7 +271,7 @@ impl ArtistsPage {
 
                             match entry {
                                 LibraryContextEntry::ShufflePlay => {
-                                    (Task::none(), ArtistsAction::PlayBatchShuffled(payload))
+                                    (Task::none(), ArtistsAction::PlayBatch(payload, true))
                                 }
                                 LibraryContextEntry::AddToQueue => {
                                     (Task::none(), ArtistsAction::AddBatchToQueue(payload))

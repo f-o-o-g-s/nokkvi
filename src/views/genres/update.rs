@@ -127,7 +127,7 @@ impl GenresPage {
                         self.expansion
                             .handle_set_offset(offset, genres, &mut self.common);
                         self.update(
-                            GenresMessage::SlotList(SlotListPageMessage::ActivateCenter),
+                            GenresMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
                             total_items,
                             genres,
                         )
@@ -142,9 +142,7 @@ impl GenresPage {
                         self.common.handle_select_all_toggle(flattened);
                         (Task::none(), GenresAction::None)
                     }
-                    SlotListPageMessage::ActivateCenter
-                    | SlotListPageMessage::ActivateCenterShuffled => {
-                        let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
+                    SlotListPageMessage::ActivateCenter(force) => {
                         let total = self.expansion.flattened_len(genres);
                         if let Some(center_idx) = self.common.get_center_item_index(total) {
                             self.common.slot_list.flash_center();
@@ -260,7 +258,7 @@ impl GenresPage {
 
                             match entry {
                                 LibraryContextEntry::ShufflePlay => {
-                                    (Task::none(), GenresAction::PlayBatchShuffled(payload))
+                                    (Task::none(), GenresAction::PlayBatch(payload, true))
                                 }
                                 LibraryContextEntry::AddToQueue => {
                                     (Task::none(), GenresAction::AddBatchToQueue(payload))

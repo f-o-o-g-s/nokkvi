@@ -147,9 +147,10 @@ pub enum AlbumsMessage {
 #[derive(Debug, Clone)]
 pub enum AlbumsAction {
     PlayAlbum(String, bool), // (album_id, force_shuffle) - replace queue and play
-    PlayBatch(nokkvi_data::types::batch::BatchPayload),
-    /// Replace the queue with the selection/clicked item, shuffled once, and play.
-    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
+    /// Replace the queue with the selection/clicked item and play. `true` shuffles
+    /// the batch once (Ctrl+Enter / context-menu Shuffle Play); `false` honors the
+    /// `enter_shuffle` setting.
+    PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     LoadLargeArtwork(String), // center_idx as string
     CenterOnPlaying,

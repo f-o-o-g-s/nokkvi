@@ -25,8 +25,9 @@ impl QueuePage {
         match message {
             QueueMessage::SlotList(msg) => {
                 match self.common.handle(msg, total_items) {
-                    SlotListPageAction::ActivateCenter => {
-                        // Play the centered song
+                    SlotListPageAction::ActivateCenter(_) => {
+                        // Play the centered song (the queue is already the play order,
+                        // so a one-shot Shuffle Play directive does not apply here)
                         if let Some(center_idx) = self.common.get_center_item_index(total_items) {
                             self.common.slot_list.flash_center();
                             (Task::none(), QueueAction::PlaySong(center_idx))

@@ -431,7 +431,7 @@ fn seed_expanded_playlist_centered_on_child(app: &mut crate::Nokkvi) {
 fn activate_center_on_playlists(app: &mut crate::Nokkvi) {
     use crate::{views::PlaylistsMessage, widgets::SlotListPageMessage};
     let _ = app.update(crate::app_message::Message::Playlists(
-        PlaylistsMessage::SlotList(SlotListPageMessage::ActivateCenter),
+        PlaylistsMessage::SlotList(SlotListPageMessage::ActivateCenter(false)),
     ));
 }
 

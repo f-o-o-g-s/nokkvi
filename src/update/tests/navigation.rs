@@ -753,10 +753,11 @@ fn genres_context_menu_show_in_folder_on_child_album() {
 }
 
 /// Context-menu "Shuffle Play" must route through the batched branch and emit
-/// `PlayBatchShuffled` — guards the `_`-fallthrough silent-no-op risk in the
-/// guard-based views (the compiler does NOT force this arm).
+/// `PlayBatch(payload, true)` — guards the `_`-fallthrough silent-no-op risk in
+/// the guard-based views (the compiler does NOT force this arm), and asserts the
+/// force flag is set so the directive shuffles regardless of `enter_shuffle`.
 #[test]
-fn genres_context_menu_shuffle_play_emits_play_batch_shuffled() {
+fn genres_context_menu_shuffle_play_emits_forced_play_batch() {
     let mut app = test_app();
     let genres = vec![make_genre("g1", "Rock")];
     app.library.genres.set_from_vec(genres.clone());
@@ -770,20 +771,21 @@ fn genres_context_menu_shuffle_play_emits_play_batch_shuffled() {
         &genres,
     );
     match action {
-        crate::views::GenresAction::PlayBatchShuffled(payload) => {
+        crate::views::GenresAction::PlayBatch(payload, force) => {
             assert_eq!(
                 payload.items.len(),
                 1,
                 "a single clicked genre yields a one-item batch"
             );
+            assert!(force, "context-menu Shuffle Play must force shuffle");
         }
-        other => panic!("Expected PlayBatchShuffled action, got {other:?}"),
+        other => panic!("Expected PlayBatch(_, true) action, got {other:?}"),
     }
 }
 
-/// Ctrl+Enter (`ActivateCenterShuffled`) forces a Shuffle Play of the centered
+/// Ctrl+Enter (`ActivateCenter(true)`) forces a Shuffle Play of the centered
 /// item — the view threads `force = true` into the play action regardless of the
-/// `enter_shuffle` setting. Mirrors that plain `ActivateCenter` would carry
+/// `enter_shuffle` setting. Mirrors that plain `ActivateCenter(false)` would carry
 /// `false`.
 #[test]
 fn genres_ctrl_enter_forces_shuffle_on_centered_genre() {
@@ -795,7 +797,7 @@ fn genres_ctrl_enter_forces_shuffle_on_centered_genre() {
 
     // Fresh page: viewport_offset 0 → get_center_item_index → Some(0) (the genre).
     let (_, action) = app.genres_page.update(
-        crate::views::GenresMessage::SlotList(SlotListPageMessage::ActivateCenterShuffled),
+        crate::views::GenresMessage::SlotList(SlotListPageMessage::ActivateCenter(true)),
         genres.len(),
         &genres,
     );

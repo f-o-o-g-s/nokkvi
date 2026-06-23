@@ -1,7 +1,7 @@
 //! Playlist data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::{backend::playlists::PlaylistUIViewData, types::OneShotShuffle};
+use nokkvi_data::backend::playlists::PlaylistUIViewData;
 use tracing::{debug, info};
 
 use crate::{
@@ -176,12 +176,13 @@ impl Nokkvi {
                     "play playlist",
                 );
             }
-            views::PlaylistsAction::PlayBatchShuffled(payload) => {
+            views::PlaylistsAction::PlayBatch(payload, force) => {
                 self.playlists_page
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                return self.play_batch_task(payload, OneShotShuffle::Full);
+                let shuffle = self.activate_shuffle_directive(force, false);
+                return self.play_batch_task(payload, shuffle);
             }
             views::PlaylistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);

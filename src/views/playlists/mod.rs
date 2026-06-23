@@ -152,8 +152,9 @@ pub enum PlaylistsMessage {
 #[derive(Debug, Clone)]
 pub enum PlaylistsAction {
     PlayPlaylist(String, bool), // (playlist_id, force_shuffle) - replace queue and play
-    /// Replace the queue with the selection/clicked item, shuffled once, and play.
-    PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
+    /// Replace the queue with the selection/clicked item and play. `true` shuffles
+    /// the batch once (context-menu Shuffle Play); `false` honors `enter_shuffle`.
+    PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     ExpandPlaylist(String), // playlist_id - load tracks for expansion
     PlayPlaylistFromTrack(String, usize, bool), // (playlist_id, track_index, force_shuffle)

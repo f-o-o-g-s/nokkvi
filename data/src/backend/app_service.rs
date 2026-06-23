@@ -411,29 +411,36 @@ impl AppService {
         shuffle: OneShotShuffle,
     ) -> Result<()> {
         if shuffle == OneShotShuffle::AnchorFirst {
-            // Resolve here so the clicked track can be pinned at index 0 before
-            // the tail is shuffled — `dispatch` resolves internally and cannot
-            // relocate it.
-            let mut songs = self
-                .library_orchestrator()
-                .resolve(SongSource::Album(album_id.to_owned()))
-                .await?;
-            if !songs.is_empty() {
-                let idx = track_idx.min(songs.len() - 1);
-                songs.swap(0, idx);
-            }
             return self
-                .dispatch_shuffled(
-                    SongSource::Preloaded(songs),
-                    QueueVerb::Play(StartPosition::First),
-                    OneShotShuffle::AnchorFirst,
-                )
+                .dispatch_anchor_first_from_track(SongSource::Album(album_id.to_owned()), track_idx)
                 .await;
         }
         self.dispatch_shuffled(
             SongSource::Album(album_id.to_owned()),
             QueueVerb::Play(StartPosition::Index(track_idx)),
             shuffle,
+        )
+        .await
+    }
+
+    /// Resolve `source` to its tracks, rotate the clicked track to index 0, then
+    /// shuffle the tail and play from the top (`AnchorFirst`). Shared by the
+    /// album/playlist `*_from_track` paths — `dispatch` resolves internally and
+    /// cannot relocate the clicked track, so the pin happens here before dispatch.
+    async fn dispatch_anchor_first_from_track(
+        &self,
+        source: SongSource,
+        track_idx: usize,
+    ) -> Result<()> {
+        let mut songs = self.library_orchestrator().resolve(source).await?;
+        if !songs.is_empty() {
+            let idx = track_idx.min(songs.len() - 1);
+            songs.swap(0, idx);
+        }
+        self.dispatch_shuffled(
+            SongSource::Preloaded(songs),
+            QueueVerb::Play(StartPosition::First),
+            OneShotShuffle::AnchorFirst,
         )
         .await
     }
@@ -505,20 +512,10 @@ impl AppService {
         shuffle: OneShotShuffle,
     ) -> Result<()> {
         if shuffle == OneShotShuffle::AnchorFirst {
-            // Pin the clicked track at index 0 before the tail is shuffled.
-            let mut songs = self
-                .library_orchestrator()
-                .resolve(SongSource::Playlist(playlist_id.to_owned()))
-                .await?;
-            if !songs.is_empty() {
-                let idx = track_idx.min(songs.len() - 1);
-                songs.swap(0, idx);
-            }
             return self
-                .dispatch_shuffled(
-                    SongSource::Preloaded(songs),
-                    QueueVerb::Play(StartPosition::First),
-                    OneShotShuffle::AnchorFirst,
+                .dispatch_anchor_first_from_track(
+                    SongSource::Playlist(playlist_id.to_owned()),
+                    track_idx,
                 )
                 .await;
         }
@@ -636,19 +633,9 @@ impl AppService {
     /// Add a single song to the queue and immediately start playing it.
     ///
     /// Used by `EnterBehavior::AppendAndPlay` — preserves existing queue.
-    pub async fn add_song_and_play(
-        &self,
-        song: crate::types::song::Song,
-        shuffle: OneShotShuffle,
-    ) -> Result<()> {
-        // Single song — shuffle is a no-op, but the param keeps the caller
-        // uniform with the multi-song append paths.
-        self.dispatch_shuffled(
-            SongSource::Preloaded(vec![song]),
-            QueueVerb::EnqueueAndPlay,
-            shuffle,
-        )
-        .await
+    pub async fn add_song_and_play(&self, song: crate::types::song::Song) -> Result<()> {
+        self.dispatch(SongSource::Preloaded(vec![song]), QueueVerb::EnqueueAndPlay)
+            .await
     }
 
     /// Add a single song to the queue by ID (loads from album first).

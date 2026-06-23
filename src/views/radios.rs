@@ -143,7 +143,7 @@ impl RadiosPage {
             // -----------------------------------------------------------------
             RadiosMessage::SlotList(msg) => {
                 match self.common.handle(msg, total) {
-                    SlotListPageAction::ActivateCenter => {
+                    SlotListPageAction::ActivateCenter(_) => {
                         if let Some(center_idx) = self.common.get_center_item_index(total)
                             && let Some(station) = stations.get(center_idx)
                         {

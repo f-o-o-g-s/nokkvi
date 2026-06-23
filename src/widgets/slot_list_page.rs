@@ -70,9 +70,9 @@ pub enum SlotListPageMessage {
     SetOffset(usize, iced::keyboard::Modifiers),
     ScrollSeek(usize),
     // Activation
-    ActivateCenter,
-    /// Ctrl+Enter — force a one-shot Shuffle Play (force flag derived by the view).
-    ActivateCenterShuffled,
+    /// Play the centered item / selection. `true` forces a one-shot Shuffle Play
+    /// (Ctrl+Enter); `false` lets the view honor the `enter_shuffle` setting.
+    ActivateCenter(bool),
     ClickPlay(usize),
     // Selection
     SelectionToggle(usize),
@@ -124,7 +124,8 @@ pub enum SlotListPageMessage {
 #[derive(Debug, Clone)]
 pub enum SlotListPageAction {
     None,
-    ActivateCenter,
+    /// Centered item / selection should play. `true` forces a one-shot Shuffle Play.
+    ActivateCenter(bool),
     AddCenterToQueue,
     RefreshViewData,
     CenterOnPlaying,
@@ -477,13 +478,10 @@ impl SlotListPageState {
                 self.handle_select_all_toggle(total);
                 SlotListPageAction::None
             }
-            SlotListPageMessage::ActivateCenter => SlotListPageAction::ActivateCenter,
-            // The view derives the force flag from the raw message; both activate
-            // variants map to the same action here.
-            SlotListPageMessage::ActivateCenterShuffled => SlotListPageAction::ActivateCenter,
+            SlotListPageMessage::ActivateCenter(force) => SlotListPageAction::ActivateCenter(force),
             SlotListPageMessage::ClickPlay(idx) => {
                 self.handle_set_offset(idx, total);
-                SlotListPageAction::ActivateCenter
+                SlotListPageAction::ActivateCenter(false)
             }
             SlotListPageMessage::AddCenterToQueue => SlotListPageAction::AddCenterToQueue,
             SlotListPageMessage::SearchQueryChanged(q) => {

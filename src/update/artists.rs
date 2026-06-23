@@ -1,10 +1,7 @@
 //! Artist data loading and component message handlers
 
 use iced::{Task, widget::image};
-use nokkvi_data::{
-    backend::artists::ArtistUIViewData,
-    types::{ItemKind, OneShotShuffle},
-};
+use nokkvi_data::{backend::artists::ArtistUIViewData, types::ItemKind};
 use tracing::debug;
 
 use crate::{
@@ -335,12 +332,13 @@ impl Nokkvi {
                     move |shell, id| async move { shell.play_artist(&id, shuffle).await },
                 );
             }
-            ArtistsAction::PlayBatchShuffled(payload) => {
+            ArtistsAction::PlayBatch(payload, force) => {
                 self.artists_page
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                return self.play_batch_task(payload, OneShotShuffle::Full);
+                let shuffle = self.activate_shuffle_directive(force, false);
+                return self.play_batch_task(payload, shuffle);
             }
             ArtistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);

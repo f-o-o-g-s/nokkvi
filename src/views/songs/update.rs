@@ -31,10 +31,8 @@ impl SongsPage {
                         | SlotListPageMessage::NavigateDown
                         | SlotListPageMessage::SetOffset(_, _)
                 );
-                let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
-
                 match self.common.handle(msg, total_items) {
-                    SlotListPageAction::ActivateCenter => {
+                    SlotListPageAction::ActivateCenter(force) => {
                         if !self.common.slot_list.selected_indices.is_empty() {
                             use nokkvi_data::types::batch::{BatchItem, BatchPayload};
                             let payload = self
@@ -49,11 +47,7 @@ impl SongsPage {
                                     })
                                 })
                                 .fold(BatchPayload::new(), |p, i| p.with_item(i));
-                            if force {
-                                (Task::none(), SongsAction::PlayBatchShuffled(payload))
-                            } else {
-                                (Task::none(), SongsAction::PlayBatch(payload))
-                            }
+                            (Task::none(), SongsAction::PlayBatch(payload, force))
                         } else if let Some(center_idx) =
                             self.common.get_center_item_index(total_items)
                         {
@@ -157,7 +151,7 @@ impl SongsPage {
                 if let Some(song) = songs.get(clicked_idx) {
                     match entry {
                         LibraryContextEntry::ShufflePlay => {
-                            (Task::none(), SongsAction::PlayBatchShuffled(payload))
+                            (Task::none(), SongsAction::PlayBatch(payload, true))
                         }
                         LibraryContextEntry::AddToQueue => {
                             (Task::none(), SongsAction::AddBatchToQueue(payload))

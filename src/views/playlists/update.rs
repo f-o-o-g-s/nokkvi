@@ -82,7 +82,9 @@ impl PlaylistsPage {
                             self.expansion
                                 .handle_set_offset(offset, playlists, &mut self.common);
                             self.update(
-                                PlaylistsMessage::SlotList(SlotListPageMessage::ActivateCenter),
+                                PlaylistsMessage::SlotList(SlotListPageMessage::ActivateCenter(
+                                    false,
+                                )),
                                 total_items,
                                 playlists,
                             )
@@ -99,9 +101,7 @@ impl PlaylistsPage {
                             self.common.handle_select_all_toggle(flattened);
                             (Task::none(), PlaylistsAction::None)
                         }
-                        SlotListPageMessage::ActivateCenter
-                        | SlotListPageMessage::ActivateCenterShuffled => {
-                            let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
+                        SlotListPageMessage::ActivateCenter(force) => {
                             let total = self.expansion.flattened_len(playlists);
                             if let Some(center_idx) = self.common.get_center_item_index(total) {
                                 self.common.slot_list.flash_center();
@@ -278,7 +278,7 @@ impl PlaylistsPage {
 
                         match entry {
                             LibraryContextEntry::ShufflePlay => {
-                                return (Task::none(), PlaylistsAction::PlayBatchShuffled(payload));
+                                return (Task::none(), PlaylistsAction::PlayBatch(payload, true));
                             }
                             LibraryContextEntry::AddToQueue => {
                                 return (Task::none(), PlaylistsAction::AddBatchToQueue(payload));

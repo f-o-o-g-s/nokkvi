@@ -242,9 +242,7 @@ impl Nokkvi {
                             let song: nokkvi_data::types::song::Song = song.clone().into();
                             let title = song.title.clone();
                             return self.shell_fire_and_forget_task(
-                                move |shell| async move {
-                                    shell.add_song_and_play(song, OneShotShuffle::None).await
-                                },
+                                move |shell| async move { shell.add_song_and_play(song).await },
                                 format!("Playing '{title}'"),
                                 "append and play song",
                             );
@@ -291,6 +289,10 @@ impl Nokkvi {
                                 let sort_mode = sort_mode.clone();
                                 let sort_order = sort_order.clone();
                                 let search_query = search_query.clone();
+                                // Preserve the active library filter (e.g. arrived via
+                                // NavigateAndFilter) so the full-resolve shuffles the
+                                // FILTERED population, not the whole library.
+                                let filter = self.songs_page.common.active_filter.clone();
                                 return self.shell_task(
                                     move |shell| async move {
                                         let library_ids = shell.active_library_ids_vec();
@@ -300,7 +302,7 @@ impl Nokkvi {
                                                 Some(&sort_mode),
                                                 Some(&sort_order),
                                                 search_query.as_deref(),
-                                                None,
+                                                filter.as_ref(),
                                                 &library_ids,
                                                 0,
                                                 total_count,
@@ -431,19 +433,13 @@ impl Nokkvi {
             SongsAction::PlayNextBatch(payload) => {
                 return self.play_next_batch_task(payload);
             }
-            SongsAction::PlayBatch(payload) => {
+            SongsAction::PlayBatch(payload, force) => {
                 self.songs_page
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                return self.play_batch_task(payload, OneShotShuffle::None);
-            }
-            SongsAction::PlayBatchShuffled(payload) => {
-                self.songs_page
-                    .common
-                    .slot_list
-                    .clear_selection_indices_only();
-                return self.play_batch_task(payload, OneShotShuffle::Full);
+                let shuffle = self.activate_shuffle_directive(force, false);
+                return self.play_batch_task(payload, shuffle);
             }
             SongsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(

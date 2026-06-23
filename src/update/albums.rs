@@ -1,10 +1,7 @@
 //! Album data loading and component message handlers
 
 use iced::{Task, widget::image};
-use nokkvi_data::{
-    backend::albums::AlbumUIViewData,
-    types::{ItemKind, OneShotShuffle},
-};
+use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
 use tracing::debug;
 
 use crate::{
@@ -463,19 +460,13 @@ impl Nokkvi {
             AlbumsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
-            AlbumsAction::PlayBatch(payload) => {
+            AlbumsAction::PlayBatch(payload, force) => {
                 self.albums_page
                     .common
                     .slot_list
                     .clear_selection_indices_only();
-                return self.play_batch_task(payload, OneShotShuffle::None);
-            }
-            AlbumsAction::PlayBatchShuffled(payload) => {
-                self.albums_page
-                    .common
-                    .slot_list
-                    .clear_selection_indices_only();
-                return self.play_batch_task(payload, OneShotShuffle::Full);
+                let shuffle = self.activate_shuffle_directive(force, false);
+                return self.play_batch_task(payload, shuffle);
             }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {
                 if let Ok(index) = album_id_str.parse::<usize>() {
