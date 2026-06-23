@@ -781,6 +781,33 @@ fn genres_context_menu_shuffle_play_emits_play_batch_shuffled() {
     }
 }
 
+/// Ctrl+Enter (`ActivateCenterShuffled`) forces a Shuffle Play of the centered
+/// item — the view threads `force = true` into the play action regardless of the
+/// `enter_shuffle` setting. Mirrors that plain `ActivateCenter` would carry
+/// `false`.
+#[test]
+fn genres_ctrl_enter_forces_shuffle_on_centered_genre() {
+    use crate::widgets::SlotListPageMessage;
+
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    // Fresh page: viewport_offset 0 → get_center_item_index → Some(0) (the genre).
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::SlotList(SlotListPageMessage::ActivateCenterShuffled),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::PlayGenre(name, force) => {
+            assert_eq!(name, "Rock");
+            assert!(force, "Ctrl+Enter must force shuffle (force = true)");
+        }
+        other => panic!("Expected PlayGenre(.., true), got {other:?}"),
+    }
+}
+
 // ============================================================================
 // Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (2-tier views)
 // ============================================================================

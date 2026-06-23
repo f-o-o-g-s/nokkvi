@@ -99,7 +99,9 @@ impl PlaylistsPage {
                             self.common.handle_select_all_toggle(flattened);
                             (Task::none(), PlaylistsAction::None)
                         }
-                        SlotListPageMessage::ActivateCenter => {
+                        SlotListPageMessage::ActivateCenter
+                        | SlotListPageMessage::ActivateCenterShuffled => {
+                            let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
                             let total = self.expansion.flattened_len(playlists);
                             if let Some(center_idx) = self.common.get_center_item_index(total) {
                                 self.common.slot_list.flash_center();
@@ -119,12 +121,13 @@ impl PlaylistsPage {
                                             PlaylistsAction::PlayPlaylistFromTrack(
                                                 parent_playlist_id,
                                                 track_idx,
+                                                force,
                                             ),
                                         )
                                     }
                                     Some(SlotListEntry::Parent(playlist)) => (
                                         Task::none(),
-                                        PlaylistsAction::PlayPlaylist(playlist.id.clone()),
+                                        PlaylistsAction::PlayPlaylist(playlist.id.clone(), force),
                                     ),
                                     None => (Task::none(), PlaylistsAction::None),
                                 }

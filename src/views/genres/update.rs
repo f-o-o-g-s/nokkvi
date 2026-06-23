@@ -142,17 +142,21 @@ impl GenresPage {
                         self.common.handle_select_all_toggle(flattened);
                         (Task::none(), GenresAction::None)
                     }
-                    SlotListPageMessage::ActivateCenter => {
+                    SlotListPageMessage::ActivateCenter
+                    | SlotListPageMessage::ActivateCenterShuffled => {
+                        let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
                         let total = self.expansion.flattened_len(genres);
                         if let Some(center_idx) = self.common.get_center_item_index(total) {
                             self.common.slot_list.flash_center();
                             match self.expansion.get_entry_at(center_idx, genres, |g| &g.id) {
-                                Some(SlotListEntry::Child(album, _)) => {
-                                    (Task::none(), GenresAction::PlayAlbum(album.id.clone()))
-                                }
-                                Some(SlotListEntry::Parent(genre)) => {
-                                    (Task::none(), GenresAction::PlayGenre(genre.name.clone()))
-                                }
+                                Some(SlotListEntry::Child(album, _)) => (
+                                    Task::none(),
+                                    GenresAction::PlayAlbum(album.id.clone(), force),
+                                ),
+                                Some(SlotListEntry::Parent(genre)) => (
+                                    Task::none(),
+                                    GenresAction::PlayGenre(genre.name.clone(), force),
+                                ),
                                 None => (Task::none(), GenresAction::None),
                             }
                         } else {

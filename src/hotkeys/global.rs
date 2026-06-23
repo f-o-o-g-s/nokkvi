@@ -138,6 +138,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::SlotListUp => Message::SlotList(SlotListMessage::NavigateUp),
         HotkeyAction::SlotListDown => Message::SlotList(SlotListMessage::NavigateDown),
         HotkeyAction::Activate => Message::SlotList(SlotListMessage::ActivateCenter),
+        HotkeyAction::ShufflePlay => Message::SlotList(SlotListMessage::ActivateCenterShuffled),
         HotkeyAction::ExpandCenter => Message::Hotkey(HotkeyMessage::ExpandCenter),
         // Browse
         HotkeyAction::ToggleBrowsingPanel => {
@@ -219,6 +220,19 @@ mod tests {
         let msg = action_to_message(action);
         // We verify that it dispatches the correct Message variant
         assert!(matches!(msg, Message::Hotkey(HotkeyMessage::RefreshView)));
+    }
+
+    #[test]
+    fn test_shuffle_play_hotkey() {
+        let config = HotkeyConfig::default();
+        let action = config.lookup(&KeyCode::Enter, false, true, false).unwrap();
+        assert_eq!(action, HotkeyAction::ShufflePlay);
+
+        let msg = action_to_message(action);
+        assert!(matches!(
+            msg,
+            Message::SlotList(SlotListMessage::ActivateCenterShuffled)
+        ));
     }
 
     // ====================================================================

@@ -151,12 +151,12 @@ pub enum PlaylistsMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum PlaylistsAction {
-    PlayPlaylist(String), // playlist_id - clear queue and play all songs in playlist
+    PlayPlaylist(String, bool), // (playlist_id, force_shuffle) - replace queue and play
     /// Replace the queue with the selection/clicked item, shuffled once, and play.
     PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     ExpandPlaylist(String), // playlist_id - load tracks for expansion
-    PlayPlaylistFromTrack(String, usize), // playlist_id, track_index - play from clicked track
+    PlayPlaylistFromTrack(String, usize, bool), // (playlist_id, track_index, force_shuffle)
     LoadArtwork(String),    // playlist_id - load artwork for centered playlist on slot list scroll
     PreloadArtwork(usize),  // viewport_offset - preload artwork for visible + buffer
     SearchChanged(String),  // trigger reload

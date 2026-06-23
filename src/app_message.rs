@@ -343,6 +343,8 @@ pub enum SlotListMessage {
     NavigateDown,
     SetOffset(usize),
     ActivateCenter,
+    /// Ctrl+Enter — force a one-shot Shuffle Play of the centered item/selection.
+    ActivateCenterShuffled,
     ToggleSortOrder,
     /// Timer-triggered: scrollbar fade animation complete (view, generation_id guard)
     ScrollbarFadeComplete(View, u64),

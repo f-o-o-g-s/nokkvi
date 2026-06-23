@@ -1054,14 +1054,17 @@ impl Nokkvi {
     /// helper.
     /// Resolve the one-shot Shuffle Play directive for a plain activate
     /// (Enter / click), honoring the `enter_shuffle` setting. `force_shuffle`
-    /// (Ctrl+Enter) overrides the setting; `anchored` pins a clicked expansion
-    /// track at index 0.
+    /// (Ctrl+Enter) forces shuffle ON, always UNANCHORED (Q4: explicit surfaces
+    /// never pin a track). `anchored` only matters for the setting-driven path:
+    /// a clicked expansion track pins itself at index 0 (AnchorFirst).
     pub(crate) fn activate_shuffle_directive(
         &self,
         force_shuffle: bool,
         anchored: bool,
     ) -> OneShotShuffle {
-        if force_shuffle || self.settings.enter_shuffle {
+        if force_shuffle {
+            OneShotShuffle::Full
+        } else if self.settings.enter_shuffle {
             if anchored {
                 OneShotShuffle::AnchorFirst
             } else {

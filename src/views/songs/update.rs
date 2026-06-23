@@ -31,6 +31,7 @@ impl SongsPage {
                         | SlotListPageMessage::NavigateDown
                         | SlotListPageMessage::SetOffset(_, _)
                 );
+                let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
 
                 match self.common.handle(msg, total_items) {
                     SlotListPageAction::ActivateCenter => {
@@ -48,12 +49,19 @@ impl SongsPage {
                                     })
                                 })
                                 .fold(BatchPayload::new(), |p, i| p.with_item(i));
-                            (Task::none(), SongsAction::PlayBatch(payload))
+                            if force {
+                                (Task::none(), SongsAction::PlayBatchShuffled(payload))
+                            } else {
+                                (Task::none(), SongsAction::PlayBatch(payload))
+                            }
                         } else if let Some(center_idx) =
                             self.common.get_center_item_index(total_items)
                         {
                             self.common.slot_list.flash_center();
-                            (Task::none(), SongsAction::PlaySongFromIndex(center_idx))
+                            (
+                                Task::none(),
+                                SongsAction::PlaySongFromIndex(center_idx, force),
+                            )
                         } else {
                             (Task::none(), SongsAction::None)
                         }

@@ -71,6 +71,8 @@ pub enum SlotListPageMessage {
     ScrollSeek(usize),
     // Activation
     ActivateCenter,
+    /// Ctrl+Enter — force a one-shot Shuffle Play (force flag derived by the view).
+    ActivateCenterShuffled,
     ClickPlay(usize),
     // Selection
     SelectionToggle(usize),
@@ -476,6 +478,9 @@ impl SlotListPageState {
                 SlotListPageAction::None
             }
             SlotListPageMessage::ActivateCenter => SlotListPageAction::ActivateCenter,
+            // The view derives the force flag from the raw message; both activate
+            // variants map to the same action here.
+            SlotListPageMessage::ActivateCenterShuffled => SlotListPageAction::ActivateCenter,
             SlotListPageMessage::ClickPlay(idx) => {
                 self.handle_set_offset(idx, total);
                 SlotListPageAction::ActivateCenter

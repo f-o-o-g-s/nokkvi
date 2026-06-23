@@ -20,7 +20,10 @@ impl Nokkvi {
         // the spin is committed and the user shouldn't be able to fire a
         // play against a moving target.
         if let Some(state) = self.roulette.as_ref()
-            && matches!(msg, SlotListMessage::ActivateCenter)
+            && matches!(
+                msg,
+                SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled
+            )
         {
             return if state.decel.is_none() {
                 Task::done(Message::Roulette(RouletteMessage::Stop))
@@ -58,7 +61,8 @@ impl Nokkvi {
                 let task = self.handle_slot_list_set_offset(offset);
                 Task::batch([task, self.scrollbar_fade_timer(self.current_view)])
             }
-            SlotListMessage::ActivateCenter => self.handle_slot_list_activate_center(),
+            SlotListMessage::ActivateCenter => self.handle_slot_list_activate_center(false),
+            SlotListMessage::ActivateCenterShuffled => self.handle_slot_list_activate_center(true),
             SlotListMessage::ToggleSortOrder => self.handle_toggle_sort_order(),
             SlotListMessage::ScrollbarFadeComplete(view, gen_id) => {
                 self.handle_scrollbar_fade_complete(view, gen_id)
@@ -226,7 +230,7 @@ impl Nokkvi {
         })
     }
 
-    fn handle_slot_list_activate_center(&mut self) -> Task<Message> {
+    fn handle_slot_list_activate_center(&mut self, shuffled: bool) -> Task<Message> {
         let target_view = self.current_target_view();
         // Play enter/activate sound (settings handles its own SFX)
         if target_view != Some(View::Settings) {
@@ -283,8 +287,12 @@ impl Nokkvi {
         if target_view == Some(View::Settings) {
             return Task::done(Message::Settings(views::SettingsMessage::EditActivate));
         }
-        self.current_view_page().map_or_else(Task::none, |p| {
-            Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::ActivateCenter))
-        })
+        let activate = if shuffled {
+            crate::widgets::SlotListPageMessage::ActivateCenterShuffled
+        } else {
+            crate::widgets::SlotListPageMessage::ActivateCenter
+        };
+        self.current_view_page()
+            .map_or_else(Task::none, |p| Task::done(p.slot_list_message(activate)))
     }
 }

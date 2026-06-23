@@ -110,6 +110,26 @@ fn lookup_matches_default() {
 }
 
 #[test]
+fn ctrl_enter_maps_to_shuffle_play_without_shadowing_enter_or_shift_enter() {
+    let config = HotkeyConfig::default();
+    // Ctrl+Enter → ShufflePlay (new)
+    assert_eq!(
+        config.lookup(&KeyCode::Enter, false, true, false),
+        Some(HotkeyAction::ShufflePlay)
+    );
+    // Plain Enter → Activate (unchanged)
+    assert_eq!(
+        config.lookup(&KeyCode::Enter, false, false, false),
+        Some(HotkeyAction::Activate)
+    );
+    // Shift+Enter → ExpandCenter (unchanged)
+    assert_eq!(
+        config.lookup(&KeyCode::Enter, true, false, false),
+        Some(HotkeyAction::ExpandCenter)
+    );
+}
+
+#[test]
 fn set_and_lookup_custom_binding() {
     let mut config = HotkeyConfig::default();
     // Rebind ToggleStar from Shift+L to Shift+K

@@ -118,7 +118,7 @@ impl Nokkvi {
         }
 
         match action {
-            views::PlaylistsAction::PlayPlaylist(playlist_id) => {
+            views::PlaylistsAction::PlayPlaylist(playlist_id, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -150,7 +150,7 @@ impl Nokkvi {
                         .iter()
                         .find(|p| p.id == playlist_id)
                         .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
-                    let shuffle = self.activate_shuffle_directive(false, false);
+                    let shuffle = self.activate_shuffle_directive(force, false);
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move {
@@ -169,7 +169,7 @@ impl Nokkvi {
                     .find(|p| p.id == playlist_id)
                     .map(crate::state::ActivePlaylistContext::from_playlist);
                 self.persist_active_playlist_info();
-                let shuffle = self.activate_shuffle_directive(false, false);
+                let shuffle = self.activate_shuffle_directive(force, false);
                 return self.shell_action_task(
                     move |shell| async move { shell.play_playlist(&playlist_id, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
@@ -202,7 +202,7 @@ impl Nokkvi {
                     "load playlist tracks",
                 );
             }
-            views::PlaylistsAction::PlayPlaylistFromTrack(playlist_id, track_idx) => {
+            views::PlaylistsAction::PlayPlaylistFromTrack(playlist_id, track_idx, force) => {
                 // Mirror the album-sibling prologue (`AlbumsAction::PlayAlbumFromTrack`):
                 // guard the play (edit-mode block + radio→queue transition) then
                 // enter a new playback context (clears a stale queue_loading_target).
@@ -221,7 +221,7 @@ impl Nokkvi {
                     .find(|p| p.id == playlist_id)
                     .map(crate::state::ActivePlaylistContext::from_playlist);
                 self.persist_active_playlist_info();
-                let shuffle = self.activate_shuffle_directive(false, true);
+                let shuffle = self.activate_shuffle_directive(force, true);
                 return self.shell_action_task(
                     move |shell| async move {
                         shell

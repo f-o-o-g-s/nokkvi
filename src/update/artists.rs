@@ -274,7 +274,7 @@ impl Nokkvi {
         }
 
         match action {
-            ArtistsAction::PlayArtist(artist_id_str) => {
+            ArtistsAction::PlayArtist(artist_id_str, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -317,7 +317,7 @@ impl Nokkvi {
                 {
                     let id = artist.id.clone();
                     let name = artist.name.clone();
-                    let shuffle = self.activate_shuffle_directive(false, false);
+                    let shuffle = self.activate_shuffle_directive(force, false);
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_artist_and_play(&id, shuffle).await },
@@ -326,7 +326,7 @@ impl Nokkvi {
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with artist (PlaySingle = PlayAll for artists)
-                let shuffle = self.activate_shuffle_directive(false, false);
+                let shuffle = self.activate_shuffle_directive(force, false);
                 return self.play_entity_task(
                     &self.library.artists,
                     &artist_id_str,
@@ -345,7 +345,7 @@ impl Nokkvi {
             ArtistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
-            ArtistsAction::PlayAlbum(album_id) => {
+            ArtistsAction::PlayAlbum(album_id, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -365,7 +365,7 @@ impl Nokkvi {
                         "add album to queue",
                     );
                 }
-                let shuffle = self.activate_shuffle_directive(false, false);
+                let shuffle = self.activate_shuffle_directive(force, false);
                 return self.shell_action_task(
                     move |shell| async move { shell.play_album(&album_id, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),

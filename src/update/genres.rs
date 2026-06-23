@@ -185,7 +185,7 @@ impl Nokkvi {
         }
 
         match action {
-            GenresAction::PlayGenre(genre_name) => {
+            GenresAction::PlayGenre(genre_name, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -222,7 +222,7 @@ impl Nokkvi {
                 if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
                     self.clear_active_playlist();
                     let name = genre_name.clone();
-                    let shuffle = self.activate_shuffle_directive(false, false);
+                    let shuffle = self.activate_shuffle_directive(force, false);
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_genre_and_play(&name, shuffle).await },
                         format!("Playing '{genre_name}'"),
@@ -230,7 +230,7 @@ impl Nokkvi {
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with genre
-                let shuffle = self.activate_shuffle_directive(false, false);
+                let shuffle = self.activate_shuffle_directive(force, false);
                 return self.shell_action_task(
                     move |shell| async move { shell.play_genre(&genre_name, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
@@ -247,7 +247,7 @@ impl Nokkvi {
             GenresAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
-            GenresAction::PlayAlbum(album_id) => {
+            GenresAction::PlayAlbum(album_id, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -267,7 +267,7 @@ impl Nokkvi {
                         "add album to queue from genre",
                     );
                 }
-                let shuffle = self.activate_shuffle_directive(false, false);
+                let shuffle = self.activate_shuffle_directive(force, false);
                 return self.shell_action_task(
                     move |shell| async move { shell.play_album(&album_id, shuffle).await },
                     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),

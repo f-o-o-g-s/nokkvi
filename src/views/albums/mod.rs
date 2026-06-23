@@ -146,7 +146,7 @@ pub enum AlbumsMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum AlbumsAction {
-    PlayAlbum(String), // album_id - clear queue and play
+    PlayAlbum(String, bool), // (album_id, force_shuffle) - replace queue and play
     PlayBatch(nokkvi_data::types::batch::BatchPayload),
     /// Replace the queue with the selection/clicked item, shuffled once, and play.
     PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
@@ -155,8 +155,8 @@ pub enum AlbumsAction {
     CenterOnPlaying,
     /// Expand album inline — root should load tracks (album_id)
     ExpandAlbum(String),
-    /// Play batch starting from a specific track (album_id, track_index)
-    PlayAlbumFromTrack(String, usize),
+    /// Play album from a specific track (album_id, track_index, force_shuffle)
+    PlayAlbumFromTrack(String, usize, bool),
     /// Set rating on item (item_id, kind, rating)
     SetRating(String, ItemKind, usize),
     /// Star/unstar item (item_id, kind, new_starred)

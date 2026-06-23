@@ -169,7 +169,7 @@ impl Nokkvi {
         }
 
         match action {
-            SongsAction::PlaySongFromIndex(index) => {
+            SongsAction::PlaySongFromIndex(index, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -290,7 +290,7 @@ impl Nokkvi {
                             // Shuffle Play is active, shuffle the loaded buffer and
                             // suppress Phase 2 — appending later pages in server
                             // order would break the shuffled order.
-                            let shuffle = self.activate_shuffle_directive(false, false);
+                            let shuffle = self.activate_shuffle_directive(force, false);
                             let play_task = self.shell_task(
                                 move |shell| async move {
                                     shell.play_songs(songs, index, shuffle).await

@@ -330,14 +330,15 @@ fn activate_shuffle_directive_resolves_from_setting_and_force() {
         OneShotShuffle::None
     );
 
-    // Setting off, force (Ctrl+Enter) → shuffle; anchored pins index 0.
+    // Setting off, force (Ctrl+Enter) → always Full, even on a clicked track
+    // (explicit surfaces are unanchored — Q4).
     assert_eq!(
         app.activate_shuffle_directive(true, false),
         OneShotShuffle::Full
     );
     assert_eq!(
         app.activate_shuffle_directive(true, true),
-        OneShotShuffle::AnchorFirst
+        OneShotShuffle::Full
     );
 
     // Setting on → plain activate shuffles.

@@ -297,6 +297,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.expand_center",
             default: KeyCombo::shift(KeyCode::Enter),
         },
+        ShufflePlay {
+            display: "Shuffle Play",
+            description: "Shuffle-play the focused item or selection (forced shuffle, ignores the Enter setting).",
+            category: "Navigation",
+            toml_key: "shuffle_play",
+            settings_key: "hotkey.shuffle_play",
+            default: KeyCombo::ctrl(KeyCode::Enter),
+        },
 
         // --- Browse / panel actions (category: "Navigation") ---
         ToggleBrowsingPanel {

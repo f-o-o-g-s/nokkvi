@@ -142,13 +142,13 @@ pub enum ArtistsMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum ArtistsAction {
-    PlayArtist(String), // artist_id - clear queue and play all songs
+    PlayArtist(String, bool), // (artist_id, force_shuffle) - replace queue and play
     /// Replace the queue with the selection/clicked item, shuffled once, and play.
     PlayBatchShuffled(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
-    PlayAlbum(String),    // album_id - play child album
-    StarArtist(String),   // artist_id - star the artist
-    UnstarArtist(String), // artist_id - unstar the artist
+    PlayAlbum(String, bool), // (album_id, force_shuffle) - play child album
+    StarArtist(String),      // artist_id - star the artist
+    UnstarArtist(String),    // artist_id - unstar the artist
     /// Set absolute rating on item (item_id, kind, rating)
     SetRating(String, ItemKind, usize),
     /// Star/unstar item by click (item_id, kind, new_starred)

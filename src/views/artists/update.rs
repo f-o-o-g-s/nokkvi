@@ -116,17 +116,20 @@ impl ArtistsPage {
                         self.common.handle_select_all_toggle(flattened);
                         (Task::none(), ArtistsAction::None)
                     }
-                    SlotListPageMessage::ActivateCenter => {
+                    SlotListPageMessage::ActivateCenter
+                    | SlotListPageMessage::ActivateCenterShuffled => {
+                        let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
                         let total = self.expansion.flattened_len(artists);
                         if let Some(center_idx) = self.common.get_center_item_index(total) {
                             self.common.slot_list.flash_center();
                             match self.expansion.get_entry_at(center_idx, artists, |a| &a.id) {
-                                Some(SlotListEntry::Child(album, _)) => {
-                                    (Task::none(), ArtistsAction::PlayAlbum(album.id.clone()))
-                                }
+                                Some(SlotListEntry::Child(album, _)) => (
+                                    Task::none(),
+                                    ArtistsAction::PlayAlbum(album.id.clone(), force),
+                                ),
                                 Some(SlotListEntry::Parent(_)) => (
                                     Task::none(),
-                                    ArtistsAction::PlayArtist(center_idx.to_string()),
+                                    ArtistsAction::PlayArtist(center_idx.to_string(), force),
                                 ),
                                 None => (Task::none(), ArtistsAction::None),
                             }

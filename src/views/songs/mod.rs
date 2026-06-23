@@ -126,7 +126,7 @@ pub enum SongsMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum SongsAction {
-    PlaySongFromIndex(usize), // Play songs starting from index
+    PlaySongFromIndex(usize, bool), // (index, force_shuffle) - play songs starting from index
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ToggleStar(String, bool), // (song_id, star)

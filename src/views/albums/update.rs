@@ -101,7 +101,9 @@ impl AlbumsPage {
                             self.common.handle_select_all_toggle(flattened);
                             (Task::none(), AlbumsAction::None)
                         }
-                        SlotListPageMessage::ActivateCenter => {
+                        SlotListPageMessage::ActivateCenter
+                        | SlotListPageMessage::ActivateCenterShuffled => {
+                            let force = matches!(msg, SlotListPageMessage::ActivateCenterShuffled);
                             let total = self.expansion.flattened_len(albums);
                             let center_idx = self.common.get_center_item_index(total);
                             let target_indices = self
@@ -130,7 +132,14 @@ impl AlbumsPage {
                                         }
                                     })
                                     .fold(BatchPayload::new(), |p, item| p.with_item(item));
-                                return (Task::none(), AlbumsAction::PlayBatch(payload));
+                                return (
+                                    Task::none(),
+                                    if force {
+                                        AlbumsAction::PlayBatchShuffled(payload)
+                                    } else {
+                                        AlbumsAction::PlayBatch(payload)
+                                    },
+                                );
                             }
 
                             if let Some(center_idx) = center_idx {
@@ -147,12 +156,13 @@ impl AlbumsPage {
                                             AlbumsAction::PlayAlbumFromTrack(
                                                 parent_album_id,
                                                 track_index,
+                                                force,
                                             ),
                                         )
                                     }
                                     Some(SlotListEntry::Parent(_)) => (
                                         Task::none(),
-                                        AlbumsAction::PlayAlbum(center_idx.to_string()),
+                                        AlbumsAction::PlayAlbum(center_idx.to_string(), force),
                                     ),
                                     None => (Task::none(), AlbumsAction::None),
                                 }

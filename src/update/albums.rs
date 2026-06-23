@@ -399,7 +399,7 @@ impl Nokkvi {
         }
 
         match action {
-            AlbumsAction::PlayAlbum(album_id_str) => {
+            AlbumsAction::PlayAlbum(album_id_str, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -442,7 +442,7 @@ impl Nokkvi {
                 {
                     let id = album.id.clone();
                     let name = album.name.clone();
-                    let shuffle = self.activate_shuffle_directive(false, false);
+                    let shuffle = self.activate_shuffle_directive(force, false);
                     self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_album_and_play(&id, shuffle).await },
@@ -451,7 +451,7 @@ impl Nokkvi {
                     );
                 }
                 // PlayAll / PlaySingle: replace queue with album (PlaySingle = PlayAll for albums)
-                let shuffle = self.activate_shuffle_directive(false, false);
+                let shuffle = self.activate_shuffle_directive(force, false);
                 return self.play_entity_task(
                     &self.library.albums,
                     &album_id_str,
@@ -542,7 +542,7 @@ impl Nokkvi {
 
                 return Task::batch([artwork_task, tracks_task]);
             }
-            AlbumsAction::PlayAlbumFromTrack(album_id, track_idx) => {
+            AlbumsAction::PlayAlbumFromTrack(album_id, track_idx, force) => {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
@@ -572,7 +572,7 @@ impl Nokkvi {
                     }
                     return Task::none();
                 }
-                let shuffle = self.activate_shuffle_directive(false, true);
+                let shuffle = self.activate_shuffle_directive(force, true);
                 return self.shell_action_task(
                     move |shell| async move {
                         shell
