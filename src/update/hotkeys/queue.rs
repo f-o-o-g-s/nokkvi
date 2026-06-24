@@ -252,6 +252,10 @@ impl Nokkvi {
             shell.move_queue_item(from, to).await
         });
 
+        // Same-length in-place reorder without a reload (like drag MoveItem) —
+        // re-check whether it still matches the applied sort.
+        self.revalidate_queue_sorted();
+
         Task::none()
     }
 }

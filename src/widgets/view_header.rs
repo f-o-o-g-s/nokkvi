@@ -95,6 +95,12 @@ pub(crate) struct ViewHeaderConfig<'a, V, Message> {
     /// to the count as e.g. "12 songs · 47m". `None` (or 0) shows no duration —
     /// used for views whose items carry no duration (Artists, Genres, Radios).
     pub total_duration_secs: Option<u64>,
+    /// When `Some`, the sort dropdown shows this grayed placeholder text instead
+    /// of `current_view`, and no entry is marked selected. Used by the Queue
+    /// view to render "Unsorted" until the user applies a queue sort (the queue
+    /// takes its order from whatever populated it, so a remembered mode would
+    /// misrepresent the actual order). All other views pass `None`.
+    pub sort_placeholder: Option<&'a str>,
 }
 
 /// View-header height — `bg0_hard()` strip with sided-border cells
@@ -172,6 +178,7 @@ pub(crate) fn view_header<
         on_dropdown_open,
         on_dropdown_close,
         total_duration_secs,
+        sort_placeholder,
     } = config;
 
     // Auto-hide collapsed state: render only a thin `bg0_hard()` sliver (plus
@@ -229,7 +236,12 @@ pub(crate) fn view_header<
             // direction (left) and the item count (right).
             CollapsedAppearance::CountStrip => {
                 let arrow = if sort_ascending { "↑" } else { "↓" };
-                let label = format!("{current_view} {arrow}");
+                // When the view supplies an unsorted placeholder (queue with no
+                // applied sort), echo it plainly — no mode, no direction arrow.
+                let label = match sort_placeholder {
+                    Some(ph) => ph.to_string(),
+                    None => format!("{current_view} {arrow}"),
+                };
                 let count = count_label(filtered_count, total_count, item_type);
                 // Append a total-duration stat ("12 songs · 47m") when the view
                 // supplies one (song / album / playlist lists).
@@ -342,11 +354,20 @@ pub(crate) fn view_header<
         // wrapper supplies the divider hairline (flat) or capsule
         // (rounded). Hover/open accent shows on the dropdown's own
         // border so the affordance stays discoverable.
+        //
+        // When `sort_placeholder` is set (queue with no applied sort), no entry
+        // is marked selected and iced renders the placeholder text grayed via
+        // `placeholder_color` below.
+        let selected = match sort_placeholder {
+            Some(_) => None,
+            None => Some(SortPickerEntry::Mode(current_view)),
+        };
         let mut sort_picker = pick_list(
-            Some(SortPickerEntry::Mode(current_view)),
+            selected,
             Cow::<'a, [SortPickerEntry<V>]>::Owned(entries),
             |entry: &SortPickerEntry<V>| entry.to_string(),
         )
+        .placeholder(sort_placeholder.unwrap_or_default())
         .on_select(select_handler)
         .width(Length::Shrink)
         .text_size(12.0)

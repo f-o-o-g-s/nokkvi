@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The Queue sort dropdown now reads **Unsorted** until you apply a sort, reverting whenever the queue order changes, instead of showing a stale remembered mode the queue isn't actually in.
+
 ### Fixed
 
 - The over-cover visualizer (Bars, Lines, and Scope) now freezes in place when paused instead of disappearing, like the bottom-band placement already did.

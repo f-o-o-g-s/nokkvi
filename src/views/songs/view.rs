@@ -94,6 +94,7 @@ impl SongsPage {
                 crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(false),
             )),
             total_duration_secs: Some(data.songs.iter().map(|s| u64::from(s.duration)).sum()),
+            sort_placeholder: None,
         });
 
         // Compose with the tri-state "select all" header bar when the

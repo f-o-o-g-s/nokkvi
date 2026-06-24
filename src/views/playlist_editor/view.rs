@@ -27,7 +27,7 @@ use crate::{
     app_message::EditorMessage,
     state::PlaylistEditorState,
     views::{
-        queue::{QueueContextEntry, QueueSortMode},
+        queue::QueueContextEntry,
         song_list_pane::{SongListPaneParams, SongListRowEvent, song_list_pane},
     },
     widgets::{self, hover_overlay::HoverOverlay},
@@ -156,8 +156,8 @@ impl PlaylistEditorState {
 
         // Render the editor's rows through the shared pane. Now-playing OFF
         // (`current_playing_*` = None) — the editor never highlights a row.
-        // `sort_mode` is the queue default (Album); the editor has no sort UI,
-        // and default column visibility keeps the auto-show gates inert.
+        // `sort_mode` is `None` (no applied sort): the editor has no sort UI,
+        // so the plays/genre auto-show gates stay inert.
         let slot_list_content = song_list_pane(
             SongListPaneParams {
                 slot_list: &self.common.slot_list,
@@ -165,7 +165,7 @@ impl PlaylistEditorState {
                 list_config: &config,
                 drop_indicator_slot: data.drop_indicator_slot,
                 columns,
-                sort_mode: QueueSortMode::Album,
+                sort_mode: None,
                 album_art,
                 current_playing_song_id: None,
                 current_playing_entry_id: None,

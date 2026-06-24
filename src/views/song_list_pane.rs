@@ -40,7 +40,7 @@ pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
 /// Two independent gates: the user toggle (always wins when off) and the
 /// responsive width gate (always wins when below the breakpoint).
 pub(crate) fn rating_column_visible(
-    _sort: QueueSortMode,
+    _sort: Option<QueueSortMode>,
     panel_width: f32,
     user_visible: bool,
 ) -> bool {
@@ -65,17 +65,19 @@ pub(crate) fn love_column_visible(user_visible: bool) -> bool {
 }
 
 /// Pure decision: should the plays column be rendered? Either the user toggle
-/// is on, OR the queue is sorted by Most Played (auto-show so the user always
-/// sees the data they're sorting by).
-pub(crate) fn plays_column_visible(sort: QueueSortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, QueueSortMode::MostPlayed)
+/// is on, OR an applied Most Played sort is in effect (auto-show so the user
+/// always sees the data they're sorting by). `sort` is the *applied* mode —
+/// `None` when the queue is unsorted, so the remembered mode never auto-shows.
+pub(crate) fn plays_column_visible(sort: Option<QueueSortMode>, user_visible: bool) -> bool {
+    user_visible || sort == Some(QueueSortMode::MostPlayed)
 }
 
 /// Pure decision: should the genre be rendered (stacked under album, or in
-/// place of the album when album is hidden)? Toggle on, OR queue is sorted by
-/// Genre — mirrors the plays-on-MostPlayed auto-show.
-pub(crate) fn genre_column_visible(sort: QueueSortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, QueueSortMode::Genre)
+/// place of the album when album is hidden)? Toggle on, OR an applied Genre
+/// sort is in effect — mirrors the plays-on-MostPlayed auto-show. `sort` is the
+/// *applied* mode (`None` when unsorted).
+pub(crate) fn genre_column_visible(sort: Option<QueueSortMode>, user_visible: bool) -> bool {
+    user_visible || sort == Some(QueueSortMode::Genre)
 }
 
 /// Neutral row-interaction vocabulary. Each caller maps these to its own
@@ -117,7 +119,9 @@ pub(crate) struct SongListPaneParams<'a, 'b> {
     pub list_config: &'b SlotListConfig,
     pub drop_indicator_slot: Option<usize>,
     pub columns: QueueColumnVisibility,
-    pub sort_mode: QueueSortMode,
+    /// The *applied* queue sort — `None` when the queue is unsorted. Drives the
+    /// plays/genre auto-show columns only when a real sort is in effect.
+    pub sort_mode: Option<QueueSortMode>,
     pub album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     pub current_playing_song_id: Option<String>,
     pub current_playing_entry_id: Option<u64>,
@@ -503,7 +507,7 @@ mod tests {
     fn rating_column_visible_for_all_sort_modes() {
         for sort in QueueSortMode::all() {
             assert!(
-                rating_column_visible(sort, WIDE_PANEL, true),
+                rating_column_visible(Some(sort), WIDE_PANEL, true),
                 "stars column should render for sort mode {sort:?}"
             );
         }
@@ -513,7 +517,7 @@ mod tests {
     fn rating_column_hidden_below_breakpoint() {
         for sort in QueueSortMode::all() {
             assert!(
-                !rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS - 1.0, true),
+                !rating_column_visible(Some(sort), BREAKPOINT_HIDE_QUEUE_STARS - 1.0, true),
                 "stars column should hide below breakpoint for {sort:?}"
             );
         }
@@ -524,7 +528,7 @@ mod tests {
         // Boundary is `>=`: the exact breakpoint width keeps stars visible.
         for sort in QueueSortMode::all() {
             assert!(
-                rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS, true),
+                rating_column_visible(Some(sort), BREAKPOINT_HIDE_QUEUE_STARS, true),
                 "stars column should remain visible at exact breakpoint for {sort:?}"
             );
         }
@@ -534,7 +538,7 @@ mod tests {
     fn rating_column_responsive_overrides_sort_mode() {
         // Width wins over sort mode: even Rating sort hides when too narrow.
         assert!(!rating_column_visible(
-            QueueSortMode::Rating,
+            Some(QueueSortMode::Rating),
             BREAKPOINT_HIDE_QUEUE_STARS - 1.0,
             true,
         ));
@@ -546,7 +550,7 @@ mod tests {
         // the user has toggled them off.
         for sort in QueueSortMode::all() {
             assert!(
-                !rating_column_visible(sort, WIDE_PANEL, false),
+                !rating_column_visible(Some(sort), WIDE_PANEL, false),
                 "user toggle off should hide stars even at wide panel ({sort:?})"
             );
         }
@@ -557,7 +561,7 @@ mod tests {
         // The two gates AND together: user wants stars visible, but the
         // panel is too narrow → still hidden.
         assert!(!rating_column_visible(
-            QueueSortMode::Album,
+            Some(QueueSortMode::Album),
             BREAKPOINT_HIDE_QUEUE_STARS - 1.0,
             true,
         ));
@@ -578,29 +582,47 @@ mod tests {
     #[test]
     fn plays_column_visible_auto_shows_on_most_played() {
         // Sort overrides the user toggle: MostPlayed always shows, regardless of toggle.
-        assert!(plays_column_visible(QueueSortMode::MostPlayed, false));
-        assert!(plays_column_visible(QueueSortMode::MostPlayed, true));
+        assert!(plays_column_visible(Some(QueueSortMode::MostPlayed), false));
+        assert!(plays_column_visible(Some(QueueSortMode::MostPlayed), true));
     }
 
     #[test]
     fn plays_column_visible_follows_user_toggle_for_other_sorts() {
-        assert!(!plays_column_visible(QueueSortMode::Title, false));
-        assert!(plays_column_visible(QueueSortMode::Title, true));
-        assert!(!plays_column_visible(QueueSortMode::Rating, false));
-        assert!(plays_column_visible(QueueSortMode::Rating, true));
+        assert!(!plays_column_visible(Some(QueueSortMode::Title), false));
+        assert!(plays_column_visible(Some(QueueSortMode::Title), true));
+        assert!(!plays_column_visible(Some(QueueSortMode::Rating), false));
+        assert!(plays_column_visible(Some(QueueSortMode::Rating), true));
+    }
+
+    #[test]
+    fn plays_column_unsorted_does_not_auto_show() {
+        // Unsorted (None): the remembered mode never auto-shows the plays
+        // column — only the user toggle can.
+        assert!(!plays_column_visible(None, false));
+        assert!(plays_column_visible(None, true));
     }
 
     #[test]
     fn genre_column_visible_auto_shows_on_genre_sort() {
-        assert!(genre_column_visible(QueueSortMode::Genre, false));
-        assert!(genre_column_visible(QueueSortMode::Genre, true));
+        assert!(genre_column_visible(Some(QueueSortMode::Genre), false));
+        assert!(genre_column_visible(Some(QueueSortMode::Genre), true));
     }
 
     #[test]
     fn genre_column_visible_follows_user_toggle_for_other_sorts() {
-        assert!(!genre_column_visible(QueueSortMode::Title, false));
-        assert!(genre_column_visible(QueueSortMode::Title, true));
-        assert!(!genre_column_visible(QueueSortMode::MostPlayed, false));
-        assert!(genre_column_visible(QueueSortMode::MostPlayed, true));
+        assert!(!genre_column_visible(Some(QueueSortMode::Title), false));
+        assert!(genre_column_visible(Some(QueueSortMode::Title), true));
+        assert!(!genre_column_visible(
+            Some(QueueSortMode::MostPlayed),
+            false
+        ));
+        assert!(genre_column_visible(Some(QueueSortMode::MostPlayed), true));
+    }
+
+    #[test]
+    fn genre_column_unsorted_does_not_auto_show() {
+        // Unsorted (None): no genre auto-show; user toggle still wins.
+        assert!(!genre_column_visible(None, false));
+        assert!(genre_column_visible(None, true));
     }
 }

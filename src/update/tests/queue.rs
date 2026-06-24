@@ -900,3 +900,369 @@ fn build_queue_view_data_matches_settings_and_counts() {
         "total_queue_count must use queue_loading_target"
     );
 }
+
+// ============================================================================
+// "Unsorted" queue state — the dropdown shows a grayed "Unsorted" placeholder
+// until the user applies a queue sort, and reverts honestly thereafter.
+// `queue_sorted` is promoted ONLY by `apply_queue_sort`; `handle_queue_loaded`
+// demotes it (never promotes) so a queue that merely coincides with a mode is
+// never shown as if the user applied it.
+// ============================================================================
+
+#[test]
+fn queue_unsorted_by_default() {
+    let app = test_app();
+    assert!(
+        !app.queue_page.queue_sorted,
+        "a fresh queue shows 'Unsorted' until the user applies a sort"
+    );
+}
+
+#[test]
+fn apply_queue_sort_marks_sorted() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("a", "Charlie", "Artist", "Album"),
+        make_queue_song("b", "Alpha", "Artist", "Album"),
+    ];
+    assert!(!app.queue_page.queue_sorted, "precondition: unsorted");
+
+    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+
+    assert!(
+        app.queue_page.queue_sorted,
+        "applying a queue sort is the sole promoter of the sorted state"
+    );
+}
+
+#[test]
+fn random_shuffle_marks_unsorted() {
+    let mut app = test_app();
+    app.queue_page.queue_sorted = true;
+
+    // Synchronous mutation runs before the (no-op without app_service) shell task.
+    let _ = app.dispatch_random_queue_shuffle();
+
+    assert!(
+        !app.queue_page.queue_sorted,
+        "a random shuffle has no verifiable sort — the dropdown shows 'Unsorted'"
+    );
+}
+
+#[test]
+fn queue_loaded_preserves_sorted_when_order_still_matches() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+    app.queue_page.common.sort_ascending = true;
+    app.queue_page.queue_sorted = true; // a sort was applied
+
+    // The backend reactive echo arrives in the same (Title-ascending) order.
+    let _ = app.handle_queue_loaded(Ok(vec![
+        make_queue_song("a", "Apple", "Artist", "Album"),
+        make_queue_song("b", "Zebra", "Artist", "Album"),
+    ]));
+
+    assert!(
+        app.queue_page.queue_sorted,
+        "a reload whose order still matches the applied sort keeps the label"
+    );
+}
+
+#[test]
+fn queue_loaded_reverts_to_unsorted_on_external_order() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+    app.queue_page.common.sort_ascending = true;
+    app.queue_page.queue_sorted = true; // a sort was applied
+
+    // An external repopulation (e.g. played an album) lands out of Title order.
+    let _ = app.handle_queue_loaded(Ok(vec![
+        make_queue_song("a", "Zebra", "Artist", "Album"),
+        make_queue_song("b", "Apple", "Artist", "Album"),
+    ]));
+
+    assert!(
+        !app.queue_page.queue_sorted,
+        "a reload whose order no longer matches the applied sort reverts to 'Unsorted'"
+    );
+}
+
+#[test]
+fn queue_loaded_never_promotes_unsorted_even_if_order_coincides() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+    app.queue_page.common.sort_ascending = true;
+    app.queue_page.queue_sorted = false; // unsorted (e.g. just played an album)
+
+    // The incoming order happens to be Title-ascending, but the user never
+    // applied a sort — it must stay unsorted (demote-only invariant).
+    let _ = app.handle_queue_loaded(Ok(vec![
+        make_queue_song("a", "Apple", "Artist", "Album"),
+        make_queue_song("b", "Zebra", "Artist", "Album"),
+    ]));
+
+    assert!(
+        !app.queue_page.queue_sorted,
+        "a coincidentally-ordered queue is never auto-promoted — only apply_queue_sort promotes"
+    );
+}
+
+#[test]
+fn queue_is_sorted_trivial_for_short_queues() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    assert!(
+        app.queue_is_sorted(QueueSortMode::Title, true),
+        "an empty queue is trivially sorted"
+    );
+    app.library.queue_songs = vec![make_queue_song("a", "Solo", "Artist", "Album")];
+    assert!(
+        app.queue_is_sorted(QueueSortMode::Title, true),
+        "a single-item queue is trivially sorted"
+    );
+}
+
+#[test]
+fn queue_is_sorted_false_for_random() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("a", "A", "Artist", "Album"),
+        make_queue_song("b", "B", "Artist", "Album"),
+    ];
+    assert!(
+        !app.queue_is_sorted(QueueSortMode::Random, true),
+        "a shuffled order has no verifiable sort"
+    );
+}
+
+#[test]
+fn queue_is_sorted_detects_misordered_queue() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("a", "Zebra", "Artist", "Album"),
+        make_queue_song("b", "Apple", "Artist", "Album"),
+    ];
+    assert!(
+        !app.queue_is_sorted(QueueSortMode::Title, true),
+        "Zebra before Apple is not Title-ascending"
+    );
+    assert!(
+        app.queue_is_sorted(QueueSortMode::Title, false),
+        "Zebra before Apple IS Title-descending"
+    );
+}
+
+#[test]
+fn revalidate_queue_sorted_demotes_on_broken_order_keeps_on_intact() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+    app.queue_page.common.sort_ascending = true;
+    app.queue_page.queue_sorted = true;
+    app.library.queue_songs = vec![
+        make_queue_song("a", "Apple", "Artist", "Album"),
+        make_queue_song("b", "Mango", "Artist", "Album"),
+        make_queue_song("c", "Zebra", "Artist", "Album"),
+    ];
+
+    // Order still matches Title-ascending → stays sorted (e.g. after a removal,
+    // which preserves relative order).
+    app.revalidate_queue_sorted();
+    assert!(
+        app.queue_page.queue_sorted,
+        "an intact sorted order keeps the sort label"
+    );
+
+    // Simulate a drag reorder that breaks Title order → demotes to unsorted.
+    app.library.queue_songs.swap(0, 2);
+    app.revalidate_queue_sorted();
+    assert!(
+        !app.queue_page.queue_sorted,
+        "a drag reorder that breaks the applied order reverts to 'Unsorted'"
+    );
+}
+
+/// Regression (review finding): the Shift+↑/↓ hotkey reorder (`handle_move_track`)
+/// is a same-length in-place reorder like drag MoveItem, so it must also revert
+/// a sorted queue to "Unsorted" when it breaks the applied order.
+#[test]
+fn move_track_hotkey_reverts_sorted_queue_to_unsorted() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+    app.queue_page.common.sort_ascending = true;
+    app.queue_page.queue_sorted = true;
+    app.library.queue_songs = vec![
+        make_queue_song("a", "Apple", "Artist", "Album"),
+        make_queue_song("b", "Bravo", "Artist", "Album"),
+        make_queue_song("c", "Charlie", "Artist", "Album"),
+    ];
+
+    // Fresh viewport (offset 0) centers on row 0; moving it down breaks Title order.
+    let _ = app.handle_move_track(false);
+
+    assert!(
+        !app.queue_page.queue_sorted,
+        "a Shift+Down hotkey reorder of a sorted queue reverts to 'Unsorted'"
+    );
+}
+
+/// Regression (review finding): after an external same-length reorder reload,
+/// the `sort_queue_songs` short-circuit cache (`last_sort_signature`) must be
+/// invalidated so re-applying the same mode actually re-sorts — not render the
+/// stale order under the sort label.
+#[test]
+fn reapplying_sort_after_same_length_reload_actually_resorts() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.queue_page.common.sort_ascending = true;
+    // `sort_queue_songs` (the local sort inside `apply_queue_sort`) reads
+    // `queue_sort_mode`; the real flow sets it via `SortModeSelected` first.
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+
+    // 1. Apply a Title sort to a scrambled queue.
+    app.library.queue_songs = vec![
+        make_queue_song("c", "Charlie", "Artist", "Album"),
+        make_queue_song("a", "Apple", "Artist", "Album"),
+        make_queue_song("b", "Bravo", "Artist", "Album"),
+    ];
+    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+    assert_eq!(
+        app.library
+            .queue_songs
+            .iter()
+            .map(|s| s.title.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Apple", "Bravo", "Charlie"],
+        "precondition: sorted by Title"
+    );
+
+    // 2. External reload replaces with the SAME length in a different order
+    //    (e.g. a play action / SSE). This demotes to unsorted and must clear
+    //    the cached signature.
+    let _ = app.handle_queue_loaded(Ok(vec![
+        make_queue_song("c", "Charlie", "Artist", "Album"),
+        make_queue_song("b", "Bravo", "Artist", "Album"),
+        make_queue_song("a", "Apple", "Artist", "Album"),
+    ]));
+    assert!(
+        !app.queue_page.queue_sorted,
+        "external reorder reverts to unsorted"
+    );
+    assert!(
+        app.queue_page.last_sort_signature.is_none(),
+        "the sort short-circuit cache must be invalidated on out-of-band reorder"
+    );
+
+    // 3. Re-apply the same Title sort — it must actually re-sort, not no-op.
+    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+    assert_eq!(
+        app.library
+            .queue_songs
+            .iter()
+            .map(|s| s.title.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Apple", "Bravo", "Charlie"],
+        "re-applying the same mode after a same-length reload must re-sort the queue"
+    );
+    assert!(
+        app.queue_page.queue_sorted,
+        "re-applied sort is shown as sorted"
+    );
+}
+
+#[test]
+fn revalidate_queue_sorted_never_promotes() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+    app.queue_page.common.sort_ascending = true;
+    app.queue_page.queue_sorted = false; // unsorted
+    // Perfectly Title-ascending order, but the user never applied a sort.
+    app.library.queue_songs = vec![
+        make_queue_song("a", "Apple", "Artist", "Album"),
+        make_queue_song("b", "Zebra", "Artist", "Album"),
+    ];
+
+    app.revalidate_queue_sorted();
+    assert!(
+        !app.queue_page.queue_sorted,
+        "revalidate is demote-only — it never promotes a coincidentally-ordered queue"
+    );
+}
+
+/// INTERLOCK: `queue_is_sorted` must agree with `sort_queue_songs` for every
+/// deterministic mode and direction — after a real sort, the verifier reports
+/// the queue as sorted. Guards the two parallel per-mode matches against drift.
+#[test]
+fn queue_is_sorted_matches_sort_queue_songs() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    // A queue with every sortable field varied and deliberately scrambled.
+    let varied = || {
+        let mut songs = vec![
+            make_queue_song("a", "Charlie", "Zoe", "Mango"),
+            make_queue_song("b", "alpha", "anna", "apple"),
+            make_queue_song("c", "Bravo", "Mike", "Banana"),
+        ];
+        songs[0].duration_seconds = 300;
+        songs[0].rating = Some(2);
+        songs[0].play_count = Some(50);
+        songs[0].genre = "Rock".to_string();
+        songs[1].duration_seconds = 120;
+        songs[1].rating = Some(5);
+        songs[1].play_count = Some(10);
+        songs[1].genre = "Ambient".to_string();
+        songs[2].duration_seconds = 200;
+        songs[2].rating = None;
+        songs[2].play_count = Some(99);
+        songs[2].genre = "Jazz".to_string();
+        songs
+    };
+
+    let deterministic = [
+        QueueSortMode::Title,
+        QueueSortMode::Artist,
+        QueueSortMode::Album,
+        QueueSortMode::Genre,
+        QueueSortMode::Duration,
+        QueueSortMode::Rating,
+        QueueSortMode::MostPlayed,
+    ];
+
+    for mode in deterministic {
+        for ascending in [true, false] {
+            let mut app = test_app();
+            app.library.queue_songs = varied();
+            app.queue_page.queue_sort_mode = mode;
+            app.queue_page.common.sort_ascending = ascending;
+            app.queue_page.last_sort_signature = None; // force the sort to run
+
+            app.sort_queue_songs();
+
+            assert!(
+                app.queue_is_sorted(mode, ascending),
+                "after sort_queue_songs by {mode:?} (ascending={ascending}), \
+                 queue_is_sorted must agree"
+            );
+        }
+    }
+}

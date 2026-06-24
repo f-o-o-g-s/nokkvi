@@ -92,6 +92,7 @@ impl ArtistsPage {
             )),
             // Artists carry no aggregate duration — count only.
             total_duration_secs: None,
+            sort_placeholder: None,
         });
 
         // Compose with the tri-state "select all" header bar when the

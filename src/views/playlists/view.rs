@@ -160,6 +160,7 @@ impl PlaylistsPage {
             on_dropdown_close: autohide.then_some(PlaylistsMessage::SlotList(
                 crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(false),
             )),
+            sort_placeholder: None,
             total_duration_secs: {
                 let secs: f64 = data.playlists.iter().map(|p| f64::from(p.duration)).sum();
                 (secs > 0.0).then_some(secs as u64)

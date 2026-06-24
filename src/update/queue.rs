@@ -45,6 +45,16 @@ impl Nokkvi {
                 // reload (consume-mode advance, SSE refresh, navigation).
                 self.queue_page.common.slot_list.clear_multi_selection();
 
+                // Honest sort label: an applied queue sort survives a reload
+                // only while the reloaded order still matches the applied mode.
+                // Every external repopulation (play album/playlist, session
+                // restore, add/remove, consume advance, SSE refresh) lands here
+                // with an order that may no longer match and reverts the
+                // dropdown to its "Unsorted" placeholder. Demote-only —
+                // `apply_queue_sort` is the sole promoter — so a queue that
+                // merely coincides with a mode is never shown as applied.
+                self.revalidate_queue_sorted();
+
                 // Freeze the strip quad identity on the FIRST queue that
                 // arrives for the active playlist context (PlayPlaylist
                 // clears the snapshot; a restored session boots with it
@@ -341,6 +351,10 @@ impl Nokkvi {
                 self.shell_spawn("queue_move_item", move |shell| async move {
                     shell.move_queue_item(from, to).await
                 });
+
+                // Drag reorder mutates the local order without a reload, so
+                // re-check whether it still matches the applied sort.
+                self.revalidate_queue_sorted();
             }
             QueueAction::MoveBatch { indices, target } => {
                 // Multi-selection drag reorder, addressed end-to-end by
@@ -422,6 +436,10 @@ impl Nokkvi {
                         .move_queue_batch_by_entry_ids(entry_ids, target_for_backend)
                         .await
                 });
+
+                // Drag reorder mutates the local order without a reload, so
+                // re-check whether it still matches the applied sort.
+                self.revalidate_queue_sorted();
             }
             QueueAction::RemoveFromQueue(entry_ids) => {
                 if entry_ids.is_empty() {
@@ -821,6 +839,9 @@ impl Nokkvi {
         // Drop any multi-selection — the in-place reorder leaves the indices
         // pointing at different songs.
         self.queue_page.common.slot_list.clear_multi_selection();
+        // This is the sole promoter of the "sorted" state — the dropdown now
+        // shows the applied mode instead of the "Unsorted" placeholder.
+        self.queue_page.queue_sorted = true;
         self.sort_queue_songs();
         let filtered = self.filter_queue_songs().into_owned();
         // Re-center on the currently playing song in the new sort order
@@ -864,6 +885,9 @@ impl Nokkvi {
         // mode; clear it so the next deterministic pick actually re-sorts
         // the now-randomized list.
         self.queue_page.last_sort_signature = None;
+        // A randomized order has no verifiable sort — show "Unsorted" rather
+        // than a stale deterministic mode (Random is never persisted either).
+        self.queue_page.queue_sorted = false;
 
         self.shell_task(
             |shell| async move {

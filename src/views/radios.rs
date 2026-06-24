@@ -262,6 +262,7 @@ impl RadiosPage {
             )),
             // Radio stations have no duration — count only.
             total_duration_secs: None,
+            sort_placeholder: None,
         });
 
         use crate::widgets::slot_list::{

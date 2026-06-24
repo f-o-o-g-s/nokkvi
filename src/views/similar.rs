@@ -319,6 +319,7 @@ impl SimilarPage {
             on_dropdown_open: None,
             on_dropdown_close: None,
             total_duration_secs: None,
+            sort_placeholder: None,
         });
 
         // Compose with the tri-state "select all" header bar when the

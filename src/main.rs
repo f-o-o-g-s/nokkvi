@@ -898,6 +898,107 @@ impl Nokkvi {
             .set_offset(0, self.library.queue_songs.len());
     }
 
+    /// Whether `library.queue_songs` is currently in `mode` / `ascending`
+    /// order — the read-only verification counterpart to [`Self::sort_queue_songs`].
+    ///
+    /// `handle_queue_loaded` calls this to decide whether a freshly-loaded
+    /// queue still reflects an applied sort (keep the dropdown label) or arrived
+    /// from elsewhere — play album/playlist, session restore, add/remove, drag,
+    /// consume, an SSE refresh — in which case the label reverts to "Unsorted".
+    /// A queue of 0 or 1 songs is trivially sorted. `Random` has no
+    /// deterministic order to verify, so it always reports `false`.
+    ///
+    /// INTERLOCK: the per-mode comparisons here mirror `sort_queue_songs`
+    /// exactly (same fields, same `Reverse` for Rating/MostPlayed, same
+    /// `ascending` flip). The `queue_is_sorted_matches_sort_queue_songs` parity
+    /// test pins the two together.
+    pub fn queue_is_sorted(&self, mode: views::QueueSortMode, ascending: bool) -> bool {
+        use views::QueueSortMode;
+
+        let songs = &self.library.queue_songs;
+        match mode {
+            // A shuffled order is not a verifiable sort.
+            QueueSortMode::Random => false,
+            // 0 or 1 items are trivially in order for any deterministic mode.
+            _ if songs.len() < 2 => true,
+            QueueSortMode::Title
+            | QueueSortMode::Artist
+            | QueueSortMode::Album
+            | QueueSortMode::Genre => {
+                let key = |s: &nokkvi_data::backend::queue::QueueSongUIViewData| match mode {
+                    QueueSortMode::Title => s.title.to_lowercase(),
+                    QueueSortMode::Artist => s.artist.to_lowercase(),
+                    QueueSortMode::Album => s.album.to_lowercase(),
+                    QueueSortMode::Genre => s.genre.to_lowercase(),
+                    _ => unreachable!("string sort branch covers only string variants"),
+                };
+                if ascending {
+                    songs.windows(2).all(|w| key(&w[0]) <= key(&w[1]))
+                } else {
+                    songs.windows(2).all(|w| key(&w[0]) >= key(&w[1]))
+                }
+            }
+            QueueSortMode::Duration => {
+                if ascending {
+                    songs
+                        .windows(2)
+                        .all(|w| w[0].duration_seconds <= w[1].duration_seconds)
+                } else {
+                    songs
+                        .windows(2)
+                        .all(|w| w[0].duration_seconds >= w[1].duration_seconds)
+                }
+            }
+            // `sort_queue_songs` keys Rating/MostPlayed by `Reverse(..)`, so the
+            // default (ascending) order is highest-first; the `!ascending` flip
+            // makes it lowest-first.
+            QueueSortMode::Rating => {
+                if ascending {
+                    songs
+                        .windows(2)
+                        .all(|w| w[0].rating.unwrap_or(0) >= w[1].rating.unwrap_or(0))
+                } else {
+                    songs
+                        .windows(2)
+                        .all(|w| w[0].rating.unwrap_or(0) <= w[1].rating.unwrap_or(0))
+                }
+            }
+            QueueSortMode::MostPlayed => {
+                if ascending {
+                    songs
+                        .windows(2)
+                        .all(|w| w[0].play_count.unwrap_or(0) >= w[1].play_count.unwrap_or(0))
+                } else {
+                    songs
+                        .windows(2)
+                        .all(|w| w[0].play_count.unwrap_or(0) <= w[1].play_count.unwrap_or(0))
+                }
+            }
+        }
+    }
+
+    /// Re-evaluate the queue's sort state after an out-of-band order change
+    /// (external reload or in-place drag reorder). Two jobs:
+    ///
+    /// 1. Invalidate the `sort_queue_songs` short-circuit cache
+    ///    (`last_sort_signature`). The cache keys on `(mode, ascending, len)`,
+    ///    so a same-length reorder leaves a stale signature that would make a
+    ///    re-applied sort a no-op (rendering the stale order under the sort
+    ///    label). Clearing it forces the next deterministic sort to actually
+    ///    run — mirroring how `dispatch_random_queue_shuffle` clears it.
+    /// 2. Demote the "sorted" state when the new order no longer reflects the
+    ///    applied sort. Demote-only: it never promotes (only `apply_queue_sort`
+    ///    does), so a queue that merely coincides with a mode is never shown as
+    ///    if the user applied it.
+    pub fn revalidate_queue_sorted(&mut self) {
+        self.queue_page.last_sort_signature = None;
+        if self.queue_page.queue_sorted {
+            let mode = self.queue_page.queue_sort_mode;
+            let ascending = self.queue_page.common.sort_ascending;
+            self.queue_page.queue_sorted = self.queue_is_sorted(mode, ascending);
+        }
+    }
+
     /// Sort radio stations based on current sort order (client-side). Same
     /// short-circuit and `sort_by_cached_key` policy as `sort_queue_songs`.
     pub fn sort_radio_stations(&mut self) {

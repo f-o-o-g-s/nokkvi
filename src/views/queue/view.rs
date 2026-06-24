@@ -222,6 +222,10 @@ impl QueuePage {
                     .map(|s| u64::from(s.duration_seconds))
                     .sum(),
             ),
+            // Show "Unsorted" until the user applies a queue sort — the queue
+            // takes its order from whatever populated it, so the remembered
+            // `queue_sort_mode` would otherwise misrepresent the actual order.
+            sort_placeholder: (!self.queue_sorted).then_some("Unsorted"),
         });
 
         // Build final header: regular header + optional "Playing From" banner.
@@ -612,7 +616,10 @@ impl QueuePage {
         let _scale_factor = data.scale_factor;
         let current_playing_song_id = data.current_playing_song_id;
         let current_playing_entry_id = data.current_playing_entry_id;
-        let current_sort_mode = self.queue_sort_mode; // For conditional column/genre display
+        // Effective applied sort: `None` when the queue is unsorted, so the
+        // plays/genre columns auto-show only when a genuine Most Played / Genre
+        // sort is in effect (not merely the remembered mode).
+        let applied_sort_mode = self.queue_sorted.then_some(self.queue_sort_mode);
         let album_art = data.album_art; // Move artwork maps
         let large_artwork = data.large_artwork;
         let queue_songs = data.queue_songs; // Move ownership to extend lifetime
@@ -631,7 +638,7 @@ impl QueuePage {
                 list_config: &config,
                 drop_indicator_slot: data.drop_indicator_slot,
                 columns: column_visibility,
-                sort_mode: current_sort_mode,
+                sort_mode: applied_sort_mode,
                 album_art,
                 current_playing_song_id: current_playing_song_id.clone(),
                 current_playing_entry_id,

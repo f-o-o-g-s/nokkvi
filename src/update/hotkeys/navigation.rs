@@ -150,23 +150,17 @@ impl Nokkvi {
         // Queue uses QueueSortMode (separate enum), handle it explicitly
         if self.current_view == View::Queue {
             self.queue_page.common.search_input_focused = false;
-            use views::QueueSortMode;
-            let types = QueueSortMode::all();
-            let current_idx = types
-                .iter()
-                .position(|t| *t == self.queue_page.queue_sort_mode)
-                .unwrap_or(0);
-            let new_idx = if forward {
-                (current_idx + 1) % types.len()
-            } else {
-                (current_idx + types.len() - 1) % types.len()
-            };
+            let target = next_queue_sort_target(
+                self.queue_page.queue_sort_mode,
+                self.queue_page.queue_sorted,
+                forward,
+            );
             debug!(
-                "🔄 CycleSortMode (Queue): {:?} -> {:?}",
-                self.queue_page.queue_sort_mode, types[new_idx]
+                "🔄 CycleSortMode (Queue): {:?} (sorted={}) -> {:?}",
+                self.queue_page.queue_sort_mode, self.queue_page.queue_sorted, target
             );
             return Task::done(Message::Queue(views::QueueMessage::SortModeSelected(
-                types[new_idx],
+                target,
             )));
         }
 
@@ -420,5 +414,81 @@ impl Nokkvi {
         } else {
             Task::none()
         }
+    }
+}
+
+/// Pure: the queue sort mode a cycle-sort hotkey press should apply.
+///
+/// While unsorted with a *deterministic* remembered mode, the first press
+/// applies it (the mode shown grayed as "Unsorted") rather than skipping ahead.
+/// Otherwise — already sorted, or unsorted with `Random` remembered (re-applying
+/// `Random` would only reshuffle and stay unsorted, looping forever) — it
+/// advances to the adjacent mode in `QueueSortMode::all()` order.
+fn next_queue_sort_target(
+    current: views::QueueSortMode,
+    sorted: bool,
+    forward: bool,
+) -> views::QueueSortMode {
+    use views::QueueSortMode;
+
+    if !sorted && current != QueueSortMode::Random {
+        return current;
+    }
+    let types = QueueSortMode::all();
+    let idx = types.iter().position(|t| *t == current).unwrap_or(0);
+    let new_idx = if forward {
+        (idx + 1) % types.len()
+    } else {
+        (idx + types.len() - 1) % types.len()
+    };
+    types[new_idx]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_queue_sort_target;
+    use crate::views::QueueSortMode;
+
+    #[test]
+    fn unsorted_deterministic_first_press_applies_remembered_mode() {
+        assert_eq!(
+            next_queue_sort_target(QueueSortMode::Title, false, true),
+            QueueSortMode::Title
+        );
+        assert_eq!(
+            next_queue_sort_target(QueueSortMode::Rating, false, false),
+            QueueSortMode::Rating
+        );
+    }
+
+    #[test]
+    fn sorted_advances_to_adjacent_mode() {
+        let all = QueueSortMode::all();
+        let album_idx = all.iter().position(|m| *m == QueueSortMode::Album).unwrap();
+        assert_eq!(
+            next_queue_sort_target(QueueSortMode::Album, true, true),
+            all[(album_idx + 1) % all.len()]
+        );
+        assert_eq!(
+            next_queue_sort_target(QueueSortMode::Album, true, false),
+            all[(album_idx + all.len() - 1) % all.len()]
+        );
+    }
+
+    #[test]
+    fn unsorted_random_remembered_advances_instead_of_reshuffling() {
+        // Regression (review finding): unsorted + Random must NOT re-apply
+        // Random (which would reshuffle and loop forever) — it advances to a
+        // deterministic neighbor.
+        assert_ne!(
+            next_queue_sort_target(QueueSortMode::Random, false, true),
+            QueueSortMode::Random,
+            "forward press must not loop on Random"
+        );
+        assert_ne!(
+            next_queue_sort_target(QueueSortMode::Random, false, false),
+            QueueSortMode::Random,
+            "backward press must not loop on Random"
+        );
     }
 }

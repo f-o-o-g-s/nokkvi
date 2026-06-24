@@ -95,6 +95,7 @@ impl AlbumsPage {
             on_dropdown_close: autohide.then_some(AlbumsMessage::SlotList(
                 crate::widgets::SlotListPageMessage::ToolbarDropdownToggled(false),
             )),
+            sort_placeholder: None,
             total_duration_secs: {
                 let secs: f64 = data.albums.iter().filter_map(|a| a.duration).sum();
                 (secs > 0.0).then_some(secs as u64)

@@ -33,8 +33,19 @@ mod view;
 pub struct QueuePage {
     pub common: SlotListPageState,
     /// Queue uses its own sort mode enum (QueueSortMode), separate from
-    /// the library views' SortMode.
+    /// the library views' SortMode. This is the *remembered* mode: it drives
+    /// the dropdown's highlighted entry once a sort is applied, the sort-order
+    /// toggle target, the hotkey cycle, and persistence — but it is shown only
+    /// when [`Self::queue_sorted`] is true.
     pub queue_sort_mode: QueueSortMode,
+    /// Whether the current queue order is the result of an applied queue sort.
+    /// The queue takes its order from whatever populated it (play album, restore
+    /// a session, add/remove, drag, consume, an SSE refresh, …), so by default
+    /// it is *not* in `queue_sort_mode` order — the dropdown shows a grayed
+    /// "Unsorted" placeholder rather than a stale remembered mode. Only
+    /// `apply_queue_sort` promotes this to true; `handle_queue_loaded` demotes
+    /// it back the moment a reloaded order no longer matches the applied mode.
+    pub queue_sorted: bool,
     /// Per-column visibility toggles surfaced via the columns-3-cog dropdown
     /// in the view header. Persisted to config.toml.
     pub column_visibility: QueueColumnVisibility,
@@ -271,6 +282,7 @@ impl Default for QueuePage {
         Self {
             common: SlotListPageState::new_without_sort_mode(),
             queue_sort_mode: QueueSortMode::Album,
+            queue_sorted: false,
             column_visibility: QueueColumnVisibility::default(),
             last_sort_signature: None,
             playlist_strip_expanded: false,
