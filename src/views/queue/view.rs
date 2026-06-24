@@ -818,22 +818,18 @@ impl QueuePage {
                 data.overlay.open_menu,
                 QueueMessage::SetOpenMenu,
             );
-        // Over-cover visualizer overlay: only while audio is playing (the same
-        // gate the now-playing cover uses), and only when the active mode is set
+        // Over-cover visualizer overlay: render whenever the active mode is set
         // to draw over the cover (carried by `over_art_visualizer` — Scope
-        // always, Bars/Lines when their placement is OverCover). Otherwise
-        // `None` → plain cover.
-        let over_art_overlay = if data.is_playing {
-            data.over_art_visualizer.clone()
-        } else {
-            None
-        };
-        // Surfing boat over the cover — same is_playing gate as the ring above.
-        let over_art_boat = if data.is_playing {
-            data.over_art_boat
-        } else {
-            None
-        };
+        // always, Bars/Lines when their placement is OverCover), independent of
+        // play state. This mirrors the bottom-band path (`app_view`), which is
+        // also ungated: when audio pauses, no fresh chunk reaches the FFT worker,
+        // so `display.bars` / the ring waveform hold their last values and the
+        // overlay freezes in place rather than vanishing. Otherwise (bottom-band
+        // placement or `Off`) `over_art_visualizer` is `None` → plain cover.
+        let over_art_overlay = data.over_art_visualizer;
+        // Surfing boat over the cover — ungated to match the ring above; the boat
+        // tick holds `visible` and the frozen position/handle while paused.
+        let over_art_boat = data.over_art_boat;
         let artwork_content = Some(single_artwork_panel_with_visualizer_and_menu(
             center_artwork_handle,
             over_art_overlay,

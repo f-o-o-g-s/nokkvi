@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The over-cover visualizer (Bars, Lines, and Scope) now freezes in place when paused instead of disappearing, like the bottom-band placement already did.
+
 ### Removed
 
 ## v0.11.1 — 2026-06-23

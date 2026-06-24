@@ -123,8 +123,10 @@ pub struct QueueViewData<'a> {
     /// widget mode to render and the Visualizer Height fraction. `Some` when the
     /// active mode is `Scope` (always over the cover) or when Bars/Lines have
     /// their placement set to `OverCover`; `None` for the bottom-band placement
-    /// and `Off`. The view additionally gates on `is_playing` so the overlay only
-    /// shows while audio is playing. The `Visualizer` is `Clone`/Arc-backed, so
+    /// and `Off`. The view renders it regardless of play state — when paused, no
+    /// fresh audio reaches the FFT worker, so the waveform holds its last frame
+    /// and the overlay freezes in place instead of vanishing. (The bottom-band
+    /// placement is ungated the same way.) The `Visualizer` is `Clone`/Arc-backed, so
     /// this shares the live audio state with no extra plumbing. The `f32` is
     /// `cfg.height_percent`: Bars/Lines occupy that fraction of the cover height
     /// (bottom-anchored); Scope ignores it (the ring sizes off `scope.radius`).
@@ -136,8 +138,9 @@ pub struct QueueViewData<'a> {
     /// Surfing boat overlaid on the over-cover Lines visualizer. `Some` only
     /// when the active mode is Lines placed `OverCover` and the boat is visible;
     /// `None` otherwise (including Scope/Bars over the cover, where the boat has
-    /// no waveform to surf). Gated on `is_playing` by the view alongside
-    /// `over_art_visualizer`. Borrows the live `BoatState`, so its position is
+    /// no waveform to surf). Rendered regardless of play state by the view
+    /// alongside `over_art_visualizer` (frozen in place while paused). Borrows
+    /// the live `BoatState`, so its position is
     /// already driven by the per-frame boat tick. `pub(crate)` because
     /// `OverCoverBoat` wraps the crate-private `BoatState`.
     pub(crate) over_art_boat: Option<crate::widgets::base_slot_list_layout::OverCoverBoat<'a>>,

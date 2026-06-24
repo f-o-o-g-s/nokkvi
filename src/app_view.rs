@@ -1294,8 +1294,8 @@ impl Nokkvi {
             // draw, when the active mode is placed over the cover (Scope always;
             // Bars/Lines when their placement is OverCover). `resolve_placement`
             // is the shared source of truth with the bottom-band site in
-            // `view()`. The queue view also gates on is_playing. Other cases
-            // render nothing here.
+            // `view()`. The queue view renders it regardless of play state, so it
+            // freezes in place when paused. Other cases render nothing here.
             over_art_visualizer: {
                 let (over_art_mode, height_percent) = {
                     let cfg = self.visualizer_config.read();
@@ -1317,7 +1317,8 @@ impl Nokkvi {
             // and the boat is visible (the boat tick sets `visible` from lines
             // mode + the boat setting, for either placement). `opacity`/`mirror`
             // mirror what the bottom-band boat overlay is fed. The queue view
-            // applies the same is_playing gate as the ring.
+            // renders it regardless of play state, matching the ring (frozen
+            // while paused).
             over_art_boat: {
                 let (over_art_mode, opacity, mirror) = {
                     let cfg = self.visualizer_config.read();
