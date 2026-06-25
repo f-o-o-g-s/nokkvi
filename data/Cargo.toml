@@ -33,25 +33,31 @@ symphonia = { version = "0.5.5", features = ["mp3", "flac", "ogg", "wav", "aac",
 # whenever we move the symphonia pin. Default `bundled` feature vendors libopus
 # via opusic-sys so users need no runtime system package.
 symphonia-adapter-libopus = "0.2.9"
-tokio = { version = "1.50.0", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7"
 tracing = "0.1.44"
 url = "2.5.8"
 futures = "0.3.32"
-# Pinned for gapless playback / crossfade API requirements
+# Pinned to a rodio git rev ~21 commits past the v0.22.2 release for its
+# unreleased realtime-path fixes (span-boundary parameter-change detection,
+# frame-aligned Source contract, mixer channel alignment) on the Source/mixer
+# path the crossfade/gapless engine uses — crates.io 0.22.2 compiles + passes
+# tests but lacks them, risking a silent regression. NOT for cpal's PipeWire host
+# (native output is the `pipewire` crate; rodio/cpal is the ALSA fallback).
+# Un-pin to the first rodio release (>=0.23) that contains these fixes.
 rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "7e9ba6dd", default-features = false, features = ["playback", "tracing"] }
-ringbuf = "0.4"
+ringbuf = "0.5"
 rustfft = "6"
-redb = "3.1.1"
+redb = "4.1.0"
 font-kit = "0.14"
 parking_lot = "0.12.5"
 bincode-next = { version = "2.1", features = ["serde"] }
 thiserror = "2"
 num-complex = "0.4"
 icy-metadata = "0.6.0"
-biquad = "0.4.1"
+biquad = "0.6"
 [target.'cfg(target_os = "linux")'.dependencies]
-pipewire = { version = "0.9.2", features = ["v0_3_77"] }
+pipewire = { version = "0.10.0", features = ["v0_3_77"] }
 
 [dev-dependencies]
 tempfile = "3"
