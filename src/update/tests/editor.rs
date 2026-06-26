@@ -1064,7 +1064,9 @@ fn queue_navigation_during_edit_leaves_editor_buffer_untouched() {
     let editor_before = editor_buffer_snapshot(&app);
 
     // Reorder the queue (move row 0 down) — exercises the queue-navigation /
-    // reorder mutation path on `library.queue_songs`.
+    // reorder mutation path on `library.queue_songs`. The source row is
+    // snapshotted by entry_id on Pick, so the gesture is Pick-then-Drop.
+    let _ = app.handle_queue(QueueMessage::DragReorder(DragEvent::Picked { index: 0 }));
     let _ = app.handle_queue(QueueMessage::DragReorder(DragEvent::Dropped {
         index: 0,
         target_index: 2,

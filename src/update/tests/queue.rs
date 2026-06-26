@@ -1266,3 +1266,222 @@ fn queue_is_sorted_matches_sort_queue_songs() {
         }
     }
 }
+
+// ============================================================================
+// Drag-reorder: source identity is captured by entry_id at PICK time
+//
+// Regression for the queue reorder-mislanding bug. `DragColumn` freezes the
+// pick SLOT index for the whole gesture; re-resolving it to an item index at
+// DROP time against the live `viewport_offset` moves the WRONG row whenever the
+// viewport (or buffer) shifted between pick and drop. The common trigger is
+// playback auto-follow re-centering the queue on a track change, but a mid-drag
+// wheel scroll or queue reload does it too. The fix snapshots the source
+// row(s)' per-row `entry_id` at pick time; the destination stays live (it
+// follows the cursor on release).
+// ============================================================================
+
+/// Build a queue of `n` rows (`s0..s{n-1}`) longer than the slot window so the
+/// non-top-packing slot→item mapping (which depends on `viewport_offset`) is
+/// exercised.
+fn app_with_numbered_queue(n: usize) -> crate::Nokkvi {
+    let mut app = test_app();
+    app.library.queue_songs = (0..n)
+        .map(|i| make_queue_song(&format!("s{i}"), &format!("T{i}"), "Artist", "Album"))
+        .collect();
+    // Pin a deterministic 9-slot window (center 4) so the math below is fixed.
+    app.queue_page.common.slot_list.slot_count = 9;
+    app
+}
+
+#[test]
+fn drag_reorder_moves_pick_time_row_after_midwait_viewport_shift() {
+    use crate::{
+        views::{QueueAction, QueueMessage},
+        widgets::drag_column::DragEvent,
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    // At offset 5 (effective_center 4): slot s → item s+1, so slot 3 → item 4.
+    let grabbed = songs[4].entry_id;
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+
+    // Mid-drag the playing track advances → auto-follow re-centers the viewport.
+    app.queue_page.common.slot_list.set_offset(11, 20);
+
+    // Release over slot 7. The frozen pick slot 3 now maps to item 10 — the bug.
+    let (_t, action) = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dropped {
+            index: 3,
+            target_index: 7,
+        }),
+        &songs,
+    );
+
+    match action {
+        QueueAction::MoveItem {
+            source_entry_id,
+            to,
+        } => {
+            assert_eq!(
+                source_entry_id, grabbed,
+                "the moved row must be the one picked (entry_id snapshotted at pick), \
+                 not whatever the frozen pick slot maps to after the viewport shifted"
+            );
+            // At offset 11: slot 7 → item 14. Destination follows the live cursor.
+            assert_eq!(to, 14, "destination tracks the live cursor at drop time");
+        }
+        other => panic!("expected MoveItem, got {other:?}"),
+    }
+}
+
+#[test]
+fn drag_reorder_batch_captured_at_pick_survives_selection_clear() {
+    use crate::{
+        views::{QueueAction, QueueMessage},
+        widgets::drag_column::DragEvent,
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    for i in [3usize, 4, 5] {
+        app.queue_page.common.slot_list.selected_indices.insert(i);
+    }
+    let songs = app.library.queue_songs.clone();
+    let want: std::collections::HashSet<u64> =
+        [songs[3].entry_id, songs[4].entry_id, songs[5].entry_id]
+            .into_iter()
+            .collect();
+
+    // Pick a selected member: slot 3 → item 4 ∈ {3,4,5} → batch drag.
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+
+    // A consume-mode reload mid-drag clears the multi-selection and re-centers.
+    app.queue_page.common.slot_list.selected_indices.clear();
+    app.queue_page.common.slot_list.set_offset(11, 20);
+
+    let (_t, action) = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dropped {
+            index: 3,
+            target_index: 7,
+        }),
+        &songs,
+    );
+
+    match action {
+        QueueAction::MoveBatch { entry_ids, target } => {
+            let got: std::collections::HashSet<u64> = entry_ids.into_iter().collect();
+            assert_eq!(
+                got, want,
+                "the whole pick-time selection must move as a batch even after the \
+                 selection set was cleared by a mid-drag reload"
+            );
+            assert_eq!(target, 14);
+        }
+        other => panic!("expected MoveBatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn drag_reorder_drop_past_last_row_appends_to_end() {
+    use crate::{
+        views::{QueueAction, QueueMessage},
+        widgets::drag_column::DragEvent,
+    };
+
+    // Short queue (top-packing): 3 rows in a 9-slot window.
+    let mut app = app_with_numbered_queue(3);
+    app.queue_page.common.slot_list.set_offset(0, 3);
+    let songs = app.library.queue_songs.clone();
+    let grabbed = songs[0].entry_id;
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 0 }),
+        &songs,
+    );
+
+    // Cursor released below all rows → `compute_target_index` reports
+    // `children.len()` (== slot_count, 9), which maps past the last item.
+    let (_t, action) = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dropped {
+            index: 0,
+            target_index: 9,
+        }),
+        &songs,
+    );
+
+    match action {
+        QueueAction::MoveItem {
+            source_entry_id,
+            to,
+        } => {
+            assert_eq!(source_entry_id, grabbed);
+            assert_eq!(
+                to, 3,
+                "a drop past the last row appends at end (to == len), not a silent no-op"
+            );
+        }
+        other => panic!("expected MoveItem appending to end, got {other:?}"),
+    }
+}
+
+/// The destination must be resolved against the LIVE viewport at drop time,
+/// including the boundary `effective_center` clamp. When a mid-drag viewport
+/// shift moves the list into its end region, `effective_center` clamps away
+/// from `slot_count/2`; `slot_to_item_index_for_drop` accounts for that, where
+/// a frozen-at-pick mapping would misland by the clamp delta.
+#[test]
+fn drag_reorder_destination_uses_live_boundary_effective_center() {
+    use crate::{
+        views::{QueueAction, QueueMessage},
+        widgets::drag_column::DragEvent,
+    };
+
+    // 14 rows, 9 slots (center 4).
+    let mut app = app_with_numbered_queue(14);
+    // Pick in the mid region (offset 4 → effective_center 4): slot 4 → item 4.
+    app.queue_page.common.slot_list.set_offset(4, 14);
+    let songs = app.library.queue_songs.clone();
+    let grabbed = songs[4].entry_id;
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 4 }),
+        &songs,
+    );
+
+    // Mid-drag auto-follow re-centers near the END: offset 10 → items_after=4,
+    // end_push=5, so effective_center clamps to 5 (not 4).
+    app.queue_page.common.slot_list.set_offset(10, 14);
+
+    // Drop at slot 3. Live mapping: 10 + (3 - 5) = item 8. A frozen-center
+    // formula would have given 10 + (3 - 4) ... = 9 — off by the clamp delta.
+    let (_t, action) = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dropped {
+            index: 4,
+            target_index: 3,
+        }),
+        &songs,
+    );
+
+    match action {
+        QueueAction::MoveItem {
+            source_entry_id,
+            to,
+        } => {
+            assert_eq!(source_entry_id, grabbed, "source stays the pick-time row");
+            assert_eq!(
+                to, 8,
+                "destination must use the live boundary effective_center (item 8), not 9"
+            );
+        }
+        other => panic!("expected MoveItem, got {other:?}"),
+    }
+}

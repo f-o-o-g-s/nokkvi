@@ -120,75 +120,124 @@ impl QueuePage {
                 let drag_allowed = self.common.search_query.is_empty();
 
                 match drag_event {
-                    DragEvent::Picked { .. } if !drag_allowed => (
-                        Task::none(),
-                        QueueAction::ShowToast("Clear search to reorder queue".to_string()),
-                    ),
+                    DragEvent::Picked { .. } if !drag_allowed => {
+                        // A search activated since the drag began; drop any
+                        // half-captured source so a later (search-cleared) drop
+                        // can't consume stale pick state.
+                        self.drag_source = None;
+                        (
+                            Task::none(),
+                            QueueAction::ShowToast("Clear search to reorder queue".to_string()),
+                        )
+                    }
                     DragEvent::Dropped {
                         index,
                         target_index,
                     } if drag_allowed => {
-                        // Translate slot indices to absolute item indices using the
-                        // same effective_center logic that build_slot_list_slots uses for
-                        // rendering. Simple `viewport_offset + slot` is wrong because
-                        // it doesn't account for the center_slot offset.
-                        let from = self.common.slot_list.slot_to_item_index(index, total_items);
+                        // SOURCE: snapshotted by per-row entry_id at PICK time, so
+                        // it survives a mid-drag viewport shift (playback
+                        // auto-follow re-centering) or a queue reload. The frozen
+                        // pick SLOT (`index`) is intentionally unused.
+                        let _ = index;
+                        let source = self.drag_source.take();
+
+                        // DESTINATION: follows the live cursor against the CURRENT
+                        // viewport. `slot_to_item` reads the stored slot_count,
+                        // which `handle_queue` resyncs (collapse-aware) immediately
+                        // before this update — so it matches the live render even
+                        // with the auto-hide toolbar collapsed, and computes the
+                        // boundary `effective_center` correctly. A past-end /
+                        // empty-area drop maps to `None`; treat it as "append at
+                        // end", mirroring the cross-pane `HoveredSlot::Empty` drop.
                         let to = self
                             .common
                             .slot_list
-                            .slot_to_item_index_for_drop(target_index, total_items);
+                            .slot_to_item_index_for_drop(target_index, total_items)
+                            .unwrap_or(total_items);
+
                         debug!(
-                            "\u{1f4e6} [QUEUE] Drag reorder: slot {}\u{2192}{} \u{2192} item {:?}\u{2192}{:?} \\
-                             (viewport_offset={}, slot_count={}, total={})",
-                            index,
+                            "\u{1f4e6} [QUEUE] Drag drop: target slot {} \u{2192} item {} \
+                             (source rows {:?}, viewport_offset={}, slot_count={}, total={})",
                             target_index,
-                            from,
                             to,
+                            source.as_deref().map(<[u64]>::len),
                             self.common.slot_list.viewport_offset,
                             self.common.slot_list.slot_count,
                             total_items,
                         );
 
-                        // Multi-selection batch drag: if selected_indices has multiple
-                        // items and the dragged item is one of them, move the whole batch.
-                        let selected = &self.common.slot_list.selected_indices;
-                        if selected.len() > 1
-                            && from.is_some_and(|f| selected.contains(&f))
-                            && let Some(t) = to
-                        {
-                            let indices: Vec<usize> = selected.iter().copied().collect();
-                            self.common.clear_multi_selection();
-                            (Task::none(), QueueAction::MoveBatch { indices, target: t })
-                        } else {
-                            match (from, to) {
-                                (Some(f), Some(t)) => {
-                                    // Keep highlight on the moved item at its new position
-                                    let insert_at = if f < t { t - 1 } else { t };
-                                    self.common.slot_list.set_selected(insert_at, total_items);
-                                    (Task::none(), QueueAction::MoveItem { from: f, to: t })
-                                }
-                                _ => {
-                                    debug!(
-                                        "\u{1f4e6} [QUEUE] Drag dropped on empty slot, ignoring"
-                                    );
-                                    (Task::none(), QueueAction::None)
-                                }
+                        match source {
+                            // Multi-selection batch drag.
+                            Some(ids) if ids.len() > 1 => {
+                                self.common.clear_multi_selection();
+                                (
+                                    Task::none(),
+                                    QueueAction::MoveBatch {
+                                        entry_ids: ids,
+                                        target: to,
+                                    },
+                                )
+                            }
+                            // Single-row drag.
+                            Some(ids) => match ids.first() {
+                                Some(&source_entry_id) => (
+                                    Task::none(),
+                                    QueueAction::MoveItem {
+                                        source_entry_id,
+                                        to,
+                                    },
+                                ),
+                                None => (Task::none(), QueueAction::None),
+                            },
+                            None => {
+                                debug!(
+                                    "\u{1f4e6} [QUEUE] Drag drop with no captured source, ignoring"
+                                );
+                                (Task::none(), QueueAction::None)
                             }
                         }
                     }
                     DragEvent::Picked { index } if drag_allowed => {
-                        // Check if the picked item is part of an active multi-selection.
-                        // If yes, preserve the selection (batch drag). If not, highlight
-                        // only the dragged item (single drag).
+                        // Snapshot the dragged source row(s) by per-row entry_id
+                        // NOW. `slot_to_item_index` reads the stored slot_count,
+                        // which `handle_queue` resyncs (collapse-aware) immediately
+                        // before this update, so it matches the live render. The
+                        // entry_id snapshot then survives any later viewport shift.
                         if let Some(item_index) =
                             self.common.slot_list.slot_to_item_index(index, total_items)
-                            && !self.common.slot_list.selected_indices.contains(&item_index)
                         {
-                            self.common.slot_list.set_selected(item_index, total_items);
+                            // A multi-selection drag moves the whole batch only
+                            // when the picked row is one of the selected rows.
+                            let is_batch = self.common.slot_list.selected_indices.len() > 1
+                                && self.common.slot_list.selected_indices.contains(&item_index);
+                            if is_batch {
+                                let ids: Vec<u64> = self
+                                    .common
+                                    .slot_list
+                                    .selected_indices
+                                    .iter()
+                                    .filter_map(|&i| queue_songs.get(i).map(|s| s.entry_id))
+                                    .collect();
+                                self.drag_source = (!ids.is_empty()).then_some(ids);
+                            } else {
+                                // Single drag: highlight only this row and
+                                // capture its identity.
+                                self.common.slot_list.set_selected(item_index, total_items);
+                                self.drag_source =
+                                    queue_songs.get(item_index).map(|s| vec![s.entry_id]);
+                            }
+                        } else {
+                            // Picked an empty/padding slot — nothing to drag.
+                            self.drag_source = None;
                         }
                         (Task::none(), QueueAction::None)
                     }
-                    _ => (Task::none(), QueueAction::None),
+                    // Dropped while a search is active: swallow it and clear any
+                    // stale pick state so a later drop can't replay it.
+                    _ => {
+                        self.drag_source = None;
+                        (Task::none(), QueueAction::None)
+                    }
                 }
             }
             QueueMessage::ContextMenuAction(clicked_idx, entry) => match entry {

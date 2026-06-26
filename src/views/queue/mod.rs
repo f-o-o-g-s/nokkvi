@@ -62,6 +62,16 @@ pub struct QueuePage {
     /// entering and exiting playlist edit mode, because that transition unmounts
     /// the banner's hover `mouse_area` and the `on_exit` collapse can never fire.
     pub playlist_strip_expanded: bool,
+    /// Source rows for an in-progress drag-reorder, captured by per-row
+    /// `entry_id` at *pick* time. The slot→item resolution depends on the live
+    /// `viewport_offset`, which playback's auto-follow (or a mid-drag wheel
+    /// scroll / queue reload) can shift between pick and drop — resolving the
+    /// source positionally at drop time then moves the *wrong* row. Snapshot the
+    /// source identity up front instead: `entry_id` survives both a viewport
+    /// shift and a buffer reorder, exactly like the cross-pane and `MoveBatch`
+    /// paths. `len() == 1` is a single-row drag, `> 1` a multi-selection batch.
+    /// Taken (cleared) on drop, and on any aborted/search-swallowed drag.
+    pub drag_source: Option<Vec<u64>>,
 }
 
 // Toggleable queue columns, in columns-dropdown order (declaration order ==
@@ -241,13 +251,19 @@ pub enum QueueAction {
     SetRating(String, usize),       // (song_id, rating) - set absolute rating
     ToggleStar(String, bool),       // (song_id, new_starred) - toggle starred state
     MoveItem {
-        from: usize,
+        /// Per-row `entry_id` of the dragged row, captured at pick time so a
+        /// mid-drag viewport shift / reload can't re-resolve it to a different
+        /// row. The handler re-finds its current position before moving.
+        source_entry_id: u64,
+        /// Destination item index (insert-before), resolved from the *live*
+        /// cursor at drop time. `total_items` means "append at end".
         to: usize,
-    }, // drag-and-drop reorder (absolute item indices)
+    }, // single-row drag-and-drop reorder (source by entry_id)
     MoveBatch {
-        indices: Vec<usize>,
+        /// Per-row `entry_id`s of the dragged rows, captured at pick time.
+        entry_ids: Vec<u64>,
         target: usize,
-    }, // multi-selection drag reorder
+    }, // multi-selection drag reorder (sources by entry_id)
     /// Remove one or more queue rows by their per-row `entry_id`s.
     /// Duplicate-aware: targets specific rows rather than every row that
     /// shares a song_id.
@@ -286,6 +302,7 @@ impl Default for QueuePage {
             column_visibility: QueueColumnVisibility::default(),
             last_sort_signature: None,
             playlist_strip_expanded: false,
+            drag_source: None,
         }
     }
 }

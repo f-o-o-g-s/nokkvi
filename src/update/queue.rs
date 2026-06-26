@@ -20,6 +20,18 @@ use crate::{
 };
 
 impl Nokkvi {
+    /// Resolve a per-row `entry_id` to its current position in
+    /// `library.queue_songs`. This is the load-bearing drift-safety primitive
+    /// for optimistic queue mutations — entry_id survives the optimistic-shift
+    /// window that raw indices don't — so every queue reorder path resolves
+    /// through it (mirrors `QueueManager::index_of_entry` on the backend side).
+    pub(crate) fn queue_position_by_entry_id(&self, entry_id: u64) -> Option<usize> {
+        self.library
+            .queue_songs
+            .iter()
+            .position(|s| s.entry_id == entry_id)
+    }
+
     pub(crate) fn handle_load_queue(&mut self) -> Task<Message> {
         self.shell_task(
             |shell| async move {
@@ -328,50 +340,77 @@ impl Nokkvi {
             QueueAction::ToggleStar(song_id, star) => {
                 return self.toggle_star_with_revert_task(song_id, ItemKind::Song, star);
             }
-            QueueAction::MoveItem { from, to } => {
-                // `from` and `to` are indices into `library.queue_songs` (the
-                // FULL queue). This is safe because the drag-reorder dispatch
-                // at `views/queue/update.rs::DragReorder` blocks the action
-                // entirely while search is active (filtered_queue would
-                // otherwise differ from library.queue_songs and the indices
-                // could not be reused). The hotkey path also guards on
-                // empty search. If a future caller plumbs MoveItem from a
-                // filtered context, migrate it to `entry_id` like
-                // `MoveBatch` (see `move_queue_batch_by_entry_ids`) — raw
-                // indices are also drift-prone across the optimistic-
-                // mutation window for a second action issued before the
-                // backend acks the first.
+            QueueAction::MoveItem {
+                source_entry_id,
+                to,
+            } => {
+                // The SOURCE is identified by per-row `entry_id` captured at
+                // PICK time, so a mid-drag viewport shift (playback auto-follow
+                // re-centering on a track change) or a queue reload can't make
+                // it name a different row. Re-find its current position here at
+                // drop time. `to` is the live drop item index into
+                // `library.queue_songs` (== filtered while a drag is allowed,
+                // since search blocks the drag); `to == len` appends.
+                let Some(from) = self.queue_position_by_entry_id(source_entry_id) else {
+                    return Task::none();
+                };
+
                 let len = self.library.queue_songs.len();
-                if from < len && to <= len && from != to {
+                if to <= len && from != to {
+                    // Capture the backend target by entry_id BEFORE the
+                    // optimistic reorder shifts indices: insert above the row
+                    // currently at `to`, or append when `to` is past the last
+                    // row. Sending entry_ids (not a raw index) lets the backend
+                    // re-resolve under its own write lock, so a rapid second
+                    // drag can't relocate the wrong server-side row — matching
+                    // the MoveBatch path.
+                    let target_for_backend = self
+                        .library
+                        .queue_songs
+                        .get(to)
+                        .map_or(MoveBatchTarget::End, |s| {
+                            MoveBatchTarget::AboveEntry(s.entry_id)
+                        });
+
                     let item = self.library.queue_songs.remove(from);
                     let insert_at = if from < to { to - 1 } else { to };
                     self.library.queue_songs.insert(insert_at, item);
+                    // Keep the highlight on the moved row at its new position
+                    // (the view no longer knows `from`, so the cursor lives here).
+                    let new_len = self.library.queue_songs.len();
+                    self.queue_page
+                        .common
+                        .slot_list
+                        .set_selected(insert_at, new_len);
+
+                    self.shell_spawn("queue_move_item", move |shell| async move {
+                        shell
+                            .move_queue_batch_by_entry_ids(
+                                vec![source_entry_id],
+                                target_for_backend,
+                            )
+                            .await
+                    });
+
+                    // Drag reorder mutates the local order without a reload, so
+                    // re-check whether it still matches the applied sort.
+                    self.revalidate_queue_sorted();
                 }
-
-                self.shell_spawn("queue_move_item", move |shell| async move {
-                    shell.move_queue_item(from, to).await
-                });
-
-                // Drag reorder mutates the local order without a reload, so
-                // re-check whether it still matches the applied sort.
-                self.revalidate_queue_sorted();
             }
-            QueueAction::MoveBatch { indices, target } => {
-                // Multi-selection drag reorder, addressed end-to-end by
-                // per-row entry_id: every position lookup resolves through
-                // the row's `entry_id` so a stale `track_number` projection
-                // (post-optimistic-mutation) can't pick the wrong row to
-                // remove or land before.
-                let entry_ids: Vec<u64> = indices
-                    .iter()
-                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.entry_id))
-                    .collect();
+            QueueAction::MoveBatch { entry_ids, target } => {
+                // Multi-selection drag reorder, addressed end-to-end by per-row
+                // `entry_id`: the source rows are snapshotted at PICK time (so a
+                // mid-drag viewport shift / reload — or a reload that clears the
+                // multi-selection — can't change which rows move), and every
+                // position lookup here resolves through `entry_id` so a stale
+                // `track_number` projection (post-optimistic-mutation) can't
+                // pick the wrong row to remove or land before.
                 if entry_ids.is_empty() {
                     return Task::none();
                 }
 
-                // Target — either a row's entry_id, or "end of queue" if
-                // the user dragged past the last filtered row.
+                // Target — either a row's entry_id, or "end of queue" if the
+                // user dropped past the last row (`target == filtered len`).
                 let target_entry_id = filtered_queue.get(target).map(|s| s.entry_id);
                 let target_for_backend =
                     target_entry_id.map_or(MoveBatchTarget::End, MoveBatchTarget::AboveEntry);
@@ -383,12 +422,7 @@ impl Nokkvi {
                 // closing the rapid-drag drift window.
                 let mut raw_indices_desc: Vec<usize> = entry_ids
                     .iter()
-                    .filter_map(|&eid| {
-                        self.library
-                            .queue_songs
-                            .iter()
-                            .position(|s| s.entry_id == eid)
-                    })
+                    .filter_map(|&eid| self.queue_position_by_entry_id(eid))
                     .collect();
                 if raw_indices_desc.is_empty() {
                     return Task::none();
@@ -396,12 +430,7 @@ impl Nokkvi {
                 raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // descending
 
                 let raw_target = target_entry_id
-                    .and_then(|eid| {
-                        self.library
-                            .queue_songs
-                            .iter()
-                            .position(|s| s.entry_id == eid)
-                    })
+                    .and_then(|eid| self.queue_position_by_entry_id(eid))
                     .unwrap_or(self.library.queue_songs.len());
 
                 debug!(

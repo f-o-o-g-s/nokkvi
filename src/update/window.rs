@@ -52,29 +52,66 @@ impl Nokkvi {
             slot_list::{SlotListConfig, chrome_height_with_header},
         };
 
-        // Use the full-header footprint: the operations that read this stored
-        // slot_count (expansion landing, center-on-playing) all fire the toolbar
-        // reveal hotkeys, so the toolbar is expanded when they run.
-        let standard_chrome = chrome_height_with_header(false);
-        let layout = BaseSlotListLayoutConfig {
+        // The vertical artwork chrome is governed by the window + artwork
+        // column only, so it's shared across pages. Probe it with the expanded
+        // footprint — the collapse delta is far too small to flip the
+        // landscape/portrait artwork fit.
+        let probe = BaseSlotListLayoutConfig {
             window_width: self.content_pane_width(),
             window_height: self.window.height,
             show_artwork_column: true,
-            slot_list_chrome: standard_chrome,
+            slot_list_chrome: chrome_height_with_header(false),
             elevated: false,
         };
-        let vertical = vertical_artwork_chrome(&layout);
-        let sc = SlotListConfig::with_dynamic_slots(self.window.height, standard_chrome + vertical)
-            .slot_count;
+        let vertical = vertical_artwork_chrome(&probe);
 
-        self.albums_page.common.slot_list.slot_count = sc;
-        self.artists_page.common.slot_list.slot_count = sc;
-        self.songs_page.common.slot_list.slot_count = sc;
-        self.genres_page.common.slot_list.slot_count = sc;
-        self.playlists_page.common.slot_list.slot_count = sc;
-        self.queue_page.common.slot_list.slot_count = sc;
-        self.radios_page.common.slot_list.slot_count = sc;
-        self.similar_page.common.slot_list.slot_count = sc;
+        // Per-page collapse state: when the auto-hide toolbar is enabled, a page
+        // whose toolbar isn't currently revealed renders the SHORTER collapsed
+        // header and therefore packs MORE slots. The stored count must reflect
+        // that — a hardcoded expanded footprint desyncs every consumer that
+        // reads slot_count without first revealing the toolbar: find-and-expand
+        // row landing centers on `slot_count/2` (lands the row a slot too low),
+        // and the drag mapper used to grab the wrong row (now anchored on
+        // hovered_slot, but kept honest here too). The reveal-on-read
+        // assumption holds for the keyboard scroll/center paths but not these.
+        //
+        // When auto-hide is OFF, `toolbar_collapsed` is always `false`, so this
+        // reduces to the previous expanded-footprint behavior exactly.
+        let autohide = crate::theme::is_autohide_toolbar();
+        let window_height = self.window.height;
+        let sc = |collapsed: bool| {
+            SlotListConfig::with_dynamic_slots(
+                window_height,
+                chrome_height_with_header(collapsed) + vertical,
+            )
+            .slot_count
+        };
+        // At most two distinct footprints exist; compute each once instead of
+        // re-running the float-heavy `with_dynamic_slots` per page. With
+        // auto-hide off, every page is `expanded`, so `sc_collapsed` is never
+        // computed.
+        let sc_expanded = sc(false);
+        let sc_collapsed = if autohide { sc(true) } else { sc_expanded };
+
+        // One loop over the (disjoint) page commons keeps the read and write
+        // for each page on the same binding — no parallel-list drift where a
+        // mismatched pair could size one page from another's collapse state.
+        for common in [
+            &mut self.albums_page.common,
+            &mut self.artists_page.common,
+            &mut self.songs_page.common,
+            &mut self.genres_page.common,
+            &mut self.playlists_page.common,
+            &mut self.queue_page.common,
+            &mut self.radios_page.common,
+            &mut self.similar_page.common,
+        ] {
+            common.slot_list.slot_count = if common.toolbar_collapsed(autohide, false) {
+                sc_collapsed
+            } else {
+                sc_expanded
+            };
+        }
     }
 
     /// Prefetch mini artwork for whatever slots are currently visible in the
