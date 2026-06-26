@@ -3003,7 +3003,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nokkvi"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "anyhow",
  "arc-swap",

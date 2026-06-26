@@ -10,11 +10,15 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- Dragging to reorder the queue now moves the row you grabbed to where you dropped it. Previously it could grab the wrong row (one off) or land it in an unexpected spot — most visibly with the auto-hide toolbar collapsed, or when the queue scrolled to follow the playing track mid-drag. It now stays correct regardless of toolbar state, scrolling, or playback. Dragging songs in from the library browser was never affected.
-- Dropping a dragged queue row into the empty space below the last track now appends it to the end instead of snapping back.
-- With the auto-hide toolbar collapsed, jumping to and expanding a row (e.g. "Go to Album") now lands it at the top of the list instead of one row too low. The slot-count the app tracks now matches the collapsed layout it actually renders.
-
 ### Removed
+
+## v0.11.3 — 2026-06-25
+
+### Fixed
+
+- Dragging to reorder the queue now lands the row where you drop it, instead of one slot off or somewhere unexpected.
+- Dropping a dragged queue row into the empty space below the last track now appends it to the end instead of snapping back.
+- With the auto-hide toolbar collapsed, "Go to Album" now lands the target row at the top of the list instead of one row too low.
 
 ## v0.11.2 — 2026-06-24
 
