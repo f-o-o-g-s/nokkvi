@@ -285,3 +285,40 @@ fn mini_player_artwork_none_without_current_song() {
         "no current song => resolver returns None even in MiniPlayer mode",
     );
 }
+
+#[test]
+fn mini_player_artwork_uses_playing_radio_station_art() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let _restore = UiModeGuard::snapshot();
+    set_track_info_display(TrackInfoDisplay::MiniPlayer);
+
+    let mut app = test_app();
+    app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+        station: nokkvi_data::types::radio_station::RadioStation {
+            id: "st1".into(),
+            name: "Groove".into(),
+            stream_url: "http://s".into(),
+            home_page_url: None,
+            cover_art: None,
+        },
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+
+    // No cached art yet → None (player bar falls back to the tower glyph).
+    assert!(
+        app.mini_player_artwork().is_none(),
+        "no cached radio art yet => None",
+    );
+
+    // Once the station's thumbnail is cached, the player bar surfaces it.
+    app.artwork.radio_art.put(
+        "st1".into(),
+        iced::widget::image::Handle::from_bytes(vec![0u8; 64]),
+    );
+    assert!(
+        app.mini_player_artwork().is_some(),
+        "player bar must show the playing station's cached art",
+    );
+}

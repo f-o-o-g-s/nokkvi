@@ -35,6 +35,7 @@ fn radio_app() -> crate::Nokkvi {
         name: "n".into(),
         stream_url: "u".into(),
         home_page_url: None,
+        cover_art: None,
     };
     app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
         station,

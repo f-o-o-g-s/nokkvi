@@ -40,6 +40,7 @@ mod notifications;
 mod page_loader;
 mod playback;
 mod queue;
+mod radio_artwork;
 mod redesign_chrome;
 mod roulette;
 mod scrobble;

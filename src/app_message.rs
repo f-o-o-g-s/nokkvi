@@ -324,6 +324,35 @@ pub enum ArtworkMessage {
     /// `updated_at` is recorded into `album_art_versions` on `MiniArt::Loaded`.
     SongMiniLoaded(String, Option<String>, MiniArt),
 
+    // --- Radio Station Artwork ---
+    /// Mini station-logo fetch finished for the Radios slot list.
+    /// `(station_id, MiniArt)`. On `Loaded`, the handle goes into
+    /// `artwork.radio_art`; `Missing`/`Transient` are dropped (no negative
+    /// cache — radio art is requested only for stations whose `coverArt` token
+    /// is present, so a miss is rare and worth re-attempting).
+    RadioArtLoaded(String, MiniArt),
+    /// Trigger a resolution-sized station-logo fetch for the centered station.
+    /// `(station_id)`. Mirrors [`ArtworkMessage::LoadLarge`] for albums.
+    LoadRadioLarge(String),
+    /// Large station-logo fetch finished. `(station_id, handle)` → stored into
+    /// `artwork.radio_large_art`.
+    RadioLargeLoaded(String, Option<image::Handle>),
+    /// Live now-playing stream (ICY) art captured for a logo-LESS radio station.
+    /// `(station_id, source_url, Option<bytes>)` — `Some` on a successful fetch,
+    /// `None` on any failure (both `Missing` and `Transient` are dropped here).
+    /// The `source_url` is the StreamUrl the bytes came from; the handler drops
+    /// the message when it no longer matches `radio_icy_captured[station_id]` (a
+    /// newer track superseded it, or a "Refresh Artwork" cleared it), guarding
+    /// against out-of-order completions. On a matching success it feeds both
+    /// `radio_large_art` and `radio_art` (the logo-less station's identity) AND
+    /// persists to the on-disk `RadioArtStore` — persistence lives in the handler
+    /// (not the fetch task) so a clear/supersede also suppresses the disk write.
+    RadioIcyArtLoaded(String, String, Option<Vec<u8>>),
+    /// Remembered radio art loaded from the on-disk `RadioArtStore` at launch:
+    /// a list of `(station_id, source_url, bytes)`. Decoded into `radio_art`
+    /// and used to seed the ICY dedup map.
+    RadioArtHydrated(Vec<(String, String, Vec<u8>)>),
+
     // --- Artwork Pane Drag ---
     /// Resize the artwork column via the split handle. `Change` is per-frame
     /// drag preview; `Commit` fires once on release and persists to TOML.

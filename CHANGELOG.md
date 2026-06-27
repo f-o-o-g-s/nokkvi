@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Radio stations now show artwork instead of a generic tower glyph: an uploaded station logo when one exists, or the last-played now-playing (stream) image for stations without a logo. It appears in the station list, the large artwork panel, and the MiniPlayer, and is remembered across restarts. The over-cover visualizer animates over the station art while music plays, and right-clicking a station offers **Refresh Artwork** to clear a stale or wrong thumbnail.
+
 ### Changed
 
 ### Fixed

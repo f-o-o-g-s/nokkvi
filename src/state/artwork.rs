@@ -31,6 +31,20 @@ const COLLAGE_MINI_CACHE_CAPACITY: NonZeroUsize =
 /// Capacity for the per-target collage tile LRU (genre or playlist).
 const COLLAGE_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(100).expect("capacity must be > 0");
+/// Capacity for the mini radio-station artwork LRU (`station_id -> Handle`).
+/// Radio station lists are small (a few dozen), so a modest cap holds every
+/// station's logo / remembered stream-art thumbnail with room to spare.
+const RADIO_ART_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(256).expect("capacity must be > 0");
+/// Capacity for the large radio-station artwork LRU (`station_id -> Handle`).
+/// The panel shows one station's large art at a time, but the cache accumulates
+/// every logo station ever centered (each scroll/nav step dispatches a
+/// `LoadRadioLarge`), and the playing station's entry is `put` once and never
+/// recency-bumped (the view reads the snapshot without touching the LRU). Sized
+/// to comfortably exceed any realistic station list so scrolling can't evict the
+/// now-playing station's large art out from under the locked panel / MiniPlayer.
+const RADIO_LARGE_ART_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(512).expect("capacity must be > 0");
 
 /// Per-target collage artwork cache (genre or playlist).
 ///
@@ -113,6 +127,34 @@ pub struct ArtworkState {
     pub failed_art: HashMap<String, Option<String>>,
     /// Large artwork cache for detail views (LRU-bounded).
     pub large_artwork: SnapshottedLru<String, image::Handle>,
+    /// Mini radio-station artwork (`station_id -> Handle`) for the Radios slot
+    /// list. Holds either an admin-uploaded station logo (fetched via
+    /// `getCoverArt?id=ra-…` when [`RadioStation::logo_cover_art`] is present)
+    /// or, for logo-less stations, the remembered last-played stream (ICY) art
+    /// hydrated from the on-disk [`RadioArtStore`]. Reset on logout via
+    /// `Default`; the disk store re-hydrates it next launch.
+    ///
+    /// [`RadioStation::logo_cover_art`]: nokkvi_data::types::radio_station::RadioStation::logo_cover_art
+    /// [`RadioArtStore`]: nokkvi_data::services::radio_art_store::RadioArtStore
+    pub radio_art: SnapshottedLru<String, image::Handle>,
+    /// Large radio-station artwork (`station_id -> Handle`) for the artwork
+    /// panel: a resolution-sized station logo (logo stations) or the
+    /// remembered/now-playing stream (ICY) image (logo-less stations). A logo
+    /// station's live track art is NOT stored here — its logo is its stable
+    /// in-app identity. Falls back to [`Self::radio_art`] then the radio-tower
+    /// glyph at the view layer.
+    pub radio_large_art: SnapshottedLru<String, image::Handle>,
+    /// Per-station dedup of the last ICY `StreamUrl` we fetched now-playing art
+    /// from (`station_id -> url`). The playback tick re-parses ICY metadata
+    /// every ~100ms, so this gates the external fetch to fire only when the
+    /// URL actually changes (a new track). Seeded from the on-disk
+    /// `RadioArtStore` on launch so a restart doesn't re-fetch unchanged art.
+    pub radio_icy_captured: HashMap<String, String>,
+    /// Whether remembered radio art has been hydrated from disk this session.
+    /// A one-shot gate — probing `radio_icy_captured` emptiness conflates
+    /// capture-state with hydration-state and re-reads disk on an empty store.
+    /// Reset with the rest of `ArtworkState` on logout.
+    pub radio_art_hydrated: bool,
     /// Genre artwork cache.
     pub genre: CollageArtworkCache,
     /// Playlist artwork cache.
@@ -129,6 +171,10 @@ impl Default for ArtworkState {
             album_art_pending: HashSet::new(),
             failed_art: HashMap::new(),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
+            radio_art: SnapshottedLru::new(RADIO_ART_CACHE_CAPACITY),
+            radio_large_art: SnapshottedLru::new(RADIO_LARGE_ART_CACHE_CAPACITY),
+            radio_icy_captured: HashMap::new(),
+            radio_art_hydrated: false,
             genre: CollageArtworkCache::new(),
             playlist: CollageArtworkCache::new(),
             loading_large_artwork: None,
@@ -152,6 +198,8 @@ impl std::fmt::Debug for ArtworkState {
             .field("album_art", &self.album_art)
             .field("album_art_versions", &self.album_art_versions)
             .field("large_artwork", &self.large_artwork)
+            .field("radio_art", &self.radio_art)
+            .field("radio_large_art", &self.radio_large_art)
             .field("genre", &self.genre)
             .field("playlist", &self.playlist)
             .field("loading_large_artwork", &self.loading_large_artwork)

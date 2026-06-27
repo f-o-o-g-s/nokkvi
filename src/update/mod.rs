@@ -67,6 +67,7 @@ mod player_bar;
 mod playlists;
 mod progressive_queue;
 mod queue;
+mod radio_artwork;
 mod radios;
 mod roulette;
 mod scrobbling;

@@ -134,6 +134,19 @@ impl StateStorage {
             None => Ok(None),
         }
     }
+
+    /// Remove a key. No-op on the stored value when the key is absent. Opening
+    /// the write table materializes an empty `STATE_TABLE` on a brand-new DB
+    /// (redb's `open_table` is create-or-open) — a negligible one-time cost.
+    pub fn remove(&self, key: &str) -> Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(STATE_TABLE)?;
+            table.remove(key)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

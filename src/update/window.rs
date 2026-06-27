@@ -232,11 +232,14 @@ impl Nokkvi {
                     ),
                 ))
             }
-            View::Genres
-            | View::Playlists
-            | View::Radios
-            | View::Settings
-            | View::PlaylistEditor => Task::none(),
+            View::Radios => {
+                let mut tasks = vec![self.prefetch_radio_logo_tasks()];
+                if let Some(task) = self.center_large_artwork_load_task(View::Radios) {
+                    tasks.push(task);
+                }
+                Task::batch(tasks)
+            }
+            View::Genres | View::Playlists | View::Settings | View::PlaylistEditor => Task::none(),
         }
     }
 
@@ -325,12 +328,39 @@ impl Nokkvi {
                 }
                 Some(self.handle_load_artist_large_artwork(artist_id))
             }
-            View::Genres
-            | View::Playlists
-            | View::Radios
-            | View::Settings
-            | View::PlaylistEditor => None,
+            // Shared with the `RadiosAction::None` browse arm so both center-load
+            // paths agree on which station to load (see the helper).
+            View::Radios => self.radio_center_large_load_task(),
+            View::Genres | View::Playlists | View::Settings | View::PlaylistEditor => None,
         }
+    }
+
+    /// Load task for the centered Radios station's large logo — the single
+    /// source of truth shared by the view-enter/resize prefetch
+    /// ([`Self::center_large_artwork_load_task`]) and the `RadiosAction::None`
+    /// browse arm in `handle_radios`. Uses the EFFECTIVE center
+    /// (`common.get_center_item_index`, which honors the click-focus
+    /// `selected_offset`) so the prefetch targets the station the panel actually
+    /// shows — not the raw viewport center the two paths previously disagreed on.
+    /// Returns `None` when there's no session, the centered station has no
+    /// uploaded logo (logo-less stations get their large panel from the ICY
+    /// capture), or its large art is already cached.
+    pub(crate) fn radio_center_large_load_task(&self) -> Option<Task<Message>> {
+        self.app_service.as_ref()?;
+        let stations = self.filter_radio_stations();
+        let center_idx = self
+            .radios_page
+            .common
+            .get_center_item_index(stations.len())?;
+        let station = stations.get(center_idx)?;
+        station.logo_cover_art()?;
+        let station_id = station.id.clone();
+        if self.artwork.radio_large_art.peek(&station_id).is_some() {
+            return None;
+        }
+        Some(Task::done(Message::Artwork(
+            ArtworkMessage::LoadRadioLarge(station_id),
+        )))
     }
 
     /// Load mini artist artwork from disk cache for all prefetch-visible slots.

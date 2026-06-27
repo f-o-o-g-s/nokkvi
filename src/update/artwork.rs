@@ -184,6 +184,18 @@ impl Nokkvi {
             ArtworkMessage::SongMiniLoaded(album_id, updated_at, art) => {
                 self.handle_song_artwork_loaded(album_id, updated_at, art)
             }
+            // Radio station artwork
+            ArtworkMessage::RadioArtLoaded(station_id, art) => {
+                self.handle_radio_art_loaded(station_id, art)
+            }
+            ArtworkMessage::LoadRadioLarge(station_id) => self.handle_load_radio_large(station_id),
+            ArtworkMessage::RadioLargeLoaded(station_id, handle) => {
+                self.handle_radio_large_loaded(station_id, handle)
+            }
+            ArtworkMessage::RadioIcyArtLoaded(station_id, source_url, bytes) => {
+                self.handle_radio_icy_art_loaded(station_id, source_url, bytes)
+            }
+            ArtworkMessage::RadioArtHydrated(records) => self.handle_radio_art_hydrated(records),
             // Artwork-pane drag. The per-view chrome dispatcher already routes
             // the per-view `ArtworkColumnDrag` / `ArtworkColumnVerticalDrag`
             // variants synchronously; these arms exist so that any caller can

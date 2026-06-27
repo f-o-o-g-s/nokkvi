@@ -1028,6 +1028,18 @@ impl CustomAudioEngine {
         self.live_icy_metadata.get()
     }
 
+    /// True when the engine's current source is exactly `url` (the string last
+    /// handed to [`Self::set_source`], set at the END of that method). Used by
+    /// the UI to verify that live ICY metadata belongs to the station it thinks
+    /// is playing: during a station switch `active_playback` flips to the new
+    /// station synchronously, but `set_source` runs async after `stop()`, so for
+    /// a window the engine is still streaming — and reporting ICY for — the
+    /// PREVIOUS source. Pairing that stale ICY with the new station would
+    /// misattribute its now-playing art/title.
+    pub fn is_playing_source(&self, url: &str) -> bool {
+        self.source == url
+    }
+
     /// Get current live codec name
     pub fn live_codec(&self) -> Option<String> {
         self.live_codec_name.get()

@@ -223,6 +223,7 @@ mod tests {
             name: "My Radio Station".to_string(),
             stream_url: "https://example.com/stream".to_string(),
             home_page_url: None,
+            cover_art: None,
         };
         assert_eq!(
             <RadioStation as Named>::display_name(&radio),

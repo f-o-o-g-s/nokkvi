@@ -10,6 +10,7 @@ pub mod font_discovery;
 pub mod navidrome_events;
 pub mod playback;
 pub mod queue;
+pub mod radio_art_store;
 pub mod settings;
 pub mod settings_tables;
 pub mod state_storage;

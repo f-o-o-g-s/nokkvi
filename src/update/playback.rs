@@ -186,7 +186,17 @@ impl Nokkvi {
                 let current_stream_bit_perfect = engine.current_stream_bit_perfect();
                 // Live compressed bitrate from decoder (0 if not yet decoding)
                 let engine_live_bitrate = engine.live_bitrate();
-                let engine_live_icy_metadata = engine.live_icy_metadata();
+                // Suppress ICY metadata that belongs to a PREVIOUS stream:
+                // during a station switch `active_playback` is already the new
+                // station, but `set_source` runs async after `stop()`, so the
+                // engine is briefly still on the old source and its live ICY is
+                // the old station's. Pairing that with the new station
+                // misattributes now-playing art (the wrong-thumbnail bug) and
+                // title. Gate on the engine actually streaming this station's URL.
+                let engine_live_icy_metadata = match &radio_station {
+                    Some(station) if !engine.is_playing_source(&station.stream_url) => None,
+                    _ => engine.live_icy_metadata(),
+                };
                 let engine_live_codec = engine.live_codec();
                 drop(engine);
 
@@ -365,9 +375,19 @@ impl Nokkvi {
         let is_stopped = !playing && !paused;
         let playback_stopped = was_playing && is_stopped;
 
-        // Process radio metadata updates
+        // Process radio metadata updates. Holds the now-playing (ICY) art
+        // capture task, folded into the return batch below (mirrors
+        // `bit_perfect_probe_task`).
+        let mut radio_icy_capture_task: Option<Task<Message>> = None;
+        // The ICY was validated against the engine source for the station that
+        // was active WHEN THIS TICK WAS BUILT (`song_id`, set to the station id
+        // in `handle_tick`). If the user switched stations in the gap before
+        // this update was processed, the now-active station differs — applying
+        // this ICY to it would re-introduce the misattribution the engine-source
+        // gate closes. Drop the stale tick; the next tick handles the new station.
         if let Some(icy_meta) = live_icy_metadata
             && self.active_playback.is_radio()
+            && self.active_playback.radio_station().map(|s| s.id.as_str()) == song_id.as_deref()
         {
             let mut extracted_title = String::new();
             let mut extracted_url = None;
@@ -404,7 +424,10 @@ impl Nokkvi {
 
             // Dispatch the metadata update directly
             // (Using handle_radio_metadata_update directly since we are already in the update fn)
-            let _ = self.handle_radio_metadata_update(artist, title, extracted_url);
+            let _ = self.handle_radio_metadata_update(artist, title, extracted_url.clone());
+            // Capture the now-playing stream art when the StreamUrl changes
+            // (deduped per-station inside the helper).
+            radio_icy_capture_task = self.maybe_capture_radio_icy_art(extracted_url);
         }
 
         // Update playback and mode fields
@@ -679,6 +702,12 @@ impl Nokkvi {
         // the honest bit-perfect badge this tick).
         if let Some(probe) = bit_perfect_probe_task {
             tasks.push(probe);
+        }
+
+        // Fold in the now-playing (ICY) radio-art capture, if a new StreamUrl
+        // was seen this tick.
+        if let Some(task) = radio_icy_capture_task {
+            tasks.push(task);
         }
 
         if tasks.is_empty() {
@@ -1202,6 +1231,10 @@ impl Nokkvi {
                     crate::views::RadiosMessage::FocusCurrentPlaying(station_id),
                 )));
             }
+
+            // Load the now-playing logo station's art so the MiniPlayer shows it
+            // even if it was never prefetched into the Radios viewport.
+            tasks.push(self.ensure_playing_radio_logo_task());
 
             tasks.push(self.shell_action_task(
                 move |shell| async move {

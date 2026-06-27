@@ -242,6 +242,109 @@ impl crate::utils::search::Searchable for AlbumUIViewData {
 /// kept as belt-and-braces for genuine transient failures.
 const ARTWORK_CONCURRENCY_LIMIT: usize = 16;
 
+/// Cap on bytes buffered from an arbitrary EXTERNAL image URL (a radio
+/// stream's ICY now-playing art). A station's `StreamUrl` points at an
+/// untrusted host, so the body read is chunk-capped to bound the buffer; with
+/// the artwork client's connect/read timeouts this bounds a hostile or slow
+/// host.
+const MAX_EXTERNAL_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Concurrency cap for untrusted EXTERNAL image fetches (radio ICY art), kept
+/// SEPARATE from [`ARTWORK_CONCURRENCY_LIMIT`] so a hostile/slow station can
+/// never starve the credentialed `getCoverArt` cover-art permits.
+const EXTERNAL_IMAGE_CONCURRENCY_LIMIT: usize = 3;
+
+/// Overall wall-clock deadline for one untrusted external image fetch. ICY
+/// now-playing art is small, so this never cuts a legitimate fetch, but it
+/// stops a slow-drip host from holding a permit/connection indefinitely (the
+/// shared client's `read_timeout` is inactivity-based, not total elapsed).
+const EXTERNAL_IMAGE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Blocked IPv4 ranges for the SSRF guard: the std-classified loopback /
+/// private / link-local / unspecified / broadcast addresses, plus three ranges
+/// std does not yet expose as stable but that still resolve to local/internal
+/// infrastructure — CGNAT/shared `100.64.0.0/10`, benchmarking `198.18.0.0/15`,
+/// and the limited broadcast `255.255.255.255` (covered by `is_broadcast`).
+fn ipv4_is_blocked(ip: std::net::Ipv4Addr) -> bool {
+    let o = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || (o[0] == 100 && (o[1] & 0xc0) == 0x40) // 100.64.0.0/10 (CGNAT / shared)
+        || (o[0] == 198 && (o[1] & 0xfe) == 18) //   198.18.0.0/15 (benchmarking)
+}
+
+/// Basic SSRF guard for the untrusted external-image path: refuse a URL whose
+/// host is a literal private / loopback / link-local / unspecified IP, the
+/// reserved `localhost` name, or that is unparseable. Other domains are
+/// deliberately NOT resolved (avoids DNS lookups + TOCTOU); the residual is a
+/// blind, no-credential, no-feedback GET to a public host, which is no worse
+/// than what any webpage's `<img src>` already permits. This blocks the
+/// realistic direct `http://127.0.0.1/…` / `http://localhost/…` /
+/// `http://192.168.x/…` case a malicious radio station could put in its ICY
+/// `StreamUrl`, including the IPv4-mapped-IPv6 (`[::ffff:127.0.0.1]`) alternate
+/// encoding the kernel routes back to IPv4. The fetch client re-runs this guard
+/// on every redirect hop (see [`AlbumsService::new`]), so a public host can't
+/// `302` past it.
+fn external_host_is_blocked(url_str: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url_str) else {
+        return true;
+    };
+    match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => ipv4_is_blocked(ip),
+        Some(url::Host::Ipv6(ip)) => {
+            // Native IPv6 loopback/unspecified/ULA/link-local first — checked
+            // before the embedded-IPv4 fold so `::1`/`::` aren't misread as the
+            // IPv4 `0.0.0.1`/`0.0.0.0`.
+            if ip.is_loopback() || ip.is_unspecified() {
+                return true;
+            }
+            let seg = ip.segments();
+            if (seg[0] & 0xfe00) == 0xfc00  // unique-local  fc00::/7
+                || (seg[0] & 0xffc0) == 0xfe80
+            // link-local    fe80::/10
+            {
+                return true;
+            }
+            // An embedded-IPv4 address — IPv4-mapped (`::ffff:a.b.c.d`) OR the
+            // deprecated IPv4-compatible (`::a.b.c.d`) form — is routed to IPv4
+            // by the kernel, so a private/loopback literal in either encoding
+            // must be blocked. `to_ipv4()` covers both (it returns `None` for a
+            // genuine global IPv6, which then falls through to "allowed").
+            match ip.to_ipv4() {
+                Some(v4) => ipv4_is_blocked(v4),
+                None => false,
+            }
+        }
+        // A domain is allowed (deliberately unresolved — see above) EXCEPT the
+        // reserved `localhost` / `*.localhost` names (RFC 6761): they denote the
+        // loopback interface with no DNS, the most realistic direct-loopback
+        // form, so the comment's stated guarantee actually holds.
+        Some(url::Host::Domain(d)) => {
+            let d = d.trim_end_matches('.').to_ascii_lowercase();
+            d == "localhost" || d.ends_with(".localhost")
+        }
+        None => true,
+    }
+}
+
+/// Shared base builder for both artwork HTTP clients. Carries the common
+/// user-agent and the connect/read timeouts that bound a stalled socket so a
+/// flaky host can't pin a concurrency permit indefinitely (`read_timeout` fires
+/// on inactivity, not total elapsed, so a slow-but-progressing large cover still
+/// completes). Both the credentialed `getCoverArt` client and the untrusted
+/// external-image client start from this so their stall behavior can't drift
+/// apart; the external client then layers its per-hop SSRF redirect policy on
+/// top.
+fn artwork_client_base() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .user_agent(crate::USER_AGENT)
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .read_timeout(std::time::Duration::from_secs(20))
+}
+
 #[derive(Clone)]
 pub struct AlbumsService {
     /// Lazily-initialized API service paired with its shared `AuthGateway`.
@@ -260,6 +363,18 @@ pub struct AlbumsService {
     /// Per-process gate that bounds concurrent in-flight artwork fetches —
     /// see [`ARTWORK_CONCURRENCY_LIMIT`].
     artwork_semaphore: Arc<Semaphore>,
+
+    /// Separate gate for untrusted EXTERNAL image fetches (radio ICY art) so
+    /// they can never consume the credentialed cover-art permits —
+    /// see [`EXTERNAL_IMAGE_CONCURRENCY_LIMIT`].
+    external_image_semaphore: Arc<Semaphore>,
+
+    /// Dedicated HTTP client for the untrusted external-image path. Identical
+    /// timeouts to [`Self::artwork_client`] but with a redirect policy that
+    /// re-runs [`external_host_is_blocked`] on EVERY hop, so a public host can't
+    /// `302` the fetch to a private/loopback target the entry guard already
+    /// approved. Kept off the credentialed `getCoverArt` client.
+    external_image_client: Arc<reqwest::Client>,
 }
 
 impl Default for AlbumsService {
@@ -274,12 +389,31 @@ impl AlbumsService {
             inner: LazyAuthedService::new(AlbumsApiService::new),
             total_count: ReactiveInt::new(0),
             artwork_client: Arc::new(
-                reqwest::Client::builder()
-                    .user_agent(crate::USER_AGENT)
+                artwork_client_base()
                     .build()
                     .expect("Failed to build artwork HTTP client"),
             ),
             artwork_semaphore: Arc::new(Semaphore::new(ARTWORK_CONCURRENCY_LIMIT)),
+            external_image_semaphore: Arc::new(Semaphore::new(EXTERNAL_IMAGE_CONCURRENCY_LIMIT)),
+            external_image_client: Arc::new(
+                artwork_client_base()
+                    // The entry guard in `fetch_external_image_capped` only sees
+                    // the original URL; without this, reqwest's default policy
+                    // would transparently follow a `302` from a public host to
+                    // `http://127.0.0.1/…`, re-introducing the SSRF the guard
+                    // exists to stop. Re-check every hop, and cap the chain.
+                    .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                        if attempt.previous().len() >= 10 {
+                            attempt.error("external image: too many redirects")
+                        } else if external_host_is_blocked(attempt.url().as_str()) {
+                            attempt.error("external image: redirect to a private/loopback host")
+                        } else {
+                            attempt.follow()
+                        }
+                    }))
+                    .build()
+                    .expect("Failed to build external-image HTTP client"),
+            ),
         }
     }
 
@@ -359,6 +493,89 @@ impl AlbumsService {
         }
 
         Ok(bytes.to_vec())
+    }
+
+    /// Fetch an image from an ARBITRARY external URL (a radio stream's ICY
+    /// `StreamUrl` now-playing art), hardened for untrusted hosts:
+    /// - the host must NOT be a literal private/loopback/link-local IP nor the
+    ///   `localhost` name (a basic SSRF guard — [`external_host_is_blocked`]),
+    ///   re-checked on every redirect hop by [`Self::external_image_client`];
+    ///   other domains are not resolved here, so the residual is a blind,
+    ///   unauthenticated, no-feedback GET to a public host, no worse than a
+    ///   webpage's `<img src>`;
+    /// - its own [`EXTERNAL_IMAGE_CONCURRENCY_LIMIT`] semaphore, so it can never
+    ///   starve the credentialed `getCoverArt` permits;
+    /// - an overall [`EXTERNAL_IMAGE_FETCH_TIMEOUT`] deadline plus the client's
+    ///   connect/read timeouts, so a slow-drip host can't pin the connection;
+    /// - a hard byte cap ([`MAX_EXTERNAL_IMAGE_BYTES`]) read in chunks (aborted
+    ///   past the cap, never buffered whole);
+    /// - image validation (content-type or magic bytes) before returning.
+    pub async fn fetch_external_image_capped(&self, url: &str) -> Result<Vec<u8>> {
+        if url.is_empty() {
+            return Err(anyhow::anyhow!("empty external image url"));
+        }
+        if external_host_is_blocked(url) {
+            return Err(anyhow::anyhow!(
+                "external image host is private/loopback/unparseable — refused"
+            ));
+        }
+
+        let _permit = self
+            .external_image_semaphore
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("external image semaphore closed: {e}"))?;
+
+        // Bound the whole request (connect + headers + full body) so a host
+        // that drips bytes slower than the inactivity read_timeout still can't
+        // hold a permit/connection indefinitely.
+        tokio::time::timeout(EXTERNAL_IMAGE_FETCH_TIMEOUT, async {
+            let mut response = self
+                .external_image_client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("external image fetch failed: {}", e.without_url()))?;
+
+            if !response.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "external image fetch returned {}",
+                    response.status()
+                ));
+            }
+
+            // Capture the content type before the body is consumed.
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_ascii_lowercase);
+
+            // Read in chunks so an oversized/hostile body is aborted, not buffered.
+            let mut bytes: Vec<u8> = Vec::new();
+            while let Some(chunk) = response.chunk().await.map_err(|e| {
+                anyhow::anyhow!("external image body read failed: {}", e.without_url())
+            })? {
+                if bytes.len() + chunk.len() > MAX_EXTERNAL_IMAGE_BYTES {
+                    return Err(anyhow::anyhow!(
+                        "external image exceeds {MAX_EXTERNAL_IMAGE_BYTES} byte cap"
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+
+            if bytes.is_empty() {
+                return Err(anyhow::anyhow!("external image fetch returned 0 bytes"));
+            }
+            if !Self::response_is_image(content_type.as_deref(), &bytes) {
+                return Err(anyhow::anyhow!("external url did not return an image"));
+            }
+            Ok(bytes)
+        })
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("external image fetch timed out after {EXTERNAL_IMAGE_FETCH_TIMEOUT:?}")
+        })?
     }
 
     /// Guard against caching Subsonic error documents as artwork. Navidrome
@@ -583,6 +800,60 @@ mod tests {
 
     fn album_from_json(value: serde_json::Value) -> Album {
         serde_json::from_value(value).expect("valid album json")
+    }
+
+    #[test]
+    fn external_host_guard_blocks_private_and_loopback_ips() {
+        // Loopback / private / link-local / unspecified IPv4 + IPv6 are refused.
+        for blocked in [
+            "http://127.0.0.1/cover.jpg",
+            "http://10.0.0.5/a.png",
+            "http://192.168.1.1/a.png",
+            "https://172.16.0.1/a.png",
+            "http://169.254.1.1/a.png",
+            "http://0.0.0.0/a.png",
+            "http://[::1]/a.png",
+            "http://[fc00::1]/a.png",
+            "http://[fe80::1]/a.png",
+            "not a url",
+            // The reserved loopback name and its subdomains (RFC 6761).
+            "http://localhost/a.png",
+            "http://localhost:9100/metrics",
+            "http://anything.localhost/a.png",
+            // IPv4-mapped IPv6 — the kernel routes these back to IPv4, so the
+            // mapped loopback / private / link-local forms must be blocked too.
+            "http://[::ffff:127.0.0.1]/a.png",
+            "http://[::ffff:10.0.0.1]/a.png",
+            "http://[::ffff:a9fe:a9fe]/a.png", // 169.254.169.254 (cloud metadata)
+            // Deprecated IPv4-compatible IPv6 (`::a.b.c.d`) — also routed to IPv4.
+            "http://[::127.0.0.1]/a.png",
+            "http://[::10.0.0.1]/a.png",
+            // Ranges std doesn't expose as stable: CGNAT, benchmarking, broadcast.
+            "http://100.64.0.1/a.png",
+            "http://198.18.0.1/a.png",
+            "http://255.255.255.255/a.png",
+        ] {
+            assert!(external_host_is_blocked(blocked), "should block: {blocked}");
+        }
+    }
+
+    #[test]
+    fn external_host_guard_allows_public_hosts() {
+        // Public domains and public IP literals are allowed (domains unresolved).
+        for allowed in [
+            "https://art.example.com/nowplaying.jpg",
+            "http://cdn.somastation.fm/cover.png",
+            "https://8.8.8.8/a.png",
+            // Just outside the blocked literal ranges — must stay allowed.
+            "http://100.63.255.255/a.png", // one below 100.64.0.0/10
+            "http://198.20.0.1/a.png",     // one above 198.18.0.0/15
+            "https://notlocalhost.example/a.png",
+        ] {
+            assert!(
+                !external_host_is_blocked(allowed),
+                "should allow: {allowed}"
+            );
+        }
     }
 
     /// The UI negative cache keys off `is_missing_artwork`: a deterministic

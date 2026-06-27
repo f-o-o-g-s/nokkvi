@@ -22,6 +22,17 @@ pub(crate) const JWT_TOKEN: &str = "jwt_token";
 pub(crate) const SUBSONIC_CREDENTIAL: &str = "subsonic_credential";
 pub(crate) const QUEUE_ORDER: &str = "queue_order";
 pub(crate) const QUEUE_SONGS: &str = "queue_songs";
+/// Bincode blob of remembered radio now-playing (ICY) artwork, keyed by
+/// station id and namespaced by server URL. Written/read by
+/// [`crate::services::radio_art_store::RadioArtStore`].
+///
+/// `_v2`: a short-lived earlier build wrote a pre-`_v2` `radio_art_index` blob.
+/// `RadioArtStore::load_migrating` merges that forward into this key once (then
+/// deletes it), so remembered art survives the rename. The rename existed to
+/// escape a stale-ICY-on-switch bug that could persist a previous station's art
+/// under a new station's id; with that bug fixed in code, migrating is safe and
+/// any leftover wrong entry can be cleared per-station via "Refresh artwork".
+pub(crate) const RADIO_ART_INDEX: &str = "radio_art_index_v2";
 
 #[cfg(test)]
 mod tests {
@@ -37,5 +48,6 @@ mod tests {
         assert_eq!(SUBSONIC_CREDENTIAL, "subsonic_credential");
         assert_eq!(QUEUE_ORDER, "queue_order");
         assert_eq!(QUEUE_SONGS, "queue_songs");
+        assert_eq!(RADIO_ART_INDEX, "radio_art_index_v2");
     }
 }

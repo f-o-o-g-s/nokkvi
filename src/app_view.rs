@@ -286,6 +286,18 @@ impl Nokkvi {
         if crate::theme::track_info_display() != TrackInfoDisplay::MiniPlayer {
             return None;
         }
+        // Radio: the playing station's cached art (uploaded logo / remembered
+        // now-playing thumbnail), mirroring the slot-list + large-panel
+        // resolution; falls back to the radio-tower glyph in the player bar.
+        if let Some(station) = self.active_playback.radio_station() {
+            return self
+                .artwork
+                .radio_large_art
+                .snapshot
+                .get(&station.id)
+                .or_else(|| self.artwork.radio_art.snapshot.get(&station.id))
+                .cloned();
+        }
         let album_id = self.current_queue_song_album_id()?;
         self.artwork
             .large_artwork
@@ -361,8 +373,8 @@ impl Nokkvi {
     /// - The browsing panel is not open — split-view has its own dual-pane
     ///   shape and skips elevation.
     /// - The current view's `ViewPage` reports `uses_horizontal_artwork_column()`
-    ///   true (Albums, Artists, Songs, Genres, Queue, Playlists today).
-    ///   Settings has no `ViewPage`; Radios overrides to false.
+    ///   true (Albums, Artists, Songs, Genres, Queue, Playlists, Radios today).
+    ///   Settings has no `ViewPage` and is not eligible.
     /// - The active `ArtworkColumnMode` resolves to a Horizontal layout for
     ///   the current window using **the same config the view passes**
     ///   (raw `window.height`, not the player-bar-adjusted variant).
@@ -1250,6 +1262,53 @@ impl Nokkvi {
         }
     }
 
+    /// The over-cover visualizer + surfing-boat overlays for an artwork panel —
+    /// the single source of truth for the Queue now-playing cover and the Radios
+    /// station-art panel (the two call sites were previously byte-identical).
+    /// `over_art` is `Some` when the active visualizer mode is placed over the
+    /// cover (Scope always; Bars/Lines when their placement is `OverCover`); the
+    /// boat rides only the Lines over-cover mode while visible. Both render
+    /// regardless of play state — when audio pauses no fresh FFT chunk arrives so
+    /// they freeze in place rather than vanish — matching the bottom-band path.
+    pub(crate) fn over_cover_overlays(
+        &self,
+    ) -> (
+        Option<(
+            widgets::visualizer::Visualizer,
+            widgets::visualizer::VisualizationMode,
+            f32,
+        )>,
+        Option<crate::widgets::base_slot_list_layout::OverCoverBoat<'_>>,
+    ) {
+        let (over_art_mode, height_percent, opacity, mirror) = {
+            let cfg = self.visualizer_config.read();
+            let mode = widgets::visualizer::resolve_placement(
+                self.engine.visualization_mode,
+                cfg.bars.placement,
+                cfg.lines.placement,
+            )
+            .over_art;
+            (mode, cfg.height_percent, cfg.opacity, cfg.lines.mirror)
+        };
+        let visualizer = over_art_mode.and_then(|mode| {
+            self.visualizer
+                .clone()
+                .map(|viz| (viz, mode, height_percent))
+        });
+        let boat = if over_art_mode == Some(widgets::visualizer::VisualizationMode::Lines)
+            && self.boat.visible
+        {
+            Some(crate::widgets::base_slot_list_layout::OverCoverBoat {
+                state: &self.boat,
+                opacity,
+                mirror,
+            })
+        } else {
+            None
+        };
+        (visualizer, boat)
+    }
+
     /// Build `QueueViewData` from current app state. Shared by the
     /// browsing-panel split-view branch and the normal single-view branch.
     /// The two call sites differ only in `window_width` and `elevated`, so
@@ -1261,6 +1320,7 @@ impl Nokkvi {
     ) -> views::QueueViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Queue);
+        let (over_art_visualizer, over_art_boat) = self.over_cover_overlays();
         views::QueueViewData {
             queue_songs: self.filter_queue_songs(),
             album_art: &self.artwork.album_art.snapshot,
@@ -1290,58 +1350,12 @@ impl Nokkvi {
             show_default_playlist_chip: self.settings.queue_show_default_playlist,
             default_playlist_name: &self.settings.default_playlist_name,
             drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
-            // Over-cover visualizer: clone the live visualizer plus the mode to
-            // draw, when the active mode is placed over the cover (Scope always;
-            // Bars/Lines when their placement is OverCover). `resolve_placement`
-            // is the shared source of truth with the bottom-band site in
-            // `view()`. The queue view renders it regardless of play state, so it
-            // freezes in place when paused. Other cases render nothing here.
-            over_art_visualizer: {
-                let (over_art_mode, height_percent) = {
-                    let cfg = self.visualizer_config.read();
-                    let mode = widgets::visualizer::resolve_placement(
-                        self.engine.visualization_mode,
-                        cfg.bars.placement,
-                        cfg.lines.placement,
-                    )
-                    .over_art;
-                    (mode, cfg.height_percent)
-                };
-                over_art_mode.and_then(|mode| {
-                    self.visualizer
-                        .clone()
-                        .map(|viz| (viz, mode, height_percent))
-                })
-            },
-            // Surfing boat over the cover: only when Lines is the over-cover mode
-            // and the boat is visible (the boat tick sets `visible` from lines
-            // mode + the boat setting, for either placement). `opacity`/`mirror`
-            // mirror what the bottom-band boat overlay is fed. The queue view
-            // renders it regardless of play state, matching the ring (frozen
-            // while paused).
-            over_art_boat: {
-                let (over_art_mode, opacity, mirror) = {
-                    let cfg = self.visualizer_config.read();
-                    let mode = widgets::visualizer::resolve_placement(
-                        self.engine.visualization_mode,
-                        cfg.bars.placement,
-                        cfg.lines.placement,
-                    )
-                    .over_art;
-                    (mode, cfg.opacity, cfg.lines.mirror)
-                };
-                if over_art_mode == Some(widgets::visualizer::VisualizationMode::Lines)
-                    && self.boat.visible
-                {
-                    Some(crate::widgets::base_slot_list_layout::OverCoverBoat {
-                        state: &self.boat,
-                        opacity,
-                        mirror,
-                    })
-                } else {
-                    None
-                }
-            },
+            // Over-cover visualizer + surfing boat (Scope always; Bars/Lines when
+            // placed OverCover), shared with the Radios station-art panel via
+            // `over_cover_overlays`. Rendered regardless of play state, so it
+            // freezes in place when paused.
+            over_art_visualizer,
+            over_art_boat,
         }
     }
 
@@ -1718,6 +1732,9 @@ impl Nokkvi {
                 .map(Message::Settings),
             View::Radios => {
                 let filtered_stations = self.filter_radio_stations();
+                // Over-cover visualizer + boat over the station artwork — the
+                // same shared overlays as the Queue now-playing cover.
+                let (over_art_visualizer, over_art_boat) = self.over_cover_overlays();
                 let view_data = views::RadiosViewData {
                     stations: filtered_stations,
                     window_width: self.content_pane_width(),
@@ -1733,6 +1750,10 @@ impl Nokkvi {
                         .active_playback
                         .radio_station()
                         .map(|s| s.id.as_str()),
+                    radio_art: &self.artwork.radio_art.snapshot,
+                    radio_large_art: &self.artwork.radio_large_art.snapshot,
+                    over_art_visualizer,
+                    over_art_boat,
                 };
                 self.radios_page.view(view_data).map(Message::Radios)
             }

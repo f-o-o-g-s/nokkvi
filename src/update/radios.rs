@@ -51,9 +51,18 @@ impl Nokkvi {
                 }
                 error!("Error loading radio stations: {}", e);
                 self.toast_error(format!("Failed to load radio stations: {e}"));
+                return Task::none();
             }
         }
-        Task::none()
+        // Warm station logos for the first screen, and (once per session)
+        // hydrate logo-less stations' remembered stream art from disk so they
+        // show their last-played thumbnail without waiting to be played again.
+        let mut tasks = vec![self.prefetch_radio_logo_tasks()];
+        if !self.artwork.radio_art_hydrated {
+            self.artwork.radio_art_hydrated = true;
+            tasks.push(self.hydrate_radio_art());
+        }
+        Task::batch(tasks)
     }
 
     pub(crate) fn handle_radios(&mut self, msg: views::RadiosMessage) -> Task<Message> {
@@ -71,6 +80,11 @@ impl Nokkvi {
 
         // Capture data before passing slice
         let (cmd, action) = self.radios_page.update(msg.clone(), &filtered_stations);
+
+        // Click/nav focus (carried as the slot-list `None` action) should load
+        // the centered logo station's full-res logo, mirroring how Albums/Songs
+        // load the clicked item's large art. Accumulated here, batched at the end.
+        let mut center_large_task = Task::none();
 
         match action {
             RadiosAction::SortModeChanged(_) | RadiosAction::SortOrderChanged(_) => {
@@ -128,6 +142,9 @@ impl Nokkvi {
                 );
                 return Task::none();
             }
+            RadiosAction::RefreshStationArtwork(station) => {
+                return self.handle_refresh_radio_station_artwork(station);
+            }
             RadiosAction::PlayRadioStation(station) => {
                 // Wait! This is the core logic.
                 // We transition ActivePlayback into RadioPlaybackState.
@@ -142,22 +159,36 @@ impl Nokkvi {
 
                 let stream_url = station.stream_url.clone();
 
-                return self.shell_action_task(
-                    move |shell| async move {
-                        shell.playback().stop().await?;
-                        let engine_arc = shell.playback().audio_engine();
-                        let mut engine = engine_arc.lock().await;
-                        // Radio: infinite stream, no metadata duration to expect.
-                        engine.set_source(stream_url, None).await;
-                        engine.play().await?;
-                        Ok(())
-                    },
-                    Message::NoOp,
-                    "play radio station",
-                );
+                // Warm the now-playing logo station's art for the MiniPlayer
+                // alongside starting the stream (a logo-less station re-captures
+                // its art from the ICY stream instead).
+                let logo_task = self.ensure_playing_radio_logo_task();
+                return Task::batch([
+                    logo_task,
+                    self.shell_action_task(
+                        move |shell| async move {
+                            shell.playback().stop().await?;
+                            let engine_arc = shell.playback().audio_engine();
+                            let mut engine = engine_arc.lock().await;
+                            // Radio: infinite stream, no metadata duration to expect.
+                            engine.set_source(stream_url, None).await;
+                            engine.play().await?;
+                            Ok(())
+                        },
+                        Message::NoOp,
+                        "play radio station",
+                    ),
+                ]);
             }
             // For data loading directly from the view
-            RadiosAction::None => {}
+            RadiosAction::None => {
+                // Click/nav focus loads the centered logo station's full-res
+                // logo via the shared helper — same effective-center resolution
+                // as the view-enter/resize prefetch, so the two paths can't drift.
+                if let Some(task) = self.radio_center_large_load_task() {
+                    center_large_task = task;
+                }
+            }
         }
 
         // Intercept RadiosLoaded message so we can process it in our state (to keep update() pure)
@@ -165,6 +196,6 @@ impl Nokkvi {
             return self.handle_radio_stations_loaded(result);
         }
 
-        cmd.map(Message::Radios)
+        Task::batch([cmd.map(Message::Radios), center_large_task])
     }
 }

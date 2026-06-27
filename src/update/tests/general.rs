@@ -574,6 +574,7 @@ fn test_handle_radio_metadata_update() {
         name: "Test Radio".into(),
         stream_url: "http://test".into(),
         home_page_url: None,
+        cover_art: None,
     };
     app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
         station,
@@ -609,12 +610,14 @@ fn radios_play_filtered_station_plays_correct_station() {
         name: "BBC Radio".into(),
         stream_url: "url3".into(),
         home_page_url: None,
+        cover_art: None,
     };
     let s2 = nokkvi_data::types::radio_station::RadioStation {
         id: "r2".into(),
         name: "SomaFM".into(),
         stream_url: "url1".into(),
         home_page_url: None,
+        cover_art: None,
     };
 
     app.library.radio_stations = vec![s1, s2];

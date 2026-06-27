@@ -79,6 +79,72 @@ fn make_playback_update() -> PlaybackStateUpdate {
     }
 }
 
+fn radio_playing(id: &str) -> crate::state::ActivePlayback {
+    crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+        station: nokkvi_data::types::radio_station::RadioStation {
+            id: id.into(),
+            name: id.into(),
+            stream_url: format!("http://{id}"),
+            home_page_url: None,
+            cover_art: None,
+        },
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    })
+}
+
+/// Gap-2 guard: if the user switched stations between the tick being built
+/// (`song_id` = the tick's station) and this update being processed, the stale
+/// ICY must NOT be applied to the now-active station — no title, no art capture.
+#[test]
+fn radio_icy_dropped_when_station_switched_during_update_gap() {
+    let mut app = test_app();
+    app.active_playback = radio_playing("B"); // now playing B
+    let mut update = make_playback_update();
+    update.song_id = Some("A".into()); // tick was built for the PREVIOUS station A
+    update.live_icy_metadata =
+        Some("StreamTitle='Stale Artist - Stale Song';StreamUrl='http://stale/art.jpg';".into());
+
+    let _ = app.handle_playback_state_updated(update);
+
+    let crate::state::ActivePlayback::Radio(state) = &app.active_playback else {
+        panic!("expected radio playback");
+    };
+    assert_eq!(state.icy_title, None, "stale ICY title must not apply to B");
+    assert_eq!(state.icy_artist, None);
+    assert!(
+        app.artwork.radio_icy_captured.is_empty(),
+        "no stale art capture for the switched-to station"
+    );
+}
+
+/// Counterpart: when the tick's `song_id` matches the active station, the ICY
+/// title/artist apply through the gate. The art-capture dedup record is written
+/// only with a backend session (finding 8); `test_app` has none, so it stays
+/// empty here — the title/artist path is what the matching gate governs.
+#[test]
+fn radio_icy_applied_when_station_matches_tick() {
+    let mut app = test_app();
+    app.active_playback = radio_playing("B");
+    let mut update = make_playback_update();
+    update.song_id = Some("B".into()); // tick matches the active station
+    update.live_icy_metadata =
+        Some("StreamTitle='Now Artist - Now Song';StreamUrl='http://now/art.jpg';".into());
+
+    let _ = app.handle_playback_state_updated(update);
+
+    let crate::state::ActivePlayback::Radio(state) = &app.active_playback else {
+        panic!("expected radio playback");
+    };
+    assert_eq!(state.icy_title.as_deref(), Some("Now Song"));
+    assert_eq!(state.icy_artist.as_deref(), Some("Now Artist"));
+    assert!(
+        app.artwork.radio_icy_captured.is_empty(),
+        "no session ⇒ art capture not recorded (re-attempts once a session exists)"
+    );
+}
+
 #[test]
 fn playback_state_updated_maps_fields() {
     let mut app = test_app();
@@ -194,6 +260,7 @@ fn now_playing_warm_none_for_radio_playback() {
             name: "Test".into(),
             stream_url: "http://example.invalid/stream".into(),
             home_page_url: None,
+            cover_art: None,
         },
         icy_artist: None,
         icy_title: None,
@@ -1336,6 +1403,7 @@ fn radio_test_app() -> crate::Nokkvi {
         name: "n".into(),
         stream_url: "u".into(),
         home_page_url: None,
+        cover_art: None,
     };
     app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
         station,

@@ -841,6 +841,7 @@ impl QueuePage {
             center_artwork_handle,
             over_art_overlay,
             over_art_boat,
+            crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Blank,
             on_refresh,
             artwork_menu_open,
             artwork_menu_position,

@@ -323,6 +323,48 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
     )
 }
 
+/// What an artwork panel draws when it has no image handle. Lets the panel keep
+/// its mode-aware sizing (and any over-cover visualizer) while customizing the
+/// art-less fill, so views don't hand-roll a parallel placeholder panel.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum ArtworkPlaceholder {
+    /// Empty `artwork_outer_bg` square — the default for albums/songs/etc.
+    #[default]
+    Blank,
+    /// Centered radio-tower glyph on the artwork background — Radios stations
+    /// with no logo / not-yet-loaded now-playing art.
+    RadioTower,
+}
+
+impl ArtworkPlaceholder {
+    /// The art-less cover content at the given panel size. `Blank` is an empty
+    /// styled square; `RadioTower` centers the tower glyph on it.
+    fn content<'a, Message: 'a>(self, width: Length, height: Length) -> Element<'a, Message> {
+        use iced::widget::{container, text};
+        let base = container::<Message, _, _>(match self {
+            ArtworkPlaceholder::Blank => Element::from(text("")),
+            ArtworkPlaceholder::RadioTower => crate::embedded_svg::svg_widget(
+                crate::widgets::track_info_strip::RADIO_TOWER_ICON_PATH,
+            )
+            .width(Length::Fixed(96.0))
+            .height(Length::Fixed(96.0))
+            .style(|_, _| iced::widget::svg::Style {
+                color: Some(theme::fg2()),
+            })
+            .into(),
+        })
+        .width(width)
+        .height(height)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(|_theme| container::Style {
+            background: Some(artwork_outer_bg().into()),
+            ..Default::default()
+        });
+        base.into()
+    }
+}
+
 /// Create a single-image artwork panel (used by albums, songs, queue, artists).
 ///
 /// Mode-aware:
@@ -335,7 +377,7 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
 pub(crate) fn single_artwork_panel<'a, Message: 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
 ) -> Element<'a, Message> {
-    single_artwork_panel_inner(artwork_handle, None, None)
+    single_artwork_panel_inner(artwork_handle, None, None, ArtworkPlaceholder::Blank)
 }
 
 /// Surfing-boat overlay for the over-cover Lines visualizer. Carries a borrow of
@@ -387,6 +429,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
         f32,
     )>,
     boat: Option<OverCoverBoat<'a>>,
+    placeholder: ArtworkPlaceholder,
 ) -> Element<'a, Message> {
     if theme::artwork_column_mode().is_stretched() {
         let fit = match theme::artwork_column_stretch_fit() {
@@ -394,7 +437,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
             ArtworkStretchFit::Fill => ContentFit::Fill,
         };
         return iced::widget::responsive(move |size| {
-            use iced::widget::{container, image, stack, text};
+            use iced::widget::{container, image, stack};
 
             let content: Element<'_, Message> = if let Some(handle) = artwork_handle {
                 image(handle.clone())
@@ -403,14 +446,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
                     .height(Length::Fixed(size.height))
                     .into()
             } else {
-                container(text(""))
-                    .width(Length::Fixed(size.width))
-                    .height(Length::Fixed(size.height))
-                    .style(|_theme| container::Style {
-                        background: Some(artwork_outer_bg().into()),
-                        ..Default::default()
-                    })
-                    .into()
+                placeholder.content(Length::Fixed(size.width), Length::Fixed(size.height))
             };
 
             let cover = container(content)
@@ -506,7 +542,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
 
     // Square (Auto / AlwaysNative) — original behavior, plus the optional ring.
     iced::widget::responsive(move |size| {
-        use iced::widget::{container, image, stack, text};
+        use iced::widget::{container, image, stack};
 
         let square_size = size.width.min(size.height).max(0.0);
 
@@ -517,14 +553,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
                 .height(Length::Fixed(square_size))
                 .into()
         } else {
-            container(text(""))
-                .width(Length::Fixed(square_size))
-                .height(Length::Fixed(square_size))
-                .style(|_theme| container::Style {
-                    background: Some(artwork_outer_bg().into()),
-                    ..Default::default()
-                })
-                .into()
+            placeholder.content(Length::Fixed(square_size), Length::Fixed(square_size))
         };
 
         let cover = container(content)
@@ -612,6 +641,9 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
 /// (the Scope ring always, and Bars/Lines when their placement is `OverCover`).
 /// The tuple carries the cloned visualizer and which widget mode to draw; `boat`
 /// adds the surfing-boat overlay on top when Lines rides over the cover.
+/// `placeholder` controls the art-less fill (e.g. Radios passes `RadioTower` so
+/// the tower glyph shows under the visualizer instead of a blank square).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone + 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     over_art: Option<(
@@ -620,12 +652,13 @@ pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone +
         f32,
     )>,
     boat: Option<OverCoverBoat<'a>>,
+    placeholder: ArtworkPlaceholder,
     on_refresh: Option<Message>,
     is_open: bool,
     open_position: Option<iced::Point>,
     on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let panel = single_artwork_panel_inner(artwork_handle, over_art, boat);
+    let panel = single_artwork_panel_inner(artwork_handle, over_art, boat, placeholder);
 
     if let Some(refresh_msg) = on_refresh {
         use crate::widgets::context_menu::{context_menu, menu_button};

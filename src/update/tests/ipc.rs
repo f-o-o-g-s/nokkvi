@@ -372,6 +372,7 @@ fn seek_during_radio_returns_unavailable_error_not_a_false_echo() {
             name: "n".into(),
             stream_url: "u".into(),
             home_page_url: None,
+            cover_art: None,
         },
         icy_artist: None,
         icy_title: None,

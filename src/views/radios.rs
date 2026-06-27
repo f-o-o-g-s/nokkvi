@@ -49,6 +49,25 @@ pub struct RadiosViewData<'a> {
     /// Borrowed from `active_playback`; the row whose id matches gets the
     /// now-playing breathing glow (parity with the queue/song-list slot).
     pub current_playing_station_id: Option<&'a str>,
+    /// Mini station artwork (`station_id -> Handle`) for the per-row thumbnail:
+    /// an uploaded logo or the remembered last-played stream art. Ids absent
+    /// here fall back to the radio-tower glyph.
+    pub radio_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// Large station artwork (`station_id -> Handle`) for the artwork panel:
+    /// a resolution-sized logo or the live now-playing stream image.
+    pub radio_large_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// Over-cover visualizer drawn over the station artwork (Scope always;
+    /// Bars/Lines when their placement is `OverCover`). `None` for bottom-band
+    /// placement or `Off`. Mirrors the Queue view's field.
+    pub over_art_visualizer: Option<(
+        crate::widgets::visualizer::Visualizer,
+        crate::widgets::visualizer::VisualizationMode,
+        f32,
+    )>,
+    /// Surfing boat over the over-cover Lines visualizer (Lines + `OverCover` +
+    /// boat visible), else `None`. `pub(crate)` — `OverCoverBoat` wraps the
+    /// crate-private `BoatState`.
+    pub(crate) over_art_boat: Option<crate::widgets::base_slot_list_layout::OverCoverBoat<'a>>,
 }
 
 // ============================================================================
@@ -76,6 +95,10 @@ pub enum RadiosMessage {
     EditStationDialog(RadioStation),
     DeleteStationConfirmation(String, String),
     CopyStreamUrl(String),
+    /// Forget a station's remembered/stale artwork (right-click → Refresh
+    /// Artwork): clears the cached thumbnail (memory + disk) so it reverts to
+    /// the tower glyph, then re-fetches the uploaded logo if the station has one.
+    RefreshStationArtwork(RadioStation),
 
     AddRadioStation,
     NoOp,
@@ -95,6 +118,7 @@ pub enum RadiosAction {
     AddRadioStation,
     EditRadioStation(RadioStation),
     DeleteStation(String, String),
+    RefreshStationArtwork(RadioStation),
     SearchChanged(String),
     SortModeChanged(SortMode),
     SortOrderChanged(bool),
@@ -191,6 +215,9 @@ impl RadiosPage {
                 let task = iced::clipboard::write(url).map(|_| RadiosMessage::NoOp);
                 (task, RadiosAction::None)
             }
+            RadiosMessage::RefreshStationArtwork(station) => {
+                (Task::none(), RadiosAction::RefreshStationArtwork(station))
+            }
 
             RadiosMessage::NoOp => (Task::none(), RadiosAction::None),
 
@@ -276,7 +303,7 @@ impl RadiosPage {
         let layout_config = BaseSlotListLayoutConfig {
             window_width: data.window_width,
             window_height: data.window_height,
-            show_artwork_column: false, // No artwork for radio stations
+            show_artwork_column: true, // station logos / remembered stream art
             slot_list_chrome,
             elevated: data.elevated,
         };
@@ -293,8 +320,17 @@ impl RadiosPage {
             );
         }
 
-        let config = SlotListConfig::with_dynamic_slots(data.window_height, slot_list_chrome)
-            .with_modifiers(data.modifiers);
+        // Account for a vertically-stacked artwork panel (Always-Vertical /
+        // Auto portrait fallback) in the slot-row math, like the other artwork
+        // views — otherwise rows render too tall and overflow behind it. Returns
+        // 0 in horizontal modes, so landscape is unaffected.
+        let vertical_artwork_chrome =
+            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
+        let config = SlotListConfig::with_dynamic_slots(
+            data.window_height,
+            slot_list_chrome + vertical_artwork_chrome,
+        )
+        .with_modifiers(data.modifiers);
 
         let stations = data.stations.as_ref();
         let open_menu_for_rows = data.open_menu;
@@ -322,19 +358,49 @@ impl RadiosPage {
 
                 let m = ctx.metrics;
 
-                // Radio tower icon — tinted to match slot text color
-                let radio_icon = container(
-                    crate::embedded_svg::svg_widget(
-                        crate::widgets::track_info_strip::RADIO_TOWER_ICON_PATH,
+                // Station thumbnail: an uploaded logo / remembered stream art
+                // when available, else the radio-tower glyph tinted to the slot
+                // text color. Sized to the slot artwork cell so the column lines
+                // up with the album/song/queue views.
+                let art_size = m.artwork_size;
+                let thumb: Element<RadiosMessage> = if let Some(handle) =
+                    data.radio_art.get(&station.id)
+                {
+                    container(
+                        iced::widget::image(handle.clone())
+                            .content_fit(iced::ContentFit::Cover)
+                            .width(Length::Fill)
+                            .height(Length::Fill),
                     )
-                    .width(Length::Fixed(m.title_size))
-                    .height(Length::Fixed(m.title_size))
-                    .style(move |_, _| iced::widget::svg::Style {
-                        color: Some(style.text_color),
-                    }),
-                )
-                .align_y(Alignment::Center)
-                .align_x(Alignment::Center);
+                    .width(Length::Fixed(art_size))
+                    .height(Length::Fixed(art_size))
+                    .clip(true)
+                    .style(|_theme| iced::widget::container::Style {
+                        background: Some(crate::theme::bg2().into()),
+                        border: iced::Border {
+                            radius: crate::theme::ui_radius_sm(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .into()
+                } else {
+                    container(
+                        crate::embedded_svg::svg_widget(
+                            crate::widgets::track_info_strip::RADIO_TOWER_ICON_PATH,
+                        )
+                        .width(Length::Fixed(art_size * 0.55))
+                        .height(Length::Fixed(art_size * 0.55))
+                        .style(move |_, _| iced::widget::svg::Style {
+                            color: Some(style.text_color),
+                        }),
+                    )
+                    .width(Length::Fixed(art_size))
+                    .height(Length::Fixed(art_size))
+                    .align_y(Alignment::Center)
+                    .align_x(Alignment::Center)
+                    .into()
+                };
 
                 // Name as title; stream URL as subtitle (aids identification when
                 // station names are ambiguous or duplicated across sources).
@@ -357,7 +423,7 @@ impl RadiosPage {
                 );
 
                 let content = iced::widget::Row::new()
-                    .push(radio_icon)
+                    .push(thumb)
                     .push(text_col)
                     .spacing(10.0)
                     .align_y(Alignment::Center)
@@ -406,6 +472,9 @@ impl RadiosPage {
                                     crate::widgets::context_menu::RadioContextEntry::CopyStreamUrl => {
                                         RadiosMessage::CopyStreamUrl(s.stream_url.clone())
                                     }
+                                    crate::widgets::context_menu::RadioContextEntry::RefreshArtwork => {
+                                        RadiosMessage::RefreshStationArtwork(s.clone())
+                                    }
                                     crate::widgets::context_menu::RadioContextEntry::Delete => {
                                         RadiosMessage::DeleteStationConfirmation(
                                             s.id.clone(),
@@ -436,8 +505,61 @@ impl RadiosPage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
+        // Large artwork panel. Mirrors the Queue view's cover selection: while a
+        // radio station is playing the panel LOCKS to that station's art (so it
+        // doesn't change as you scroll the list); otherwise it follows the
+        // centered station so you can browse the different stations' artwork. The
+        // `or_else` chain keeps the panel from going blank if the playing
+        // station's large art hasn't loaded yet, then falls through the mini
+        // thumbnail and finally the radio-tower glyph.
+        let playing_handle = data.current_playing_station_id.and_then(|id| {
+            data.radio_large_art
+                .get(id)
+                .or_else(|| data.radio_art.get(id))
+        });
+        let centered_handle = playing_handle.or_else(|| {
+            self.common
+                .get_center_item_index(stations.len())
+                .and_then(|idx| stations.get(idx))
+                .and_then(|s| {
+                    data.radio_large_art
+                        .get(&s.id)
+                        .or_else(|| data.radio_art.get(&s.id))
+                })
+        });
+        // Over-cover visualizer + surfing boat are UNGATED, matching the Queue
+        // view: while audio plays they animate over the cover, and when it pauses
+        // no fresh chunk reaches the FFT so they freeze in place rather than
+        // vanishing. `None` only for bottom-band placement or `Off`.
+        let over_art_visualizer = data.over_art_visualizer;
+        let over_art_boat = data.over_art_boat;
+        // Render the station art through the SHARED panel — the same helper the
+        // Queue now-playing cover uses — so the over-cover visualizer/boat stack
+        // on top even when there's no art: `ArtworkPlaceholder::RadioTower` draws
+        // the tower glyph as the cover, and the visualizer rides over it (instead
+        // of a bespoke art-less panel that dropped the overlay). Menu params are
+        // required by the helper but inert here (no `on_refresh` → no panel menu).
+        let (menu_open, menu_position, on_menu_change) =
+            crate::widgets::context_menu::artwork_panel_open_state(
+                crate::View::Radios,
+                data.open_menu,
+                RadiosMessage::SetOpenMenu,
+            );
+        let artwork_content = Some(
+            crate::widgets::base_slot_list_layout::single_artwork_panel_with_visualizer_and_menu(
+                centered_handle,
+                over_art_visualizer,
+                over_art_boat,
+                crate::widgets::base_slot_list_layout::ArtworkPlaceholder::RadioTower,
+                None::<RadiosMessage>,
+                menu_open,
+                menu_position,
+                on_menu_change,
+            ),
+        );
+
         use crate::widgets::base_slot_list_layout::base_slot_list_layout;
-        base_slot_list_layout(&layout_config, header, slot_list_content, None)
+        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
     }
 }
 
@@ -489,5 +611,14 @@ impl super::ViewPage for RadiosPage {
 
     fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
         Message::Radios(RadiosMessage::SlotList(msg))
+    }
+
+    /// Radios renders a horizontal artwork column (`show_artwork_column: true`),
+    /// so it participates in the artwork-elevation feature like every other
+    /// artwork view — without this the elevated top-nav bar spans the full
+    /// window and the artwork column stops below the nav instead of extending
+    /// to the top of the window. See [`Nokkvi::elevated_artwork_extent`].
+    fn uses_horizontal_artwork_column(&self) -> bool {
+        true
     }
 }

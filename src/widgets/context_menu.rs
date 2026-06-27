@@ -292,12 +292,14 @@ pub(crate) enum RadioContextEntry {
     Edit,
     Delete,
     CopyStreamUrl,
+    RefreshArtwork,
 }
 
 pub(crate) fn radio_entries() -> Vec<RadioContextEntry> {
     vec![
         RadioContextEntry::Edit,
         RadioContextEntry::CopyStreamUrl,
+        RadioContextEntry::RefreshArtwork,
         RadioContextEntry::Delete,
     ]
 }
@@ -317,6 +319,11 @@ pub(crate) fn radio_entry_view<'a, Message: Clone + 'a>(
             Some("assets/icons/copy.svg"),
             "Copy Stream URL",
             on_action(RadioContextEntry::CopyStreamUrl),
+        ),
+        RadioContextEntry::RefreshArtwork => menu_button(
+            Some("assets/icons/refresh-cw.svg"),
+            "Refresh Artwork",
+            on_action(RadioContextEntry::RefreshArtwork),
         ),
         RadioContextEntry::Delete => menu_button(
             Some("assets/icons/trash-2.svg"),
