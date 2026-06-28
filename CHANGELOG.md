@@ -6,74 +6,28 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Radio stations can now scrobble what they're playing to **ListenBrainz** and **Last.fm**. Set it up in Settings → Playback → Radio Scrobbling: paste a ListenBrainz token, or connect Last.fm through your browser, and nokkvi reads the stream's now-playing metadata (the "Artist - Title" the station broadcasts), shows it as "Listening now", and submits a scrobble once you've heard enough of the track. A threshold slider controls how long that is, "now playing" updates are an independent toggle, and each target's row shows whether it's actually connected so you're never guessing. Your keys are stored in a `[radio_scrobble]` block in `config.toml` (plaintext, like navidrome.toml), so you can set them through the GUI or hand-edit the file directly — and a `NOKKVI_RADIO_*` environment variable overrides the file if you'd rather not keep keys on disk. Library scrobbling is unchanged; this only covers internet-radio playback, which has no Navidrome track to scrobble through the server.
-- Radio stations now show artwork instead of a generic tower glyph: an uploaded station logo when one exists, or the last-played now-playing (stream) image for stations without a logo. It appears in the station list, the large artwork panel, and the MiniPlayer, and is remembered across restarts. The over-cover visualizer animates over the station art while music plays, and right-clicking a station offers **Refresh Artwork** to clear a stale or wrong thumbnail.
-
 ### Changed
 
 ### Fixed
 
 ### Removed
 
-## v0.11.3 — 2026-06-25
-
-### Fixed
-
-- Dragging to reorder the queue now lands the row where you drop it, instead of one slot off or somewhere unexpected.
-- Dropping a dragged queue row into the empty space below the last track now appends it to the end instead of snapping back.
-- With the auto-hide toolbar collapsed, "Go to Album" now lands the target row at the top of the list instead of one row too low.
-
-## v0.11.2 — 2026-06-24
-
-### Changed
-
-- The Queue sort dropdown now shows **Unsorted** until you apply a sort, instead of a stale mode the queue isn't actually in.
-
-### Fixed
-
-- The over-cover visualizer (Bars, Lines, and Scope) now freezes in place when paused instead of disappearing, like the bottom-band placement already did.
-
-## v0.11.1 — 2026-06-23
+## v0.12.0 — 2026-06-28
 
 ### Added
 
-- New **Shuffle Play**: right-click any album, artist, genre, playlist, song, or multi-selection — or press **Ctrl+Enter** — to replace the queue with those tracks in a fresh random order, leaving the player-bar shuffle mode untouched.
-- New **Shuffle Play on Enter** setting (Settings → General → Behavior): when on, pressing Enter or clicking a collection plays it in a fresh random order instead of list order.
-
-### Changed
-
-- Selected library rows now show an accent border ring instead of a solid fill highlight, matching the theme picker's selection style.
-- New installs now default the visualizer to 40% of the window height, up from 25%.
-
-### Fixed
-
-- Playing a filtered Songs view no longer appends tracks from outside the filter as the rest of the queue loads in the background.
-
-## v0.11.0 — 2026-06-22
-
-### Added
-
-- Picking a theme now opens a searchable modal where each row is painted in that theme's own colors — a live color preview.
-- New Icon Set setting (Interface → Font & Icons) switches the UI between Phosphor and Lucide glyphs.
-
-### Changed
-
-- The Scope visualizer now defaults to a height-based gradient instead of a static (flat) color.
-- Verbose Config is now a three-way On/Off/Clean choice, where Clean writes a sparse config.toml with no auto-added comments.
-- The UI now uses Phosphor icons by default, with Lucide's thin-outline set available in Settings.
-- The Queue and Playlists nav tabs now have dedicated icons (a queue glyph for Queue, a playlist glyph for Playlists).
-- The surfing-boat doodad's anchor now follows the icon set: a filled Phosphor anchor, or the stroked Lucide one.
-
-### Fixed
-
-- Single-weight fonts (such as pixel fonts) now display correctly for bold and medium UI text instead of falling back to a generic serif/sans.
-
-### Removed
-
-- The inline per-color theme editors in Settings → Theme — edit a theme's colors directly in the TOML file instead.
+- Internet radio stations can now scrobble to **ListenBrainz** and **Last.fm**, set up under Settings → Playback → Radio Scrobbling.
+- nokkvi reads the Artist - Title from a station's stream title and scrobbles it once it has played past your listen-threshold slider.
+- A separate toggle sends a live now-playing update each time the radio track changes, and each service's row shows whether it's connected.
+- Radio scrobble keys live in a plaintext `[radio_scrobble]` block in `config.toml`, editable in the GUI or by hand and overridable with `NOKKVI_RADIO_*` environment variables.
+- Radio stations now show artwork (an uploaded station logo, or the last now-playing stream image) instead of a generic tower glyph.
+- Station artwork appears in the station list, the large artwork panel, and the MiniPlayer, and persists across restarts.
+- The over-cover visualizer now animates over a station's artwork while its stream plays.
+- Right-clicking a radio station now offers **Refresh Artwork** to clear a stale or wrong thumbnail.
 
 ## Older releases
 
+- **v0.11.x** (2026-06-22 → 2026-06-25, v0.11.0–v0.11.3): [CHANGELOG-0.11.md](./changelog-archive/CHANGELOG-0.11.md)
 - **v0.10.x** (2026-06-19 → 2026-06-21, v0.10.0–v0.10.1): [CHANGELOG-0.10.md](./changelog-archive/CHANGELOG-0.10.md)
 - **v0.9.x** (2026-06-15 → 2026-06-18, v0.9.0–v0.9.4): [CHANGELOG-0.9.md](./changelog-archive/CHANGELOG-0.9.md)
 - **v0.8.x** (2026-06-14, v0.8.0): [CHANGELOG-0.8.md](./changelog-archive/CHANGELOG-0.8.md)

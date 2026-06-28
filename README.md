@@ -44,7 +44,7 @@ Things that shaped this project:
 - GPU-accelerated visualizer with `bars`, `lines`, and `scope` (circular oscilloscope) modes, beat-reactive neon glow and bloom, plus optional motion trails, echo, and CRT/film post-processing; `bars`/`lines` can sit in a band above the player bar or draw over the now-playing cover art
 - Browse albums, artists, songs, genres, playlists, internet radios, and similar artists; inline expansion, split-view browsing, and multi-library filtering included
 - 23 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, Firmium, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
-- Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling (Last.fm / ListenBrainz)
+- Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling to Last.fm / ListenBrainz — including direct scrobbling of internet-radio streams from their broadcast metadata
 - Fully keyboard-driven with configurable shortcuts, MPRIS, optional system tray icon, and right-click menus everywhere
 - Designed on a tiling WM — player bar folds controls into a kebab menu as width shrinks; library views use a **slot-paginated list** (the viewport is a fixed odd number of whole-row slots — never partials) where the slot count adapts to window height (up to 29) and text, album artwork, and star icons scale with each slot
 
