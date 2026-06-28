@@ -44,6 +44,18 @@ pub struct PersistedPlayerSettings {
     /// Scrobble threshold as a fraction of track duration (0.25–0.90, default 0.50)
     #[serde(default = "default_scrobble_threshold")]
     pub scrobble_threshold: f64,
+    /// Whether internet-radio tracks are scrobbled directly to ListenBrainz
+    /// (default: false — opt-in, requires a configured token)
+    #[serde(default)]
+    pub radio_scrobbling_enabled: bool,
+    /// Absolute seconds a radio track must play before it scrobbles
+    /// (radio has no duration; default 60)
+    #[serde(default = "default_radio_scrobble_threshold_secs")]
+    pub radio_scrobble_threshold_secs: u32,
+    /// Whether to send radio now-playing updates on each ICY track change
+    /// (default: true)
+    #[serde(default = "default_radio_now_playing_enabled")]
+    pub radio_now_playing_enabled: bool,
     /// Start view name ("Queue", "Albums", etc. — default "Queue")
     #[serde(default = "default_start_view")]
     pub start_view: String,
@@ -363,6 +375,17 @@ fn default_scrobbling_enabled() -> bool {
 fn default_scrobble_threshold() -> f64 {
     0.50
 }
+fn default_radio_scrobble_threshold_secs() -> u32 {
+    60
+}
+/// Bounds for the radio listen threshold (seconds). Enforced identically on the
+/// settings setter AND the config.toml load path (so a hand-edited config can't
+/// bypass them), and mirror the slider min/max in the playback settings table.
+pub(crate) const RADIO_SCROBBLE_THRESHOLD_MIN: u32 = 20;
+pub(crate) const RADIO_SCROBBLE_THRESHOLD_MAX: u32 = 240;
+fn default_radio_now_playing_enabled() -> bool {
+    true
+}
 fn default_start_view() -> String {
     "Queue".to_string()
 }
@@ -398,6 +421,9 @@ impl Default for PersistedPlayerSettings {
             light_mode: false,
             scrobbling_enabled: default_scrobbling_enabled(),
             scrobble_threshold: default_scrobble_threshold(),
+            radio_scrobbling_enabled: false,
+            radio_scrobble_threshold_secs: default_radio_scrobble_threshold_secs(),
+            radio_now_playing_enabled: default_radio_now_playing_enabled(),
             start_view: default_start_view(),
             stable_viewport: default_stable_viewport(),
             auto_follow_playing: default_auto_follow_playing(),

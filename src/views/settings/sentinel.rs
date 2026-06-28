@@ -11,6 +11,16 @@ pub(crate) enum SentinelKind {
     Logout,
     RestoreVisualizer,
     RestoreAllHotkeys,
+    /// Open the masked dialog to set/clear the ListenBrainz scrobble token.
+    SetListenBrainzToken,
+    /// Validate the currently-configured ListenBrainz token.
+    VerifyListenBrainz,
+    /// Open the dialog to enter the Last.fm app key + secret.
+    SetLastfmCredentials,
+    /// Start the Last.fm browser-auth flow (request token + authorize).
+    ConnectLastfm,
+    /// Clear the stored Last.fm session (disconnect).
+    DisconnectLastfm,
 }
 
 impl SentinelKind {
@@ -22,6 +32,11 @@ impl SentinelKind {
             "__action_logout" => Some(Self::Logout),
             "__restore_visualizer" => Some(Self::RestoreVisualizer),
             "__restore_all_hotkeys" => Some(Self::RestoreAllHotkeys),
+            "__set_listenbrainz_token" => Some(Self::SetListenBrainzToken),
+            "__verify_listenbrainz" => Some(Self::VerifyListenBrainz),
+            "__set_lastfm_credentials" => Some(Self::SetLastfmCredentials),
+            "__connect_lastfm" => Some(Self::ConnectLastfm),
+            "__disconnect_lastfm" => Some(Self::DisconnectLastfm),
             _ => None,
         }
     }
@@ -33,6 +48,11 @@ impl SentinelKind {
             Self::Logout => "__action_logout".to_string(),
             Self::RestoreVisualizer => "__restore_visualizer".to_string(),
             Self::RestoreAllHotkeys => "__restore_all_hotkeys".to_string(),
+            Self::SetListenBrainzToken => "__set_listenbrainz_token".to_string(),
+            Self::VerifyListenBrainz => "__verify_listenbrainz".to_string(),
+            Self::SetLastfmCredentials => "__set_lastfm_credentials".to_string(),
+            Self::ConnectLastfm => "__connect_lastfm".to_string(),
+            Self::DisconnectLastfm => "__disconnect_lastfm".to_string(),
         }
     }
 }
@@ -47,6 +67,11 @@ mod tests {
             SentinelKind::Logout,
             SentinelKind::RestoreVisualizer,
             SentinelKind::RestoreAllHotkeys,
+            SentinelKind::SetListenBrainzToken,
+            SentinelKind::VerifyListenBrainz,
+            SentinelKind::SetLastfmCredentials,
+            SentinelKind::ConnectLastfm,
+            SentinelKind::DisconnectLastfm,
         ] {
             assert_eq!(SentinelKind::from_key(&k.to_key()), Some(k));
         }

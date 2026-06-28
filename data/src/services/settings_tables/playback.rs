@@ -227,6 +227,64 @@ define_settings! {
             },
         },
 
+        // -- Radio scrobbling (direct to ListenBrainz) ------------------------
+        RadioScrobblingEnabled {
+            key: "general.radio_scrobbling_enabled",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_radio_scrobbling_enabled(v),
+            toml_apply: |ts, p| p.radio_scrobbling_enabled = ts.radio_scrobbling_enabled,
+            read: |src, out| out.radio_scrobbling_enabled = src.radio_scrobbling_enabled,
+            write: |ps, ts| ts.radio_scrobbling_enabled = ps.radio_scrobbling_enabled,
+            ui_meta: {
+                label: "Scrobble Radio",
+                category: "Radio Scrobbling",
+                subtitle: Some("Submit internet-radio tracks (from the stream's ICY title) to ListenBrainz. Needs a token below."),
+                default: false,
+                read_field: |d| d.radio_scrobbling_enabled,
+            },
+        },
+        // Radio streams report no duration, so this is an ABSOLUTE seconds gate
+        // (not a percentage). Stored as u32 internally; the UI works in i64.
+        RadioScrobbleThresholdSecs {
+            key: "general.radio_scrobble_threshold_secs",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_radio_scrobble_threshold_secs(v),
+            toml_apply: |ts, p| {
+                p.radio_scrobble_threshold_secs = ts.radio_scrobble_threshold_secs.clamp(
+                    crate::types::settings::RADIO_SCROBBLE_THRESHOLD_MIN,
+                    crate::types::settings::RADIO_SCROBBLE_THRESHOLD_MAX,
+                );
+            },
+            read: |src, out| out.radio_scrobble_threshold_secs = src.radio_scrobble_threshold_secs,
+            write: |ps, ts| ts.radio_scrobble_threshold_secs = ps.radio_scrobble_threshold_secs,
+            ui_meta: {
+                label: "Radio Listen Threshold",
+                category: "Radio Scrobbling",
+                subtitle: Some("Seconds a radio track must play before it scrobbles. Lower catches short songs; higher skips station IDs and ads."),
+                default: 60_i64,
+                min: 20_i64,
+                max: 240_i64,
+                step: 10_i64,
+                unit: "s",
+                read_field: |d| d.radio_scrobble_threshold_secs,
+            },
+        },
+        RadioNowPlayingEnabled {
+            key: "general.radio_now_playing_enabled",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_radio_now_playing_enabled(v),
+            toml_apply: |ts, p| p.radio_now_playing_enabled = ts.radio_now_playing_enabled,
+            read: |src, out| out.radio_now_playing_enabled = src.radio_now_playing_enabled,
+            write: |ps, ts| ts.radio_now_playing_enabled = ps.radio_now_playing_enabled,
+            ui_meta: {
+                label: "Send Radio Now-Playing",
+                category: "Radio Scrobbling",
+                subtitle: Some("Update your now-playing each time the radio track changes."),
+                default: true,
+                read_field: |d| d.radio_now_playing_enabled,
+            },
+        },
+
         // -- Rating reminder --------------------------------------------------
         RatingReminderEnabled {
             key: "general.rating_reminder_enabled",
@@ -440,6 +498,12 @@ mod tests {
             replay_gain_prevent_clipping: true,
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,
+            radio_scrobbling_enabled: false,
+            radio_scrobble_threshold_secs: 60,
+            radio_now_playing_enabled: true,
+            listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,
+            lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource::Unset,
+            lastfm_username: "".into(),
             quick_add_to_playlist: false,
             default_playlist_name: "".into(),
             queue_show_default_playlist: false,
@@ -460,10 +524,10 @@ mod tests {
     /// rows are emitted here unconditionally but the UI builder
     /// (`items_playback.rs`) only splices them in when the feature is enabled.
     #[test]
-    fn build_playback_tab_settings_items_emits_thirteen_rows() {
+    fn build_playback_tab_settings_items_emits_sixteen_rows() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 13);
+        assert_eq!(entries.len(), 16);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -837,6 +901,14 @@ mod tests {
             replay_gain_prevent_clipping: live.replay_gain_prevent_clipping,
             scrobbling_enabled: live.scrobbling_enabled,
             scrobble_threshold: f64::from(live.scrobble_threshold),
+            radio_scrobbling_enabled: live.radio_scrobbling_enabled,
+            radio_scrobble_threshold_secs: i64::from(live.radio_scrobble_threshold_secs),
+            radio_now_playing_enabled: live.radio_now_playing_enabled,
+            // Connection status is sourced from redb in build_settings_view_data,
+            // not from LivePlayerSettings — not part of this macro round-trip.
+            listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,
+            lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource::Unset,
+            lastfm_username: String::new().into(),
             quick_add_to_playlist: live.quick_add_to_playlist,
             default_playlist_name: live.default_playlist_name.clone().into(),
             queue_show_default_playlist: live.queue_show_default_playlist,

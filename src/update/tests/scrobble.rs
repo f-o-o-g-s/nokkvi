@@ -198,3 +198,121 @@ fn now_playing_refresh_noop_when_radio() {
         "radio playback must not heartbeat now-playing (no re-arm)"
     );
 }
+
+// ============================================================================
+// Radio scrobble tick handler — gating (code-review #12: handler TDD gap)
+// ============================================================================
+
+/// A radio app with enabled radio scrobbling and an ICY-tracked track.
+fn radio_app_playing(artist: &str, title: &str) -> crate::Nokkvi {
+    let mut app = radio_app();
+    app.settings.radio_scrobbling_enabled = true;
+    app.settings.radio_now_playing_enabled = true;
+    // A real threshold so a single tick doesn't instantly scrobble (which would
+    // mask the now-playing-dispatch assertions; the test default is 0).
+    app.settings.radio_scrobble_threshold_secs = 60;
+    if let crate::state::ActivePlayback::Radio(r) = &mut app.active_playback {
+        r.icy_artist = Some(artist.to_string());
+        r.icy_title = Some(title.to_string());
+    }
+    app
+}
+
+#[test]
+fn radio_tick_disabled_clears_tracking_and_dispatches_nothing() {
+    let mut app = radio_app_playing("A", "B");
+    app.radio_scrobble.observe("A", "B", 1); // pre-existing tracking
+    app.settings.radio_scrobbling_enabled = false;
+
+    let mut tasks = Vec::new();
+    app.handle_radio_scrobble_tick(true, false, &mut tasks);
+
+    assert_eq!(
+        app.radio_scrobble.current_key(),
+        None,
+        "disabling radio scrobbling must clear tracking"
+    );
+    assert!(tasks.is_empty(), "disabled → no dispatch");
+}
+
+#[test]
+fn radio_tick_clears_tracking_on_queue_playback() {
+    let mut app = radio_app_playing("A", "B");
+    app.radio_scrobble.observe("A", "B", 1);
+    app.active_playback = crate::state::ActivePlayback::Queue;
+
+    let mut tasks = Vec::new();
+    app.handle_radio_scrobble_tick(true, false, &mut tasks);
+
+    assert_eq!(
+        app.radio_scrobble.current_key(),
+        None,
+        "leaving radio must clear tracking"
+    );
+    assert!(tasks.is_empty(), "queue playback → no radio dispatch");
+}
+
+#[test]
+fn radio_tick_tracks_and_now_plays_on_change_when_active() {
+    let mut app = radio_app_playing("Artist", "Song");
+
+    let mut tasks = Vec::new();
+    app.handle_radio_scrobble_tick(true, false, &mut tasks);
+
+    assert_eq!(
+        app.radio_scrobble.current_key(),
+        Some(("Artist", "Song")),
+        "an active radio tick must track the ICY track"
+    );
+    assert!(
+        !tasks.is_empty(),
+        "a genuine track change while playing must dispatch now-playing"
+    );
+}
+
+#[test]
+fn radio_tick_paused_tracks_but_does_not_now_play() {
+    let mut app = radio_app_playing("Artist", "Song");
+
+    let mut tasks = Vec::new();
+    app.handle_radio_scrobble_tick(false, true, &mut tasks); // paused
+
+    assert_eq!(
+        app.radio_scrobble.current_key(),
+        Some(("Artist", "Song")),
+        "observe still tracks the track while paused"
+    );
+    assert!(
+        tasks.is_empty(),
+        "paused → no now-playing dispatch (timer accrues nothing)"
+    );
+}
+
+#[test]
+fn radio_tick_now_playing_toggle_suppresses_dispatch() {
+    let mut app = radio_app_playing("Artist", "Song");
+    app.settings.radio_now_playing_enabled = false;
+
+    let mut tasks = Vec::new();
+    app.handle_radio_scrobble_tick(true, false, &mut tasks);
+
+    assert!(
+        tasks.is_empty(),
+        "now-playing toggle off → no dispatch even on a track change"
+    );
+}
+
+#[test]
+fn radio_tick_title_only_icy_is_skipped() {
+    let mut app = radio_app_playing("Artist", "Song");
+    // Station emits a separator-less title (no artist) → not scrobbleable.
+    if let crate::state::ActivePlayback::Radio(r) = &mut app.active_playback {
+        r.icy_artist = None;
+        r.icy_title = Some("Just A Station ID".to_string());
+    }
+
+    let mut tasks = Vec::new();
+    app.handle_radio_scrobble_tick(true, false, &mut tasks);
+
+    assert!(tasks.is_empty(), "title-only ICY → nothing dispatched");
+}

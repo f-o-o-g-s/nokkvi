@@ -45,6 +45,10 @@ impl std::fmt::Display for PlaylistMutation {
     }
 }
 
+/// Radio scrobble track payload — canonical definition in data crate
+pub(crate) use nokkvi_data::services::radio_scrobble::{
+    RadioSubmitOutcome, ScrobbleTargets, ScrobbleTrack,
+};
 /// Named struct for player settings — canonical definition in data crate
 pub(crate) use nokkvi_data::types::player_settings::LivePlayerSettings;
 /// Named struct for all view sort preferences — canonical definition in data crate
@@ -182,6 +186,37 @@ pub enum ScrobbleMessage {
     /// only when still live (matching timer_id, playing, not paused, queue
     /// playback); otherwise it is a no-op.
     NowPlayingRefresh(u64, String),
+    /// Submit a now-playing update for an internet-radio track DIRECTLY to the
+    /// configured scrobble service (ListenBrainz). Radio has no Navidrome song
+    /// id, so it bypasses the Subsonic relay entirely.
+    RadioNowPlaying(ScrobbleTrack),
+    /// Submit a completed listen for a radio track, timestamped at the track's
+    /// start (unix seconds), to the requested `targets` (a retry narrows to the
+    /// not-yet-succeeded targets).
+    RadioSubmit(ScrobbleTrack, i64, ScrobbleTargets),
+    /// Result of a radio now-playing. Best-effort: logged only (a failed radio
+    /// now-playing must not toast-spam during normal listening).
+    RadioResult(Result<(), String>),
+    /// Per-target outcome of a radio scrobble SUBMIT, carrying the `(artist,
+    /// title)` it was for so the timer can latch each target on success or
+    /// re-arm it on failure (`RadioScrobbleState::mark_outcome`). A stale result
+    /// (track since changed) is ignored by the key match.
+    RadioSubmitResult {
+        artist: String,
+        title: String,
+        outcome: RadioSubmitOutcome,
+    },
+    /// Result of a ListenBrainz token set/verify action (settings GUI). Toasted
+    /// as explicit user feedback. `Ok(None)` = token cleared (disconnected);
+    /// `Ok(Some(name))` = connected (name may be empty for endpoints that omit
+    /// it); `Err` = the failure reason.
+    RadioVerifyResult(Result<Option<String>, String>),
+    /// Last.fm desktop-auth step 1 result: `Ok((token, authorize_url))` →
+    /// open the browser + the confirm dialog; `Err` → toast.
+    LastfmAuthStarted(Result<(String, String), String>),
+    /// Last.fm credentials-saved / connect result (toasted). `Ok("")` = creds
+    /// saved; `Ok(name)` = connected as `name`; `Err` = the failure reason.
+    LastfmAuthResult(Result<String, String>),
 }
 
 /// Hotkey action messages, namespaced under `Message::Hotkey(..)`

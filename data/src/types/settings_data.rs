@@ -166,6 +166,20 @@ pub struct PlaybackSettingsData {
     pub scrobbling_enabled: bool,
     /// Scrobble threshold as a fraction (0.25–0.90).
     pub scrobble_threshold: f64,
+    /// Whether internet-radio scrobbling (direct to ListenBrainz) is enabled.
+    pub radio_scrobbling_enabled: bool,
+    /// Absolute seconds a radio track must play before it scrobbles.
+    pub radio_scrobble_threshold_secs: i64,
+    /// Whether radio now-playing updates are sent.
+    pub radio_now_playing_enabled: bool,
+    /// Which layer supplies each radio-scrobble credential (env / config.toml /
+    /// redb / unset), so the settings rows show "Saved" vs "Set in config.toml"
+    /// vs "Set via env var" — and a GUI clear can warn when a higher layer still
+    /// shadows it.
+    pub listenbrainz_source: crate::services::radio_scrobble::source::CredSource,
+    pub lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource,
+    /// Linked Last.fm username, empty when not connected.
+    pub lastfm_username: Cow<'static, str>,
     pub quick_add_to_playlist: bool,
     pub default_playlist_name: Cow<'static, str>,
     pub queue_show_default_playlist: bool,
@@ -195,6 +209,12 @@ impl Default for PlaybackSettingsData {
             replay_gain_prevent_clipping: false,
             scrobbling_enabled: false,
             scrobble_threshold: 0.0,
+            radio_scrobbling_enabled: false,
+            radio_scrobble_threshold_secs: 0,
+            radio_now_playing_enabled: false,
+            listenbrainz_source: crate::services::radio_scrobble::source::CredSource::Unset,
+            lastfm_credentials_source: crate::services::radio_scrobble::source::CredSource::Unset,
+            lastfm_username: Cow::Borrowed(""),
             quick_add_to_playlist: false,
             default_playlist_name: Cow::Borrowed("test-default"),
             queue_show_default_playlist: false,

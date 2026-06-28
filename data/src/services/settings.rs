@@ -253,6 +253,25 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_radio_scrobbling_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.radio_scrobbling_enabled = enabled;
+        self.save()
+    }
+
+    pub fn set_radio_scrobble_threshold_secs(&mut self, secs: i64) -> Result<()> {
+        use crate::types::settings::{RADIO_SCROBBLE_THRESHOLD_MAX, RADIO_SCROBBLE_THRESHOLD_MIN};
+        self.settings.player.radio_scrobble_threshold_secs = secs.clamp(
+            i64::from(RADIO_SCROBBLE_THRESHOLD_MIN),
+            i64::from(RADIO_SCROBBLE_THRESHOLD_MAX),
+        ) as u32;
+        self.save()
+    }
+
+    pub fn set_radio_now_playing_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.radio_now_playing_enabled = enabled;
+        self.save()
+    }
+
     pub fn set_start_view(&mut self, view: &str) -> Result<()> {
         self.settings.player.start_view = view.to_string();
         self.save()
@@ -1226,6 +1245,9 @@ mod sentinel_roundtrip_tests {
             light_mode: true, // default false; UI-PS lacks this field — excluded from the round-trip
             scrobbling_enabled: false, // default true
             scrobble_threshold: 0.8123, // default 0.50
+            radio_scrobbling_enabled: true, // default false
+            radio_scrobble_threshold_secs: 90, // default 60
+            radio_now_playing_enabled: false, // default true
 
             // General
             start_view: "Albums".to_string(), // default "Queue"

@@ -42,6 +42,14 @@ pub enum TextInputDialogAction {
     DeleteRadioStation(String, String),
     /// Edit an internet radio station (holds station id)
     EditRadioStation(String),
+    /// Save (or clear, with an empty value) the ListenBrainz scrobble token to
+    /// redb, then validate it.
+    WriteListenBrainzToken,
+    /// Save the Last.fm app key (primary field) + secret (secondary field).
+    WriteLastfmCredentials,
+    /// Complete Last.fm desktop auth: exchange the held request token (after the
+    /// user authorized in the browser) for a session key.
+    CompleteLastfmAuth(String),
 }
 
 /// An option in the playlist selection combo_box.
@@ -87,6 +95,8 @@ pub struct TextInputDialogState {
     // Optional secondary input (for radio stations)
     pub secondary_value: Option<String>,
     pub secondary_placeholder: String,
+    /// Mask the primary input (bullets) for secret entry, e.g. a scrobble token.
+    pub secure: bool,
 }
 
 impl Default for TextInputDialogState {
@@ -105,6 +115,7 @@ impl Default for TextInputDialogState {
             confirmation_message: String::new(),
             secondary_value: None,
             secondary_placeholder: String::new(),
+            secure: false,
         }
     }
 }
@@ -126,6 +137,7 @@ impl TextInputDialogState {
         self.confirmation_message.clear();
         self.secondary_value = None;
         self.secondary_placeholder.clear();
+        self.secure = false;
     }
 
     /// Open the dialog with the given configuration.
@@ -250,6 +262,18 @@ impl TextInputDialogState {
     }
 
     /// Open a confirmation dialog for resetting visualizer settings.
+    /// Open the "authorize then confirm" dialog for Last.fm desktop auth,
+    /// carrying the request `token` to exchange on confirm.
+    pub fn open_lastfm_auth_confirmation(&mut self, token: String) {
+        self.reset_fields();
+        self.title = "Connect Last.fm".to_string();
+        self.confirmation_message =
+            "Authorize nokkvi in the browser window that just opened, then click Confirm."
+                .to_string();
+        self.action = Some(TextInputDialogAction::CompleteLastfmAuth(token));
+        self.confirmation_only = true;
+    }
+
     pub fn open_reset_visualizer_confirmation(&mut self) {
         self.reset_fields();
         self.title = "Reset Visualizer Settings".to_string();
@@ -402,6 +426,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .id(DIALOG_INPUT_ID)
             .on_input(TextInputDialogMessage::ValueChanged)
             .on_submit(TextInputDialogMessage::Submit)
+            .secure(state.secure)
             .padding(8)
             .size(14)
             .font(theme::ui_font())
@@ -436,6 +461,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             let input2 = text_input(&state.secondary_placeholder, sec_val)
                 .on_input(TextInputDialogMessage::SecondaryValueChanged)
                 .on_submit(TextInputDialogMessage::Submit)
+                .secure(state.secure)
                 .padding(8)
                 .size(14)
                 .font(theme::ui_font())
@@ -523,6 +549,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             Some(
                 TextInputDialogAction::ResetVisualizerSettings
                     | TextInputDialogAction::ResetAllHotkeys
+                    | TextInputDialogAction::CompleteLastfmAuth(_)
             )
         );
 
@@ -540,6 +567,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 TextInputDialogAction::ResetVisualizerSettings
                 | TextInputDialogAction::ResetAllHotkeys,
             ) => "Reset",
+            Some(TextInputDialogAction::CompleteLastfmAuth(_)) => "Confirm",
             _ => "Delete",
         }
     } else if is_overwrite {

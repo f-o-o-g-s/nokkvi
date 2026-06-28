@@ -47,6 +47,12 @@ pub struct LivePlayerSettings {
     pub scrobbling_enabled: bool,
     /// Scrobble threshold as a fraction of track duration (0.25–0.90)
     pub scrobble_threshold: f32,
+    /// Whether internet-radio tracks scrobble directly to ListenBrainz
+    pub radio_scrobbling_enabled: bool,
+    /// Absolute seconds a radio track must play before it scrobbles
+    pub radio_scrobble_threshold_secs: u32,
+    /// Whether to send radio now-playing updates on each ICY track change
+    pub radio_now_playing_enabled: bool,
     /// Start view name (e.g. "Queue", "Albums")
     pub start_view: String,
     /// Whether stable viewport mode is enabled

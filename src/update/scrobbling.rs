@@ -5,7 +5,9 @@ use tracing::{debug, warn};
 
 use crate::{
     Nokkvi,
-    app_message::{HotkeyMessage, Message, ScrobbleMessage},
+    app_message::{
+        HotkeyMessage, Message, RadioSubmitOutcome, ScrobbleMessage, ScrobbleTargets, ScrobbleTrack,
+    },
 };
 
 /// Debounce before the FIRST now-playing emit after a song change / loop.
@@ -14,6 +16,17 @@ const NOW_PLAYING_DEBOUNCE_SECS: u64 = 2;
 /// Navidrome's ephemeral now-playing TTL so a long single track keeps its
 /// server-side entry alive.
 const NOW_PLAYING_REFRESH_SECS: u64 = 30;
+
+/// Current wall-clock as unix seconds, or `None` on a pre-epoch clock. A radio
+/// scrobble is timestamped at the track start, so a bogus pre-1970 clock would
+/// stamp the listen at the epoch and get it rejected — the caller skips the tick
+/// instead of submitting a junk timestamp.
+fn unix_now_secs() -> Option<i64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
+}
 
 impl Nokkvi {
     /// Arm the debounced "now playing" emit for `song_id`.
@@ -261,6 +274,304 @@ impl Nokkvi {
         Task::batch(vec![submit_task, now_playing_task])
     }
 
+    /// Submit a radio now-playing update directly to the scrobble service
+    /// (ListenBrainz). No-ops in the backend when no token is configured.
+    pub(crate) fn handle_radio_now_playing(&mut self, track: ScrobbleTrack) -> Task<Message> {
+        debug!(
+            " [SCROBBLE] Radio now-playing: {} - {}",
+            track.artist, track.title
+        );
+        self.shell_task(
+            move |shell| async move {
+                shell
+                    .radio_scrobble_now_playing(track)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            |result| Message::Scrobble(ScrobbleMessage::RadioResult(result)),
+        )
+    }
+
+    /// Submit a completed radio listen directly to the scrobble service,
+    /// timestamped at the track's start. No-ops in the backend when no token is
+    /// configured.
+    pub(crate) fn handle_radio_submit(
+        &mut self,
+        track: ScrobbleTrack,
+        started_at: i64,
+        targets: ScrobbleTargets,
+    ) -> Task<Message> {
+        debug!(
+            " [SCROBBLE] Radio submit: {} - {} @ {} (lb={}, lf={})",
+            track.artist, track.title, started_at, targets.listenbrainz, targets.lastfm
+        );
+        // Carry the key back so the timer can latch each target independently.
+        let artist = track.artist.clone();
+        let title = track.title.clone();
+        self.shell_task(
+            move |shell| async move {
+                shell
+                    .radio_scrobble_submit(track, started_at, targets)
+                    .await
+            },
+            move |outcome| {
+                Message::Scrobble(ScrobbleMessage::RadioSubmitResult {
+                    artist,
+                    title,
+                    outcome,
+                })
+            },
+        )
+    }
+
+    /// Handle a radio now-playing result. Best-effort: logged only, so a
+    /// transient now-playing hiccup never toast-spams during listening.
+    pub(crate) fn handle_radio_result(&mut self, result: Result<(), String>) -> Task<Message> {
+        // Now-playing is best-effort and fired on every track change AND the 30 s
+        // keep-alive, so a persistent failure (offline / expired token) would
+        // warn!-spam the log all session. Log at debug! like the queue path.
+        match result {
+            Ok(()) => debug!(" [SCROBBLE] ✅ Radio now-playing accepted"),
+            Err(e) => debug!(" [SCROBBLE] Radio now-playing failed (best-effort): {}", e),
+        }
+        Task::none()
+    }
+
+    /// Handle a radio scrobble-submit result: latch each target on success or
+    /// re-arm it (cooldown) on failure, per the bounded re-arm policy.
+    pub(crate) fn handle_radio_submit_result(
+        &mut self,
+        artist: String,
+        title: String,
+        outcome: RadioSubmitOutcome,
+    ) -> Task<Message> {
+        // `Some(true)` accepted, `Some(false)` failed (will re-arm), `None` not
+        // attempted (unconfigured / already done).
+        let lb = outcome.listenbrainz.as_ref().map(Result::is_ok);
+        let lf = outcome.lastfm.as_ref().map(Result::is_ok);
+        if let Some(Err(e)) = &outcome.listenbrainz {
+            debug!(" [SCROBBLE] ListenBrainz scrobble failed (will re-arm): {e}");
+        }
+        if let Some(Err(e)) = &outcome.lastfm {
+            debug!(" [SCROBBLE] Last.fm scrobble failed (will re-arm): {e}");
+        }
+        debug!(" [SCROBBLE] Radio scrobble outcome {artist} - {title}: lb={lb:?} lf={lf:?}");
+        let now = unix_now_secs().unwrap_or(0);
+        self.radio_scrobble
+            .mark_outcome(&artist, &title, now, lb, lf);
+        Task::none()
+    }
+
+    /// True when a higher-precedence layer (env / config.toml) supplies the
+    /// ListenBrainz token, so a redb (GUI) write is shadowed.
+    fn listenbrainz_shadowed_by_higher_layer(&self) -> bool {
+        self.app_service
+            .as_ref()
+            .is_some_and(|s| s.radio_credentials().listenbrainz_source.shadows_redb())
+    }
+
+    /// True when a higher-precedence layer supplies the Last.fm key/secret.
+    fn lastfm_shadowed_by_higher_layer(&self) -> bool {
+        self.app_service
+            .as_ref()
+            .is_some_and(|s| s.radio_credentials().lastfm_source.shadows_redb())
+    }
+
+    /// Handle a ListenBrainz token set/verify result with a user-facing toast.
+    pub(crate) fn handle_radio_verify_result(
+        &mut self,
+        result: Result<Option<String>, String>,
+    ) -> Task<Message> {
+        match result {
+            // Clearing only removes the redb (GUI) value. If env/config still
+            // supplies a token, the disconnect didn't actually take — say so
+            // honestly rather than a misleading "cleared" (review #2).
+            Ok(None) if self.listenbrainz_shadowed_by_higher_layer() => self
+                .toast_warn("Cleared the saved token, but a config.toml/env value is still active"),
+            Ok(None) => self.toast_success("ListenBrainz token cleared"),
+            Ok(Some(name)) if name.is_empty() => self.toast_success("ListenBrainz connected"),
+            Ok(Some(name)) => self.toast_success(format!("ListenBrainz connected as {name}")),
+            Err(e) => self.toast_error(format!("ListenBrainz: {e}")),
+        }
+        // Refresh the settings rows so the connection status updates at once.
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
+        Task::none()
+    }
+
+    /// Last.fm desktop-auth step 1: open the authorize URL in a browser and the
+    /// confirm dialog that completes the exchange once the user has authorized.
+    pub(crate) fn handle_lastfm_auth_started(
+        &mut self,
+        result: Result<(String, String), String>,
+    ) -> Task<Message> {
+        match result {
+            Ok((token, url)) => {
+                debug!(
+                    " [SCROBBLE] Last.fm auth: token obtained, opening browser + confirm dialog"
+                );
+                // The authorize URL carries the request token — a credential that
+                // can be exchanged for a session during the auth window. Don't log
+                // it on the happy path (the browser already has it). Only emit it
+                // when xdg-open fails and the user must open it manually; the log
+                // is created 0600 so it stays owner-readable.
+                if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+                    warn!(" [SCROBBLE] Failed to open Last.fm authorize URL: {e}");
+                    tracing::info!(" [SCROBBLE] Open this URL to authorize Last.fm: {url}");
+                    self.toast_error("Could not open browser — copy the URL from the log");
+                }
+                self.text_input_dialog.open_lastfm_auth_confirmation(token);
+                Task::none()
+            }
+            Err(e) => {
+                warn!(" [SCROBBLE] Last.fm begin-auth failed: {e}");
+                self.toast_error(format!("Last.fm: {e}"));
+                Task::none()
+            }
+        }
+    }
+
+    /// Handle a Last.fm credentials-saved / connect result with a toast.
+    pub(crate) fn handle_lastfm_auth_result(
+        &mut self,
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(name) if name.is_empty() => {
+                debug!(" [SCROBBLE] Last.fm credentials saved");
+                if self.lastfm_shadowed_by_higher_layer() {
+                    self.toast_warn(
+                        "Saved, but a config.toml/env Last.fm key/secret still overrides these",
+                    );
+                } else {
+                    self.toast_success("Last.fm credentials saved — now click Connect Last.fm");
+                }
+            }
+            Ok(name) => {
+                tracing::info!(" [SCROBBLE] Last.fm connected as {name}");
+                self.toast_success(format!("Last.fm connected as {name}"));
+            }
+            Err(e) => {
+                warn!(" [SCROBBLE] Last.fm auth/save failed: {e}");
+                self.toast_error(format!("Last.fm: {e}"));
+            }
+        }
+        // Refresh the settings rows so the connection status updates at once.
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
+        Task::none()
+    }
+
+    /// Drive radio scrobbling from the playback tick. Self-gating: clears all
+    /// tracking when not in radio playback, otherwise observes the current ICY
+    /// track (dispatching a now-playing on a genuine change) and accumulates
+    /// listen time (dispatching a scrobble once the absolute threshold is met).
+    ///
+    /// Called once per `PlaybackStateUpdated` after the queue-scrobble block.
+    /// The listen timer is wall-clock based (seconds since the track was first
+    /// observed), so it needs no engine position. Title-only / unparseable ICY
+    /// is skipped (no artist → not scrobbled), and submissions only accrue
+    /// while actually playing.
+    pub(crate) fn handle_radio_scrobble_tick(
+        &mut self,
+        playing: bool,
+        paused: bool,
+        tasks: &mut Vec<Task<Message>>,
+    ) {
+        // Feature gate: when radio scrobbling is off, keep no tracking so a
+        // later enable starts fresh.
+        if !self.settings.radio_scrobbling_enabled {
+            self.radio_scrobble.clear();
+            return;
+        }
+
+        // Borrow the radio metadata. `station_name` is cloned (owned for the
+        // action-driven tracks below); the ICY fields stay borrowed so the
+        // unchanged-tick fast path allocates nothing. Non-radio clears tracking.
+        let (icy_artist, icy_title, station_name) = match &self.active_playback {
+            crate::state::ActivePlayback::Radio(r) => (
+                r.icy_artist.as_deref(),
+                r.icy_title.as_deref(),
+                r.station.name.clone(),
+            ),
+            crate::state::ActivePlayback::Queue => {
+                self.radio_scrobble.clear();
+                return;
+            }
+        };
+
+        let Some(now) = unix_now_secs() else {
+            // Pre-epoch clock — can't produce a valid scrobble timestamp this tick.
+            return;
+        };
+        // Playback active = playing and not paused. The timer accrues only while
+        // active, but `tick` still runs so `last_tick` tracks the pause (a resume
+        // doesn't credit the paused gap).
+        let active = playing && !paused;
+        let now_playing_on = self.settings.radio_now_playing_enabled;
+        let threshold_secs = i64::from(self.settings.radio_scrobble_threshold_secs);
+
+        // Flush the CURRENT (possibly outgoing) track FIRST, before `observe`
+        // can replace it on a title change — a track that crosses the threshold
+        // on the same tick its ICY title flips still scrobbles (review #6). The
+        // action carries the already-cleaned artist/title, so no re-clean here.
+        if let crate::state::RadioScrobbleAction::Scrobble {
+            artist,
+            title,
+            started_at,
+            targets,
+        } = self.radio_scrobble.tick(now, active, threshold_secs)
+        {
+            debug!(" [SCROBBLE] Radio listen threshold met → submitting {artist} - {title}");
+            tasks.push(Task::done(Message::Scrobble(ScrobbleMessage::RadioSubmit(
+                ScrobbleTrack::from_clean(artist, title, Some(station_name.clone())),
+                started_at,
+                targets,
+            ))));
+        }
+
+        // Only rebuild + re-observe when the raw ICY actually changed — skips the
+        // clean()/alloc churn on the ~10 Hz ticks where the title is unchanged
+        // (review #12).
+        if self.radio_scrobble.raw_icy_changed(icy_artist, icy_title)
+            && let Some(track) =
+                ScrobbleTrack::from_icy(icy_artist, icy_title, None, Some(&station_name))
+            && matches!(
+                self.radio_scrobble
+                    .observe(&track.artist, &track.title, now),
+                crate::state::RadioScrobbleAction::NowPlaying { .. }
+            )
+        {
+            debug!(
+                " [SCROBBLE] Radio track change: {} - {}",
+                track.artist, track.title
+            );
+            if now_playing_on && active {
+                tasks.push(Task::done(Message::Scrobble(
+                    ScrobbleMessage::RadioNowPlaying(track),
+                )));
+            }
+        }
+
+        // Now-playing keep-alive: re-send periodically so the service's
+        // now-playing indicator doesn't expire on a long single-title segment.
+        if now_playing_on
+            && let Some((artist, title)) = self.radio_scrobble.now_playing_refresh_due(
+                now,
+                active,
+                NOW_PLAYING_REFRESH_SECS as i64,
+            )
+        {
+            tasks.push(Task::done(Message::Scrobble(
+                ScrobbleMessage::RadioNowPlaying(ScrobbleTrack::from_clean(
+                    artist,
+                    title,
+                    Some(station_name),
+                )),
+            )));
+        }
+    }
+
     /// Dispatch a `ScrobbleMessage` to its handler.
     pub(super) fn dispatch_scrobble(&mut self, msg: ScrobbleMessage) -> Task<Message> {
         match msg {
@@ -278,6 +589,19 @@ impl Nokkvi {
             ScrobbleMessage::NowPlayingRefresh(timer_id, song_id) => {
                 self.handle_scrobble_now_playing_refresh(timer_id, song_id)
             }
+            ScrobbleMessage::RadioNowPlaying(track) => self.handle_radio_now_playing(track),
+            ScrobbleMessage::RadioSubmit(track, started_at, targets) => {
+                self.handle_radio_submit(track, started_at, targets)
+            }
+            ScrobbleMessage::RadioResult(result) => self.handle_radio_result(result),
+            ScrobbleMessage::RadioSubmitResult {
+                artist,
+                title,
+                outcome,
+            } => self.handle_radio_submit_result(artist, title, outcome),
+            ScrobbleMessage::RadioVerifyResult(result) => self.handle_radio_verify_result(result),
+            ScrobbleMessage::LastfmAuthStarted(result) => self.handle_lastfm_auth_started(result),
+            ScrobbleMessage::LastfmAuthResult(result) => self.handle_lastfm_auth_result(result),
         }
     }
 }

@@ -12,6 +12,13 @@ use iced::Task;
 use crate::{Nokkvi, app_message::Message};
 
 impl Nokkvi {
+    /// Build the settings view data, including the radio-scrobble connection
+    /// status (read from `AppService`). This is always read — `data` is handed
+    /// to `SettingsPage::update` on every non-nav message and is applied to the
+    /// credential rows, so a status-less build would clobber a previously
+    /// correct "Saved"/"Connected" badge with "Not set". Plain keystroke nav is
+    /// already short-circuited before this is called (the nav-only fast path in
+    /// `handle_settings`), so this is never on the per-frame hot path.
     pub(crate) fn build_settings_view_data(&self) -> crate::views::SettingsViewData {
         use nokkvi_data::types::settings_data::{
             GeneralSettingsData, InterfaceSettingsData, PlaybackSettingsData,
@@ -86,6 +93,23 @@ impl Nokkvi {
             artwork_vertical_height_pct: f64::from(crate::theme::artwork_vertical_height_pct()),
         };
 
+        // Radio-scrobble connection status, resolved from a SINGLE config.toml
+        // read, reporting which layer (env / config.toml / redb) supplies each
+        // credential so the rows can show the source and warn on a shadowed GUI
+        // clear (review #2 / #11).
+        use nokkvi_data::services::radio_scrobble::source::CredSource;
+        let (listenbrainz_source, lastfm_credentials_source, lastfm_username) = self
+            .app_service
+            .as_ref()
+            .map_or((CredSource::Unset, CredSource::Unset, String::new()), |s| {
+                let creds = s.radio_credentials();
+                (
+                    creds.listenbrainz_source,
+                    creds.lastfm_source,
+                    creds.lastfm_username.unwrap_or_default(),
+                )
+            });
+
         let playback = PlaybackSettingsData {
             crossfade_enabled: self.engine.crossfade_enabled,
             bit_perfect: self.engine.bit_perfect_mode.as_label().into(),
@@ -99,6 +123,12 @@ impl Nokkvi {
             replay_gain_prevent_clipping: self.engine.replay_gain_prevent_clipping,
             scrobbling_enabled: self.settings.scrobbling_enabled,
             scrobble_threshold: f64::from(self.settings.scrobble_threshold),
+            radio_scrobbling_enabled: self.settings.radio_scrobbling_enabled,
+            radio_scrobble_threshold_secs: i64::from(self.settings.radio_scrobble_threshold_secs),
+            radio_now_playing_enabled: self.settings.radio_now_playing_enabled,
+            listenbrainz_source,
+            lastfm_credentials_source,
+            lastfm_username: lastfm_username.into(),
             quick_add_to_playlist: self.settings.quick_add_to_playlist,
             default_playlist_name: self.settings.default_playlist_name.clone().into(),
             queue_show_default_playlist: self.settings.queue_show_default_playlist,
@@ -206,10 +236,12 @@ impl Nokkvi {
         }
 
         // Full path: build SettingsViewData (reads from theme system + config.toml)
+        let rebuilding =
+            self.settings_page.config_dirty || self.settings_page.cached_entries.is_empty();
         let data = self.build_settings_view_data();
 
         // Only rebuild entries when config has changed or entries are empty
-        if self.settings_page.config_dirty || self.settings_page.cached_entries.is_empty() {
+        if rebuilding {
             self.settings_page.refresh_entries(&data);
             self.settings_page.config_dirty = false;
         }
@@ -322,6 +354,84 @@ impl Nokkvi {
                 Task::done(Message::DefaultPlaylistPicker(
                     crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,
                 ))
+            }
+            crate::views::SettingsAction::OpenListenBrainzTokenDialog => {
+                let saved = self
+                    .app_service
+                    .as_ref()
+                    .is_some_and(|s| s.listenbrainz_token().is_some());
+                let placeholder = if saved {
+                    "A token is saved — paste a new one to replace, or leave empty to disconnect"
+                } else {
+                    "Paste your token (leave empty to disconnect)"
+                };
+                self.text_input_dialog.open(
+                    "ListenBrainz Token",
+                    "",
+                    placeholder,
+                    crate::widgets::text_input_dialog::TextInputDialogAction::WriteListenBrainzToken,
+                );
+                // Mask the input — it's a secret.
+                self.text_input_dialog.secure = true;
+                Task::none()
+            }
+            crate::views::SettingsAction::VerifyListenBrainz => self.shell_task(
+                |shell| async move {
+                    let Some(token) = shell.listenbrainz_token() else {
+                        return Err("no token set".to_string());
+                    };
+                    // Shared validate→name mapping; Some(name) = connected.
+                    shell
+                        .validate_listenbrainz_token_to_name(token)
+                        .await
+                        .map(Some)
+                },
+                |result| {
+                    Message::Scrobble(crate::app_message::ScrobbleMessage::RadioVerifyResult(
+                        result,
+                    ))
+                },
+            ),
+            crate::views::SettingsAction::OpenLastfmCredentialsDialog => {
+                let saved = self
+                    .app_service
+                    .as_ref()
+                    .is_some_and(|s| s.lastfm_credentials().is_some());
+                let (key_ph, secret_ph) = if saved {
+                    ("API key (saved — paste to replace)", "API secret (saved)")
+                } else {
+                    ("API key", "API secret")
+                };
+                self.text_input_dialog.open_two_fields(
+                    "Last.fm API Credentials",
+                    "",
+                    key_ph,
+                    "",
+                    secret_ph,
+                    crate::widgets::text_input_dialog::TextInputDialogAction::WriteLastfmCredentials,
+                );
+                self.text_input_dialog.secure = true; // mask both fields
+                Task::none()
+            }
+            crate::views::SettingsAction::ConnectLastfm => self.shell_task(
+                |shell| async move { shell.lastfm_begin_auth().await.map_err(|e| e.to_string()) },
+                |result| {
+                    Message::Scrobble(crate::app_message::ScrobbleMessage::LastfmAuthStarted(
+                        result,
+                    ))
+                },
+            ),
+            crate::views::SettingsAction::DisconnectLastfm => {
+                // Sync redb clear — done inline so the row status refreshes
+                // immediately via the tail `refresh_settings_entries_if_dirty`.
+                let result = self.app_service.as_ref().map(|s| s.disconnect_lastfm());
+                match result {
+                    Some(Ok(())) => self.toast_success("Last.fm disconnected"),
+                    Some(Err(e)) => self.toast_error(format!("Last.fm: {e}")),
+                    None => {}
+                }
+                self.settings_page.config_dirty = true;
+                Task::none()
             }
         };
 

@@ -14,6 +14,9 @@ anyhow = "1.0.102"
 bytemuck = { version = "1.25", features = ["derive"] }
 chrono = "0.4.44"
 directories = "6.0.0"
+# Last.fm scrobbling requires an MD5 `api_sig` signature on every authenticated
+# call — there is no Last.fm without it. RustCrypto, tiny, audited.
+md-5 = "0.10"
 rand = "0.10"
 reqwest = { version = "0.13.2", features = ["json", "blocking", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }

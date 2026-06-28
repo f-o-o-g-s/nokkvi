@@ -379,6 +379,80 @@ impl Nokkvi {
                     "update radio station",
                 )
             }
+            Some(TextInputDialogAction::WriteListenBrainzToken) => {
+                let token = self.text_input_dialog.value.trim().to_string();
+                self.text_input_dialog.close();
+                self.shell_task(
+                    move |shell| async move {
+                        // Empty value clears the token (disconnect) → Ok(None).
+                        if token.is_empty() {
+                            shell
+                                .set_listenbrainz_token("")
+                                .map_err(|e| e.to_string())?;
+                            return Ok(None);
+                        }
+                        // Validate FIRST; only persist a token that works, so a
+                        // rejected token never lingers in redb looking "saved".
+                        let name = shell
+                            .validate_listenbrainz_token_to_name(token.clone())
+                            .await?;
+                        shell
+                            .set_listenbrainz_token(&token)
+                            .map_err(|e| e.to_string())?;
+                        Ok(Some(name))
+                    },
+                    |result| {
+                        Message::Scrobble(crate::app_message::ScrobbleMessage::RadioVerifyResult(
+                            result,
+                        ))
+                    },
+                )
+            }
+            Some(TextInputDialogAction::WriteLastfmCredentials) => {
+                let api_key = self.text_input_dialog.value.trim().to_string();
+                let api_secret = self
+                    .text_input_dialog
+                    .secondary_value
+                    .clone()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                self.text_input_dialog.close();
+                if api_key.is_empty() || api_secret.is_empty() {
+                    self.toast_warn("Both API key and secret are required");
+                    return Task::none();
+                }
+                self.shell_task(
+                    move |shell| async move {
+                        shell
+                            .set_lastfm_credentials(&api_key, &api_secret)
+                            .map_err(|e| e.to_string())
+                            // Empty string => "credentials saved" toast.
+                            .map(|()| String::new())
+                    },
+                    |result| {
+                        Message::Scrobble(crate::app_message::ScrobbleMessage::LastfmAuthResult(
+                            result,
+                        ))
+                    },
+                )
+            }
+            Some(TextInputDialogAction::CompleteLastfmAuth(token)) => {
+                self.text_input_dialog.close();
+                self.shell_task(
+                    move |shell| async move {
+                        shell
+                            .lastfm_complete_auth(token)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    |result| {
+                        Message::Scrobble(crate::app_message::ScrobbleMessage::LastfmAuthResult(
+                            result,
+                        ))
+                    },
+                )
+            }
             None => Task::none(),
         }
     }

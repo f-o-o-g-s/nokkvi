@@ -33,6 +33,22 @@ pub(crate) const QUEUE_SONGS: &str = "queue_songs";
 /// under a new station's id; with that bug fixed in code, migrating is safe and
 /// any leftover wrong entry can be cleared per-station via "Refresh artwork".
 pub(crate) const RADIO_ART_INDEX: &str = "radio_art_index_v2";
+/// ListenBrainz user submission token for direct **radio** scrobbling. The
+/// `radio_` prefix is deliberate: library scrobbling rides Navidrome's own
+/// server-side keys, so these keys must read as radio-only and never be
+/// mistaken for a library setting. This is the redb (GUI-entered) layer; the
+/// effective value also honors a `[radio_scrobble]` config.toml entry and the
+/// `NOKKVI_RADIO_*` env vars (see `radio_scrobble::source`). Empty = not set.
+pub(crate) const LISTENBRAINZ_TOKEN: &str = "radio_listenbrainz_token";
+/// Last.fm radio-scrobble credentials (redb layer — see [`LISTENBRAINZ_TOKEN`]
+/// for the prefix rationale and the config.toml/env override layers). The app
+/// key/secret are user-supplied (also config.toml/env-settable); the session
+/// key + username come from the in-app browser auth flow and stay redb-only.
+/// Empty = not set.
+pub(crate) const LASTFM_API_KEY: &str = "radio_lastfm_api_key";
+pub(crate) const LASTFM_API_SECRET: &str = "radio_lastfm_api_secret";
+pub(crate) const LASTFM_SESSION_KEY: &str = "radio_lastfm_session_key";
+pub(crate) const LASTFM_USERNAME: &str = "radio_lastfm_username";
 
 #[cfg(test)]
 mod tests {
@@ -49,5 +65,10 @@ mod tests {
         assert_eq!(QUEUE_ORDER, "queue_order");
         assert_eq!(QUEUE_SONGS, "queue_songs");
         assert_eq!(RADIO_ART_INDEX, "radio_art_index_v2");
+        assert_eq!(LISTENBRAINZ_TOKEN, "radio_listenbrainz_token");
+        assert_eq!(LASTFM_API_KEY, "radio_lastfm_api_key");
+        assert_eq!(LASTFM_API_SECRET, "radio_lastfm_api_secret");
+        assert_eq!(LASTFM_SESSION_KEY, "radio_lastfm_session_key");
+        assert_eq!(LASTFM_USERNAME, "radio_lastfm_username");
     }
 }

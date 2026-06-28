@@ -181,6 +181,9 @@ impl SettingsService {
     delegate_setter!(set_visualization_mode, VisualizationMode);
     delegate_setter!(set_scrobbling_enabled, bool);
     delegate_setter!(set_scrobble_threshold, f64);
+    delegate_setter!(set_radio_scrobbling_enabled, bool);
+    delegate_setter!(set_radio_scrobble_threshold_secs, i64);
+    delegate_setter!(set_radio_now_playing_enabled, bool);
     delegate_setter!(set_start_view, &str);
     delegate_setter!(set_stable_viewport, bool);
     delegate_setter!(set_enter_shuffle, bool);

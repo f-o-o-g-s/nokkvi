@@ -485,6 +485,16 @@ pub(crate) enum SettingsAction {
     OpenResetHotkeysDialog,
     /// Open the default-playlist picker modal (root-level overlay).
     OpenDefaultPlaylistPicker,
+    /// Open the masked dialog to set/clear the ListenBrainz scrobble token.
+    OpenListenBrainzTokenDialog,
+    /// Validate the currently-configured ListenBrainz token (toasts the result).
+    VerifyListenBrainz,
+    /// Open the dialog to enter the Last.fm app key + secret.
+    OpenLastfmCredentialsDialog,
+    /// Begin the Last.fm browser-auth flow.
+    ConnectLastfm,
+    /// Disconnect Last.fm (clear the stored session).
+    DisconnectLastfm,
 }
 
 // ============================================================================
@@ -823,6 +833,21 @@ impl SettingsPage {
                                     | sentinel::SentinelKind::RestoreAllHotkeys,
                                 ) => {
                                     return self.handle_restore_defaults(key_ref.as_ref());
+                                }
+                                Some(sentinel::SentinelKind::SetListenBrainzToken) => {
+                                    return SettingsAction::OpenListenBrainzTokenDialog;
+                                }
+                                Some(sentinel::SentinelKind::VerifyListenBrainz) => {
+                                    return SettingsAction::VerifyListenBrainz;
+                                }
+                                Some(sentinel::SentinelKind::SetLastfmCredentials) => {
+                                    return SettingsAction::OpenLastfmCredentialsDialog;
+                                }
+                                Some(sentinel::SentinelKind::ConnectLastfm) => {
+                                    return SettingsAction::ConnectLastfm;
+                                }
+                                Some(sentinel::SentinelKind::DisconnectLastfm) => {
+                                    return SettingsAction::DisconnectLastfm;
                                 }
                                 None => {
                                     match &item.value {

@@ -167,6 +167,11 @@ pub struct TomlSettings {
     #[serde(serialize_with = "round_f32")]
     pub scrobble_threshold: f32,
 
+    // -- Radio scrobbling (direct to ListenBrainz) --
+    pub radio_scrobbling_enabled: bool,
+    pub radio_scrobble_threshold_secs: u32,
+    pub radio_now_playing_enabled: bool,
+
     // -- Playlists --
     pub quick_add_to_playlist: bool,
     #[serde(default)]
@@ -304,6 +309,9 @@ impl Default for TomlSettings {
             sfx_volume: 0.68,
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,
+            radio_scrobbling_enabled: false,
+            radio_scrobble_threshold_secs: 60,
+            radio_now_playing_enabled: true,
             quick_add_to_playlist: false,
             queue_show_default_playlist: false,
             eq_enabled: false,

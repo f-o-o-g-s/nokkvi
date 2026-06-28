@@ -12,18 +12,47 @@
 //! they gate.
 
 // See `items_general.rs` for why the data struct lives in the data crate.
-use nokkvi_data::services::settings_tables::playback::build_playback_tab_settings_items;
+use nokkvi_data::services::{
+    radio_scrobble::source::CredSource,
+    settings_tables::playback::build_playback_tab_settings_items,
+};
 pub(crate) use nokkvi_data::types::settings_data::PlaybackSettingsData;
 
-use super::items::{ActivateKind, MacroRows, SettingItem, SettingMeta, SettingsEntry};
+use super::{
+    items::{ActivateKind, MacroRows, SettingItem, SettingMeta, SettingsEntry},
+    sentinel::SentinelKind,
+};
+
+/// Status value for a radio-scrobble credential row, naming the source so a
+/// config.toml / env value that shadows the GUI write is visible (review #2).
+fn radio_cred_value(source: CredSource) -> &'static str {
+    match source {
+        CredSource::Unset => "Not set · Enter to set",
+        CredSource::Redb => "Saved · Enter to replace",
+        CredSource::Config => "Set in config.toml (overrides GUI entry)",
+        CredSource::Env => "Set via env var (overrides GUI entry)",
+    }
+}
 
 /// Build settings entries for the Playback tab.
 pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsEntry> {
     const TRANSITIONS: &str = "assets/icons/audio-waveform.svg";
     const NORMALIZATION: &str = "assets/icons/sliders-vertical.svg";
     const SCR: &str = "assets/icons/radio-tower.svg";
+    const CHECK: &str = "assets/icons/check.svg";
+    const LOGOUT: &str = "assets/icons/log-out.svg";
     const REMIND: &str = "assets/icons/star.svg";
     const LIST: &str = "assets/icons/list-music.svg";
+
+    // Status-aware values for the radio-scrobble action rows so the user can
+    // see what's configured (and from which source) at a glance.
+    let lb_token_val = radio_cred_value(data.listenbrainz_source);
+    let lf_creds_val = radio_cred_value(data.lastfm_credentials_source);
+    let lf_connect_val = if data.lastfm_username.is_empty() {
+        "Not connected · Enter to connect".to_string()
+    } else {
+        format!("Connected as {} · Enter to reconnect", data.lastfm_username)
+    };
 
     let mut macro_rows = MacroRows::new(build_playback_tab_settings_items(data));
 
@@ -119,6 +148,78 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         },
         macro_rows.take("general.scrobbling_enabled"),
         macro_rows.take("general.scrobble_threshold"),
+        // --- Radio Scrobbling (direct to ListenBrainz) ---
+        SettingsEntry::Header {
+            label: "Radio Scrobbling",
+            icon: SCR,
+        },
+        macro_rows.take("general.radio_scrobbling_enabled"),
+        macro_rows.take("general.radio_scrobble_threshold_secs"),
+        macro_rows.take("general.radio_now_playing_enabled"),
+        SettingItem::text_with_icon(
+            SettingMeta::new(
+                SentinelKind::SetListenBrainzToken.to_key(),
+                "ListenBrainz Token",
+                "Radio Scrobbling",
+            )
+            .with_subtitle(
+                "Paste your token from listenbrainz.org/settings (empty to disconnect). \
+                 A config.toml [radio_scrobble] entry (plaintext, like navidrome.toml) or \
+                 $NOKKVI_RADIO_LISTENBRAINZ_TOKEN overrides this. Radio only — library \
+                 scrobbling uses Navidrome's keys.",
+            ),
+            lb_token_val,
+            "",
+            SCR,
+        ),
+        SettingItem::text_with_icon(
+            SettingMeta::new(
+                SentinelKind::VerifyListenBrainz.to_key(),
+                "Verify ListenBrainz",
+                "Radio Scrobbling",
+            )
+            .with_subtitle("Check the saved token and show your username."),
+            "Press Enter to verify",
+            "",
+            CHECK,
+        ),
+        SettingItem::text_with_icon(
+            SettingMeta::new(
+                SentinelKind::SetLastfmCredentials.to_key(),
+                "Last.fm API Credentials",
+                "Radio Scrobbling",
+            )
+            .with_subtitle(
+                "Enter your Last.fm app API key + secret (from last.fm/api). A config.toml \
+                 [radio_scrobble] entry (plaintext) or the $NOKKVI_RADIO_LASTFM_API_KEY/SECRET \
+                 env vars override these. Radio only — library scrobbling uses Navidrome's keys.",
+            ),
+            lf_creds_val,
+            "",
+            SCR,
+        ),
+        SettingItem::text_with_icon(
+            SettingMeta::new(
+                SentinelKind::ConnectLastfm.to_key(),
+                "Connect Last.fm",
+                "Radio Scrobbling",
+            )
+            .with_subtitle("Authorize nokkvi in your browser to link your Last.fm account."),
+            lf_connect_val.as_str(),
+            "",
+            CHECK,
+        ),
+        SettingItem::text_with_icon(
+            SettingMeta::new(
+                SentinelKind::DisconnectLastfm.to_key(),
+                "Disconnect Last.fm",
+                "Radio Scrobbling",
+            )
+            .with_subtitle("Clear the stored Last.fm session."),
+            "Press Enter to disconnect",
+            "",
+            LOGOUT,
+        ),
         // --- Rating Reminder ---
         SettingsEntry::Header {
             label: "Rating Reminder",

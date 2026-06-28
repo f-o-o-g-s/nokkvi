@@ -190,6 +190,10 @@ pub struct Nokkvi {
     /// `phase = (now - glow_epoch) / GLOW_PERIOD_SECS` from it while playing.
     pub glow_epoch: std::time::Instant,
     pub scrobble: crate::state::ScrobbleState,
+    /// Timing + dedup state for scrobbling internet radio directly to the
+    /// configured service (ListenBrainz). Separate from `scrobble` because radio
+    /// has no duration and no song id — see [`crate::state::RadioScrobbleState`].
+    pub radio_scrobble: crate::state::RadioScrobbleState,
     pub modes: crate::state::PlaybackModes,
     pub sfx: crate::state::SfxState,
     pub engine: crate::state::EngineState,
@@ -406,6 +410,7 @@ impl Default for Nokkvi {
             playback: crate::state::PlaybackState::default(),
             glow_epoch: std::time::Instant::now(),
             scrobble: crate::state::ScrobbleState::default(),
+            radio_scrobble: crate::state::RadioScrobbleState::default(),
             modes: crate::state::PlaybackModes::default(),
             sfx: crate::state::SfxState::default(),
             engine: crate::state::EngineState::default(),
@@ -1196,7 +1201,17 @@ pub fn main() -> iced::Result {
     let file_layer = nokkvi_data::utils::paths::get_log_path()
         .ok()
         .and_then(|path| {
-            std::fs::File::create(path).ok().map(|file| {
+            let file = std::fs::File::create(&path).ok()?;
+            // The log captures full debug context (and is attached to bug
+            // reports); it can carry sensitive material such as a Last.fm
+            // authorize URL on the browser-open-failure fallback. Create it
+            // owner-only rather than at the default umask. Best-effort.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+            Some(
                 tracing_subscriber::fmt::layer()
                     .with_target(true)
                     .with_ansi(false)
@@ -1204,8 +1219,8 @@ pub fn main() -> iced::Result {
                     .with_filter(
                         EnvFilter::try_from_default_env()
                             .unwrap_or_else(|_| EnvFilter::new(&file_default_filter)),
-                    )
-            })
+                    ),
+            )
         });
 
     tracing_subscriber::registry()

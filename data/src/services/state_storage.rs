@@ -32,7 +32,21 @@ impl StateStorage {
             std::fs::create_dir_all(parent)?;
         }
 
-        let db = Database::create(path)?;
+        let db = Database::create(&path)?;
+
+        // Tighten to owner-only (0600). app.redb holds session tokens (JWT,
+        // Subsonic credential) and radio-scrobble keys in cleartext; the
+        // default umask would otherwise leave it world-readable. Best-effort —
+        // a failure here must not block startup.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = std::fs::set_permissions(&path, perms);
+            }
+        }
 
         Ok(Self { db: Arc::new(db) })
     }
@@ -161,6 +175,21 @@ mod tests {
     struct TestQueue {
         songs: Vec<String>,
         index: usize,
+    }
+
+    /// The DB file holds cleartext session + scrobble secrets, so it must be
+    /// created owner-only (0600), never world-readable.
+    #[cfg(unix)]
+    #[test]
+    fn new_creates_owner_only_db_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("perms.redb");
+        let _storage = StateStorage::new(path.clone()).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "app.redb must be created 0600, got {mode:o}");
     }
 
     #[test]

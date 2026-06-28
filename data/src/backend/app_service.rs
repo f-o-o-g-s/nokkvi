@@ -23,12 +23,29 @@ use crate::{
         settings::SettingsService,
         songs::SongsService,
     },
-    services::{state_storage::ACTIVE_LIBRARY_IDS_KEY, task_manager::TaskManager},
+    services::{
+        radio_scrobble::{
+            RadioSubmitOutcome, ScrobbleTargets, ScrobbleTrack,
+            lastfm::{LastfmClient, LastfmSession},
+            listenbrainz::{DEFAULT_API_URL, ListenBrainzClient, TokenValidation},
+        },
+        state_storage::ACTIVE_LIBRARY_IDS_KEY,
+        storage_keys::{
+            LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_SESSION_KEY, LASTFM_USERNAME,
+            LISTENBRAINZ_TOKEN,
+        },
+        task_manager::TaskManager,
+    },
     types::{
         library::Library, one_shot_shuffle::OneShotShuffle, queue_sort_mode::QueueSortMode,
         song_source::SongSource,
     },
 };
+
+/// User-Agent for direct scrobble-service requests. ListenBrainz/MusicBrainz
+/// etiquette wants a descriptive agent with a contact URL (distinct from the
+/// bare `crate::USER_AGENT` used for Navidrome).
+const RADIO_SCROBBLE_USER_AGENT: &str = "nokkvi (+https://github.com/f-o-o-g-s/nokkvi)";
 
 /// AppService — Application-level orchestration and state management.
 ///
@@ -63,6 +80,10 @@ pub struct AppService {
     /// from this snapshot. Shared across clones for the same reason as
     /// `active_library_ids`.
     all_libraries: Arc<RwLock<Vec<Library>>>,
+    /// Shared HTTP client for direct scrobble-service submissions (ListenBrainz
+    /// and Last.fm). Separate from the Navidrome `ApiClient` and the artwork
+    /// client — radio scrobbling does not go through Navidrome.
+    radio_scrobble_http: Arc<reqwest::Client>,
 }
 
 impl std::fmt::Debug for AppService {
@@ -121,6 +142,14 @@ impl AppService {
         };
 
         let task_manager = Arc::new(TaskManager::new());
+        let radio_scrobble_http = Arc::new(
+            reqwest::Client::builder()
+                .user_agent(RADIO_SCROBBLE_USER_AGENT)
+                .connect_timeout(std::time::Duration::from_secs(8))
+                .read_timeout(std::time::Duration::from_secs(20))
+                .build()
+                .expect("Failed to build radio-scrobble HTTP client"),
+        );
         let albums_service = AlbumsService::new().with_auth(auth_gateway.clone());
         let artists_service = ArtistsService::new().with_auth(auth_gateway.clone());
         let songs_service = SongsService::new().with_auth(auth_gateway.clone());
@@ -147,6 +176,7 @@ impl AppService {
             queue_changed_rx: Arc::new(Mutex::new(Some(queue_changed_rx))),
             active_library_ids: Arc::new(RwLock::new(active_library_ids)),
             all_libraries: Arc::new(RwLock::new(Vec::new())),
+            radio_scrobble_http,
         })
     }
 
@@ -838,6 +868,232 @@ impl AppService {
     ) -> Result<Vec<crate::types::radio_station::RadioStation>> {
         let radios_service = self.radios_api().await?;
         radios_service.load_radio_stations().await
+    }
+
+    // =========================================================================
+    // Radio scrobbling (direct to ListenBrainz + Last.fm; bypasses Navidrome)
+    // =========================================================================
+
+    /// Read a non-empty trimmed string from redb, or `None`.
+    fn redb_string(&self, key: &str) -> Option<String> {
+        match self.storage.load::<String>(key) {
+            Ok(Some(s)) if !s.trim().is_empty() => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Resolve every radio-scrobble credential together from a **single**
+    /// config.toml read, each by precedence (env, then `[radio_scrobble]` in
+    /// config.toml, then redb — the GUI write target), reporting which layer
+    /// supplied each. The one shared resolution used by client construction and
+    /// the settings badges — call this once rather than the per-field getters
+    /// when more than one credential is needed (each getter re-reads config.toml).
+    pub fn radio_credentials(&self) -> crate::services::radio_scrobble::source::RadioCreds {
+        use crate::services::radio_scrobble::source;
+        let cfg = source::RadioScrobbleToml::load();
+        let (listenbrainz_token, listenbrainz_source) = source::resolve_with_source(
+            std::env::var(source::ENV_LISTENBRAINZ_TOKEN).ok(),
+            cfg.listenbrainz_token.as_deref(),
+            self.redb_string(LISTENBRAINZ_TOKEN),
+        );
+        let (lastfm, lastfm_source) = source::resolve_pair_with_source(
+            std::env::var(source::ENV_LASTFM_API_KEY).ok(),
+            std::env::var(source::ENV_LASTFM_API_SECRET).ok(),
+            cfg.lastfm_api_key.as_deref(),
+            cfg.lastfm_api_secret.as_deref(),
+            self.redb_string(LASTFM_API_KEY),
+            self.redb_string(LASTFM_API_SECRET),
+        );
+        source::RadioCreds {
+            listenbrainz_token,
+            listenbrainz_source,
+            lastfm,
+            lastfm_source,
+            lastfm_session: self.redb_string(LASTFM_SESSION_KEY),
+            lastfm_username: self.redb_string(LASTFM_USERNAME),
+        }
+    }
+
+    /// The effective ListenBrainz radio-scrobble token, or `None` when unset.
+    /// Convenience over [`Self::radio_credentials`] for single-credential callers
+    /// (validate / verify); resolves the same precedence.
+    pub fn listenbrainz_token(&self) -> Option<String> {
+        self.radio_credentials().listenbrainz_token
+    }
+
+    /// Persist (or clear, with an empty string) the ListenBrainz token.
+    pub fn set_listenbrainz_token(&self, token: &str) -> Result<()> {
+        self.storage
+            .save(LISTENBRAINZ_TOKEN, &token.trim().to_string())
+    }
+
+    /// Validate an arbitrary ListenBrainz token against the API (for the
+    /// settings "Verify" action — does not persist).
+    pub async fn validate_listenbrainz_token(&self, token: String) -> Result<TokenValidation> {
+        ListenBrainzClient::new(self.radio_scrobble_http.clone(), DEFAULT_API_URL, token)
+            .validate_token()
+            .await
+    }
+
+    /// Validate a token and map to the owning username (possibly empty) on
+    /// success, or a human-readable reason on failure. The single shared mapping
+    /// used by both the settings "Verify" and "Set token" paths so they can't
+    /// drift in how they report success/failure for the same token.
+    pub async fn validate_listenbrainz_token_to_name(
+        &self,
+        token: String,
+    ) -> std::result::Result<String, String> {
+        let v = self
+            .validate_listenbrainz_token(token)
+            .await
+            .map_err(|e| e.to_string())?;
+        if v.valid {
+            Ok(v.user_name.unwrap_or_default())
+        } else {
+            Err(v
+                .message
+                .unwrap_or_else(|| "token is not valid".to_string()))
+        }
+    }
+
+    /// The effective Last.fm app key + secret, or `None` when unset. Convenience
+    /// over [`Self::radio_credentials`]; the pair always resolves from one layer
+    /// so the key + secret can't mismatch across registered apps.
+    pub fn lastfm_credentials(&self) -> Option<(String, String)> {
+        self.radio_credentials().lastfm
+    }
+
+    /// Persist the Last.fm app key + secret.
+    pub fn set_lastfm_credentials(&self, api_key: &str, api_secret: &str) -> Result<()> {
+        self.storage
+            .save(LASTFM_API_KEY, &api_key.trim().to_string())?;
+        self.storage
+            .save(LASTFM_API_SECRET, &api_secret.trim().to_string())
+    }
+
+    /// The linked Last.fm username, or `None` when not connected.
+    pub fn lastfm_username(&self) -> Option<String> {
+        self.redb_string(LASTFM_USERNAME)
+    }
+
+    /// Last.fm desktop-auth step 1: fetch a request token (needs key+secret).
+    /// Returns `(token, authorize_url)` for the browser step.
+    pub async fn lastfm_begin_auth(&self) -> Result<(String, String)> {
+        let (key, secret) = self
+            .lastfm_credentials()
+            .ok_or_else(|| anyhow::anyhow!("Set your Last.fm API key and secret first"))?;
+        let client = LastfmClient::new(self.radio_scrobble_http.clone(), key, secret);
+        let token = client.get_token().await?;
+        let url = client.authorize_url(&token);
+        Ok((token, url))
+    }
+
+    /// Last.fm desktop-auth step 3: exchange an authorized token for a session,
+    /// persist the session key + username, and return the username.
+    pub async fn lastfm_complete_auth(&self, token: String) -> Result<String> {
+        let (key, secret) = self
+            .lastfm_credentials()
+            .ok_or_else(|| anyhow::anyhow!("Set your Last.fm API key and secret first"))?;
+        debug!("Last.fm complete_auth: exchanging token for a session");
+        let LastfmSession { name, key: sk } =
+            LastfmClient::new(self.radio_scrobble_http.clone(), key, secret)
+                .get_session(&token)
+                .await?;
+        self.storage.save(LASTFM_SESSION_KEY, &sk)?;
+        self.storage.save(LASTFM_USERNAME, &name)?;
+        debug!("Last.fm complete_auth: session saved for user '{name}'");
+        Ok(name)
+    }
+
+    /// Clear the Last.fm session (disconnect); keeps the app key/secret.
+    pub fn disconnect_lastfm(&self) -> Result<()> {
+        self.storage.save(LASTFM_SESSION_KEY, &String::new())?;
+        self.storage.save(LASTFM_USERNAME, &String::new())
+    }
+
+    /// Run a submission against each REQUESTED + configured target concurrently,
+    /// returning each target's outcome **independently** so a retry can
+    /// re-dispatch only the targets that haven't yet succeeded. Resolves
+    /// credentials once (single config.toml read) and builds both clients from
+    /// that snapshot. A target that's unrequested or unconfigured yields `None`.
+    async fn dispatch_radio<'a, LbFut, LfFut>(
+        &'a self,
+        targets: ScrobbleTargets,
+        lb: impl FnOnce(ListenBrainzClient) -> LbFut,
+        lf: impl FnOnce(LastfmClient) -> LfFut,
+    ) -> RadioSubmitOutcome
+    where
+        LbFut: std::future::Future<Output = Result<()>> + 'a,
+        LfFut: std::future::Future<Output = Result<()>> + 'a,
+    {
+        let creds = self.radio_credentials();
+        let lb_client = (targets.listenbrainz)
+            .then(|| creds.listenbrainz_token.clone())
+            .flatten()
+            .map(|t| ListenBrainzClient::new(self.radio_scrobble_http.clone(), DEFAULT_API_URL, t));
+        let lf_client = (targets.lastfm)
+            .then(|| match (&creds.lastfm, &creds.lastfm_session) {
+                (Some((k, s)), Some(sk)) => Some(
+                    LastfmClient::new(self.radio_scrobble_http.clone(), k.clone(), s.clone())
+                        .with_session_key(sk.clone()),
+                ),
+                _ => None,
+            })
+            .flatten();
+        debug!(
+            "radio scrobble dispatch: listenbrainz={}, lastfm={}",
+            lb_client.is_some(),
+            lf_client.is_some()
+        );
+        // Run both targets concurrently — wall-clock is max(lb, lf), not the
+        // sum, so a stalled target can't delay the other.
+        let lb_fut = lb_client.map(lb);
+        let lf_fut = lf_client.map(lf);
+        let (lb_res, lf_res) = match (lb_fut, lf_fut) {
+            (Some(a), Some(b)) => {
+                let (ra, rb) = tokio::join!(a, b);
+                (Some(ra), Some(rb))
+            }
+            (Some(a), None) => (Some(a.await), None),
+            (None, Some(b)) => (None, Some(b.await)),
+            (None, None) => (None, None),
+        };
+        RadioSubmitOutcome {
+            listenbrainz: lb_res.map(|r| r.map_err(|e| e.to_string())),
+            lastfm: lf_res.map(|r| r.map_err(|e| e.to_string())),
+        }
+    }
+
+    /// Submit a now-playing update for a radio track to every configured target.
+    /// Best-effort (no per-target retry) — collapses to one combined result.
+    pub async fn radio_scrobble_now_playing(&self, track: ScrobbleTrack) -> Result<()> {
+        let track = &track;
+        self.dispatch_radio(
+            ScrobbleTargets::ALL,
+            |c| async move { c.submit_playing_now(track).await },
+            |c| async move { c.update_now_playing(track).await },
+        )
+        .await
+        .into_combined()
+        .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    /// Submit a completed listen (timestamped at `started_at`) to the requested
+    /// targets, returning each target's outcome so the caller can latch / retry
+    /// them independently.
+    pub async fn radio_scrobble_submit(
+        &self,
+        track: ScrobbleTrack,
+        started_at: i64,
+        targets: ScrobbleTargets,
+    ) -> RadioSubmitOutcome {
+        let track = &track;
+        self.dispatch_radio(
+            targets,
+            |c| async move { c.submit_listen(track, started_at).await },
+            |c| async move { c.scrobble(track, started_at).await },
+        )
+        .await
     }
 
     // =========================================================================

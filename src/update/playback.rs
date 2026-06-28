@@ -685,6 +685,11 @@ impl Nokkvi {
             }
         }
 
+        // Radio scrobbling (direct to ListenBrainz; bypasses Navidrome). Runs
+        // unconditionally and self-gates: clears tracking off-radio, otherwise
+        // drives now-playing + the wall-clock listen-time scrobble gate.
+        self.handle_radio_scrobble_tick(playing, paused, &mut tasks);
+
         // MPRIS: push state to D-Bus
         self.push_mpris_state(MprisUpdate {
             playing,
