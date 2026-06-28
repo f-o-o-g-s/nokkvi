@@ -362,19 +362,19 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// True when a higher-precedence layer (env / config.toml) supplies the
-    /// ListenBrainz token, so a redb (GUI) write is shadowed.
-    fn listenbrainz_shadowed_by_higher_layer(&self) -> bool {
+    /// True when a `NOKKVI_RADIO_*` env var overrides the ListenBrainz token in
+    /// config.toml (the GUI write target), so a GUI save/clear won't take effect.
+    fn listenbrainz_env_overrides(&self) -> bool {
         self.app_service
             .as_ref()
-            .is_some_and(|s| s.radio_credentials().listenbrainz_source.shadows_redb())
+            .is_some_and(|s| s.radio_credentials().listenbrainz_source.env_overrides())
     }
 
-    /// True when a higher-precedence layer supplies the Last.fm key/secret.
-    fn lastfm_shadowed_by_higher_layer(&self) -> bool {
+    /// True when a `NOKKVI_RADIO_*` env var overrides the Last.fm key/secret.
+    fn lastfm_env_overrides(&self) -> bool {
         self.app_service
             .as_ref()
-            .is_some_and(|s| s.radio_credentials().lastfm_source.shadows_redb())
+            .is_some_and(|s| s.radio_credentials().lastfm_source.env_overrides())
     }
 
     /// Handle a ListenBrainz token set/verify result with a user-facing toast.
@@ -383,11 +383,12 @@ impl Nokkvi {
         result: Result<Option<String>, String>,
     ) -> Task<Message> {
         match result {
-            // Clearing only removes the redb (GUI) value. If env/config still
-            // supplies a token, the disconnect didn't actually take — say so
+            // Clearing removes the config.toml value. If a NOKKVI_RADIO_* env var
+            // still supplies a token, the disconnect didn't actually take — say so
             // honestly rather than a misleading "cleared" (review #2).
-            Ok(None) if self.listenbrainz_shadowed_by_higher_layer() => self
-                .toast_warn("Cleared the saved token, but a config.toml/env value is still active"),
+            Ok(None) if self.listenbrainz_env_overrides() => self.toast_warn(
+                "Cleared the saved token, but a NOKKVI_RADIO_* env var still overrides it",
+            ),
             Ok(None) => self.toast_success("ListenBrainz token cleared"),
             Ok(Some(name)) if name.is_empty() => self.toast_success("ListenBrainz connected"),
             Ok(Some(name)) => self.toast_success(format!("ListenBrainz connected as {name}")),
@@ -439,9 +440,9 @@ impl Nokkvi {
         match result {
             Ok(name) if name.is_empty() => {
                 debug!(" [SCROBBLE] Last.fm credentials saved");
-                if self.lastfm_shadowed_by_higher_layer() {
+                if self.lastfm_env_overrides() {
                     self.toast_warn(
-                        "Saved, but a config.toml/env Last.fm key/secret still overrides these",
+                        "Saved to config.toml, but a NOKKVI_RADIO_* env var still overrides these",
                     );
                 } else {
                     self.toast_success("Last.fm credentials saved — now click Connect Last.fm");

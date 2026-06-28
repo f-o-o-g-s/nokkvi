@@ -110,6 +110,10 @@ impl AppService {
     pub async fn new_with_storage(
         storage: crate::services::state_storage::StateStorage,
     ) -> Result<Self> {
+        // Move any GUI-entered radio creds left in redb into config.toml (the
+        // GUI write target) so existing values surface where they're now stored.
+        Self::migrate_radio_creds_to_config(&storage);
+
         let auth_gateway = AuthGateway::new()?;
         let queue_service = QueueService::new(auth_gateway.clone(), storage.clone())?;
         let settings_service = SettingsService::new(storage.clone())?;
@@ -874,6 +878,60 @@ impl AppService {
     // Radio scrobbling (direct to ListenBrainz + Last.fm; bypasses Navidrome)
     // =========================================================================
 
+    /// One-time move of GUI-entered radio creds from redb into `config.toml`,
+    /// run at construction. Earlier builds wrote the ListenBrainz token + Last.fm
+    /// key/secret to redb; they're now stored in `[radio_scrobble]` in
+    /// config.toml. Copies any non-empty redb value forward only when config.toml
+    /// doesn't already define that field (never clobbers a hand-edit), then clears
+    /// the redb copies (config.toml is authoritative). Best-effort; non-fatal.
+    fn migrate_radio_creds_to_config(storage: &crate::services::state_storage::StateStorage) {
+        use crate::services::radio_scrobble::source;
+
+        const KEYS: [(&str, &str); 3] = [
+            (LISTENBRAINZ_TOKEN, "listenbrainz_token"),
+            (LASTFM_API_KEY, "lastfm_api_key"),
+            (LASTFM_API_SECRET, "lastfm_api_secret"),
+        ];
+        let redb_vals: Vec<(&str, String)> = KEYS
+            .iter()
+            .filter_map(|(redb_key, field)| {
+                storage
+                    .load::<String>(redb_key)
+                    .ok()
+                    .flatten()
+                    .filter(|v| !v.trim().is_empty())
+                    .map(|v| (*field, v))
+            })
+            .collect();
+        if redb_vals.is_empty() {
+            return;
+        }
+
+        // Only fill fields config.toml doesn't already define.
+        let cfg = source::RadioScrobbleToml::load();
+        let defined = |field: &str| match field {
+            "listenbrainz_token" => cfg.listenbrainz_token.is_some(),
+            "lastfm_api_key" => cfg.lastfm_api_key.is_some(),
+            "lastfm_api_secret" => cfg.lastfm_api_secret.is_some(),
+            _ => true,
+        };
+        let pending: Vec<(&str, &str)> = redb_vals
+            .iter()
+            .filter(|(field, _)| !defined(field))
+            .map(|(field, val)| (*field, val.as_str()))
+            .collect();
+        if !pending.is_empty()
+            && let Err(e) = source::write_config_fields(&pending)
+        {
+            warn!("radio-scrobble redb->config migration failed: {e}");
+            return;
+        }
+        // Clear the redb copies — config.toml now owns these.
+        for (redb_key, _) in KEYS {
+            let _ = storage.save(redb_key, &String::new());
+        }
+    }
+
     /// Read a non-empty trimmed string from redb, or `None`.
     fn redb_string(&self, key: &str) -> Option<String> {
         match self.storage.load::<String>(key) {
@@ -921,10 +979,17 @@ impl AppService {
         self.radio_credentials().listenbrainz_token
     }
 
-    /// Persist (or clear, with an empty string) the ListenBrainz token.
+    /// Persist (or clear, with an empty string) the ListenBrainz token to
+    /// `config.toml`'s `[radio_scrobble]` — the GUI write target, so the value
+    /// lands where the user can see and hand-edit it — and clear any legacy redb
+    /// copy so a stale value can't shadow a cleared config entry.
     pub fn set_listenbrainz_token(&self, token: &str) -> Result<()> {
-        self.storage
-            .save(LISTENBRAINZ_TOKEN, &token.trim().to_string())
+        crate::services::radio_scrobble::source::write_config_fields(&[(
+            "listenbrainz_token",
+            token,
+        )])?;
+        let _ = self.storage.save(LISTENBRAINZ_TOKEN, &String::new());
+        Ok(())
     }
 
     /// Validate an arbitrary ListenBrainz token against the API (for the
@@ -963,12 +1028,17 @@ impl AppService {
         self.radio_credentials().lastfm
     }
 
-    /// Persist the Last.fm app key + secret.
+    /// Persist the Last.fm app key + secret to `config.toml`'s `[radio_scrobble]`
+    /// (the GUI write target), clearing any legacy redb copies. The session key +
+    /// username stay in redb (browser-auth output).
     pub fn set_lastfm_credentials(&self, api_key: &str, api_secret: &str) -> Result<()> {
-        self.storage
-            .save(LASTFM_API_KEY, &api_key.trim().to_string())?;
-        self.storage
-            .save(LASTFM_API_SECRET, &api_secret.trim().to_string())
+        crate::services::radio_scrobble::source::write_config_fields(&[
+            ("lastfm_api_key", api_key),
+            ("lastfm_api_secret", api_secret),
+        ])?;
+        let _ = self.storage.save(LASTFM_API_KEY, &String::new());
+        let _ = self.storage.save(LASTFM_API_SECRET, &String::new());
+        Ok(())
     }
 
     /// The linked Last.fm username, or `None` when not connected.

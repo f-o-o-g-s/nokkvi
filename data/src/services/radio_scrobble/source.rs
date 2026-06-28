@@ -4,9 +4,10 @@
 //! descending priority:
 //!
 //! 1. **Environment variable** — `NOKKVI_RADIO_*` (scriptable, never on disk).
-//! 2. **`config.toml`** — the `[radio_scrobble]` section (hand-editable, the
-//!    "obvious" home; mirrors how Navidrome keeps `lastfm.apikey`/`secret`).
-//! 3. **redb** — the GUI write target (kept out of the user's tracked dotfiles).
+//! 2. **`config.toml`** — the `[radio_scrobble]` section: the GUI write target
+//!    AND hand-editable (mirrors how Navidrome keeps `lastfm.apikey`/`secret`).
+//! 3. **redb** — legacy fallback for values entered before config.toml became
+//!    the store (migrated forward on launch).
 //!
 //! [`resolve`] / [`resolve_pair`] apply that precedence over already-read
 //! values so the choice logic stays pure and unit-testable. Only the
@@ -70,6 +71,57 @@ impl RadioScrobbleToml {
     }
 }
 
+/// Persist (or clear) `[radio_scrobble]` credential fields in `config.toml`,
+/// preserving the rest of the file (toml_edit). An empty value removes that key;
+/// the table is dropped when it empties. Routes through `write_atomic` so the
+/// config watcher doesn't reflect our own write. This is the GUI write target
+/// for the hand-configurable credentials — the user gets them in config.toml,
+/// visible and hand-editable. The Last.fm session key + username stay in redb
+/// (browser-auth output, not hand-typed).
+pub fn write_config_fields(fields: &[(&str, &str)]) -> anyhow::Result<()> {
+    write_config_fields_at(&crate::utils::paths::get_config_path()?, fields)
+}
+
+fn write_config_fields_at(path: &std::path::Path, fields: &[(&str, &str)]) -> anyhow::Result<()> {
+    use toml_edit::{Item, Table};
+
+    let mut doc: toml_edit::DocumentMut = if path.exists() {
+        std::fs::read_to_string(path)?.parse().unwrap_or_default()
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    // Ensure a standard (non-inline) `[radio_scrobble]` table — index-assignment
+    // would otherwise create an inline `radio_scrobble = { … }` whose value
+    // isn't an `Item::Table`, so a later remove couldn't find it.
+    if !doc.get("radio_scrobble").is_some_and(Item::is_table) {
+        let mut tbl = Table::new();
+        tbl.set_implicit(false);
+        doc.insert("radio_scrobble", Item::Table(tbl));
+    }
+    {
+        let tbl = doc["radio_scrobble"]
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("config.toml [radio_scrobble] is not a table"))?;
+        for (field, value) in fields {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                tbl.remove(field);
+            } else {
+                tbl.insert(field, toml_edit::value(trimmed));
+            }
+        }
+    }
+    // Drop an emptied table so we don't leave a bare header behind.
+    if doc["radio_scrobble"]
+        .as_table()
+        .is_some_and(Table::is_empty)
+    {
+        doc.remove("radio_scrobble");
+    }
+    crate::utils::paths::write_atomic(path, &doc.to_string())
+}
+
 /// Which layer supplied a resolved credential. Drives the settings badges so a
 /// user can see *where* a credential comes from — and understand why a GUI
 /// "disconnect" that only clears redb may not take effect while a higher layer
@@ -79,29 +131,21 @@ pub enum CredSource {
     /// No layer supplies it.
     #[default]
     Unset,
-    /// Entered in the GUI (redb — the write target).
+    /// A legacy redb value (entered before config.toml became the GUI store;
+    /// migrated forward on launch).
     Redb,
-    /// `[radio_scrobble]` in config.toml.
+    /// `[radio_scrobble]` in config.toml — the GUI write target + hand-edit.
     Config,
     /// A `NOKKVI_RADIO_*` environment variable.
     Env,
 }
 
 impl CredSource {
-    /// Short badge label for a *set* credential, or `None` when unset.
-    pub fn badge(self) -> Option<&'static str> {
-        match self {
-            CredSource::Unset => None,
-            CredSource::Redb => Some("Saved"),
-            CredSource::Config => Some("Set in config.toml"),
-            CredSource::Env => Some("Set via env var"),
-        }
-    }
-
-    /// True when a layer *above* redb (env or config.toml) supplies the value —
-    /// i.e. a GUI write to redb would be shadowed.
-    pub fn shadows_redb(self) -> bool {
-        matches!(self, CredSource::Env | CredSource::Config)
+    /// True when a `NOKKVI_RADIO_*` env var supplies the value, overriding the
+    /// config.toml (the GUI write target) — so a GUI save/clear won't take effect
+    /// until the env var is unset.
+    pub fn env_overrides(self) -> bool {
+        matches!(self, CredSource::Env)
     }
 }
 
@@ -261,6 +305,64 @@ mod tests {
         assert_eq!(
             RadioScrobbleToml::parse("[radio_scrobble]\nlistenbrainz_token = \"oops"),
             RadioScrobbleToml::default()
+        );
+    }
+
+    // ── write_config_fields ─────────────────────────────────────────────────
+
+    #[test]
+    fn write_config_fields_roundtrips_and_preserves_other_sections() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "server_url = \"https://x\"\n[settings]\nvolume = 50\n",
+        )
+        .unwrap();
+
+        write_config_fields_at(
+            &path,
+            &[("listenbrainz_token", "lb"), ("lastfm_api_key", "  k  ")],
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let cfg = RadioScrobbleToml::parse(&content);
+        assert_eq!(cfg.listenbrainz_token.as_deref(), Some("lb"));
+        assert_eq!(cfg.lastfm_api_key.as_deref(), Some("k"), "value is trimmed");
+        assert!(
+            content.contains("server_url"),
+            "preserves other top-level keys"
+        );
+        assert!(content.contains("[settings]"), "preserves other sections");
+    }
+
+    #[test]
+    fn write_config_fields_empty_clears_the_key() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        write_config_fields_at(
+            &path,
+            &[("listenbrainz_token", "lb"), ("lastfm_api_key", "k")],
+        )
+        .unwrap();
+
+        // Empty value removes just that key; siblings stay.
+        write_config_fields_at(&path, &[("listenbrainz_token", "")]).unwrap();
+        let cfg = RadioScrobbleToml::parse(&std::fs::read_to_string(&path).unwrap());
+        assert!(cfg.listenbrainz_token.is_none(), "empty clears the key");
+        assert_eq!(
+            cfg.lastfm_api_key.as_deref(),
+            Some("k"),
+            "siblings untouched"
+        );
+
+        // Clearing the last key drops the table header entirely.
+        write_config_fields_at(&path, &[("lastfm_api_key", "")]).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("[radio_scrobble]"),
+            "emptied table is removed, got: {content:?}"
         );
     }
 

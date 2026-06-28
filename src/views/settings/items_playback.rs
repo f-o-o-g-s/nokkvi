@@ -23,14 +23,14 @@ use super::{
     sentinel::SentinelKind,
 };
 
-/// Status value for a radio-scrobble credential row, naming the source so a
-/// config.toml / env value that shadows the GUI write is visible (review #2).
+/// Status value for a radio-scrobble credential row. Config.toml is the GUI
+/// write target, so Config/Redb read as "Saved"; an env var overrides config,
+/// so it's called out (review #2).
 fn radio_cred_value(source: CredSource) -> &'static str {
     match source {
         CredSource::Unset => "Not set · Enter to set",
-        CredSource::Redb => "Saved · Enter to replace",
-        CredSource::Config => "Set in config.toml (overrides GUI entry)",
-        CredSource::Env => "Set via env var (overrides GUI entry)",
+        CredSource::Redb | CredSource::Config => "Saved · Enter to replace",
+        CredSource::Env => "Set via env var (overrides config.toml)",
     }
 }
 
@@ -164,8 +164,8 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             )
             .with_subtitle(
                 "Paste your token from listenbrainz.org/settings (empty to disconnect). \
-                 A config.toml [radio_scrobble] entry (plaintext, like navidrome.toml) or \
-                 $NOKKVI_RADIO_LISTENBRAINZ_TOKEN overrides this. Radio only — library \
+                 Saved to config.toml's [radio_scrobble] (plaintext, like navidrome.toml); a \
+                 $NOKKVI_RADIO_LISTENBRAINZ_TOKEN env var overrides it. Radio only — library \
                  scrobbling uses Navidrome's keys.",
             ),
             lb_token_val,
@@ -190,9 +190,9 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
                 "Radio Scrobbling",
             )
             .with_subtitle(
-                "Enter your Last.fm app API key + secret (from last.fm/api). A config.toml \
-                 [radio_scrobble] entry (plaintext) or the $NOKKVI_RADIO_LASTFM_API_KEY/SECRET \
-                 env vars override these. Radio only — library scrobbling uses Navidrome's keys.",
+                "Enter your Last.fm app API key + secret (from last.fm/api). Saved to \
+                 config.toml's [radio_scrobble] (plaintext); the $NOKKVI_RADIO_LASTFM_API_KEY/SECRET \
+                 env vars override them. Radio only — library scrobbling uses Navidrome's keys.",
             ),
             lf_creds_val,
             "",
