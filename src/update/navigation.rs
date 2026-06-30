@@ -171,6 +171,24 @@ impl Nokkvi {
         stop_task
     }
 
+    /// Mutable references to every slot-list page's shared `SlotListPageState`.
+    /// The whole-app fan-outs below share this one array instead of each
+    /// repeating the eight page fields. It stays hand-maintained — adding a page
+    /// means adding it here; the `; 8` length only forces the count to match the
+    /// elements listed, it won't catch a page silently left out.
+    fn all_slot_list_commons_mut(&mut self) -> [&mut crate::widgets::SlotListPageState; 8] {
+        [
+            &mut self.albums_page.common,
+            &mut self.artists_page.common,
+            &mut self.genres_page.common,
+            &mut self.playlists_page.common,
+            &mut self.queue_page.common,
+            &mut self.songs_page.common,
+            &mut self.radios_page.common,
+            &mut self.similar_page.common,
+        ]
+    }
+
     /// Clear the auto-hide toolbar reveal-locks on every slot-list page.
     ///
     /// Called on unmount edges where a page's header leaves the widget tree with
@@ -182,14 +200,41 @@ impl Nokkvi {
     /// header re-fires `on_enter` on the next cursor event. Search state is left
     /// intact (an active filter legitimately keeps the toolbar revealed).
     pub(crate) fn clear_all_toolbar_reveal_locks(&mut self) {
-        self.albums_page.common.reset_reveal_locks();
-        self.artists_page.common.reset_reveal_locks();
-        self.genres_page.common.reset_reveal_locks();
-        self.playlists_page.common.reset_reveal_locks();
-        self.queue_page.common.reset_reveal_locks();
-        self.songs_page.common.reset_reveal_locks();
-        self.radios_page.common.reset_reveal_locks();
-        self.similar_page.common.reset_reveal_locks();
+        for common in self.all_slot_list_commons_mut() {
+            common.reset_reveal_locks();
+        }
+    }
+
+    /// Mark every slot-list page as OS-window-focused or not. The auto-hide
+    /// toolbar's transient reveals (hover / open dropdown / hotkey timer /
+    /// focused-but-empty search) are gated on this in `toolbar_revealed`, so
+    /// losing focus collapses a mid-reveal toolbar even if its `on_exit` never
+    /// fired (unfocused Wayland surfaces stop delivering pointer events) and even
+    /// if the cursor is parked in the hover zone. A non-empty search filter is
+    /// not gated.
+    pub(crate) fn set_all_window_focused(&mut self, focused: bool) {
+        for common in self.all_slot_list_commons_mut() {
+            common.set_window_focused(focused);
+        }
+    }
+
+    /// Drop search-input focus only on pages whose search box actually UNMOUNTS
+    /// on focus loss — i.e. when the auto-hide toolbar collapses (auto-hide on
+    /// and no active filter). There iced silently drops the text_input focus but
+    /// never fires our blur, so a lingering `search_input_focused` would re-reveal
+    /// the header on refocus with the cursor nowhere near it. When the box stays
+    /// mounted (an active filter, or auto-hide off) it keeps real iced focus, so
+    /// clearing the flag would desync it and break Tab-out / Escape, which both
+    /// read this flag — leave it. The search *query* is always left intact.
+    pub(crate) fn clear_all_search_input_focus(&mut self) {
+        if !crate::theme::is_autohide_toolbar() {
+            return;
+        }
+        for common in self.all_slot_list_commons_mut() {
+            if common.search_query.is_empty() {
+                common.search_input_focused = false;
+            }
+        }
     }
 
     pub(crate) fn handle_switch_view(&mut self, view: View) -> Task<Message> {

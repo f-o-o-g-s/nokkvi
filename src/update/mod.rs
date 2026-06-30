@@ -339,6 +339,37 @@ impl Nokkvi {
             Message::ScaleFactorChanged(scale_factor) => {
                 self.handle_scale_factor_changed(scale_factor)
             }
+            Message::WindowUnfocused => {
+                // Mark all pages unfocused (collapses the auto-hide toolbar's
+                // transient reveals at render time) and clear any stranded
+                // reveal-locks so the toolbar can't sit expanded behind another
+                // app's window. Drop search-input focus where the box unmounts
+                // (see clear_all_search_input_focus) so it can't re-reveal the
+                // header on refocus. Close ONLY the columns-cog dropdown — its
+                // overlay renders from stored trigger bounds independent of the
+                // (now-collapsed) header, so it would otherwise strand visible;
+                // context menus / popovers are left open. A non-empty search
+                // filter (query) is preserved.
+                self.set_all_window_focused(false);
+                self.clear_all_toolbar_reveal_locks();
+                self.clear_all_search_input_focus();
+                if matches!(
+                    self.open_menu,
+                    Some(
+                        crate::app_message::OpenMenu::CheckboxDropdown { .. }
+                            | crate::app_message::OpenMenu::CheckboxDropdownSimilar { .. }
+                    )
+                ) {
+                    self.open_menu = None;
+                }
+                Task::none()
+            }
+            Message::WindowFocused => {
+                // Re-enable transient reveals; the toolbar stays collapsed until
+                // a genuine cursor move re-fires the header hover.
+                self.set_all_window_focused(true);
+                Task::none()
+            }
             Message::HotkeyConfigUpdated(config) => self.handle_hotkey_config_updated(config),
             Message::NoOp => Task::none(),
             Message::QuitApp => iced::exit(),

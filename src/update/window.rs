@@ -73,7 +73,9 @@ impl Nokkvi {
         // row landing centers on `slot_count/2` (lands the row a slot too low),
         // and the drag mapper used to grab the wrong row (now anchored on
         // hovered_slot, but kept honest here too). The reveal-on-read
-        // assumption holds for the keyboard scroll/center paths but not these.
+        // assumption holds for the keyboard scroll path but not these (nor
+        // center-on-playing, which no longer reveals the toolbar — it relies on
+        // the stored collapsed count just like find-and-expand).
         //
         // When auto-hide is OFF, `toolbar_collapsed` is always `false`, so this
         // reduces to the previous expanded-footprint behavior exactly.

@@ -913,6 +913,17 @@ pub enum Message {
     // --- Window Events ---
     WindowResized(f32, f32),
     ScaleFactorChanged(f32),
+    /// The OS window lost focus (e.g. the user Alt+Tabbed away). Marks every
+    /// slot-list page unfocused (which collapses the auto-hide toolbar's
+    /// transient reveals at render time), clears any stranded reveal-locks,
+    /// drops search-input focus, and closes any open header menu so the toolbar
+    /// can't sit expanded behind another app's window (or re-reveal on refocus).
+    /// A non-empty search filter (query) is preserved.
+    WindowUnfocused,
+    /// The OS window regained focus. Re-enables the auto-hide toolbar's
+    /// transient reveals; the toolbar stays collapsed until a genuine cursor
+    /// move re-fires the header hover (no auto-reveal on focus).
+    WindowFocused,
 
     /// Play sound effect
     PlaySfx(nokkvi_data::audio::SfxType),

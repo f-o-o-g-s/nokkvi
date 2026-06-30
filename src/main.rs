@@ -526,6 +526,12 @@ impl Nokkvi {
             Event::Window(iced::window::Event::Rescaled(scale_factor)) => {
                 Some(Message::ScaleFactorChanged(scale_factor))
             }
+            // Window focus changes: gate the auto-hide toolbar's transient
+            // reveals so a mid-reveal toolbar can't strand expanded behind
+            // another app's window (its `on_exit` can't fire on an unfocused
+            // Wayland surface).
+            Event::Window(iced::window::Event::Unfocused) => Some(Message::WindowUnfocused),
+            Event::Window(iced::window::Event::Focused) => Some(Message::WindowFocused),
             // Cross-pane drag mouse tracking (handlers no-op when panel is closed).
             // CursorMoved: skip when a widget (e.g. scrollbar) captured the event —
             // prevents scrollbar drags from exceeding the 5px threshold and

@@ -118,10 +118,11 @@ impl Nokkvi {
     }
 
     /// Reveal the current view's auto-hide toolbar (pane-aware). Called by
-    /// header-interacting hotkeys (sort cycle/toggle, focus search,
-    /// center-on-playing) so a keyboard-driven change surfaces the toolbar
-    /// even when the cursor isn't on it. No-op on views without a slot-list
-    /// page (e.g. Settings).
+    /// header-interacting hotkeys that alter toolbar content (sort cycle/toggle,
+    /// focus search) so a keyboard-driven change surfaces the toolbar even when
+    /// the cursor isn't on it. Center-on-playing deliberately does NOT call this
+    /// — it only scrolls the list. No-op on views without a slot-list page
+    /// (e.g. Settings).
     pub(crate) fn reveal_current_toolbar(&mut self) {
         if let Some(page) = self.current_view_page_mut() {
             page.common_mut().reveal_toolbar();
@@ -189,8 +190,11 @@ impl Nokkvi {
 
     pub(crate) fn handle_center_on_playing(&mut self) -> Task<Message> {
         trace!(" CenterOnPlaying hotkey pressed on {:?}", self.current_view);
-        // Surface the auto-hide toolbar (its center-on-playing button lives there).
-        self.reveal_current_toolbar();
+        // Deliberately does NOT reveal the auto-hide toolbar: Shift+C only
+        // scrolls the list to centre the playing track — it alters nothing in
+        // the toolbar (unlike sort cycle / focus search), so surfacing it is
+        // gratuitous. It also avoids stranding the 2.5s reveal window if the
+        // user immediately focuses another OS window mid-reveal.
 
         // Get the current song ID from scrobble state (already tracked)
         let song_id = match self.scrobble.current_song_id.as_deref() {

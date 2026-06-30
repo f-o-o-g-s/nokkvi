@@ -17,14 +17,24 @@ pub struct SlotListPageState {
     /// Auto-hide toolbar: cursor is currently over the toolbar's reveal zone.
     pub toolbar_hovered: bool,
     /// Auto-hide toolbar: stays revealed until this instant. Set by
-    /// header-interacting hotkeys (sort cycle/toggle, focus search,
-    /// center-on-playing); checked at render time against `Instant::now()`.
+    /// header-interacting hotkeys that alter toolbar content (sort cycle/toggle,
+    /// focus search); checked at render time against `Instant::now()`. Cleared
+    /// by [`Self::reset_reveal_locks`] on unmount/focus-loss edges so a
+    /// mid-reveal toolbar can't strand expanded.
     pub toolbar_reveal_until: Option<std::time::Instant>,
     /// Auto-hide toolbar: the sort dropdown (pick_list) is currently open, so
     /// the toolbar stays revealed even though the cursor has moved off it into
     /// the dropdown menu. Set via the pick_list's on_open / on_close; cleared
     /// on selection (which closes the menu without firing on_close).
     pub toolbar_dropdown_open: bool,
+    /// Auto-hide toolbar: whether nokkvi's OS window currently has focus.
+    /// Updated on `window::Event::Focused` / `Unfocused`. The transient reveals
+    /// (hover, open dropdown, hotkey timer) are gated on this in
+    /// [`Self::toolbar_revealed`], so a stranded `toolbar_hovered` — its
+    /// `on_exit` can't fire on an unfocused Wayland surface — can't pin the
+    /// toolbar expanded behind another app's window. Search-driven reveal is
+    /// not gated. Defaults to `true` (a fresh window is focused).
+    pub window_focused: bool,
 }
 
 impl SlotListPageState {
@@ -40,6 +50,7 @@ impl SlotListPageState {
             toolbar_hovered: false,
             toolbar_reveal_until: None,
             toolbar_dropdown_open: false,
+            window_focused: true,
         }
     }
 
@@ -382,8 +393,7 @@ impl SlotListPageState {
     }
 
     /// How long the auto-hide toolbar stays revealed after a
-    /// header-interacting hotkey fires (sort cycle/toggle, focus search,
-    /// center-on-playing).
+    /// header-interacting hotkey fires (sort cycle/toggle, focus search).
     pub const TOOLBAR_REVEAL_DURATION: std::time::Duration = std::time::Duration::from_millis(2500);
 
     /// Set whether the cursor is over the auto-hide toolbar's reveal zone.
@@ -395,6 +405,12 @@ impl SlotListPageState {
     /// revealed while the cursor is in the open dropdown menu, off the header).
     pub fn set_toolbar_dropdown_open(&mut self, open: bool) {
         self.toolbar_dropdown_open = open;
+    }
+
+    /// Set whether nokkvi's OS window has focus. Gates the transient toolbar
+    /// reveals in [`Self::toolbar_revealed`] so they collapse when unfocused.
+    pub fn set_window_focused(&mut self, focused: bool) {
+        self.window_focused = focused;
     }
 
     /// Clear the transient reveal-locks that hold the auto-hide toolbar open.
@@ -421,21 +437,33 @@ impl SlotListPageState {
 
     /// Whether the auto-hide toolbar should currently render expanded.
     ///
-    /// Always expanded when `autohide_enabled` is false. When enabled, it
-    /// expands while the cursor is over it, while a search query or search
-    /// focus is active (so a live filter is never hidden), or while a hotkey
-    /// reveal window is still open.
+    /// Always expanded when `autohide_enabled` is false. When enabled, a live
+    /// search query (a non-empty filter) keeps it expanded unconditionally — the
+    /// filter must never be hidden, even while nokkvi is unfocused. Every other
+    /// reveal — a focused-but-empty search input, the cursor over the header, an
+    /// open sort dropdown, or an in-flight hotkey reveal window — is gated on the
+    /// window having OS focus, so while nokkvi sits behind another app the
+    /// toolbar collapses. This defeats the stuck-expanded cases where a flag
+    /// strands true on focus loss: `toolbar_hovered` / `search_input_focused`
+    /// whose clearing event (`on_exit` / blur) can't fire on an unfocused
+    /// Wayland surface, or a re-published hover over a parked cursor.
     pub fn toolbar_revealed(&self, autohide_enabled: bool) -> bool {
         if !autohide_enabled {
             return true;
         }
-        self.toolbar_hovered
-            || self.toolbar_dropdown_open
-            || self.search_input_focused
-            || !self.search_query.is_empty()
-            || self
-                .toolbar_reveal_until
-                .is_some_and(|until| std::time::Instant::now() < until)
+        // A non-empty filter is never hidden, even while unfocused.
+        if !self.search_query.is_empty() {
+            return true;
+        }
+        // Everything else — a focused-but-empty search input, hover, an open
+        // sort dropdown, an in-flight hotkey reveal timer — requires OS focus.
+        self.window_focused
+            && (self.search_input_focused
+                || self.toolbar_hovered
+                || self.toolbar_dropdown_open
+                || self
+                    .toolbar_reveal_until
+                    .is_some_and(|until| std::time::Instant::now() < until))
     }
 
     /// Whether the auto-hide toolbar should render collapsed: enabled, not
@@ -444,8 +472,13 @@ impl SlotListPageState {
     /// `column_dropdown_open` is the view's columns-cog dropdown state (pass
     /// `false` for views without a columns picker, e.g. Radios). Centralizes
     /// the collapse rule so the ~6 slot-list views can't drift.
+    ///
+    /// The columns dropdown is focus-gated like every other transient reveal:
+    /// while the window is unfocused it cannot hold the toolbar open, so an open
+    /// columns menu can't strand the toolbar expanded behind another app.
     pub fn toolbar_collapsed(&self, autohide_enabled: bool, column_dropdown_open: bool) -> bool {
-        !self.toolbar_revealed(autohide_enabled) && !column_dropdown_open
+        // Collapsed = not revealed AND not held open by a focused columns menu.
+        !(self.toolbar_revealed(autohide_enabled) || (column_dropdown_open && self.window_focused))
     }
 
     /// Unified dispatch for non-expansion views (Songs, Queue, Radios, Similar).
