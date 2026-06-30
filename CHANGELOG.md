@@ -10,10 +10,14 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+### Removed
+
+## v0.12.1 — 2026-06-30
+
+### Fixed
+
 - The auto-hide view-header toolbar now collapses when nokkvi loses focus, instead of staying stuck expanded behind another window or re-expanding on return.
 - Pressing Shift+C to centre the playing track no longer expands the auto-hide toolbar.
-
-### Removed
 
 ## v0.12.0 — 2026-06-28
 
