@@ -331,12 +331,11 @@ impl TomlSettings {
     /// Build a `TomlSettings` from a `LivePlayerSettings` (for migration from redb).
     ///
     /// Composition: start from default TOML, apply each tab's macro-emitted
-    /// `write_<tab>_toml` (covers ~53 migrated setting keys), apply each
-    /// view's macro-emitted `write_<view>_columns_to_toml` (covers ~54
-    /// column-visibility booleans, including `queue_show_genre` and
+    /// `write_<tab>_toml` (whose `write:`/copy-only closures cover every
+    /// user-facing key), then the consolidated `write_columns_tab_toml`
+    /// (all 50 column-visibility booleans, including `queue_show_genre` and
     /// `songs_show_genre` that the legacy hand-written body silently
-    /// omitted), then hand-write the residual scalars that aren't (yet)
-    /// owned by any per-tab or per-view-column macro invocation.
+    /// omitted).
     ///
     /// `light_mode` has no writer that sources from `ps` (the value lives
     /// on a UI atomic + `config.toml`, not on `LivePlayerSettings`). To
@@ -368,40 +367,15 @@ impl TomlSettings {
         crate::services::settings_tables::write_interface_tab_toml(ps, &mut ts);
         crate::services::settings_tables::write_playback_tab_toml(ps, &mut ts);
 
-        // Per-view-column macro-emitted writers (define_view_column_toml_helpers!).
-        crate::types::view_column_toml::write_albums_columns_to_toml(ps, &mut ts);
-        crate::types::view_column_toml::write_artists_columns_to_toml(ps, &mut ts);
-        crate::types::view_column_toml::write_genres_columns_to_toml(ps, &mut ts);
-        crate::types::view_column_toml::write_playlists_columns_to_toml(ps, &mut ts);
-        crate::types::view_column_toml::write_similar_columns_to_toml(ps, &mut ts);
-        crate::types::view_column_toml::write_songs_columns_to_toml(ps, &mut ts);
-        crate::types::view_column_toml::write_queue_columns_to_toml(ps, &mut ts);
+        // Consolidated view-column writer (define_settings! `view_columns:`
+        // clause) — all 50 column booleans across the 7 slot-list views.
+        crate::services::settings_tables::write_columns_tab_toml(ps, &mut ts);
 
-        // Hand-written residuals — fields not (yet) owned by any per-tab or
-        // per-view-column macro invocation:
-        //
-        // - `artwork_column_width_pct` is the pixel-drag-driven slider that
-        //   the Artwork Column section intentionally leaves off the items
-        //   dispatcher (see `interface.rs` — "absent: it has a setter but no
-        //   UI dispatch arm").
-        // - `font_family` routes through `Message::ApplyFont`, not a tab
-        //   dispatcher, so no `define_settings!` entry owns it.
-        // - The 3 audio/visualizer scalars (`visualization_mode`,
-        //   `sound_effects_enabled`, `sfx_volume`) and 3 EQ fields
-        //   (`eq_enabled`, `eq_gains`, `custom_eq_presets`) live on
-        //   different code paths and aren't claimed by any tab today.
-        // - `light_mode` is owned by the `SetLightModeAtomic` side-effect
-        //   handler in the UI crate (targeted `update_config_value` write).
-        //   The value is threaded in via `existing_light_mode` below so the
-        //   whole-section replace doesn't reset it to `false`.
-        ts.artwork_column_width_pct = ps.artwork_column_width_pct;
-        ts.font_family = ps.font_family.clone();
-        ts.visualization_mode = ps.visualization_mode;
-        ts.sound_effects_enabled = ps.sound_effects_enabled;
-        ts.sfx_volume = ps.sfx_volume;
-        ts.eq_enabled = ps.eq_enabled;
-        ts.eq_gains = ps.eq_gains;
-        ts.custom_eq_presets = ps.custom_eq_presets.clone();
+        // `light_mode` is owned by the `SetLightModeAtomic` side-effect
+        // handler in the UI crate (targeted `update_config_value` write) and
+        // has no `LivePlayerSettings` field to write from. The value is
+        // threaded in via `existing_light_mode` below so the whole-section
+        // replace doesn't reset it to `false`.
 
         if let Some(v) = existing_light_mode {
             ts.light_mode = v;

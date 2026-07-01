@@ -334,6 +334,25 @@ mod tests {
         assert_eq!(count_items(&entries), 75);
     }
 
+    /// Every dispatchable Visualizer-table key renders exactly one UI row —
+    /// the table (dispatch) and the builder (display) cannot drift. The
+    /// builder's MacroRows::finish() guards the other direction (a table row
+    /// the builder forgot to take panics in debug).
+    #[test]
+    fn every_visualizer_scalar_key_has_a_ui_row() {
+        let config = VisualizerConfig::default();
+        let theme = nokkvi_data::types::theme_file::ThemeFile::default();
+        let entries = build_visualizer_items(&config, &theme, "everforest");
+        let keys = extract_keys(&entries);
+        for def in nokkvi_data::services::settings_tables::TAB_VISUALIZER_SETTINGS {
+            assert!(
+                keys.contains(&def.key),
+                "Visualizer table key {} has no UI row",
+                def.key
+            );
+        }
+    }
+
     #[test]
     fn visualizer_items_key_paths() {
         let config = VisualizerConfig::default();

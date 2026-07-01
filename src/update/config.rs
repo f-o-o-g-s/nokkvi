@@ -49,31 +49,6 @@ impl Nokkvi {
         Task::done(Message::Playback(PlaybackMessage::Tick))
     }
 
-    /// Apply a new visualizer config to the live atomic and reinitialize
-    /// the spectrum engine. Marks settings dirty so cached entries refresh.
-    pub(super) fn handle_visualizer_config_changed(
-        &mut self,
-        config: crate::visualizer_config::VisualizerConfig,
-    ) -> Task<Message> {
-        use crate::visualizer_config::SharedVisualizerConfigExt;
-        debug!(
-            " Applying new visualizer config: noise_reduction={:.2}, waves={}, bar_spacing={:.1}",
-            config.noise_reduction, config.waves, config.bars.bar_spacing
-        );
-        // Update shared config state (held for the minimum write-lock window).
-        self.visualizer_config.apply(config);
-        // Apply config to visualizer (reinitializes spectrum engine with new params)
-        if let Some(ref vis) = self.visualizer {
-            vis.apply_config();
-        }
-        // Mark settings dirty and refresh immediately when the Settings view
-        // is showing — hot-reloads while sitting on the Visualizer tab must
-        // land without waiting for the next settings interaction.
-        self.settings_page.config_dirty = true;
-        self.refresh_settings_entries_if_dirty();
-        Task::none()
-    }
-
     /// React to a theme TOML hot-reload: pull new colors + light-mode flag,
     /// rebuild settings entries if visible, and push a Tick to repaint.
     pub(super) fn handle_theme_config_reloaded(&mut self) -> Task<Message> {

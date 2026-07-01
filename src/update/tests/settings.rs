@@ -1117,17 +1117,34 @@ fn toggle_crossfade_refreshes_cached_playback_entry_when_settings_visible() {
 }
 
 #[test]
-fn visualizer_config_changed_refreshes_entries_when_settings_visible() {
+fn hot_reload_visualizer_via_unified_path() {
+    // The unified hot-reload chain is SettingsConfigReloaded ->
+    // reload_from_toml (re-reads [visualizer]) -> PlayerSettingsLoaded.
+    // Exercise its final hop directly: a PlayerSettingsLoaded carrying a
+    // fresh visualizer config must land on BOTH the shared render config
+    // and the cached settings entries while the Visualizer tab is open —
+    // the legacy VisualizerConfigChanged message is gone.
+    use crate::visualizer_config::SharedVisualizerConfigExt;
+
     let mut app = test_app();
+    // A running app has already applied its start view — without this the
+    // one-shot start_view hop inside handle_player_settings_loaded would
+    // navigate off Settings and skip the entries refresh.
+    app.start_view_applied = true;
     app.settings_page.active_category = crate::views::settings::SettingsTab::Visualizer;
     let _ = app.handle_switch_view(crate::View::Settings);
 
-    let config = crate::visualizer_config::VisualizerConfig {
-        noise_reduction: 0.33,
-        ..Default::default()
-    };
-    let _ = app.update(crate::app_message::Message::VisualizerConfigChanged(config));
+    let mut settings = nokkvi_data::types::player_settings::LivePlayerSettings::default();
+    settings.visualizer.noise_reduction = 0.33;
+    let _ = app.update(crate::app_message::Message::Playback(
+        crate::app_message::PlaybackMessage::PlayerSettingsLoaded(Box::new(settings)),
+    ));
 
+    assert_eq!(
+        app.visualizer_config.snapshot().noise_reduction,
+        0.33,
+        "unified reload must push the visualizer config to the shared render state"
+    );
     match cached_setting_value(&app, crate::visualizer_config::keys::NOISE_REDUCTION) {
         crate::views::settings::items::SettingValue::Float { val, .. } => {
             assert!(

@@ -152,25 +152,10 @@ impl Nokkvi {
         }
     }
 
-    /// Reload the visualizer config from disk and apply it to the live engine.
-    /// Used after any visualizer TOML write to keep the UI and audio in sync.
-    pub(crate) fn reload_visualizer_config(&mut self) {
-        use crate::visualizer_config::SharedVisualizerConfigExt;
-        if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
-            self.visualizer_config.apply(new_config);
-            self.settings_page.config_dirty = true;
-            if let Some(ref vis) = self.visualizer {
-                vis.apply_config();
-            }
-            // Refresh now in case this reload arrived outside the
-            // `handle_settings` flow (e.g. the reset-visualizer confirmation
-            // dialog) — entries are rebuilt in update, not per frame.
-            // Idempotent for in-`handle_settings` callers (the tail refresh
-            // sees a cleared dirty flag).
-            self.refresh_settings_entries_if_dirty();
-        }
-    }
-
+    /// Central dispatcher for every Settings-view message: routes nav /
+    /// search / activation to the page state, and every `SettingsAction`
+    /// write to its typed handler (general dispatch chain, WriteConfig,
+    /// hotkeys, presets, logout).
     pub(crate) fn handle_settings(&mut self, msg: crate::views::SettingsMessage) -> Task<Message> {
         use crate::views::SettingsMessage;
 
@@ -275,7 +260,11 @@ impl Nokkvi {
                     crate::theme::reload_theme();
                     self.settings_page.config_dirty = true;
                 } else {
-                    self.reload_visualizer_config();
+                    // Non-theme color arrays live in config.toml sub-tables
+                    // the behavior config doesn't model — refresh the cached
+                    // entries so the GUI reflects the write.
+                    self.settings_page.config_dirty = true;
+                    self.refresh_settings_entries_if_dirty();
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
@@ -525,6 +514,14 @@ impl Nokkvi {
         let is_theme = key.is_theme();
         let key_str = key.as_str().to_string();
 
+        // `visualizer.*` keys take the dispatch-first path: mutate the
+        // manager's in-memory config, and only persist on success (a
+        // dispatch miss or type error must not leave disk ahead of memory
+        // until restart).
+        if !is_theme && key_str.starts_with("visualizer.") {
+            return self.handle_visualizer_config_write(key, key_str, value, description);
+        }
+
         // In `Clean` verbose-config mode the writer adds no `# description`
         // comments (only `[visualizer]` keys carry them — theme writes never
         // pass a comment). `On`/`Off` keep the documentation.
@@ -540,86 +537,98 @@ impl Nokkvi {
         } else if is_theme {
             crate::theme::reload_theme();
             self.settings_page.config_dirty = true;
-        } else if key_str.starts_with("visualizer.") {
-            self.reload_visualizer_config();
-        }
-        // Mutual exclusivity: waves and monstercat can't both be active.
-        // When one is enabled, auto-disable the other in config AND update the
-        // cached settings entry in-place so the GUI reflects the change immediately
-        // (without clearing search state).
-        match key_str.as_str() {
-            crate::visualizer_config::keys::MONSTERCAT => {
-                if matches!(value, crate::views::settings::items::SettingValue::Float { val, .. } if val >= crate::visualizer_config::MONSTERCAT_MIN_EFFECTIVE)
-                {
-                    let _ = crate::config_writer::ConfigKey::app_scalar(
-                        crate::visualizer_config::keys::WAVES.to_string(),
-                    )
-                    .write(
-                        &crate::views::settings::items::SettingValue::Bool(false),
-                        None,
-                    );
-                    // Patch the waves entry in the cached list
-                    Self::patch_cached_entry(
-                        &mut self.settings_page.cached_entries,
-                        crate::visualizer_config::keys::WAVES,
-                        crate::views::settings::items::SettingValue::Bool(false),
-                    );
-                    self.reload_visualizer_config();
-                }
-            }
-            crate::visualizer_config::keys::WAVES => {
-                if matches!(
-                    value,
-                    crate::views::settings::items::SettingValue::Bool(true)
-                ) {
-                    let _ = crate::config_writer::ConfigKey::app_scalar(
-                        crate::visualizer_config::keys::MONSTERCAT.to_string(),
-                    )
-                    .write(
-                        &crate::views::settings::items::SettingValue::Float {
-                            val: 0.0,
-                            min: 0.0,
-                            max: 10.0,
-                            step: 0.1,
-                            unit: "",
-                        },
-                        None,
-                    );
-                    // Patch the monstercat entry in the cached list
-                    Self::patch_cached_entry(
-                        &mut self.settings_page.cached_entries,
-                        crate::visualizer_config::keys::MONSTERCAT,
-                        crate::views::settings::items::SettingValue::Float {
-                            val: 0.0,
-                            min: 0.0,
-                            max: 10.0,
-                            step: 0.1,
-                            unit: "",
-                        },
-                    );
-                    self.reload_visualizer_config();
-                }
-            }
-            _ => {}
         }
         Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
     }
 
-    /// Patch a single cached settings entry by key, updating its value in-place.
-    /// Preserves search state and scroll position.
-    fn patch_cached_entry(
-        entries: &mut [crate::views::settings::items::SettingsEntry],
-        key: &str,
-        new_value: crate::views::settings::items::SettingValue,
-    ) {
-        for entry in entries.iter_mut() {
-            if let crate::views::settings::items::SettingsEntry::Item(item) = entry
-                && item.key == key
-            {
-                item.value = new_value;
-                return;
+    /// A `visualizer.*` config write, dispatch-FIRST: the table setter
+    /// mutates the manager's in-memory config (validating and applying
+    /// monstercat↔waves exclusivity); only on success do the config.toml
+    /// writes land — the user's raw primary value plus every secondary key
+    /// the setter actually changed (`visualizer_secondary_writes`
+    /// before/after diff, so the data-crate setter is the single owner of
+    /// the exclusivity rule and config.toml receives BOTH keys — config.toml
+    /// wins on reload). Finishes through the slim
+    /// `apply_visualizer_settings` path.
+    fn handle_visualizer_config_write(
+        &mut self,
+        key: crate::config_writer::ConfigKey,
+        key_str: String,
+        value: crate::views::settings::items::SettingValue,
+        description: Option<String>,
+    ) -> Task<Message> {
+        let Some(shell) = self.app_service.as_ref() else {
+            return Task::none();
+        };
+        let mgr_arc = shell.settings().settings_manager();
+        let result = {
+            let mut mgr = mgr_arc.blocking_lock();
+            let before = mgr.visualizer().clone();
+            nokkvi_data::services::settings_tables::dispatch_visualizer_tab_setting(
+                &key_str,
+                value.clone(),
+                &mut mgr,
+            )
+            .map(|res| res.map(|effect| (effect, before, mgr.visualizer().clone())))
+        };
+        match result {
+            Some(Ok((effect, before, after))) => {
+                let comment = if self.settings.verbose_config.writes_comments() {
+                    description.as_deref()
+                } else {
+                    None
+                };
+                // Persist the user's RAW primary value (validate may clamp
+                // in memory; the read side re-applies the same clamp, so
+                // disk and memory stay convergent).
+                if let Err(e) = key.write(&value, comment) {
+                    tracing::warn!(" [SETTINGS] Failed to write config: {e}");
+                    self.toast_warn(format!("Failed to save setting: {e}"));
+                }
+                for (secondary_key, secondary_value) in
+                    visualizer_secondary_writes(&key_str, &before, &after)
+                {
+                    if let Err(e) =
+                        crate::config_writer::ConfigKey::app_scalar(secondary_key.to_string())
+                            .write(&secondary_value, None)
+                    {
+                        tracing::warn!(
+                            " [SETTINGS] Failed to write exclusivity companion {secondary_key}: {e}"
+                        );
+                    }
+                }
+                let apply_task = self.apply_visualizer_settings(after);
+                let side_task = self.dispatch_settings_side_effect(effect);
+                Task::batch([apply_task, side_task])
+            }
+            Some(Err(e)) => {
+                tracing::warn!(" [SETTINGS] Visualizer dispatch failed for {key_str}: {e:#}");
+                self.toast_warn(format!("Failed to apply setting: {e}"));
+                Task::none()
+            }
+            None => {
+                tracing::warn!(" [SETTINGS] Unhandled visualizer key: {key_str}");
+                Task::none()
             }
         }
+    }
+
+    /// Slim apply path for a visualizer-only change: mirror it onto
+    /// `self.settings.visualizer`, push the shared render config
+    /// (change-gated), and refresh the settings entries. Deliberately NOT
+    /// `handle_player_settings_loaded` — that startup-grade handler
+    /// re-applies playback/SFX volume, engine modes, and column state from
+    /// the manager's snapshot, and would clobber an in-flight async persist
+    /// (e.g. a just-released volume slider) with a stale value.
+    pub(crate) fn apply_visualizer_settings(
+        &mut self,
+        visualizer: nokkvi_data::types::visualizer_config::VisualizerConfig,
+    ) -> Task<Message> {
+        self.push_visualizer_to_shared(&visualizer);
+        self.settings.visualizer = visualizer;
+        self.settings_page.config_dirty = true;
+        self.refresh_settings_entries_if_dirty();
+        Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
     }
 
     // =========================================================================
@@ -783,6 +792,11 @@ impl Nokkvi {
                     &key, value, &mut mgr,
                 )
             })
+            // Deliberately NO dispatch_visualizer_tab_setting here:
+            // visualizer.* keys route through WriteConfig →
+            // handle_visualizer_config_write (config.toml is their only
+            // store — this redb-persisting chain would mutate in-memory
+            // state that silently reverts on the next reload).
             .map(|res| {
                 res.map(|effect| {
                     if enabling_crossfade {
@@ -925,76 +939,42 @@ impl Nokkvi {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::views::settings::items::{SettingItem, SettingValue, SettingsEntry};
+/// Derive the secondary `[visualizer]` config.toml writes for a primary key
+/// dispatch from the manager state BEFORE and AFTER the setter ran — the
+/// data-crate setter is the single owner of the monstercat↔waves exclusivity
+/// rule; whatever sibling field it changed must ALSO be persisted (invariant:
+/// config.toml wins on reload, so an in-memory-only sibling change would be
+/// resurrected by the next reload/restart).
+///
+/// Scope: only fields whose setters CROSS-MUTATE a sibling (the exclusivity
+/// pair). Plain validate() clamps (e.g. `higher_cutoff_freq` tracking
+/// `lower_cutoff_freq`) are deliberately NOT persisted — the read side
+/// re-derives them from the raw on-disk values, so disk and memory converge
+/// without a write.
+pub(crate) fn visualizer_secondary_writes(
+    primary_key: &str,
+    before: &nokkvi_data::types::visualizer_config::VisualizerConfig,
+    after: &nokkvi_data::types::visualizer_config::VisualizerConfig,
+) -> Vec<(&'static str, crate::views::settings::items::SettingValue)> {
+    use nokkvi_data::types::visualizer_config::keys;
 
-    #[test]
-    fn test_patch_cached_entry_mutual_exclusivity_updates_in_place() {
-        let mut entries = vec![
-            SettingsEntry::Item(SettingItem {
-                key: crate::visualizer_config::keys::MONSTERCAT.into(),
-                label: "Monstercat".to_string(),
-                category: "Test",
-                value: SettingValue::Float {
-                    val: 1.0,
-                    min: 0.0,
-                    max: 2.0,
-                    step: 0.1,
-                    unit: "",
-                },
-                default: SettingValue::Float {
-                    val: 1.0,
-                    min: 0.0,
-                    max: 2.0,
-                    step: 0.1,
-                    unit: "",
-                },
-                label_icon: None,
-                subtitle: None,
-                is_theme_key: false,
-                needs_enter_hint: false,
-                on_activate: None,
-            }),
-            SettingsEntry::Item(SettingItem {
-                key: crate::visualizer_config::keys::WAVES.into(),
-                label: "Waves".to_string(),
-                category: "Test",
-                value: SettingValue::Bool(false),
-                default: SettingValue::Bool(false),
-                label_icon: None,
-                subtitle: None,
-                is_theme_key: false,
-                needs_enter_hint: false,
-                on_activate: None,
-            }),
-        ];
+    use crate::views::settings::items::SettingValue;
 
-        // Simulate logic where waves is activated, so we must clamp monstercat locally
-        crate::Nokkvi::patch_cached_entry(
-            &mut entries,
-            crate::visualizer_config::keys::MONSTERCAT,
+    let mut writes = Vec::new();
+    if primary_key != keys::WAVES && after.waves != before.waves {
+        writes.push((keys::WAVES, SettingValue::Bool(after.waves)));
+    }
+    if primary_key != keys::MONSTERCAT && after.monstercat != before.monstercat {
+        writes.push((
+            keys::MONSTERCAT,
             SettingValue::Float {
-                val: 0.0,
+                val: after.monstercat,
                 min: 0.0,
                 max: 10.0,
                 step: 0.1,
                 unit: "",
             },
-        );
-
-        if let SettingsEntry::Item(item) = &entries[0] {
-            assert_eq!(item.key, crate::visualizer_config::keys::MONSTERCAT);
-            if let SettingValue::Float { val, .. } = item.value {
-                assert_eq!(
-                    val, 0.0,
-                    "Patching must successfully update the float value in place"
-                );
-            } else {
-                panic!("Wrong value type after patching");
-            }
-        } else {
-            panic!("Wrong entry type after patching");
-        }
+        ));
     }
+    writes
 }

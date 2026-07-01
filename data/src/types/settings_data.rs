@@ -226,6 +226,222 @@ impl Default for PlaybackSettingsData {
     }
 }
 
+/// Data needed by the Visualizer tab builder — one slot per macro-emitted
+/// row (the `ui_meta.read_field` closures in
+/// `settings_tables/visualizer.rs` read these). Populated from the live
+/// [`VisualizerConfig`][crate::types::visualizer_config::VisualizerConfig]
+/// via the `From<&VisualizerConfig>` impl; enum slots carry WIRE strings
+/// (`as_wire_str`), matching the wire-keyed visualizer dropdowns.
+#[derive(Debug, Clone)]
+pub struct VisualizerSettingsData {
+    pub height_percent: f64,
+    pub opacity: f64,
+    pub bloom: bool,
+    pub bloom_intensity: f64,
+    pub beat_reactivity: f64,
+    pub crt: f64,
+    pub noise_reduction: f64,
+    pub lower_cutoff_freq: i64,
+    pub higher_cutoff_freq: i64,
+    pub auto_sensitivity: bool,
+    pub bars_placement: Cow<'static, str>,
+    pub waves: bool,
+    pub waves_smoothing: i64,
+    pub monstercat: f64,
+    pub bars_max_bars: i64,
+    pub bars_bar_width_min: i64,
+    pub bars_bar_width_max: i64,
+    pub bars_bar_spacing: i64,
+    pub bars_border_width: i64,
+    pub bars_led_bars: bool,
+    pub bars_led_segment_height: i64,
+    pub bars_gradient_mode: Cow<'static, str>,
+    pub bars_gradient_orientation: Cow<'static, str>,
+    pub bars_peak_gradient_mode: Cow<'static, str>,
+    pub bars_peak_mode: Cow<'static, str>,
+    pub bars_peak_hold_time: i64,
+    pub bars_peak_fade_time: i64,
+    pub bars_peak_fall_speed: i64,
+    pub bars_peak_height_ratio: i64,
+    pub bars_bar_depth_3d: i64,
+    pub bars_flash_intensity: f64,
+    pub bars_trails: f64,
+    pub bars_echo: f64,
+    pub lines_placement: Cow<'static, str>,
+    pub lines_point_count: i64,
+    pub lines_line_thickness: f64,
+    pub lines_outline_thickness: f64,
+    pub lines_outline_opacity: f64,
+    pub lines_animation_speed: f64,
+    pub lines_gradient_mode: Cow<'static, str>,
+    pub lines_fill_opacity: f64,
+    pub lines_glow_intensity: f64,
+    pub lines_mirror: bool,
+    pub lines_style: Cow<'static, str>,
+    pub lines_boat: bool,
+    pub lines_trails: f64,
+    pub lines_echo: f64,
+    pub scope_radius: f64,
+    pub scope_sensitivity: f64,
+    pub scope_point_count: i64,
+    pub scope_line_thickness: f64,
+    pub scope_fill_opacity: f64,
+    pub scope_glow_intensity: f64,
+    pub scope_outline_thickness: f64,
+    pub scope_outline_opacity: f64,
+    pub scope_gradient_mode: Cow<'static, str>,
+    pub scope_animation_speed: f64,
+    pub scope_style: Cow<'static, str>,
+    pub scope_particles: bool,
+    pub scope_particle_count: i64,
+    pub scope_particle_speed: f64,
+    pub scope_beam: bool,
+    pub scope_trails: f64,
+    pub scope_echo: f64,
+}
+
+impl Default for VisualizerSettingsData {
+    fn default() -> Self {
+        Self {
+            height_percent: 0.0,
+            opacity: 0.0,
+            bloom: false,
+            bloom_intensity: 0.0,
+            beat_reactivity: 0.0,
+            crt: 0.0,
+            noise_reduction: 0.0,
+            lower_cutoff_freq: 0,
+            higher_cutoff_freq: 0,
+            auto_sensitivity: false,
+            bars_placement: Cow::Borrowed("test-default"),
+            waves: false,
+            waves_smoothing: 0,
+            monstercat: 0.0,
+            bars_max_bars: 0,
+            bars_bar_width_min: 0,
+            bars_bar_width_max: 0,
+            bars_bar_spacing: 0,
+            bars_border_width: 0,
+            bars_led_bars: false,
+            bars_led_segment_height: 0,
+            bars_gradient_mode: Cow::Borrowed("test-default"),
+            bars_gradient_orientation: Cow::Borrowed("test-default"),
+            bars_peak_gradient_mode: Cow::Borrowed("test-default"),
+            bars_peak_mode: Cow::Borrowed("test-default"),
+            bars_peak_hold_time: 0,
+            bars_peak_fade_time: 0,
+            bars_peak_fall_speed: 0,
+            bars_peak_height_ratio: 0,
+            bars_bar_depth_3d: 0,
+            bars_flash_intensity: 0.0,
+            bars_trails: 0.0,
+            bars_echo: 0.0,
+            lines_placement: Cow::Borrowed("test-default"),
+            lines_point_count: 0,
+            lines_line_thickness: 0.0,
+            lines_outline_thickness: 0.0,
+            lines_outline_opacity: 0.0,
+            lines_animation_speed: 0.0,
+            lines_gradient_mode: Cow::Borrowed("test-default"),
+            lines_fill_opacity: 0.0,
+            lines_glow_intensity: 0.0,
+            lines_mirror: false,
+            lines_style: Cow::Borrowed("test-default"),
+            lines_boat: false,
+            lines_trails: 0.0,
+            lines_echo: 0.0,
+            scope_radius: 0.0,
+            scope_sensitivity: 0.0,
+            scope_point_count: 0,
+            scope_line_thickness: 0.0,
+            scope_fill_opacity: 0.0,
+            scope_glow_intensity: 0.0,
+            scope_outline_thickness: 0.0,
+            scope_outline_opacity: 0.0,
+            scope_gradient_mode: Cow::Borrowed("test-default"),
+            scope_animation_speed: 0.0,
+            scope_style: Cow::Borrowed("test-default"),
+            scope_particles: false,
+            scope_particle_count: 0,
+            scope_particle_speed: 0.0,
+            scope_beam: false,
+            scope_trails: 0.0,
+            scope_echo: 0.0,
+        }
+    }
+}
+
+impl From<&crate::types::visualizer_config::VisualizerConfig> for VisualizerSettingsData {
+    fn from(c: &crate::types::visualizer_config::VisualizerConfig) -> Self {
+        Self {
+            height_percent: f64::from(c.height_percent),
+            opacity: f64::from(c.opacity),
+            bloom: c.bloom,
+            bloom_intensity: f64::from(c.bloom_intensity),
+            beat_reactivity: f64::from(c.beat_reactivity),
+            crt: f64::from(c.crt),
+            noise_reduction: c.noise_reduction,
+            lower_cutoff_freq: c.lower_cutoff_freq as i64,
+            higher_cutoff_freq: c.higher_cutoff_freq as i64,
+            auto_sensitivity: c.auto_sensitivity,
+            bars_placement: Cow::Borrowed(c.bars.placement.as_wire_str()),
+            waves: c.waves,
+            waves_smoothing: c.waves_smoothing as i64,
+            monstercat: c.monstercat,
+            bars_max_bars: c.bars.max_bars as i64,
+            bars_bar_width_min: c.bars.bar_width_min as i64,
+            bars_bar_width_max: c.bars.bar_width_max as i64,
+            bars_bar_spacing: c.bars.bar_spacing as i64,
+            bars_border_width: c.bars.border_width as i64,
+            bars_led_bars: c.bars.led_bars,
+            bars_led_segment_height: c.bars.led_segment_height as i64,
+            bars_gradient_mode: Cow::Borrowed(c.bars.gradient_mode.as_wire_str()),
+            bars_gradient_orientation: Cow::Borrowed(c.bars.gradient_orientation.as_wire_str()),
+            bars_peak_gradient_mode: Cow::Borrowed(c.bars.peak_gradient_mode.as_wire_str()),
+            bars_peak_mode: Cow::Borrowed(c.bars.peak_mode.as_wire_str()),
+            bars_peak_hold_time: c.bars.peak_hold_time as i64,
+            bars_peak_fade_time: c.bars.peak_fade_time as i64,
+            bars_peak_fall_speed: c.bars.peak_fall_speed as i64,
+            bars_peak_height_ratio: c.bars.peak_height_ratio as i64,
+            bars_bar_depth_3d: c.bars.bar_depth_3d as i64,
+            bars_flash_intensity: f64::from(c.bars.flash_intensity),
+            bars_trails: f64::from(c.bars.trails),
+            bars_echo: f64::from(c.bars.echo),
+            lines_placement: Cow::Borrowed(c.lines.placement.as_wire_str()),
+            lines_point_count: c.lines.point_count as i64,
+            lines_line_thickness: f64::from(c.lines.line_thickness),
+            lines_outline_thickness: f64::from(c.lines.outline_thickness),
+            lines_outline_opacity: f64::from(c.lines.outline_opacity),
+            lines_animation_speed: f64::from(c.lines.animation_speed),
+            lines_gradient_mode: Cow::Borrowed(c.lines.gradient_mode.as_wire_str()),
+            lines_fill_opacity: f64::from(c.lines.fill_opacity),
+            lines_glow_intensity: f64::from(c.lines.glow_intensity),
+            lines_mirror: c.lines.mirror,
+            lines_style: Cow::Borrowed(c.lines.style.as_wire_str()),
+            lines_boat: c.lines.boat,
+            lines_trails: f64::from(c.lines.trails),
+            lines_echo: f64::from(c.lines.echo),
+            scope_radius: f64::from(c.scope.radius),
+            scope_sensitivity: f64::from(c.scope.sensitivity),
+            scope_point_count: c.scope.point_count as i64,
+            scope_line_thickness: f64::from(c.scope.line_thickness),
+            scope_fill_opacity: f64::from(c.scope.fill_opacity),
+            scope_glow_intensity: f64::from(c.scope.glow_intensity),
+            scope_outline_thickness: f64::from(c.scope.outline_thickness),
+            scope_outline_opacity: f64::from(c.scope.outline_opacity),
+            scope_gradient_mode: Cow::Borrowed(c.scope.gradient_mode.as_wire_str()),
+            scope_animation_speed: f64::from(c.scope.animation_speed),
+            scope_style: Cow::Borrowed(c.scope.style.as_wire_str()),
+            scope_particles: c.scope.particles,
+            scope_particle_count: c.scope.particle_count as i64,
+            scope_particle_speed: f64::from(c.scope.particle_speed),
+            scope_beam: c.scope.beam,
+            scope_trails: f64::from(c.scope.trails),
+            scope_echo: f64::from(c.scope.echo),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +481,29 @@ mod tests {
         assert_eq!(data.artwork_vertical_height_pct, 0.0);
         assert!(!data.horizontal_volume);
         assert!(!data.slot_text_links);
+    }
+
+    #[test]
+    fn visualizer_settings_data_default_uses_sentinel() {
+        let data = VisualizerSettingsData::default();
+        assert_eq!(data.bars_gradient_mode.as_ref(), "test-default");
+        assert_eq!(data.scope_style.as_ref(), "test-default");
+        assert!(!data.auto_sensitivity);
+        assert_eq!(data.noise_reduction, 0.0);
+        assert_eq!(data.bars_max_bars, 0);
+    }
+
+    #[test]
+    fn visualizer_settings_data_from_config_carries_wire_strings_and_casts() {
+        let mut cfg = crate::types::visualizer_config::VisualizerConfig::default();
+        cfg.bars.gradient_mode = crate::types::visualizer_config::BarsGradientMode::Static;
+        cfg.bars.bar_width_min = 7.0; // f32 config field surfaced as an Int row
+        cfg.noise_reduction = 0.42;
+        let data = VisualizerSettingsData::from(&cfg);
+        assert_eq!(data.bars_gradient_mode.as_ref(), "static");
+        assert_eq!(data.bars_bar_width_min, 7);
+        assert_eq!(data.noise_reduction, 0.42);
+        assert!(data.bloom);
     }
 
     #[test]

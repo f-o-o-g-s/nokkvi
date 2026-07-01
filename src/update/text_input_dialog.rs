@@ -315,9 +315,24 @@ impl Nokkvi {
                     self.toast_warn(format!("Failed to reset visualizer settings: {e}"));
                     Task::none()
                 } else {
-                    self.reload_visualizer_config();
+                    // The reset wrote [visualizer] via write_atomic (an
+                    // internal write, so the watcher suppresses it) —
+                    // re-read JUST that section into the manager and apply
+                    // via the slim visualizer path. A global
+                    // SettingsConfigReloaded would re-apply every section
+                    // and reload the library views, far outside this
+                    // button's scope.
                     self.toast_success("Visualizer settings reset to defaults");
-                    Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
+                    let reloaded = self.app_service.as_ref().map(|shell| {
+                        let mgr_arc = shell.settings().settings_manager();
+                        let mut mgr = mgr_arc.blocking_lock();
+                        mgr.reload_visualizer_from_toml();
+                        mgr.visualizer().clone()
+                    });
+                    match reloaded {
+                        Some(visualizer) => self.apply_visualizer_settings(visualizer),
+                        None => Task::none(),
+                    }
                 }
             }
             Some(TextInputDialogAction::CreateRadioStation) => {

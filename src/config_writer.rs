@@ -852,6 +852,61 @@ mod tests {
         );
     }
 
+    /// M3 invariant: the surgical per-key `[visualizer]` write must preserve
+    /// the color sub-tables (`[visualizer.bars.dark]` etc.) that
+    /// `VisualizerConfig` does not model — a whole-section replace would
+    /// delete them.
+    #[test]
+    fn color_subtables_survive_visualizer_write() {
+        let mut doc: DocumentMut = "[visualizer]\nwaves = true\nmonstercat = 1.0\n\n[visualizer.bars.dark]\nborder_color = \"#1d2021\"\nbar_gradient_colors = [\"#458588\", \"#83a598\"]\n\n[visualizer.lines.light]\nborder_color = \"#fbf1c7\"\n"
+            .parse()
+            .unwrap();
+
+        set_dotted_value(
+            &mut doc,
+            "visualizer.waves",
+            &SettingValue::Bool(false),
+            None,
+        )
+        .unwrap();
+        set_dotted_value(
+            &mut doc,
+            "visualizer.monstercat",
+            &SettingValue::Float {
+                val: 0.0,
+                min: 0.0,
+                max: 10.0,
+                step: 0.1,
+                unit: "",
+            },
+            None,
+        )
+        .unwrap();
+
+        assert!(!doc["visualizer"]["waves"].as_bool().unwrap());
+        assert_eq!(
+            doc["visualizer"]["bars"]["dark"]["border_color"]
+                .as_str()
+                .unwrap(),
+            "#1d2021",
+            "dark color sub-table must survive the surgical write"
+        );
+        assert_eq!(
+            doc["visualizer"]["bars"]["dark"]["bar_gradient_colors"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            doc["visualizer"]["lines"]["light"]["border_color"]
+                .as_str()
+                .unwrap(),
+            "#fbf1c7",
+            "light color sub-table must survive the surgical write"
+        );
+    }
+
     #[test]
     fn set_dotted_value_adds_comment_on_new_key() {
         let mut doc: DocumentMut = "".parse().unwrap();

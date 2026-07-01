@@ -4,8 +4,7 @@ use crate::{
     services::{
         state_storage::StateStorage,
         toml_settings_io::{
-            read_toml_hotkeys, read_toml_settings, read_toml_views, write_all_toml_sections,
-            write_toml_hotkeys, write_toml_settings, write_toml_views,
+            write_all_toml_sections, write_toml_hotkeys, write_toml_settings, write_toml_views,
         },
     },
     types::{
@@ -35,6 +34,13 @@ use crate::{
 /// (one-time migration). All writes go to both stores (dual-write).
 pub struct SettingsManager {
     settings: UserSettings,
+    /// In-memory visualizer config, sourced from config.toml `[visualizer]`
+    /// ONLY (startup phase 1 + `reload_from_toml`). NEVER serialized to redb —
+    /// it is deliberately not part of `UserSettings`, and
+    /// `persisted_player_settings_json_has_no_visualizer_key` pins that.
+    /// Mirrored wholesale onto `LivePlayerSettings.visualizer` by
+    /// `get_player_settings`.
+    visualizer: crate::types::visualizer_config::VisualizerConfig,
     storage: StateStorage,
     /// When true, `save()` skips writing `config.toml`. Test-only knob — keeps
     /// `cargo test` from clobbering the developer's real settings file when
@@ -54,19 +60,17 @@ impl std::fmt::Debug for SettingsManager {
 
 impl SettingsManager {
     pub fn new(storage: StateStorage) -> Result<Self> {
-        // Phase 1: Try to read from config.toml (new source of truth)
-        let toml_settings = read_toml_settings().unwrap_or_else(|e| {
-            tracing::warn!("Error reading [settings] from config.toml: {e}");
-            None
-        });
-        let toml_hotkeys = read_toml_hotkeys().unwrap_or_else(|e| {
-            tracing::warn!("Error reading [hotkeys] from config.toml: {e}");
-            None
-        });
-        let toml_views = read_toml_views().unwrap_or_else(|e| {
-            tracing::warn!("Error reading [views] from config.toml: {e}");
-            None
-        });
+        // Phase 1: Try to read from config.toml (new source of truth) —
+        // one file read + one parse for all four sections (review #10).
+        let sections =
+            crate::services::toml_settings_io::read_all_toml_sections().unwrap_or_else(|e| {
+                tracing::warn!("Error reading config.toml: {e}");
+                Default::default()
+            });
+        let toml_settings = sections.settings;
+        let toml_hotkeys = sections.hotkeys;
+        let toml_views = sections.views;
+        let toml_visualizer = sections.visualizer;
 
         let has_toml = toml_settings.is_some();
         tracing::debug!(
@@ -105,6 +109,7 @@ impl SettingsManager {
 
         let manager = Self {
             settings,
+            visualizer: toml_visualizer.unwrap_or_default(),
             storage,
             skip_toml_writes: false,
         };
@@ -127,6 +132,7 @@ impl SettingsManager {
     pub(crate) fn for_test(storage: StateStorage) -> Self {
         Self {
             settings: UserSettings::default(),
+            visualizer: crate::types::visualizer_config::VisualizerConfig::default(),
             storage,
             skip_toml_writes: true,
         }
@@ -145,6 +151,7 @@ impl SettingsManager {
         settings.player = player;
         Self {
             settings,
+            visualizer: crate::types::visualizer_config::VisualizerConfig::default(),
             storage,
             skip_toml_writes: true,
         }
@@ -199,20 +206,60 @@ impl SettingsManager {
         self.write_all_toml()
     }
 
+    /// Read access to the in-memory visualizer config (config.toml
+    /// `[visualizer]`-sourced; never redb).
+    pub fn visualizer(&self) -> &crate::types::visualizer_config::VisualizerConfig {
+        &self.visualizer
+    }
+
+    /// Mutate the in-memory visualizer config under the standard contract:
+    /// apply the closure, then re-validate (the same range clamps the legacy
+    /// hot-reload applied on read-back). Every Visualizer-table setter routes
+    /// through here. Deliberately NO redb write — `[visualizer]` persists in
+    /// config.toml only, via the UI's surgical writer.
+    pub fn with_visualizer(
+        &mut self,
+        f: impl FnOnce(&mut crate::types::visualizer_config::VisualizerConfig),
+    ) -> Result<()> {
+        f(&mut self.visualizer);
+        self.visualizer.validate();
+        Ok(())
+    }
+
+    /// Re-read ONLY the `[visualizer]` section from config.toml into the
+    /// in-memory field (absent section resets to defaults, matching
+    /// `reload_from_toml`). Used by the reset-defaults flow, whose scope is
+    /// the visualizer alone — a full `reload_from_toml` would re-apply every
+    /// section and roll back concurrently in-flight, not-yet-flushed
+    /// settings.
+    pub fn reload_visualizer_from_toml(&mut self) {
+        self.visualizer = crate::services::toml_settings_io::read_toml_visualizer()
+            .unwrap_or(None)
+            .unwrap_or_default();
+    }
+
     /// Hot-reload settings from config.toml and update the in-memory state.
     /// Does NOT save to redb, to prevent feedback loops where a TOML read
     /// triggers a database write. The new values will be propagated to redb
     /// automatically whenever the user next modifies a setting.
     pub fn reload_from_toml(&mut self) {
-        if let Some(ts) = read_toml_settings().unwrap_or(None) {
+        // One file read + one parse for all four sections (the per-section
+        // readers each re-parse the whole file).
+        let sections =
+            crate::services::toml_settings_io::read_all_toml_sections().unwrap_or_default();
+        if let Some(ts) = sections.settings {
             apply_toml_settings_to_internal(&ts, &mut self.settings.player);
         }
-        if let Some(hk) = read_toml_hotkeys().unwrap_or(None) {
+        if let Some(hk) = sections.hotkeys {
             self.settings.hotkeys = hk;
         }
-        if let Some(tv) = read_toml_views().unwrap_or(None) {
+        if let Some(tv) = sections.views {
             self.settings.views = tv.to_all_view_prefs().into();
         }
+        // [visualizer] is config.toml-only: a deleted/absent section resets
+        // the in-memory config to defaults (matching the legacy
+        // load_visualizer_config hot-reload behavior).
+        self.visualizer = sections.visualizer.unwrap_or_default();
         tracing::debug!(" [SETTINGS] Manager state hot-reloaded from config.toml");
     }
 
@@ -1025,9 +1072,9 @@ impl SettingsManager {
     ///
     /// Composition: start from default UI-facing `LivePlayerSettings`,
     /// populate the runtime-only fields (volume, playlist IDs that don't
-    /// round-trip through `config.toml`) and the scalar residuals not yet
-    /// owned by any per-tab or per-view-column macro, then run the 3 per-tab
-    /// dumpers and 7 per-view-column dumpers to cover the migrated entries.
+    /// round-trip through `config.toml`), then run the 3 per-tab dumpers
+    /// (whose `read:`/copy-only closures cover every user-facing field)
+    /// plus the consolidated view-columns dumper.
     pub fn get_player_settings(&self) -> crate::types::player_settings::LivePlayerSettings {
         let p = &self.settings.player;
         let mut out = crate::types::player_settings::LivePlayerSettings {
@@ -1045,18 +1092,10 @@ impl SettingsManager {
             active_playlist_public: p.active_playlist_public,
             active_playlist_song_count: p.active_playlist_song_count,
 
-            // Scalar residuals — fields not (yet) owned by any per-tab or
-            // per-view-column macro (paralleling the same residuals in
-            // `apply_toml_settings_to_internal` and
-            // `TomlSettings::from_player_settings`).
-            sfx_volume: p.sfx_volume as f32,
-            sound_effects_enabled: p.sound_effects_enabled,
-            visualization_mode: p.visualization_mode,
-            font_family: p.font_family.clone(),
-            eq_enabled: p.eq_enabled,
-            eq_gains: p.eq_gains,
-            custom_eq_presets: p.custom_eq_presets.clone(),
-            artwork_column_width_pct: p.artwork_column_width_pct,
+            // In-memory visualizer config (config.toml `[visualizer]`-only;
+            // never redb) — mirrored wholesale, not via a dumper.
+            visualizer: self.visualizer.clone(),
+
             ..Default::default()
         };
 
@@ -1065,14 +1104,9 @@ impl SettingsManager {
         crate::services::settings_tables::dump_interface_tab_player_settings(p, &mut out);
         crate::services::settings_tables::dump_playback_tab_player_settings(p, &mut out);
 
-        // Per-view-column macro-emitted dumpers (define_view_column_toml_helpers!).
-        crate::types::view_column_toml::dump_albums_columns_to_player(p, &mut out);
-        crate::types::view_column_toml::dump_artists_columns_to_player(p, &mut out);
-        crate::types::view_column_toml::dump_genres_columns_to_player(p, &mut out);
-        crate::types::view_column_toml::dump_playlists_columns_to_player(p, &mut out);
-        crate::types::view_column_toml::dump_similar_columns_to_player(p, &mut out);
-        crate::types::view_column_toml::dump_songs_columns_to_player(p, &mut out);
-        crate::types::view_column_toml::dump_queue_columns_to_player(p, &mut out);
+        // Consolidated view-column dumper (define_settings! `view_columns:`
+        // clause) — all 50 column booleans across the 7 slot-list views.
+        crate::services::settings_tables::dump_columns_tab_player_settings(p, &mut out);
 
         out
     }
@@ -1101,17 +1135,11 @@ impl SettingsManager {
 /// Only overwrites user-facing preference fields — volume, playlist IDs, and
 /// other runtime state are left untouched.
 ///
-/// Composition: 3 per-tab `apply_toml_<tab>` macro-emitted helpers cover the
-/// migrated `define_settings!` entries; 7 per-view `apply_toml_<view>_columns`
-/// macro-emitted helpers cover every column-toggle bool — including
-/// `queue_show_genre` and `songs_show_genre` that the previous hand-written
-/// body silently dropped. The remaining hand-written assignments cover the
-/// scalar residuals (`font_family`, visualizer/SFX/EQ fields) that are not
-/// yet owned by any per-tab or per-view-column macro invocation.
-///
-/// `light_mode` and a handful of other fields are still applied here because
-/// they round-trip through `TomlSettings` but are not yet routed through a
-/// macro entry — see the inline comments.
+/// Composition: 3 per-tab `apply_toml_<tab>` macro-emitted helpers cover
+/// every `define_settings!` entry (dispatchable and copy-only alike); the
+/// consolidated `apply_toml_columns_tab` covers every column-toggle bool —
+/// including `queue_show_genre` and `songs_show_genre` that the pre-macro
+/// hand-written body silently dropped.
 fn apply_toml_settings_to_internal(
     ts: &TomlSettings,
     p: &mut crate::types::settings::PersistedPlayerSettings,
@@ -1121,34 +1149,11 @@ fn apply_toml_settings_to_internal(
     crate::services::settings_tables::apply_toml_interface_tab(ts, p);
     crate::services::settings_tables::apply_toml_playback_tab(ts, p);
 
-    // Per-view-column macro-emitted appliers (define_view_column_toml_helpers!).
-    // These close the silent-drop bug for queue_show_genre / songs_show_genre
-    // that the pre-refactor hand-written body did not cover.
-    crate::types::view_column_toml::apply_toml_albums_columns(ts, p);
-    crate::types::view_column_toml::apply_toml_artists_columns(ts, p);
-    crate::types::view_column_toml::apply_toml_genres_columns(ts, p);
-    crate::types::view_column_toml::apply_toml_playlists_columns(ts, p);
-    crate::types::view_column_toml::apply_toml_similar_columns(ts, p);
-    crate::types::view_column_toml::apply_toml_songs_columns(ts, p);
-    crate::types::view_column_toml::apply_toml_queue_columns(ts, p);
-
-    // Hand-written residuals — scalar fields not (yet) owned by any per-tab
-    // or per-view-column macro invocation:
-    //
-    // - `font_family` routes through Message::ApplyFont, not a tab dispatcher.
-    // - The 3 audio/visualizer scalars (`visualization_mode`,
-    //   `sound_effects_enabled`, `sfx_volume`) and 3 EQ fields (`eq_enabled`,
-    //   `eq_gains`, `custom_eq_presets`) live on different code paths.
-    // - `artwork_column_width_pct` is the pixel-drag-driven slider that
-    //   intentionally has no UI dispatch arm.
-    p.font_family = ts.font_family.clone();
-    p.visualization_mode = ts.visualization_mode;
-    p.sound_effects_enabled = ts.sound_effects_enabled;
-    p.sfx_volume = ts.sfx_volume as f64;
-    p.eq_enabled = ts.eq_enabled;
-    p.eq_gains = ts.eq_gains;
-    p.custom_eq_presets = ts.custom_eq_presets.clone();
-    p.artwork_column_width_pct = ts.artwork_column_width_pct;
+    // Consolidated view-column applier (define_settings! `view_columns:`
+    // clause) — all 50 column booleans, including queue_show_genre /
+    // songs_show_genre whose silent drop the original hand-written body
+    // caused (pinned by queue_and_songs_genre_columns_apply_correctly).
+    crate::services::settings_tables::apply_toml_columns_tab(ts, p);
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.
@@ -2172,11 +2177,521 @@ name = "sentinel preset"
         assert_eq!(lhs.rating_reminder_percent, rhs.rating_reminder_percent);
     }
 
+    /// M3-S3: `get_player_settings` mirrors the manager's in-memory
+    /// `visualizer` field (config.toml-sourced) onto
+    /// `LivePlayerSettings.visualizer` wholesale.
+    #[test]
+    fn visualizer_mirrors_to_live_player_settings() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("test_settings.redb");
+        let storage = StateStorage::new(path).expect("StateStorage::new");
+        let mut sm = SettingsManager::for_test(storage);
+
+        sm.visualizer.noise_reduction = 0.42;
+        sm.visualizer.waves = true;
+        sm.visualizer.bars.led_bars = true;
+        sm.visualizer.scope.point_count = 128;
+
+        let live = sm.get_player_settings();
+        assert_eq!(live.visualizer.noise_reduction, 0.42);
+        assert!(live.visualizer.waves);
+        assert!(live.visualizer.bars.led_bars);
+        assert_eq!(live.visualizer.scope.point_count, 128);
+    }
+
+    /// M3-S3: visualizer config NEVER lands in redb — the serialized
+    /// `PersistedPlayerSettings` JSON has no `visualizer` key (and no
+    /// `visualizer.`-prefixed key). `visualization_mode` (the audio-visualizer
+    /// on/off selector) is a different, legitimate key.
+    #[test]
+    fn persisted_player_settings_json_has_no_visualizer_key() {
+        let sentinel = build_exhaustive_persisted_player_settings();
+        let json = serde_json::to_value(&sentinel).expect("serialize to JSON");
+        let obj = json.as_object().expect("JSON object");
+        assert!(
+            obj.get("visualizer").is_none(),
+            "PersistedPlayerSettings must NOT gain a visualizer key (config.toml is the sole store)"
+        );
+        for key in obj.keys() {
+            assert!(
+                !key.starts_with("visualizer."),
+                "unexpected visualizer sub-key {key} in PersistedPlayerSettings JSON"
+            );
+        }
+    }
+
+    /// M3-S8g per-mode round-trip helper: parse a `[visualizer]` TOML
+    /// document, seed a test manager's in-memory config with it, and return
+    /// the LivePlayerSettings projection (the full config.toml → in-memory →
+    /// Live chain; redb is deliberately not involved — visualizer config
+    /// never lands there).
+    fn visualizer_toml_to_live(
+        toml_doc: &str,
+    ) -> crate::types::player_settings::LivePlayerSettings {
+        let cf: crate::types::visualizer_config::ConfigFile =
+            toml::from_str(toml_doc).expect("parse [visualizer] document");
+        let mut parsed = cf.visualizer;
+        parsed.validate();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let storage =
+            StateStorage::new(tmp.path().join("test_settings.redb")).expect("StateStorage::new");
+        let mut sm = SettingsManager::for_test(storage);
+        sm.visualizer = parsed;
+        sm.get_player_settings()
+    }
+
+    /// M3-S8g: a non-default Bars config survives config.toml → in-memory →
+    /// LivePlayerSettings.
+    #[test]
+    fn bars_mode_config_toml_live_roundtrip() {
+        let live = visualizer_toml_to_live(
+            "[visualizer.bars]\nmax_bars = 128\nled_bars = true\ngradient_mode = \"static\"\npeak_mode = \"fade\"\nbar_width_min = 4\ntrails = 0.5\nplacement = \"bottom_band\"\n",
+        );
+        let bars = &live.visualizer.bars;
+        assert_eq!(bars.max_bars, 128);
+        assert!(bars.led_bars);
+        assert_eq!(
+            bars.gradient_mode,
+            crate::types::visualizer_config::BarsGradientMode::Static
+        );
+        assert_eq!(
+            bars.peak_mode,
+            crate::types::visualizer_config::BarsPeakMode::Fade
+        );
+        assert_eq!(bars.bar_width_min, 4.0);
+        assert_eq!(bars.trails, 0.5);
+        assert_eq!(
+            bars.placement,
+            crate::types::visualizer_config::VisualizerPlacement::BottomBand
+        );
+    }
+
+    /// M3-S8g: a non-default Lines config survives config.toml → in-memory →
+    /// LivePlayerSettings.
+    #[test]
+    fn lines_mode_config_toml_live_roundtrip() {
+        let live = visualizer_toml_to_live(
+            "[visualizer.lines]\npoint_count = 256\nstyle = \"angular\"\ngradient_mode = \"position\"\nmirror = true\nboat = false\nfill_opacity = 0.25\n",
+        );
+        let lines = &live.visualizer.lines;
+        assert_eq!(lines.point_count, 256);
+        assert_eq!(
+            lines.style,
+            crate::types::visualizer_config::LinesStyle::Angular
+        );
+        assert_eq!(
+            lines.gradient_mode,
+            crate::types::visualizer_config::LinesGradientMode::Position
+        );
+        assert!(lines.mirror);
+        assert!(!lines.boat);
+        assert_eq!(lines.fill_opacity, 0.25);
+    }
+
+    /// M3-S8g: a non-default Scope config survives config.toml → in-memory →
+    /// LivePlayerSettings (validate() clamps ride along: 9000 points → 512).
+    #[test]
+    fn scope_mode_config_toml_live_roundtrip() {
+        let live = visualizer_toml_to_live(
+            "[visualizer.scope]\npoint_count = 9000\nradius = 0.5\nsensitivity = 2.5\nbeam = false\nparticle_count = 1024\necho = 0.25\ngradient_mode = \"breathing\"\n",
+        );
+        let scope = &live.visualizer.scope;
+        assert_eq!(scope.point_count, 512, "validate() must clamp on read");
+        assert_eq!(scope.radius, 0.5);
+        assert_eq!(scope.sensitivity, 2.5);
+        assert!(!scope.beam);
+        assert_eq!(scope.particle_count, 1024);
+        assert_eq!(scope.echo, 0.25);
+        assert_eq!(
+            scope.gradient_mode,
+            crate::types::visualizer_config::LinesGradientMode::Breathing
+        );
+    }
+
+    // ── M4 golden-bytes harness ─────────────────────────────────────────
+    //
+    // These four tests pin the EXACT serde_json bytes PersistedPlayerSettings
+    // writes to redb, captured on the post-M3 tree. NOTE: they make struct
+    // FIELD DECLARATION ORDER load-bearing (serde_json emits in declaration
+    // order; the #[serde(flatten)] view_columns routes through serde's
+    // Content buffer). An order-only golden diff is a CONSERVATIVE tripwire,
+    // NOT a real redb-read compat break (serde_json reads are name-keyed).
+    // How to tell: a diff that is purely a reordering of identical
+    // "name": value pairs is order-only and safe (fix the declaration order,
+    // do NOT regenerate the golden to mask it); a changed key name, changed
+    // default value, or dropped/added key is a REAL break.
+
+    const SENTINEL_GOLDEN: &str = include_str!("testdata/persisted_sentinel.golden.json");
+    const DEFAULT_GOLDEN: &str = include_str!("testdata/persisted_default.golden.json");
+
+    /// The exhaustive sentinel serializes to the exact golden bytes — every
+    /// field name, serde attr, and declaration position pinned.
+    #[test]
+    fn persisted_sentinel_serializes_to_golden_json() {
+        let sentinel = build_exhaustive_persisted_player_settings();
+        assert_eq!(
+            serde_json::to_string_pretty(&sentinel).expect("serialize sentinel"),
+            SENTINEL_GOLDEN,
+            "PersistedPlayerSettings sentinel bytes drifted from the golden (see harness note)"
+        );
+    }
+
+    /// The golden bytes parse back and re-serialize byte-identically — a
+    /// rename/attr change that survives serialization is caught on the read
+    /// side too.
+    #[test]
+    fn golden_json_reserializes_byte_identical() {
+        let parsed: PersistedPlayerSettings =
+            serde_json::from_str(SENTINEL_GOLDEN).expect("golden must deserialize");
+        assert_eq!(
+            serde_json::to_string_pretty(&parsed).expect("re-serialize"),
+            SENTINEL_GOLDEN,
+            "golden re-serialization drifted (rename or attr change)"
+        );
+    }
+
+    /// `PersistedPlayerSettings::default()` serializes to the default golden —
+    /// pins every default VALUE (the compat surface for old configs missing
+    /// keys).
+    #[test]
+    fn persisted_default_serializes_to_default_golden_json() {
+        assert_eq!(
+            serde_json::to_string_pretty(&PersistedPlayerSettings::default())
+                .expect("serialize default"),
+            DEFAULT_GOLDEN,
+            "a default VALUE changed (compat surface for old stores)"
+        );
+    }
+
+    /// A legacy partial redb JSON (old app version: few keys, legacy bool
+    /// forms for the three shimmed enums) fills every missing field from
+    /// Default and maps the legacy bools through their compat shims.
+    #[test]
+    fn legacy_partial_redb_json_fills_defaults() {
+        let legacy = r#"{
+            "volume": 0.5,
+            "start_view": "Artists",
+            "rounded_mode": true,
+            "bit_perfect": true,
+            "verbose_config": true,
+            "queue_show_genre": true
+        }"#;
+        let parsed: PersistedPlayerSettings =
+            serde_json::from_str(legacy).expect("legacy partial JSON must parse");
+        assert_eq!(parsed.volume, 0.5);
+        assert_eq!(parsed.start_view, "Artists");
+        // Legacy bools map through the compat shims.
+        assert_eq!(parsed.rounded_mode, RoundedMode::On);
+        assert_eq!(
+            parsed.bit_perfect,
+            crate::types::player_settings::BitPerfectMode::Strict
+        );
+        assert_eq!(
+            parsed.verbose_config,
+            crate::types::player_settings::VerboseConfig::On
+        );
+        // Flattened view-column key lands on the flattened struct.
+        assert!(parsed.view_columns.queue_show_genre);
+        // Missing fields fill from Default.
+        let d = PersistedPlayerSettings::default();
+        assert_eq!(parsed.scrobble_threshold, d.scrobble_threshold);
+        assert_eq!(parsed.font_family, d.font_family);
+        assert_eq!(parsed.eq_gains, d.eq_gains);
+        assert!(!parsed.light_mode);
+    }
+
+    /// M4: both twins emit from the ONE `player_settings_schema!` table with
+    /// the declared divergences — a `same` field exists on both, each split
+    /// field carries f64 on Persisted / f32 on Live, `light_mode` exists on
+    /// Persisted only and `visualizer` on Live only (reading them here is the
+    /// compile-time proof; the golden + overlap tests pin the rest).
+    #[test]
+    fn twin_schema_field_parity_compiles() {
+        let p = PersistedPlayerSettings::default();
+        let l = crate::types::player_settings::LivePlayerSettings::default();
+
+        // same field on both.
+        assert_eq!(p.start_view, "Queue");
+        assert_eq!(l.start_view, "");
+
+        // splits: f64 on Persisted, f32 on Live.
+        let _pv: f64 = p.volume;
+        let _lv: f32 = l.volume;
+        let _ps: f64 = p.sfx_volume;
+        let _ls: f32 = l.sfx_volume;
+        let _pt: f64 = p.scrobble_threshold;
+        let _lt: f32 = l.scrobble_threshold;
+
+        // divergences: persist_only / live_only.
+        let _light: bool = p.light_mode;
+        let _viz: crate::types::visualizer_config::VisualizerConfig = l.visualizer;
+    }
+
+    /// M2 structural sentinel (Part A): every residual key is published in
+    /// its tab's copy-only registry, is NOT a dispatchable settings-table
+    /// entry, and is invisible to the containment helpers — proving the
+    /// residuals are macro-owned without phantom dispatch arms or UI rows.
+    #[test]
+    fn residual_fields_are_macro_owned() {
+        use crate::services::settings_tables::{
+            general::tab_general_contains,
+            interface::{TAB_INTERFACE_COPY_ONLY_KEYS, tab_interface_contains},
+            playback::{TAB_PLAYBACK_COPY_ONLY_KEYS, tab_playback_contains},
+        };
+
+        const RESIDUAL_KEYS: &[&str] = &[
+            "interface.font_family",
+            "interface.artwork_column_width_pct",
+            "playback.visualization_mode",
+            "playback.sound_effects_enabled",
+            "playback.sfx_volume",
+            "playback.eq_enabled",
+            "playback.eq_gains",
+            "playback.custom_eq_presets",
+        ];
+
+        let registry: Vec<&str> = TAB_INTERFACE_COPY_ONLY_KEYS
+            .iter()
+            .chain(TAB_PLAYBACK_COPY_ONLY_KEYS.iter())
+            .copied()
+            .collect();
+        for key in RESIDUAL_KEYS {
+            assert!(
+                registry.contains(key),
+                "{key} must be published in a TAB_*_COPY_ONLY_KEYS registry"
+            );
+            let in_settings_table = crate::services::settings_tables::TAB_GENERAL_SETTINGS
+                .iter()
+                .chain(crate::services::settings_tables::TAB_INTERFACE_SETTINGS.iter())
+                .chain(crate::services::settings_tables::TAB_PLAYBACK_SETTINGS.iter())
+                .any(|d| d.key == *key);
+            assert!(
+                !in_settings_table,
+                "{key} must NOT appear in any TAB_*_SETTINGS table (phantom dispatch/UI row)"
+            );
+            assert!(
+                !tab_general_contains(key)
+                    && !tab_interface_contains(key)
+                    && !tab_playback_contains(key),
+                "{key} must be invisible to every tab containment helper"
+            );
+        }
+        assert_eq!(
+            registry.len(),
+            RESIDUAL_KEYS.len(),
+            "copy-only registries must contain exactly the 8 residual keys"
+        );
+    }
+
+    /// M2 behavioral sentinel (Part B): the 8 residual fields survive the
+    /// FULL orchestrator round-trip, asserted against the SOURCE sentinel
+    /// values — NOT pipeline-vs-pipeline (a copy-step deleted from both dump
+    /// passes would make ui_ps1 == ui_ps2 vacuously equal; anchoring on the
+    /// exhaustive builder's values catches exactly that). 1e-4 tolerance for
+    /// the `round_f32`-quantized `sfx_volume` / `eq_gains`.
+    #[test]
+    fn residual_fields_round_trip() {
+        let src = build_exhaustive_persisted_player_settings();
+
+        let (sm, _tmp) = make_test_manager_with_player(src.clone());
+        let live = sm.get_player_settings();
+        let ts = TomlSettings::from_player_settings_with_existing(&live, None);
+        let serialized = toml::to_string(&ts).expect("serialize TomlSettings");
+        let parsed: TomlSettings = toml::from_str(&serialized).expect("parse TomlSettings");
+        let mut dst = PersistedPlayerSettings::default();
+        apply_toml_settings_to_internal(&parsed, &mut dst);
+        let (sm2, _tmp2) = make_test_manager_with_player(dst);
+        let out = sm2.get_player_settings();
+
+        // 1. font_family (String, Interface).
+        assert_eq!(out.font_family, src.font_family, "font_family residual");
+        // 2. artwork_column_width_pct (f32, Interface).
+        assert!(
+            (out.artwork_column_width_pct - src.artwork_column_width_pct as f32).abs() < 1e-4,
+            "artwork_column_width_pct residual: {} vs {}",
+            out.artwork_column_width_pct,
+            src.artwork_column_width_pct
+        );
+        // 3. visualization_mode (Copy enum, Playback).
+        assert_eq!(
+            out.visualization_mode, src.visualization_mode,
+            "visualization_mode residual"
+        );
+        // 4. sound_effects_enabled (bool, Playback).
+        assert_eq!(
+            out.sound_effects_enabled, src.sound_effects_enabled,
+            "sound_effects_enabled residual"
+        );
+        // 5. sfx_volume (f64 Persisted / f32 Live+Toml, Playback).
+        assert!(
+            (f64::from(out.sfx_volume) - src.sfx_volume).abs() < 1e-4,
+            "sfx_volume residual: {} vs {}",
+            out.sfx_volume,
+            src.sfx_volume
+        );
+        // 6. eq_enabled (bool, Playback).
+        assert_eq!(out.eq_enabled, src.eq_enabled, "eq_enabled residual");
+        // 7. eq_gains ([f32; 10], Playback).
+        for (i, (a, b)) in out.eq_gains.iter().zip(src.eq_gains.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-4, "eq_gains[{i}] residual: {a} vs {b}");
+        }
+        // 8. custom_eq_presets (Vec<CustomEqPreset>, Playback).
+        assert_eq!(
+            out.custom_eq_presets.len(),
+            src.custom_eq_presets.len(),
+            "custom_eq_presets residual length"
+        );
+        for (o, s) in out
+            .custom_eq_presets
+            .iter()
+            .zip(src.custom_eq_presets.iter())
+        {
+            assert_eq!(o.name, s.name, "custom_eq_presets name");
+            for (i, (a, b)) in o.gains.iter().zip(s.gains.iter()).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-4,
+                    "custom_eq_presets gains[{i}]: {a} vs {b}"
+                );
+            }
+        }
+
+        // Bool residuals in BOTH polarities: the exhaustive builder flips
+        // each bool from its Persisted default, but a flipped value can
+        // coincide with LivePlayerSettings' DERIVED default (false) — e.g.
+        // sound_effects_enabled's sentinel false == Live's default false, so
+        // a dropped copy-step would pass vacuously on one polarity. Running
+        // the chain with each bool at both values closes that hole.
+        for polarity in [false, true] {
+            let mut src2 = build_exhaustive_persisted_player_settings();
+            src2.sound_effects_enabled = polarity;
+            src2.eq_enabled = polarity;
+            let (sm, _tmp) = make_test_manager_with_player(src2);
+            let live = sm.get_player_settings();
+            let ts = TomlSettings::from_player_settings_with_existing(&live, None);
+            let serialized = toml::to_string(&ts).expect("serialize TomlSettings");
+            let parsed: TomlSettings = toml::from_str(&serialized).expect("parse TomlSettings");
+            let mut dst = PersistedPlayerSettings::default();
+            apply_toml_settings_to_internal(&parsed, &mut dst);
+            let (sm2, _tmp2) = make_test_manager_with_player(dst);
+            let out = sm2.get_player_settings();
+            assert_eq!(
+                out.sound_effects_enabled, polarity,
+                "sound_effects_enabled residual (polarity {polarity})"
+            );
+            assert_eq!(
+                out.eq_enabled, polarity,
+                "eq_enabled residual (polarity {polarity})"
+            );
+        }
+    }
+
+    /// Every `ViewColumns` field flipped from its shipped default. The full
+    /// struct literal (no `..`) is deliberate: adding a `ViewColumns` field
+    /// without flipping it here is a missing-initializer compile error.
+    fn flipped_view_columns() -> crate::types::view_columns::ViewColumns {
+        let d = crate::types::view_columns::ViewColumns::default();
+        crate::types::view_columns::ViewColumns {
+            queue_show_stars: !d.queue_show_stars,
+            queue_show_album: !d.queue_show_album,
+            queue_show_duration: !d.queue_show_duration,
+            queue_show_love: !d.queue_show_love,
+            queue_show_plays: !d.queue_show_plays,
+            queue_show_index: !d.queue_show_index,
+            queue_show_thumbnail: !d.queue_show_thumbnail,
+            queue_show_genre: !d.queue_show_genre,
+            queue_show_select: !d.queue_show_select,
+            albums_show_stars: !d.albums_show_stars,
+            albums_show_songcount: !d.albums_show_songcount,
+            albums_show_plays: !d.albums_show_plays,
+            albums_show_love: !d.albums_show_love,
+            albums_show_index: !d.albums_show_index,
+            albums_show_thumbnail: !d.albums_show_thumbnail,
+            albums_show_select: !d.albums_show_select,
+            songs_show_stars: !d.songs_show_stars,
+            songs_show_album: !d.songs_show_album,
+            songs_show_duration: !d.songs_show_duration,
+            songs_show_plays: !d.songs_show_plays,
+            songs_show_love: !d.songs_show_love,
+            songs_show_index: !d.songs_show_index,
+            songs_show_thumbnail: !d.songs_show_thumbnail,
+            songs_show_genre: !d.songs_show_genre,
+            songs_show_select: !d.songs_show_select,
+            artists_show_stars: !d.artists_show_stars,
+            artists_show_albumcount: !d.artists_show_albumcount,
+            artists_show_songcount: !d.artists_show_songcount,
+            artists_show_plays: !d.artists_show_plays,
+            artists_show_love: !d.artists_show_love,
+            artists_show_index: !d.artists_show_index,
+            artists_show_thumbnail: !d.artists_show_thumbnail,
+            artists_show_select: !d.artists_show_select,
+            genres_show_index: !d.genres_show_index,
+            genres_show_thumbnail: !d.genres_show_thumbnail,
+            genres_show_albumcount: !d.genres_show_albumcount,
+            genres_show_songcount: !d.genres_show_songcount,
+            genres_show_select: !d.genres_show_select,
+            playlists_show_index: !d.playlists_show_index,
+            playlists_show_thumbnail: !d.playlists_show_thumbnail,
+            playlists_show_songcount: !d.playlists_show_songcount,
+            playlists_show_duration: !d.playlists_show_duration,
+            playlists_show_updatedat: !d.playlists_show_updatedat,
+            playlists_show_select: !d.playlists_show_select,
+            similar_show_index: !d.similar_show_index,
+            similar_show_thumbnail: !d.similar_show_thumbnail,
+            similar_show_album: !d.similar_show_album,
+            similar_show_duration: !d.similar_show_duration,
+            similar_show_love: !d.similar_show_love,
+            similar_show_select: !d.similar_show_select,
+        }
+    }
+
+    /// M1 characterization: every one of the 50 view-column booleans survives
+    /// the FULL orchestrator round-trip — redb-backed Persisted →
+    /// `get_player_settings` (dump) → `from_player_settings_with_existing`
+    /// (write) → TOML bytes → parse → `apply_toml_settings_to_internal`
+    /// (apply) → `get_player_settings` again. Written against the pre-rewire
+    /// 7-helper path and kept green across the consolidated single-call
+    /// rewire; `ViewColumns` derives `PartialEq`, so each whole-struct
+    /// equality assert covers all 50 fields.
+    #[test]
+    fn all_view_columns_survive_full_orchestrator_roundtrip() {
+        let flipped = flipped_view_columns();
+        let mut persisted = PersistedPlayerSettings::default();
+        persisted.view_columns = flipped.clone();
+
+        // Persisted → Live (dump direction).
+        let (sm, _tmp) = make_test_manager_with_player(persisted);
+        let live = sm.get_player_settings();
+        assert_eq!(
+            live.view_columns, flipped,
+            "dump direction must carry all 50 flipped columns onto LivePlayerSettings"
+        );
+
+        // Live → TOML (write direction) → bytes → parse.
+        let ts = TomlSettings::from_player_settings_with_existing(&live, None);
+        let toml_str = toml::to_string(&ts).expect("serialize TomlSettings");
+        let parsed: TomlSettings = toml::from_str(&toml_str).expect("parse TomlSettings");
+        assert_eq!(
+            parsed.view_columns, flipped,
+            "TOML round-trip must preserve all 50 flipped columns"
+        );
+
+        // TOML → Persisted (apply direction) → Live again.
+        let mut p2 = PersistedPlayerSettings::default();
+        apply_toml_settings_to_internal(&parsed, &mut p2);
+        let (sm2, _tmp2) = make_test_manager_with_player(p2);
+        let live2 = sm2.get_player_settings();
+        assert_eq!(
+            live2.view_columns, flipped,
+            "apply direction must land all 50 flipped columns back on the live view"
+        );
+    }
+
     /// Field-mapping integrity test for the `define_settings!` `read:`
     /// closures: build a `PersistedPlayerSettings` with three sentinel
     /// values, run it through `get_player_settings()` (which exercises
-    /// every per-tab `dump_*_player_settings` and every per-view-column
-    /// `dump_*_columns_to_player`), and assert the corresponding fields
+    /// every per-tab `dump_*_player_settings` and the consolidated
+    /// `dump_columns_tab_player_settings`), and assert the corresponding fields
     /// land on the resulting `LivePlayerSettings`. Pins that the rename
     /// didn't silently mismap any field across the redb↔UI boundary.
     #[test]
@@ -2186,9 +2701,8 @@ name = "sentinel preset"
         //   General  — start_view
         //   Interface — nav_display_mode
         //   Playback  — crossfade_duration_secs
-        // Plus one view-column field (Queue) so the
-        // define_view_column_toml_helpers! dump_*_columns_to_player path is
-        // also exercised end-to-end:
+        // Plus one view-column field (Queue) so the consolidated
+        // dump_columns_tab_player_settings path is also exercised end-to-end:
         //   queue_show_select
         persisted.start_view = "Albums".to_string();
         persisted.nav_display_mode = NavDisplayMode::IconsOnly;

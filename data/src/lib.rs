@@ -1,3 +1,7 @@
+// The player_settings_schema! tt-muncher recurses once per field row (~90
+// rows across the settings twins), which overflows the default limit of 128
+// when combined with the crate's other macro expansion depth.
+#![recursion_limit = "256"]
 #![cfg_attr(
     test,
     allow(

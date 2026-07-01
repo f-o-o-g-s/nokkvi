@@ -20,13 +20,18 @@
 //! [`crate::types::settings_side_effect`] for the typed side-effect enum the
 //! `on_dispatch:` hook returns.
 
+pub mod columns;
 pub mod general;
 pub mod interface;
 pub mod playback;
+pub mod visualizer;
 
 #[cfg(test)]
 mod lock_watchpoint_test;
 
+pub use columns::{
+    apply_toml_columns_tab, dump_columns_tab_player_settings, write_columns_tab_toml,
+};
 pub use general::{
     TAB_GENERAL_SETTINGS, apply_toml_general_tab, dispatch_general_tab_setting,
     dump_general_tab_player_settings, write_general_tab_toml,
@@ -39,5 +44,6 @@ pub use playback::{
     TAB_PLAYBACK_SETTINGS, apply_toml_playback_tab, dispatch_playback_tab_setting,
     dump_playback_tab_player_settings, write_playback_tab_toml,
 };
+pub use visualizer::{TAB_VISUALIZER_SETTINGS, dispatch_visualizer_tab_setting};
 
 pub use crate::types::settings_side_effect::SettingsSideEffect;

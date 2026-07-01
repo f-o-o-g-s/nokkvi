@@ -493,6 +493,30 @@ define_settings! {
                 read_field: |d| d.artwork_vertical_height_pct,
             },
         },
+    ],
+    copy_only_const: TAB_INTERFACE_COPY_ONLY_KEYS,
+    copy_only: [
+        // Copy-only residuals: apply/dump/write copy-steps ONLY — no setter,
+        // no dispatch arm, no ui_meta row. Their write paths live elsewhere
+        // (see each entry).
+        //
+        // `font_family` routes through Message::ApplyFont in the UI crate
+        // (font picker modal), not the tab dispatcher.
+        FontFamily {
+            key: "interface.font_family",
+            toml_apply: |ts, p| p.font_family = ts.font_family.clone(),
+            read: |src, out| out.font_family = src.font_family.clone(),
+            write: |ps, ts| ts.font_family = ps.font_family.clone(),
+        },
+        // `artwork_column_width_pct` persists from the pixel-drag slider
+        // (WriteGeneralSetting) — intentionally no UI dispatch arm; f32 on
+        // all three structs. Mirrored to the ui_mode atomic on load.
+        ArtworkColumnWidthPct {
+            key: "interface.artwork_column_width_pct",
+            toml_apply: |ts, p| p.artwork_column_width_pct = ts.artwork_column_width_pct,
+            read: |src, out| out.artwork_column_width_pct = src.artwork_column_width_pct,
+            write: |ps, ts| ts.artwork_column_width_pct = ps.artwork_column_width_pct,
+        },
     ]
 }
 

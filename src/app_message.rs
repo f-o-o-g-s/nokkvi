@@ -959,10 +959,6 @@ pub enum Message {
     /// availability to either hide the window or quit the app.
     WindowCloseRequested(iced::window::Id),
 
-    // --- Visualizer Hot-Reload ---
-    /// Config file changed, apply new visualizer settings
-    VisualizerConfigChanged(crate::visualizer_config::VisualizerConfig),
-
     // --- Surfing-Boat Overlay (lines mode) ---
     /// Per-frame tick from `iced::window::frames()` driving the boat overlay's
     /// eased horizontal motion + waveform-height sampling. Cheap when not in

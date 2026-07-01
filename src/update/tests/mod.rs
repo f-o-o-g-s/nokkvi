@@ -52,4 +52,5 @@ mod slot_list;
 mod split_view;
 mod star_rating;
 mod state;
+mod visualizer;
 mod window;

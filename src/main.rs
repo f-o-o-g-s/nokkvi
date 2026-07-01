@@ -595,14 +595,16 @@ impl Nokkvi {
         let window_open_sub = iced::window::open_events().map(Message::WindowOpened);
         let window_close_sub = iced::window::close_requests().map(Message::WindowCloseRequested);
 
-        // Config file watcher for hot-reloading both visualizer AND theme settings
+        // Config file watcher for hot-reloading theme + settings (the
+        // [visualizer] section rides the unified SettingsConfigReloaded path:
+        // reload_from_toml re-reads it and PlayerSettingsLoaded pushes it to
+        // the shared render config).
         let config_watcher = iced::Subscription::run(|| {
             futures::stream::StreamExt::flat_map(
                 crate::visualizer_config::config_watcher_subscription(),
                 |opt| {
-                    if let Some(config) = opt {
+                    if opt.is_some() {
                         futures::stream::iter(vec![
-                            Message::VisualizerConfigChanged(config),
                             Message::ThemeConfigReloaded,
                             Message::SettingsConfigReloaded,
                         ])

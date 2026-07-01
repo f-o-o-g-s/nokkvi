@@ -13,6 +13,7 @@ use tracing::debug;
 use crate::{
     types::{
         hotkey_config::HotkeyConfig, toml_settings::TomlSettings, toml_views::TomlViewPreferences,
+        visualizer_config::VisualizerConfig,
     },
     utils::paths::get_config_path,
 };
@@ -60,6 +61,74 @@ pub fn read_toml_hotkeys() -> Result<Option<HotkeyConfig>> {
 /// Returns `None` if the file or section doesn't exist.
 pub fn read_toml_views() -> Result<Option<TomlViewPreferences>> {
     read_section::<TomlViewPreferences>("views")
+}
+
+/// Read the `[visualizer]` section from config.toml, validated (range-clamped
+/// via `VisualizerConfig::validate`). Returns `None` if the file or section
+/// doesn't exist. The unmodeled color sub-tables are ignored by serde and
+/// preserved on disk (writes to `[visualizer]` are surgical).
+pub fn read_toml_visualizer() -> Result<Option<VisualizerConfig>> {
+    Ok(
+        read_section::<VisualizerConfig>("visualizer")?.map(|mut v| {
+            v.validate();
+            v
+        }),
+    )
+}
+
+/// All four config.toml sections, from ONE file read + ONE parse.
+///
+/// The per-section readers above each re-read and re-parse the whole file —
+/// fine for a single-section consumer, wasteful when the caller wants
+/// everything (SettingsManager startup phase 1 and `reload_from_toml`).
+#[derive(Debug, Default)]
+pub struct TomlSections {
+    pub settings: Option<TomlSettings>,
+    pub hotkeys: Option<HotkeyConfig>,
+    pub views: Option<TomlViewPreferences>,
+    /// Validated (range-clamped), same contract as [`read_toml_visualizer`].
+    pub visualizer: Option<VisualizerConfig>,
+}
+
+/// Read config.toml once and extract all four sections. Returns all-`None`
+/// sections when the file doesn't exist; errors only on a read failure or a
+/// file-level parse failure (which would have failed every per-section
+/// reader identically).
+pub fn read_all_toml_sections() -> Result<TomlSections> {
+    let config_path = get_config_path().context("Failed to get config path")?;
+    if !config_path.exists() {
+        return Ok(TomlSections::default());
+    }
+    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
+    let doc: toml::Value = toml::from_str(&content).context("Failed to parse config.toml")?;
+    Ok(sections_from_value(&doc))
+}
+
+/// Pure section extraction from an already-parsed document. A malformed
+/// SECTION degrades to `None` with a warn (matching how the manager treated
+/// a failed per-section reader) without poisoning its siblings.
+fn sections_from_value(doc: &toml::Value) -> TomlSections {
+    fn extract<T: serde::de::DeserializeOwned>(doc: &toml::Value, section: &str) -> Option<T> {
+        let value = doc.get(section)?;
+        match value.clone().try_into() {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::warn!("Error deserializing [{section}] from config.toml: {e}");
+                None
+            }
+        }
+    }
+
+    TomlSections {
+        settings: extract::<TomlSettings>(doc, "settings"),
+        hotkeys: extract::<std::collections::BTreeMap<String, String>>(doc, "hotkeys")
+            .map(|map| HotkeyConfig::from_toml_map(&map)),
+        views: extract::<TomlViewPreferences>(doc, "views"),
+        visualizer: extract::<VisualizerConfig>(doc, "visualizer").map(|mut v| {
+            v.validate();
+            v
+        }),
+    }
 }
 
 // =============================================================================
@@ -306,6 +375,48 @@ mod tests {
             toml::to_string_pretty(&back).unwrap(),
             toml::to_string_pretty(&v).unwrap(),
         );
+    }
+
+    /// One file read + ONE parse yields all four sections (review #10: the
+    /// per-section readers each re-read and re-parsed the whole file, 3-4x
+    /// per hot-reload/startup).
+    #[test]
+    fn sections_from_value_extracts_all_four_from_one_parse() {
+        let doc: toml::Value = toml::from_str(
+            "[settings]\nstart_view = \"Albums\"\n\n[hotkeys]\nswitch_to_settings = \"F1\"\n\n[views]\nqueue_sort = \"rating\"\n\n[visualizer]\nnoise_reduction = 0.42\n",
+        )
+        .unwrap();
+        let sections = super::sections_from_value(&doc);
+        assert_eq!(sections.settings.expect("settings").start_view, "Albums");
+        assert!(sections.hotkeys.is_some());
+        assert_eq!(sections.views.expect("views").queue_sort, "rating");
+        let viz = sections.visualizer.expect("visualizer");
+        assert_eq!(viz.noise_reduction, 0.42);
+        // The visualizer section arrives validated (same contract as
+        // read_toml_visualizer).
+        assert!(viz.higher_cutoff_freq >= viz.lower_cutoff_freq);
+    }
+
+    /// Missing sections extract to None; a malformed SECTION degrades to
+    /// None (warn) without poisoning its siblings.
+    #[test]
+    fn sections_from_value_tolerates_missing_and_malformed_sections() {
+        let doc: toml::Value = toml::from_str("[settings]\nstart_view = \"Queue\"\n").unwrap();
+        let sections = super::sections_from_value(&doc);
+        assert!(sections.settings.is_some());
+        assert!(sections.hotkeys.is_none());
+        assert!(sections.views.is_none());
+        assert!(sections.visualizer.is_none());
+
+        // settings malformed (wrong type), visualizer fine.
+        let doc: toml::Value =
+            toml::from_str("settings = 5\n\n[visualizer]\nopacity = 0.5\n").unwrap();
+        let sections = super::sections_from_value(&doc);
+        assert!(
+            sections.settings.is_none(),
+            "malformed [settings] degrades to None"
+        );
+        assert_eq!(sections.visualizer.expect("visualizer").opacity, 0.5);
     }
 
     #[test]

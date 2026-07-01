@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Clickable artist and album name links in list rows are now off by default (re-enable under Settings → Interface → Slot Text Links).
+- Internal settings-schema unification: every user setting (including all visualizer knobs) is now declared in one table-driven registry, so settings can no longer silently drop out of the save/load/UI pipeline. No user-visible behavior change.
+- Visualizer settings now hot-reload through the same unified path as every other setting.
 
 ### Fixed
 

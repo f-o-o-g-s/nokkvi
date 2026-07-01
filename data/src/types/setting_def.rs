@@ -42,6 +42,9 @@ pub enum Tab {
     General,
     Interface,
     Playback,
+    /// Dormant until the M3 visualizer table lands — no
+    /// `settings_tables/visualizer.rs` invocation references it yet.
+    Visualizer,
 }
 
 /// Static metadata about a single declared setting. The macro emits one
@@ -146,6 +149,17 @@ pub struct SettingDef {
 /// [`SettingsSideEffect`][crate::types::settings_side_effect::SettingsSideEffect]
 /// the UI handler runs after `handle_player_settings_loaded`.
 ///
+/// An optional trailing `copy_only_const: <NAME>, copy_only: [ ... ]` section
+/// (after `settings: [...]`) declares entries that participate ONLY in the
+/// emitted `apply`/`dump`/`write` copy functions — no setter, no dispatch
+/// arm, no containment hit, no UI row. Each copy-only entry declares `key`,
+/// `toml_apply`, `read`, and `write` (same closure shapes as a full entry;
+/// bodies may be non-scalar — array assigns, `Vec` clones). Their keys are
+/// published in `pub const <NAME>: &[&str]` so structural sentinel tests can
+/// assert a residual field is macro-owned, and are deliberately EXCLUDED
+/// from the `SettingDef` table, `contains_fn`, `dispatch_fn`, and
+/// `items_fn`.
+///
 /// `ui_meta:` carries the UI-row payload used by `$items_fn`. Field shape:
 ///
 /// - `label: &'static str` — human-readable row label.
@@ -196,7 +210,29 @@ macro_rules! define_settings {
                     $(,)?
                 }
             ),* $(,)?
-        ] $(,)?
+        ]
+        $(,
+            copy_only_const: $copy_only_const:ident,
+            copy_only: [
+                $(
+                    $cvariant:ident {
+                        key: $ckey:literal,
+                        toml_apply: |$cats:ident, $cap:ident| $cabody:expr,
+                        read: |$crsrc:ident, $crout:ident| $crbody:expr,
+                        write: |$cwps:ident, $cwts:ident| $cwbody:expr
+                        $(,)?
+                    }
+                ),* $(,)?
+            ]
+        )?
+        $(,
+            view_columns: {
+                fields: [ $( $vc_field:ident ),* $(,)? ]
+                $(, assert_exhaustive: $vc_cov_fn:ident)?
+                $(,)?
+            }
+        )?
+        $(,)?
     ) => {
         #[allow(dead_code)]
         pub const $settings_const: &[$crate::types::setting_def::SettingDef] = &[
@@ -207,6 +243,17 @@ macro_rules! define_settings {
                 },
             )*
         ];
+
+        $(
+            /// Macro-emitted registry of this tab's copy-only keys. These
+            /// entries run apply/dump/write copy closures ONLY — they have no
+            /// setter, no dispatch arm, no `ui_meta` row, and never appear in
+            /// the `TAB_<TAB>_SETTINGS` table. The const exists so structural
+            /// sentinel tests can assert a residual field is macro-owned
+            /// without exposing it to dispatch.
+            #[allow(dead_code)]
+            pub const $copy_only_const: &[&str] = &[ $( $ckey, )* ];
+        )?
 
         pub fn $contains_fn(_key: &str) -> bool {
             const KEYS: &[&str] = &[$( $key, )*];
@@ -253,6 +300,16 @@ macro_rules! define_settings {
                     $abody;
                 }
             )*
+            $( $(
+                {
+                    let $cats: &$crate::types::toml_settings::TomlSettings = ts;
+                    let $cap: &mut $crate::types::settings::PersistedPlayerSettings = p;
+                    $cabody;
+                }
+            )* )?
+            $( $(
+                p.view_columns.$vc_field = ts.view_columns.$vc_field;
+            )* )?
         }
 
         #[allow(unused_variables)]
@@ -267,6 +324,16 @@ macro_rules! define_settings {
                     $rbody;
                 }
             )*
+            $( $(
+                {
+                    let $crsrc: &$crate::types::settings::PersistedPlayerSettings = src;
+                    let $crout: &mut $crate::types::player_settings::LivePlayerSettings = out;
+                    $crbody;
+                }
+            )* )?
+            $( $(
+                out.view_columns.$vc_field = src.view_columns.$vc_field;
+            )* )?
         }
 
         /// Macro-emitted writer — copies the per-tab declared fields from the
@@ -290,7 +357,24 @@ macro_rules! define_settings {
                     $wbody;
                 }
             )*
+            $( $(
+                {
+                    let $cwps: &$crate::types::player_settings::LivePlayerSettings = ps;
+                    let $cwts: &mut $crate::types::toml_settings::TomlSettings = ts;
+                    $cwbody;
+                }
+            )* )?
+            $( $(
+                ts.view_columns.$vc_field = ps.view_columns.$vc_field;
+            )* )?
         }
+
+        $(
+            $crate::define_settings_view_columns_cov! {
+                cov_fn: [ $( $vc_cov_fn )? ],
+                fields: [ $( $vc_field ),* ]
+            }
+        )?
 
         /// Macro-emitted flat-row builder. Returns one `SettingsEntry::Item`
         /// per entry that declared `ui_meta:`. Section headers, conditional
@@ -467,6 +551,27 @@ macro_rules! define_settings_dispatch_arm {
     }};
 }
 
+/// Internal helper used by [`define_settings!`] to emit the optional
+/// compile-time coverage guard for the `view_columns:` clause. When an
+/// `assert_exhaustive:` ident is supplied, emits a never-called function that
+/// destructures [`ViewColumns`][crate::types::view_columns::ViewColumns] with
+/// NO `..` rest pattern, so any field not declared in the `fields:` list
+/// fails the build with E0027 (pattern does not mention field). The function
+/// body IS the check.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! define_settings_view_columns_cov {
+    ( cov_fn: [], fields: [ $( $field:ident ),* $(,)? ] ) => {};
+    ( cov_fn: [ $cov_fn:ident ], fields: [ $( $field:ident ),* $(,)? ] ) => {
+        #[allow(dead_code, clippy::needless_pass_by_value)]
+        fn $cov_fn(v: $crate::types::view_columns::ViewColumns) {
+            let $crate::types::view_columns::ViewColumns {
+                $( $field: _, )*
+            } = v;
+        }
+    };
+}
+
 /// Internal helper used by [`define_settings!`] to build one
 /// `SettingsEntry::Item` from a `ui_meta:` cluster. Dispatches on the
 /// `value_type` ident so the right `SettingItem::*` constructor receives the
@@ -554,101 +659,17 @@ macro_rules! define_settings_build_item_arm {
     };
 }
 
-/// Declarative table of view-column-visibility booleans for one slot-list view
-/// (Albums / Artists / Songs / Genres / Playlists / Similar / Queue). Emits
-/// three free functions per invocation:
-///
-/// - `$apply_fn(ts, p)` — copy `ts.field → p.field` for each declared field,
-///   moving the column toggle from TOML onto the redb-backed
-///   `PersistedPlayerSettings`.
-/// - `$dump_fn(src, out)` — copy `src.field → out.field` for each declared
-///   field, moving the column toggle from the redb-backed
-///   `PersistedPlayerSettings` onto the UI-facing `LivePlayerSettings`
-///   consumed by `Message::PlayerSettingsLoaded`.
-/// - `$write_fn(ps, ts)` — copy `ps.field → ts.field` for each declared field,
-///   moving the column toggle from the UI-facing `LivePlayerSettings` onto the
-///   TOML representation written to `config.toml`.
-///
-/// Companion to `define_view_columns!` (UI crate, `src/views/mod.rs`): the
-/// UI macro owns the column enum + visibility struct + `ColumnPersist` impl
-/// (UI types), this macro owns the TOML wire copies (data types). The two
-/// invocations share the same column-set per view; a parity test in this
-/// crate's test module asserts the column counts match so a column added on
-/// one side without the other surfaces as a test failure.
-///
-/// All declared fields must be `bool` fields on the canonical
-/// [`ViewColumns`][crate::types::view_columns::ViewColumns] struct, which
-/// `TomlSettings`, `PersistedPlayerSettings`, and `LivePlayerSettings` each
-/// embed as a `view_columns` member (serde-flattened on the two wire-format
-/// structs so every `<view>_show_<column>` key stays flat on disk).
-///
-/// # Example
-///
-/// ```ignore
-/// nokkvi_data::define_view_column_toml_helpers! {
-///     view: Albums,
-///     apply_fn: apply_toml_albums_columns,
-///     dump_fn: dump_albums_columns_to_player,
-///     write_fn: write_albums_columns_to_toml,
-///     fields: [
-///         albums_show_select,
-///         albums_show_index,
-///         albums_show_thumbnail,
-///         albums_show_stars,
-///         albums_show_songcount,
-///         albums_show_plays,
-///         albums_show_love,
-///     ],
-/// }
-/// ```
-#[macro_export]
-macro_rules! define_view_column_toml_helpers {
-    (
-        view: $view:ident,
-        apply_fn: $apply_fn:ident,
-        dump_fn: $dump_fn:ident,
-        write_fn: $write_fn:ident,
-        fields: [ $( $field:ident ),* $(,)? ] $(,)?
-    ) => {
-        /// Macro-emitted: copy declared view-column-visibility fields from
-        /// `TomlSettings` onto the redb-backed `PersistedPlayerSettings`.
-        pub fn $apply_fn(
-            ts: &$crate::types::toml_settings::TomlSettings,
-            p: &mut $crate::types::settings::PersistedPlayerSettings,
-        ) {
-            $(
-                p.view_columns.$field = ts.view_columns.$field;
-            )*
-        }
-
-        /// Macro-emitted: copy declared view-column-visibility fields from
-        /// the redb-backed `PersistedPlayerSettings` onto the UI-facing
-        /// `LivePlayerSettings`.
-        pub fn $dump_fn(
-            src: &$crate::types::settings::PersistedPlayerSettings,
-            out: &mut $crate::types::player_settings::LivePlayerSettings,
-        ) {
-            $(
-                out.view_columns.$field = src.view_columns.$field;
-            )*
-        }
-
-        /// Macro-emitted: copy declared view-column-visibility fields from
-        /// the UI-facing `LivePlayerSettings` onto `TomlSettings` (for writing
-        /// back to `config.toml`).
-        pub fn $write_fn(
-            ps: &$crate::types::player_settings::LivePlayerSettings,
-            ts: &mut $crate::types::toml_settings::TomlSettings,
-        ) {
-            $(
-                ts.view_columns.$field = ps.view_columns.$field;
-            )*
-        }
-    };
-}
-
 #[cfg(test)]
 mod tests {
+    use super::Tab;
+
+    /// `Tab::Visualizer` exists as a dormant M0 capability (consumed by the
+    /// M3 visualizer table). It must be a distinct variant.
+    #[test]
+    fn tab_visualizer_variant_is_distinct() {
+        assert_ne!(Tab::Visualizer, Tab::General);
+    }
+
     /// Stand-in for `SettingsManager` to prove `define_settings!` is
     /// genuinely parametric on its `mgr_type:` argument. If the macro ever
     /// regresses to hardcoding `SettingsManager`, this module fails to
@@ -685,7 +706,98 @@ mod tests {
                 read: |_src, _out| {},
                 write: |_ps, _ts| {},
             },
+        ],
+        copy_only_const: MOCK_COPY_ONLY_KEYS,
+        copy_only: [
+            // String body — the font_family shape.
+            CopyOnlyFont {
+                key: "mock.copy_font",
+                toml_apply: |ts, p| p.font_family = ts.font_family.clone(),
+                read: |src, out| out.font_family = src.font_family.clone(),
+                write: |ps, ts| ts.font_family = ps.font_family.clone(),
+            },
+            // Copy-array body — the eq_gains [f32; 10] shape.
+            CopyOnlyEq {
+                key: "mock.copy_eq_gains",
+                toml_apply: |ts, p| p.eq_gains = ts.eq_gains,
+                read: |src, out| out.eq_gains = src.eq_gains,
+                write: |ps, ts| ts.eq_gains = ps.eq_gains,
+            },
+            // Vec-clone body — the custom_eq_presets shape.
+            CopyOnlyPresets {
+                key: "mock.copy_presets",
+                toml_apply: |ts, p| p.custom_eq_presets = ts.custom_eq_presets.clone(),
+                read: |src, out| out.custom_eq_presets = src.custom_eq_presets.clone(),
+                write: |ps, ts| ts.custom_eq_presets = ps.custom_eq_presets.clone(),
+            },
         ]
+    }
+
+    // Second invocation proving the `view_columns:` clause in isolation —
+    // empty settings list, two declared column fields, no assert_exhaustive
+    // (the consolidated 50-field invocation in settings_tables/columns.rs
+    // owns the exhaustive destructure).
+    crate::define_settings! {
+        tab: crate::types::setting_def::Tab::General,
+        data_type: crate::types::settings_data::GeneralSettingsData,
+        mgr_type: MockMgr,
+        items_fn: mock_columns_items_fn,
+        settings_const: MOCK_COLUMNS_TABLE,
+        contains_fn: mock_columns_contains,
+        dispatch_fn: mock_columns_dispatch,
+        apply_fn: mock_columns_apply_toml,
+        dump_fn: mock_columns_dump_ps,
+        write_fn: mock_columns_write_toml,
+        settings: [],
+        view_columns: {
+            fields: [queue_show_select, queue_show_stars],
+        }
+    }
+
+    /// The `view_columns:` clause emits `view_columns.<field>` copy steps in
+    /// all three emitted functions for exactly the declared fields.
+    #[test]
+    fn macro_view_columns_clause_copies_declared_fields() {
+        // apply: TOML → Persisted.
+        let mut ts = crate::types::toml_settings::TomlSettings::default();
+        ts.view_columns.queue_show_select = true; // default false
+        ts.view_columns.queue_show_stars = false; // default true
+        ts.view_columns.queue_show_album = false; // default true — NOT declared
+        let mut p = crate::types::settings::PersistedPlayerSettings::default();
+        mock_columns_apply_toml(&ts, &mut p);
+        assert!(p.view_columns.queue_show_select);
+        assert!(!p.view_columns.queue_show_stars);
+        assert!(
+            p.view_columns.queue_show_album,
+            "undeclared field must NOT be copied by the clause"
+        );
+
+        // dump: Persisted → Live.
+        let mut out = crate::types::player_settings::LivePlayerSettings::default();
+        mock_columns_dump_ps(&p, &mut out);
+        assert!(out.view_columns.queue_show_select);
+        assert!(!out.view_columns.queue_show_stars);
+
+        // write: Live → TOML.
+        let mut ts2 = crate::types::toml_settings::TomlSettings::default();
+        mock_columns_write_toml(&out, &mut ts2);
+        assert!(ts2.view_columns.queue_show_select);
+        assert!(!ts2.view_columns.queue_show_stars);
+
+        // view_columns fields are copy-steps only — never dispatchable and
+        // never claimed by the containment helper.
+        let mut mgr = MockMgr { last_flag: false };
+        for key in ["queue_show_select", "queue_show_stars"] {
+            assert!(!mock_columns_contains(key));
+            assert!(
+                mock_columns_dispatch(
+                    key,
+                    crate::types::setting_value::SettingValue::Bool(true),
+                    &mut mgr,
+                )
+                .is_none()
+            );
+        }
     }
 
     /// The macro is parametric on the manager type: instantiated above with
@@ -725,6 +837,88 @@ mod tests {
             &mut mgr,
         );
         assert!(miss.is_none(), "unknown key must return None");
+    }
+
+    /// `copy_only` entries run their closure bodies in the emitted apply /
+    /// dump / write functions — including non-scalar bodies (`[f32; 10]`
+    /// plain assign, `Vec` clone) that `SettingValue` has no variant for.
+    #[test]
+    fn copy_only_runs_in_apply_dump_write() {
+        let preset = crate::audio::eq::CustomEqPreset {
+            name: "mock preset".to_string(),
+            gains: [2.0; 10],
+        };
+
+        // toml_apply: TomlSettings → PersistedPlayerSettings.
+        let mut ts = crate::types::toml_settings::TomlSettings::default();
+        ts.font_family = "MockFont".to_string();
+        ts.eq_gains = [1.5; 10];
+        ts.custom_eq_presets = vec![preset.clone()];
+        let mut p = crate::types::settings::PersistedPlayerSettings::default();
+        mock_apply_toml(&ts, &mut p);
+        assert_eq!(p.font_family, "MockFont");
+        assert_eq!(p.eq_gains, [1.5; 10]);
+        assert_eq!(p.custom_eq_presets.len(), 1);
+        assert_eq!(p.custom_eq_presets[0].name, "mock preset");
+
+        // read: PersistedPlayerSettings → LivePlayerSettings.
+        let mut out = crate::types::player_settings::LivePlayerSettings::default();
+        mock_dump_ps(&p, &mut out);
+        assert_eq!(out.font_family, "MockFont");
+        assert_eq!(out.eq_gains, [1.5; 10]);
+        assert_eq!(out.custom_eq_presets.len(), 1);
+
+        // write: LivePlayerSettings → TomlSettings.
+        let mut ts2 = crate::types::toml_settings::TomlSettings::default();
+        mock_write_toml(&out, &mut ts2);
+        assert_eq!(ts2.font_family, "MockFont");
+        assert_eq!(ts2.eq_gains, [1.5; 10]);
+        assert_eq!(ts2.custom_eq_presets.len(), 1);
+        assert_eq!(ts2.custom_eq_presets[0].gains, [2.0; 10]);
+    }
+
+    /// `copy_only` keys must be invisible to dispatch and the containment
+    /// helper — they have no setter, so a dispatch hit would be a phantom.
+    #[test]
+    fn copy_only_excluded_from_dispatch_and_contains() {
+        let mut mgr = MockMgr { last_flag: false };
+        for key in ["mock.copy_font", "mock.copy_eq_gains", "mock.copy_presets"] {
+            assert!(!mock_contains(key), "contains must reject copy-only {key}");
+            let miss = mock_dispatch(
+                key,
+                crate::types::setting_value::SettingValue::Bool(true),
+                &mut mgr,
+            );
+            assert!(miss.is_none(), "dispatch must not claim copy-only {key}");
+        }
+    }
+
+    /// `copy_only` entries carry no `ui_meta`, so the items builder must not
+    /// emit rows for them (no phantom settings rows in the GUI).
+    #[test]
+    fn copy_only_omitted_from_items() {
+        let data = crate::types::settings_data::GeneralSettingsData::default();
+        let items = mock_items_fn(&data);
+        assert!(
+            items.is_empty(),
+            "no entry declares ui_meta, so items must stay empty even with copy_only present"
+        );
+    }
+
+    /// The copy-only registry publishes exactly the declared keys, and none
+    /// of them leak into the dispatchable settings table.
+    #[test]
+    fn copy_only_keys_appear_in_copy_only_registry() {
+        assert_eq!(
+            MOCK_COPY_ONLY_KEYS,
+            &["mock.copy_font", "mock.copy_eq_gains", "mock.copy_presets"]
+        );
+        for key in MOCK_COPY_ONLY_KEYS {
+            assert!(
+                !MOCK_SETTINGS_TABLE.iter().any(|d| d.key == *key),
+                "copy-only {key} must not appear in TAB settings table"
+            );
+        }
     }
 
     /// Smoke test for the other three macro-emitted functions on the same

@@ -1,6 +1,6 @@
 ---
 trigger: glob
-globs: src/widgets/visualizer/**,src/visualizer_config.rs
+globs: src/widgets/visualizer/**,src/visualizer_config.rs,data/src/types/visualizer_config.rs,data/src/services/settings_tables/visualizer.rs
 ---
 
 # Visualizer
@@ -9,7 +9,7 @@ globs: src/widgets/visualizer/**,src/visualizer_config.rs
 
 Pure-Rust FFT in `data/src/audio/spectrum.rs`. Dual-band FFT (bass 2×, treble 1×). `max_bars_for_sample_rate()` caps treble bins; `interpolate_bars()` (`src/widgets/visualizer/state.rs`) fills gaps. Zero allocation (pre-allocated scratch). Engine reinitializes on sample rate change.
 
-Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `auto_sensitivity` (fields + `MONSTERCAT_MIN_EFFECTIVE` in `src/visualizer_config.rs`). Smoothing filters (mutually exclusive, applied as `waves_filter` / `monstercat_filter` in `src/widgets/visualizer/state.rs`): `waves` (Catmull-Rom, `waves_smoothing` 2–16) or `monstercat` (exponential; values < `MONSTERCAT_MIN_EFFECTIVE = 0.7` are snapped to 0 / off; default 1.0).
+Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `auto_sensitivity` (fields + `MONSTERCAT_MIN_EFFECTIVE` in `data/src/types/visualizer_config.rs`; `src/visualizer_config.rs` re-exports everything). Smoothing filters (mutually exclusive, applied as `waves_filter` / `monstercat_filter` in `src/widgets/visualizer/state.rs`): `waves` (Catmull-Rom, `waves_smoothing` 2–16) or `monstercat` (exponential; values < `MONSTERCAT_MIN_EFFECTIVE = 0.7` are snapped to 0 / off; default 1.0).
 
 ## Module Structure
 
@@ -25,13 +25,13 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 `VisualizationMode` enum (`data/src/types/player_settings/visualizer.rs`): `Off`, `Bars`, `Lines`, `Scope` (cycled by the player-bar toggle).  `MIN_BAR_COUNT = 4`; bar width interpolates between `bar_width_min` and `bar_width_max` over a 400→2560px window range.
 
-**Placement.** Bars and Lines each carry a `VisualizerPlacement` (`OverCover` default / `BottomBand`) in `src/visualizer_config.rs` (per-mode field on `BarsConfig` / `LinesConfig`, follows the same `ALL`/`as_wire_str()`/pin-test enum convention as the others). `BottomBand` draws a band above the player bar (every view); `OverCover` draws over the now-playing cover art in the Queue, while playing — the slot the Scope ring uses (Scope is always over-cover, with no placement of its own). Over the cover, Bars/Lines honor the `Visualizer Height` setting (`height_percent`) as a bottom-anchored fraction of the cover height; Scope fills the panel (its ring sizes off `scope.radius`). `widgets::visualizer::resolve_placement(mode, bars_placement, lines_placement) -> VisualizerSlots { bottom_band, over_art }` is the single source of truth for the render fork (the two slots are mutually exclusive); `app_view` calls it for both the bottom-band overlay and the over-cover (`single_artwork_panel_inner`) render sites. The surfing boat rides the Lines wave in either placement — the bottom band (`app_view`) or over the cover (the Queue artwork panel, via `OverCoverBoat`).
+**Placement.** Bars and Lines each carry a `VisualizerPlacement` (`OverCover` default / `BottomBand`) — a per-mode field on `BarsConfig` / `LinesConfig`, same `wire_enum!` convention as the others. `BottomBand` draws a band above the player bar (every view); `OverCover` draws over the now-playing cover art in the Queue, while playing — the slot the Scope ring uses (Scope is always over-cover, with no placement of its own). Over the cover, Bars/Lines honor the `Visualizer Height` setting (`height_percent`) as a bottom-anchored fraction of the cover height; Scope fills the panel (its ring sizes off `scope.radius`). `widgets::visualizer::resolve_placement(mode, bars_placement, lines_placement) -> VisualizerSlots { bottom_band, over_art }` is the single source of truth for the render fork (the two slots are mutually exclusive); `app_view` calls it for both the bottom-band overlay and the over-cover (`single_artwork_panel_inner`) render sites. The surfing boat rides the Lines wave in either placement — the bottom band (`app_view`) or over the cover (the Queue artwork panel, via `OverCoverBoat`).
 
 ## Bars Mode
 
-Mode enums in `src/visualizer_config.rs` (real Rust enums, not strings — hand-rolled `#[derive(Serialize, Deserialize)]` `#[serde(rename_all = "snake_case")]` `#[repr(u32)]` enums, each with a manual `as_wire_str()`, a pinned `ALL` const slice (declaration order = settings-dropdown display order), and `all_wire_strs()`; deserialization is via the derived `Deserialize`). The settings dropdowns in `src/views/settings/items_visualizer.rs` derive their option lists from `all_wire_strs()` — when adding a variant, extend `ALL` too; pin tests assert each `ALL` carries every variant exactly once in declaration order, and the no-wildcard `as_wire_str()` matches force a compile error until both are updated. Enums:
+Mode enums live in `data/src/types/visualizer_config.rs` as `wire_enum!` invocations (explicit per-variant wire literals tied to per-variant `#[serde(rename)]`, explicit `#[repr(u32)]` discriminants; the macro generates `ALL` / `as_wire_str` / `all_wire_strs` / `from_wire_str` (tolerant Default fallback) / `as_u32`; declaration order = settings-dropdown display order). The settings dropdowns derive their option lists from `all_wire_strs()` via each entry's `ui_meta.options`; enum dispatch parses with `from_wire_str` (visualizer dropdowns key on WIRE strings, unlike the `from_label` tabs). Pin tests assert each `ALL` carries every variant exactly once in declaration order. Enums:
 - `BarsPeakMode`: `None` / `Fade` / `Fall` / `FallAccel` / `FallFade`. `peak_fall_speed` 1–20.
-- `BarsGradientMode`: `Static` (0) / `Wave` (2). **Discriminant `1` is intentionally skipped** — `bars.wgsl` has no branch for it; the `bars_gradient_mode_never_emits_dead_1u` test in `src/visualizer_config.rs` pins this against accidental future use. (Shimmer/Energy/Alternate were dropped in b92d311; the glow/bloom/beat effects supersede them.)
+- `BarsGradientMode`: `Static` (0) / `Wave` (2). **Discriminant `1` is intentionally skipped** — `bars.wgsl` has no branch for it; the `bars_gradient_mode_never_emits_dead_1u` test in `data/src/types/visualizer_config.rs` pins this against accidental future use. (Shimmer/Energy/Alternate were dropped in b92d311; the glow/bloom/beat effects supersede them.)
 - `BarsGradientOrientation`: `Vertical` (within-bar) / `Horizontal` (bass → treble across bars).
 - `BarsPeakGradientMode`: `Static` / `Cycle` / `Height` / `Match` (separate enum from bar gradients).
 
@@ -48,7 +48,7 @@ Key settings: `point_count` (8–512), `line_thickness`, `outline_thickness`, `f
 
 ## Scope Mode
 
-Circular oscilloscope: a time-domain waveform plotted as a closed ring over the now-playing cover (Queue, while playing — no placement of its own). `ScopeConfig` (`src/visualizer_config.rs`) reuses `LinesGradientMode` / `LinesStyle` and the same SDF stroke + bloom-glow path, plus ring-only geometry. `tick()` snapshots the raw PCM chunk (asymmetric, untouched — design intent is waveform purity) instead of the FFT.
+Circular oscilloscope: a time-domain waveform plotted as a closed ring over the now-playing cover (Queue, while playing — no placement of its own). `ScopeConfig` reuses `LinesGradientMode` / `LinesStyle` and the same SDF stroke + bloom-glow path, plus ring-only geometry. `tick()` snapshots the raw PCM chunk (asymmetric, untouched — design intent is waveform purity) instead of the FFT.
 
 Settings (`point_count` 16–512, default 16; `radius`, `sensitivity`, `line_thickness`, `fill_opacity`, `glow_intensity`, `outline_thickness`/`outline_opacity`, `gradient_mode`, `animation_speed`, `style`, `particles` + `particle_count` (0–2048) + `particle_speed`, `beam`, `trails`, `echo`). The `gradient_mode` default is `LinesGradientMode::Height` (052c19ea, reads better over cover art); `beam` (additive woscope-style ring) and `particles` default on, `echo` defaults to `1.0`.
 
@@ -57,9 +57,16 @@ Settings (`point_count` 16–512, default 16; `radius`, `sensitivity`, `line_thi
 - Behavior under `[visualizer]`, `[visualizer.bars]`, `[visualizer.lines]`, `[visualizer.scope]` in `config.toml`
 - Colors under `[dark.visualizer]` / `[light.visualizer]` in active theme file: `bar_gradient_colors`, `peak_gradient_colors`, `border_color`, `border_opacity`, `led_border_opacity`
 
+## Configuration pipeline (M3 unified)
+
+- Pure types (`VisualizerConfig` + Bars/Lines/Scope + the 7 `wire_enum!` enums + `validate()` + the `keys` module incl. `keys::ALL_KEYS`) live in `data/src/types/visualizer_config.rs`; the UI residue (`ThemeBarColors`, `SharedVisualizerConfig` + `apply`/`snapshot`, `ConfigWatcher`) stays in `src/visualizer_config.rs` with a glob re-export.
+- Persistence is config.toml `[visualizer]` ONLY — never redb (`persisted_player_settings_json_has_no_visualizer_key` pins it). `SettingsManager` holds an in-memory `visualizer` field (startup phase 1 + `reload_from_toml` via `read_toml_visualizer`), mirrored wholesale onto `LivePlayerSettings.visualizer`.
+- Dispatch + UI rows come from the `Tab::Visualizer` `define_settings!` table (`data/src/services/settings_tables/visualizer.rs`): setters mutate `mgr.with_visualizer(...)` (validate rides along); each entry's `ui_meta` builds its row (`build_visualizer_tab_settings_items` consumed by `items_visualizer.rs` via `MacroRows`). Several f32 config fields surface as INT pixel rows — `every_visualizer_macro_row_dispatches` pins row↔dispatch type agreement.
+- Writes: `handle_settings_write_config` does the surgical per-key config.toml write (color sub-tables survive — never whole-section on this path), then routes through `dispatch_visualizer_tab_setting` → `PlayerSettingsLoaded` (which pushes the shared render config, change-gated). monstercat↔waves exclusivity lives in the data-crate setters AND writes BOTH keys to config.toml (`visualizer_exclusivity_companion`) — config.toml wins on reload.
+
 ## Runtime
 
-- Hot-reload: config watcher → `VisualizerConfigChanged` → state rebuilt
+- Hot-reload: config watcher → `SettingsConfigReloaded` → `reload_from_toml` (re-reads `[visualizer]`) → `PlayerSettingsLoaded` → shared config apply (the standalone `VisualizerConfigChanged` message is gone)
 - Dirty-flag gated redraws: `is_dirty()` / `clear_dirty()` — GPU idle when paused
 - `apply_config()` sets `pending_engine_reinit` — FFT thread picks it up, prevents stutter
 - Resize debouncing: 100ms for bar count changes

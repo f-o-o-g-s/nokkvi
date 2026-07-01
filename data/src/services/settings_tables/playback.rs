@@ -457,6 +457,61 @@ define_settings! {
             read: |src, out| out.rounded_mode = src.rounded_mode,
             write: |ps, ts| ts.rounded_mode = ps.rounded_mode,
         },
+    ],
+    copy_only_const: TAB_PLAYBACK_COPY_ONLY_KEYS,
+    copy_only: [
+        // Copy-only residuals: apply/dump/write copy-steps ONLY — no setter,
+        // no dispatch arm, no ui_meta row. Their write paths live elsewhere
+        // (see each entry).
+        //
+        // `sfx_volume` carries the f64 (Persisted) <-> f32 (Live/Toml) split:
+        // the casts below are load-bearing; TOML emit quantizes via the
+        // `round_f32` serializer. Written from the SFX volume slider path.
+        SfxVolume {
+            key: "playback.sfx_volume",
+            toml_apply: |ts, p| p.sfx_volume = f64::from(ts.sfx_volume),
+            read: |src, out| out.sfx_volume = src.sfx_volume as f32,
+            write: |ps, ts| ts.sfx_volume = ps.sfx_volume,
+        },
+        // The audio-visualizer on/off/mode selector, cycled by the
+        // player-bar toggle (NOT the [visualizer] config universe). Copy
+        // enum, plain assignment.
+        VisualizationModeResidual {
+            key: "playback.visualization_mode",
+            toml_apply: |ts, p| p.visualization_mode = ts.visualization_mode,
+            read: |src, out| out.visualization_mode = src.visualization_mode,
+            write: |ps, ts| ts.visualization_mode = ps.visualization_mode,
+        },
+        // Written from the SFX toggle's own path (plain bool on all three).
+        SoundEffectsEnabled {
+            key: "playback.sound_effects_enabled",
+            toml_apply: |ts, p| p.sound_effects_enabled = ts.sound_effects_enabled,
+            read: |src, out| out.sound_effects_enabled = src.sound_effects_enabled,
+            write: |ps, ts| ts.sound_effects_enabled = ps.sound_effects_enabled,
+        },
+        // EQ fields persist from the EQ modal's own path (eq_modal.rs),
+        // synced to the engine's EqState — never via the tab dispatcher.
+        EqEnabled {
+            key: "playback.eq_enabled",
+            toml_apply: |ts, p| p.eq_enabled = ts.eq_enabled,
+            read: |src, out| out.eq_enabled = src.eq_enabled,
+            write: |ps, ts| ts.eq_enabled = ps.eq_enabled,
+        },
+        // [f32; EQ_BAND_COUNT] is Copy — plain assignment; TOML emit
+        // quantizes via round_f32_array.
+        EqGains {
+            key: "playback.eq_gains",
+            toml_apply: |ts, p| p.eq_gains = ts.eq_gains,
+            read: |src, out| out.eq_gains = src.eq_gains,
+            write: |ps, ts| ts.eq_gains = ps.eq_gains,
+        },
+        // Vec<CustomEqPreset> — .clone() in all three directions.
+        CustomEqPresets {
+            key: "playback.custom_eq_presets",
+            toml_apply: |ts, p| p.custom_eq_presets = ts.custom_eq_presets.clone(),
+            read: |src, out| out.custom_eq_presets = src.custom_eq_presets.clone(),
+            write: |ps, ts| ts.custom_eq_presets = ps.custom_eq_presets.clone(),
+        },
     ]
 }
 

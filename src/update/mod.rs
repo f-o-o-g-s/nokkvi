@@ -71,7 +71,7 @@ mod radio_artwork;
 mod radios;
 mod roulette;
 mod scrobbling;
-mod settings;
+pub(crate) mod settings;
 mod similar;
 mod slot_list;
 mod songs;
@@ -491,9 +491,6 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Visualizer / Theme / Settings Hot-Reload (see update/config.rs)
             // -----------------------------------------------------------------
-            Message::VisualizerConfigChanged(config) => {
-                self.handle_visualizer_config_changed(config)
-            }
             Message::ThemeConfigReloaded => self.handle_theme_config_reloaded(),
             Message::SettingsConfigReloaded => self.handle_settings_config_reloaded(),
             Message::SettingsReloadDataLoaded(vp, hotkeys, settings) => {

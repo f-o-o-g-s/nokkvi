@@ -19,331 +19,316 @@ use crate::{
     },
 };
 
-/// Player-related settings (volume, visualizer, theme, general)
-///
-/// Redb-shaped: persisted via `serde_json::to_vec` in
-/// `services/state_storage.rs`. Renamed from `PlayerSettings` so it no longer
-/// collides with the UI-facing `LivePlayerSettings` in the adjacent
-/// `player_settings` module. Persistence is byte-stable across this rename:
-/// serde_json keys by field name, never by struct name.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersistedPlayerSettings {
+// The PersistedPlayerSettings / LivePlayerSettings twins are emitted from
+// this ONE field table (M4). Row order == redb serde_json emission order —
+// pinned by the golden-bytes tests; see player_settings_schema.rs for the
+// full contract. `crate::types::player_settings` re-exports the Live twin.
+crate::player_settings_schema! {
     #[serde(default = "default_volume")]
-    pub volume: f64,
+    split volume: f64 | f32 = default_volume(),
     #[serde(default = "default_sfx_volume")]
-    pub sfx_volume: f64,
+    split sfx_volume: f64 | f32 = default_sfx_volume(),
     #[serde(default = "default_sound_effects_enabled")]
-    pub sound_effects_enabled: bool,
+    same sound_effects_enabled: bool = default_sound_effects_enabled(),
     #[serde(default)]
-    pub visualization_mode: VisualizationMode,
+    same visualization_mode: VisualizationMode = VisualizationMode::default(),
     #[serde(default)]
-    pub light_mode: bool,
+    persist_only light_mode: bool = false,
     /// Whether scrobbling is enabled (default: true)
     #[serde(default = "default_scrobbling_enabled")]
-    pub scrobbling_enabled: bool,
+    same scrobbling_enabled: bool = default_scrobbling_enabled(),
     /// Scrobble threshold as a fraction of track duration (0.25–0.90, default 0.50)
     #[serde(default = "default_scrobble_threshold")]
-    pub scrobble_threshold: f64,
+    split scrobble_threshold: f64 | f32 = default_scrobble_threshold(),
     /// Whether internet-radio tracks are scrobbled directly to ListenBrainz
     /// (default: false — opt-in, requires a configured token)
     #[serde(default)]
-    pub radio_scrobbling_enabled: bool,
+    same radio_scrobbling_enabled: bool = false,
     /// Absolute seconds a radio track must play before it scrobbles
     /// (radio has no duration; default 60)
     #[serde(default = "default_radio_scrobble_threshold_secs")]
-    pub radio_scrobble_threshold_secs: u32,
+    same radio_scrobble_threshold_secs: u32 = default_radio_scrobble_threshold_secs(),
     /// Whether to send radio now-playing updates on each ICY track change
     /// (default: true)
     #[serde(default = "default_radio_now_playing_enabled")]
-    pub radio_now_playing_enabled: bool,
+    same radio_now_playing_enabled: bool = default_radio_now_playing_enabled(),
     /// Start view name ("Queue", "Albums", etc. — default "Queue")
     #[serde(default = "default_start_view")]
-    pub start_view: String,
+    same start_view: String = default_start_view(),
     /// Stable viewport mode (default: true)
     /// When enabled, clicking items highlights in-place without scrolling,
     /// and playback changes don't auto-scroll the viewport.
     #[serde(default = "default_stable_viewport")]
-    pub stable_viewport: bool,
+    same stable_viewport: bool = default_stable_viewport(),
     /// Auto-follow playing track (default: true)
     /// When enabled, the queue view auto-scrolls to the currently playing
     /// track on track changes and queue reload.
     #[serde(default = "default_auto_follow_playing")]
-    pub auto_follow_playing: bool,
+    same auto_follow_playing: bool = default_auto_follow_playing(),
     /// What Enter does when activating items (default: PlayAll)
     #[serde(default)]
-    pub enter_behavior: EnterBehavior,
+    same enter_behavior: EnterBehavior = EnterBehavior::default(),
     /// Whether plain Enter/click layers a one-shot Shuffle Play on top of
     /// `enter_behavior` (default: false). Distinct from the persistent shuffle
     /// MODE — it never writes `queue.shuffle`.
     #[serde(default)]
-    pub enter_shuffle: bool,
+    same enter_shuffle: bool = false,
     /// Local filesystem prefix for the music library (default: empty = not configured).
     /// Joined with the server-relative song path to form an absolute local path.
     /// e.g. "/music/Library" for local Navidrome, or "/mnt/nas/music" for NFS mounts.
     #[serde(default)]
-    pub local_music_path: String,
+    same local_music_path: String = String::new(),
     /// Rounded corners mode (default: `On`).
     ///
     /// Field-level shim accepts legacy bool values (`true` → `On`,
     /// `false` → `Off`) for configs written before the tri-state migration.
-    #[serde(
-        default,
-        deserialize_with = "deserialize_rounded_mode_with_bool_compat"
-    )]
-    pub rounded_mode: RoundedMode,
+    #[serde( default, deserialize_with = "deserialize_rounded_mode_with_bool_compat" )]
+    same rounded_mode: RoundedMode = RoundedMode::On,
     /// Navigation layout mode (default: Top = horizontal bar)
     #[serde(default)]
-    pub nav_layout: NavLayout,
+    same nav_layout: NavLayout = NavLayout::default(),
     /// Navigation display mode (default: TextOnly)
     #[serde(default)]
-    pub nav_display_mode: NavDisplayMode,
+    same nav_display_mode: NavDisplayMode = NavDisplayMode::default(),
     /// Track info display mode (off / player bar / top bar)
     #[serde(default)]
-    pub track_info_display: TrackInfoDisplay,
+    same track_info_display: TrackInfoDisplay = TrackInfoDisplay::MiniPlayer,
     /// Slot list row density (default: Default = 70px)
     #[serde(default)]
-    pub slot_row_height: SlotRowHeight,
+    same slot_row_height: SlotRowHeight = SlotRowHeight::Compact,
     /// Whether the opacity gradient on non-center slots is enabled (default: false)
     #[serde(default = "default_opacity_gradient")]
-    pub opacity_gradient: bool,
+    same opacity_gradient: bool = default_opacity_gradient(),
     /// Whether clickable text links in slot list items are enabled (default: false)
     #[serde(default)]
-    pub slot_text_links: bool,
+    same slot_text_links: bool = false,
     /// How the slot-list scrollbar is shown (default `Always` — a permanent
     /// gutter track). `OnHover` is the transient fade handle; `Hidden` removes
     /// the bar entirely.
     #[serde(default)]
-    pub scrollbar_visibility: ScrollbarVisibility,
+    same scrollbar_visibility: ScrollbarVisibility = ScrollbarVisibility::default(),
     /// Which icon family the UI renders (default `Phosphor`). Missing keys fill
     /// from `IconSet::default()` (Phosphor), so configs without the key adopt
     /// Phosphor on upgrade; pick `Lucide` to keep the original outline set.
     #[serde(default)]
-    pub icon_set: IconSet,
+    same icon_set: IconSet = IconSet::default(),
     /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default = "default_true")]
-    pub crossfade_enabled: bool,
+    same crossfade_enabled: bool = true,
     /// Bit-perfect output mode (Off / Strict / Relaxed): Strict and Relaxed
     /// play at each track's native sample rate with the DSP chain (EQ / software
     /// volume / limiter) bypassed, letting PipeWire switch the device clock.
     /// They differ only on same-rate crossfades. Off by default (opt-in).
     /// Legacy bool records load via the compat shim (true → Strict, false → Off).
     #[serde(default, deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
-    pub bit_perfect: BitPerfectMode,
+    same bit_perfect: BitPerfectMode = BitPerfectMode::default(),
     /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]
-    pub crossfade_duration_secs: u32,
+    same crossfade_duration_secs: u32 = default_crossfade_duration_secs(),
     /// Whether the Previous button restarts the current track once it has
     /// played past the threshold (default false).
     #[serde(default)]
-    pub rewind_on_previous: bool,
+    same rewind_on_previous: bool = false,
     /// Default playlist ID for quick-add (None = no default)
     #[serde(default)]
-    pub default_playlist_id: Option<String>,
+    same default_playlist_id: Option<String> = None,
     /// Default playlist display name (for settings UI)
     #[serde(default)]
-    pub default_playlist_name: String,
+    same default_playlist_name: String = String::new(),
     /// Whether to skip the Add to Playlist dialog and use the default playlist directly
     #[serde(default)]
-    pub quick_add_to_playlist: bool,
+    same quick_add_to_playlist: bool = false,
     /// Whether the queue view's header shows the default playlist chip (default: false)
     #[serde(default)]
-    pub queue_show_default_playlist: bool,
+    same queue_show_default_playlist: bool = false,
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     #[serde(default)]
-    pub horizontal_volume: bool,
+    same horizontal_volume: bool = false,
     /// Whether the view-header toolbar auto-hides to a thin line until hovered
     /// or a sort/search shortcut is used (default: true)
     #[serde(default)]
-    pub autohide_toolbar: bool,
+    same autohide_toolbar: bool = true,
     /// Collapsed auto-hide toolbar height in px (default: 4)
     #[serde(default = "default_autohide_toolbar_height")]
-    pub autohide_toolbar_height: u32,
+    same autohide_toolbar_height: u32 = default_autohide_toolbar_height(),
     /// Whether the collapsed auto-hide toolbar shows a centered accent grip bar (default: true)
     #[serde(default = "default_true")]
-    pub autohide_toolbar_grip: bool,
+    same autohide_toolbar_grip: bool = true,
     /// What the collapsed auto-hide toolbar shows (default: Count strip)
     #[serde(default)]
-    pub autohide_collapsed_appearance: CollapsedAppearance,
+    same autohide_collapsed_appearance: CollapsedAppearance = CollapsedAppearance::CountStrip,
     /// Whether the mini-player bar shows the volume slider (default: true).
     /// Only affects `TrackInfoDisplay::MiniPlayer`.
     #[serde(default = "default_true")]
-    pub mini_player_show_volume: bool,
+    same mini_player_show_volume: bool = true,
     /// Whether the mini-player bar shows the modes menu (default: true).
     /// Only affects `TrackInfoDisplay::MiniPlayer`.
     #[serde(default = "default_true")]
-    pub mini_player_show_modes: bool,
+    same mini_player_show_modes: bool = true,
     /// Font family override (default: empty = system default sans-serif)
     #[serde(default)]
-    pub font_family: String,
+    same font_family: String = String::new(),
     /// Volume normalization mode (default: Off). On-disk key is
     /// `volume_normalization_mode`.
     #[serde(default, rename = "volume_normalization_mode")]
-    pub volume_normalization: VolumeNormalizationMode,
+    same volume_normalization: VolumeNormalizationMode = VolumeNormalizationMode::default(),
     /// AGC target level (default: Normal). Only meaningful when
     /// `volume_normalization == Agc`.
     #[serde(default)]
-    pub normalization_level: NormalizationLevel,
+    same normalization_level: NormalizationLevel = NormalizationLevel::default(),
     /// Pre-amp dB applied on top of resolved ReplayGain (default 0.0).
     #[serde(default)]
-    pub replay_gain_preamp_db: f32,
+    same replay_gain_preamp_db: f32 = 0.0,
     /// Fallback dB for tracks with no ReplayGain tags (default 0.0 = unity).
     #[serde(default)]
-    pub replay_gain_fallback_db: f32,
+    same replay_gain_fallback_db: f32 = 0.0,
     /// When true, untagged tracks fall through to AGC.
     #[serde(default)]
-    pub replay_gain_fallback_to_agc: bool,
+    same replay_gain_fallback_to_agc: bool = false,
     /// When true, clamp gain so `peak * gain <= 1.0` (default true).
     #[serde(default = "default_true")]
-    pub replay_gain_prevent_clipping: bool,
+    same replay_gain_prevent_clipping: bool = true,
     /// Whether the title field is visible in the track info strip (default: true)
     #[serde(default = "default_true")]
-    pub strip_show_title: bool,
+    same strip_show_title: bool = true,
     /// Whether the artist field is visible in the track info strip (default: true)
     #[serde(default = "default_true")]
-    pub strip_show_artist: bool,
+    same strip_show_artist: bool = true,
     /// Whether the album field is visible in the track info strip (default: true)
     #[serde(default = "default_true")]
-    pub strip_show_album: bool,
+    same strip_show_album: bool = true,
     /// Whether format info (codec/kHz/kbps) is visible in the track info strip (default: true)
     #[serde(default = "default_true")]
-    pub strip_show_format_info: bool,
+    same strip_show_format_info: bool = true,
     /// Whether the metastrip renders artist/album/title as a single shared
     /// scrolling unit with one set of bookend separators (default: true).
     #[serde(default)]
-    pub strip_merged_mode: bool,
+    same strip_merged_mode: bool = true,
     /// What happens when clicking the track info strip (default: GoToQueue)
     #[serde(default)]
-    pub strip_click_action: StripClickAction,
+    same strip_click_action: StripClickAction = StripClickAction::default(),
     /// Whether `title:` / `artist:` / `album:` labels are prepended to each
     /// field in the metadata strip (default: true).
     #[serde(default = "default_true")]
-    pub strip_show_labels: bool,
+    same strip_show_labels: bool = true,
     /// Visual character used to join visible fields in merged-mode rendering
     /// (default: Slash /).
     #[serde(default)]
-    pub strip_separator: StripSeparator,
+    same strip_separator: StripSeparator = StripSeparator::Slash,
     /// Active playlist ID loaded in the queue (None = no playlist context)
     #[serde(default)]
-    pub active_playlist_id: Option<String>,
+    same active_playlist_id: Option<String> = None,
     /// Active playlist display name
     #[serde(default)]
-    pub active_playlist_name: String,
+    same active_playlist_name: String = String::new(),
     /// Active playlist comment/description
     #[serde(default)]
-    pub active_playlist_comment: String,
+    same active_playlist_comment: String = String::new(),
     /// Active playlist total duration in seconds (0.0 when unknown).
     #[serde(default)]
-    pub active_playlist_duration: f32,
+    same active_playlist_duration: f32 = 0.0,
     /// Active playlist last-updated timestamp (raw ISO-8601; empty when unknown).
     #[serde(default)]
-    pub active_playlist_updated: String,
+    same active_playlist_updated: String = String::new(),
     /// Active playlist public/private visibility (drives the strip lock chip).
     #[serde(default)]
-    pub active_playlist_public: bool,
+    same active_playlist_public: bool = false,
     /// Active playlist song count (0 when unknown; strip falls back to queue length).
     #[serde(default)]
-    pub active_playlist_song_count: u32,
+    same active_playlist_song_count: u32 = 0,
     /// Whether the 10-band graphic EQ is enabled (master bypass).
     #[serde(default)]
-    pub eq_enabled: bool,
+    same eq_enabled: bool = false,
     /// Per-band EQ gain values in dB (-12.0 to +12.0). Indexed by band.
     #[serde(default = "default_eq_gains")]
-    pub eq_gains: [f32; EQ_BAND_COUNT],
+    same eq_gains: [f32; EQ_BAND_COUNT] = default_eq_gains(),
     /// User-created custom EQ presets.
     #[serde(default)]
-    pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
+    same custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset> = Vec::new(),
     /// How config.toml is written (full / sparse-with-comments / sparse-clean).
     /// Legacy bool records load via the compat shim (`true` → On, `false` → Off).
-    #[serde(
-        default,
-        deserialize_with = "deserialize_verbose_config_with_bool_compat"
-    )]
-    pub verbose_config: VerboseConfig,
+    #[serde( default, deserialize_with = "deserialize_verbose_config_with_bool_compat" )]
+    same verbose_config: VerboseConfig = VerboseConfig::default(),
     /// Library page size controls how many items are fetched at once.
     #[serde(default)]
-    pub library_page_size: LibraryPageSize,
+    same library_page_size: LibraryPageSize = LibraryPageSize::default(),
     /// Artwork resolution for the large panel (Default / High / Ultra / Original)
     #[serde(default)]
-    pub artwork_resolution: ArtworkResolution,
+    same artwork_resolution: ArtworkResolution = ArtworkResolution::default(),
     /// Whether the Artists view shows only album artists
     #[serde(default = "default_true")]
-    pub show_album_artists_only: bool,
+    same show_album_artists_only: bool = default_true(),
     /// Whether to suppress the toast notification shown when Navidrome
     /// emits a library-refresh event (default: true = toasts suppressed).
     #[serde(default)]
-    pub suppress_library_refresh_toasts: bool,
+    same suppress_library_refresh_toasts: bool = true,
     /// Per-view column-visibility toggles — flattened so every
     /// `<view>_show_<col>` key stays a TOP-LEVEL key on the persisted JSON
     /// wire (pinned by `persisted_column_keys_stay_flat_on_the_json_wire`).
     /// Missing keys fill from `ViewColumns::default()` — the single source
     /// of truth for the shipped column defaults.
     #[serde(flatten)]
-    pub view_columns: ViewColumns,
-
-    // -- Per-view artwork text overlay toggles --
+    same view_columns: ViewColumns = ViewColumns::default(),
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
     #[serde(default = "default_true")]
-    pub albums_artwork_overlay: bool,
+    same albums_artwork_overlay: bool = true,
     /// Whether the metadata text overlay is rendered on the large artwork in Artists view.
     #[serde(default = "default_true")]
-    pub artists_artwork_overlay: bool,
+    same artists_artwork_overlay: bool = true,
     /// Whether the metadata text overlay is rendered on the large artwork in Songs view.
     #[serde(default = "default_true")]
-    pub songs_artwork_overlay: bool,
+    same songs_artwork_overlay: bool = true,
     /// Whether the metadata text overlay is rendered on the large artwork in Playlists view.
     #[serde(default = "default_true")]
-    pub playlists_artwork_overlay: bool,
-
-    // -- Artwork column layout --
+    same playlists_artwork_overlay: bool = true,
     /// Display mode for the large artwork column (auto / always-native / always-stretched / never).
     #[serde(default)]
-    pub artwork_column_mode: ArtworkColumnMode,
+    same artwork_column_mode: ArtworkColumnMode = ArtworkColumnMode::default(),
     /// Fit mode used when `artwork_column_mode == AlwaysStretched`.
     #[serde(default)]
-    pub artwork_column_stretch_fit: ArtworkStretchFit,
+    same artwork_column_stretch_fit: ArtworkStretchFit = ArtworkStretchFit::default(),
     /// Artwork column width as a fraction of window width (0.05..=0.80).
     /// Only consulted in always modes.
     #[serde(default = "default_artwork_column_width_pct")]
-    pub artwork_column_width_pct: f32,
+    same artwork_column_width_pct: f32 = default_artwork_column_width_pct(),
     /// Auto-mode max artwork size as a fraction of the window's short axis
     /// (0.30..=0.70). Default 0.40. The Auto resolver uses this for both the
     /// horizontal candidate and the portrait-fallback vertical candidate.
     #[serde(default = "default_artwork_auto_max_pct")]
-    pub artwork_auto_max_pct: f32,
+    same artwork_auto_max_pct: f32 = default_artwork_auto_max_pct(),
     /// Always-Vertical artwork height as a fraction of window height
     /// (0.10..=0.80). Default 0.40. Consulted by the AlwaysVerticalNative /
     /// AlwaysVerticalStretched resolver branches.
     #[serde(default = "default_artwork_vertical_height_pct")]
-    pub artwork_vertical_height_pct: f32,
-
-    // -- System tray --
+    same artwork_vertical_height_pct: f32 = default_artwork_vertical_height_pct(),
     /// Whether to register a system tray (StatusNotifierItem) icon.
     /// Requires the compositor to host an SNI tray (e.g. waybar with the
     /// `tray` module on Hyprland; AppIndicator extension on GNOME).
     #[serde(default)]
-    pub show_tray_icon: bool,
+    same show_tray_icon: bool = false,
     /// When true and `show_tray_icon` is on, pressing the window's close button
     /// hides the window into the tray instead of quitting the app.
     #[serde(default)]
-    pub close_to_tray: bool,
-
-    // -- Rating reminder --
+    same close_to_tray: bool = false,
     /// Whether the rate-this-track desktop notification is enabled (default false).
     #[serde(default)]
-    pub rating_reminder_enabled: bool,
+    same rating_reminder_enabled: bool = false,
     /// Whether a desktop notification fires when a rating changes via a hotkey
     /// or the `nokkvi rate` IPC verb (default false).
     #[serde(default)]
-    pub rating_change_notification_enabled: bool,
+    same rating_change_notification_enabled: bool = false,
     /// When the rating reminder fires (default: on scrobble).
     #[serde(default)]
-    pub rating_reminder_trigger: RatingReminderTrigger,
+    same rating_reminder_trigger: RatingReminderTrigger = RatingReminderTrigger::default(),
     /// Percent of track played that fires the reminder in percentage mode
     /// (default 75; UI clamp 60–90).
     #[serde(default = "default_rating_reminder_percent")]
-    pub rating_reminder_percent: u32,
+    same rating_reminder_percent: u32 = default_rating_reminder_percent(),
+    /// Visualizer behavior config — sourced from the in-memory
+    /// `SettingsManager.visualizer` field (config.toml `[visualizer]`-only;
+    /// NEVER redb). `PersistedPlayerSettings` deliberately has no twin field.
+    live_only visualizer: crate::types::visualizer_config::VisualizerConfig,
 }
-
 fn default_artwork_column_width_pct() -> f32 {
     crate::types::player_settings::ARTWORK_COLUMN_WIDTH_PCT_DEFAULT
 }
@@ -409,99 +394,6 @@ fn default_true() -> bool {
 }
 fn default_rating_reminder_percent() -> u32 {
     75
-}
-
-impl Default for PersistedPlayerSettings {
-    fn default() -> Self {
-        Self {
-            volume: default_volume(),
-            sfx_volume: default_sfx_volume(),
-            sound_effects_enabled: default_sound_effects_enabled(),
-            visualization_mode: VisualizationMode::default(),
-            light_mode: false,
-            scrobbling_enabled: default_scrobbling_enabled(),
-            scrobble_threshold: default_scrobble_threshold(),
-            radio_scrobbling_enabled: false,
-            radio_scrobble_threshold_secs: default_radio_scrobble_threshold_secs(),
-            radio_now_playing_enabled: default_radio_now_playing_enabled(),
-            start_view: default_start_view(),
-            stable_viewport: default_stable_viewport(),
-            auto_follow_playing: default_auto_follow_playing(),
-            enter_behavior: EnterBehavior::default(),
-            enter_shuffle: false,
-            local_music_path: String::new(),
-            rounded_mode: RoundedMode::On,
-            nav_layout: NavLayout::default(),
-            nav_display_mode: NavDisplayMode::default(),
-            track_info_display: TrackInfoDisplay::MiniPlayer,
-            slot_row_height: SlotRowHeight::Compact,
-            opacity_gradient: default_opacity_gradient(),
-            slot_text_links: false,
-            scrollbar_visibility: ScrollbarVisibility::default(),
-            icon_set: IconSet::default(),
-            crossfade_enabled: true,
-            bit_perfect: BitPerfectMode::default(),
-            crossfade_duration_secs: default_crossfade_duration_secs(),
-            rewind_on_previous: false,
-            default_playlist_id: None,
-            default_playlist_name: String::new(),
-            quick_add_to_playlist: false,
-            queue_show_default_playlist: false,
-            horizontal_volume: false,
-            autohide_toolbar: true,
-            autohide_toolbar_height: default_autohide_toolbar_height(),
-            autohide_toolbar_grip: true,
-            autohide_collapsed_appearance: CollapsedAppearance::CountStrip,
-            mini_player_show_volume: true,
-            mini_player_show_modes: true,
-            font_family: String::new(),
-            volume_normalization: VolumeNormalizationMode::default(),
-            normalization_level: NormalizationLevel::default(),
-            replay_gain_preamp_db: 0.0,
-            replay_gain_fallback_db: 0.0,
-            replay_gain_fallback_to_agc: false,
-            replay_gain_prevent_clipping: true,
-            strip_show_title: true,
-            strip_show_artist: true,
-            strip_show_album: true,
-            strip_show_format_info: true,
-            strip_merged_mode: true,
-            strip_click_action: StripClickAction::default(),
-            strip_show_labels: true,
-            strip_separator: StripSeparator::Slash,
-            active_playlist_id: None,
-            active_playlist_name: String::new(),
-            active_playlist_comment: String::new(),
-            active_playlist_duration: 0.0,
-            active_playlist_updated: String::new(),
-            active_playlist_public: false,
-            active_playlist_song_count: 0,
-            eq_enabled: false,
-            eq_gains: default_eq_gains(),
-            custom_eq_presets: Vec::new(),
-            verbose_config: VerboseConfig::default(),
-            library_page_size: LibraryPageSize::default(),
-            artwork_resolution: ArtworkResolution::default(),
-            show_album_artists_only: default_true(),
-            suppress_library_refresh_toasts: true,
-            view_columns: ViewColumns::default(),
-            albums_artwork_overlay: true,
-            artists_artwork_overlay: true,
-            songs_artwork_overlay: true,
-            playlists_artwork_overlay: true,
-            artwork_column_mode: ArtworkColumnMode::default(),
-            artwork_column_stretch_fit: ArtworkStretchFit::default(),
-            artwork_column_width_pct: default_artwork_column_width_pct(),
-            artwork_auto_max_pct: default_artwork_auto_max_pct(),
-            artwork_vertical_height_pct: default_artwork_vertical_height_pct(),
-            show_tray_icon: false,
-            close_to_tray: false,
-            rating_reminder_enabled: false,
-            rating_change_notification_enabled: false,
-            rating_reminder_trigger: RatingReminderTrigger::default(),
-            rating_reminder_percent: default_rating_reminder_percent(),
-        }
-    }
 }
 
 /// View sort preferences for all views
