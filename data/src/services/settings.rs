@@ -1262,7 +1262,7 @@ mod sentinel_roundtrip_tests {
             track_info_display: TrackInfoDisplay::TopBar, // default Mini Player
             slot_row_height: SlotRowHeight::Spacious, // default Default
             opacity_gradient: false,               // default true
-            slot_text_links: false,                // default true
+            slot_text_links: true,                 // default false
             scrollbar_visibility: crate::types::player_settings::ScrollbarVisibility::Hidden, // default Always
             icon_set: crate::types::player_settings::IconSet::Lucide, // default Phosphor
 

@@ -275,7 +275,7 @@ impl Default for TomlSettings {
             track_info_display: TrackInfoDisplay::MiniPlayer,
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: false,
-            slot_text_links: true,
+            slot_text_links: false,
             scrollbar_visibility: ScrollbarVisibility::default(),
             icon_set: IconSet::default(),
             horizontal_volume: false,

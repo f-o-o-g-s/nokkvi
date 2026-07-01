@@ -106,8 +106,8 @@ pub struct PersistedPlayerSettings {
     /// Whether the opacity gradient on non-center slots is enabled (default: false)
     #[serde(default = "default_opacity_gradient")]
     pub opacity_gradient: bool,
-    /// Whether clickable text links in slot list items are enabled (default: true)
-    #[serde(default = "default_true")]
+    /// Whether clickable text links in slot list items are enabled (default: false)
+    #[serde(default)]
     pub slot_text_links: bool,
     /// How the slot-list scrollbar is shown (default `Always` — a permanent
     /// gutter track). `OnHover` is the transient fade handle; `Hidden` removes
@@ -436,7 +436,7 @@ impl Default for PersistedPlayerSettings {
             track_info_display: TrackInfoDisplay::MiniPlayer,
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: default_opacity_gradient(),
-            slot_text_links: default_true(),
+            slot_text_links: false,
             scrollbar_visibility: ScrollbarVisibility::default(),
             icon_set: IconSet::default(),
             crossfade_enabled: true,

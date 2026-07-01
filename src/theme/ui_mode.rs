@@ -106,7 +106,7 @@ pub(super) static UI_MODE: UiModeFlags = UiModeFlags {
     nav_display_mode: AtomicU8::new(NavDisplayMode::TextOnly as u8),
     slot_row_height: AtomicU8::new(SlotRowHeight::Default as u8),
     opacity_gradient: AtomicBool::new(true),
-    slot_text_links: AtomicBool::new(true),
+    slot_text_links: AtomicBool::new(false),
     scrollbar_visibility: AtomicU8::new(ScrollbarVisibility::Always as u8),
     icon_set: AtomicU8::new(IconSet::Phosphor as u8),
     horizontal_volume: AtomicBool::new(false),

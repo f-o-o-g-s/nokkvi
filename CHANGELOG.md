@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Clickable artist and album name links in list rows are now off by default (re-enable under Settings → Interface → Slot Text Links).
+
 ### Fixed
 
 ### Removed

@@ -260,7 +260,7 @@ define_settings! {
                 subtitle: Some(
                     "Make title and artist text clickable to navigate to albums and artists",
                 ),
-                default: true,
+                default: false,
                 read_field: |d| d.slot_text_links,
             },
         },
