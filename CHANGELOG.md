@@ -8,15 +8,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## v0.12.2 — 2026-07-02
+
+### Changed
+
 - Clickable artist and album name links in list rows are now off by default (re-enable under Settings → Interface → Slot Text Links).
-- Internal settings-schema unification: every user setting (including all visualizer knobs) is now declared in one table-driven registry, so settings can no longer silently drop out of the save/load/UI pipeline. No user-visible behavior change.
-- Visualizer settings now hot-reload through the same unified path as every other setting.
-- Internal queue-domain redesign: queue rows, the play order, and the playhead are now typed structures (one row struct, a permutation-preserving order newtype, a derived playing index), making the historical row/id-drift and order/playhead-desync bug classes structurally impossible. Saved queues stay byte-compatible — no migration, existing queues restore as-is. No user-visible behavior change.
 
 ### Fixed
 
-- "Play Next" now refreshes the queue view when it completes; previously the moved song kept its old row on screen, and clicking it failed with "entry_id not in queue" until something else reloaded the queue (bug present since v0.0.1).
-- Toggling Crossfade while the next track was already prepared no longer desyncs the player into a silent fade followed by an endless "crossfade incoming stalled — recovering" warn loop: the toggle now cancels the prepared transition (same contract as the Bit-Perfect toggle), and the stall recovery now also repairs the renderer-only case instead of no-op looping.
+- "Play Next" now refreshes the queue immediately, so the moved song appears in its new spot and stays clickable instead of erroring.
+- Toggling Crossfade while the next track is already prepared no longer causes a silent fade or a stuck "stalled — recovering" loop.
 
 ## v0.12.1 — 2026-06-30
 
