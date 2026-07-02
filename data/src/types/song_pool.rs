@@ -179,6 +179,63 @@ mod tests {
         assert!(pool.get("y").is_some());
     }
 
+    /// GOLDEN captured from the pre-refactor encoder (hand-rolled
+    /// `Encode`/`Decode` above, `config::standard()`, main @ 03eb6ea7).
+    /// NEVER regenerate — a diff here is a wire break to fix in code.
+    ///
+    /// One song keeps the encode deterministic (HashMap iteration order is
+    /// unobservable with a single value). Layout: Vec<Song> of len 1, then
+    /// `Song`'s fields in declaration order (`types/song.rs`).
+    const POOL_GOLDEN: &[u8] = &[
+        1, // pool: 1 song
+        1, 97, // id: "a"
+        6, 83, 111, 110, 103, 32, 65, // title: "Song A"
+        6, 65, 114, 116, 105, 115, 116, // artist: "Artist"
+        0,   // artist_id: None
+        5, 65, 108, 98, 117, 109, // album: "Album"
+        0, 0,   // album_id, cover_art: None
+        180, // duration: 180
+        0, 0, 0, 0, // track, disc, year, genre: None
+        0, 0, // path: "", size: 0
+        0, 0, 0, // bitrate: None, starred: false, play_count: None
+        0, 0, 0, 0, 0, 0, 0, // bpm..sample_rate: None
+        0, 0, 0, 0, 0, // created_at..updated_at: None
+        0, 0, 0, 0, // replay_gain, tags, participants, original_position: None
+    ];
+
+    /// W3 wire lock: the `queue_songs` blob layout (flat `Vec<Song>`) must
+    /// stay byte-identical through the queue refactor — insurance for the
+    /// hand-rolled impls above and for `Song`'s field order.
+    #[test]
+    fn song_pool_bincode_golden() {
+        let mut pool = SongPool::new();
+        pool.insert(make_song("a", "Song A"));
+
+        let encoded = bincode_next::encode_to_vec(&pool, bincode_next::config::standard())
+            .expect("encode golden pool");
+        assert_eq!(
+            encoded, POOL_GOLDEN,
+            "SongPool encode drifted from the pre-refactor wire bytes — fix \
+             the encoder, never the constant"
+        );
+
+        let (decoded, consumed): (SongPool, usize) =
+            bincode_next::decode_from_slice(POOL_GOLDEN, bincode_next::config::standard())
+                .expect("decode golden pool bytes");
+        assert_eq!(
+            consumed,
+            POOL_GOLDEN.len(),
+            "decode must consume every byte"
+        );
+        assert_eq!(decoded.len(), 1);
+        let song = decoded.get("a").expect("song a present");
+        assert_eq!(song.title, "Song A");
+        assert_eq!(song.artist, "Artist");
+        assert_eq!(song.album, "Album");
+        assert_eq!(song.duration, 180);
+        assert!(!song.starred);
+    }
+
     #[test]
     fn serde_roundtrip() {
         let mut pool = SongPool::new();

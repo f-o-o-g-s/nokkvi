@@ -203,7 +203,7 @@ impl Nokkvi {
                 let qm_arc = shell.queue().queue_manager();
                 let qm = qm_arc.lock().await;
                 let song = qm.get_current_song();
-                let current_index = qm.get_queue().current_index;
+                let current_index = qm.current_index();
                 let current_entry_id = current_index.and_then(|i| qm.entry_id_at(i));
                 let (title, artist, album, cover_art, album_id, song_id, format_suffix, bitrate) =
                     if let Some(station) = &radio_station {

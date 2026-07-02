@@ -223,21 +223,15 @@ impl QueueService {
         server_url: &str,
         subsonic_credential: &str,
     ) -> Vec<QueueSongUIViewData> {
-        let entry_ids = qm.entry_ids();
-        qm.get_queue()
-            .song_ids
+        qm.rows()
             .iter()
             .enumerate()
-            .filter_map(|(index, id)| {
-                let song = qm.get_song(id)?;
-                // entry_ids is maintained parallel to song_ids; the get()
-                // is defense-in-depth for an out-of-sync caller, not an
-                // expected path.
-                let entry_id = entry_ids.get(index).copied()?;
+            .filter_map(|(index, row)| {
+                let song = qm.get_song(&row.song_id)?;
                 Some(build_queue_song_ui_view_data(
                     song,
                     index,
-                    entry_id,
+                    row.entry_id,
                     server_url,
                     subsonic_credential,
                 ))
@@ -318,7 +312,7 @@ impl QueueService {
     /// Get the current playing index
     pub async fn current_index(&self) -> Option<usize> {
         let qm = self.queue_manager.lock().await;
-        qm.get_queue().current_index
+        qm.current_index()
     }
 
     /// Refresh reactive properties from current queue state.
@@ -353,7 +347,7 @@ impl QueueService {
         let song_count = ui_data.len();
         self.songs.set(ui_data);
 
-        let current_index = qm.get_queue().current_index.unwrap_or(0) as i32;
+        let current_index = qm.current_index().unwrap_or(0) as i32;
         self.current_index.set(current_index);
         self.total_count.set(song_count as i32);
 

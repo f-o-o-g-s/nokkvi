@@ -36,7 +36,7 @@ pub enum TrackTransitionPlan {
 }
 
 /// Plan describing what the audio engine must do after a queue-removal has
-/// already updated `QueueManager.queue.current_index`.
+/// already moved the queue play cursor (from which the physical index derives).
 ///
 /// Returned by [`decide_removal_aftermath`]. The decision is pure — no engine
 /// I/O, no further queue mutation — so the orchestrator can drop the queue
@@ -49,7 +49,7 @@ pub enum RemovalAftermath {
     NoCurrentChange,
     /// The current row was removed and the queue still has songs. The engine
     /// must load `new_song_id` (which the queue model has already promoted to
-    /// `queue.current_index = new_index`) so its source follows the queue
+    /// the play cursor now derives `new_index`) so its source follows the queue
     /// instead of streaming the deleted track, and the navigator's
     /// `current_song_id` must follow.
     ///
@@ -72,10 +72,10 @@ pub enum RemovalAftermath {
 }
 
 /// Decide what the audio engine must do after a queue-removal mutation has
-/// already updated `QueueManager.queue.current_index`.
+/// already moved the queue play cursor (from which the physical index derives).
 ///
 /// Pure — reads inputs only, no I/O, no mutation. Runs after
-/// `QueueManager::remove_songs_by_ids` so `qm.queue.current_index` already
+/// `QueueManager::remove_songs_by_ids` so the derived playhead already
 /// names whatever now occupies the playing slot (per the clamp in
 /// `QueueManager::remove_song`).
 ///
@@ -105,10 +105,9 @@ pub fn decide_removal_aftermath(
     if !removed_ids.iter().any(|id| id == was_playing) {
         return RemovalAftermath::NoCurrentChange;
     }
-    let queue = qm.get_queue();
-    match queue
-        .current_index
-        .and_then(|idx| queue.song_ids.get(idx).map(|id| (id.clone(), idx)))
+    match qm
+        .current_index()
+        .and_then(|idx| qm.song_id_at(idx).map(|id| (id.to_owned(), idx)))
     {
         Some((new_id, idx)) => {
             // Duplicate-row case: the current song was removed from one row,
@@ -156,11 +155,10 @@ impl QueueNavigator {
         // detection on startup. If the queue has a current_index, get that song's ID.
         let initial_song_id = {
             let queue = queue_manager.lock().await;
-            let queue_ref = queue.get_queue();
-            queue_ref
-                .current_index
-                .and_then(|idx| queue_ref.song_ids.get(idx))
-                .cloned()
+            queue
+                .current_index()
+                .and_then(|idx| queue.song_id_at(idx))
+                .map(str::to_owned)
         };
 
         Ok(Self {
@@ -215,11 +213,11 @@ impl QueueNavigator {
         queue_manager: &mut QueueManager,
         index: usize,
     ) -> Option<NextTrackResetEffect> {
-        if index >= queue_manager.get_queue().song_ids.len() {
+        if index >= queue_manager.queue_len() {
             return None;
         }
 
-        if let Some(id) = queue_manager.get_queue().song_ids.get(index)
+        if let Some(id) = queue_manager.song_id_at(index)
             && let Some(song) = queue_manager.get_song(id)
         {
             debug!(
@@ -230,10 +228,7 @@ impl QueueNavigator {
 
         let effect = queue_manager.remove_song(index).ok();
 
-        debug!(
-            " [CONSUME] Queue length now: {}",
-            queue_manager.get_queue().song_ids.len()
-        );
+        debug!(" [CONSUME] Queue length now: {}", queue_manager.queue_len());
 
         effect
     }
@@ -314,9 +309,9 @@ impl QueueNavigator {
             // Clear queued just in case
             queue_manager.clear_queued();
 
-            let idx = queue_manager.get_queue().current_index;
+            let idx = queue_manager.current_index();
             let song = if let Some(idx) = idx {
-                if let Some(id) = queue_manager.get_queue().song_ids.get(idx) {
+                if let Some(id) = queue_manager.song_id_at(idx) {
                     queue_manager.get_song(id).cloned()
                 } else {
                     None
@@ -364,7 +359,7 @@ impl QueueNavigator {
             // `apply_locked` before releasing the queue lock.
             let prev_id = self.current_song_id.lock().await.clone();
             let consume_effect = if let Some(ref pid) = prev_id
-                && let Some(idx) = queue_manager.get_queue().current_index
+                && let Some(idx) = queue_manager.current_index()
             {
                 self.record_and_consume(&mut queue_manager, pid, idx)
             } else {
@@ -532,7 +527,7 @@ impl QueueNavigator {
         subsonic_credential: &str,
     ) -> Result<Option<(Song, TransitionReason)>> {
         let mut queue_manager = self.queue_manager.lock().await;
-        let current_index = queue_manager.get_queue().current_index;
+        let current_index = queue_manager.current_index();
         let is_consume = queue_manager.get_queue().consume;
 
         // Anchor the consume target to the current row's stable entry_id
@@ -607,7 +602,7 @@ impl QueueNavigator {
         use crate::services::queue::PreviousSongResult;
 
         let mut queue_manager = self.queue_manager.lock().await;
-        let current_index = queue_manager.get_queue().current_index;
+        let current_index = queue_manager.current_index();
         let is_consume = queue_manager.get_queue().consume;
 
         match queue_manager.get_previous_song(current_index) {
@@ -775,7 +770,7 @@ mod tests {
             "current_song_id must clear when queue is exhausted"
         );
         assert!(
-            qm.lock().await.get_queue().current_index.is_none(),
+            qm.lock().await.current_index().is_none(),
             "current_index must reset to None"
         );
     }
@@ -807,7 +802,7 @@ mod tests {
             "expected Stop, got {plan:?}"
         );
         assert!(nav.get_current_song_id().await.is_none());
-        assert!(qm.lock().await.get_queue().current_index.is_none());
+        assert!(qm.lock().await.current_index().is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -838,7 +833,7 @@ mod tests {
 
         // Navigator advanced current_song_id to the new track before returning.
         assert_eq!(nav.get_current_song_id().await.as_deref(), Some("b"));
-        assert_eq!(qm.lock().await.get_queue().current_index, Some(1));
+        assert_eq!(qm.lock().await.current_index(), Some(1));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -872,7 +867,7 @@ mod tests {
         }
 
         // Repeat-track preserves current_index.
-        assert_eq!(qm.lock().await.get_queue().current_index, Some(0));
+        assert_eq!(qm.lock().await.current_index(), Some(0));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -908,7 +903,7 @@ mod tests {
         }
 
         // The finished song "a" was consumed (removed) from the queue.
-        let song_ids = qm.lock().await.get_queue().song_ids.clone();
+        let song_ids = qm.lock().await.song_ids_snapshot();
         assert_eq!(song_ids, vec!["b"], "'a' must be consumed");
     }
 
@@ -952,11 +947,8 @@ mod tests {
 
         assert!(result.is_none(), "no next track at end of queue");
         let q = qm.lock().await;
-        assert!(
-            q.get_queue().song_ids.is_empty(),
-            "the finished song must be consumed",
-        );
-        assert_eq!(q.get_queue().current_index, None);
+        assert!(q.is_queue_empty(), "the finished song must be consumed",);
+        assert_eq!(q.current_index(), None);
     }
 
     /// N19 multi-song variant: at the last index of a multi-song queue,
@@ -977,8 +969,8 @@ mod tests {
 
         assert!(result.is_none());
         let q = qm.lock().await;
-        assert_eq!(q.get_queue().song_ids, vec!["a"], "b consumed");
-        assert_eq!(q.get_queue().current_index, None);
+        assert_eq!(q.song_ids_snapshot(), vec!["a"], "b consumed");
+        assert_eq!(q.current_index(), None);
     }
 
     /// N19 negative: at the last index WITHOUT consume, Next is a plain no-op
@@ -999,11 +991,11 @@ mod tests {
         assert!(result.is_none());
         let q = qm.lock().await;
         assert_eq!(
-            q.get_queue().song_ids,
+            q.song_ids_snapshot(),
             vec!["a"],
             "song stays without consume"
         );
-        assert_eq!(q.get_queue().current_index, Some(0));
+        assert_eq!(q.current_index(), Some(0));
     }
 
     // ── decide_removal_aftermath unit tests ──
@@ -1144,7 +1136,7 @@ mod tests {
             .iter()
             .filter_map(|&eid| {
                 qm.index_of_entry(eid)
-                    .and_then(|idx| qm.get_queue().song_ids.get(idx).cloned())
+                    .and_then(|idx| qm.song_id_at(idx).map(str::to_owned))
             })
             .collect();
         assert_eq!(
@@ -1157,14 +1149,14 @@ mod tests {
         let _ = qm
             .remove_entry_by_id(target_entry_id)
             .expect("remove by entry_id");
-        assert_eq!(qm.get_queue().song_ids, vec!["a", "c"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "c"]);
         // After removal the entry_id is gone, so a resolution attempt would
         // return an empty Vec — proves the ordering is load-bearing.
         let post_mutation_resolved: Vec<String> = [target_entry_id]
             .iter()
             .filter_map(|&eid| {
                 qm.index_of_entry(eid)
-                    .and_then(|idx| qm.get_queue().song_ids.get(idx).cloned())
+                    .and_then(|idx| qm.song_id_at(idx).map(str::to_owned))
             })
             .collect();
         assert!(
@@ -1201,8 +1193,8 @@ mod tests {
         );
         // Remove only the row at index 0 (one of the duplicates).
         let _ = qm.remove_song(0).expect("remove duplicate row");
-        assert_eq!(qm.get_queue().song_ids, vec!["dup", "b"]);
-        assert_eq!(qm.get_queue().current_index, Some(0));
+        assert_eq!(qm.song_ids_snapshot(), vec!["dup", "b"]);
+        assert_eq!(qm.current_index(), Some(0));
 
         let plan = decide_removal_aftermath(&qm, Some("dup"), &["dup".to_string()], true);
 

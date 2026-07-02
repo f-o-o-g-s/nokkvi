@@ -3,11 +3,10 @@
 //! Contains all order array manipulation methods: rebuild, shuffle,
 //! unshuffle, extend, remove, insert, and sync helpers.
 
-use rand::seq::SliceRandom;
 use tracing::debug;
 
 use super::QueueManager;
-use crate::types::queue::RepeatMode;
+use crate::types::queue::{PlayOrder, RepeatMode};
 
 impl QueueManager {
     // ══════════════════════════════════════════════════════════════════════
@@ -17,22 +16,24 @@ impl QueueManager {
     /// Rebuild the order array as identity `[0, 1, 2, …, len-1]`.
     /// Called after `set_queue`, `add_songs`, sort, and on migration.
     pub(crate) fn rebuild_order(&mut self) {
-        self.queue.order = (0..self.queue.song_ids.len()).collect();
+        self.queue.order = PlayOrder::identity(self.queue.rows.len());
     }
 
-    /// Rebuild the order array and sync `current_order` with `current_index`.
-    pub(crate) fn rebuild_order_and_sync(&mut self) {
+    /// Rebuild the order array as identity and point the play cursor at
+    /// `row` (the physical index of the playing song).
+    pub(crate) fn rebuild_order_and_set_cursor(&mut self, row: Option<usize>) {
         self.rebuild_order();
-        self.sync_current_order_to_index();
+        self.set_cursor_to_row(row);
     }
 
-    /// Sync `current_order` to match `current_index` in the order array.
-    /// Used when the order array is identity (shuffle off) or after rebuild.
-    pub(crate) fn sync_current_order_to_index(&mut self) {
-        self.queue.current_order = self
-            .queue
-            .current_index
-            .and_then(|idx| self.queue.order.iter().position(|&o| o == idx));
+    /// Point the play cursor (`current_order`) at the order slot holding
+    /// physical row index `row` — the single way to move the playhead by
+    /// physical position. `current_index` is DERIVED from the cursor, so
+    /// there is no second field to keep in sync. `None` (or a row absent
+    /// from the order) clears the cursor.
+    pub(crate) fn set_cursor_to_row(&mut self, row: Option<usize>) {
+        self.queue.current_order =
+            row.and_then(|idx| self.queue.order.iter().position(|&o| o == idx));
     }
 
     /// Fisher-Yates shuffle the order array, keeping the currently-playing
@@ -43,20 +44,11 @@ impl QueueManager {
         }
 
         let mut rng = rand::rng();
-
-        // If we have a current order position, anchor it
-        if let Some(cur_order) = self.queue.current_order {
-            // Move current to front, shuffle the rest, then swap back
-            let cur_song_idx = self.queue.order[cur_order];
-            self.queue.order.swap(0, cur_order);
-            self.queue.order[1..].shuffle(&mut rng);
-            // Put current back at position 0 so it's "already played"
-            // and next song is order[1]
-            self.queue.order[0] = cur_song_idx;
-            self.queue.current_order = Some(0);
-        } else {
-            self.queue.order.shuffle(&mut rng);
-        }
+        // Anchored: current moves to order[0] ("already played"), tail is
+        // Fisher-Yates shuffled — the owner-blessed honest-shuffle
+        // distribution, implemented inside PlayOrder.
+        let anchor = self.queue.current_order;
+        self.queue.current_order = self.queue.order.shuffle_anchored(anchor, &mut rng);
 
         debug!(
             " [SHUFFLE] Order array shuffled ({} entries)",
@@ -66,8 +58,8 @@ impl QueueManager {
 
     /// Capture the current play-order as a sequence of per-row `entry_id`s.
     ///
-    /// `order[i]` is a `song_ids` index; this maps each through `entry_ids`
-    /// to the stable row identity, yielding the upcoming play sequence in
+    /// `order[i]` is a `rows` index; this maps each to the row's
+    /// `entry_id` — the stable row identity — yielding the upcoming play sequence in
     /// terms that survive a physical reorder. Pair with
     /// [`Self::rebuild_order_from_play_sequence`] to relocate moved rows
     /// inside a shuffled order WITHOUT re-randomizing the tail.
@@ -75,13 +67,13 @@ impl QueueManager {
         self.queue
             .order
             .iter()
-            .filter_map(|&song_idx| self.entry_ids.get(song_idx).copied())
+            .filter_map(|&row_idx| self.queue.rows.get(row_idx).map(|r| r.entry_id))
             .collect()
     }
 
     /// Rebuild the `order` array so it reproduces a previously-captured
     /// play-order sequence of `entry_id`s over the (possibly reordered)
-    /// physical layout. Each entry_id maps to its NEW `song_ids` index, so
+    /// physical layout. Each entry_id maps to its NEW `rows` index, so
     /// the random tail keeps its relative order and only the moved rows
     /// follow their new physical slot — a queue move under shuffle stops
     /// re-randomizing next-up.
@@ -89,23 +81,30 @@ impl QueueManager {
     /// Falls back to the canonical identity order if the reconstruction
     /// can't reproduce a full permutation (e.g. a row vanished), keeping
     /// the navigation invariants intact.
-    pub(crate) fn rebuild_order_from_play_sequence(&mut self, play_order_eids: &[u64]) {
+    /// `cursor_row` is the physical index of the playing song AFTER the
+    /// physical reorder (the caller tracked it through the move); the play
+    /// cursor re-anchors onto it once the order is rebuilt.
+    pub(crate) fn rebuild_order_from_play_sequence(
+        &mut self,
+        play_order_eids: &[u64],
+        cursor_row: Option<usize>,
+    ) {
         let new_order: Vec<usize> = play_order_eids
             .iter()
-            .filter_map(|&eid| self.entry_ids.iter().position(|&id| id == eid))
+            .filter_map(|&eid| self.queue.rows.iter().position(|r| r.entry_id == eid))
             .collect();
-        if new_order.len() == self.queue.song_ids.len() {
-            self.queue.order = new_order;
-        } else {
+        let len = self.queue.rows.len();
+        if !self.queue.order.splice_from_play_sequence(new_order, len) {
             self.rebuild_order();
         }
-        self.sync_current_order_to_index();
+        self.set_cursor_to_row(cursor_row);
     }
 
-    /// Restore order array to identity `[0, 1, 2, …]` and sync current_order.
+    /// Restore order array to identity `[0, 1, 2, …]`, keeping the cursor
+    /// on the same physical row.
     pub(crate) fn unshuffle_order(&mut self) {
-        self.rebuild_order();
-        self.sync_current_order_to_index();
+        let row = self.queue.current_index();
+        self.rebuild_order_and_set_cursor(row);
         debug!(" [SHUFFLE] Order array restored to identity");
     }
 
@@ -137,7 +136,7 @@ impl QueueManager {
     /// Compute the previous order index based on current position and repeat
     /// mode. Mirrors `next_order_index`: returns `None` at the play-order head
     /// with no repeat. Order-aware so Previous walks `order[]`, not physical
-    /// `song_ids`, under shuffle.
+    /// row positions, under shuffle.
     pub(crate) fn prev_order_index(&self) -> Option<usize> {
         if self.queue.order.is_empty() {
             return None;
@@ -152,33 +151,26 @@ impl QueueManager {
         }
     }
 
-    /// Insert new song_ids indices into the order array at the end.
+    /// Insert new row indices into the order array at the end.
     /// Used when songs are appended to the queue.
     pub(crate) fn extend_order(&mut self, new_indices: std::ops::Range<usize>) {
-        if self.queue.shuffle {
-            // In shuffle mode, insert new entries at random positions
-            // AFTER current_order so they're in the "upcoming" portion
-            let insert_after = self.queue.current_order.map_or(0, |c| c + 1);
-            for idx in new_indices {
-                let insert_at = if insert_after < self.queue.order.len() {
-                    rand::random_range(insert_after..=self.queue.order.len())
-                } else {
-                    self.queue.order.len()
-                };
-                self.queue.order.insert(insert_at, idx);
-            }
-        } else {
-            self.queue.order.extend(new_indices);
-        }
+        // In shuffle mode, new entries land at random positions AFTER
+        // current_order so they're in the "upcoming" portion.
+        let shuffled_after = self
+            .queue
+            .shuffle
+            .then(|| self.queue.current_order.map_or(0, |c| c + 1));
+        self.queue
+            .order
+            .extend_rows(new_indices, shuffled_after, &mut rand::rng());
     }
 
-    /// Remove a song_ids index from the order array and adjust all
+    /// Remove a row index from the order array and adjust all
     /// indices that are > removed to account for the shift.
     pub(crate) fn remove_from_order(&mut self, removed_song_idx: usize) {
-        // Find and remove the entry pointing to removed_song_idx
-        if let Some(order_pos) = self.queue.order.iter().position(|&o| o == removed_song_idx) {
-            self.queue.order.remove(order_pos);
-
+        // PlayOrder removes the entry and shifts the higher indices down;
+        // the play-cursor and gapless-prep adjustments stay here.
+        if let Some(order_pos) = self.queue.order.remove_row(removed_song_idx) {
             // Adjust current_order
             if let Some(cur) = self.queue.current_order {
                 if self.queue.order.is_empty() {
@@ -201,76 +193,34 @@ impl QueueManager {
                 }
             }
         }
-
-        // Adjust all order entries: indices > removed_song_idx shift down by 1
-        for entry in &mut self.queue.order {
-            if *entry > removed_song_idx {
-                *entry -= 1;
-            }
-        }
     }
 
-    /// Insert entries for new song_ids indices at a specific position.
+    /// Insert entries for new row indices at a specific position.
     /// Adjusts existing order entries that are >= insert_pos upward.
     pub(crate) fn insert_into_order(&mut self, insert_pos: usize, count: usize) {
-        // Bump existing entries that reference indices >= insert_pos
-        for entry in &mut self.queue.order {
-            if *entry >= insert_pos {
-                *entry += count;
-            }
-        }
-
-        // Also adjust current_order if songs were inserted before it in order
-        // (current_order references into the order array, not song_ids, so
-        // we only need to adjust song_ids references above)
-
-        // Add new entries. In shuffle mode, place them randomly after current.
-        // In sequential mode, place them at the corresponding order position.
-        if self.queue.shuffle {
-            let insert_after = self.queue.current_order.map_or(0, |c| c + 1);
-            for i in 0..count {
-                let new_song_idx = insert_pos + i;
-                let insert_at = if insert_after < self.queue.order.len() {
-                    rand::random_range(insert_after..=self.queue.order.len())
-                } else {
-                    self.queue.order.len()
-                };
-                self.queue.order.insert(insert_at, new_song_idx);
-
-                // Adjust current_order and queued since we inserted into the order array
-                if let Some(cur) = self.queue.current_order
-                    && insert_at <= cur
-                {
-                    self.queue.current_order = Some(cur + 1);
-                }
-                if let Some(q) = self.queue.queued
-                    && insert_at <= q
-                {
-                    self.queue.queued = Some(q + 1);
-                }
-            }
-        } else {
-            // Sequential: insert at the matching order position
-            // Find where in the order array the insert_pos-th song_ids entry would go
-            let order_insert = self
-                .queue
+        // PlayOrder shifts existing indices >= insert_pos up and inserts the
+        // new entries (randomly after current under shuffle, at the matching
+        // sequential position otherwise), reporting where each one landed so
+        // the play-cursor and gapless-prep adjustments replay here in the
+        // same application order.
+        let shuffled_after = self
+            .queue
+            .shuffle
+            .then(|| self.queue.current_order.map_or(0, |c| c + 1));
+        let applied =
+            self.queue
                 .order
-                .iter()
-                .position(|&o| o >= insert_pos)
-                .unwrap_or(self.queue.order.len());
-            for i in 0..count {
-                self.queue.order.insert(order_insert + i, insert_pos + i);
-                // Adjust current_order and queued
-                if let Some(cur) = self.queue.current_order
-                    && order_insert + i <= cur
-                {
-                    self.queue.current_order = Some(cur + 1);
-                }
-                if let Some(q) = self.queue.queued
-                    && order_insert + i <= q
-                {
-                    self.queue.queued = Some(q + 1);
-                }
+                .insert_rows(insert_pos, count, shuffled_after, &mut rand::rng());
+        for insert_at in applied {
+            if let Some(cur) = self.queue.current_order
+                && insert_at <= cur
+            {
+                self.queue.current_order = Some(cur + 1);
+            }
+            if let Some(q) = self.queue.queued
+                && insert_at <= q
+            {
+                self.queue.queued = Some(q + 1);
             }
         }
     }

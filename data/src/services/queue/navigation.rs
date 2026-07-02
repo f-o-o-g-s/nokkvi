@@ -55,9 +55,9 @@ pub struct NextSongResult {
 #[derive(Debug, Clone)]
 pub struct TransitionResult {
     pub song: Song,
-    /// The song_ids index we transitioned FROM (for consume/history).
+    /// The physical `rows` index we transitioned FROM (for consume/history).
     pub old_index: Option<usize>,
-    /// The song_ids index we transitioned TO.
+    /// The physical `rows` index we transitioned TO.
     pub new_index: usize,
 }
 
@@ -151,7 +151,7 @@ impl QueueManager {
     }
 
     fn compute_peek_next(&mut self) -> Option<NextSongResult> {
-        if self.queue.song_ids.is_empty() || self.queue.order.is_empty() {
+        if self.queue.rows.is_empty() || self.queue.order.is_empty() {
             return None;
         }
 
@@ -159,9 +159,9 @@ impl QueueManager {
         // suppresses the replay so the gapless-prepared next track is the real
         // next song, letting the queue drain.
         if self.queue.repeat == RepeatMode::Track && !self.queue.consume {
-            if let Some(idx) = self.queue.current_index
-                && let Some(id) = self.queue.song_ids.get(idx)
-                && let Some(song) = self.pool.get(id)
+            if let Some(idx) = self.queue.current_index()
+                && let Some(row) = self.queue.rows.get(idx)
+                && let Some(song) = self.pool.get(&row.song_id)
             {
                 return Some(NextSongResult {
                     song: song.clone(),
@@ -176,8 +176,11 @@ impl QueueManager {
         if let Some(queued_order) = self.queue.queued {
             if queued_order < self.queue.order.len() {
                 let song_idx = self.queue.order[queued_order];
-                if let Some(id) = self.queue.song_ids.get(song_idx)
-                    && let Some(song) = self.pool.get(id)
+                if let Some(song) = self
+                    .queue
+                    .rows
+                    .get(song_idx)
+                    .and_then(|row| self.pool.get(&row.song_id))
                 {
                     return Some(NextSongResult {
                         song: song.clone(),
@@ -222,10 +225,13 @@ impl QueueManager {
             None => return None,
         };
         let song_idx = self.queue.order[next_order];
-        let id = self.queue.song_ids.get(song_idx)?;
+        let id = &self.queue.rows.get(song_idx)?.song_id;
         let song = self.pool.get(id)?;
 
         self.queue.queued = Some(next_order);
+        // NOTE: the "song_ids[..]" label below is historical (the field is
+        // now `rows`) but the log format is grep-stable by contract — the
+        // owner reconstructs play order from these exact lines.
         debug!(
             " [QUEUE] Queued next: order[{}] → song_ids[{}] = {} (id: {})",
             next_order, song_idx, song.title, id
@@ -244,7 +250,9 @@ impl QueueManager {
         })
     }
 
-    /// Transition to the queued next song. Updates current_index and current_order.
+    /// Transition to the queued next song by moving the play cursor
+    /// (`current_order`) onto the queued order slot; the physical index
+    /// derives from it.
     /// This is the SINGLE transition path — all automatic and manual transitions
     /// converge here (gapless, crossfade, normal end-of-track, manual skip).
     ///
@@ -259,15 +267,18 @@ impl QueueManager {
             return None;
         }
 
-        let old_index = self.queue.current_index;
+        let old_index = self.queue.current_index();
         let song_idx = self.queue.order[queued_order];
-        let id = self.queue.song_ids.get(song_idx)?;
+        let id = &self.queue.rows.get(song_idx)?.song_id;
         let song = self.pool.get(id)?.clone();
 
+        // Setting the cursor IS the whole playhead move — the physical
+        // index derives from order[current_order] (== song_idx here).
         self.queue.current_order = Some(queued_order);
-        self.queue.current_index = Some(song_idx);
         self.save_order().ok();
 
+        // NOTE: "song_ids[..]" label is historical but grep-stable (see
+        // compute_peek_next).
         debug!(
             " [QUEUE] Transitioned: order {} → song_ids[{}] = {} (old_index: {:?})",
             queued_order, song_idx, song.title, old_index
@@ -291,21 +302,21 @@ impl QueueManager {
     pub fn get_next_song(&mut self) -> Option<NextSongResult> {
         debug!(
             " [QUEUE] get_next_song called, current_index: {:?}, current_order: {:?}, consume: {}, queue_length: {}",
-            self.queue.current_index,
+            self.queue.current_index(),
             self.queue.current_order,
             self.queue.consume,
-            self.queue.song_ids.len()
+            self.queue.rows.len()
         );
 
         // Trace: Log current queue state (very verbose with large queues)
         trace!(" [QUEUE] Current queue songs:");
-        for (i, id) in self.queue.song_ids.iter().enumerate() {
-            let marker = if Some(i) == self.queue.current_index {
+        for (i, row) in self.queue.rows.iter().enumerate() {
+            let marker = if Some(i) == self.queue.current_index() {
                 "▶️"
             } else {
                 "  "
             };
-            if let Some(song) = self.pool.get(id) {
+            if let Some(song) = self.pool.get(&row.song_id) {
                 trace!(
                     " [QUEUE] {} [{}] {} - {} (id: {})",
                     marker, i, song.title, song.artist, song.id
@@ -313,7 +324,7 @@ impl QueueManager {
             }
         }
 
-        if self.queue.song_ids.is_empty() {
+        if self.queue.rows.is_empty() {
             debug!(" [QUEUE] Queue is empty, returning None");
             return None;
         }
@@ -352,7 +363,7 @@ impl QueueManager {
 
     /// Get previous song using playback history or previous index
     pub fn get_previous_song(&mut self, _current_index: Option<usize>) -> PreviousSongResult {
-        if self.queue.song_ids.is_empty() && self.playback_history.is_empty() {
+        if self.queue.rows.is_empty() && self.playback_history.is_empty() {
             return PreviousSongResult::None;
         }
 
@@ -367,15 +378,14 @@ impl QueueManager {
             // the row was consumed/removed (entry_id no longer present).
             let found_idx = prev_eid
                 .and_then(|eid| self.index_of_entry(eid))
-                .or_else(|| self.queue.song_ids.iter().position(|id| *id == prev_id));
+                .or_else(|| self.queue.rows.iter().position(|r| r.song_id == prev_id));
 
             // Pop after lookup (avoids double-borrow)
             let popped = self.playback_history.pop().expect("checked Some above");
 
             if let Some(idx) = found_idx {
-                // Found in queue — navigate to it
-                self.queue.current_index = Some(idx);
-                self.sync_current_order_to_index();
+                // Found in queue — anchor the cursor on that physical row
+                self.set_cursor_to_row(Some(idx));
                 self.clear_queued();
                 self.save_order().ok();
                 let song = self.pool.get(&prev_id).cloned().unwrap_or(popped.song);
@@ -403,23 +413,20 @@ impl QueueManager {
 
         // Order-aware backward step (no history available). Mirrors the
         // forward `next_order_index` walk: compute the previous ORDER
-        // position, map through `order[prev]` to the physical index, and set
-        // BOTH `current_index` and `current_order`. Reduces to physical
-        // idx-1 / wrap-to-last when shuffle is off (identity order). Setting
-        // both fields directly (rather than via `sync_current_order_to_index`)
-        // keeps the invariant `order[current_order] == current_index` exact
-        // even with duplicate physical ids, where a first-match sync could
-        // re-derive the wrong order slot.
+        // position, map through `order[prev]` to the physical index, and
+        // set the cursor to that ORDER slot directly (not a first-match
+        // row sync) — exact even with duplicate physical ids, and the
+        // physical index derives from it. Reduces to physical idx-1 /
+        // wrap-to-last when shuffle is off (identity order).
         if let Some(prev_order) = self.prev_order_index()
             && let Some(&phys) = self.queue.order.get(prev_order)
             && let Some(song) = self
                 .queue
-                .song_ids
+                .rows
                 .get(phys)
-                .and_then(|id| self.pool.get(id))
+                .and_then(|row| self.pool.get(&row.song_id))
                 .cloned()
         {
-            self.queue.current_index = Some(phys);
             self.queue.current_order = Some(prev_order);
             self.clear_queued();
             self.save_order().ok();
@@ -511,7 +518,7 @@ mod tests {
         assert_eq!(peeked.song().id, "b");
         drop(peeked);
         // current_index must NOT have changed
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.queue.current_index(), Some(0));
         assert_eq!(qm.queue.current_order, Some(0));
     }
 
@@ -569,7 +576,7 @@ mod tests {
         let result = peeked.transition();
         assert_eq!(result.new_index, 1);
         assert_eq!(result.old_index, Some(0));
-        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.current_index(), Some(1));
     }
 
     // ── get_next_song tests ──
@@ -594,7 +601,7 @@ mod tests {
                 next.index
             );
         }
-        assert_eq!(qm.queue.current_index, Some(4));
+        assert_eq!(qm.queue.current_index(), Some(4));
     }
 
     #[test]
@@ -605,7 +612,7 @@ mod tests {
         let next = qm.get_next_song();
         assert!(next.is_none());
         // current_index unchanged
-        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.current_index(), Some(1));
     }
 
     #[test]
@@ -617,7 +624,7 @@ mod tests {
         let next = qm.get_next_song().unwrap();
         assert_eq!(next.index, 0);
         assert_eq!(next.song.id, "a");
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.queue.current_index(), Some(0));
     }
 
     #[test]
@@ -639,7 +646,7 @@ mod tests {
         // Ensure repeat mode remains active
         assert_eq!(qm.queue.repeat, RepeatMode::Track);
         // current_index should be advanced
-        assert_eq!(qm.queue.current_index, Some(2));
+        assert_eq!(qm.queue.current_index(), Some(2));
     }
 
     #[test]
@@ -754,7 +761,7 @@ mod tests {
         // "a" was consumed: present in history, absent from the queue.
         qm.add_to_history(make_test_song("a"), None);
         let history_before = qm.playback_history.len();
-        let song_ids_before = qm.queue.song_ids.clone();
+        let song_ids_before = qm.song_ids_snapshot();
 
         let result = qm.get_previous_song(Some(0));
 
@@ -766,7 +773,7 @@ mod tests {
         // queue is untouched (no re-insertion).
         assert_eq!(qm.playback_history.len(), history_before);
         assert_eq!(qm.playback_history.last().unwrap().song.id, "a");
-        assert_eq!(qm.queue.song_ids, song_ids_before);
+        assert_eq!(qm.song_ids_snapshot(), song_ids_before);
     }
 
     #[test]
@@ -842,7 +849,7 @@ mod tests {
             }
             other => panic!("Expected InQueue wrap to last, got {other:?}"),
         }
-        assert_eq!(qm.queue.current_index, Some(2));
+        assert_eq!(qm.queue.current_index(), Some(2));
     }
 
     #[test]
@@ -858,7 +865,7 @@ mod tests {
 
         let result = qm.get_previous_song(Some(0));
         assert!(matches!(result, PreviousSongResult::None));
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.queue.current_index(), Some(0));
     }
 
     #[test]
@@ -875,9 +882,8 @@ mod tests {
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(3));
         qm.queue.shuffle = true;
-        qm.queue.order = vec![2, 0, 3, 1];
-        qm.queue.current_index = Some(3);
-        qm.queue.current_order = Some(2);
+        qm.queue.order = vec![2, 0, 3, 1].into();
+        qm.queue.current_order = Some(2); // order[2] == 3: playing row 3
         qm.queue.repeat = RepeatMode::None;
 
         let result = qm.get_previous_song(Some(3));
@@ -889,7 +895,7 @@ mod tests {
             other => panic!("Expected InQueue(a, 0), got {other:?}"),
         }
         // Invariant order[current_order] == current_index holds: order[1]==0.
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.queue.current_index(), Some(0));
         assert_eq!(qm.queue.current_order, Some(1));
     }
 
@@ -908,9 +914,8 @@ mod tests {
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(3));
         qm.queue.shuffle = true;
-        qm.queue.order = vec![3, 0, 2, 1];
-        qm.queue.current_index = Some(3);
-        qm.queue.current_order = Some(0);
+        qm.queue.order = vec![3, 0, 2, 1].into();
+        qm.queue.current_order = Some(0); // order[0] == 3: playing row 3
         qm.queue.repeat = RepeatMode::Playlist;
         qm.queue.consume = false;
 
@@ -922,7 +927,7 @@ mod tests {
             }
             other => panic!("Expected InQueue(b, 1), got {other:?}"),
         }
-        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.current_index(), Some(1));
         assert_eq!(qm.queue.current_order, Some(3));
     }
 
@@ -941,15 +946,14 @@ mod tests {
         ];
         let (mut qm, _temp) = make_test_manager(songs, Some(2));
         qm.queue.shuffle = true;
-        qm.queue.order = vec![2, 0, 3, 1];
-        qm.queue.current_index = Some(2);
-        qm.queue.current_order = Some(0);
+        qm.queue.order = vec![2, 0, 3, 1].into();
+        qm.queue.current_order = Some(0); // order[0] == 2: playing row 2
         qm.queue.repeat = RepeatMode::None;
         qm.queue.consume = false;
 
         let result = qm.get_previous_song(Some(2));
         assert!(matches!(result, PreviousSongResult::None));
-        assert_eq!(qm.queue.current_index, Some(2));
+        assert_eq!(qm.queue.current_index(), Some(2));
     }
 
     // ── History tests ──
@@ -999,8 +1003,7 @@ mod tests {
         // Auto-advance simulation: record each LEFT row with its real entry_id.
         qm.add_to_history(make_test_song("a"), e0); // first a, row 0
         qm.add_to_history(make_test_song("a"), e1); // second a, row 1
-        qm.queue.current_index = Some(2); // now playing b
-        qm.sync_current_order_to_index();
+        qm.set_cursor_to_row(Some(2)); // now playing b
 
         let result = qm.get_previous_song(Some(2));
         match result {
@@ -1010,7 +1013,7 @@ mod tests {
             }
             other => panic!("Expected InQueue(a, 1), got {other:?}"),
         }
-        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.current_index(), Some(1));
     }
 
     #[test]
@@ -1169,7 +1172,6 @@ mod tests {
 
         // Advance to the last song in the order
         qm.queue.current_order = Some(qm.queue.order.len() - 1);
-        qm.queue.current_index = Some(qm.queue.order[qm.queue.order.len() - 1]);
 
         // Next should succeed (repeat-playlist wrap) and reshuffle
         let next = qm.get_next_song();
@@ -1178,8 +1180,8 @@ mod tests {
         // The order should have been reshuffled (with 5 songs, extremely unlikely to be identical)
         let new_order = qm.queue.order.clone();
         // Both orders should contain the same elements (just reordered)
-        let mut sorted_initial = initial_order.clone();
-        let mut sorted_new = new_order.clone();
+        let mut sorted_initial = initial_order.to_vec();
+        let mut sorted_new = new_order.to_vec();
         sorted_initial.sort();
         sorted_new.sort();
         assert_eq!(
@@ -1225,7 +1227,7 @@ mod tests {
     /// - current_order points to a valid order entry
     /// - current_index matches order[current_order]
     fn assert_navigation_invariants(qm: &QueueManager, label: &str) {
-        let len = qm.queue.song_ids.len();
+        let len = qm.queue.rows.len();
         // Order array entries must be in [0, len)
         for (pos, &idx) in qm.queue.order.iter().enumerate() {
             assert!(
@@ -1235,7 +1237,7 @@ mod tests {
         }
         // Order must be a permutation (no duplicates)
         {
-            let mut sorted = qm.queue.order.clone();
+            let mut sorted = qm.queue.order.to_vec();
             sorted.sort();
             sorted.dedup();
             assert_eq!(
@@ -1252,7 +1254,7 @@ mod tests {
                 qm.queue.order.len()
             );
             // current_index must match order[current_order]
-            if let Some(ci) = qm.queue.current_index {
+            if let Some(ci) = qm.queue.current_index() {
                 assert_eq!(
                     ci, qm.queue.order[co],
                     "{label}: current_index {ci} != order[{co}]={}",
@@ -1382,7 +1384,7 @@ mod tests {
         qm.add_to_history(next.song, next_eid);
 
         // Previous should go back to history
-        let prev = qm.get_previous_song(qm.queue.current_index);
+        let prev = qm.get_previous_song(qm.queue.current_index());
         match prev {
             PreviousSongResult::InQueue(_, _) => {}
             other => {
@@ -1577,14 +1579,14 @@ mod proptest_navigation {
                 // Core invariant: order indices are in bounds
                 for (pos, &idx) in qm.queue.order.iter().enumerate() {
                     prop_assert!(
-                        idx < qm.queue.song_ids.len(),
+                        idx < qm.queue_len(),
                         "order[{}]={} >= len={} (n={}, shuf={}, consume={}, repeat={:?})",
-                        pos, idx, qm.queue.song_ids.len(), n, shuffle, consume, repeat
+                        pos, idx, qm.queue_len(), n, shuffle, consume, repeat
                     );
                 }
 
                 // Order must be a permutation
-                let mut sorted = qm.queue.order.clone();
+                let mut sorted = qm.queue.order.to_vec();
                 sorted.sort();
                 sorted.dedup();
                 prop_assert_eq!(
@@ -1611,11 +1613,11 @@ mod proptest_navigation {
                 if qm.get_next_song().is_none() {
                     break;
                 }
-                if let Some(ci) = qm.queue.current_index {
+                if let Some(ci) = qm.queue.current_index() {
                     prop_assert!(
-                        ci < qm.queue.song_ids.len(),
+                        ci < qm.queue_len(),
                         "current_index={} >= len={} (n={}, shuf={}, consume={}, repeat={:?})",
-                        ci, qm.queue.song_ids.len(), n, shuffle, consume, repeat
+                        ci, qm.queue_len(), n, shuffle, consume, repeat
                     );
                 }
             }
@@ -1713,27 +1715,26 @@ mod proptest_navigation {
             qm.queue.consume = false;
             let _ = qm.set_repeat(RepeatMode::None).unwrap();
 
-            // Pick a random valid current_order and re-anchor the invariant
-            // (toggle_shuffle keeps song 0 anchored at current_order=0; choose
-            // a fresh position and sync current_index to order[co]).
+            // Pick a random valid current_order and re-anchor there
+            // (toggle_shuffle keeps song 0 anchored at current_order=0;
+            // choose a fresh position — the physical index derives from it).
             let co = co_pick % n;
             qm.queue.current_order = Some(co);
-            qm.queue.current_index = Some(qm.queue.order[co]);
             qm.queue.queued = None;
 
             // Capture the play-order tail strictly after current_order BEFORE
             // removal: these genuinely-upcoming survivors must all be reached.
             let upcoming_before: Vec<String> = qm.queue.order[co + 1..]
                 .iter()
-                .map(|&phys| qm.queue.song_ids[phys].clone())
+                .map(|&phys| qm.rows()[phys].song_id.clone())
                 .collect();
 
             // Remove the currently-playing physical row.
-            let cur_phys = qm.queue.current_index.unwrap();
+            let cur_phys = qm.queue.current_index().unwrap();
             let _ = qm.remove_song(cur_phys).unwrap();
 
             // Invariant restored after removal.
-            let (post_co, post_ci) = (qm.queue.current_order, qm.queue.current_index);
+            let (post_co, post_ci) = (qm.queue.current_order, qm.queue.current_index());
             if let (Some(c_ord), Some(c_idx)) = (post_co, post_ci) {
                 prop_assert_eq!(
                     qm.queue.order[c_ord], c_idx,
@@ -1749,7 +1750,7 @@ mod proptest_navigation {
             let expected: Vec<String> = match post_co {
                 Some(c) => qm.queue.order[c..]
                     .iter()
-                    .map(|&phys| qm.queue.song_ids[phys].clone())
+                    .map(|&phys| qm.rows()[phys].song_id.clone())
                     .collect(),
                 None => Vec::new(),
             };
@@ -1757,7 +1758,7 @@ mod proptest_navigation {
             // Drain via get_next_song collecting the play sequence.
             let mut seq: Vec<String> = Vec::new();
             if let Some(ci) = post_ci {
-                seq.push(qm.queue.song_ids[ci].clone());
+                seq.push(qm.rows()[ci].song_id.clone());
             }
             let cap = n + 5;
             let mut count = 0;

@@ -25,17 +25,30 @@ pub struct QueueWriteGuard<'a> {
     mgr: Option<&'a mut QueueManager>,
 }
 
-/// Debug-only invariant check: `entry_ids` must stay strictly parallel to
-/// `queue.song_ids`. Every mutator pairs the two; this assert lights up the
-/// path in tests if a future mutator forgets one half. Release builds skip
-/// the check, so production cost is zero.
+/// Debug-only invariant check, fired on every commit path. After the typed
+/// Phase-2 model most of the historical checks are STRUCTURAL and gone from
+/// here: `order` is a permutation by `PlayOrder` construction, and
+/// `current_index` is derived from `order[current_order]`, so the I3
+/// coupling cannot break. What still needs asserting is the one coupling
+/// the types cannot see: `order` must track the ROW VECTOR's length, and a
+/// `Some` cursor must be in range (a stale cursor after an order shrink
+/// would silently derive `None`). Release builds skip the check;
+/// `every_mutator_keeps_rows_order_consistent` covers release builds.
 #[inline]
-fn assert_entry_ids_parallel(mgr: &QueueManager) {
+fn assert_order_consistent(mgr: &QueueManager) {
+    let n = mgr.queue.rows.len();
     debug_assert_eq!(
-        mgr.entry_ids.len(),
-        mgr.queue.song_ids.len(),
-        "entry_ids drifted from song_ids: a mutator updated one without the other",
+        mgr.queue.order.len(),
+        n,
+        "order length drifted from rows: a mutator updated one without the other",
     );
+    if let Some(co) = mgr.queue.current_order {
+        debug_assert!(
+            co < mgr.queue.order.len(),
+            "current_order {co} out of range 0..{}",
+            mgr.queue.order.len(),
+        );
+    }
 }
 
 impl QueueWriteGuard<'_> {
@@ -45,7 +58,7 @@ impl QueueWriteGuard<'_> {
     /// next-track decoder.
     pub fn commit_save_all(mut self) -> Result<NextTrackResetEffect> {
         let mgr = self.mgr.take().expect("guard already consumed");
-        assert_entry_ids_parallel(mgr);
+        assert_order_consistent(mgr);
         mgr.clear_queued();
         mgr.save_all()?;
         Ok(NextTrackResetEffect::new())
@@ -55,7 +68,7 @@ impl QueueWriteGuard<'_> {
     /// [`NextTrackResetEffect`] obligation — see [`Self::commit_save_all`].
     pub fn commit_save_order(mut self) -> Result<NextTrackResetEffect> {
         let mgr = self.mgr.take().expect("guard already consumed");
-        assert_entry_ids_parallel(mgr);
+        assert_order_consistent(mgr);
         mgr.clear_queued();
         mgr.save_order()?;
         Ok(NextTrackResetEffect::new())
@@ -65,7 +78,7 @@ impl QueueWriteGuard<'_> {
     /// [`NextTrackResetEffect`] obligation — see [`Self::commit_save_all`].
     pub fn commit_no_save(mut self) -> NextTrackResetEffect {
         let mgr = self.mgr.take().expect("guard already consumed");
-        assert_entry_ids_parallel(mgr);
+        assert_order_consistent(mgr);
         mgr.clear_queued();
         NextTrackResetEffect::new()
     }

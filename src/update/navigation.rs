@@ -598,10 +598,8 @@ impl Nokkvi {
                     async move {
                         let queue_manager = shell_for_scrobble.queue().queue_manager();
                         let qm = queue_manager.lock().await;
-                        let queue = qm.get_queue();
-                        queue
-                            .current_index
-                            .and_then(|idx| queue.song_ids.get(idx))
+                        qm.current_index()
+                            .and_then(|idx| qm.song_id_at(idx))
                             .and_then(|id| qm.get_song(id))
                             .map(|song| song.id.clone())
                     },

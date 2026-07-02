@@ -246,15 +246,15 @@ impl PlaybackController {
         {
             let queue_manager_arc = self.queue_service.queue_manager();
             let mut queue_manager = queue_manager_arc.lock().await;
-            let current_index = queue_manager.get_queue().current_index.or_else(|| {
-                if queue_manager.get_queue().song_ids.is_empty() {
+            let current_index = queue_manager.current_index().or_else(|| {
+                if queue_manager.is_queue_empty() {
                     None
                 } else {
                     Some(0)
                 }
             });
             let song = current_index
-                .and_then(|idx| queue_manager.get_queue().song_ids.get(idx))
+                .and_then(|idx| queue_manager.song_id_at(idx))
                 .and_then(|id| queue_manager.get_song(id))
                 .cloned();
 
@@ -263,7 +263,7 @@ impl PlaybackController {
             // already locked above, so the next-track-reset effect is
             // discharged in-line against the held lock.
             if let Some(idx) = current_index
-                && queue_manager.get_queue().current_index.is_none()
+                && queue_manager.current_index().is_none()
             {
                 let effect = queue_manager.reposition_to_index(Some(idx));
                 let _ = queue_manager.save_order();
@@ -787,11 +787,14 @@ impl PlaybackController {
             let queue_index = qm.index_of_entry(entry_id).ok_or_else(|| {
                 anyhow::anyhow!("play_entry_from_queue: entry_id {entry_id} not in queue")
             })?;
-            let song_id = qm.queue.song_ids.get(queue_index).cloned().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "play_entry_from_queue: song_id missing at queue position {queue_index}"
-                )
-            })?;
+            let song_id = qm
+                .song_id_at(queue_index)
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "play_entry_from_queue: song_id missing at queue position {queue_index}"
+                    )
+                })?;
             let effect = if starting_fresh {
                 // Re-anchor under shuffle (no-op reshuffle when shuffle is off,
                 // so this stays a plain reposition for sequential playback).

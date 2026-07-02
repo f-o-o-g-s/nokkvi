@@ -1263,7 +1263,7 @@ impl AppService {
                 .iter()
                 .filter_map(|&eid| {
                     qm.index_of_entry(eid)
-                        .and_then(|idx| qm.get_queue().song_ids.get(idx).cloned())
+                        .and_then(|idx| qm.song_id_at(idx).map(str::to_owned))
                 })
                 .collect()
         };
@@ -1342,7 +1342,7 @@ impl AppService {
                 .iter()
                 .filter_map(|&eid| {
                     let idx = qm.index_of_entry(eid)?;
-                    let song_id = qm.get_queue().song_ids.get(idx).cloned()?;
+                    let song_id = qm.song_id_at(idx)?.to_owned();
                     qm.get_song(&song_id).cloned()
                 })
                 .collect();

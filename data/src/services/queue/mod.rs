@@ -23,7 +23,7 @@ use crate::{
     services::state_storage::StateStorage,
     types::{
         NextTrackResetEffect,
-        queue::{MoveBatchTarget, Queue, RepeatMode},
+        queue::{MoveBatchTarget, PlayOrder, Queue, QueueRow, RepeatMode},
         queue_sort_mode::QueueSortMode,
         song::Song,
         song_pool::SongPool,
@@ -51,26 +51,18 @@ pub struct QueueManager {
     pub(crate) storage: StateStorage,
     pub(crate) playback_history: Vec<HistoryEntry>,
     pub(crate) max_history_size: usize,
-    /// Per-row unique identifiers, parallel to `queue.song_ids`. Two queue
-    /// entries that share a `song_id` (duplicate adds, "Play Next" of an
-    /// already-queued song) still get distinct `entry_id`s, so right-click
-    /// "Remove from queue" can target a single row.
-    ///
-    /// Runtime-only — rebuilt from scratch on every `QueueManager::new()`,
-    /// so a persisted queue snapshot loads fine on an older client and the
-    /// IDs start fresh on relaunch.
-    pub(crate) entry_ids: Vec<u64>,
-    /// Monotonic counter that hands out the next `entry_id`. Never reused
-    /// within a process lifetime.
+    /// Monotonic counter that hands out the next per-row `entry_id`
+    /// (`QueueRow.entry_id`). Never reused within a process lifetime;
+    /// entry ids reseed `0..len` on every `QueueManager::new()`.
     pub(crate) next_entry_id: u64,
 }
 
 impl std::fmt::Debug for QueueManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueueManager")
-            .field("queue_len", &self.queue.song_ids.len())
+            .field("queue_len", &self.queue.rows.len())
             .field("pool_len", &self.pool.len())
-            .field("current_index", &self.queue.current_index)
+            .field("current_index", &self.queue.current_index())
             .field("current_order", &self.queue.current_order)
             .finish()
     }
@@ -87,54 +79,68 @@ const KEY_QUEUE_SONGS: &str = crate::services::storage_keys::QUEUE_SONGS;
 /// queue was changed, so the caller can persist the cleaned state.
 ///
 /// Steps:
-/// 1. Prune `song_ids` whose id is absent from `pool`, building an
+/// 1. Prune rows whose `song_id` is absent from `pool`, building an
 ///    old→new index remap.
 /// 2. Rewrite `order` through the remap, dropping missing entries. If the
 ///    result is not a valid permutation of `0..new_len`, fall back to the
 ///    canonical identity order (matches `rebuild_order`) and drop
 ///    `current_order`.
-/// 3. Remap `current_index` through the old→new map; if its row was pruned,
-///    clamp to the adjacent survivor (or `None` when the queue is now empty).
-/// 4. Re-derive `current_order` from `current_index`'s position in `order`.
+/// 3. Remap the derived physical playhead through the old→new map; if its
+///    row was pruned, clamp to the adjacent survivor (or `None` when the
+///    queue is now empty).
+/// 4. Re-anchor `current_order` onto the surviving physical row.
 /// 5. ALWAYS clear `queued` — gapless-prep transient, never valid across a
 ///    relaunch.
 ///
 /// Pure and non-panicking; unit-testable without redb.
 fn reconcile_loaded_queue(queue: &mut Queue, pool: &SongPool) -> bool {
-    let old_len = queue.song_ids.len();
+    let old_len = queue.rows.len();
 
-    // (1) Prune missing ids, building an old→new index remap.
+    // (1) Prune rows whose id is missing, building an old→new index remap.
     let mut remap: Vec<Option<usize>> = Vec::with_capacity(old_len);
-    let mut pruned_ids: Vec<String> = Vec::with_capacity(old_len);
-    for id in &queue.song_ids {
-        if pool.get(id).is_some() {
-            remap.push(Some(pruned_ids.len()));
-            pruned_ids.push(id.clone());
+    let mut pruned_rows: Vec<QueueRow> = Vec::with_capacity(old_len);
+    for row in &queue.rows {
+        if pool.get(&row.song_id).is_some() {
+            remap.push(Some(pruned_rows.len()));
+            pruned_rows.push(row.clone());
         } else {
             remap.push(None);
         }
     }
-    let new_len = pruned_ids.len();
+    let new_len = pruned_rows.len();
     let pruned_any = new_len != old_len;
 
     // Always clear the transient gapless-prep field on restore.
     let had_queued = queue.queued.is_some();
     queue.queued = None;
 
+    // Physical playhead reconstructed from the DECODED cursor state. For
+    // any valid save this equals the legacy stored index (I3 held at save
+    // time); for a corrupt order/cursor it degrades to None and the repair
+    // below re-anchors deterministically.
+    let old_phys = queue
+        .current_order
+        .and_then(|co| queue.order.get(co).copied());
+    let decoded_cursor = queue.current_order;
+
     if !pruned_any {
-        // No rows dropped: validate/repair the order array, clamp an
-        // out-of-range playhead, and re-derive current_order so a stale
-        // persisted order can't desync the playhead.
+        // No rows dropped: validate/repair the order array, clamp a stale
+        // physical playhead, and re-anchor the cursor onto it.
         let order_was_valid = order_is_identity_permutation(&queue.order, old_len);
         if !order_was_valid {
-            queue.order = (0..old_len).collect();
+            queue.order = PlayOrder::identity(old_len);
         }
-        let index_was_in_range = clamp_current_index(queue, old_len);
-        sync_current_order(queue);
-        return had_queued || !order_was_valid || !index_was_in_range;
+        let clamped_phys = if old_len == 0 {
+            None
+        } else {
+            old_phys.map(|p| p.min(old_len - 1))
+        };
+        queue.current_order =
+            clamped_phys.and_then(|idx| queue.order.iter().position(|&o| o == idx));
+        return had_queued || !order_was_valid || queue.current_order != decoded_cursor;
     }
 
-    queue.song_ids = pruned_ids;
+    queue.rows = pruned_rows;
 
     // (2) Rewrite order through the remap, dropping pruned entries.
     let remapped_order: Vec<usize> = queue
@@ -143,74 +149,40 @@ fn reconcile_loaded_queue(queue: &mut Queue, pool: &SongPool) -> bool {
         .filter_map(|&old_idx| remap.get(old_idx).copied().flatten())
         .collect();
     queue.order = if order_is_identity_permutation(&remapped_order, new_len) {
-        remapped_order
+        // Just validated as a full permutation of 0..new_len.
+        PlayOrder::from_raw_unvalidated(remapped_order)
     } else {
         // Canonical identity fallback (deterministic, matches rebuild_order).
-        queue.current_order = None;
-        (0..new_len).collect()
+        PlayOrder::identity(new_len)
     };
 
-    // (3) Remap or clamp current_index.
-    queue.current_index = match queue.current_index {
+    // (3) Remap or clamp the physical playhead.
+    let new_phys = match old_phys {
         Some(old) => match remap.get(old).copied().flatten() {
             Some(new) => Some(new),
             None if new_len == 0 => None,
             // Its row was pruned — clamp to the adjacent survivor
             // (stay-in-place), matching remove_from_order. NOTE: `old` is in
-            // OLD song_ids space, so when rows BEFORE the playhead are pruned
-            // in the same reconcile this can overshoot the precise successor;
+            // OLD row space, so when rows BEFORE the playhead are pruned in
+            // the same reconcile this can overshoot the precise successor;
             // it is still never worse than the queue tail and never replays.
             None => Some(old.min(new_len - 1)),
         },
         None => None,
     };
 
-    // (4) Re-derive current_order from current_index's position in order.
-    sync_current_order(queue);
+    // (4) Re-anchor the cursor onto the surviving physical row; the
+    // physical index is DERIVED from it everywhere else.
+    queue.current_order = new_phys.and_then(|idx| queue.order.iter().position(|&o| o == idx));
 
     true
 }
 
 /// `true` when `order` is exactly a permutation of `0..len` (no out-of-range
-/// entry, no duplicate, correct length).
+/// entry, no duplicate, correct length). Delegates to the single validator
+/// on `PlayOrder` so the load-repair path and the newtype cannot drift.
 fn order_is_identity_permutation(order: &[usize], len: usize) -> bool {
-    if order.len() != len {
-        return false;
-    }
-    let mut seen = vec![false; len];
-    for &idx in order {
-        match seen.get_mut(idx) {
-            Some(slot) if !*slot => *slot = true,
-            _ => return false,
-        }
-    }
-    true
-}
-
-/// Clamp `current_index` into `[0, len)`. Returns `false` when the index was
-/// out of range and had to be corrected (clamped to `len-1`, or `None` when
-/// the queue is empty), so the caller can mark the queue dirty.
-fn clamp_current_index(queue: &mut Queue, len: usize) -> bool {
-    match queue.current_index {
-        Some(idx) if idx < len => true,
-        Some(_) if len == 0 => {
-            queue.current_index = None;
-            false
-        }
-        Some(_) => {
-            queue.current_index = Some(len - 1);
-            false
-        }
-        None => true,
-    }
-}
-
-/// Set `current_order` to the position of `current_index` within `order`
-/// (or `None` when there is no current index / no match).
-fn sync_current_order(queue: &mut Queue) {
-    queue.current_order = queue
-        .current_index
-        .and_then(|idx| queue.order.iter().position(|&o| o == idx));
+    PlayOrder::is_full_permutation(order, len)
 }
 
 impl QueueManager {
@@ -252,13 +224,14 @@ impl QueueManager {
         // leave current_index/order pointing at ids the pool no longer holds.
         let dirty = reconcile_loaded_queue(&mut queue, &pool);
 
-        // Seed runtime entry_ids parallel to the (now pruned) song_ids. The
-        // counter starts past the seeded range so subsequent inserts cannot
-        // collide. MUST run AFTER reconcile so entry_ids stay strictly
-        // parallel to the pruned song_ids.
-        let initial_len = queue.song_ids.len();
-        let entry_ids: Vec<u64> = (0..initial_len as u64).collect();
-        let next_entry_id = initial_len as u64;
+        // Reseed runtime entry_ids over the (now pruned) rows, replacing
+        // the Decode placeholders. The counter starts past the seeded range
+        // so subsequent inserts cannot collide. MUST run AFTER reconcile so
+        // ids stay dense `0..len` over exactly the surviving rows.
+        for (i, row) in queue.rows.iter_mut().enumerate() {
+            row.entry_id = i as u64;
+        }
+        let next_entry_id = queue.rows.len() as u64;
 
         let mgr = Self {
             queue,
@@ -266,7 +239,6 @@ impl QueueManager {
             storage,
             playback_history: Vec::new(),
             max_history_size: 100,
-            entry_ids,
             next_entry_id,
         };
 
@@ -291,35 +263,35 @@ impl QueueManager {
     /// Used by `QueueService::refresh_from_queue()` to build UI data.
     pub fn songs_in_order(&self) -> Vec<&Song> {
         self.queue
-            .song_ids
+            .rows
             .iter()
-            .filter_map(|id| self.pool.get(id))
+            .filter_map(|row| self.pool.get(&row.song_id))
             .collect()
     }
 
     /// O(n) scan to find the index of a song ID in the queue.
     /// Centralized here so all callers use the same lookup.
     fn index_of(&self, song_id: &str) -> Option<usize> {
-        self.queue.song_ids.iter().position(|id| id == song_id)
+        self.queue.rows.iter().position(|r| r.song_id == song_id)
     }
 
-    /// Read-only access to the per-row `entry_id` array (parallel to
-    /// `queue.song_ids`). Used by `transform_songs_from_pool` so each
-    /// `QueueSongUIViewData` carries the row identifier the view layer
-    /// echoes back on right-click removal.
-    pub fn entry_ids(&self) -> &[u64] {
-        &self.entry_ids
+    /// Owned snapshot of every row's `entry_id`, in physical order. A test
+    /// convenience since the QueueRow collapse — production projections
+    /// iterate [`Self::rows`] directly.
+    #[cfg(test)]
+    pub(crate) fn entry_ids(&self) -> Vec<u64> {
+        self.queue.rows.iter().map(|r| r.entry_id).collect()
     }
 
     /// Look up the `entry_id` for a queue position. `None` if `index` is
     /// out of bounds.
     pub fn entry_id_at(&self, index: usize) -> Option<u64> {
-        self.entry_ids.get(index).copied()
+        self.queue.rows.get(index).map(|r| r.entry_id)
     }
 
     /// O(n) scan to find the queue position holding a given `entry_id`.
     pub fn index_of_entry(&self, entry_id: u64) -> Option<usize> {
-        self.entry_ids.iter().position(|&id| id == entry_id)
+        self.queue.rows.iter().position(|r| r.entry_id == entry_id)
     }
 
     /// Hand out `count` fresh, never-reused `entry_id`s.
@@ -332,15 +304,10 @@ impl QueueManager {
         (start..start + count as u64).collect()
     }
 
-    /// Test-only fast-path that replaces `song_ids` and reseeds the parallel
-    /// `entry_ids` in lockstep. Pool insertion is the caller's responsibility.
-    ///
-    /// Production code MUST NOT touch `queue.song_ids` directly — every
-    /// mutator pairs the song_ids change with the matching entry_ids work.
-    /// This helper exists so test fixtures don't have to copy-paste the
-    /// invariant-restoration ritual (and so a future contributor reading
-    /// the test code can't mistake the field-bypass idiom for production
-    /// usage).
+    /// Test-only fast-path that replaces the queue rows from bare song ids,
+    /// allocating fresh entry ids. Pool insertion is the caller's
+    /// responsibility. Keeps the `(Vec<String>, Option<usize>)` signature so
+    /// fixtures stay oblivious to the row representation.
     #[cfg(test)]
     pub(crate) fn replace_song_ids_for_test(
         &mut self,
@@ -348,10 +315,13 @@ impl QueueManager {
         current_index: Option<usize>,
     ) {
         let count = song_ids.len();
-        self.queue.song_ids = song_ids;
-        self.entry_ids = self.allocate_entry_ids(count);
-        self.queue.current_index = current_index;
-        self.rebuild_order_and_sync();
+        let fresh = self.allocate_entry_ids(count);
+        self.queue.rows = song_ids
+            .into_iter()
+            .zip(fresh)
+            .map(|(song_id, entry_id)| QueueRow { song_id, entry_id })
+            .collect();
+        self.rebuild_order_and_set_cursor(current_index);
     }
 
     /// Assign `original_position` to a batch of songs, continuing from the
@@ -360,12 +330,12 @@ impl QueueManager {
     fn assign_original_positions(&self, songs: &mut [Song]) {
         let next_pos = self
             .queue
-            .song_ids
+            .rows
             .iter()
-            .filter_map(|id| self.pool.get(id))
+            .filter_map(|row| self.pool.get(&row.song_id))
             .filter_map(|s| s.original_position)
             .max()
-            .map_or(self.queue.song_ids.len() as u32, |m| m + 1);
+            .map_or(self.queue.rows.len() as u32, |m| m + 1);
         for (i, song) in songs.iter_mut().enumerate() {
             song.original_position = Some(next_pos + i as u32);
         }
@@ -380,13 +350,15 @@ impl QueueManager {
         let count = songs.len();
         let fresh_entry_ids = self.allocate_entry_ids(count);
         let mut tx = self.write();
-        let start_idx = tx.queue.song_ids.len();
+        let start_idx = tx.queue.rows.len();
 
-        // Add IDs to ordering, songs to pool
-        for song in &songs {
-            tx.queue.song_ids.push(song.id.clone());
+        // Add rows to ordering, songs to pool
+        for (song, entry_id) in songs.iter().zip(fresh_entry_ids) {
+            tx.queue.rows.push(QueueRow {
+                song_id: song.id.clone(),
+                entry_id,
+            });
         }
-        tx.entry_ids.extend(fresh_entry_ids);
         tx.pool.insert_many(songs);
 
         // Extend order array with new indices
@@ -405,16 +377,21 @@ impl QueueManager {
         }
         let fresh_entry_ids = self.allocate_entry_ids(songs.len());
         let mut tx = self.write();
-        tx.queue.song_ids = songs.iter().map(|s| s.id.clone()).collect();
-        tx.entry_ids = fresh_entry_ids;
-        tx.queue.current_index = current_index;
+        tx.queue.rows = songs
+            .iter()
+            .zip(fresh_entry_ids)
+            .map(|(s, entry_id)| QueueRow {
+                song_id: s.id.clone(),
+                entry_id,
+            })
+            .collect();
         // Clear and rebuild pool
         tx.pool.clear();
         tx.pool.insert_many(songs);
         // Clear history on context switch (new album/playlist) — Spotify behavior
         tx.playback_history.clear();
-        // Rebuild order array and sync
-        tx.rebuild_order_and_sync();
+        // Rebuild order array and anchor the cursor on the requested row
+        tx.rebuild_order_and_set_cursor(current_index);
         // If shuffle is on, shuffle the new order
         if tx.queue.shuffle {
             tx.shuffle_order();
@@ -423,53 +400,26 @@ impl QueueManager {
     }
 
     pub fn remove_song(&mut self, index: usize) -> Result<NextTrackResetEffect> {
-        if index >= self.queue.song_ids.len() {
+        if index >= self.queue.rows.len() {
             return Ok(NextTrackResetEffect::new());
         }
         let mut tx = self.write();
-        let removed_id = tx.queue.song_ids.remove(index);
-        if index < tx.entry_ids.len() {
-            tx.entry_ids.remove(index);
-        }
+        let removed_id = tx.queue.rows.remove(index).song_id;
         // Only drop the pool entry when no other queue row still references
         // this song_id — a duplicate add keeps the pool alive for survivors.
-        if !tx.queue.song_ids.iter().any(|id| id == &removed_id) {
+        if !tx.queue.rows.iter().any(|r| r.song_id == removed_id) {
             tx.pool.remove(&removed_id);
         }
 
-        // Remove from order array and adjust indices
+        // Remove from order array and adjust indices. The physical playhead
+        // needs NO separate bookkeeping anymore: current_index() derives
+        // from order[current_order], and remove_from_order already moved the
+        // cursor onto the play-order slot the next surviving song slid into
+        // (removed-current case) or kept it on the same row (shifted-index
+        // cases). The old hand-derivation of current_index — and the
+        // shuffle-desync bug class it guarded against — is structurally
+        // gone.
         tx.remove_from_order(index);
-
-        // Adjust current_index to keep tracking the same playing song
-        if let Some(cur) = tx.queue.current_index {
-            if tx.queue.song_ids.is_empty() {
-                // Queue is now empty
-                tx.queue.current_index = None;
-            } else if index < cur {
-                // Removed before current — shift back
-                tx.queue.current_index = Some(cur - 1);
-            } else if index == cur {
-                // Removed the current song. remove_from_order has already moved
-                // current_order onto the play-order slot the next surviving
-                // upcoming song slid into, so derive current_index from
-                // order[current_order] to restore the invariant
-                // order[current_order] == current_index. Under a shuffled
-                // (non-identity) order a bare physical clamp (cur.min(len-1))
-                // diverges from the order clamp, desyncing the two and causing
-                // the next peek/transition to replay or strand survivors. The
-                // or_else physical clamp is a defensive fallback for the
-                // (unreachable while non-empty) current_order == None case.
-                tx.queue.current_index = tx
-                    .queue
-                    .current_order
-                    .and_then(|co| tx.queue.order.get(co).copied())
-                    .or_else(|| {
-                        let new_len = tx.queue.song_ids.len();
-                        Some(cur.min(new_len - 1))
-                    });
-            }
-            // index > cur: no adjustment needed
-        }
 
         tx.commit_save_all()
     }
@@ -546,39 +496,27 @@ impl QueueManager {
     /// Shuffle the queue order randomly.
     /// Preserves the currently playing song at its current index.
     pub fn shuffle_queue(&mut self) -> Result<NextTrackResetEffect> {
-        if self.queue.song_ids.is_empty() {
+        if self.queue.rows.is_empty() {
             return Ok(NextTrackResetEffect::new());
         }
 
         let mut tx = self.write();
         let current_song_id = tx
             .queue
-            .current_index
-            .and_then(|idx| tx.queue.song_ids.get(idx))
-            .cloned();
+            .current_index()
+            .and_then(|idx| tx.queue.rows.get(idx))
+            .map(|r| r.song_id.clone());
 
-        // Shuffle song_ids together with entry_ids so per-row identity
-        // follows the row through the shuffle. (Field-disjoint borrows
-        // don't see through the guard's Deref/DerefMut, so reborrow once
-        // and operate via `qm`.)
-        let qm: &mut QueueManager = &mut tx;
+        // Shuffle whole rows — per-row identity (entry_id) follows the row
+        // through the shuffle by construction.
         let mut rng = rand::rng();
-        let song_ids = std::mem::take(&mut qm.queue.song_ids);
-        let entry_ids = std::mem::take(&mut qm.entry_ids);
-        let mut pairs: Vec<(String, u64)> = song_ids.into_iter().zip(entry_ids).collect();
-        pairs.shuffle(&mut rng);
-        for (sid, eid) in pairs {
-            qm.queue.song_ids.push(sid);
-            qm.entry_ids.push(eid);
-        }
+        tx.queue.rows.shuffle(&mut rng);
 
-        // Update current_index to point to the same song after shuffle
-        if let Some(song_id) = current_song_id {
-            tx.queue.current_index = tx.index_of(&song_id);
-        }
-
-        // Rebuild order after physical reorder
-        tx.rebuild_order_and_sync();
+        // Re-anchor the cursor on the playing song's new physical position
+        // (first match by id, matching the historical behavior) and rebuild
+        // the order for the new physical layout.
+        let new_row = current_song_id.and_then(|song_id| tx.index_of(&song_id));
+        tx.rebuild_order_and_set_cursor(new_row);
         if tx.queue.shuffle {
             tx.shuffle_order();
         }
@@ -587,15 +525,16 @@ impl QueueManager {
     }
 
     /// Sort the queue by the given sort mode and direction.
-    /// Physically reorders `queue.song_ids` so next/previous follows sorted order.
-    /// Preserves the currently-playing song's position via `current_index` update.
+    /// Physically reorders `queue.rows` so next/previous follows sorted order.
+    /// Preserves the currently-playing song by re-anchoring the play cursor
+    /// onto its new physical position.
     /// `Random` delegates to `shuffle_queue` and ignores `ascending`.
     pub fn sort_queue(
         &mut self,
         mode: QueueSortMode,
         ascending: bool,
     ) -> Result<NextTrackResetEffect> {
-        if self.queue.song_ids.is_empty() {
+        if self.queue.rows.is_empty() {
             return Ok(NextTrackResetEffect::new());
         }
 
@@ -605,28 +544,25 @@ impl QueueManager {
 
         let mut tx = self.write();
         // The sort_by closure needs a disjoint borrow of `pool` and
-        // `queue.song_ids`. Field-disjoint borrows work through a real
+        // `queue.rows`. Field-disjoint borrows work through a real
         // `&mut QueueManager`, but not through the guard's Deref/DerefMut
         // (which hide field structure). Reborrow once and operate via `qm`.
         let qm: &mut QueueManager = &mut tx;
         let current_song_id = qm
             .queue
-            .current_index
-            .and_then(|idx| qm.queue.song_ids.get(idx))
-            .cloned();
+            .current_index()
+            .and_then(|idx| qm.queue.rows.get(idx))
+            .map(|r| r.song_id.clone());
 
-        // Sort song_ids + entry_ids as a pair so per-row identity follows
-        // the row through the sort. (`sort_by` on song_ids alone would
-        // leave the parallel entry_ids in stale positions.) Take the
-        // backing storage out via `mem::take` so the closure can borrow
-        // `pool` immutably without overlapping these mutable accesses.
-        let song_ids_buf = std::mem::take(&mut qm.queue.song_ids);
-        let entry_ids_buf = std::mem::take(&mut qm.entry_ids);
+        // Sort whole rows — per-row identity (entry_id) follows the row
+        // through the sort by construction. Take the backing storage out
+        // via `mem::take` so the closure can borrow `pool` immutably
+        // without overlapping these mutable accesses.
+        let mut rows_buf = std::mem::take(&mut qm.queue.rows);
         let pool = &qm.pool;
-        let mut pairs: Vec<(String, u64)> = song_ids_buf.into_iter().zip(entry_ids_buf).collect();
-        pairs.sort_by(|(a_id, _), (b_id, _)| {
-            let a = pool.get(a_id);
-            let b = pool.get(b_id);
+        rows_buf.sort_by(|ra, rb| {
+            let a = pool.get(&ra.song_id);
+            let b = pool.get(&rb.song_id);
             let cmp = match (a, b) {
                 (Some(a), Some(b)) => match mode {
                     QueueSortMode::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
@@ -656,18 +592,13 @@ impl QueueManager {
             };
             if ascending { cmp } else { cmp.reverse() }
         });
-        for (sid, eid) in pairs {
-            qm.queue.song_ids.push(sid);
-            qm.entry_ids.push(eid);
-        }
+        qm.queue.rows = rows_buf;
 
-        // Update current_index to point to the same song after sort
-        if let Some(song_id) = current_song_id {
-            qm.queue.current_index = qm.index_of(&song_id);
-        }
-
-        // Rebuild order after physical reorder
-        qm.rebuild_order_and_sync();
+        // Re-anchor the cursor on the playing song's new physical position
+        // (first match by id, matching the historical behavior) and rebuild
+        // the order for the new physical layout.
+        let new_row = current_song_id.and_then(|song_id| qm.index_of(&song_id));
+        qm.rebuild_order_and_set_cursor(new_row);
         if qm.queue.shuffle {
             qm.shuffle_order();
         }
@@ -693,9 +624,9 @@ impl QueueManager {
 
     pub fn get_current_song(&self) -> Option<Song> {
         self.queue
-            .current_index
-            .and_then(|idx| self.queue.song_ids.get(idx))
-            .and_then(|id| self.pool.get(id))
+            .current_index()
+            .and_then(|idx| self.queue.rows.get(idx))
+            .and_then(|row| self.pool.get(&row.song_id))
             .cloned()
     }
 
@@ -746,6 +677,41 @@ impl QueueManager {
         &self.queue
     }
 
+    /// The physical queue rows, in order. The sanctioned external read path
+    /// for per-row (song_id, entry_id) projections — keeps callers off the
+    /// raw field so the storage layout can change underneath.
+    pub fn rows(&self) -> &[QueueRow] {
+        &self.queue.rows
+    }
+
+    /// The physical row index of the playing song (see
+    /// [`Queue::current_index`]).
+    pub fn current_index(&self) -> Option<usize> {
+        self.queue.current_index()
+    }
+
+    /// The song id at physical queue position `index` (`None` when out of
+    /// range). External callers use this instead of reaching into the
+    /// queue's row storage, so the storage layout can change underneath.
+    pub fn song_id_at(&self, index: usize) -> Option<&str> {
+        self.queue.rows.get(index).map(|r| r.song_id.as_str())
+    }
+
+    /// Number of rows in the queue.
+    pub fn queue_len(&self) -> usize {
+        self.queue.rows.len()
+    }
+
+    /// Whether the queue has no rows.
+    pub fn is_queue_empty(&self) -> bool {
+        self.queue.rows.is_empty()
+    }
+
+    /// Owned snapshot of every row's song id, in physical order.
+    pub fn song_ids_snapshot(&self) -> Vec<String> {
+        self.queue.rows.iter().map(|r| r.song_id.clone()).collect()
+    }
+
     /// Directly reposition the playhead to `index` without triggering a
     /// gapless transition. Use for play-from-here, stop, and shuffle resets.
     ///
@@ -753,8 +719,7 @@ impl QueueManager {
     /// `transition_to_queued_internal()` instead.
     pub fn reposition_to_index(&mut self, index: Option<usize>) -> NextTrackResetEffect {
         let mut tx = self.write();
-        tx.queue.current_index = index;
-        tx.sync_current_order_to_index();
+        tx.set_cursor_to_row(index);
         tx.commit_no_save()
     }
 
@@ -776,17 +741,16 @@ impl QueueManager {
     /// out from under an active listen.
     pub fn reanchor_shuffle_to_index(&mut self, index: usize) -> NextTrackResetEffect {
         let mut tx = self.write();
-        tx.queue.current_index = Some(index);
-        tx.sync_current_order_to_index();
+        tx.set_cursor_to_row(Some(index));
         // A valid in-range `index` always resolves to an order slot (order[] is
         // a full permutation of 0..len), so current_order is Some here. If it
         // were None, shuffle_order would fall to its no-anchor branch and leave
         // the clicked track unanchored — re-creating the dead-end. Surface that
         // contract violation in tests rather than shipping a silent regression.
         debug_assert!(
-            tx.queue.current_order.is_some() || tx.queue.song_ids.is_empty(),
+            tx.queue.current_order.is_some() || tx.queue.rows.is_empty(),
             "reanchor_shuffle_to_index: index {index} absent from order[] — \
-             current_order desynced; caller must pass an in-range song_ids index"
+             current_order desynced; caller must pass an in-range row index"
         );
         if tx.queue.shuffle {
             // Re-anchor: `shuffle_order` moves `current_order` (now the
@@ -805,9 +769,9 @@ impl QueueManager {
 
     /// Move a song from one position to another in the queue.
     /// Used for drag-and-drop reordering.
-    /// Updates `current_index` so the currently-playing song isn't lost.
+    /// Re-anchors the play cursor so the currently-playing song isn't lost.
     pub fn move_item(&mut self, from: usize, to: usize) -> Result<NextTrackResetEffect> {
-        let len = self.queue.song_ids.len();
+        let len = self.queue.rows.len();
         if from >= len || to > len || from == to {
             return Ok(NextTrackResetEffect::new());
         }
@@ -822,17 +786,17 @@ impl QueueManager {
             None
         };
 
-        let item = tx.queue.song_ids.remove(from);
-        let insert_at = if from < to { to - 1 } else { to };
-        tx.queue.song_ids.insert(insert_at, item);
-        // Keep entry_ids parallel with song_ids so per-row identity follows
-        // the row through reorders.
-        let entry = tx.entry_ids.remove(from);
-        tx.entry_ids.insert(insert_at, entry);
+        // Track the playing song's physical position through the move so
+        // the cursor can re-anchor onto it after the order rebuild.
+        let cur_before = tx.queue.current_index();
 
-        // Adjust current_index to keep tracking the same song
-        if let Some(cur) = tx.queue.current_index {
-            tx.queue.current_index = Some(if cur == from {
+        let row = tx.queue.rows.remove(from);
+        let insert_at = if from < to { to - 1 } else { to };
+        // Per-row identity (entry_id) moves with the row by construction.
+        tx.queue.rows.insert(insert_at, row);
+
+        let cur_after = cur_before.map(|cur| {
+            if cur == from {
                 // The playing song itself was moved
                 insert_at
             } else if from < cur && cur <= insert_at {
@@ -843,16 +807,16 @@ impl QueueManager {
                 cur + 1
             } else {
                 cur
-            });
-        }
+            }
+        });
 
         // Rebuild order after move (indices changed). Under shuffle, splice
         // the moved row inside the existing order instead of reshuffling the
         // whole tail so the user's manual move sticks and next-up stays
         // deterministic.
         match play_order_eids {
-            Some(eids) => tx.rebuild_order_from_play_sequence(&eids),
-            None => tx.rebuild_order_and_sync(),
+            Some(eids) => tx.rebuild_order_from_play_sequence(&eids, cur_after),
+            None => tx.rebuild_order_and_set_cursor(cur_after),
         }
         debug!(
             "📦 [QUEUE] Moved item from {} to {} (inserted at {})",
@@ -880,30 +844,30 @@ impl QueueManager {
         entry_ids: &[u64],
         target: MoveBatchTarget,
     ) -> Result<NextTrackResetEffect> {
-        // Resolve entry_ids → (index, song_id, entry_id) triples,
-        // dropping unknown ids silently. Sort + dedup by index so a
-        // single entry_id passed twice still moves one row.
-        let mut to_move: Vec<(usize, String, u64)> = entry_ids
+        // Resolve entry_ids → (index, row) pairs, dropping unknown ids
+        // silently. Sort + dedup by index so a single entry_id passed
+        // twice still moves one row.
+        let mut to_move: Vec<(usize, QueueRow)> = entry_ids
             .iter()
             .filter_map(|&eid| {
                 let idx = self.index_of_entry(eid)?;
-                let song_id = self.queue.song_ids.get(idx)?.clone();
-                Some((idx, song_id, eid))
+                let row = self.queue.rows.get(idx)?.clone();
+                Some((idx, row))
             })
             .collect();
         if to_move.is_empty() {
             return Ok(NextTrackResetEffect::new());
         }
-        to_move.sort_unstable_by_key(|&(i, _, _)| i);
-        to_move.dedup_by_key(|&mut (i, _, _)| i);
+        to_move.sort_unstable_by_key(|&(i, _)| i);
+        to_move.dedup_by_key(|&mut (i, _)| i);
 
         // Resolve target → raw position BEFORE any removal. `End` and an
         // unknown `AboveEntry` both fall through to "append".
         let target_idx = match target {
-            MoveBatchTarget::AboveEntry(eid) => self
-                .index_of_entry(eid)
-                .unwrap_or(self.queue.song_ids.len()),
-            MoveBatchTarget::End => self.queue.song_ids.len(),
+            MoveBatchTarget::AboveEntry(eid) => {
+                self.index_of_entry(eid).unwrap_or(self.queue.rows.len())
+            }
+            MoveBatchTarget::End => self.queue.rows.len(),
         };
 
         // Capture the playing row's `entry_id` so current_index can be
@@ -912,8 +876,8 @@ impl QueueManager {
         // position-arithmetic cannot.
         let current_entry_id = self
             .queue
-            .current_index
-            .and_then(|i| self.entry_ids.get(i).copied());
+            .current_index()
+            .and_then(|i| self.queue.rows.get(i).map(|r| r.entry_id));
 
         let mut tx = self.write();
 
@@ -927,11 +891,10 @@ impl QueueManager {
         };
 
         // Remove rows in descending order so surviving indices stay valid.
-        let mut descending: Vec<usize> = to_move.iter().map(|&(i, _, _)| i).collect();
+        let mut descending: Vec<usize> = to_move.iter().map(|&(i, _)| i).collect();
         descending.sort_unstable_by(|a, b| b.cmp(a));
         for &i in &descending {
-            tx.queue.song_ids.remove(i);
-            tx.entry_ids.remove(i);
+            tx.queue.rows.remove(i);
         }
 
         // Post-removal insert position: shift the original target back by
@@ -939,26 +902,25 @@ impl QueueManager {
         let removed_before_target = descending.iter().filter(|&&i| i < target_idx).count();
         let insert_at = target_idx
             .saturating_sub(removed_before_target)
-            .min(tx.queue.song_ids.len());
+            .min(tx.queue.rows.len());
 
         // Insert in original ascending order so the moved block preserves
         // the user's selection ordering.
-        for (offset, (_, song_id, entry_id)) in to_move.iter().enumerate() {
-            let pos = insert_at + offset;
-            tx.queue.song_ids.insert(pos, song_id.clone());
-            tx.entry_ids.insert(pos, *entry_id);
+        for (offset, (_, row)) in to_move.iter().enumerate() {
+            tx.queue.rows.insert(insert_at + offset, row.clone());
         }
 
-        // Restore current_index by entry_id identity (duplicate-aware).
-        tx.queue.current_index =
-            current_entry_id.and_then(|eid| tx.entry_ids.iter().position(|&id| id == eid));
+        // Locate the playing row by entry_id identity (duplicate-aware) so
+        // the cursor re-anchors onto it after the order rebuild.
+        let cur_after =
+            current_entry_id.and_then(|eid| tx.queue.rows.iter().position(|r| r.entry_id == eid));
 
         // Order array depends on the physical positions. Under shuffle,
         // splice the moved rows inside the existing order (preserving the
         // random tail) instead of reshuffling; otherwise rebuild identity.
         match play_order_eids {
-            Some(eids) => tx.rebuild_order_from_play_sequence(&eids),
-            None => tx.rebuild_order_and_sync(),
+            Some(eids) => tx.rebuild_order_from_play_sequence(&eids, cur_after),
+            None => tx.rebuild_order_and_set_cursor(cur_after),
         }
 
         debug!(
@@ -981,28 +943,29 @@ impl QueueManager {
         let mut tx = self.write();
         let insert_pos = tx
             .queue
-            .current_index
-            .map_or(tx.queue.song_ids.len(), |idx| idx + 1);
+            .current_index()
+            .map_or(tx.queue.rows.len(), |idx| idx + 1);
 
-        let clamped = insert_pos.min(tx.queue.song_ids.len());
+        let clamped = insert_pos.min(tx.queue.rows.len());
 
-        // Insert IDs + entry_ids in reverse so they end up in original
-        // forward order at `clamped`.
-        for (song, eid) in songs.into_iter().zip(fresh_entry_ids).rev() {
-            tx.queue.song_ids.insert(clamped, song.id.clone());
-            tx.entry_ids.insert(clamped, eid);
+        // Insert rows in reverse so they end up in original forward order
+        // at `clamped`.
+        for (song, entry_id) in songs.into_iter().zip(fresh_entry_ids).rev() {
+            tx.queue.rows.insert(
+                clamped,
+                QueueRow {
+                    song_id: song.id.clone(),
+                    entry_id,
+                },
+            );
             tx.pool.insert(song);
         }
 
-        // Update order array for the insertion
+        // Update order array for the insertion. insert_into_order bumps
+        // the row indices inside `order` and the cursor where needed; the
+        // derived current_index follows automatically — the old manual
+        // "+= count" bookkeeping is structurally gone.
         tx.insert_into_order(clamped, count);
-
-        // Adjust current_index for songs inserted before it
-        if let Some(cur) = tx.queue.current_index
-            && clamped <= cur
-        {
-            tx.queue.current_index = Some(cur + count);
-        }
 
         debug!("📦 [QUEUE] Inserted songs after current (pos {})", clamped);
         tx.commit_save_all()
@@ -1015,7 +978,7 @@ impl QueueManager {
         index: usize,
         song: Song,
     ) -> Result<NextTrackResetEffect> {
-        let clamped = index.min(self.queue.song_ids.len());
+        let clamped = index.min(self.queue.rows.len());
         let _ = self.insert_songs_at(clamped, vec![song])?;
         let _ = self.reposition_to_index(Some(clamped));
         self.save_order()?;
@@ -1040,25 +1003,23 @@ impl QueueManager {
         let fresh_entry_ids = self.allocate_entry_ids(count);
 
         let mut tx = self.write();
-        let clamped = index.min(tx.queue.song_ids.len());
+        let clamped = index.min(tx.queue.rows.len());
 
-        // Insert in reverse so they end up in order at `clamped`. entry_ids
-        // ride along to keep the parallel arrays aligned.
-        for (song, eid) in songs.into_iter().zip(fresh_entry_ids).rev() {
-            tx.queue.song_ids.insert(clamped, song.id.clone());
-            tx.entry_ids.insert(clamped, eid);
+        // Insert rows in reverse so they end up in order at `clamped`.
+        for (song, entry_id) in songs.into_iter().zip(fresh_entry_ids).rev() {
+            tx.queue.rows.insert(
+                clamped,
+                QueueRow {
+                    song_id: song.id.clone(),
+                    entry_id,
+                },
+            );
             tx.pool.insert(song);
         }
 
-        // Update order array for the insertion
+        // Update order array for the insertion (cursor adjustments happen
+        // inside; the derived current_index follows automatically).
         tx.insert_into_order(clamped, count);
-
-        // Adjust current_index: if inserting before the playing song, shift it forward
-        if let Some(cur) = tx.queue.current_index
-            && clamped <= cur
-        {
-            tx.queue.current_index = Some(cur + count);
-        }
 
         debug!(
             "📦 [QUEUE] Inserted {} songs at position {}",
@@ -1120,6 +1081,671 @@ pub(crate) mod tests {
         (qm, temp)
     }
 
+    // ── Wire-compat + row-identity characterization (pre-QueueRow lock) ──
+
+    /// Snapshot the per-row `(song_id, entry_id)` pairs in physical order.
+    fn row_pairs(qm: &QueueManager) -> Vec<(String, u64)> {
+        qm.queue
+            .rows
+            .iter()
+            .map(|r| (r.song_id.clone(), r.entry_id))
+            .collect()
+    }
+
+    /// Bare song ids of a raw `Queue` (for reconcile tests that operate on
+    /// a `Queue` without a manager).
+    fn song_ids_of(q: &Queue) -> Vec<&str> {
+        q.rows.iter().map(|r| r.song_id.as_str()).collect()
+    }
+
+    /// Invariants that must hold after ANY queue mutation: rows and entry
+    /// ids stay length-aligned, `order` is a permutation of `0..len`, and
+    /// the playhead coupling `order[current_order] == current_index` holds.
+    pub(crate) fn assert_queue_invariants(qm: &QueueManager, label: &str) {
+        let len = qm.queue.rows.len();
+        assert_eq!(qm.queue.order.len(), len, "{label}: order length != len");
+        let mut seen = vec![false; len];
+        for &idx in qm.queue.order.iter() {
+            assert!(idx < len, "{label}: order entry {idx} out of range {len}");
+            assert!(!seen[idx], "{label}: order entry {idx} duplicated");
+            seen[idx] = true;
+        }
+        if let Some(co) = qm.queue.current_order {
+            assert!(co < len, "{label}: current_order {co} out of range");
+            assert_eq!(
+                qm.queue.current_index(),
+                Some(qm.queue.order[co]),
+                "{label}: order[current_order] != current_index"
+            );
+        }
+        if let Some(ci) = qm.queue.current_index() {
+            assert!(ci < len, "{label}: current_index {ci} out of range");
+        }
+    }
+
+    /// M1 lock: the external-reader accessors must stay semantically glued
+    /// to the queue's row storage — same ids, same length, same emptiness —
+    /// so the M2 storage flip cannot silently change accessor behavior.
+    #[test]
+    fn accessors_match_get_queue_song_ids() {
+        let songs: Vec<Song> = ["a", "b", "c"]
+            .iter()
+            .map(|id| make_test_song(id))
+            .collect();
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
+
+        assert_eq!(qm.queue_len(), 3);
+        assert!(!qm.is_queue_empty());
+        for i in 0..3 {
+            assert_eq!(
+                qm.song_id_at(i),
+                qm.get_queue().rows.get(i).map(|r| r.song_id.as_str())
+            );
+        }
+        assert_eq!(qm.song_id_at(3), None);
+        assert_eq!(qm.song_ids_snapshot(), song_ids_of(qm.get_queue()));
+
+        let _ = qm.remove_song(0).expect("remove");
+        assert_eq!(qm.queue_len(), 2);
+        assert_eq!(qm.song_id_at(0), Some("b"));
+
+        let _ = qm.remove_song(0).expect("remove");
+        let _ = qm.remove_song(0).expect("remove");
+        assert!(qm.is_queue_empty());
+        assert_eq!(qm.queue_len(), 0);
+        assert!(qm.song_ids_snapshot().is_empty());
+    }
+
+    /// C2: a `queue_order` blob written by the PRE-REFACTOR encoder (bytes
+    /// captured from main @ 03eb6ea7, derived `Encode` on the 8-field
+    /// `Queue`) must keep loading through both refactor phases: rows
+    /// reconstructed, runtime `entry_id`s reseeded `0..len`, playhead and
+    /// flags preserved, transient `queued` cleared.
+    #[test]
+    fn pre_refactor_queue_blob_still_loads() {
+        // song_ids ["a","b","c","d"], current_index Some(2), current_order
+        // Some(0), order [2,0,3,1], queued Some(1), shuffle true,
+        // repeat Playlist, consume false. NEVER regenerate.
+        const LEGACY_QUEUE_ORDER_BLOB: &[u8] = &[
+            4, 1, 97, 1, 98, 1, 99, 1, 100, // song_ids: ["a","b","c","d"]
+            1, 2, // current_index: Some(2)
+            1, 0, // current_order: Some(0)
+            4, 2, 0, 3, 1, // order: [2, 0, 3, 1]
+            1, 1, // queued: Some(1)
+            1, // shuffle: true
+            2, // repeat: Playlist
+            0, // consume: false
+        ];
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let storage = StateStorage::new(temp.path().join("queue.redb")).expect("temp storage");
+
+        // Matching pool blob. `Song`'s encode is untouched by this refactor
+        // (locked by `song_pool_bincode_golden`), so encoding the pool at
+        // runtime is legacy-faithful; only the QUEUE blob layout is at risk.
+        let songs: Vec<Song> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|id| make_test_song(id))
+            .collect();
+        let pool_blob = bincode_next::encode_to_vec(&songs, bincode_next::config::standard())
+            .expect("encode pool blob");
+
+        storage
+            .save_binary_batch(&[
+                (KEY_QUEUE_ORDER, LEGACY_QUEUE_ORDER_BLOB),
+                (KEY_QUEUE_SONGS, pool_blob.as_slice()),
+            ])
+            .expect("write legacy blobs");
+
+        let qm = QueueManager::new(storage).expect("legacy blob must load");
+
+        let ids = qm.song_ids_snapshot();
+        assert_eq!(ids, vec!["a", "b", "c", "d"]);
+        assert_eq!(qm.queue.current_index(), Some(2));
+        assert_eq!(qm.queue.order, vec![2, 0, 3, 1]);
+        assert_eq!(qm.queue.current_order, Some(0));
+        assert!(qm.queue.shuffle);
+        assert_eq!(qm.queue.repeat, RepeatMode::Playlist);
+        assert!(!qm.queue.consume);
+        // Gapless-prep transient — always cleared on load.
+        assert_eq!(qm.queue.queued, None);
+        // Runtime entry ids reseed fresh per launch, counter past them.
+        assert_eq!(qm.entry_ids(), vec![0, 1, 2, 3]);
+        assert_eq!(qm.next_entry_id, 4);
+        assert_queue_invariants(&qm, "legacy blob load");
+    }
+
+    /// M6 contract: the physical playhead is DERIVED — after any mutation,
+    /// `current_index()` equals `order[current_order]` by definition.
+    /// Tautological against the derived accessor (that is the point: there
+    /// is no stored field left to disagree, and a reintroduced stored
+    /// writer would fail to compile); kept as the executable statement of
+    /// the I3 invariant.
+    #[test]
+    fn current_index_is_derived_from_order_cursor() {
+        let songs: Vec<Song> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|id| make_test_song(id))
+            .collect();
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
+
+        let assert_derived = |qm: &QueueManager, label: &str| {
+            assert_eq!(
+                qm.queue.current_index(),
+                qm.queue
+                    .current_order
+                    .and_then(|co| qm.queue.order.get(co).copied()),
+                "{label}: derivation contract broken"
+            );
+        };
+
+        assert_derived(&qm, "seeded");
+        // Concrete-value pins (independent of the accessor body): the
+        // seeded identity order puts the cursor slot == physical index.
+        assert_eq!(qm.current_index(), Some(1));
+        let _ = qm.toggle_shuffle().expect("shuffle");
+        assert_derived(&qm, "shuffle");
+        // Anchored shuffle keeps the SAME physical row playing at order[0].
+        assert_eq!(qm.current_index(), Some(1));
+        assert_eq!(qm.queue.current_order, Some(0));
+        let _ = qm.get_next_song();
+        assert_derived(&qm, "next");
+        let _ = qm.move_item(0, 4).expect("move");
+        assert_derived(&qm, "move");
+        let _ = qm
+            .remove_song(qm.current_index().expect("cur"))
+            .expect("remove current");
+        assert_derived(&qm, "remove current");
+        let _ = qm.reposition_to_index(Some(0));
+        assert_derived(&qm, "reposition");
+        // Concrete pin: repositioning onto row 0 derives exactly Some(0).
+        assert_eq!(qm.current_index(), Some(0));
+    }
+
+    /// I11 characterization (Phase-2 gate): `current_index` is `Some` IFF
+    /// `current_order` is `Some`, across every mutator AND every navigation
+    /// path (next, previous incl. order-walk, peek→transition, reanchor,
+    /// reposition, drain-to-empty). This coupling is the precondition for
+    /// deriving `current_index` from `order[current_order]` in M6 — if it
+    /// ever splits, the derived encode of wire slot #2 would be lossy.
+    /// (The commit-path sentinel asserts the same iff on every write;
+    /// this test additionally covers the non-commit navigation setters.)
+    #[test]
+    fn playhead_coupling_holds_across_all_mutators() {
+        let coupled = |qm: &QueueManager, label: &str| {
+            assert_eq!(
+                qm.get_queue().current_index().is_some(),
+                qm.get_queue().current_order.is_some(),
+                "{label}: current_index/current_order Some-ness split"
+            );
+            assert_queue_invariants(qm, label);
+        };
+
+        let songs: Vec<Song> = ["a", "b", "c", "d", "e", "f"]
+            .iter()
+            .map(|id| make_test_song(id))
+            .collect();
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        coupled(&qm, "seeded");
+
+        // Mutator script (M0-style) + navigation extensions.
+        let _ = qm
+            .add_songs(vec![make_test_song("g"), make_test_song("h")])
+            .expect("add");
+        coupled(&qm, "add_songs");
+
+        let _ = qm.toggle_shuffle().expect("shuffle on");
+        coupled(&qm, "toggle_shuffle on");
+
+        let next = qm.get_next_song();
+        assert!(next.is_some(), "next under shuffle");
+        coupled(&qm, "get_next_song");
+
+        // peek → transition (the gapless path).
+        if let Some(peeked) = qm.peek_next_song() {
+            let _ = peeked.transition();
+        }
+        coupled(&qm, "peek+transition");
+
+        // peek → drop (abandoned prep).
+        drop(qm.peek_next_song());
+        coupled(&qm, "peek abandoned");
+
+        let _ = qm.move_item(0, 3).expect("move");
+        coupled(&qm, "move_item");
+
+        let _ = qm.sort_queue(QueueSortMode::Title, true).expect("sort");
+        coupled(&qm, "sort_queue");
+
+        // Previous via history.
+        qm.add_to_history_by_song_id("a");
+        let _ = qm.get_previous_song(qm.get_queue().current_index());
+        coupled(&qm, "previous (history)");
+
+        // Previous via order-walk (no history left).
+        qm.playback_history.clear();
+        let _ = qm.reposition_to_index(Some(3));
+        coupled(&qm, "reposition");
+        let _ = qm.get_previous_song(Some(3));
+        coupled(&qm, "previous (order-walk)");
+
+        let _ = qm.reanchor_shuffle_to_index(2);
+        coupled(&qm, "reanchor");
+
+        let _ = qm.toggle_shuffle().expect("shuffle off");
+        coupled(&qm, "toggle_shuffle off");
+
+        let _ = qm.reposition_to_index(None);
+        coupled(&qm, "reposition to None");
+        let _ = qm.reposition_to_index(Some(1));
+        coupled(&qm, "reposition to Some");
+
+        // Consume-drain to empty: both halves must land on None together.
+        let _ = qm.toggle_consume().expect("consume on");
+        coupled(&qm, "toggle_consume");
+        while !qm.is_queue_empty() {
+            let cur = qm.get_queue().current_index().unwrap_or(0);
+            let _ = qm.remove_song(cur).expect("drain");
+            coupled(&qm, "drain remove");
+        }
+        assert_eq!(qm.get_queue().current_index(), None);
+        assert_eq!(qm.get_queue().current_order, None);
+
+        // Refill after empty.
+        let _ = qm
+            .set_queue(vec![make_test_song("z1"), make_test_song("z2")], Some(1))
+            .expect("set_queue");
+        coupled(&qm, "set_queue after drain");
+    }
+
+    /// B1 (release-safe): EVERY queue mutator must leave `order` a full
+    /// permutation of `0..rows.len()` with the playhead coupling
+    /// `order[current_order] == current_index` intact. Plain asserts, so
+    /// this bites in `cargo test --release` too — the commit-path
+    /// `assert_order_consistent` sentinel is debug-only.
+    #[test]
+    fn every_mutator_keeps_rows_order_consistent() {
+        type Mutator = (&'static str, fn(&mut QueueManager));
+        let mutators: &[Mutator] = &[
+            ("add_songs", |qm| {
+                let _ = qm
+                    .add_songs(vec![make_test_song("n1"), make_test_song("n2")])
+                    .expect("add_songs");
+            }),
+            ("set_queue", |qm| {
+                let songs = vec![make_test_song("x"), make_test_song("y")];
+                let _ = qm.set_queue(songs, Some(1)).expect("set_queue");
+            }),
+            ("remove_song", |qm| {
+                let _ = qm.remove_song(2).expect("remove_song");
+            }),
+            ("remove_song_current", |qm| {
+                let cur = qm.get_queue().current_index().expect("current");
+                let _ = qm.remove_song(cur).expect("remove current");
+            }),
+            ("remove_song_by_id", |qm| {
+                let _ = qm.remove_song_by_id("dup").expect("remove_song_by_id");
+            }),
+            ("remove_songs_by_ids", |qm| {
+                let ids = vec!["a".to_string(), "dup".to_string()];
+                let _ = qm.remove_songs_by_ids(&ids).expect("remove_songs_by_ids");
+            }),
+            ("remove_entry_by_id", |qm| {
+                let eid = qm.entry_id_at(1).expect("entry at 1");
+                let _ = qm.remove_entry_by_id(eid).expect("remove_entry_by_id");
+            }),
+            ("remove_entries_by_ids", |qm| {
+                let eids: Vec<u64> = [0usize, 3]
+                    .iter()
+                    .filter_map(|&i| qm.entry_id_at(i))
+                    .collect();
+                let _ = qm.remove_entries_by_ids(&eids).expect("remove_entries");
+            }),
+            ("move_item", |qm| {
+                let _ = qm.move_item(0, 4).expect("move_item");
+            }),
+            ("move_batch_by_entry_ids", |qm| {
+                let eids: Vec<u64> = [4usize, 1]
+                    .iter()
+                    .filter_map(|&i| qm.entry_id_at(i))
+                    .collect();
+                let _ = qm
+                    .move_batch_by_entry_ids(&eids, MoveBatchTarget::End)
+                    .expect("move_batch");
+            }),
+            ("sort_queue", |qm| {
+                let _ = qm
+                    .sort_queue(QueueSortMode::Title, false)
+                    .expect("sort_queue");
+            }),
+            ("sort_queue_random", |qm| {
+                let _ = qm
+                    .sort_queue(QueueSortMode::Random, true)
+                    .expect("sort random");
+            }),
+            ("shuffle_queue", |qm| {
+                let _ = qm.shuffle_queue().expect("shuffle_queue");
+            }),
+            ("toggle_shuffle", |qm| {
+                let _ = qm.toggle_shuffle().expect("toggle_shuffle");
+            }),
+            ("toggle_consume", |qm| {
+                let _ = qm.toggle_consume().expect("toggle_consume");
+            }),
+            ("set_repeat", |qm| {
+                let _ = qm.set_repeat(RepeatMode::Playlist).expect("set_repeat");
+            }),
+            ("reposition_to_index", |qm| {
+                let _ = qm.reposition_to_index(Some(3));
+            }),
+            ("reposition_to_none", |qm| {
+                let _ = qm.reposition_to_index(None);
+            }),
+            ("reanchor_shuffle_to_index", |qm| {
+                let _ = qm.reanchor_shuffle_to_index(4);
+            }),
+            ("insert_after_current", |qm| {
+                let _ = qm
+                    .insert_after_current(vec![make_test_song("i1")])
+                    .expect("insert_after_current");
+            }),
+            ("insert_songs_at", |qm| {
+                let _ = qm
+                    .insert_songs_at(2, vec![make_test_song("i2"), make_test_song("i3")])
+                    .expect("insert_songs_at");
+            }),
+            ("insert_song_and_make_current", |qm| {
+                let _ = qm
+                    .insert_song_and_make_current(1, make_test_song("i4"))
+                    .expect("insert_song_and_make_current");
+            }),
+        ];
+
+        for shuffle in [false, true] {
+            for &(name, op) in mutators {
+                // 6 rows incl. a duplicated id so duplicate-aware paths run.
+                let mut songs: Vec<Song> = ["a", "b", "c", "d", "e"]
+                    .iter()
+                    .map(|id| make_test_song(id))
+                    .collect();
+                songs.push(make_test_song("dup"));
+                songs.push(make_test_song("dup"));
+                let (mut qm, _temp) = make_test_manager(songs, Some(2));
+                if shuffle {
+                    let _ = qm.toggle_shuffle().expect("preset shuffle");
+                    assert_queue_invariants(&qm, "preset shuffle");
+                }
+                op(&mut qm);
+                let label = format!("{name} (shuffle={shuffle})");
+                assert_queue_invariants(&qm, &label);
+            }
+        }
+    }
+
+    /// B2: the commit-path `assert_order_consistent` sentinel is
+    /// unbypassable — corrupting `order` under a live write guard must
+    /// panic the commit in debug builds.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "order length drifted from rows")]
+    fn commit_paths_assert_order_consistency() {
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+        let mut tx = qm.write();
+        tx.queue.order.corrupt_push_for_test(0); // deliberate corruption: length drift
+        let _ = tx.commit_no_save();
+    }
+
+    /// M2: the Decode placeholders (`entry_id = position` at decode time)
+    /// must be RESEEDED after `reconcile_loaded_queue` prunes rows — the
+    /// surviving rows carry dense `0..new_len` ids and the allocator starts
+    /// past them. Without the reseed, pruning a middle row leaves a gap
+    /// (ids 0,2) and a colliding allocator.
+    #[test]
+    fn decode_placeholder_entry_ids_are_reseeded_after_reconcile() {
+        // Queue blob lists [a, b, c] but the pool only holds [a, c] — row b
+        // is pruned by reconcile on load.
+        const QUEUE_BLOB_ABC: &[u8] = &[
+            3, 1, 97, 1, 98, 1, 99, // song_ids: ["a","b","c"]
+            1, 0, // current_index: Some(0)
+            1, 0, // current_order: Some(0)
+            3, 0, 1, 2, // order: [0, 1, 2]
+            0, // queued: None
+            0, // shuffle: false
+            0, // repeat: None
+            0, // consume: false
+        ];
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let storage = StateStorage::new(temp.path().join("queue.redb")).expect("temp storage");
+
+        let songs: Vec<Song> = ["a", "c"].iter().map(|id| make_test_song(id)).collect();
+        let pool_blob = bincode_next::encode_to_vec(&songs, bincode_next::config::standard())
+            .expect("encode pool blob");
+
+        storage
+            .save_binary_batch(&[
+                (KEY_QUEUE_ORDER, QUEUE_BLOB_ABC),
+                (KEY_QUEUE_SONGS, pool_blob.as_slice()),
+            ])
+            .expect("write blobs");
+
+        let qm = QueueManager::new(storage).expect("load");
+
+        assert_eq!(
+            row_pairs(&qm),
+            vec![("a".to_string(), 0), ("c".to_string(), 1)],
+            "surviving rows must carry dense reseeded entry ids, not decode placeholders"
+        );
+        assert_eq!(
+            qm.next_entry_id, 2,
+            "allocator starts past the reseeded range"
+        );
+        assert_queue_invariants(&qm, "reseed after reconcile");
+    }
+
+    /// A1: the behavior oracle for the whole QueueRow refactor. Chains every
+    /// row-reordering mutator and asserts the surviving `(song_id, entry_id)`
+    /// pairs after EACH step against hand-computed expectations. Physical row
+    /// identity is deterministic even with shuffle on — shuffle only permutes
+    /// the `order` array, never the rows.
+    #[test]
+    fn row_identity_survives_mutation_pipeline() {
+        let songs: Vec<Song> = ["a", "b", "c", "d", "e", "f"]
+            .iter()
+            .map(|id| make_test_song(id))
+            .collect();
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+
+        let pairs_of = |ids: &[(&str, u64)]| -> Vec<(String, u64)> {
+            ids.iter().map(|&(s, e)| (s.to_string(), e)).collect()
+        };
+
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[("a", 0), ("b", 1), ("c", 2), ("d", 3), ("e", 4), ("f", 5)])
+        );
+
+        // 1. add_songs: fresh rows get fresh monotonic entry ids (6, 7).
+        let _ = qm
+            .add_songs(vec![make_test_song("g"), make_test_song("h")])
+            .expect("add_songs");
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[
+                ("a", 0),
+                ("b", 1),
+                ("c", 2),
+                ("d", 3),
+                ("e", 4),
+                ("f", 5),
+                ("g", 6),
+                ("h", 7),
+            ]),
+            "after add_songs"
+        );
+        assert_queue_invariants(&qm, "after add_songs");
+
+        // 2. toggle_shuffle: permutes `order` only — physical rows untouched.
+        let _ = qm.toggle_shuffle().expect("toggle_shuffle");
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[
+                ("a", 0),
+                ("b", 1),
+                ("c", 2),
+                ("d", 3),
+                ("e", 4),
+                ("f", 5),
+                ("g", 6),
+                ("h", 7),
+            ]),
+            "after toggle_shuffle"
+        );
+        assert_queue_invariants(&qm, "after toggle_shuffle");
+
+        // 3. move_item(0, 3): row a lands at index 2 (insert_at = to - 1).
+        let _ = qm.move_item(0, 3).expect("move_item");
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[
+                ("b", 1),
+                ("c", 2),
+                ("a", 0),
+                ("d", 3),
+                ("e", 4),
+                ("f", 5),
+                ("g", 6),
+                ("h", 7),
+            ]),
+            "after move_item"
+        );
+        assert_queue_invariants(&qm, "after move_item");
+
+        // 4. move_batch_by_entry_ids([5, 1] → above entry 6): rows f and b
+        // move as a block, ascending original order, above row g.
+        let _ = qm
+            .move_batch_by_entry_ids(&[5, 1], MoveBatchTarget::AboveEntry(6))
+            .expect("move_batch");
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[
+                ("c", 2),
+                ("a", 0),
+                ("d", 3),
+                ("e", 4),
+                ("b", 1),
+                ("f", 5),
+                ("g", 6),
+                ("h", 7),
+            ]),
+            "after move_batch_by_entry_ids"
+        );
+        assert_queue_invariants(&qm, "after move_batch_by_entry_ids");
+
+        // 5. sort_queue(Title asc): titles are "Song {id}" so rows return to
+        // alphabetical id order — entry ids ride along with their rows.
+        let _ = qm
+            .sort_queue(QueueSortMode::Title, true)
+            .expect("sort_queue");
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[
+                ("a", 0),
+                ("b", 1),
+                ("c", 2),
+                ("d", 3),
+                ("e", 4),
+                ("f", 5),
+                ("g", 6),
+                ("h", 7),
+            ]),
+            "after sort_queue"
+        );
+        assert_queue_invariants(&qm, "after sort_queue");
+
+        // 6. remove_entry_by_id(2): row c disappears; every other pair intact.
+        let _ = qm.remove_entry_by_id(2).expect("remove_entry_by_id");
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[
+                ("a", 0),
+                ("b", 1),
+                ("d", 3),
+                ("e", 4),
+                ("f", 5),
+                ("g", 6),
+                ("h", 7),
+            ]),
+            "after remove_entry_by_id"
+        );
+        assert_queue_invariants(&qm, "after remove_entry_by_id");
+
+        // 7. toggle_consume + a consume-style removal of the head row —
+        // mode flags never disturb row identity.
+        let _ = qm.toggle_consume().expect("toggle_consume");
+        let _ = qm.remove_entry_by_id(0).expect("consume head row");
+        assert_eq!(
+            row_pairs(&qm),
+            pairs_of(&[("b", 1), ("d", 3), ("e", 4), ("f", 5), ("g", 6), ("h", 7),]),
+            "after consume removal"
+        );
+        assert_queue_invariants(&qm, "after consume removal");
+    }
+
+    /// A2: `order` keys rows by PHYSICAL POSITION, never by `entry_id`
+    /// value. After churn pushes entry ids past `len`, `order` must remain a
+    /// permutation of `0..len` while entry ids are large.
+    #[test]
+    fn order_indexes_rows_by_position_not_entry_id() {
+        let songs: Vec<Song> = ["a", "b", "c"]
+            .iter()
+            .map(|id| make_test_song(id))
+            .collect();
+        let (mut qm, _temp) = make_test_manager(songs, None);
+
+        // Churn: drop the first two rows, then append three fresh ones so
+        // allocated entry ids (3, 4, 5) exceed every valid row index.
+        let _ = qm.remove_song(0).expect("remove a");
+        let _ = qm.remove_song(0).expect("remove b");
+        let _ = qm
+            .add_songs(vec![
+                make_test_song("d"),
+                make_test_song("e"),
+                make_test_song("f"),
+            ])
+            .expect("add fresh rows");
+
+        assert_eq!(
+            row_pairs(&qm),
+            vec![
+                ("c".to_string(), 2),
+                ("d".to_string(), 3),
+                ("e".to_string(), 4),
+                ("f".to_string(), 5),
+            ]
+        );
+        let len = qm.queue.rows.len();
+        let max_entry = qm.entry_ids().into_iter().max().expect("entries");
+        assert!(
+            max_entry >= len as u64,
+            "churn must push entry ids past the index range for this test to bite"
+        );
+
+        // `order` stays a permutation of 0..len (positions), untouched by
+        // the large entry-id VALUES living on the same rows.
+        assert_queue_invariants(&qm, "after churn");
+        let mut sorted = qm.queue.order.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (0..len).collect::<Vec<_>>());
+
+        // Position→entry and entry→position lookups agree on every row.
+        for (pos, &(_, eid)) in row_pairs(&qm).iter().enumerate() {
+            assert_eq!(qm.entry_id_at(pos), Some(eid));
+            assert_eq!(qm.index_of_entry(eid), Some(pos));
+        }
+    }
+
     /// Firmium-trap guard (one-shot Shuffle Play): permuting the list with
     /// [`OneShotShuffle`] and handing it to `set_queue` must NEVER flip the
     /// persistent shuffle MODE flag (`queue.shuffle`) — in either preset state —
@@ -1150,7 +1776,7 @@ pub(crate) mod tests {
                 qm.queue.shuffle, preset,
                 "a one-shot shuffle must not write the persistent shuffle mode flag (preset={preset})"
             );
-            let got: BTreeSet<String> = qm.queue.song_ids.iter().cloned().collect();
+            let got: BTreeSet<String> = qm.song_ids_snapshot().iter().cloned().collect();
             assert_eq!(
                 got, expected,
                 "the shuffled queue preserves the song multiset"
@@ -1174,7 +1800,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         // song_ids[0] ("a") sits at the LAST order slot.
-        qm.queue.order = vec![1, 2, 3, 0];
+        qm.queue.order = vec![1, 2, 3, 0].into();
 
         let _ = qm.reposition_to_index(Some(0));
         assert_eq!(qm.queue.current_order, Some(3));
@@ -1199,17 +1825,17 @@ pub(crate) mod tests {
         qm.queue.shuffle = true;
         // Clicked song_ids[0] ("a") starts at the LAST order slot — the exact
         // dead-end position.
-        qm.queue.order = vec![1, 2, 3, 0];
+        qm.queue.order = vec![1, 2, 3, 0].into();
 
         let _ = qm.reanchor_shuffle_to_index(0);
 
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.queue.current_index(), Some(0));
         assert_eq!(qm.queue.current_order, Some(0));
         assert_eq!(qm.queue.order[0], 0, "clicked track anchored at head");
 
         // Order is still a full permutation of every song index — no track
         // dropped, none duplicated.
-        let mut sorted = qm.queue.order.clone();
+        let mut sorted = qm.queue.order.to_vec();
         sorted.sort_unstable();
         assert_eq!(sorted, vec![0, 1, 2, 3]);
 
@@ -1235,7 +1861,7 @@ pub(crate) mod tests {
 
         let _ = qm.reanchor_shuffle_to_index(2);
 
-        assert_eq!(qm.queue.current_index, Some(2));
+        assert_eq!(qm.queue.current_index(), Some(2));
         assert_eq!(qm.queue.current_order, Some(2));
         assert_eq!(
             qm.queue.order,
@@ -1254,7 +1880,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, None);
 
         let _ = qm.move_item(0, 2).unwrap();
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["b", "a", "c"]);
     }
 
@@ -1268,7 +1894,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, None);
 
         let _ = qm.move_item(2, 0).unwrap();
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["c", "a", "b"]);
     }
 
@@ -1278,7 +1904,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, None);
 
         let _ = qm.move_item(1, 1).unwrap();
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["a", "b"]);
     }
 
@@ -1288,7 +1914,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, None);
 
         let _ = qm.move_item(5, 0).unwrap();
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["a", "b"]);
     }
 
@@ -1302,8 +1928,8 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         let _ = qm.move_item(0, 2).unwrap();
-        assert_eq!(qm.queue.current_index, Some(1));
-        assert_eq!(qm.queue.song_ids[1], "a");
+        assert_eq!(qm.queue.current_index(), Some(1));
+        assert_eq!(qm.rows()[1].song_id, "a");
     }
 
     #[test]
@@ -1316,8 +1942,8 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(2));
 
         let _ = qm.move_item(2, 0).unwrap();
-        assert_eq!(qm.queue.current_index, Some(0));
-        assert_eq!(qm.queue.song_ids[0], "c");
+        assert_eq!(qm.queue.current_index(), Some(0));
+        assert_eq!(qm.rows()[0].song_id, "c");
     }
 
     #[test]
@@ -1330,8 +1956,8 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(1));
 
         let _ = qm.move_item(0, 2).unwrap();
-        assert_eq!(qm.queue.current_index, Some(0));
-        assert_eq!(qm.queue.song_ids[0], "b");
+        assert_eq!(qm.queue.current_index(), Some(0));
+        assert_eq!(qm.rows()[0].song_id, "b");
     }
 
     #[test]
@@ -1344,8 +1970,8 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(1));
 
         let _ = qm.move_item(2, 0).unwrap();
-        assert_eq!(qm.queue.current_index, Some(2));
-        assert_eq!(qm.queue.song_ids[2], "b");
+        assert_eq!(qm.queue.current_index(), Some(2));
+        assert_eq!(qm.rows()[2].song_id, "b");
     }
 
     #[test]
@@ -1355,7 +1981,7 @@ pub(crate) mod tests {
 
         // from=0, to=2 (== len) means "place after the last item"
         let _ = qm.move_item(0, 2).unwrap();
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["b", "a"]);
     }
 
@@ -1368,7 +1994,7 @@ pub(crate) mod tests {
     #[test]
     fn move_batch_by_entry_ids_above_target_collects_block() {
         let (mut qm, _t) = make_test_manager(songs_n(5), None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         // Move s0, s2, s4 to above s1 → block lands at position 0
         // (s1's index 1 minus 1 row removed before it = 0).
@@ -1379,7 +2005,7 @@ pub(crate) mod tests {
             )
             .unwrap();
 
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["s0", "s2", "s4", "s1", "s3"]);
         assert_eq!(
             qm.entry_ids(),
@@ -1391,13 +2017,13 @@ pub(crate) mod tests {
     #[test]
     fn move_batch_by_entry_ids_to_end_appends_block() {
         let (mut qm, _t) = make_test_manager(songs_n(4), None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         let _ = qm
             .move_batch_by_entry_ids(&[eids[0], eids[2]], MoveBatchTarget::End)
             .unwrap();
 
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["s1", "s3", "s0", "s2"]);
         assert_eq!(qm.entry_ids(), &[eids[1], eids[3], eids[0], eids[2]]);
     }
@@ -1405,42 +2031,42 @@ pub(crate) mod tests {
     #[test]
     fn move_batch_by_entry_ids_unknown_ids_silently_skipped() {
         let (mut qm, _t) = make_test_manager(songs_n(3), None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         // 9999 is a fresh u64 that hasn't been handed out.
         let _ = qm
             .move_batch_by_entry_ids(&[eids[0], 9999, eids[2]], MoveBatchTarget::End)
             .unwrap();
 
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["s1", "s0", "s2"]);
     }
 
     #[test]
     fn move_batch_by_entry_ids_empty_is_noop() {
         let (mut qm, _t) = make_test_manager(songs_n(3), None);
-        let before_ids = qm.queue.song_ids.clone();
-        let before_eids = qm.entry_ids().to_vec();
+        let before_ids = qm.song_ids_snapshot();
+        let before_eids = qm.entry_ids();
 
         let _ = qm
             .move_batch_by_entry_ids(&[], MoveBatchTarget::End)
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, before_ids);
+        assert_eq!(qm.song_ids_snapshot(), before_ids);
         assert_eq!(qm.entry_ids(), before_eids.as_slice());
     }
 
     #[test]
     fn move_batch_by_entry_ids_dedups_repeated_input() {
         let (mut qm, _t) = make_test_manager(songs_n(3), None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         // Same entry_id passed twice → resolves to one move.
         let _ = qm
             .move_batch_by_entry_ids(&[eids[0], eids[0]], MoveBatchTarget::End)
             .unwrap();
 
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["s1", "s2", "s0"]);
     }
 
@@ -1448,14 +2074,14 @@ pub(crate) mod tests {
     fn move_batch_by_entry_ids_preserves_current_song_through_shift() {
         // s1 playing; move s0 to end → s1 shifts to index 0 but stays current.
         let (mut qm, _t) = make_test_manager(songs_n(4), Some(1));
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         let _ = qm
             .move_batch_by_entry_ids(&[eids[0]], MoveBatchTarget::End)
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["s1", "s2", "s3", "s0"]);
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.song_ids_snapshot(), vec!["s1", "s2", "s3", "s0"]);
+        assert_eq!(qm.queue.current_index(), Some(0));
         assert_eq!(qm.entry_id_at(0), Some(eids[1]));
     }
 
@@ -1463,14 +2089,14 @@ pub(crate) mod tests {
     fn move_batch_by_entry_ids_preserves_current_when_current_is_moved() {
         // s2 playing; move s1, s2 to end → s2 still current at new position.
         let (mut qm, _t) = make_test_manager(songs_n(4), Some(2));
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         let _ = qm
             .move_batch_by_entry_ids(&[eids[1], eids[2]], MoveBatchTarget::End)
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["s0", "s3", "s1", "s2"]);
-        assert_eq!(qm.queue.current_index, Some(3));
+        assert_eq!(qm.song_ids_snapshot(), vec!["s0", "s3", "s1", "s2"]);
+        assert_eq!(qm.queue.current_index(), Some(3));
         assert_eq!(qm.entry_id_at(3), Some(eids[2]));
     }
 
@@ -1483,14 +2109,14 @@ pub(crate) mod tests {
             make_test_song("a"),
         ];
         let (mut qm, _t) = make_test_manager(songs, None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         // Move only the FIRST "a" to end; the second "a" stays put.
         let _ = qm
             .move_batch_by_entry_ids(&[eids[0]], MoveBatchTarget::End)
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["b", "a", "a"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["b", "a", "a"]);
         assert_eq!(
             qm.entry_ids(),
             &[eids[1], eids[2], eids[0]],
@@ -1504,19 +2130,19 @@ pub(crate) mod tests {
         // mutation shifted positions. The batch move resolves entry_ids
         // freshly under its own lock and lands rows correctly.
         let (mut qm, _t) = make_test_manager(songs_n(5), None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
         let target_eid = eids[2];
 
         // External insert shifts s2 from index 2 to index 3.
         let _ = qm.insert_songs_at(0, vec![make_test_song("X")]).unwrap();
-        assert_eq!(qm.queue.song_ids[3], "s2");
+        assert_eq!(qm.rows()[3].song_id, "s2");
 
         // The pre-shift entry_id still resolves to s2.
         let _ = qm
             .move_batch_by_entry_ids(&[target_eid], MoveBatchTarget::End)
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids.last(), Some(&"s2".to_string()));
+        assert_eq!(qm.song_ids_snapshot().last(), Some(&"s2".to_string()));
     }
 
     #[test]
@@ -1526,7 +2152,7 @@ pub(crate) mod tests {
         // count before it (1 → s1), so insert_at = 1. Result is the
         // original order (effectively a no-op for a contiguous run).
         let (mut qm, _t) = make_test_manager(songs_n(5), None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         let _ = qm
             .move_batch_by_entry_ids(
@@ -1535,7 +2161,7 @@ pub(crate) mod tests {
             )
             .unwrap();
 
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        let ids = qm.song_ids_snapshot();
         assert_eq!(ids, vec!["s0", "s1", "s2", "s3", "s4"]);
     }
 
@@ -1558,8 +2184,8 @@ pub(crate) mod tests {
         let _ = qm.move_item(3, 1).unwrap();
 
         // The play-order is the SAME multiset of row indices (a permutation).
-        let mut sorted_before = before_order.clone();
-        let mut sorted_after = qm.queue.order.clone();
+        let mut sorted_before = before_order.to_vec();
+        let mut sorted_after = qm.queue.order.to_vec();
         sorted_before.sort();
         sorted_after.sort();
         assert_eq!(sorted_before, sorted_after, "order must stay a permutation");
@@ -1587,7 +2213,7 @@ pub(crate) mod tests {
         // Force qm2 to the same initial shuffled order as qm BEFORE its move,
         // then apply the identical move.
         qm2.queue.order = before_order.clone();
-        qm2.sync_current_order_to_index();
+        qm2.set_cursor_to_row(Some(0));
         let _ = qm2.move_item(3, 1).unwrap();
         let next2 = qm2
             .queue
@@ -1608,7 +2234,7 @@ pub(crate) mod tests {
             .collect();
         let (mut qm, _t) = make_test_manager(songs, Some(0));
         let _ = qm.toggle_shuffle().unwrap();
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         let before_play_eids = qm.capture_play_order_entry_ids();
         let before_order = qm.queue.order.clone();
@@ -1619,8 +2245,8 @@ pub(crate) mod tests {
             .unwrap();
 
         // Still a valid permutation.
-        let mut sorted_before = before_order.clone();
-        let mut sorted_after = qm.queue.order.clone();
+        let mut sorted_before = before_order.to_vec();
+        let mut sorted_after = qm.queue.order.to_vec();
         sorted_before.sort();
         sorted_after.sort();
         assert_eq!(sorted_before, sorted_after);
@@ -1647,7 +2273,7 @@ pub(crate) mod tests {
             "current must remain anchored at the head of the play order",
         );
         // current_index still resolves the same song.
-        let ci = qm.queue.current_index.unwrap();
+        let ci = qm.queue.current_index().unwrap();
         assert_eq!(qm.queue.order[qm.queue.current_order.unwrap()], ci);
     }
 
@@ -1663,8 +2289,8 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(2)); // playing "c"
 
         let _ = qm.remove_song(0).unwrap(); // remove "a"
-        assert_eq!(qm.queue.current_index, Some(1)); // "c" shifted from 2→1
-        assert_eq!(qm.queue.song_ids[1], "c");
+        assert_eq!(qm.queue.current_index(), Some(1)); // "c" shifted from 2→1
+        assert_eq!(qm.rows()[1].song_id, "c");
     }
 
     #[test]
@@ -1677,8 +2303,8 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(0)); // playing "a"
 
         let _ = qm.remove_song(2).unwrap(); // remove "c"
-        assert_eq!(qm.queue.current_index, Some(0)); // unchanged
-        assert_eq!(qm.queue.song_ids[0], "a");
+        assert_eq!(qm.queue.current_index(), Some(0)); // unchanged
+        assert_eq!(qm.rows()[0].song_id, "a");
     }
 
     #[test]
@@ -1691,7 +2317,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(2)); // playing "c" (last)
 
         let _ = qm.remove_song(2).unwrap(); // remove "c"
-        assert_eq!(qm.queue.current_index, Some(1)); // clamped to last valid
+        assert_eq!(qm.queue.current_index(), Some(1)); // clamped to last valid
     }
 
     #[test]
@@ -1700,8 +2326,8 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         let _ = qm.remove_song(0).unwrap();
-        assert_eq!(qm.queue.current_index, None);
-        assert!(qm.queue.song_ids.is_empty());
+        assert_eq!(qm.queue.current_index(), None);
+        assert!(qm.song_ids_snapshot().is_empty());
     }
 
     #[test]
@@ -1719,8 +2345,8 @@ pub(crate) mod tests {
         let _ = qm.remove_song(0).unwrap(); // remove "b" → current becomes 2
         let _ = qm.remove_song(0).unwrap(); // remove "c" → current becomes 1
 
-        assert_eq!(qm.queue.current_index, Some(1));
-        assert_eq!(qm.queue.song_ids[1], "e");
+        assert_eq!(qm.queue.current_index(), Some(1));
+        assert_eq!(qm.rows()[1].song_id, "e");
     }
 
     // SongPool integration tests
@@ -1745,9 +2371,17 @@ pub(crate) mod tests {
 
     fn queue_with(song_ids: &[&str], current_index: Option<usize>) -> Queue {
         let mut q = Queue::default();
-        q.song_ids = song_ids.iter().map(|s| s.to_string()).collect();
-        q.order = (0..song_ids.len()).collect();
-        q.current_index = current_index;
+        q.rows = song_ids
+            .iter()
+            .enumerate()
+            .map(|(i, s)| QueueRow {
+                song_id: s.to_string(),
+                entry_id: i as u64,
+            })
+            .collect();
+        q.order = PlayOrder::identity(song_ids.len());
+        // Identity order: the cursor slot equals the physical index, and
+        // current_index() derives from it.
         q.current_order = current_index;
         q
     }
@@ -1760,9 +2394,9 @@ pub(crate) mod tests {
 
         let dirty = reconcile_loaded_queue(&mut q, &pool);
         assert!(dirty);
-        assert_eq!(q.song_ids, vec!["A", "C", "D"]);
+        assert_eq!(song_ids_of(&q), vec!["A", "C", "D"]);
         // C followed by remap: was index 2, now index 1 (NOT clamped/None).
-        assert_eq!(q.current_index, Some(1));
+        assert_eq!(q.current_index(), Some(1));
         // order is a valid permutation of 0..3 with no entry >= 3.
         assert!(order_is_identity_permutation(&q.order, 3));
         assert!(q.order.iter().all(|&i| i < 3));
@@ -1779,18 +2413,21 @@ pub(crate) mod tests {
 
         let dirty = reconcile_loaded_queue(&mut q, &pool);
         assert!(dirty);
-        assert_eq!(q.song_ids, vec!["A", "B", "D", "E"]);
+        assert_eq!(song_ids_of(&q), vec!["A", "B", "D", "E"]);
         // Adjacent survivor, NOT Some(3) (the tail).
-        assert_eq!(q.current_index, Some(2));
+        assert_eq!(q.current_index(), Some(2));
         // Resolves to D, not E.
-        assert_eq!(q.song_ids[q.current_index.unwrap()], "D");
+        assert_eq!(q.rows[q.current_index().unwrap()].song_id, "D");
         // Invariant + sync: order[current_order] == current_index.
         assert_eq!(q.current_order, Some(2));
-        assert_eq!(q.order[q.current_order.unwrap()], q.current_index.unwrap());
+        assert_eq!(
+            q.order[q.current_order.unwrap()],
+            q.current_index().unwrap()
+        );
         // Forward reachability of the tail: order=[0,1,2,3] so the next
         // forward step (order[current_order+1]) maps to song_ids[3] == "E".
         assert_eq!(q.order, vec![0, 1, 2, 3]);
-        assert_eq!(q.song_ids[q.order[q.current_order.unwrap() + 1]], "E");
+        assert_eq!(q.rows[q.order[q.current_order.unwrap() + 1]].song_id, "E");
     }
 
     #[test]
@@ -1799,12 +2436,14 @@ pub(crate) mod tests {
         let pool = pool_with(&["A", "B"]);
 
         let dirty = reconcile_loaded_queue(&mut q, &pool);
-        // Index 7 is out of range for the rebuilt order; current_index must
-        // land within [0, 2).
+        // Cursor 7 is out of range for the 2-row order: the repair drops the
+        // playhead entirely (cursor-anchored model — there is no stored
+        // physical index to salvage) and flags the queue dirty. A regression
+        // that leaves the stale out-of-range cursor in place must fail HERE,
+        // not later at a write-guard commit assert.
         assert!(dirty);
-        if let Some(i) = q.current_index {
-            assert!(i < 2, "current_index {i} not clamped");
-        }
+        assert_eq!(q.current_order, None, "out-of-range cursor must be dropped");
+        assert_eq!(q.current_index(), None);
     }
 
     #[test]
@@ -1814,8 +2453,8 @@ pub(crate) mod tests {
 
         let dirty = reconcile_loaded_queue(&mut q, &pool);
         assert!(dirty);
-        assert!(q.song_ids.is_empty());
-        assert_eq!(q.current_index, None);
+        assert!(q.rows.is_empty());
+        assert_eq!(q.current_index(), None);
         assert!(q.order.is_empty());
         assert_eq!(q.current_order, None);
     }
@@ -1839,8 +2478,8 @@ pub(crate) mod tests {
 
         let dirty = reconcile_loaded_queue(&mut q, &pool);
         assert!(!dirty);
-        assert_eq!(q.song_ids, vec!["A", "B", "C"]);
-        assert_eq!(q.current_index, Some(1));
+        assert_eq!(song_ids_of(&q), vec!["A", "B", "C"]);
+        assert_eq!(q.current_index(), Some(1));
     }
 
     #[test]
@@ -1857,8 +2496,8 @@ pub(crate) mod tests {
 
         // new() must recover (Ok) rather than propagate Err.
         let qm = QueueManager::new(storage).expect("new must degrade to empty, not abort");
-        assert!(qm.get_queue().song_ids.is_empty());
-        assert_eq!(qm.get_queue().current_index, None);
+        assert!(qm.is_queue_empty());
+        assert_eq!(qm.get_queue().current_index(), None);
     }
 
     #[test]
@@ -1877,8 +2516,8 @@ pub(crate) mod tests {
         }
 
         let qm2 = QueueManager::new(storage).expect("reload");
-        assert_eq!(qm2.get_queue().song_ids, vec!["a", "b"]);
-        assert_eq!(qm2.get_queue().current_index, Some(0));
+        assert_eq!(qm2.song_ids_snapshot(), vec!["a", "b"]);
+        assert_eq!(qm2.get_queue().current_index(), Some(0));
     }
 
     #[test]
@@ -1915,8 +2554,8 @@ pub(crate) mod tests {
         // Load via bincode
         let raw_order: Option<Queue> = qm.storage.load_binary(KEY_QUEUE_ORDER).unwrap();
         let queue = raw_order.unwrap();
-        assert_eq!(queue.song_ids, vec!["x", "y"]);
-        assert_eq!(queue.current_index, Some(0));
+        assert_eq!(song_ids_of(&queue), vec!["x", "y"]);
+        assert_eq!(queue.current_index(), Some(0));
     }
 
     // ── Order Array Tests ──
@@ -1993,7 +2632,7 @@ pub(crate) mod tests {
         let result = peeked.transition();
         assert_eq!(result.new_index, 1);
         assert_eq!(result.old_index, Some(0));
-        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.current_index(), Some(1));
         assert_eq!(qm.queue.current_order, Some(1));
     }
 
@@ -2088,25 +2727,25 @@ pub(crate) mod tests {
 
         // Order should now be [0, 1, 2] (indices adjusted)
         assert_eq!(qm.queue.order, vec![0, 1, 2]);
-        assert_eq!(qm.queue.song_ids, vec!["a", "c", "d"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "c", "d"]);
     }
 
     // ── QUEUE-1: removing the playing row under shuffle must keep the
     //    invariant order[current_order] == current_index AND reach every
     //    still-upcoming survivor exactly once before stopping (no replay,
     //    no strand). These tests drain via get_next_song() and assert the
-    //    EXACT play sequence so the bare sync_current_order_to_index()
-    //    one-liner (which strands / over-plays) cannot pass.
+    //    EXACT play sequence so a bare first-match row re-sync (the
+    //    historically rejected fix, which strands / over-plays) cannot pass.
 
     /// Drain the queue from the current song: push the current song id, then
     /// repeatedly call get_next_song() collecting each id until None (capped to
     /// avoid spinning under repeat modes). Returns the full play sequence.
     fn drain_play_sequence(qm: &mut QueueManager, cap: usize) -> Vec<String> {
         let mut seq = Vec::new();
-        if let Some(idx) = qm.queue.current_index
-            && let Some(id) = qm.queue.song_ids.get(idx)
+        if let Some(idx) = qm.queue.current_index()
+            && let Some(id) = qm.song_id_at(idx)
         {
-            seq.push(id.clone());
+            seq.push(id.to_owned());
         }
         for _ in 0..cap {
             match qm.get_next_song() {
@@ -2131,9 +2770,10 @@ pub(crate) mod tests {
     /// STRANDING DISCRIMINATOR. order=[0,2,1], playing s0 (current_order=0).
     /// Upcoming survivors after removing s0 are s2 (order pos 1) then s1
     /// (order pos 2). The correct derive fix drains to exactly [s2, s1]. The
-    /// rejected bare sync_current_order_to_index() one-liner STRANDS s2 and
+    /// historically rejected bare first-match row re-sync STRANDS s2 and
     /// drains to only [s1]. This is the test that enforces the spec's
-    /// acceptance bar "do NOT ship the bare one-liner alone".
+    /// acceptance bar "do NOT ship the bare one-liner alone". (Post-M6 the
+    /// derive IS the only possible behavior — this pins it forever.)
     #[test]
     fn remove_current_under_shuffle_strands_with_bare_oneliner() {
         let songs = vec![
@@ -2145,21 +2785,20 @@ pub(crate) mod tests {
         qm.queue.shuffle = true;
         qm.queue.consume = false;
         qm.queue.repeat = RepeatMode::None;
-        qm.queue.order = vec![0, 2, 1];
-        qm.queue.current_index = Some(0); // order[0] == 0 == s0, invariant holds
-        qm.queue.current_order = Some(0);
+        qm.queue.order = vec![0, 2, 1].into();
+        qm.queue.current_order = Some(0); // order[0] == 0 == s0 playing
 
         let _ = qm.remove_song(0).unwrap(); // remove playing s0
         // song_ids after removal: [s1, s2]
-        assert_eq!(qm.queue.song_ids, vec!["s1", "s2"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["s1", "s2"]);
 
         // (a) invariant restored
         let co = qm.queue.current_order.expect("current_order set");
-        let ci = qm.queue.current_index.expect("current_index set");
+        let ci = qm.queue.current_index().expect("current_index set");
         assert_eq!(qm.queue.order[co], ci, "invariant order[co]==ci broken");
 
         // (b) no immediate replay of the removed/current song
-        let cur_id = qm.queue.song_ids[ci].clone();
+        let cur_id = qm.rows()[ci].song_id.clone();
         if let Some(peek) = qm.peek_next_song() {
             assert_ne!(peek.song().id, cur_id, "peek replays the current song");
         }
@@ -2192,21 +2831,20 @@ pub(crate) mod tests {
         qm.queue.shuffle = true;
         qm.queue.consume = false;
         qm.queue.repeat = RepeatMode::None;
-        qm.queue.order = vec![2, 1, 0, 3];
-        qm.queue.current_index = Some(1); // order[1] == 1 == s1, invariant holds
-        qm.queue.current_order = Some(1);
+        qm.queue.order = vec![2, 1, 0, 3].into();
+        qm.queue.current_order = Some(1); // order[1] == 1 == s1 playing
 
         let _ = qm.remove_song(1).unwrap(); // remove playing s1
         // song_ids after removal: [s0, s2, s3]
-        assert_eq!(qm.queue.song_ids, vec!["s0", "s2", "s3"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["s0", "s2", "s3"]);
 
         // (a) invariant restored
         let co = qm.queue.current_order.expect("current_order set");
-        let ci = qm.queue.current_index.expect("current_index set");
+        let ci = qm.queue.current_index().expect("current_index set");
         assert_eq!(qm.queue.order[co], ci, "invariant order[co]==ci broken");
 
         // (b) no immediate replay
-        let cur_id = qm.queue.song_ids[ci].clone();
+        let cur_id = qm.rows()[ci].song_id.clone();
         if let Some(peek) = qm.peek_next_song() {
             assert_ne!(peek.song().id, cur_id, "peek replays the current song");
         }
@@ -2238,21 +2876,20 @@ pub(crate) mod tests {
         qm.queue.shuffle = true;
         qm.queue.consume = false;
         qm.queue.repeat = RepeatMode::None;
-        qm.queue.order = vec![2, 0, 1];
-        qm.queue.current_index = Some(1); // order[2] == 1 == s1, invariant holds
-        qm.queue.current_order = Some(2);
+        qm.queue.order = vec![2, 0, 1].into();
+        qm.queue.current_order = Some(2); // order[2] == 1 == s1 playing
 
         let _ = qm.remove_song(1).unwrap(); // remove playing s1
         // song_ids after removal: [s0, s2]
-        assert_eq!(qm.queue.song_ids, vec!["s0", "s2"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["s0", "s2"]);
 
         // (a) invariant restored
         let co = qm.queue.current_order.expect("current_order set");
-        let ci = qm.queue.current_index.expect("current_index set");
+        let ci = qm.queue.current_index().expect("current_index set");
         assert_eq!(qm.queue.order[co], ci, "invariant order[co]==ci broken");
 
         // (b) no replay of the current song
-        let cur_id = qm.queue.song_ids[ci].clone();
+        let cur_id = qm.rows()[ci].song_id.clone();
         if let Some(peek) = qm.peek_next_song() {
             assert_ne!(peek.song().id, cur_id, "peek replays the current song");
         }
@@ -2277,7 +2914,7 @@ pub(crate) mod tests {
         // Order should include new entries
         assert_eq!(qm.queue.order.len(), 4);
         // All indices [0, 1, 2, 3] should be present
-        let mut sorted_order = qm.queue.order.clone();
+        let mut sorted_order = qm.queue.order.to_vec();
         sorted_order.sort();
         assert_eq!(sorted_order, vec![0, 1, 2, 3]);
     }
@@ -2323,8 +2960,8 @@ pub(crate) mod tests {
 
         // After title sort ascending: Alpha, Bravo, Charlie
         // "c" (Charlie) should now be at index 2
-        assert_eq!(qm.queue.current_index, Some(2));
-        assert_eq!(qm.queue.song_ids[2], "c");
+        assert_eq!(qm.queue.current_index(), Some(2));
+        assert_eq!(qm.rows()[2].song_id, "c");
     }
 
     #[test]
@@ -2333,8 +2970,8 @@ pub(crate) mod tests {
 
         let (mut qm, _temp) = make_test_manager(vec![], None);
         let _ = qm.sort_queue(QueueSortMode::Title, true).unwrap();
-        assert!(qm.queue.song_ids.is_empty());
-        assert_eq!(qm.queue.current_index, None);
+        assert!(qm.song_ids_snapshot().is_empty());
+        assert_eq!(qm.queue.current_index(), None);
     }
 
     #[test]
@@ -2353,7 +2990,7 @@ pub(crate) mod tests {
 
         // ascending=true mirrors Rating's pre-flip convention: highest first.
         let _ = qm.sort_queue(QueueSortMode::MostPlayed, true).unwrap();
-        assert_eq!(qm.queue.song_ids, vec!["b", "c", "a"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["b", "c", "a"]);
     }
 
     #[test]
@@ -2366,7 +3003,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, None);
 
         let _ = qm.sort_queue(QueueSortMode::MostPlayed, true).unwrap();
-        assert_eq!(qm.queue.song_ids, vec!["b", "a"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["b", "a"]);
     }
 
     #[test]
@@ -2377,9 +3014,10 @@ pub(crate) mod tests {
         let _ = qm.shuffle_queue().unwrap();
 
         // current_index should point to "7" wherever it ended up
-        let idx = qm.queue.current_index.unwrap();
+        let idx = qm.queue.current_index().unwrap();
         assert_eq!(
-            qm.queue.song_ids[idx], "7",
+            qm.rows()[idx].song_id,
+            "7",
             "playing song identity lost after shuffle"
         );
     }
@@ -2398,11 +3036,11 @@ pub(crate) mod tests {
 
         // insert_after_current inserts at pos 2 (after current=1)
         // Since 2 > 1, current_index should NOT shift
-        assert_eq!(qm.queue.current_index, Some(1));
-        assert_eq!(qm.queue.song_ids[1], "b");
+        assert_eq!(qm.queue.current_index(), Some(1));
+        assert_eq!(qm.rows()[1].song_id, "b");
         // New songs at 2,3
-        assert_eq!(qm.queue.song_ids[2], "x");
-        assert_eq!(qm.queue.song_ids[3], "y");
+        assert_eq!(qm.rows()[2].song_id, "x");
+        assert_eq!(qm.rows()[3].song_id, "y");
     }
 
     #[test]
@@ -2414,9 +3052,9 @@ pub(crate) mod tests {
         let _ = qm.insert_after_current(new_songs).unwrap();
 
         // With no current_index, inserts at end
-        assert_eq!(qm.queue.song_ids.len(), 3);
-        assert_eq!(qm.queue.song_ids[2], "x");
-        assert_eq!(qm.queue.current_index, None);
+        assert_eq!(qm.queue_len(), 3);
+        assert_eq!(qm.rows()[2].song_id, "x");
+        assert_eq!(qm.queue.current_index(), None);
     }
 
     #[test]
@@ -2434,8 +3072,8 @@ pub(crate) mod tests {
 
         // Inserted 2 songs at index 1 (before current=3)
         // current_index should shift to 5
-        assert_eq!(qm.queue.current_index, Some(5));
-        assert_eq!(qm.queue.song_ids[5], "d");
+        assert_eq!(qm.queue.current_index(), Some(5));
+        assert_eq!(qm.rows()[5].song_id, "d");
     }
 
     #[test]
@@ -2450,8 +3088,8 @@ pub(crate) mod tests {
         let new_songs = vec![make_test_song("x")];
         let _ = qm.insert_songs_at(3, new_songs).unwrap(); // insert after end
 
-        assert_eq!(qm.queue.current_index, Some(1)); // unchanged
-        assert_eq!(qm.queue.song_ids[1], "b");
+        assert_eq!(qm.queue.current_index(), Some(1)); // unchanged
+        assert_eq!(qm.rows()[1].song_id, "b");
     }
 
     #[test]
@@ -2470,9 +3108,9 @@ pub(crate) mod tests {
         ];
         let _ = qm.add_songs(new_songs).unwrap();
 
-        assert_eq!(qm.queue.current_index, Some(2)); // unchanged
-        assert_eq!(qm.queue.song_ids[2], "c");
-        assert_eq!(qm.queue.song_ids.len(), 6);
+        assert_eq!(qm.queue.current_index(), Some(2)); // unchanged
+        assert_eq!(qm.rows()[2].song_id, "c");
+        assert_eq!(qm.queue_len(), 6);
     }
 
     #[test]
@@ -2521,7 +3159,7 @@ pub(crate) mod tests {
 
         let _ = qm.remove_song_by_id("c").unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["a", "b", "d"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "b", "d"]);
         assert!(qm.pool.get("c").is_none());
     }
 
@@ -2532,8 +3170,8 @@ pub(crate) mod tests {
 
         let _ = qm.remove_song_by_id("nonexistent").unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["a", "b"]);
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "b"]);
+        assert_eq!(qm.queue.current_index(), Some(0));
     }
 
     #[test]
@@ -2547,8 +3185,8 @@ pub(crate) mod tests {
 
         // Remove "a" (before current) — current should shift back
         let _ = qm.remove_song_by_id("a").unwrap();
-        assert_eq!(qm.queue.song_ids, vec!["b", "c"]);
-        assert_eq!(qm.queue.current_index, Some(1)); // still points at "c"
+        assert_eq!(qm.song_ids_snapshot(), vec!["b", "c"]);
+        assert_eq!(qm.queue.current_index(), Some(1)); // still points at "c"
     }
 
     #[test]
@@ -2566,7 +3204,7 @@ pub(crate) mod tests {
             .remove_songs_by_ids(&["b".to_string(), "d".to_string()])
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["a", "c", "e"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "c", "e"]);
         assert!(qm.pool.get("b").is_none());
         assert!(qm.pool.get("d").is_none());
         assert!(qm.pool.get("a").is_some());
@@ -2585,7 +3223,7 @@ pub(crate) mod tests {
             .remove_songs_by_ids(&["b".to_string(), "nonexistent".to_string(), "c".to_string()])
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["a"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["a"]);
     }
 
     #[test]
@@ -2607,7 +3245,7 @@ pub(crate) mod tests {
             .remove_songs_by_ids(&["a".to_string(), "c".to_string()])
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["b", "d"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["b", "d"]);
     }
 
     #[test]
@@ -2617,8 +3255,8 @@ pub(crate) mod tests {
 
         let _ = qm.remove_songs_by_ids(&[]).unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["a", "b"]);
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "b"]);
+        assert_eq!(qm.queue.current_index(), Some(0));
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -2634,8 +3272,8 @@ pub(crate) mod tests {
         let song = make_test_song("dup");
         let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone()], Some(0));
 
-        assert_eq!(qm.queue.song_ids, vec!["dup", "dup"]);
-        let entry_ids = qm.entry_ids().to_vec();
+        assert_eq!(qm.song_ids_snapshot(), vec!["dup", "dup"]);
+        let entry_ids = qm.entry_ids();
         assert_eq!(entry_ids.len(), 2, "two rows should have two entry_ids");
         assert_ne!(
             entry_ids[0], entry_ids[1],
@@ -2645,7 +3283,11 @@ pub(crate) mod tests {
         let target = entry_ids[1];
         let _ = qm.remove_entry_by_id(target).unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["dup"], "second row should remain");
+        assert_eq!(
+            qm.song_ids_snapshot(),
+            vec!["dup"],
+            "second row should remain"
+        );
         assert_eq!(qm.entry_ids(), &[entry_ids[0]]);
         // The pool entry survives because another row still references it.
         assert!(
@@ -2661,7 +3303,7 @@ pub(crate) mod tests {
 
         let _ = qm.remove_entry_by_id(99_999).unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["a", "b"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["a", "b"]);
         assert_eq!(qm.entry_ids().len(), 2);
     }
 
@@ -2670,14 +3312,14 @@ pub(crate) mod tests {
         let song = make_test_song("dup");
         let unique = make_test_song("uniq");
         let (mut qm, _temp) = make_test_manager(vec![song.clone(), unique, song.clone()], Some(0));
-        let entry_ids = qm.entry_ids().to_vec();
+        let entry_ids = qm.entry_ids();
 
         // Remove the two duplicate rows, leave the unique row.
         let _ = qm
             .remove_entries_by_ids(&[entry_ids[0], entry_ids[2]])
             .unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["uniq"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["uniq"]);
         // Pool drops "dup" only because no row references it anymore.
         assert!(qm.get_song("dup").is_none());
         assert!(qm.get_song("uniq").is_some());
@@ -2694,7 +3336,7 @@ pub(crate) mod tests {
 
         let _ = qm.remove_song_by_id("dup").unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["uniq"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["uniq"]);
         assert!(qm.get_song("dup").is_none());
     }
 
@@ -2712,7 +3354,7 @@ pub(crate) mod tests {
         let other = make_test_song("B");
         let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone(), other], Some(0));
         qm.queue.consume = true;
-        let original_entry_ids = qm.entry_ids().to_vec();
+        let original_entry_ids = qm.entry_ids();
         assert_eq!(original_entry_ids.len(), 3);
 
         // Mimic `on_track_finished`'s decide_transition: peek + transition
@@ -2721,14 +3363,14 @@ pub(crate) mod tests {
         let transition = peeked.transition();
         assert_eq!(transition.old_index, Some(0));
         assert_eq!(transition.new_index, 1);
-        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.current_index(), Some(1));
 
         // Then `record_and_consume` runs `remove_song(prev_index)` where
         // prev_index is the captured `transition.old_index`.
         let _ = qm.remove_song(0).expect("consume previous index");
 
         assert_eq!(
-            qm.queue.song_ids,
+            qm.song_ids_snapshot(),
             vec!["A", "B"],
             "first duplicate consumed; the survivor and B remain",
         );
@@ -2743,7 +3385,7 @@ pub(crate) mod tests {
         );
         assert!(qm.get_song("B").is_some());
         assert_eq!(
-            qm.queue.current_index,
+            qm.queue.current_index(),
             Some(0),
             "current_index shifts back from 1 → 0 after the index-0 removal",
         );
@@ -2766,8 +3408,8 @@ pub(crate) mod tests {
         assert_eq!(transition.old_index, Some(0));
         assert_eq!(transition.new_index, 1);
         let _ = qm.remove_song(0).expect("consume cycle 1");
-        assert_eq!(qm.queue.song_ids, vec!["A", "B"]);
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.song_ids_snapshot(), vec!["A", "B"]);
+        assert_eq!(qm.queue.current_index(), Some(0));
         assert!(
             qm.get_song("A").is_some(),
             "pool keeps A after first cycle — survivor row still references it",
@@ -2779,8 +3421,8 @@ pub(crate) mod tests {
         assert_eq!(transition.old_index, Some(0));
         assert_eq!(transition.new_index, 1);
         let _ = qm.remove_song(0).expect("consume cycle 2");
-        assert_eq!(qm.queue.song_ids, vec!["B"]);
-        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.song_ids_snapshot(), vec!["B"]);
+        assert_eq!(qm.queue.current_index(), Some(0));
         assert!(
             qm.get_song("A").is_none(),
             "pool finally drops A — no row references it anymore",
@@ -2802,11 +3444,11 @@ pub(crate) mod tests {
         songs[2].title = "Bravo".into();
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
-        let original = qm.entry_ids().to_vec();
+        let original = qm.entry_ids();
         let _ = qm.sort_queue(QueueSortMode::Title, true).unwrap();
 
         // After ascending title sort: Alpha (b), Bravo (c), Charlie (a).
-        assert_eq!(qm.queue.song_ids, vec!["b", "c", "a"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["b", "c", "a"]);
         // entry_ids ride with their songs through the sort.
         assert_eq!(
             qm.entry_ids(),
@@ -2839,11 +3481,15 @@ pub(crate) mod tests {
 
         // Concurrent shift: an earlier row is removed → [B, C, D].
         let _ = qm.remove_song(0).unwrap();
-        assert_eq!(qm.queue.song_ids, vec!["B", "C", "D"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["B", "C", "D"]);
 
         // NEW path removes B (correct) regardless of the index drift.
         let _ = qm.remove_entry_by_id(b_eid).unwrap();
-        assert_eq!(qm.queue.song_ids, vec!["C", "D"], "B removed by identity");
+        assert_eq!(
+            qm.song_ids_snapshot(),
+            vec!["C", "D"],
+            "B removed by identity"
+        );
 
         // Manager 2 — OLD raw-index path demonstrates the bug: the stale
         // index 1 now removes C, not B.
@@ -2857,7 +3503,7 @@ pub(crate) mod tests {
         let _ = qm2.remove_song(0).unwrap(); // [B, C, D]
         let _ = qm2.remove_song(1).unwrap(); // raw stale index → removes C
         assert_eq!(
-            qm2.queue.song_ids,
+            qm2.song_ids_snapshot(),
             vec!["B", "D"],
             "raw index removed the WRONG row (C) — the bug the fix avoids",
         );
@@ -2866,16 +3512,16 @@ pub(crate) mod tests {
     #[test]
     fn entry_ids_survive_move_item() {
         let (mut qm, _temp) = make_test_manager(songs_n(3), None);
-        let eids = qm.entry_ids().to_vec();
+        let eids = qm.entry_ids();
 
         // Move s0 to position 3 (end). entry_ids must travel with the row.
         let _ = qm.move_item(0, 3).unwrap();
 
-        assert_eq!(qm.queue.song_ids, vec!["s1", "s2", "s0"]);
+        assert_eq!(qm.song_ids_snapshot(), vec!["s1", "s2", "s0"]);
         assert_eq!(
             qm.entry_ids(),
             &[eids[1], eids[2], eids[0]],
-            "move_item must keep entry_ids parallel to song_ids through the reorder",
+            "move_item must keep each row's entry_id riding with its song through the reorder",
         );
     }
 
