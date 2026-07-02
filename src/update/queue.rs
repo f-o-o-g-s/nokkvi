@@ -525,11 +525,27 @@ impl Nokkvi {
                     self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
 
-                // Skip optimistic UI for PlayNext — target slot depends on the
-                // current playing index, which lives in the backend.
-                self.shell_spawn("queue_play_next_batch", move |shell| async move {
-                    shell.play_next_in_queue(entry_ids).await
-                });
+                // Skip optimistic UI for PlayNext — the target slot AND the
+                // moved rows' entry_ids both live in the backend (the
+                // remove+reinsert allocates FRESH ids). Chain a LoadQueue on
+                // completion so the view picks them up; without it the stale
+                // rows keep dead entry_ids and clicking one fails with
+                // "entry_id N not in queue" until an unrelated reload.
+                return self.shell_task(
+                    move |shell| async move { shell.play_next_in_queue(entry_ids).await },
+                    |result| match result {
+                        Ok(()) => Message::LoadQueue,
+                        Err(e) => {
+                            error!(" Play Next failed: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Play Next failed: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                );
             }
             QueueAction::ShowToast(msg) => {
                 self.toast_info(msg);

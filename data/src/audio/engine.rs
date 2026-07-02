@@ -1881,9 +1881,28 @@ impl CustomAudioEngine {
     // Crossfade Engine API
     // =========================================================================
 
-    /// Set crossfade enabled from settings
-    pub fn set_crossfade_enabled(&mut self, enabled: bool) {
+    /// Set crossfade enabled from settings.
+    ///
+    /// On a REAL change this also abandons any prepared/armed/in-flight
+    /// transition via `reset_next_track`: the toggle flips
+    /// `crossfade_eligible`, and the renderer's armed trigger fires on
+    /// position alone — a blend armed under the old setting would start
+    /// against an engine gate that now refuses (routing into the
+    /// buffer-starvation wait) and orphan a silent incoming stream. Mirrors
+    /// the `set_bit_perfect` contract below and the shuffle/repeat/consume
+    /// mode-toggle contract. No-op when unchanged so a routine settings save
+    /// (which re-applies every field) never disturbs an in-flight transition.
+    ///
+    /// `set_crossfade_duration` deliberately keeps its bare write: a duration
+    /// change never flips eligibility (an armed trigger just fires once at
+    /// the old offset), and cancelling a live blend on every slider step
+    /// would hard-cut audio for a cosmetic knob.
+    pub async fn set_crossfade_enabled(&mut self, enabled: bool) {
+        let changed = self.crossfade.enabled != enabled;
         self.crossfade.enabled = enabled;
+        if changed {
+            self.reset_next_track().await;
+        }
     }
 
     /// Set crossfade duration from settings (in seconds)
@@ -2063,7 +2082,14 @@ impl CustomAudioEngine {
     /// transition so the bad track is skipped via the standard prepared/next
     /// path. No decoder is created while a lock is held (cancel only clears).
     pub async fn recover_stalled_crossfade(&mut self) {
-        if self.crossfade.phase.is_idle() {
+        // Gate on the LIVE predicate, not the engine phase alone: in the
+        // desynced case (renderer Active mid-fade while the engine half never
+        // started, so its phase is still Idle) a phase-idle early-return
+        // no-ops without resetting the renderer — render_tick then re-reports
+        // the stall every tick, an unrecoverable warn livelock.
+        // `cancel_crossfade` tolerates engine-Idle and tears the renderer
+        // down regardless.
+        if !self.crossfade.is_crossfade_live(&self.renderer) {
             return;
         }
         warn!("🔀 [CROSSFADE] Incoming stalled at completion — restoring outgoing and skipping");
@@ -3150,6 +3176,78 @@ mod tests {
             engine.crossfade.is_crossfade_live(&engine.renderer),
             "engine phase Idle + renderer Active must read as a LIVE crossfade",
         );
+    }
+
+    /// Toggling the Crossfade SETTING mid-transition must abandon the
+    /// prepared/armed/in-flight transition, exactly like bit-perfect below:
+    /// it flips `crossfade_eligible`, and the renderer's armed trigger fires
+    /// on position alone — a blend armed under the old setting would start
+    /// against an engine gate that now refuses (routing into the
+    /// buffer-starvation wait), orphaning a silent incoming stream.
+    #[tokio::test]
+    async fn set_crossfade_enabled_change_cancels_active_crossfade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        engine.set_crossfade_enabled(false).await;
+
+        assert!(
+            engine.crossfade.phase.is_idle(),
+            "a REAL crossfade-setting change must cancel the in-flight transition",
+        );
+        assert!(!engine.crossfade.enabled);
+    }
+
+    /// A settings save re-applies every field; an UNCHANGED crossfade value
+    /// must not disturb an in-flight transition (same no-op contract as
+    /// `set_bit_perfect`).
+    #[tokio::test]
+    async fn set_crossfade_enabled_unchanged_is_noop() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        engine.set_crossfade_enabled(true).await;
+
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "an unchanged value (routine settings save) must not cancel the blend",
+        );
+    }
+
+    /// The stall recovery must recover the DESYNCED case: renderer Active
+    /// (mid-fade, incoming ring empty) while the engine phase is Idle because
+    /// its half never started (e.g. the settings-toggle desync routed the
+    /// trigger into the buffer-starvation wait). The old phase-idle
+    /// early-return no-op'd here, leaving the renderer Active so render_tick
+    /// re-reported the stall every 20ms tick — an unrecoverable warn livelock.
+    #[tokio::test]
+    async fn recover_stalled_crossfade_tears_down_renderer_only_stall() {
+        let mut engine = CustomAudioEngine::new();
+        let _keepalive = engine.renderer.lock().force_crossfade_active_for_test();
+        assert!(
+            engine.crossfade.phase.is_idle(),
+            "precondition: engine half never started",
+        );
+        assert!(
+            engine.renderer.lock().is_crossfade_active(),
+            "precondition: renderer is mid-fade",
+        );
+
+        engine.recover_stalled_crossfade().await;
+
+        assert!(
+            !engine.renderer.lock().is_crossfade_active(),
+            "recovery must tear down the renderer's orphaned blend, not no-op",
+        );
+        assert!(engine.crossfade.phase.is_idle());
     }
 
     /// Toggling bit-perfect mid-transition must abandon the in-flight crossfade

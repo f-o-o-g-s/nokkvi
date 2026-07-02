@@ -1562,7 +1562,7 @@ impl Nokkvi {
             shell.settings().set_crossfade_enabled(enabled).await?;
             let engine_arc = shell.audio_engine();
             let mut engine = engine_arc.lock().await;
-            engine.set_crossfade_enabled(enabled);
+            engine.set_crossfade_enabled(enabled).await;
             if cleared_bit_perfect {
                 shell.settings().set_bit_perfect(bit_perfect).await?;
                 engine.set_bit_perfect(bit_perfect).await;
@@ -1615,7 +1615,7 @@ impl Nokkvi {
             engine.set_bit_perfect(mode).await;
             if cleared_crossfade {
                 shell.settings().set_crossfade_enabled(crossfade).await?;
-                engine.set_crossfade_enabled(crossfade);
+                engine.set_crossfade_enabled(crossfade).await;
             }
             Ok(())
         });
@@ -1841,7 +1841,7 @@ impl Nokkvi {
                 async move {
                     let engine = shell.audio_engine();
                     let mut engine_guard = engine.lock().await;
-                    engine_guard.set_crossfade_enabled(enabled);
+                    engine_guard.set_crossfade_enabled(enabled).await;
                     engine_guard.set_bit_perfect(bit_perfect).await;
                     engine_guard.set_crossfade_duration(duration_secs);
                     engine_guard.set_volume_normalization(

@@ -15,7 +15,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-### Removed
+- "Play Next" now refreshes the queue view when it completes; previously the moved song kept its old row on screen, and clicking it failed with "entry_id not in queue" until something else reloaded the queue (bug present since v0.0.1).
+- Toggling Crossfade while the next track was already prepared no longer desyncs the player into a silent fade followed by an endless "crossfade incoming stalled — recovering" warn loop: the toggle now cancels the prepared transition (same contract as the Bit-Perfect toggle), and the stall recovery now also repairs the renderer-only case instead of no-op looping.
 
 ## v0.12.1 — 2026-06-30
 
