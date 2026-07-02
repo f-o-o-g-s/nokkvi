@@ -164,9 +164,15 @@ pub(crate) fn is_light_mode() -> bool {
 /// Set light mode state (call to toggle theme at runtime)
 #[inline]
 pub(crate) fn set_light_mode(enabled: bool) {
-    UI_MODE.light_mode.store(enabled, Ordering::Relaxed);
+    let was = UI_MODE.light_mode.swap(enabled, Ordering::Relaxed);
     THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
-    debug!(" Theme mode changed: light_mode={}", enabled);
+    // Log only on a REAL flip — this setter is called unconditionally on
+    // every settings reload (handle_player_settings_loaded re-applies the
+    // config.toml value), and an unconditional "changed" line sent a
+    // light-mode forensics session down the wrong path.
+    if was != enabled {
+        debug!(" Theme mode changed: light_mode={}", enabled);
+    }
 }
 
 /// Crate-wide serialization guard for tests that flip process-global theme
