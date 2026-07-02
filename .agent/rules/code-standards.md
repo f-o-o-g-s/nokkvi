@@ -47,7 +47,7 @@ trigger: always_on
 
 Discuss before adding new crates. Existing workspace runtime deps:
 - **UI crate** (`Cargo.toml`): `iced` (git-pinned to `iced-rs/iced` master), `nokkvi-data`, `nokkvi-ipc`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `zbus`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `lru`, `bytemuck`, `libc`
-- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `tracing`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `pipewire` (linux-only)
+- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `tracing`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `md-5` (Last.fm `api_sig`), `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `pipewire` (linux-only)
 - **IPC crate** (`nokkvi-ipc/Cargo.toml`): `tokio` (net/io-util/macros/rt/sync/fs only), `interprocess`, `serde` (+ `serde_json`), `futures`, `thiserror`, `tracing`. Iced-free invariant — the client path links this before iced exists. Tests: `serial_test`, `tempfile`
 - **Test-only `[dev-dependencies]`**: `proptest`, `tempfile`
 
@@ -82,12 +82,14 @@ cargo build --release                        # release build
 
 | Store | What | How |
 |-------|------|-----|
-| `config.toml` | User preferences (general, interface, playback, hotkeys, views, visualizer behavior, font, artwork resolution, library page size, normalization, tray, etc.) | Hot-reloadable via `SettingsManager` + `config_writer.rs`. `verbose_config` (On/Off/Clean): On writes all defaults; Off/Clean write sparse (Clean also strips `[visualizer]` comments) |
+| `config.toml` | User preferences (general, interface, playback, hotkeys, views, visualizer behavior, font, artwork resolution, library page size, normalization, tray, etc.), plus `[radio_scrobble]` creds (ListenBrainz token, Last.fm API key/secret — plaintext by design) | Hot-reloadable via `SettingsManager` + `config_writer.rs`. `verbose_config` (On/Off/Clean): On writes all defaults; Off/Clean write sparse (Clean also strips `[visualizer]` comments) |
 | Theme files | Named `.toml` in `~/.config/nokkvi/themes/` | Palette + visualizer colors. **23 built-in**. `config.toml` stores `theme = "name"` |
-| redb | Queue, session tokens (JWT + Subsonic credential) | Via `state_storage.rs`, `services/queue/`, `credentials.rs`. **No password on disk** — JWT auto-refreshes, expired JWT drops to login |
+| redb | Queue, session tokens (JWT + Subsonic credential), Last.fm session key + username | Via `state_storage.rs`, `services/queue/`, `credentials.rs`. **No password on disk** — JWT auto-refreshes, expired JWT drops to login |
 | Credentials | Server URL, username | In `config.toml`. Password never persists |
 
 Settings actions carry a typed `ConfigKey` (`AppScalar` / `Theme` / `ThemeArrayEntry`) so the writer matches on the variant rather than sniffing key prefixes.
+
+Adding or changing a user setting goes through the `define_settings!` schema tables (`data/src/services/settings_tables/`) — one table row owns dispatch, the persistence round-trips, and the UI row. See `settings-view.md` and `backend-services.md` for the schema details.
 
 ## Release & Versioning
 

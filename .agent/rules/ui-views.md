@@ -22,11 +22,11 @@ Pages on `Nokkvi`: Login, Albums, Artists, Genres, Playlists, Queue, Songs, Radi
 
 ## SlotListPageState
 
-Shared by every slot-list view: search query, scroll position, focus index. Visible slot count is computed dynamically from window height (always odd, capped at `MAX_SLOT_COUNT = 29`); window resizes propagate via `update/window.rs`. Prefetch radius = `slot_count + MIN_PREFETCH_BUFFER` (3 by default).
+Shared by every slot-list view: search query, scroll position, focus index. Visible slot count is computed dynamically from window height (always odd, capped at `MAX_SLOT_COUNT = 29`); window resizes propagate via `update/window.rs`. `resync_slot_counts()` sizes each page from its OWN auto-hide collapse state (`toolbar_collapsed()` — a collapsed toolbar packs more slots); the stored count must match the live render or the slot→item mapping desyncs (drag grabs the wrong row, find-and-expand lands a row low). Prefetch radius = `slot_count + MIN_PREFETCH_BUFFER` (3 by default).
 
 **Multi-selection** (Ctrl+click / Shift+click / per-row checkbox / select-all): `selected_indices: HashSet`, `anchor_index` for range. `handle_slot_click()` handles modifier-aware selection; `handle_selection_toggle(offset, total)` and `handle_select_all_toggle(total)` drive the optional checkbox column. `select_all_state(total)` returns the tri-state (`None` / `Some` / `All`) the header bar uses. `clear_multi_selection()` resets. `evaluate_context_menu()` resolves batch targets for right-click menus.
 
-**Auto-hide toolbar** (opt-in, Interface → Slot List, `settings.autohide_toolbar`): the view-header toolbar collapses to a thin strip until revealed. Reveal state lives on `SlotListPageState`: `toolbar_hovered` (cursor over the reveal zone), `toolbar_dropdown_open` (sort `pick_list` open), and `toolbar_reveal_until` (2.5 s hotkey reveal window set by `reveal_toolbar()`). `toolbar_revealed(autohide_enabled)` resolves these at render time — an active search query or focused search input also keeps it open. The `Toolbar*` `SlotListPageMessage` variants land via `set_toolbar_hovered()` / `set_toolbar_dropdown_open()` in both `SlotListPageState::handle()` and the `impl_expansion_update!` macro. **Invariant**: the flags are normally cleared by `on_exit` / `on_close`, which can't fire once the header unmounts — so `reset_reveal_locks()` must run on every unmount edge: view switch (`clear_all_toolbar_reveal_locks()` in `handle_switch_view`), browsing-panel close (`clear_browsing_panel_reveal_locks()`), and session reset. The collapse animation depends on the unconditional 100 ms `PlaybackMessage::Tick` for redraws — keep that tick ungated on playback.
+**Auto-hide toolbar** (on by default, Interface → Slot List, `settings.autohide_toolbar`): the view-header toolbar collapses to a thin strip until revealed. Reveal state lives on `SlotListPageState`: `toolbar_hovered` (cursor over the reveal zone), `toolbar_dropdown_open` (sort `pick_list` open), `toolbar_reveal_until` (2.5 s hotkey reveal window set by `reveal_toolbar()`), and `window_focused` (per-page OS-focus flag driven by `Message::WindowFocused` / `WindowUnfocused`). `toolbar_revealed(autohide_enabled)` resolves these at render time: a non-empty search query keeps the toolbar open unconditionally; every transient reveal (hover, open dropdown, hotkey timer, focused-but-empty search input) is gated on `window_focused` so the toolbar collapses while nokkvi sits behind another window (Wayland stops delivering the clearing `on_exit`/blur events to unfocused surfaces). `toolbar_collapsed(autohide, column_dropdown_open)` centralizes the collapse rule (columns-cog dropdown is focus-gated too). Center-on-playing (Shift+C) deliberately does NOT call `reveal_toolbar()` — it only scrolls. The `Toolbar*` `SlotListPageMessage` variants land via `set_toolbar_hovered()` / `set_toolbar_dropdown_open()` in both `SlotListPageState::handle()` and the `impl_expansion_update!` macro. **Invariant**: the flags are normally cleared by `on_exit` / `on_close`, which can't fire once the header unmounts — so `reset_reveal_locks()` must run on every unmount edge: view switch (`clear_all_toolbar_reveal_locks()` in `handle_switch_view`), browsing-panel close (`clear_browsing_panel_reveal_locks()`), session reset, and window unfocus (`Message::WindowUnfocused` also drops search-input focus where the box unmounts via `clear_all_search_input_focus()` and closes the columns-cog dropdown). The collapse animation depends on the unconditional 100 ms `PlaybackMessage::Tick` for redraws — keep that tick ungated on playback.
 
 ## Navigation & Interaction
 
@@ -48,7 +48,7 @@ Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` va
 - **Stable viewport** (default): non-center clicks → `SetOffset` (highlight in-place); center clicks → `ActivateCenter`.
 - **Legacy mode**: non-center clicks → `ClickPlay` (direct play).
 - Activation flash: `slot_list.flash_center()` on activation/transitions.
-- Clickable text links: inline album/artist text dispatches `NavigateAndFilter { view, filter, for_browsing_pane }` via `mouse_area`. When the browsing panel is active, `for_browsing_pane: true` routes the change into its tab instead of switching the main view.
+- Clickable text links (opt-in, `settings.slot_text_links`, default off since easy accidental hits): inline album/artist text dispatches `NavigateAndFilter { view, filter, for_browsing_pane }` via `mouse_area`. When the browsing panel is active, `for_browsing_pane: true` routes the change into its tab instead of switching the main view.
 - Clickable star ratings + clickable hearts on every slot via `mouse_area`.
 - Scrollbar timers carry the target `View` so seek messages route correctly between panes.
 
@@ -66,17 +66,17 @@ Each `define_view_columns!` entry has the form `Variant("Label"): field = defaul
 
 **Multi-select column**: opt-in `{view}_show_select` flag adds a per-row checkbox + tri-state "select all" header bar to every slot-list view. Helpers `wrap_with_select_column()` and `compose_header_with_select()` (`widgets/slot_list.rs`) keep per-view plumbing minimal; the checkbox state mirrors `selected_indices` regardless of how membership was set.
 
-**Genre column** (Queue): stacks under the album when both columns are visible, takes over the album slot at album-size font when album is hidden. Auto-shows when sort = Genre (mirrors how the plays column auto-shows on MostPlayed sort).
+**Genre column** (Queue): stacks under the album when both columns are visible, takes over the album slot at album-size font when album is hidden. Auto-shows only under a genuinely *applied* Genre sort (mirrors how the plays column auto-shows on an applied MostPlayed sort) — an unsorted queue's remembered mode never auto-shows either column (`genre_column_visible` / `plays_column_visible` in `views/song_list_pane.rs` take `Option<QueueSortMode>`, `None` when unsorted).
 
 ## Context Menus & Toasts
 
-- Library views: `LibraryContextEntry`. Queue: `QueueContextEntry`. Strip: `StripContextEntry`.
+- Library views: `LibraryContextEntry`. Queue: `QueueContextEntry`. Strip: `StripContextEntry`. Radios: `RadioContextEntry` (Edit / Copy Stream URL / Refresh Artwork / Delete).
 - Toast helpers: `toast_info()`, `toast_success()`, `toast_warn()`, `toast_error()`.
 - Batch actions: context menu resolves targets via `evaluate_context_menu()` (or generates full-batch payloads for algorithmic views like Similar Songs), then dispatches batch operations. `clear_multi_selection()` after every batch completion.
 
 ## Browsing Panel (Split-View)
 
-Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`, `Genres`, `Similar`. Reuses existing page structs. `PaneFocus` toggled via Tab.
+Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`, `Genres`, `Similar`. Reuses existing page structs. `PaneFocus` starts on Queue, flips to Browser only when Similar results open (`update/similar.rs`), and resets to Queue on panel open/close and edit-mode edges. (`SplitViewMessage::SwitchPaneFocus` / `handle_switch_pane_focus()` exists but nothing dispatches it — Tab is bound to `SlotListDown`.)
 
 **Cross-pane drag** state lives in the `Nokkvi.cross_pane_drag: state::CrossPaneDragUi` cluster (active drag + press tracking + pending drop position; manual `Default` keeps `selection_count` at 1). Batch support: `cross_pane_drag.selection_count` tracks single vs multi-selection batch. Drag threshold 5 px. Center index snapshotted at press time.
 
@@ -88,13 +88,23 @@ Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`
 
 Physical sort via `QueueManager::sort_queue()`, persists to redb. `QueueSortMode`: Album, Artist, Title, Duration, Genre, Rating, MostPlayed, Random (re-rolls on re-select / order toggle). Album column visible across all sort modes; stars use responsive hide. Sort signature is cached and `sort_by_cached_key` avoids re-keying when the signature is unchanged.
 
+**"Unsorted" placeholder**: the queue takes its order from whatever populated it (play album, session restore, add/remove, drag, consume, SSE refresh), so `QueuePage.queue_sort_mode` is only the *remembered* mode. The sort dropdown shows a grayed "Unsorted" placeholder (`sort_placeholder` on the view header) until `QueuePage.queue_sorted` is true. Only `apply_queue_sort` promotes it; `revalidate_queue_sorted` (`src/main.rs`) demotes — never promotes — by re-verifying the live order against the applied mode (`queue_is_sorted`) and clearing the sort-signature cache. It runs from `handle_queue_loaded` and after every in-place reorder (drag, batch drag, Shift+arrow move).
+
+## Queue Drag Reorder
+
+Source rows are snapshotted by per-row `entry_id` at *pick* time (`QueuePage.drag_source`; `len() > 1` = multi-selection batch) — the viewport can shift mid-drag (playback auto-follow, wheel scroll, queue reload), so resolving the source positionally at drop time moves the wrong row. The destination follows the live cursor against the current viewport at drop time; a past-end / empty-area drop appends (`slot_to_item_index_for_drop(...).unwrap_or(total_items)`). `QueueAction::MoveItem { source_entry_id, .. }` / `MoveBatch { entry_ids, .. }` carry entry_ids so the backend re-resolves under its own write lock. Drags are blocked (and half-captured pick state dropped) while a search filter is active.
+
 ## Queue Shuffle
 
 Re-shuffles the order array when a shuffled queue with repeat-playlist wraps back to the start, instead of replaying the same shuffle sequence.
 
+## Radio Station Artwork (Radios)
+
+Station rows render artwork instead of the generic tower glyph. Uploaded logos are fetched via getCoverArt only when the station has a non-empty OpenSubsonic `coverArt` token; logo-less stations remember their live ICY now-playing art, persisted server-namespaced on disk via the backend `RadioArtStore` and hydrated once per session (`artwork.radio_art_hydrated` gate). Caches live on `Nokkvi.artwork`: `radio_art` / `radio_large_art` (`SnapshottedLru<String, Handle>` keyed by `station_id`) + `radio_icy_captured`. The large panel LOCKS to the playing station while a radio plays and follows the centered station otherwise, with the over-cover visualizer + boat drawn via the same shared panel helper as the Queue cover. Right-click → Refresh Artwork (`RadioContextEntry::RefreshArtwork`) clears memory + disk and refetches. Handlers in `update/radio_artwork.rs`; `ArtworkMessage` carries the `RadioArt*` / `LoadRadioLarge` / `RadioIcyArtLoaded` variants.
+
 ## Roulette (slot-machine random pick)
 
-Available on every slot-list view via the "Roulette" entry in the sort dropdown or the `Roulette` hotkey (default `Ctrl+R`). State on `Nokkvi.roulette: Option<state::RouletteState>` is snapshotted at start so live data churn (page loads, search edits, queue mutations) cannot drift the math. Two-phase: the cruise runs at constant velocity indefinitely until the user presses **Enter** (intercepted in `handle_slot_list_message` and dispatched as `RouletteMessage::Stop`), which rolls the landing target and arms `state.decel`. Tick handlers in `update/roulette.rs` derive the offset purely from elapsed time — cruise loops cyclically; decel walks the pre-rolled keyframe sequence (cubic-distributed holds + fake-out wobble) anchored at `stop_time`. Cancelled by Escape or view change; in-decel Enter is swallowed (the spin is committed once Stop fires).
+Available on every slot-list view except Similar (which has no `Roulette` variant — see Update Handler Pattern) via the "Roulette" entry in the sort dropdown or the `Roulette` hotkey (default `Ctrl+R`). State on `Nokkvi.roulette: Option<state::RouletteState>` is snapshotted at start so live data churn (page loads, search edits, queue mutations) cannot drift the math. Two-phase: the cruise runs at constant velocity indefinitely until the user presses **Enter** (intercepted in `handle_slot_list_message` and dispatched as `RouletteMessage::Stop`), which rolls the landing target and arms `state.decel`. Tick handlers in `update/roulette.rs` derive the offset purely from elapsed time — cruise loops cyclically; decel walks the pre-rolled keyframe sequence (cubic-distributed holds + fake-out wobble) anchored at `stop_time`. Cancelled by Escape or view change; in-decel Enter is swallowed (the spin is committed once Stop fires).
 
 ## Update Handler Pattern
 

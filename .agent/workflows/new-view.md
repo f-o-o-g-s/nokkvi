@@ -30,7 +30,7 @@ Steps to add a new slot-list-based view, in order.
    - Register the message type with `impl_view_chrome!({Name}Message { ... })` in `src/update/chrome.rs` and start `handle_{name}` with the mandatory prologue `dispatch_view_chrome(self, &msg, View::{Name})` (see `src/update/albums.rs::handle_albums`). This prologue carries the shared SetOpenMenu/roulette/SFX/artwork-drag handling — skipping it compiles fine but silently drops that chrome for the new view
    - In `handle_{name}`, map the `{Name}Action` returned by the page's `update()` to side effects
 
-6. If the view has a paginated/async loader, add a typed loader inbox (Phase 2 pattern — see Albums/Songs/Artists/Playlists/Queue):
+6. If the view has a paginated/async loader, add a typed loader inbox (Phase 2 pattern — see Albums/Songs/Artists/Genres/Playlists/Queue):
    - Define `{Name}LoaderMessage` in `src/app_message.rs` with `Loaded { ... }` / `PageLoaded(result, total_count)` variants for each loader result shape
    - Add `Message::{Name}Loader({Name}LoaderMessage)` to the root `Message`
    - Route in `src/update/mod.rs`: `Message::{Name}Loader(msg) => self.dispatch_{name}_loader(msg)`
@@ -47,13 +47,13 @@ Steps to add a new slot-list-based view, in order.
 
 11. Context menu: wrap rows in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry`. Resolve batch targets via `evaluate_context_menu()` and `get_batch_target_indices()` / `get_queue_target_indices()`. Build payloads via `expansion::build_batch_payload()`.
 
-12. Multi-selection: route clicks through `handle_slot_click()`; clear with `clear_multi_selection()` after every batch op. Add an opt-in checkbox column via `wrap_with_select_column()` + `compose_header_with_select()` (`widgets/slot_list.rs`) and a `{view}_show_select` flag in `ViewColumns` (`data/src/types/view_columns.rs` — shared by `LivePlayerSettings` / `PersistedPlayerSettings` / `TomlSettings` via their `view_columns` member) so the columns dropdown can toggle it.
+12. Multi-selection: route clicks through `handle_slot_click()`; clear with `clear_multi_selection()` after every batch op. Add an opt-in checkbox column via `wrap_with_select_column()` + `compose_header_with_select()` (`widgets/slot_list.rs`) and a `{view}_show_select` flag in `ViewColumns` (`data/src/types/view_columns.rs` — shared by `LivePlayerSettings` / `PersistedPlayerSettings` / `TomlSettings` via their `view_columns` member) so the columns dropdown can toggle it. Every new `ViewColumns` field also gets declared in the `view_columns:` fields list of the consolidated `define_settings!` invocation in `data/src/services/settings_tables/columns.rs` — its exhaustive destructure turns an omission into a compile error (settings system: `.agent/rules/settings-view.md`; the per-view `define_view_columns!` dropdown side: `.agent/rules/ui-views.md`).
 
 13. Toasts: `toast_success()` / `toast_error()` / `toast_warn()` / `toast_info()`.
 
 14. Browsing panel: add a `BrowsingView` variant in `views/browsing_panel.rs` if the view should appear in split-view; wire lazy data load.
 
-15. Icons: drop SVGs into `assets/icons/`. The build.rs generator picks them up automatically — no manual registration.
+15. Icons: adding one is a three-part change — the Lucide SVG in `assets/icons/` (the path code references; build.rs registers both icon dirs automatically), its Phosphor counterpart in `assets/icons-phosphor/`, and a `NAME_MAP` row in `src/embedded_svg.rs` mapping the Lucide stem to the Phosphor file. The `icon_name_map_*` tests enforce all three (Phosphor is the default set). Details: `.agent/rules/widgets.md`.
 
 16. Verify:
     - `cargo +nightly fmt --all -- --check`

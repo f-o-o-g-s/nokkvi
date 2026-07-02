@@ -18,7 +18,7 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 
 **Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for library data. `Deref<Target=[T]>` makes it a drop-in. Tracks load state via `set_loading()` / `needs_fetch()`. Exposes a monotonic `generation()` counter that bumps on every mutation — pair with `(query, generation)` keys when memoizing.
 
-**Consolidated state** in `src/state/`: per-domain submodules (`panes`, `roulette`, `pending`, `session`, `playback`, `playlist_editor`, `scrobble`, `audio`, `artwork`, `window`, `library`, `toast`, `similar`, `snapshotted_lru`) re-exported via `state/mod.rs` so call sites use `crate::state::Foo`. `SnapshottedLru<K, V>` (`state/snapshotted_lru.rs`) bundles a `lru::LruCache` with its parallel `HashMap` snapshot so the borrow-friendly view-data slice always reflects the latest `put`/`promote` — never pair a bare `LruCache` with a manual snapshot, the newtype is the only legal shape. Plus `Nokkvi.open_menu: Option<OpenMenu>` as the single-active overlay-menu coordinator (Hamburger / PlayerModes / CheckboxDropdown { view, trigger_bounds } / CheckboxDropdownSimilar { trigger_bounds } / Context { id: ContextMenuId, position } / LibrarySelector { trigger_bounds }) and `Nokkvi.default_playlist_picker` for the modal picker overlay shared between Playlists and Queue views.
+**Consolidated state** in `src/state/`: per-domain submodules (`panes`, `roulette`, `pending`, `session`, `playback`, `playlist_editor`, `scrobble`, `audio`, `artwork`, `window`, `library`, `toast`, `similar`) re-exported via `state/mod.rs` so call sites use `crate::state::Foo`, plus the state-internal `snapshotted_lru` module (not re-exported; consumed by `state/artwork.rs`). `SnapshottedLru<K, V>` (`state/snapshotted_lru.rs`) bundles a `lru::LruCache` with its parallel `HashMap` snapshot so the borrow-friendly view-data slice always reflects the latest `put`/`pop`/`get_touch` — never pair a bare `LruCache` with a manual snapshot, the newtype is the only legal shape. Plus `Nokkvi.open_menu: Option<OpenMenu>` as the single-active overlay-menu coordinator (Hamburger / PlayerModes / CheckboxDropdown { view, trigger_bounds } / CheckboxDropdownSimilar { trigger_bounds } / Context { id: ContextMenuId, position } / LibrarySelector { trigger_bounds }) and `Nokkvi.default_playlist_picker` for the modal picker overlay shared between Playlists and Queue views.
 
 ## Core Pattern: TEA (The Elm Architecture)
 
@@ -26,8 +26,8 @@ Every view follows this — do not deviate:
 
 ```rust
 pub struct AlbumsPage { common: SlotListPageState, /* ... */ }
-pub enum AlbumsMessage { SlotListNavigateUp, /* ... */ }
-pub enum AlbumsAction { PlayAlbum(String), None }
+pub enum AlbumsMessage { SlotList(SlotListPageMessage), /* ... */ }
+pub enum AlbumsAction { PlayAlbum(String, bool), None }  // (album_id, force_shuffle)
 fn update(&mut self, msg: AlbumsMessage) -> (Task<AlbumsMessage>, AlbumsAction);
 fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>;  // pure
 ```
@@ -68,4 +68,4 @@ Root `Message` is namespaced: `NavigationMessage`, `PlaybackMessage`, `ScrobbleM
 
 ## Reference Codebases
 
-External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `alsa-lib`, `bevy-audioviz`, `circular-audio-wave`, `feishin`, `ferrosonic`, `firmium`, `fooyin`, `gelly`, `glsl-app`, `iced`, `iced_anim`, `iced-apps`, `iced-book`, `iced-docs`, `lookas`, `lucide` (icons), `mimalloc`, `mimalloc-rust`, `mpd`, `mpris`, `mpv`, `navidrome`, `ncs-spectrum-glava`, `nocturne`, `phosphor-icons` (icons), `pipewire`, `rmpc`, `rmpc-docs`, `rodio`, `symphonia`, `wav2bar`, `wavejs`, `wireplumber`, `woscope`.
+External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `alsa-lib`, `bevy-audioviz`, `circular-audio-wave`, `feishin`, `ferrosonic`, `firmium`, `fooyin`, `gelly`, `glsl-app`, `iced`, `iced_anim`, `iced-apps`, `iced-book`, `iced-docs`, `listenbrainz-server`, `lookas`, `lucide` (icons), `mimalloc`, `mimalloc-rust`, `mpd`, `mpris`, `mpv`, `navidrome`, `ncs-spectrum-glava`, `nocturne`, `phosphor-icons` (icons), `pipewire`, `rmpc`, `rmpc-docs`, `rodio`, `symphonia`, `troi`, `wav2bar`, `wavejs`, `wireplumber`, `woscope`.

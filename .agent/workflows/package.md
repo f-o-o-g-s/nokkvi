@@ -179,6 +179,17 @@ if [ -d ~/aur/nokkvi-git/.git ]; then
 fi
 ```
 
+**Recovery — `makepkg -od` fails with `unable to find all commit-graph files` → `fatal: bad object refs/heads/main`:** the cause is a stale split commit-graph in makepkg's local cache, not the AUR or GitHub repo (`git fsck` on the mirror passes clean). Clean the bare mirror, disable graph writes there, drop the cached working copy, then re-run the block:
+
+```bash
+cd ~/aur/nokkvi-git/nokkvi                    # makepkg's bare mirror
+rm -rf objects/info/commit-graphs objects/info/commit-graph
+git config core.commitGraph false
+git config fetch.writeCommitGraph false
+git config gc.writeCommitGraph false
+cd ~/aur/nokkvi-git && rm -rf src pkg         # force a fresh re-clone from the mirror
+```
+
 Both blocks are guarded — they no-op cleanly if the AUR repos aren't cloned locally (e.g. for contributors running `/package` who don't maintain AUR packages).
 
 If either push fails due to remote-ahead (someone else pushed first), recover with `git pull --rebase && git push`.
