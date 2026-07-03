@@ -32,13 +32,14 @@ use crate::{
 };
 
 mod artwork_prefetch;
+pub(crate) mod custom_artwork;
 // Canonical artwork-prefetch helpers live in the `artwork_prefetch` submodule
 // (the one path-reached unit here); re-exported so call sites keep using
 // `components::<fn>` unchanged.
-// `should_refetch` is exercised directly only by the artwork dedup tests; its
-// production callers live inside `artwork_prefetch`, so re-export it for tests.
-#[cfg(test)]
-pub(super) use artwork_prefetch::should_refetch;
+// `should_refetch` is the canonical membership+version+negative-cache gate;
+// besides its callers inside `artwork_prefetch`, the playlist custom-cover
+// prefetch (`update/playlist_artwork.rs`) routes through it too.
+pub(crate) use artwork_prefetch::should_refetch;
 pub(super) use artwork_prefetch::{
     expansion_album_artwork_tasks, expansion_child_album_ids, passive_artwork_version,
     prefetch_album_artwork_tasks, prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,

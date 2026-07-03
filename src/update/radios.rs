@@ -43,7 +43,28 @@ impl Nokkvi {
             Ok(new_stations) => {
                 info!(" Loaded {} internet radio stations", new_stations.len());
                 self.library.radio_stations = new_stations;
+                // Invalidate the sort short-circuit: its `(ascending, len)`
+                // signature can't see that the LIST was replaced, so a reload
+                // with an unchanged count would silently keep the server's
+                // raw order (queue twin: `revalidate_queue_sorted`).
+                self.radios_page.last_sort_signature = None;
                 self.sort_radio_stations();
+                // Refresh the active radio playback's station SNAPSHOT from
+                // the fresh list. It was cloned at play time, so its coverArt
+                // token goes stale the moment an upload/reset lands — and
+                // both the panel re-warm below and the ICY-capture logo gate
+                // read it. Without this, the primary flow (first upload to
+                // the playing station) never warms the locked panel.
+                if let crate::state::ActivePlayback::Radio(radio_state) = &mut self.active_playback
+                    && let Some(fresh) = self
+                        .library
+                        .radio_stations
+                        .iter()
+                        .find(|s| s.id == radio_state.station.id)
+                    && radio_state.station != *fresh
+                {
+                    radio_state.station = fresh.clone();
+                }
             }
             Err(e) => {
                 if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
@@ -61,6 +82,16 @@ impl Nokkvi {
         if !self.artwork.radio_art_hydrated {
             self.artwork.radio_art_hydrated = true;
             tasks.push(self.hydrate_radio_art());
+        }
+        // Re-warm the artwork PANEL's station too: the playing station (the
+        // panel locks to it) and the centered one. Both are cache-gated
+        // no-ops normally, but after a custom-artwork upload/reset the
+        // invalidation popped the large handle and THIS reload carries the
+        // fresh coverArt token — without this the panel would sit on the
+        // tower glyph until the user re-navigates.
+        tasks.push(self.ensure_playing_radio_logo_task());
+        if let Some(task) = self.radio_center_large_load_task() {
+            tasks.push(task);
         }
         Task::batch(tasks)
     }
@@ -144,6 +175,12 @@ impl Nokkvi {
             }
             RadiosAction::RefreshStationArtwork(station) => {
                 return self.handle_refresh_radio_station_artwork(station);
+            }
+            RadiosAction::SetStationArtwork(station) => {
+                return self.handle_set_radio_station_artwork(station);
+            }
+            RadiosAction::ResetStationArtwork(station) => {
+                return self.handle_reset_radio_station_artwork(station);
             }
             RadiosAction::PlayRadioStation(station) => {
                 // Wait! This is the core logic.

@@ -311,6 +311,28 @@ impl MiniArt {
     }
 }
 
+/// Outcome of a "Set Custom Artwork…" / "Reset Artwork" round-trip, flattened
+/// to a Clone-able payload at the task boundary (typed errors can't cross the
+/// `Message` boundary — same convention as the `Result<_, String>` loaders).
+#[derive(Debug, Clone)]
+pub enum CustomArtworkOutcome {
+    /// The server accepted the upload / delete.
+    Applied,
+    /// The user dismissed the file picker — a silent no-op.
+    Cancelled,
+    /// The upload/DELETE **API call** failed; carries the flattened detail
+    /// (`NokkviError::is_unauthorized_str` / `is_forbidden_str` match on it).
+    /// Only server-side failures may land here — see [`Self::LocalFailed`].
+    Failed(String),
+    /// The **local** pick/read step failed (file unreadable, over the size
+    /// ceiling). Kept apart from [`Self::Failed`] by ORIGIN so the detail —
+    /// which embeds the user-picked path — can never flow through the
+    /// substring-based server-error classifiers (a folder literally named
+    /// "Unauthorized Bootlegs" must not trigger session teardown). Surfaced
+    /// as a plain error toast, verbatim.
+    LocalFailed(String),
+}
+
 /// Artwork pipeline messages, namespaced under `Message::Artwork(..)`
 ///
 /// Covers shared album artwork, collage artwork (genre/playlist), and song artwork.
@@ -387,6 +409,39 @@ pub enum ArtworkMessage {
     /// a list of `(station_id, source_url, bytes)`. Decoded into `radio_art`
     /// and used to seed the ICY dedup map.
     RadioArtHydrated(Vec<(String, String, Vec<u8>)>),
+
+    // --- Custom Artwork (user-uploaded, server-side) ---
+    /// "Set Custom Artwork…" pick + upload finished for a radio station.
+    /// Carries the station snapshotted at menu time (id for invalidation,
+    /// name for the toast) and the flattened outcome.
+    RadioCustomArtworkSet(
+        nokkvi_data::types::radio_station::RadioStation,
+        CustomArtworkOutcome,
+    ),
+    /// "Reset Artwork" DELETE finished for a radio station.
+    RadioCustomArtworkReset(
+        nokkvi_data::types::radio_station::RadioStation,
+        CustomArtworkOutcome,
+    ),
+    /// "Set Custom Artwork…" pick + upload finished for a playlist.
+    /// `(playlist_id, playlist_name, outcome)` — the name feeds the toast.
+    PlaylistCustomArtworkSet(String, String, CustomArtworkOutcome),
+    /// "Reset Artwork" DELETE finished for a playlist.
+    PlaylistCustomArtworkReset(String, String, CustomArtworkOutcome),
+    /// Mini (80px) custom playlist cover fetch finished. `(playlist_id,
+    /// version, MiniArt)` — `version` is the `updated_at` cache-buster the
+    /// fetch URL carried; on `Loaded` it is recorded into
+    /// `playlist_custom_art_versions` so a later server-side cover change is
+    /// a version-aware prefetch miss. `Missing` is negatively cached;
+    /// `Transient` records nothing (the collage keeps standing and a later
+    /// viewport pass re-attempts).
+    PlaylistCustomMiniLoaded(String, Option<String>, MiniArt),
+    /// Trigger a resolution-sized custom-cover fetch for a playlist whose
+    /// `uploaded_image` is set. Mirrors [`ArtworkMessage::LoadRadioLarge`].
+    LoadPlaylistCustomLarge(String),
+    /// Large custom playlist cover fetch finished. `(playlist_id, handle)` →
+    /// stored into `artwork.playlist_custom_large_art`.
+    PlaylistCustomLargeLoaded(String, Option<image::Handle>),
 
     // --- Artwork Pane Drag ---
     /// Resize the artwork column via the split handle. `Change` is per-frame

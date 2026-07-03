@@ -818,7 +818,14 @@ impl QueuePage {
                 .and_then(|center_idx| queue_songs.get(center_idx))
                 .map(|song| song.album_id.clone())
         });
-        let on_refresh = center_album_id.map(QueueMessage::RefreshArtwork);
+        let panel_menu_entries: Vec<_> = center_album_id
+            .map(|id| {
+                crate::widgets::context_menu::PanelMenuEntry::refresh_artwork(
+                    QueueMessage::RefreshArtwork(id),
+                )
+            })
+            .into_iter()
+            .collect();
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
             crate::widgets::context_menu::artwork_panel_open_state(
                 crate::View::Queue,
@@ -842,7 +849,7 @@ impl QueuePage {
             over_art_overlay,
             over_art_boat,
             crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Blank,
-            on_refresh,
+            panel_menu_entries,
             artwork_menu_open,
             artwork_menu_position,
             on_artwork_menu_change,

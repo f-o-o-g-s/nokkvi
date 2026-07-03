@@ -64,6 +64,7 @@ mod notifications;
 mod pending_expand_resolve;
 mod playback;
 mod player_bar;
+mod playlist_artwork;
 mod playlists;
 mod progressive_queue;
 mod queue;

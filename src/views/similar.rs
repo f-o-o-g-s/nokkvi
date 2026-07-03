@@ -562,12 +562,12 @@ impl SimilarPage {
         let artwork_handle = centered_song
             .and_then(|song| song.album_id.as_ref())
             .and_then(|album_id| data.large_artwork.get(album_id));
-        // No refresh action wired up for Similar artwork — pass inert
-        // controlled-component arguments. The helper short-circuits because
-        // `on_refresh` is None.
+        // No menu entries wired up for Similar artwork — pass inert
+        // controlled-component arguments. The helper returns the bare panel
+        // for an empty entries list.
         let artwork_content = Some(single_artwork_panel_with_menu::<SimilarMessage>(
             artwork_handle,
-            None,
+            Vec::new(),
             false,
             None,
             |_| SimilarMessage::SetOpenMenu(None),

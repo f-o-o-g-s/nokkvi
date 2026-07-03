@@ -262,9 +262,9 @@ impl PlaylistEditorState {
                     .get(&song.album_id)
                     .or_else(|| album_art.get(&song.album_id))
             });
-        let artwork_content = Some(single_artwork_panel_with_menu(
+        let artwork_content = Some(single_artwork_panel_with_menu::<EditorMessage>(
             center_handle,
-            None::<EditorMessage>,
+            Vec::new(),
             false,
             None,
             // No artwork context menu in the editor; the open-change closure is

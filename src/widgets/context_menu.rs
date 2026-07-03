@@ -292,16 +292,30 @@ pub(crate) enum RadioContextEntry {
     Edit,
     Delete,
     CopyStreamUrl,
+    /// Pick an image file and upload it as the station's custom logo.
+    SetArtwork,
+    /// Delete the uploaded logo server-side; automatic artwork (ICY
+    /// now-playing / tower glyph) returns. Listed only when the station
+    /// actually has an uploaded logo.
+    ResetArtwork,
     RefreshArtwork,
 }
 
-pub(crate) fn radio_entries() -> Vec<RadioContextEntry> {
-    vec![
+/// Radio-station context entries. `has_custom_art` (the station's
+/// `logo_cover_art().is_some()`) gates the "Reset Artwork" entry — there is
+/// nothing to reset on a station without an uploaded logo.
+pub(crate) fn radio_entries(has_custom_art: bool) -> Vec<RadioContextEntry> {
+    let mut entries = vec![
         RadioContextEntry::Edit,
         RadioContextEntry::CopyStreamUrl,
-        RadioContextEntry::RefreshArtwork,
-        RadioContextEntry::Delete,
-    ]
+        RadioContextEntry::SetArtwork,
+    ];
+    if has_custom_art {
+        entries.push(RadioContextEntry::ResetArtwork);
+    }
+    entries.push(RadioContextEntry::RefreshArtwork);
+    entries.push(RadioContextEntry::Delete);
+    entries
 }
 
 pub(crate) fn radio_entry_view<'a, Message: Clone + 'a>(
@@ -320,16 +334,79 @@ pub(crate) fn radio_entry_view<'a, Message: Clone + 'a>(
             "Copy Stream URL",
             on_action(RadioContextEntry::CopyStreamUrl),
         ),
-        RadioContextEntry::RefreshArtwork => menu_button(
-            Some("assets/icons/refresh-cw.svg"),
-            "Refresh Artwork",
-            on_action(RadioContextEntry::RefreshArtwork),
-        ),
+        // The three artwork rows delegate to the PanelMenuEntry constructors
+        // so the icon + label vocabulary has ONE definition shared with the
+        // artwork-panel menus (and the playlist row menu) — a future rename
+        // can't fork the wording between surfaces.
+        RadioContextEntry::SetArtwork => {
+            PanelMenuEntry::set_custom_artwork(on_action(RadioContextEntry::SetArtwork)).view()
+        }
+        RadioContextEntry::ResetArtwork => {
+            PanelMenuEntry::reset_artwork(on_action(RadioContextEntry::ResetArtwork)).view()
+        }
+        RadioContextEntry::RefreshArtwork => {
+            PanelMenuEntry::refresh_artwork(on_action(RadioContextEntry::RefreshArtwork)).view()
+        }
         RadioContextEntry::Delete => menu_button(
             Some("assets/icons/trash-2.svg"),
             "Delete Station",
             on_action(RadioContextEntry::Delete),
         ),
+    }
+}
+
+// ============================================================================
+// Artwork-Panel Menu Entry
+// ============================================================================
+
+/// One entry of a view's large-artwork-panel right-click menu: a static icon +
+/// label pair and the message it dispatches. The panel helpers in
+/// `widgets::base_slot_list_layout` take a `Vec<PanelMenuEntry<Message>>` and
+/// wrap the panel in a [`context_menu`] when the list is non-empty — views
+/// declare their entries with the constructors below instead of the old
+/// hardcoded single "Refresh Artwork" action.
+#[derive(Debug, Clone)]
+pub(crate) struct PanelMenuEntry<Message> {
+    pub icon: &'static str,
+    pub label: &'static str,
+    pub message: Message,
+}
+
+impl<Message> PanelMenuEntry<Message> {
+    /// "Refresh Artwork" — evict + re-fetch the entity's artwork.
+    pub(crate) fn refresh_artwork(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/refresh-cw.svg",
+            label: "Refresh Artwork",
+            message,
+        }
+    }
+
+    /// "Set Custom Artwork…" — open the native file picker and upload.
+    pub(crate) fn set_custom_artwork(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/folder-open.svg",
+            label: "Set Custom Artwork…",
+            message,
+        }
+    }
+
+    /// "Reset Artwork" — delete the custom image so the automatic art returns.
+    pub(crate) fn reset_artwork(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/rotate-ccw.svg",
+            label: "Reset Artwork",
+            message,
+        }
+    }
+
+    /// Render this entry as a standard menu row. Consumes the entry (the
+    /// message moves into the button).
+    pub(crate) fn view<'a>(self) -> Element<'a, Message>
+    where
+        Message: Clone + 'a,
+    {
+        menu_button(Some(self.icon), self.label, self.message)
     }
 }
 
@@ -574,7 +651,7 @@ impl State {
 
 impl<'a, T, Message> Widget<Message, Theme, iced::Renderer> for ContextMenu<'a, T, Message>
 where
-    T: Copy + 'a,
+    T: Clone + 'a,
     Message: 'a,
 {
     fn tag(&self) -> tree::Tag {
@@ -729,7 +806,7 @@ where
     }
 }
 
-impl<'a, T: Copy + 'a, Message: 'a> From<ContextMenu<'a, T, Message>> for Element<'a, Message> {
+impl<'a, T: Clone + 'a, Message: 'a> From<ContextMenu<'a, T, Message>> for Element<'a, Message> {
     fn from(menu: ContextMenu<'a, T, Message>) -> Self {
         Element::new(menu)
     }
@@ -744,12 +821,12 @@ fn build_menu_element<'a, T, Message>(
     entry_view: &(dyn Fn(T, Length) -> Element<'a, Message> + 'a),
 ) -> Element<'a, Message>
 where
-    T: Copy + 'a,
+    T: Clone + 'a,
     Message: 'a,
 {
     // Shared menu-panel chrome — see `widgets::menu_chrome`.
     container(column(
-        entries.iter().copied().map(|e| entry_view(e, Length::Fill)),
+        entries.iter().cloned().map(|e| entry_view(e, Length::Fill)),
     ))
     .padding(4)
     .style(super::menu_chrome::container_style)
@@ -766,7 +843,7 @@ fn build_overlay<'a, 'b, T, Message>(
     translation: Vector,
 ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>>
 where
-    T: Copy + 'a,
+    T: Clone + 'a,
     Message: 'a,
 {
     if entries.is_empty() {
@@ -1075,6 +1152,53 @@ mod tests {
         let (open, pos) = open_state_for(Some(&hamburger), &id);
         assert!(!open);
         assert!(pos.is_none());
+    }
+
+    // --- radio_entries gating ------------------------------------------------
+
+    /// "Set Custom Artwork…" is always offered; "Reset Artwork" only when the
+    /// station actually has an uploaded logo (`logo_cover_art().is_some()`).
+    #[test]
+    fn radio_entries_gate_reset_on_custom_art() {
+        let with = radio_entries(true);
+        assert!(
+            with.iter()
+                .any(|e| matches!(e, RadioContextEntry::ResetArtwork)),
+            "custom-art station must offer Reset Artwork"
+        );
+        assert!(
+            with.iter()
+                .any(|e| matches!(e, RadioContextEntry::SetArtwork)),
+        );
+
+        let without = radio_entries(false);
+        assert!(
+            !without
+                .iter()
+                .any(|e| matches!(e, RadioContextEntry::ResetArtwork)),
+            "a station without custom art has nothing to reset"
+        );
+        assert!(
+            without
+                .iter()
+                .any(|e| matches!(e, RadioContextEntry::SetArtwork)),
+            "Set Custom Artwork… must always be offered"
+        );
+        // The pre-existing entries survive in both forms.
+        for entries in [&with, &without] {
+            for expected in ["Edit", "CopyStreamUrl", "RefreshArtwork", "Delete"] {
+                let found = entries.iter().any(|e| {
+                    matches!(
+                        (e, expected),
+                        (RadioContextEntry::Edit, "Edit")
+                            | (RadioContextEntry::CopyStreamUrl, "CopyStreamUrl")
+                            | (RadioContextEntry::RefreshArtwork, "RefreshArtwork")
+                            | (RadioContextEntry::Delete, "Delete")
+                    )
+                });
+                assert!(found, "missing {expected}");
+            }
+        }
     }
 
     // --- artwork_panel_open_state ------------------------------------------

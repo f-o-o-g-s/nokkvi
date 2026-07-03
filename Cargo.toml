@@ -99,5 +99,11 @@ notify = "8"
 parking_lot = "0.12.5"
 arc-swap = "1.7"
 libc = "0.2"
+# Native file dialog for "Set Custom Artwork…" (playlist / radio-station image
+# upload). Portal backend only (`xdg-portal`, the 0.17 default): the dialog is
+# served by xdg-desktop-portal over D-Bus — correct on Wayland/Hyprland and no
+# gtk3 link-time dependency. The async dialog future is runtime-agnostic and is
+# awaited inside iced `Task::perform` closures on the tokio runtime.
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
 

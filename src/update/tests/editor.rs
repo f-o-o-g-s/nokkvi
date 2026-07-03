@@ -1139,6 +1139,7 @@ fn playlist_entry(
         public: true,
         updated_at: updated_at.into(),
         artwork_album_ids: vec![],
+        uploaded_image: None,
         searchable_lower: name.to_lowercase(),
     }
 }

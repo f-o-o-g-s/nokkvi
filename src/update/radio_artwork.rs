@@ -21,7 +21,8 @@ use nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE;
 
 use crate::{
     Nokkvi,
-    app_message::{ArtworkMessage, Message, MiniArt},
+    app_message::{ArtworkMessage, CustomArtworkOutcome, Message, MiniArt},
+    update::components::custom_artwork,
 };
 
 impl Nokkvi {
@@ -355,29 +356,7 @@ impl Nokkvi {
         station: nokkvi_data::types::radio_station::RadioStation,
     ) -> Task<Message> {
         let station_id = station.id.clone();
-        // Revert immediately in the UI.
-        self.artwork.radio_art.pop(&station_id);
-        self.artwork.radio_large_art.pop(&station_id);
-        self.artwork.radio_icy_captured.remove(&station_id);
-
-        // Forget the persisted record off-thread.
-        let remove_task = if self.app_service.is_some() {
-            let id = station_id.clone();
-            self.shell_task(
-                move |shell| async move {
-                    let (server_url, _cred) = shell.queue().get_server_config().await;
-                    let store = nokkvi_data::services::radio_art_store::RadioArtStore::new(
-                        shell.storage().clone(),
-                    );
-                    if let Err(e) = store.remove_station(&server_url, &id) {
-                        tracing::warn!("failed to clear radio art for {id}: {e}");
-                    }
-                },
-                |()| Message::NoOp,
-            )
-        } else {
-            Task::none()
-        };
+        let remove_task = self.clear_radio_station_artwork_caches(&station_id);
 
         self.toast_info("Station artwork cleared");
 
@@ -391,6 +370,182 @@ impl Nokkvi {
             ])
         } else {
             remove_task
+        }
+    }
+
+    /// FULL clear of a station's cached artwork identities: the in-memory
+    /// row + panel handles, the on-disk `RadioArtStore` record, AND the ICY
+    /// dedup record — dropping the dedup is what lets the next play
+    /// re-capture stream art, which is exactly what "Refresh Artwork" and
+    /// the custom-artwork RESET want. The custom-artwork SET path must NOT
+    /// use this — see [`Self::clear_radio_station_art_handles`].
+    pub(crate) fn clear_radio_station_artwork_caches(&mut self, station_id: &str) -> Task<Message> {
+        self.artwork.radio_icy_captured.remove(station_id);
+        self.clear_radio_station_art_handles(station_id)
+    }
+
+    /// Art handles + on-disk record only — KEEPS `radio_icy_captured`. The
+    /// custom-artwork SET success path uses this: wiping the dedup record
+    /// there would let the ~100ms playback tick immediately re-capture the
+    /// stream's ICY now-playing art, racing the station-list reload and
+    /// masking the just-uploaded logo for the rest of the session (worst
+    /// case persisting the stream art to `RadioArtStore`). The returned task
+    /// is the off-thread disk removal (or `Task::none()` pre-login).
+    pub(crate) fn clear_radio_station_art_handles(&mut self, station_id: &str) -> Task<Message> {
+        let key = station_id.to_string();
+        self.artwork.radio_art.pop(&key);
+        self.artwork.radio_large_art.pop(&key);
+
+        if self.app_service.is_none() {
+            return Task::none();
+        }
+        self.shell_task(
+            move |shell| async move {
+                let (server_url, _cred) = shell.queue().get_server_config().await;
+                let store = nokkvi_data::services::radio_art_store::RadioArtStore::new(
+                    shell.storage().clone(),
+                );
+                if let Err(e) = store.remove_station(&server_url, &key) {
+                    tracing::warn!("failed to clear radio art for {key}: {e}");
+                }
+            },
+            |()| Message::NoOp,
+        )
+    }
+
+    /// "Set Custom Artwork…" on a radio station: open the native file picker,
+    /// read the chosen image, and upload it to Navidrome's
+    /// `POST /api/radio/{id}/image` — all inside one async task. The
+    /// completion lands as [`ArtworkMessage::RadioCustomArtworkSet`], where
+    /// [`Self::handle_radio_custom_artwork_set`] invalidates + reloads.
+    pub(crate) fn handle_set_radio_station_artwork(
+        &mut self,
+        station: nokkvi_data::types::radio_station::RadioStation,
+    ) -> Task<Message> {
+        let station_id = station.id.clone();
+        self.shell_task(
+            move |shell| async move {
+                let outcome = custom_artwork::pick_and_upload(|bytes, filename| async move {
+                    shell
+                        .radios_api()
+                        .await?
+                        .upload_image(&station_id, bytes, &filename)
+                        .await
+                })
+                .await;
+                (station, outcome)
+            },
+            |(station, outcome)| {
+                Message::Artwork(ArtworkMessage::RadioCustomArtworkSet(station, outcome))
+            },
+        )
+    }
+
+    /// "Reset Artwork" on a radio station: `DELETE /api/radio/{id}/image`.
+    /// Completion lands as [`ArtworkMessage::RadioCustomArtworkReset`].
+    pub(crate) fn handle_reset_radio_station_artwork(
+        &mut self,
+        station: nokkvi_data::types::radio_station::RadioStation,
+    ) -> Task<Message> {
+        let station_id = station.id.clone();
+        self.shell_task(
+            move |shell| async move {
+                let outcome = custom_artwork::outcome_from_result(
+                    async { shell.radios_api().await?.delete_image(&station_id).await }.await,
+                );
+                (station, outcome)
+            },
+            |(station, outcome)| {
+                Message::Artwork(ArtworkMessage::RadioCustomArtworkReset(station, outcome))
+            },
+        )
+    }
+
+    /// Completion of the radio "Set Custom Artwork…" upload. On success,
+    /// invalidate every cached identity for the station and reload the
+    /// station list — the fresh list carries the new `coverArt` token, and
+    /// [`Self::handle_radio_stations_loaded`] re-warms the row logo + the
+    /// panel (playing/centered station) from it.
+    pub(crate) fn handle_radio_custom_artwork_set(
+        &mut self,
+        station: nokkvi_data::types::radio_station::RadioStation,
+        outcome: CustomArtworkOutcome,
+    ) -> Task<Message> {
+        self.finish_radio_custom_artwork(
+            station,
+            outcome,
+            "Artwork upload",
+            // SET keeps the ICY dedup record — see clear_radio_station_art_handles.
+            true,
+            |name| format!("Custom artwork set for '{name}'"),
+        )
+    }
+
+    /// Completion of the radio "Reset Artwork" delete. On success the same
+    /// invalidate + reload runs; the reloaded station has no `coverArt`
+    /// token, so the tower glyph stands until the next play re-captures the
+    /// stream's ICY art.
+    pub(crate) fn handle_radio_custom_artwork_reset(
+        &mut self,
+        station: nokkvi_data::types::radio_station::RadioStation,
+        outcome: CustomArtworkOutcome,
+    ) -> Task<Message> {
+        self.finish_radio_custom_artwork(
+            station,
+            outcome,
+            "Artwork reset",
+            // RESET drops it — the next play SHOULD re-capture stream art.
+            false,
+            |name| format!("Artwork reset for '{name}' — automatic artwork returns"),
+        )
+    }
+
+    /// Shared completion body for the radio Set/Reset flows: cancel is a
+    /// silent no-op; failure maps 401 → session expiry and everything else →
+    /// a friendly error toast (caches untouched — the server didn't change);
+    /// success toasts, drops every cached identity, and reloads the station
+    /// list so the fresh `coverArt` token drives the re-fetch.
+    fn finish_radio_custom_artwork(
+        &mut self,
+        station: nokkvi_data::types::radio_station::RadioStation,
+        outcome: CustomArtworkOutcome,
+        action_label: &'static str,
+        preserve_icy_dedup: bool,
+        success_toast: impl FnOnce(&str) -> String,
+    ) -> Task<Message> {
+        match outcome {
+            CustomArtworkOutcome::Cancelled => Task::none(),
+            // LOCAL pick/read failure: plain toast, verbatim. Deliberately
+            // bypasses the Unauthorized/Forbidden/400 classifiers — the
+            // detail embeds the user-picked path (see CustomArtworkOutcome).
+            CustomArtworkOutcome::LocalFailed(detail) => {
+                tracing::error!(
+                    "{action_label} failed locally for station {}: {detail}",
+                    station.id
+                );
+                self.toast_error(format!("{action_label} failed: {detail}"));
+                Task::none()
+            }
+            CustomArtworkOutcome::Failed(detail) => {
+                if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&detail) {
+                    return self.handle_session_expired();
+                }
+                tracing::error!("{action_label} failed for station {}: {detail}", station.id);
+                self.toast_error(custom_artwork::custom_artwork_error_toast(
+                    action_label,
+                    &detail,
+                ));
+                Task::none()
+            }
+            CustomArtworkOutcome::Applied => {
+                self.toast_success(success_toast(&station.name));
+                let clear_task = if preserve_icy_dedup {
+                    self.clear_radio_station_art_handles(&station.id)
+                } else {
+                    self.clear_radio_station_artwork_caches(&station.id)
+                };
+                Task::batch([clear_task, self.handle_load_radio_stations()])
+            }
         }
     }
 

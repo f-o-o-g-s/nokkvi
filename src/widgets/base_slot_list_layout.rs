@@ -635,8 +635,41 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
     .into()
 }
 
+/// Wrap an artwork panel in its right-click menu when `entries` is non-empty;
+/// return the bare panel otherwise (an empty list means "no menu on this
+/// panel"). Shared implementation behind every
+/// `*_artwork_panel_with_*` helper below — the menu is a controlled overlay
+/// driven by the caller's `is_open` / `open_position` / `on_open_change` trio
+/// (see `context_menu::artwork_panel_open_state`).
+///
+/// Each view's entries list is statically non-empty or statically empty per
+/// render path, so the conditional wrap never flips the widget-tree shape
+/// across renders (root-widget-stability rule); only the entry CONTENT varies
+/// (e.g. a gated "Reset Artwork"), which is fine — the menu element is built
+/// on open.
+fn wrap_with_panel_menu<'a, Message: Clone + 'a>(
+    panel: Element<'a, Message>,
+    entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
+    is_open: bool,
+    open_position: Option<iced::Point>,
+    on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
+) -> Element<'a, Message> {
+    if entries.is_empty() {
+        return panel;
+    }
+    crate::widgets::context_menu::context_menu(
+        panel,
+        entries,
+        |entry, _length| entry.view(),
+        is_open,
+        open_position,
+        on_open_change,
+    )
+    .into()
+}
+
 /// Artwork panel with the active visualizer overlaid on the cover (when
-/// `over_art` is `Some`) plus the standard "Refresh Artwork" right-click menu.
+/// `over_art` is `Some`) plus a right-click menu built from `menu_entries`.
 /// Used by the Queue now-playing panel for the over-cover visualizer placement
 /// (the Scope ring always, and Bars/Lines when their placement is `OverCover`).
 /// The tuple carries the cloned visualizer and which widget mode to draw; `boat`
@@ -653,71 +686,28 @@ pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone +
     )>,
     boat: Option<OverCoverBoat<'a>>,
     placeholder: ArtworkPlaceholder,
-    on_refresh: Option<Message>,
+    menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
     is_open: bool,
     open_position: Option<iced::Point>,
     on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
     let panel = single_artwork_panel_inner(artwork_handle, over_art, boat, placeholder);
-
-    if let Some(refresh_msg) = on_refresh {
-        use crate::widgets::context_menu::{context_menu, menu_button};
-
-        context_menu(
-            panel,
-            vec![()],
-            move |_entry, _length| {
-                menu_button(
-                    Some("assets/icons/refresh-cw.svg"),
-                    "Refresh Artwork",
-                    refresh_msg.clone(),
-                )
-            },
-            is_open,
-            open_position,
-            on_open_change,
-        )
-        .into()
-    } else {
-        panel
-    }
+    wrap_with_panel_menu(panel, menu_entries, is_open, open_position, on_open_change)
 }
 
 /// Create a single-image artwork panel with an optional right-click context menu.
 ///
-/// When `on_refresh` is `Some`, wraps the panel in a context menu with "Refresh Artwork".
-/// When `None`, this is identical to [`single_artwork_panel`].
+/// A non-empty `menu_entries` wraps the panel in a context menu; an empty
+/// list is identical to [`single_artwork_panel`].
 pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
-    on_refresh: Option<Message>,
+    menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
     is_open: bool,
     open_position: Option<iced::Point>,
     on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
     let panel = single_artwork_panel(artwork_handle);
-
-    if let Some(refresh_msg) = on_refresh {
-        // Wrap in context menu with a single "Refresh Artwork" entry
-        use crate::widgets::context_menu::{context_menu, menu_button};
-
-        context_menu(
-            panel,
-            vec![()],
-            move |_entry, _length| {
-                menu_button(
-                    Some("assets/icons/refresh-cw.svg"),
-                    "Refresh Artwork",
-                    refresh_msg.clone(),
-                )
-            },
-            is_open,
-            open_position,
-            on_open_change,
-        )
-        .into()
-    } else {
-        panel
-    }
+    wrap_with_panel_menu(panel, menu_entries, is_open, open_position, on_open_change)
 }
 
 /// Wrap an existing artwork panel element with a bottom-anchored, full-width
@@ -769,7 +759,7 @@ fn wrap_with_pill_overlay<'a, Message: 'a>(
 pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     pill_content: Option<Element<'a, Message>>,
-    on_refresh: Option<Message>,
+    menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
     is_open: bool,
     open_position: Option<iced::Point>,
     on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
@@ -782,40 +772,29 @@ pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
         base_panel
     };
 
-    if let Some(refresh_msg) = on_refresh {
-        use crate::widgets::context_menu::{context_menu, menu_button};
-        context_menu(
-            panel,
-            vec![()],
-            move |_entry, _length| {
-                menu_button(
-                    Some("assets/icons/refresh-cw.svg"),
-                    "Refresh Artwork",
-                    refresh_msg.clone(),
-                )
-            },
-            is_open,
-            open_position,
-            on_open_change,
-        )
-        .into()
-    } else {
-        panel
-    }
+    wrap_with_panel_menu(panel, menu_entries, is_open, open_position, on_open_change)
 }
 
-/// Create a 3x3 collage artwork panel with a bottom-anchored, full-width bar overlay
+/// Create a 3x3 collage artwork panel with a bottom-anchored, full-width bar
+/// overlay and an optional right-click menu (same `menu_entries` plumbing as
+/// its single-panel sibling; an empty list leaves the panel bare).
 pub(crate) fn collage_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     collage_handles: &'a [iced::widget::image::Handle],
     pill_content: Option<Element<'a, Message>>,
+    menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
+    is_open: bool,
+    open_position: Option<iced::Point>,
+    on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
     let base_panel = collage_artwork_panel(collage_handles);
 
-    if let Some(content) = pill_content {
+    let panel = if let Some(content) = pill_content {
         wrap_with_pill_overlay(base_panel, content)
     } else {
         base_panel
-    }
+    };
+
+    wrap_with_panel_menu(panel, menu_entries, is_open, open_position, on_open_change)
 }
 
 /// Create a 3×3 collage artwork panel (used by genres, playlists)

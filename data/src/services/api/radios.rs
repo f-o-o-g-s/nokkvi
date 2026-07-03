@@ -113,6 +113,44 @@ impl RadiosApiService {
         .await
     }
 
+    /// Upload a custom logo image for a radio station. Navidrome stores it
+    /// server-side; the next `getInternetRadioStations` response then carries
+    /// a `coverArt` token (`ra-<id>_<ts>`) for the station, which nokkvi's
+    /// existing logo pipeline renders. Requires `EnableArtworkUpload`
+    /// (default true) or admin — a refusal surfaces as
+    /// [`NokkviError::Forbidden`].
+    ///
+    /// Uses Navidrome native API: POST /api/radio/:id/image
+    /// (`multipart/form-data`, one part named `image`).
+    ///
+    /// [`NokkviError::Forbidden`]: crate::types::error::NokkviError::Forbidden
+    pub async fn upload_image(
+        &self,
+        station_id: &str,
+        bytes: Vec<u8>,
+        filename: &str,
+    ) -> Result<()> {
+        self.client
+            .post_multipart(
+                &format!("/api/radio/{station_id}/image"),
+                "image",
+                bytes,
+                filename,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Delete a radio station's custom logo, reverting to the automatic
+    /// artwork (ICY now-playing capture / tower glyph client-side).
+    ///
+    /// Uses Navidrome native API: DELETE /api/radio/:id/image
+    pub async fn delete_image(&self, station_id: &str) -> Result<()> {
+        self.client
+            .delete(&format!("/api/radio/{station_id}/image"))
+            .await
+    }
+
     /// Update an internet radio station
     pub async fn update_radio_station(
         &self,

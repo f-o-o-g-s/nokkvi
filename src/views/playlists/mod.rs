@@ -59,6 +59,13 @@ pub struct PlaylistsViewData<'a> {
     /// `artwork_album_ids`, falling back to the single `playlist_artwork`
     /// mini while tiles are still cold.
     pub album_art: &'a HashMap<String, image::Handle>,
+    /// Mini CUSTOM (user-uploaded) covers snapshot
+    /// (`artwork.playlist_custom_art`). A playlist with `uploaded_image` set
+    /// AND a handle here renders this single image instead of the quad.
+    pub playlist_custom_art: &'a HashMap<String, image::Handle>,
+    /// Large CUSTOM covers snapshot (`artwork.playlist_custom_large_art`)
+    /// for the artwork panel; falls back to the mini while loading.
+    pub playlist_custom_large_art: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -96,6 +103,11 @@ pub enum PlaylistContextEntry {
     EditPlaylist,
     /// Set this playlist as the default for quick-add
     SetAsDefault,
+    /// Pick an image file and upload it as the playlist's custom cover.
+    SetCustomArtwork,
+    /// Delete the uploaded cover server-side; the collage returns. Listed
+    /// only when the playlist actually has an uploaded image.
+    ResetArtwork,
 }
 
 /// Messages for local playlists page interactions
@@ -139,6 +151,13 @@ pub enum PlaylistsMessage {
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
     /// Always-Vertical artwork drag handle event — intercepted at root.
     ArtworkColumnVerticalDrag(crate::widgets::artwork_split_handle::DragEvent),
+    /// Panel-menu "Set Custom Artwork…" — `(playlist_id, playlist_name)`
+    /// resolved at view-build time (the centered playlist), so the handler
+    /// never re-resolves. Row menus reach the same action through
+    /// `PlaylistContextAction(idx, SetCustomArtwork)`.
+    SetCustomArtwork(String, String),
+    /// Panel-menu "Reset Artwork" — `(playlist_id, playlist_name)`.
+    ResetCustomArtwork(String, String),
     /// Header chip clicked — bubble to root, opens the default-playlist picker.
     OpenDefaultPlaylistPicker,
     /// View-header `+` button clicked — bubble to root to open the
@@ -171,6 +190,10 @@ pub enum PlaylistsAction {
     EditPlaylist(String, String, String, bool), // (playlist_id, playlist_name, comment, public) — enter split-view edit mode
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
+    /// Root should run the pick-file → upload flow. `(playlist_id, name)`.
+    SetCustomArtwork(String, String),
+    /// Root should DELETE the playlist's uploaded cover. `(playlist_id, name)`.
+    ResetCustomArtwork(String, String),
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
     /// Bubble to root: open the default-playlist picker overlay.

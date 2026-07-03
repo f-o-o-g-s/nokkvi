@@ -16,6 +16,12 @@ pub struct PlaylistUIViewData {
     pub updated_at: String,
     /// Album IDs for 3x3 collage (up to 9 albums)
     pub artwork_album_ids: Vec<String>,
+    /// User-uploaded custom cover reference, already collapsed through
+    /// `Playlist::custom_image` — `Some` here always means a REAL uploaded
+    /// image (the wire's `""`-when-none form never reaches this projection).
+    /// Gates the custom-artwork display path and the "Reset Artwork" menu
+    /// entry; the value itself is unused (fetches key on `pl-<id>`).
+    pub uploaded_image: Option<String>,
     /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
     pub searchable_lower: String,
 }
@@ -24,6 +30,7 @@ impl From<Playlist> for PlaylistUIViewData {
     fn from(playlist: Playlist) -> Self {
         let searchable_lower =
             crate::utils::search::build_searchable_lower(&[&playlist.name, &playlist.comment]);
+        let uploaded_image = playlist.custom_image().map(str::to_string);
         Self {
             id: playlist.id,
             name: playlist.name,
@@ -34,6 +41,7 @@ impl From<Playlist> for PlaylistUIViewData {
             public: playlist.public,
             updated_at: playlist.updated_at,
             artwork_album_ids: Vec::new(),
+            uploaded_image,
             searchable_lower,
         }
     }
@@ -85,6 +93,8 @@ mod tests {
             public: true,
             created_at: "2026-01-02T03:04:05Z".to_owned(),
             updated_at: "2026-06-07T08:09:10Z".to_owned(),
+            uploaded_image: Some("al-cover-ref".to_owned()),
+            external_image_url: None,
         };
 
         let by_ref = PlaylistUIViewData::from(&playlist);
@@ -99,6 +109,27 @@ mod tests {
         assert_eq!(by_ref.public, by_value.public);
         assert_eq!(by_ref.updated_at, by_value.updated_at);
         assert_eq!(by_ref.artwork_album_ids, by_value.artwork_album_ids);
+        assert_eq!(by_ref.uploaded_image, by_value.uploaded_image);
         assert_eq!(by_ref.searchable_lower, by_value.searchable_lower);
+    }
+
+    /// The projection must carry only the COLLAPSED custom-image form: the
+    /// wire's `""`-when-none encoding never reaches `PlaylistUIViewData`.
+    #[test]
+    fn projection_collapses_empty_uploaded_image_to_none() {
+        let mut playlist: Playlist = serde_json::from_value(serde_json::json!({
+            "id": "pl-2", "name": "Empty", "uploadedImage": ""
+        }))
+        .expect("fixture must deserialize");
+        assert_eq!(playlist.uploaded_image.as_deref(), Some(""));
+        assert_eq!(PlaylistUIViewData::from(&playlist).uploaded_image, None);
+
+        playlist.uploaded_image = Some("real-ref".to_owned());
+        assert_eq!(
+            PlaylistUIViewData::from(&playlist)
+                .uploaded_image
+                .as_deref(),
+            Some("real-ref")
+        );
     }
 }

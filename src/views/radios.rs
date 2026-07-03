@@ -45,10 +45,14 @@ pub struct RadiosViewData<'a> {
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus can resolve their own open/closed status.
     pub open_menu: Option<&'a crate::app_message::OpenMenu>,
-    /// Stream id of the station currently driving radio playback, if any.
-    /// Borrowed from `active_playback`; the row whose id matches gets the
-    /// now-playing breathing glow (parity with the queue/song-list slot).
-    pub current_playing_station_id: Option<&'a str>,
+    /// The station currently driving radio playback, if any — the SINGLE
+    /// playing-station source for this view (the row glow derives its id
+    /// from it, so the pair can't drift). Resolved at `app_view` from the
+    /// LIBRARY list by id when possible (fresh `coverArt` token — the
+    /// `active_playback` copy is snapshotted at play time and goes stale
+    /// after an upload/reset), falling back to the `active_playback` copy
+    /// when the library hasn't loaded the station.
+    pub playing_station: Option<&'a RadioStation>,
     /// Mini station artwork (`station_id -> Handle`) for the per-row thumbnail:
     /// an uploaded logo or the remembered last-played stream art. Ids absent
     /// here fall back to the radio-tower glyph.
@@ -99,6 +103,12 @@ pub enum RadiosMessage {
     /// Artwork): clears the cached thumbnail (memory + disk) so it reverts to
     /// the tower glyph, then re-fetches the uploaded logo if the station has one.
     RefreshStationArtwork(RadioStation),
+    /// Right-click → "Set Custom Artwork…": open the native file picker and
+    /// upload the chosen image as the station's server-side logo.
+    SetStationArtwork(RadioStation),
+    /// Right-click → "Reset Artwork": delete the uploaded logo server-side so
+    /// the automatic artwork (ICY capture / tower glyph) returns.
+    ResetStationArtwork(RadioStation),
 
     AddRadioStation,
     NoOp,
@@ -119,6 +129,10 @@ pub enum RadiosAction {
     EditRadioStation(RadioStation),
     DeleteStation(String, String),
     RefreshStationArtwork(RadioStation),
+    /// Root should run the pick-file → upload flow for this station.
+    SetStationArtwork(RadioStation),
+    /// Root should DELETE the station's uploaded logo and refresh.
+    ResetStationArtwork(RadioStation),
     SearchChanged(String),
     SortModeChanged(SortMode),
     SortOrderChanged(bool),
@@ -217,6 +231,12 @@ impl RadiosPage {
             }
             RadiosMessage::RefreshStationArtwork(station) => {
                 (Task::none(), RadiosAction::RefreshStationArtwork(station))
+            }
+            RadiosMessage::SetStationArtwork(station) => {
+                (Task::none(), RadiosAction::SetStationArtwork(station))
+            }
+            RadiosMessage::ResetStationArtwork(station) => {
+                (Task::none(), RadiosAction::ResetStationArtwork(station))
             }
 
             RadiosMessage::NoOp => (Task::none(), RadiosAction::None),
@@ -334,7 +354,7 @@ impl RadiosPage {
 
         let stations = data.stations.as_ref();
         let open_menu_for_rows = data.open_menu;
-        let current_station_id = data.current_playing_station_id;
+        let current_station_id = data.playing_station.map(|s| s.id.as_str());
 
         // Render slot list — flat list, each row is a radio station
         let slot_list_content = slot_list_view_with_scroll(
@@ -457,7 +477,9 @@ impl RadiosPage {
                 let cm_id_for_msg = cm_id.clone();
                 crate::widgets::context_menu::context_menu(
                     glowing,
-                    crate::widgets::context_menu::radio_entries(),
+                    crate::widgets::context_menu::radio_entries(
+                        station.logo_cover_art().is_some(),
+                    ),
                     {
                         let station_cloned = station.clone();
                         move |entry, length| {
@@ -471,6 +493,12 @@ impl RadiosPage {
                                     }
                                     crate::widgets::context_menu::RadioContextEntry::CopyStreamUrl => {
                                         RadiosMessage::CopyStreamUrl(s.stream_url.clone())
+                                    }
+                                    crate::widgets::context_menu::RadioContextEntry::SetArtwork => {
+                                        RadiosMessage::SetStationArtwork(s.clone())
+                                    }
+                                    crate::widgets::context_menu::RadioContextEntry::ResetArtwork => {
+                                        RadiosMessage::ResetStationArtwork(s.clone())
                                     }
                                     crate::widgets::context_menu::RadioContextEntry::RefreshArtwork => {
                                         RadiosMessage::RefreshStationArtwork(s.clone())
@@ -508,24 +536,29 @@ impl RadiosPage {
         // Large artwork panel. Mirrors the Queue view's cover selection: while a
         // radio station is playing the panel LOCKS to that station's art (so it
         // doesn't change as you scroll the list); otherwise it follows the
-        // centered station so you can browse the different stations' artwork. The
-        // `or_else` chain keeps the panel from going blank if the playing
-        // station's large art hasn't loaded yet, then falls through the mini
-        // thumbnail and finally the radio-tower glyph.
-        let playing_handle = data.current_playing_station_id.and_then(|id| {
+        // centered station so you can browse the different stations' artwork.
+        //
+        // ONE "panel station" drives BOTH the displayed handle and the
+        // right-click menu target, so they can never diverge: the playing
+        // station while its art is cached, else the centered station (whose
+        // art — or the tower placeholder — is what actually shows while the
+        // playing station's art hasn't loaded yet). Deriving the menu from
+        // anything else lets Set/Reset mutate a station whose cover isn't
+        // the one on screen.
+        let panel_station: Option<&RadioStation> = data
+            .playing_station
+            .filter(|s| {
+                data.radio_large_art.contains_key(&s.id) || data.radio_art.contains_key(&s.id)
+            })
+            .or_else(|| {
+                self.common
+                    .get_center_item_index(stations.len())
+                    .and_then(|idx| stations.get(idx))
+            });
+        let panel_handle = panel_station.and_then(|s| {
             data.radio_large_art
-                .get(id)
-                .or_else(|| data.radio_art.get(id))
-        });
-        let centered_handle = playing_handle.or_else(|| {
-            self.common
-                .get_center_item_index(stations.len())
-                .and_then(|idx| stations.get(idx))
-                .and_then(|s| {
-                    data.radio_large_art
-                        .get(&s.id)
-                        .or_else(|| data.radio_art.get(&s.id))
-                })
+                .get(&s.id)
+                .or_else(|| data.radio_art.get(&s.id))
         });
         // Over-cover visualizer + surfing boat are UNGATED, matching the Queue
         // view: while audio plays they animate over the cover, and when it pauses
@@ -537,8 +570,28 @@ impl RadiosPage {
         // Queue now-playing cover uses — so the over-cover visualizer/boat stack
         // on top even when there's no art: `ArtworkPlaceholder::RadioTower` draws
         // the tower glyph as the cover, and the visualizer rides over it (instead
-        // of a bespoke art-less panel that dropped the overlay). Menu params are
-        // required by the helper but inert here (no `on_refresh` → no panel menu).
+        // of a bespoke art-less panel that dropped the overlay).
+        //
+        // Panel menu entries act on the SAME resolved panel station whose art
+        // is displayed (above), carried in each entry's message so the
+        // handler never re-resolves (the viewport may have moved by then).
+        let panel_menu_entries: Vec<_> = panel_station
+            .map(|s| {
+                use crate::widgets::context_menu::PanelMenuEntry;
+                let mut entries = vec![PanelMenuEntry::set_custom_artwork(
+                    RadiosMessage::SetStationArtwork(s.clone()),
+                )];
+                if s.logo_cover_art().is_some() {
+                    entries.push(PanelMenuEntry::reset_artwork(
+                        RadiosMessage::ResetStationArtwork(s.clone()),
+                    ));
+                }
+                entries.push(PanelMenuEntry::refresh_artwork(
+                    RadiosMessage::RefreshStationArtwork(s.clone()),
+                ));
+                entries
+            })
+            .unwrap_or_default();
         let (menu_open, menu_position, on_menu_change) =
             crate::widgets::context_menu::artwork_panel_open_state(
                 crate::View::Radios,
@@ -547,11 +600,11 @@ impl RadiosPage {
             );
         let artwork_content = Some(
             crate::widgets::base_slot_list_layout::single_artwork_panel_with_visualizer_and_menu(
-                centered_handle,
+                panel_handle,
                 over_art_visualizer,
                 over_art_boat,
                 crate::widgets::base_slot_list_layout::ArtworkPlaceholder::RadioTower,
-                None::<RadiosMessage>,
+                panel_menu_entries,
                 menu_open,
                 menu_position,
                 on_menu_change,

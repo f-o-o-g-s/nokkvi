@@ -478,9 +478,15 @@ impl SongsPage {
                     .or_else(|| data.album_art.get(album_id))
             });
 
-        let on_refresh = centered_song
+        let panel_menu_entries: Vec<_> = centered_song
             .and_then(|song| song.album_id.clone())
-            .map(SongsMessage::RefreshArtwork);
+            .map(|id| {
+                crate::widgets::context_menu::PanelMenuEntry::refresh_artwork(
+                    SongsMessage::RefreshArtwork(id),
+                )
+            })
+            .into_iter()
+            .collect();
 
         let pill_content = centered_song
             .filter(|_| crate::theme::songs_artwork_overlay())
@@ -556,7 +562,7 @@ impl SongsPage {
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,
             pill_content,
-            on_refresh,
+            panel_menu_entries,
             artwork_menu_open,
             artwork_menu_position,
             on_artwork_menu_change,

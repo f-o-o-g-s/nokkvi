@@ -413,6 +413,7 @@ fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::
         public: false,
         updated_at: String::new(),
         artwork_album_ids: vec![],
+        uploaded_image: None,
         searchable_lower: name.to_lowercase(),
     }
 }

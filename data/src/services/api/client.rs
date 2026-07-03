@@ -170,6 +170,24 @@ enum BodyPolicy {
     Tolerant,
 }
 
+/// Content type for an image filename, by extension (case-insensitive).
+/// Covers the four formats Navidrome's image-upload endpoints decode
+/// (jpeg/png/gif/webp); anything else degrades to `application/octet-stream`
+/// — the server sniffs the actual bytes, so the mime is advisory.
+fn mime_for_image_filename(filename: &str) -> &'static str {
+    let ext = filename
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
 /// Current wall-clock time as unix seconds. Saturates to 0 on a time-travel
 /// system clock (pre-epoch) — same fallback as redb / serde defaults.
 fn unix_now() -> i64 {
@@ -316,7 +334,9 @@ impl ApiClient {
 
     /// Apply the shared response status policy: 2xx returns the body, 401
     /// routes to [`NokkviError::Unauthorized`] (the UI's session-expiry
-    /// downcast depends on it), anything else becomes a descriptive error.
+    /// downcast depends on it), 403 routes to [`NokkviError::Forbidden`]
+    /// (permission failures like artwork-upload-disabled map to friendly
+    /// toasts), anything else becomes a descriptive error.
     ///
     /// Pure (no I/O) so it can be unit-tested without an HTTP server —
     /// mirrors `check_subsonic_response_status` in
@@ -326,6 +346,10 @@ impl ApiClient {
             Ok(body)
         } else if status == StatusCode::UNAUTHORIZED {
             Err(NokkviError::Unauthorized.into())
+        } else if status == StatusCode::FORBIDDEN {
+            // Keep the generic arm's detail text inside the typed variant so
+            // log lines lose nothing to the split.
+            Err(NokkviError::Forbidden(format!("{ctx} failed with status {status}: {body}")).into())
         } else {
             Err(anyhow!("{ctx} failed with status {status}: {body}"))
         }
@@ -434,6 +458,37 @@ impl ApiClient {
             .execute(
                 request,
                 &format!("API PUT {endpoint}"),
+                BodyPolicy::Required,
+            )
+            .await?;
+        Ok(body)
+    }
+
+    /// Make a `multipart/form-data` POST to the Navidrome REST API with a
+    /// single file part named `field_name` (Navidrome's image-upload endpoints
+    /// expect exactly one part literally named `image`). Routes through the
+    /// same [`Self::build_request`] + [`Self::execute`] pipeline as every
+    /// other verb, so JWT attachment, token-refresh interception, and the
+    /// 401/403 status mapping keep working.
+    pub async fn post_multipart(
+        &self,
+        endpoint: &str,
+        field_name: &'static str,
+        bytes: Vec<u8>,
+        filename: &str,
+    ) -> Result<String> {
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(filename.to_string())
+            .mime_str(mime_for_image_filename(filename))
+            .context("failed to build multipart file part")?;
+        let form = reqwest::multipart::Form::new().part(field_name, part);
+        let request = self
+            .build_request(Method::POST, endpoint, &[])?
+            .multipart(form);
+        let (body, _total_count) = self
+            .execute(
+                request,
+                &format!("API POST {endpoint}"),
                 BodyPolicy::Required,
             )
             .await?;
@@ -837,6 +892,56 @@ mod tests {
         assert!(
             matches!(nokkvi_err, NokkviError::Unauthorized),
             "expected NokkviError::Unauthorized, got {nokkvi_err:?}"
+        );
+    }
+
+    /// HTTP 403 must downcast to [`NokkviError::Forbidden`] so the artwork
+    /// upload/reset handlers can map permission failures to a friendly toast,
+    /// while the detail string keeps the ctx + status + body for logs.
+    #[test]
+    fn finish_status_403_downcasts_to_forbidden_with_detail() {
+        let err = ApiClient::finish_status(
+            StatusCode::FORBIDDEN,
+            "not authorized".to_string(),
+            "API POST /api/playlist/p1/image",
+        )
+        .expect_err("403 must produce an error");
+
+        let nokkvi_err = err
+            .downcast_ref::<NokkviError>()
+            .expect("403 should downcast to NokkviError");
+        let NokkviError::Forbidden(detail) = nokkvi_err else {
+            panic!("expected NokkviError::Forbidden, got {nokkvi_err:?}");
+        };
+        assert!(detail.contains("API POST /api/playlist/p1/image"));
+        assert!(detail.contains("403"));
+        assert!(detail.contains("not authorized"));
+        // The Display marker the flattened string matcher keys on.
+        assert!(NokkviError::is_forbidden_str(&format!("{err:#}")));
+        assert!(!NokkviError::is_unauthorized_str(&format!("{err:#}")));
+    }
+
+    #[test]
+    fn mime_for_image_filename_maps_known_extensions() {
+        assert_eq!(mime_for_image_filename("cover.png"), "image/png");
+        assert_eq!(mime_for_image_filename("cover.jpg"), "image/jpeg");
+        assert_eq!(mime_for_image_filename("cover.JPEG"), "image/jpeg");
+        assert_eq!(mime_for_image_filename("art.gif"), "image/gif");
+        assert_eq!(mime_for_image_filename("art.WebP"), "image/webp");
+        // Dotted names resolve by the LAST extension segment.
+        assert_eq!(mime_for_image_filename("a.b.c.png"), "image/png");
+    }
+
+    #[test]
+    fn mime_for_image_filename_falls_back_to_octet_stream() {
+        assert_eq!(
+            mime_for_image_filename("noextension"),
+            "application/octet-stream"
+        );
+        assert_eq!(mime_for_image_filename(""), "application/octet-stream");
+        assert_eq!(
+            mime_for_image_filename("weird.bmp"),
+            "application/octet-stream"
         );
     }
 

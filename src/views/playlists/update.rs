@@ -234,6 +234,12 @@ impl PlaylistsPage {
                     PlaylistsAction::NavigateAndExpandArtist(artist_id),
                 ),
 
+                PlaylistsMessage::SetCustomArtwork(id, name) => {
+                    (Task::none(), PlaylistsAction::SetCustomArtwork(id, name))
+                }
+                PlaylistsMessage::ResetCustomArtwork(id, name) => {
+                    (Task::none(), PlaylistsAction::ResetCustomArtwork(id, name))
+                }
                 PlaylistsMessage::OpenDefaultPlaylistPicker => {
                     (Task::none(), PlaylistsAction::OpenDefaultPlaylistPicker)
                 }
@@ -369,6 +375,20 @@ impl PlaylistsPage {
                             PlaylistContextEntry::SetAsDefault => (
                                 Task::none(),
                                 PlaylistsAction::SetAsDefaultPlaylist(
+                                    playlist.id.clone(),
+                                    playlist.name.clone(),
+                                ),
+                            ),
+                            PlaylistContextEntry::SetCustomArtwork => (
+                                Task::none(),
+                                PlaylistsAction::SetCustomArtwork(
+                                    playlist.id.clone(),
+                                    playlist.name.clone(),
+                                ),
+                            ),
+                            PlaylistContextEntry::ResetArtwork => (
+                                Task::none(),
+                                PlaylistsAction::ResetCustomArtwork(
                                     playlist.id.clone(),
                                     playlist.name.clone(),
                                 ),

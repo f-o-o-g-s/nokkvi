@@ -295,6 +295,17 @@ impl Nokkvi {
                     // same pass (dedup-gated, so warm viewports add nothing).
                     tasks.extend(self.quad_prefetch_tasks(CollageTarget::Playlist));
 
+                    // Custom (user-uploaded) covers: warm the viewport's
+                    // minis, plus the centered playlist's large panel image
+                    // (the handler gates on the live uploaded_image field,
+                    // so this is a no-op for collage playlists).
+                    tasks.push(self.prefetch_playlist_custom_art_tasks());
+                    if let Some(id) = center_id {
+                        tasks.push(Task::done(Message::Artwork(
+                            ArtworkMessage::LoadPlaylistCustomLarge(id),
+                        )));
+                    }
+
                     if !tasks.is_empty() {
                         return Task::batch(tasks);
                     }
@@ -390,6 +401,12 @@ impl Nokkvi {
                 return self.update(Message::InfoModal(
                     crate::widgets::info_modal::InfoModalMessage::Open(item),
                 ));
+            }
+            PlaylistsAction::SetCustomArtwork(playlist_id, playlist_name) => {
+                return self.handle_set_playlist_artwork(playlist_id, playlist_name);
+            }
+            PlaylistsAction::ResetCustomArtwork(playlist_id, playlist_name) => {
+                return self.handle_reset_playlist_artwork(playlist_id, playlist_name);
             }
             PlaylistsAction::SetAsDefaultPlaylist(playlist_id, playlist_name) => {
                 info!(

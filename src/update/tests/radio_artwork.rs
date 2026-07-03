@@ -232,3 +232,301 @@ fn hydrate_skips_radio_art_for_logo_stations() {
         "a logo station's remembered stream art must not block its logo fetch"
     );
 }
+
+// ============================================================================
+// Custom artwork (Set Custom Artwork… / Reset Artwork)
+// ============================================================================
+
+/// Right-click "Set Custom Artwork…" on a station row must bubble the
+/// station to root as `RadiosAction::SetStationArtwork` (the root handler
+/// owns the pick-file → upload side effects).
+#[test]
+fn set_station_artwork_message_maps_to_set_action() {
+    let mut app = radio_app_with_cover(None);
+    let station = app.library.radio_stations[0].clone();
+    let stations = app.library.radio_stations.clone();
+
+    let (_task, action) = app.radios_page.update(
+        crate::views::RadiosMessage::SetStationArtwork(station),
+        &stations,
+    );
+
+    assert!(
+        matches!(action, crate::views::RadiosAction::SetStationArtwork(s) if s.id == "s1"),
+        "SetStationArtwork message must map to the SetStationArtwork action"
+    );
+}
+
+/// Right-click "Reset Artwork" must bubble `RadiosAction::ResetStationArtwork`.
+#[test]
+fn reset_station_artwork_message_maps_to_reset_action() {
+    let mut app = radio_app_with_cover(Some("ra-s1_18f0"));
+    let station = app.library.radio_stations[0].clone();
+    let stations = app.library.radio_stations.clone();
+
+    let (_task, action) = app.radios_page.update(
+        crate::views::RadiosMessage::ResetStationArtwork(station),
+        &stations,
+    );
+
+    assert!(
+        matches!(action, crate::views::RadiosAction::ResetStationArtwork(s) if s.id == "s1"),
+        "ResetStationArtwork message must map to the ResetStationArtwork action"
+    );
+}
+
+/// Seed every in-memory artwork identity for station `s1`.
+fn seed_station_art(app: &mut crate::Nokkvi) {
+    app.artwork.radio_art.put("s1".into(), handle(b"mini"));
+    app.artwork
+        .radio_large_art
+        .put("s1".into(), handle(b"large"));
+    app.artwork
+        .radio_icy_captured
+        .insert("s1".into(), "http://np.jpg".into());
+}
+
+/// A successful upload must invalidate every cached identity for the station
+/// (so the reloaded list's fresh coverArt token re-fetches the NEW image) and
+/// confirm with a success toast.
+#[test]
+fn radio_custom_set_applied_clears_caches_and_toasts_success() {
+    let mut app = radio_app_with_cover(Some("ra-s1_18f0"));
+    seed_station_art(&mut app);
+    let station = app.library.radio_stations[0].clone();
+
+    let _ = app.handle_radio_custom_artwork_set(
+        station,
+        crate::app_message::CustomArtworkOutcome::Applied,
+    );
+
+    assert!(!app.artwork.radio_art.contains(&"s1".to_string()));
+    assert!(!app.artwork.radio_large_art.contains(&"s1".to_string()));
+    // The ICY dedup record is deliberately KEPT on a custom-art SET: wiping
+    // it would let the ~100ms playback tick immediately re-capture the
+    // stream's now-playing art and mask the just-uploaded logo for the rest
+    // of the session (worst case persisting it to RadioArtStore).
+    assert!(
+        app.artwork.radio_icy_captured.contains_key("s1"),
+        "SET must preserve the ICY dedup record so the tick can't re-capture over the new logo"
+    );
+    assert_eq!(app.toast.toasts.len(), 1);
+    assert_eq!(
+        app.toast.toasts[0].level,
+        nokkvi_data::types::toast::ToastLevel::Success
+    );
+}
+
+/// A cancelled file picker is a silent no-op: no toast, caches untouched.
+#[test]
+fn radio_custom_set_cancelled_is_silent_noop() {
+    let mut app = radio_app_with_cover(Some("ra-s1_18f0"));
+    seed_station_art(&mut app);
+    let station = app.library.radio_stations[0].clone();
+
+    let _ = app.handle_radio_custom_artwork_set(
+        station,
+        crate::app_message::CustomArtworkOutcome::Cancelled,
+    );
+
+    assert!(app.artwork.radio_art.contains(&"s1".to_string()));
+    assert!(app.artwork.radio_large_art.contains(&"s1".to_string()));
+    assert!(app.toast.toasts.is_empty(), "cancel must not toast");
+}
+
+/// A 403 refusal surfaces the friendly permission toast and leaves the
+/// cached art alone (nothing changed server-side).
+#[test]
+fn radio_custom_set_forbidden_toasts_friendly_error() {
+    let mut app = radio_app_with_cover(Some("ra-s1_18f0"));
+    seed_station_art(&mut app);
+    let station = app.library.radio_stations[0].clone();
+
+    let _ = app.handle_radio_custom_artwork_set(
+        station,
+        crate::app_message::CustomArtworkOutcome::Failed(
+            "Forbidden: API POST /api/radio/s1/image failed with status 403: denied".into(),
+        ),
+    );
+
+    assert!(app.artwork.radio_art.contains(&"s1".to_string()));
+    assert_eq!(app.toast.toasts.len(), 1);
+    assert_eq!(
+        app.toast.toasts[0].level,
+        nokkvi_data::types::toast::ToastLevel::Error
+    );
+    assert!(
+        app.toast.toasts[0].message.contains("not allowed"),
+        "403 must map to the friendly permission message, got: {}",
+        app.toast.toasts[0].message
+    );
+}
+
+/// A successful reset clears the caches (ICY/glyph returns until the fresh
+/// list confirms) and confirms with a success toast.
+#[test]
+fn radio_custom_reset_applied_clears_caches_and_toasts_success() {
+    let mut app = radio_app_with_cover(Some("ra-s1_18f0"));
+    seed_station_art(&mut app);
+    let station = app.library.radio_stations[0].clone();
+
+    let _ = app.handle_radio_custom_artwork_reset(
+        station,
+        crate::app_message::CustomArtworkOutcome::Applied,
+    );
+
+    assert!(!app.artwork.radio_art.contains(&"s1".to_string()));
+    assert!(!app.artwork.radio_large_art.contains(&"s1".to_string()));
+    assert!(!app.artwork.radio_icy_captured.contains_key("s1"));
+    assert_eq!(app.toast.toasts.len(), 1);
+    assert_eq!(
+        app.toast.toasts[0].level,
+        nokkvi_data::types::toast::ToastLevel::Success
+    );
+}
+
+/// A failed reset keeps the cached art (server still has the image) and
+/// surfaces an error toast.
+#[test]
+fn radio_custom_reset_failed_toasts_error_and_keeps_caches() {
+    let mut app = radio_app_with_cover(Some("ra-s1_18f0"));
+    seed_station_art(&mut app);
+    let station = app.library.radio_stations[0].clone();
+
+    let _ = app.handle_radio_custom_artwork_reset(
+        station,
+        crate::app_message::CustomArtworkOutcome::Failed("connection refused".into()),
+    );
+
+    assert!(app.artwork.radio_art.contains(&"s1".to_string()));
+    assert_eq!(app.toast.toasts.len(), 1);
+    assert_eq!(
+        app.toast.toasts[0].level,
+        nokkvi_data::types::toast::ToastLevel::Error
+    );
+}
+
+/// A LOCAL pick/read failure must surface verbatim as a plain error toast —
+/// NEVER through the server-error classifiers. The detail embeds the picked
+/// path, so a folder literally named "Unauthorized Bootlegs" must not match
+/// the 401 marker and log the user out (nor may "Forbidden" in a path map to
+/// the permission message).
+#[test]
+fn radio_local_failure_toasts_verbatim_without_session_teardown() {
+    let mut app = radio_app_with_cover(Some("ra-s1_18f0"));
+    seed_station_art(&mut app);
+    let station = app.library.radio_stations[0].clone();
+    let detail = "could not read /music/Unauthorized Bootlegs/Forbidden Fruit.png: permission denied (os error 13)";
+
+    let _ = app.handle_radio_custom_artwork_set(
+        station,
+        crate::app_message::CustomArtworkOutcome::LocalFailed(detail.into()),
+    );
+
+    // State untouched — nothing changed server-side.
+    assert!(app.artwork.radio_art.contains(&"s1".to_string()));
+    // Exactly one ERROR toast carrying the detail verbatim. A session
+    // teardown would instead push the Info "Session expired…" toast.
+    assert_eq!(app.toast.toasts.len(), 1);
+    assert_eq!(
+        app.toast.toasts[0].level,
+        nokkvi_data::types::toast::ToastLevel::Error
+    );
+    assert!(
+        app.toast.toasts[0].message.contains(detail),
+        "local detail must surface verbatim, got: {}",
+        app.toast.toasts[0].message
+    );
+    assert!(
+        !app.toast.toasts[0].message.contains("Session expired"),
+        "a local path substring must not trigger session teardown"
+    );
+    assert!(
+        !app.toast.toasts[0].message.contains("not allowed"),
+        "a local path substring must not hit the 403 classifier"
+    );
+}
+
+// ============================================================================
+// Station-list reload: snapshot refresh + sort-signature reset
+// ============================================================================
+
+fn station(
+    id: &str,
+    name: &str,
+    cover: Option<&str>,
+) -> nokkvi_data::types::radio_station::RadioStation {
+    nokkvi_data::types::radio_station::RadioStation {
+        id: id.into(),
+        name: name.into(),
+        stream_url: format!("http://stream/{id}"),
+        home_page_url: None,
+        cover_art: cover.map(str::to_string),
+    }
+}
+
+/// The active radio playback's station is a clone snapshotted at play time;
+/// a station-list reload (e.g. right after a custom-artwork upload) must
+/// refresh it from the fresh list — otherwise the panel re-warm and the ICY
+/// logo gate keep reading the stale (logo-less) coverArt for the whole play.
+#[test]
+fn station_list_reload_refreshes_active_playback_station_snapshot() {
+    // Playing s1 while it had NO logo (the primary first-upload flow).
+    let mut app = radio_app_with_cover(None);
+
+    // The reload lands carrying the freshly-uploaded logo token.
+    let _ = app.handle_radio_stations_loaded(Ok(vec![station("s1", "Test", Some("ra-s1_2"))]));
+
+    assert_eq!(
+        app.active_playback
+            .radio_station()
+            .and_then(|s| s.logo_cover_art()),
+        Some("ra-s1_2"),
+        "the play-time station snapshot must be refreshed from the reloaded list"
+    );
+}
+
+/// A reload with an UNKNOWN playing station (filtered/deleted server-side)
+/// leaves the snapshot untouched rather than clearing it.
+#[test]
+fn station_list_reload_keeps_snapshot_when_station_absent() {
+    let mut app = radio_app_with_cover(Some("ra-s1_1"));
+
+    let _ = app.handle_radio_stations_loaded(Ok(vec![station("other", "Other", None)]));
+
+    assert_eq!(
+        app.active_playback.radio_station().map(|s| s.id.as_str()),
+        Some("s1"),
+        "an absent station must not wipe the playback snapshot"
+    );
+}
+
+/// Reloading the station list must re-sort it even when the count is
+/// unchanged: `sort_radio_stations` short-circuits on its cached
+/// `(ascending, len)` signature, and without a reset site the reloaded
+/// server-ordered list silently replaced the sorted one (latent in the
+/// pre-existing R-hotkey reload; hit constantly by the upload/reset reload).
+#[test]
+fn station_list_reload_resets_sort_signature_and_resorts() {
+    let mut app = test_app();
+    // Simulate a prior sorted load of 2 stations under the same settings.
+    app.radios_page.last_sort_signature = Some((true, 2));
+
+    // Server returns them OUT of name order (raw server order).
+    let _ = app.handle_radio_stations_loaded(Ok(vec![
+        station("s2", "Zebra FM", None),
+        station("s1", "Alpha FM", None),
+    ]));
+
+    let names: Vec<&str> = app
+        .library
+        .radio_stations
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Alpha FM", "Zebra FM"],
+        "a reload with an unchanged count must still re-sort the fresh list"
+    );
+}

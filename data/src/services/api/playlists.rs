@@ -317,6 +317,43 @@ impl PlaylistsApiService {
             .await
     }
 
+    /// Upload a custom cover image for a playlist. Navidrome stores it
+    /// server-side and serves it back through `getCoverArt?id=pl-<id>` at any
+    /// size, taking precedence over the generated mosaic. Requires
+    /// `EnableArtworkUpload` (default true) or admin, plus playlist
+    /// ownership — a refusal surfaces as [`NokkviError::Forbidden`].
+    ///
+    /// Uses Navidrome native API: POST /api/playlist/:id/image
+    /// (`multipart/form-data`, one part named `image`).
+    ///
+    /// [`NokkviError::Forbidden`]: crate::types::error::NokkviError::Forbidden
+    pub async fn upload_image(
+        &self,
+        playlist_id: &str,
+        bytes: Vec<u8>,
+        filename: &str,
+    ) -> Result<()> {
+        self.client
+            .post_multipart(
+                &format!("/api/playlist/{playlist_id}/image"),
+                "image",
+                bytes,
+                filename,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Delete a playlist's custom cover image, reverting `getCoverArt` to the
+    /// automatic artwork (sidecar / external URL / generated mosaic).
+    ///
+    /// Uses Navidrome native API: DELETE /api/playlist/:id/image
+    pub async fn delete_image(&self, playlist_id: &str) -> Result<()> {
+        self.client
+            .delete(&format!("/api/playlist/{playlist_id}/image"))
+            .await
+    }
+
     /// Add songs to an existing playlist (append).
     ///
     /// Uses Navidrome native API: POST /api/playlist/:id/tracks

@@ -243,8 +243,14 @@ impl AlbumsPage {
                 .or_else(|| data.album_art.get(&album.id))
         });
 
-        let on_refresh =
-            centered_album.map(|album| AlbumsMessage::RefreshArtwork(album.id.clone()));
+        let panel_menu_entries: Vec<_> = centered_album
+            .map(|album| {
+                crate::widgets::context_menu::PanelMenuEntry::refresh_artwork(
+                    AlbumsMessage::RefreshArtwork(album.id.clone()),
+                )
+            })
+            .into_iter()
+            .collect();
 
         // Overlay building (gated by Settings → Interface → Views → Text Overlay On Artwork)
         let overlay_content = centered_album
@@ -337,7 +343,7 @@ impl AlbumsPage {
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,
             overlay_content,
-            on_refresh,
+            panel_menu_entries,
             artwork_menu_open,
             artwork_menu_position,
             on_artwork_menu_change,

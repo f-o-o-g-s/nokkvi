@@ -105,6 +105,7 @@ fn seed_all(app: &mut crate::Nokkvi) {
             public: false,
             updated_at: String::new(),
             artwork_album_ids: Vec::new(),
+            uploaded_image: None,
             searchable_lower: String::new(),
         }]);
     seed_genres(app, vec![make_genre("g0", "Genre 0")]);

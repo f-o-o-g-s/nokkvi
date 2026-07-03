@@ -6,9 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Right-clicking a playlist or radio station (the row thumbnail or the large artwork panel) now offers "Set Custom Artwork…", which opens a native file picker and uploads the image to Navidrome, so the cover shows in nokkvi, the web UI, and every other client.
+- "Reset Artwork" on the same menus removes the uploaded image and brings back the automatic artwork (the album collage for playlists; stream art or the tower glyph for stations).
+
 ### Changed
 
 ### Fixed
+
+- Reloading the Radios list (the refresh button or the R hotkey) no longer silently drops the name sort when the station count is unchanged.
 
 ### Removed
 

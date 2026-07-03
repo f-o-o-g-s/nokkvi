@@ -48,18 +48,27 @@ pub(crate) fn playlists_updated_at_visible(
 }
 
 /// Build the full set of context menu entries for a playlist parent item.
-fn playlist_context_entries() -> Vec<PlaylistContextEntry> {
+/// `has_custom_art` (the playlist's `uploaded_image.is_some()`) gates the
+/// "Reset Artwork" entry — there is nothing to reset without an uploaded
+/// cover.
+fn playlist_context_entries(has_custom_art: bool) -> Vec<PlaylistContextEntry> {
     use crate::widgets::context_menu::LibraryContextEntry;
-    vec![
+    let mut entries = vec![
         PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue),
         PlaylistContextEntry::Separator,
         PlaylistContextEntry::EditPlaylist,
         PlaylistContextEntry::Rename,
         PlaylistContextEntry::Delete,
         PlaylistContextEntry::Separator,
-        PlaylistContextEntry::SetAsDefault,
-        PlaylistContextEntry::Library(LibraryContextEntry::GetInfo),
-    ]
+        PlaylistContextEntry::SetCustomArtwork,
+    ];
+    if has_custom_art {
+        entries.push(PlaylistContextEntry::ResetArtwork);
+    }
+    entries.push(PlaylistContextEntry::Separator);
+    entries.push(PlaylistContextEntry::SetAsDefault);
+    entries.push(PlaylistContextEntry::Library(LibraryContextEntry::GetInfo));
+    entries
 }
 
 /// Render a playlist context menu entry.
@@ -94,6 +103,20 @@ fn playlist_entry_view<'a, Message: Clone + 'a>(
             "Set as Default Playlist",
             on_action(PlaylistContextEntry::SetAsDefault),
         ),
+        // Delegate to the shared PanelMenuEntry constructors — ONE icon +
+        // label definition across row menus and the artwork-panel menus.
+        PlaylistContextEntry::SetCustomArtwork => {
+            crate::widgets::context_menu::PanelMenuEntry::set_custom_artwork(on_action(
+                PlaylistContextEntry::SetCustomArtwork,
+            ))
+            .view()
+        }
+        PlaylistContextEntry::ResetArtwork => {
+            crate::widgets::context_menu::PanelMenuEntry::reset_artwork(on_action(
+                PlaylistContextEntry::ResetArtwork,
+            ))
+            .view()
+        }
     }
 }
 
@@ -229,6 +252,7 @@ impl PlaylistsPage {
         let playlist_artwork = data.playlist_artwork;
         let playlist_collage_artwork = data.playlist_collage_artwork;
         let album_art = data.album_art;
+        let playlist_custom_art = data.playlist_custom_art;
         let open_menu_for_rows = data.overlay.open_menu;
 
         // Build flattened list (playlists + injected tracks when expanded)
@@ -253,6 +277,7 @@ impl PlaylistsPage {
                         &ctx,
                         playlist_artwork,
                         album_art,
+                        playlist_custom_art,
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
@@ -356,10 +381,54 @@ impl PlaylistsPage {
             collage_artwork_panel_with_pill, single_artwork_panel_with_pill,
         };
 
-        // Playlist artwork panels currently have no refresh action wired up,
-        // but the helper still requires the controlled-component plumbing.
-        // Pass inert defaults — no menu opens because `on_refresh` is None.
-        let artwork_content = if album_count <= 1 {
+        // Panel right-click menu: Set/Reset custom artwork for the CENTERED
+        // playlist. Resolved here and carried IN each entry's message so the
+        // handler never re-resolves (the viewport may move before the click
+        // lands). "Reset Artwork" is gated on the live `uploaded_image`.
+        let panel_menu_entries: Vec<_> = centered_playlist
+            .map(|p| {
+                use crate::widgets::context_menu::PanelMenuEntry;
+                let mut entries = vec![PanelMenuEntry::set_custom_artwork(
+                    PlaylistsMessage::SetCustomArtwork(p.id.clone(), p.name.clone()),
+                )];
+                if p.uploaded_image.is_some() {
+                    entries.push(PanelMenuEntry::reset_artwork(
+                        PlaylistsMessage::ResetCustomArtwork(p.id.clone(), p.name.clone()),
+                    ));
+                }
+                entries
+            })
+            .unwrap_or_default();
+        let (panel_menu_open, panel_menu_position, on_panel_menu_change) =
+            crate::widgets::context_menu::artwork_panel_open_state(
+                crate::View::Playlists,
+                data.overlay.open_menu,
+                PlaylistsMessage::SetOpenMenu,
+            );
+
+        // A user-uploaded custom cover wins over the collage/quad branches:
+        // one single-image panel at large size, with the 80px mini as an
+        // instantly-available (if blurry) fallback while the large loads.
+        // Gated on the live `uploaded_image` field AND cache membership,
+        // mirroring the row thumbnail.
+        let custom_panel_handle = centered_playlist
+            .filter(|p| p.uploaded_image.is_some())
+            .and_then(|p| {
+                data.playlist_custom_large_art
+                    .get(&p.id)
+                    .or_else(|| data.playlist_custom_art.get(&p.id))
+            });
+
+        let artwork_content = if custom_panel_handle.is_some() {
+            Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
+                custom_panel_handle,
+                pill_content,
+                panel_menu_entries,
+                panel_menu_open,
+                panel_menu_position,
+                on_panel_menu_change,
+            ))
+        } else if album_count <= 1 {
             // Show single artwork full-size (use collage[0] if available, else mini)
             let handle = collage_handles
                 .and_then(|v| v.first())
@@ -367,16 +436,20 @@ impl PlaylistsPage {
             Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
                 handle,
                 pill_content,
-                None,
-                false,
-                None,
-                |_| PlaylistsMessage::SetOpenMenu(None),
+                panel_menu_entries,
+                panel_menu_open,
+                panel_menu_position,
+                on_panel_menu_change,
             ))
         } else if let Some(handles) = collage_handles.filter(|v| !v.is_empty()) {
             // Render 3x3 collage grid (2+ albums)
             Some(collage_artwork_panel_with_pill::<PlaylistsMessage>(
                 handles,
                 pill_content,
+                panel_menu_entries,
+                panel_menu_open,
+                panel_menu_position,
+                on_panel_menu_change,
             ))
         } else {
             // Multi-album playlist with no collage cached — fall back to
@@ -387,10 +460,10 @@ impl PlaylistsPage {
             Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
                 playlist_artwork.get(&playlist_id),
                 pill_content,
-                None,
-                false,
-                None,
-                |_| PlaylistsMessage::SetOpenMenu(None),
+                panel_menu_entries,
+                panel_menu_open,
+                panel_menu_position,
+                on_panel_menu_change,
             ))
         };
 
@@ -405,12 +478,18 @@ impl PlaylistsPage {
     }
 
     /// Render a parent playlist row in the slot list
+    // Three artwork maps (collage mini, album quad tiles, custom cover) plus
+    // per-row context tip this over clippy's 7-arg line; the args are all
+    // borrowed snapshots with distinct roles, so a bundling struct would only
+    // add indirection. Same tradeoff as the other 15 allows in the tree.
+    #[allow(clippy::too_many_arguments)]
     fn render_playlist_row<'a>(
         &self,
         playlist: &PlaylistUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         playlist_artwork: &'a HashMap<String, image::Handle>,
         album_art: &'a HashMap<String, image::Handle>,
+        playlist_custom_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, PlaylistsMessage> {
@@ -471,30 +550,49 @@ impl PlaylistsPage {
             ));
         }
         if self.column_visibility.thumbnail {
-            // 2×2 quad of the playlist's first distinct album covers; while
-            // any tile is still cold (or the playlist spans ≤1 album) the
-            // column keeps the single first-album mini, mirroring the large
-            // panel's mini→collage upgrade.
-            let quad_tiles = crate::services::collage_artwork::resolve_quad_handles(
-                &playlist.artwork_album_ids,
-                album_art,
-            );
-            columns.push(match quad_tiles {
-                Some(tiles) => crate::widgets::slot_list::slot_list_artwork_quad_column(
-                    &tiles,
+            // A user-uploaded custom cover (uploaded_image set AND its handle
+            // warmed) takes precedence as a single image. Gating on BOTH the
+            // live field and cache membership means an external reset (SSE
+            // reload clearing the field) drops the stale custom art even
+            // while its handle lingers in the LRU.
+            let custom_handle = playlist
+                .uploaded_image
+                .as_ref()
+                .and_then(|_| playlist_custom_art.get(&playlist.id));
+            if let Some(handle) = custom_handle {
+                columns.push(slot_list_artwork_column(
+                    Some(handle),
                     artwork_size,
                     ctx.is_center,
                     false,
                     ctx.opacity,
-                ),
-                None => slot_list_artwork_column(
-                    playlist_artwork.get(&playlist.id),
-                    artwork_size,
-                    ctx.is_center,
-                    false,
-                    ctx.opacity,
-                ),
-            });
+                ));
+            } else {
+                // 2×2 quad of the playlist's first distinct album covers;
+                // while any tile is still cold (or the playlist spans ≤1
+                // album) the column keeps the single first-album mini,
+                // mirroring the large panel's mini→collage upgrade.
+                let quad_tiles = crate::services::collage_artwork::resolve_quad_handles(
+                    &playlist.artwork_album_ids,
+                    album_art,
+                );
+                columns.push(match quad_tiles {
+                    Some(tiles) => crate::widgets::slot_list::slot_list_artwork_quad_column(
+                        &tiles,
+                        artwork_size,
+                        ctx.is_center,
+                        false,
+                        ctx.opacity,
+                    ),
+                    None => slot_list_artwork_column(
+                        playlist_artwork.get(&playlist.id),
+                        artwork_size,
+                        ctx.is_center,
+                        false,
+                        ctx.opacity,
+                    ),
+                });
+            }
         }
         columns.push({
             let click_title = Some(PlaylistsMessage::PlaylistContextAction(
@@ -613,7 +711,7 @@ impl PlaylistsPage {
         let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
         context_menu(
             slot_button,
-            playlist_context_entries(),
+            playlist_context_entries(playlist.uploaded_image.is_some()),
             move |entry, length| {
                 playlist_entry_view(entry, length, |e| {
                     PlaylistsMessage::PlaylistContextAction(item_idx, e)
@@ -654,5 +752,54 @@ impl PlaylistsPage {
                 .map(|id| PlaylistsMessage::NavigateAndExpandArtist(id.clone())),
             1, // depth 1: child tracks under playlist
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// "Set Custom Artwork…" is always offered on playlist rows; "Reset
+    /// Artwork" only when the playlist has an uploaded cover.
+    #[test]
+    fn playlist_entries_gate_reset_on_custom_art() {
+        let with = playlist_context_entries(true);
+        assert!(
+            with.iter()
+                .any(|e| matches!(e, PlaylistContextEntry::ResetArtwork)),
+            "custom-art playlist must offer Reset Artwork"
+        );
+        let without = playlist_context_entries(false);
+        assert!(
+            !without
+                .iter()
+                .any(|e| matches!(e, PlaylistContextEntry::ResetArtwork)),
+            "a playlist without custom art has nothing to reset"
+        );
+        for entries in [&with, &without] {
+            assert!(
+                entries
+                    .iter()
+                    .any(|e| matches!(e, PlaylistContextEntry::SetCustomArtwork)),
+                "Set Custom Artwork… must always be offered"
+            );
+            // The pre-existing playlist actions survive in both forms.
+            for check in [
+                entries
+                    .iter()
+                    .any(|e| matches!(e, PlaylistContextEntry::EditPlaylist)),
+                entries
+                    .iter()
+                    .any(|e| matches!(e, PlaylistContextEntry::Rename)),
+                entries
+                    .iter()
+                    .any(|e| matches!(e, PlaylistContextEntry::Delete)),
+                entries
+                    .iter()
+                    .any(|e| matches!(e, PlaylistContextEntry::SetAsDefault)),
+            ] {
+                assert!(check, "pre-existing entries must survive the gating");
+            }
+        }
     }
 }

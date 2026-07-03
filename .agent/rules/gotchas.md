@@ -33,7 +33,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Source generation counter**: typed `SourceGeneration` wrapper (over `AtomicU64`) — every user-driven source change goes through `bump_for_user_action()`; renderer snapshots `current()` before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
 - **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `PaginatedFetch::from_common()` handles this in update handlers.
 - **PagedBuffer generation**: `generation()` bumps on every mutation. Use `(query, generation)` keys when memoizing filtered results.
-- **Artwork LRU caches go through `SnapshottedLru<K, V>`**: `album_art`, `large_artwork`, `radio_art`, `radio_large_art`, and the `{mini, collage}` pair on each `CollageArtworkCache` (two instances — `ArtworkState.genre` and `ArtworkState.playlist`) are `SnapshottedLru` newtypes that maintain the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — a fresh cache must use `SnapshottedLru`.
+- **Artwork LRU caches go through `SnapshottedLru<K, V>`**: `album_art`, `large_artwork`, `radio_art`, `radio_large_art`, `playlist_custom_art`, `playlist_custom_large_art`, and the `{mini, collage}` pair on each `CollageArtworkCache` (two instances — `ArtworkState.genre` and `ArtworkState.playlist`) are `SnapshottedLru` newtypes that maintain the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — a fresh cache must use `SnapshottedLru`.
 
 ## Widget Tree & Focus
 

@@ -1709,6 +1709,8 @@ impl Nokkvi {
                     playlist_artwork: &self.artwork.playlist.mini.snapshot,
                     playlist_collage_artwork: &self.artwork.playlist.collage.snapshot,
                     album_art: &self.artwork.album_art.snapshot,
+                    playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,
+                    playlist_custom_large_art: &self.artwork.playlist_custom_large_art.snapshot,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
@@ -1746,10 +1748,18 @@ impl Nokkvi {
                     elevated,
                     modifiers: self.window.keyboard_modifiers,
                     open_menu: self.open_menu.as_ref(),
-                    current_playing_station_id: self
-                        .active_playback
-                        .radio_station()
-                        .map(|s| s.id.as_str()),
+                    // Prefer the LIBRARY copy of the playing station (fresh
+                    // coverArt token after an upload/reset reload) over the
+                    // active_playback snapshot taken at play time; fall back
+                    // to the snapshot when the library list lacks it. The
+                    // view derives the now-playing row id from this too.
+                    playing_station: self.active_playback.radio_station().map(|s| {
+                        self.library
+                            .radio_stations
+                            .iter()
+                            .find(|ls| ls.id == s.id)
+                            .unwrap_or(s)
+                    }),
                     radio_art: &self.artwork.radio_art.snapshot,
                     radio_large_art: &self.artwork.radio_large_art.snapshot,
                     over_art_visualizer,

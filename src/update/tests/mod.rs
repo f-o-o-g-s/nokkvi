@@ -39,6 +39,7 @@ mod navigation;
 mod notifications;
 mod page_loader;
 mod playback;
+mod playlist_artwork;
 mod queue;
 mod radio_artwork;
 mod redesign_chrome;

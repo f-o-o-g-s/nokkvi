@@ -340,13 +340,13 @@ impl ArtistsPage {
                 col.into()
             });
 
-        // Artists artwork panel has no refresh action wired up, but still
+        // Artists artwork panel has no menu entries wired up, but still
         // needs the controlled-component plumbing arguments. They're inert
-        // when `on_refresh` is None — the helper short-circuits.
+        // with an empty entries list — the helper returns the bare panel.
         let artwork_content = Some(single_artwork_panel_with_pill::<ArtistsMessage>(
             artwork_handle,
             pill_content,
-            None,
+            Vec::new(),
             false,
             None,
             |_| ArtistsMessage::SetOpenMenu(None),

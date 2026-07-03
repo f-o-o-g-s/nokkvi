@@ -690,6 +690,7 @@ fn playlists_selection_toggle_on_expansion_child_lands_in_selected_indices() {
             public: false,
             updated_at: String::new(),
             artwork_album_ids: vec![],
+            uploaded_image: None,
             searchable_lower: "playlist 1".to_string(),
         }];
     app.library

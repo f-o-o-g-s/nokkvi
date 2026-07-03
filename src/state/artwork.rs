@@ -36,6 +36,17 @@ const COLLAGE_ARTWORK_CACHE_CAPACITY: NonZeroUsize =
 /// station's logo / remembered stream-art thumbnail with room to spare.
 const RADIO_ART_CACHE_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(256).expect("capacity must be > 0");
+/// Capacity for the mini custom playlist artwork LRU (`playlist_id -> Handle`).
+/// Mirrors the collage-mini cap: custom covers are one image per playlist and
+/// only playlists whose `uploaded_image` is set ever fetch, so 100 covers a
+/// full viewport plus generous scrollback.
+const PLAYLIST_CUSTOM_ART_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(100).expect("capacity must be > 0");
+/// Capacity for the large custom playlist artwork LRU (`playlist_id -> Handle`).
+/// The panel shows one at a time; a small cap keeps back-navigation instant
+/// without holding many resolution-sized images.
+const PLAYLIST_CUSTOM_LARGE_ART_CACHE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(32).expect("capacity must be > 0");
 /// Capacity for the large radio-station artwork LRU (`station_id -> Handle`).
 /// The panel shows one station's large art at a time, but the cache accumulates
 /// every logo station ever centered (each scroll/nav step dispatches a
@@ -159,6 +170,35 @@ pub struct ArtworkState {
     pub genre: CollageArtworkCache,
     /// Playlist artwork cache.
     pub playlist: CollageArtworkCache,
+    /// Mini CUSTOM playlist artwork (`playlist_id -> Handle`): the
+    /// user-uploaded cover fetched via `getCoverArt?id=pl-<id>` at 80px for
+    /// the slot-row thumbnail. Populated only for playlists whose
+    /// `uploaded_image` is set; takes display precedence over the 2×2 quad /
+    /// collage mini. Mirrors [`Self::radio_art`]'s shape.
+    pub playlist_custom_art: SnapshottedLru<String, image::Handle>,
+    /// Large CUSTOM playlist artwork (`playlist_id -> Handle`) at the user's
+    /// `artwork_resolution` for the artwork panel. Falls back to
+    /// [`Self::playlist_custom_art`] at the view layer while loading.
+    /// Mirrors [`Self::radio_large_art`]'s shape.
+    pub playlist_custom_large_art: SnapshottedLru<String, image::Handle>,
+    /// Playlist ids with an in-flight custom-cover mini fetch. The viewport
+    /// prefetch re-dispatches on every scroll step; without this gate a cold
+    /// viewport duplicates every still-loading request per step. Inserted
+    /// when a fetch task is built, released by the loaded-handler on success
+    /// AND failure. Mirrors [`Self::album_art_pending`].
+    pub playlist_custom_art_pending: HashSet<String>,
+    /// `playlist_id -> the updated_at cache-buster that warmed its custom
+    /// mini`. A cover replaced in the web UI bumps the playlist's
+    /// `updated_at`, so the version-aware prefetch gate re-fetches it this
+    /// session instead of serving the stale handle forever. Mirrors
+    /// [`Self::album_art_versions`]; reset wholesale on logout via `Default`.
+    pub playlist_custom_art_versions: HashMap<String, Option<String>>,
+    /// Negative cache for custom-cover minis: `playlist_id -> the updated_at
+    /// that failed` (code-70 "Artwork not found" — a stale `uploaded_image`
+    /// flag whose image is gone server-side). Stops a known-dead id from
+    /// re-firing on every scroll step; a CHANGED updated_at bypasses the
+    /// entry. Mirrors [`Self::failed_art`].
+    pub playlist_custom_art_failed: HashMap<String, Option<String>>,
     /// Currently loading large artwork album ID.
     pub loading_large_artwork: Option<String>,
 }
@@ -177,6 +217,13 @@ impl Default for ArtworkState {
             radio_art_hydrated: false,
             genre: CollageArtworkCache::new(),
             playlist: CollageArtworkCache::new(),
+            playlist_custom_art: SnapshottedLru::new(PLAYLIST_CUSTOM_ART_CACHE_CAPACITY),
+            playlist_custom_large_art: SnapshottedLru::new(
+                PLAYLIST_CUSTOM_LARGE_ART_CACHE_CAPACITY,
+            ),
+            playlist_custom_art_pending: HashSet::new(),
+            playlist_custom_art_versions: HashMap::new(),
+            playlist_custom_art_failed: HashMap::new(),
             loading_large_artwork: None,
         }
     }
@@ -202,6 +249,8 @@ impl std::fmt::Debug for ArtworkState {
             .field("radio_large_art", &self.radio_large_art)
             .field("genre", &self.genre)
             .field("playlist", &self.playlist)
+            .field("playlist_custom_art", &self.playlist_custom_art)
+            .field("playlist_custom_large_art", &self.playlist_custom_large_art)
             .field("loading_large_artwork", &self.loading_large_artwork)
             .finish()
     }

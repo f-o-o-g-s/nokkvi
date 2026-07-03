@@ -1,5 +1,12 @@
 // Formatting utilities for display strings
 
+/// Current wall-clock time as an RFC 3339 string — the same shape Navidrome
+/// emits for `updatedAt`/`createdAt`, so optimistic client-side bumps of
+/// those fields keep parsing through [`format_date_concise`] and friends.
+pub fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
 pub fn format_duration(seconds: u32) -> String {
     let minutes = seconds / 60;
     let secs = seconds % 60;
@@ -229,6 +236,24 @@ pub const fn compute_rating_toggle(current: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The optimistic-bump helper must emit the RFC 3339 shape the rest of
+    /// the date plumbing parses (concise-formatter round-trip + the naive
+    /// `split('T')` consumers).
+    #[test]
+    fn now_rfc3339_round_trips_through_date_parsing() {
+        let now = now_rfc3339();
+        assert!(now.contains('T'), "must carry the ISO date/time separator");
+        assert!(
+            now.parse::<chrono::DateTime<chrono::Utc>>().is_ok(),
+            "must parse back as RFC 3339: {now}"
+        );
+        let concise = format_date_concise(&now);
+        assert!(
+            concise.contains('/'),
+            "concise formatter must take the parsed path, got: {concise}"
+        );
+    }
 
     #[test]
     fn toggle_same_rating_decrements() {

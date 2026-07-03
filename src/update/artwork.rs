@@ -196,6 +196,28 @@ impl Nokkvi {
                 self.handle_radio_icy_art_loaded(station_id, source_url, bytes)
             }
             ArtworkMessage::RadioArtHydrated(records) => self.handle_radio_art_hydrated(records),
+            // Custom (user-uploaded) artwork completions
+            ArtworkMessage::RadioCustomArtworkSet(station, outcome) => {
+                self.handle_radio_custom_artwork_set(station, outcome)
+            }
+            ArtworkMessage::RadioCustomArtworkReset(station, outcome) => {
+                self.handle_radio_custom_artwork_reset(station, outcome)
+            }
+            ArtworkMessage::PlaylistCustomArtworkSet(id, name, outcome) => {
+                self.handle_playlist_custom_artwork_set(id, name, outcome)
+            }
+            ArtworkMessage::PlaylistCustomArtworkReset(id, name, outcome) => {
+                self.handle_playlist_custom_artwork_reset(id, name, outcome)
+            }
+            ArtworkMessage::PlaylistCustomMiniLoaded(id, version, art) => {
+                self.handle_playlist_custom_mini_loaded(id, version, art)
+            }
+            ArtworkMessage::LoadPlaylistCustomLarge(id) => {
+                self.handle_load_playlist_custom_large(id)
+            }
+            ArtworkMessage::PlaylistCustomLargeLoaded(id, handle) => {
+                self.handle_playlist_custom_large_loaded(id, handle)
+            }
             // Artwork-pane drag. The per-view chrome dispatcher already routes
             // the per-view `ArtworkColumnDrag` / `ArtworkColumnVerticalDrag`
             // variants synchronously; these arms exist so that any caller can
