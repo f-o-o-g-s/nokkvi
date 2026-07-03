@@ -6,50 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Right-clicking a playlist or radio station (the row thumbnail or the large artwork panel) now offers "Set Custom Artwork…", which opens a native file picker and uploads the image to Navidrome, so the cover shows in nokkvi, the web UI, and every other client.
-- "Reset Artwork" on the same menus removes the uploaded image and brings back the automatic artwork (the album collage for playlists; stream art or the tower glyph for stations).
-
 ### Changed
 
 ### Fixed
-
-- Reloading the Radios list (the refresh button or the R hotkey) no longer silently drops the name sort when the station count is unchanged.
 
 ### Removed
 
-## v0.12.2 — 2026-07-02
-
-### Changed
-
-- Clickable artist and album name links in list rows are now off by default (re-enable under Settings → Interface → Slot Text Links).
-
-### Fixed
-
-- "Play Next" now refreshes the queue immediately, so the moved song appears in its new spot and stays clickable instead of erroring.
-- Toggling Crossfade while the next track is already prepared no longer causes a silent fade or a stuck "stalled — recovering" loop.
-
-## v0.12.1 — 2026-06-30
-
-### Fixed
-
-- The auto-hide view-header toolbar now collapses when nokkvi loses focus, instead of staying stuck expanded behind another window or re-expanding on return.
-- Pressing Shift+C to centre the playing track no longer expands the auto-hide toolbar.
-
-## v0.12.0 — 2026-06-28
+## v0.13.0 — 2026-07-03
 
 ### Added
 
-- Internet radio stations can now scrobble to **ListenBrainz** and **Last.fm**, set up under Settings → Playback → Radio Scrobbling.
-- nokkvi reads the Artist - Title from a station's stream title and scrobbles it once it has played past your listen-threshold slider.
-- A separate toggle sends a live now-playing update each time the radio track changes, and each service's row shows whether it's connected.
-- Radio scrobble keys live in a plaintext `[radio_scrobble]` block in `config.toml`, editable in the GUI or by hand and overridable with `NOKKVI_RADIO_*` environment variables.
-- Radio stations now show artwork (an uploaded station logo, or the last now-playing stream image) instead of a generic tower glyph.
-- Station artwork appears in the station list, the large artwork panel, and the MiniPlayer, and persists across restarts.
-- The over-cover visualizer now animates over a station's artwork while its stream plays.
-- Right-clicking a radio station now offers **Refresh Artwork** to clear a stale or wrong thumbnail.
+- Right-click a playlist or radio station and choose **Set Custom Artwork…** to upload a cover image to Navidrome, shown across all clients.
+- **Reset Artwork** removes the uploaded image and restores the automatic cover: an album collage for playlists, stream art or the tower glyph for stations.
+
+### Fixed
+
+- Reloading the Radios list (the refresh button or R hotkey) no longer silently drops the name sort when the station count is unchanged.
 
 ## Older releases
 
+- **v0.12.x** (2026-06-28 → 2026-07-02, v0.12.0–v0.12.2): [CHANGELOG-0.12.md](./changelog-archive/CHANGELOG-0.12.md)
 - **v0.11.x** (2026-06-22 → 2026-06-25, v0.11.0–v0.11.3): [CHANGELOG-0.11.md](./changelog-archive/CHANGELOG-0.11.md)
 - **v0.10.x** (2026-06-19 → 2026-06-21, v0.10.0–v0.10.1): [CHANGELOG-0.10.md](./changelog-archive/CHANGELOG-0.10.md)
 - **v0.9.x** (2026-06-15 → 2026-06-18, v0.9.0–v0.9.4): [CHANGELOG-0.9.md](./changelog-archive/CHANGELOG-0.9.md)
