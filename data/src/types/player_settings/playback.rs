@@ -193,8 +193,9 @@ impl CrossfadeCurve {
 }
 
 define_labeled_enum! {
-    /// "Fade on Skip" mode (M7) — what a manual Next/Previous does to the
-    /// sound instead of a hard cut.
+    /// "Fade on Skip" mode (M7; clicks joined in M10) — what a manual skip
+    /// (Next/Previous, or clicking a track to start it) does to the sound
+    /// instead of a hard cut.
     ///
     /// `Off` keeps the historical instant cut. `BoundaryFade` ramps the
     /// outgoing track to silence over `fade_skip_secs` before the hard load

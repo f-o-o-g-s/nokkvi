@@ -38,8 +38,10 @@ pub struct PlaybackController {
     queue_service: QueueService,
     settings_service: SettingsService,
     task_manager: Arc<TaskManager>,
-    /// M7 skip supersession counter: stamped (under the engine+navigator
-    /// locks) at the START of every manual next/previous, and re-checked
+    /// M7/M10 skip supersession counter: stamped (under the engine+navigator
+    /// locks) at the START of every manual next/previous, by every click
+    /// that plans a fade ([`plan_click_play`], M10 — one shared counter so
+    /// skips and clicks supersede each other), and re-checked
     /// before a [`SkipFadePlan`](crate::services::playback::SkipFadePlan)
     /// fires — the plan's decoder builds with NO locks held, so a newer skip
     /// can land mid-build and must win (only the LATEST skip may drive the
@@ -828,37 +830,81 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
-        // 3-4. Load, play, discharge the set_queue reset, and update the
-        //      navigator so consume mode knows what's playing.
-        self.load_play_and_set_current(
-            &stream_url,
-            song.replay_gain.clone(),
-            song.expected_duration_ms(),
-            effect,
-            song.id.clone(),
-        )
-        .await?;
+        // 3-4. Load, play (or blend, per "Fade on Skip"), discharge the
+        //      set_queue reset, and update the navigator so consume mode
+        //      knows what's playing.
+        self.load_play_and_set_current(&stream_url, Some(song.clone()), effect, song.id.clone())
+            .await?;
 
         Ok(())
     }
 
     /// Shared engine-load epilogue for the 3 same-shape play primitives:
-    /// acquire the engine lock, load the track, play, discharge the queue
-    /// mutation's `NextTrackResetEffect` while the lock is held, drop the lock,
-    /// then update the navigator's `current_song_id` (used by consume mode).
+    /// acquire the engine lock, route the click through "Fade on Skip"
+    /// ([`plan_click_play`], M10), then — on the hard route — load the track,
+    /// play, discharge the queue mutation's `NextTrackResetEffect` while the
+    /// lock is held, drop the lock, and update the navigator's
+    /// `current_song_id` (used by consume mode). On the crossfade route the
+    /// engine keeps playing the outgoing untouched and the skip-fade plan is
+    /// completed via [`Self::complete_skip_fade`] (lock-free decoder build,
+    /// then the direct-Active fire).
+    ///
+    /// `song` carries the clicked song's full metadata for the fade plan +
+    /// ReplayGain; `None` (a defensive pool-miss) degrades to the hard route
+    /// with no ReplayGain, exactly as before M10.
     ///
     /// EXCLUDES `play_song_direct` (method on `QueueNavigator`, caller-held
-    /// `&mut engine`, set-before-load), `apply_removal_aftermath` (conditional
-    /// resume, no effect), and the cold-start branch (engine lock already held).
+    /// `&mut engine`, set-before-load, M7's skip-fade domain),
+    /// `apply_removal_aftermath` (conditional resume, no effect), and the
+    /// cold-start branch (engine lock already held) — none of those is a
+    /// click that starts a different track while one is audibly playing.
     async fn load_play_and_set_current(
         &self,
         stream_url: &str,
-        rg: Option<crate::types::song::ReplayGain>,
-        expected_duration_ms: Option<u64>,
+        song: Option<crate::types::song::Song>,
         effect: crate::types::next_track_reset::NextTrackResetEffect,
         song_id: String,
     ) -> Result<()> {
         let mut engine = self.audio_engine.lock().await;
+        let effect = match plan_click_play(
+            &mut engine,
+            &self.skip_fade_seq,
+            effect,
+            song.as_ref(),
+            stream_url,
+        )
+        .await
+        {
+            ClickPlayRoute::FadePlanned {
+                plan,
+                generation,
+                seq,
+            } => {
+                drop(engine);
+                // Mirror `skip_to_song`: the queue layer names the clicked
+                // song BEFORE the unlocked decoder build, so completions
+                // deferred by the pending window and UI reads agree with
+                // the already-repositioned queue.
+                self.queue_navigator
+                    .lock()
+                    .await
+                    .set_current_song_id(Some(song_id))
+                    .await;
+                return self.complete_skip_fade(*plan, generation, seq).await;
+            }
+            ClickPlayRoute::BoundaryFadeThenHard(effect) => {
+                // M7's ease-out (self-refusing: paused, bit-perfect
+                // stream, live blend, drained ring all degrade to the
+                // honest instant cut), then the normal hard load below —
+                // M2's onset ramp covers the incoming edge.
+                engine.run_skip_out_fade().await;
+                effect
+            }
+            ClickPlayRoute::Hard(effect) => effect,
+        };
+        let (rg, expected_duration_ms) = song.as_ref().map_or((None, None), |s| {
+            (s.replay_gain.clone(), s.expected_duration_ms())
+        });
         engine
             .load_track_with_rg(stream_url, rg, expected_duration_ms)
             .await;
@@ -965,14 +1011,12 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
-        let (rg, expected_ms) = {
+        let song = {
             let qm = queue_manager.lock().await;
-            qm.get_song(&song_id).map_or((None, None), |s| {
-                (s.replay_gain.clone(), s.expected_duration_ms())
-            })
+            qm.get_song(&song_id).cloned()
         };
 
-        self.load_play_and_set_current(&stream_url, rg, expected_ms, reposition_effect, song_id)
+        self.load_play_and_set_current(&stream_url, song, reposition_effect, song_id)
             .await?;
 
         Ok(())
@@ -1021,21 +1065,13 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
-        let (rg, expected_ms) = {
+        let song = {
             let qm = queue_manager.lock().await;
-            qm.get_song(song_id).map_or((None, None), |s| {
-                (s.replay_gain.clone(), s.expected_duration_ms())
-            })
+            qm.get_song(song_id).cloned()
         };
 
-        self.load_play_and_set_current(
-            &stream_url,
-            rg,
-            expected_ms,
-            reposition_effect,
-            song_id.to_string(),
-        )
-        .await?;
+        self.load_play_and_set_current(&stream_url, song, reposition_effect, song_id.to_string())
+            .await?;
 
         Ok(())
     }
@@ -1160,6 +1196,108 @@ impl PlaybackController {
     }
 }
 
+/// How a user click that starts a track should reach the engine (M10 —
+/// clicks honor "Fade on Skip"). Decided by [`plan_click_play`] under the
+/// engine lock; the two hard variants carry the still-undischarged
+/// [`NextTrackResetEffect`](crate::types::next_track_reset::NextTrackResetEffect)
+/// so the hard path keeps today's exact apply-after-play ordering.
+enum ClickPlayRoute {
+    /// Hard load + play — the historical path, byte-identical.
+    Hard(crate::types::next_track_reset::NextTrackResetEffect),
+    /// Run M7's `run_skip_out_fade` ease-out first (self-refusing), then the
+    /// hard load + play ("Fade on Skip" = Boundary Fade).
+    BoundaryFadeThenHard(crate::types::next_track_reset::NextTrackResetEffect),
+    /// `plan_skip_fade` ran under the engine lock ("Fade on Skip" =
+    /// Crossfade, viable): the caller must complete the blend via
+    /// [`complete_skip_fade`] — build the incoming decoder with NO locks
+    /// held, then fire `crossfade_to_next`. The effect was already
+    /// discharged at plan time (its `reset_next_track` must precede the
+    /// fire, never follow it — it would cancel the blend it belongs to).
+    FadePlanned {
+        /// Boxed: `SkipFadePlan` carries a full `Song`, which would bloat
+        /// the two lean hard variants (clippy `large_enum_variant`).
+        plan: Box<crate::services::playback::SkipFadePlan>,
+        generation: u64,
+        seq: u64,
+    },
+}
+
+/// M10 phase 1 for the click paths (queue click / play-from-here /
+/// browse-view play): decide, UNDER the engine lock, how a user click that
+/// starts a track honors "Fade on Skip" — the same setting M7 wired into
+/// manual Next/Previous.
+///
+/// Crossfade mode with the engine audibly playing a finite stream (and not
+/// bit-perfect Strict — [`CustomAudioEngine::click_skip_crossfade_viable`])
+/// mirrors `QueueNavigator::skip_to_song`'s plan arm: stamp this click as
+/// the latest manual skip (`skip_fade_seq` — a competing skip or click
+/// during the unlocked build must win), discharge the click's queue-mutation
+/// `NextTrackResetEffect` (cancelling any live blend so nothing can finalize
+/// against the just-repositioned/replaced queue during the build, while the
+/// outgoing's decode loop keeps producing), then `plan_skip_fade` (cancel +
+/// generation bump + pending-window latch). Boundary Fade mode routes
+/// through the M7 ease-out before the hard load. Everything else — mode Off,
+/// paused/stopped, an infinite (radio) outgoing (M6's switch-fade domain),
+/// bit-perfect Strict, or a metadata-less click — takes today's hard path
+/// unchanged.
+///
+/// Module-level (over `&mut CustomAudioEngine` + the supersession counter)
+/// so the routing matrix is unit testable without a full controller.
+async fn plan_click_play(
+    engine: &mut CustomAudioEngine,
+    skip_fade_seq: &std::sync::atomic::AtomicU64,
+    effect: crate::types::next_track_reset::NextTrackResetEffect,
+    song: Option<&crate::types::song::Song>,
+    stream_url: &str,
+) -> ClickPlayRoute {
+    use crate::types::player_settings::FadeOnSkip;
+
+    match engine.skip_fade_mode() {
+        FadeOnSkip::Crossfade if engine.click_skip_crossfade_viable() => {
+            let Some(song) = song else {
+                return ClickPlayRoute::Hard(effect);
+            };
+            // Stamp this click as the latest manual skip while the lock is
+            // held (mirrors `PlaybackController::next`) — a competing skip
+            // or click during the unlocked decoder build must win.
+            let seq = skip_fade_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            // Discharge the click's queue-mutation reset BEFORE planning:
+            // its `reset_next_track` cancels any live blend / prepared
+            // transition from the pre-click queue, so nothing can finalize
+            // against the just-repositioned (or replaced) queue during the
+            // build. The outgoing's PRIMARY decode loop keeps producing —
+            // its liveness rides `decode_loop`, not this reset.
+            effect.apply_locked(engine).await;
+            // Plan-time invalidation (M7 phase 1): cancel again
+            // (idempotent), bump the source generation, latch the
+            // generation-keyed pending window so completions dispatched
+            // during the build are deferred instead of double-advancing the
+            // already-repositioned queue.
+            engine.plan_skip_fade().await;
+            let generation = engine.source_generation();
+            debug!(
+                "🔀 Click fade planned: {} - {} (id: {})",
+                song.title, song.artist, song.id
+            );
+            ClickPlayRoute::FadePlanned {
+                plan: Box::new(crate::services::playback::SkipFadePlan {
+                    song: song.clone(),
+                    reason: crate::services::queue::TransitionReason::Click,
+                    stream_url: stream_url.to_string(),
+                }),
+                generation,
+                seq,
+            }
+        }
+        FadeOnSkip::BoundaryFade if engine.skip_crossfade_viable() => {
+            ClickPlayRoute::BoundaryFadeThenHard(effect)
+        }
+        FadeOnSkip::Off | FadeOnSkip::BoundaryFade | FadeOnSkip::Crossfade => {
+            ClickPlayRoute::Hard(effect)
+        }
+    }
+}
+
 /// Body of [`PlaybackController::complete_skip_fade`] — see its doc. A
 /// module-level function over the shared engine mutex + supersession counter
 /// (rather than `&self`) so the phase-3 fire/fallback branches are unit
@@ -1180,6 +1318,16 @@ async fn complete_skip_fade(
     let mut engine = audio_engine.lock().await;
     if skip_fade_seq.load(std::sync::atomic::Ordering::SeqCst) != seq {
         debug!("🔀 [SKIP FADE] Superseded by a newer skip — abandoning build");
+        // The superseding action normally owns the engine and closes the
+        // window with its own generation bump — but a NO-OP skip (Next at
+        // the end of the queue, Previous with nothing to step back to)
+        // stamps the sequence without ever touching the engine, and THIS
+        // plan's latch would stay matched to the live generation forever,
+        // deferring every end-of-track completion at `on_renderer_finished`
+        // (silence, no advance, UI stuck playing). Close the plan's own
+        // window; the generation gate inside leaves a newer plan's re-latch
+        // (always at a strictly greater generation) untouched.
+        engine.close_skip_fade_window(generation);
         return Ok(());
     }
 
@@ -1371,6 +1519,572 @@ mod tests {
             e.is_playing_source("http://127.0.0.1:9/rest/stream?id=b"),
             "the skip target must be staged so a later Play starts it"
         );
+    }
+
+    /// M10 review cycle 1 — a competing NO-OP skip must not strand the
+    /// pending window. Next at the end of the queue (or Previous with
+    /// nothing to step back to) stamps `skip_fade_seq` WITHOUT touching the
+    /// engine, so no generation bump ever un-matches an in-flight plan's
+    /// latch. When that plan's build is then abandoned at the seq gate, the
+    /// abandon must close its own window — otherwise every end-of-track
+    /// completion defers forever at `on_renderer_finished` (silence, no
+    /// advance, UI stuck playing) until the next source-changing action.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skip_fade_abandon_after_noop_skip_closes_pending_window() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let seq = std::sync::atomic::AtomicU64::new(1);
+        let generation;
+        {
+            let mut e = engine.lock().await;
+            e.force_playing_for_test();
+            // The click's plan (seq 1): window latched at generation G.
+            e.plan_skip_fade().await;
+            generation = e.source_generation();
+        }
+        // A competing no-op skip stamps the sequence counter — exactly what
+        // `next()`'s NoNext arm does engine-wise: no plan, no load, no bump.
+        seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let result = complete_skip_fade(&engine, &seq, unreachable_plan(), generation, 1).await;
+
+        let e = engine.lock().await;
+        assert!(result.is_ok(), "abandon must be clean: {result:?}");
+        assert_eq!(
+            e.source_generation(),
+            generation,
+            "precondition: the no-op skip left the generation unmoved, so \
+             only the abandon branch itself can ever close the window"
+        );
+        assert!(
+            !e.skip_fade_window_pending(),
+            "the seq-abandon must close the plan's own pending window — a \
+             stranded latch defers every end-of-track completion forever"
+        );
+    }
+
+    /// The abandon-side close must touch ONLY the abandoned plan's window: a
+    /// newer plan re-latches at a strictly greater generation (its
+    /// `plan_skip_fade` bump), and the stale build's abandon must leave that
+    /// newer window open for the newer completion to consume.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skip_fade_abandon_leaves_newer_plan_window_latched() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let seq = std::sync::atomic::AtomicU64::new(1);
+        let stale_generation;
+        {
+            let mut e = engine.lock().await;
+            e.force_playing_for_test();
+            e.plan_skip_fade().await; // plan A (seq 1)
+            stale_generation = e.source_generation();
+            // Plan B supersedes while A's build runs: new seq + new latch.
+            seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            e.plan_skip_fade().await;
+        }
+
+        let result =
+            complete_skip_fade(&engine, &seq, unreachable_plan(), stale_generation, 1).await;
+
+        let e = engine.lock().await;
+        assert!(result.is_ok(), "abandon must be clean: {result:?}");
+        assert!(
+            e.skip_fade_window_pending(),
+            "plan B's window (latched at a newer generation) must survive \
+             plan A's abandon"
+        );
+    }
+
+    // ── M10 — clicks honor "Fade on Skip": plan_click_play routing matrix ──
+    //
+    // The routing is decided UNDER the engine lock by the module-level
+    // `plan_click_play` (mirroring `complete_skip_fade`'s testable shape).
+    // These tests drive it with a bare engine — no audio device, no network.
+
+    fn click_song(id: &str) -> crate::types::song::Song {
+        crate::types::song::Song::test_default(id, &format!("Song {id}"))
+    }
+
+    fn effect() -> crate::types::next_track_reset::NextTrackResetEffect {
+        crate::types::next_track_reset::NextTrackResetEffect::new()
+    }
+
+    /// Crossfade mode + audibly playing a finite stream: the click must take
+    /// the M7 plan path — `plan_skip_fade` runs under the lock (source
+    /// generation bumped, pending window latched), the seq counter stamps
+    /// this click as the latest skip, the plan carries the clicked song, and
+    /// the engine's outgoing source is left untouched for the blend.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_playing_plans_fade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let gen_before = engine.source_generation();
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        let ClickPlayRoute::FadePlanned {
+            plan,
+            generation,
+            seq,
+        } = route
+        else {
+            panic!("expected FadePlanned for a crossfade-mode click while playing");
+        };
+        assert_eq!(plan.song.id, "b");
+        assert_eq!(
+            plan.reason,
+            crate::services::queue::TransitionReason::Click,
+            "the click plan carries the click reason for its log line"
+        );
+        assert_eq!(plan.stream_url, "http://server/rest/stream?id=b");
+        assert_eq!(seq, 1, "the click stamps itself as the latest skip");
+        assert_eq!(
+            generation,
+            gen_before + 1,
+            "plan_skip_fade must invalidate in-flight completions AT PLAN TIME"
+        );
+        assert_eq!(engine.source_generation(), generation);
+        assert!(
+            engine.source().is_empty(),
+            "the engine must keep the outgoing untouched (no load happened)"
+        );
+        assert!(
+            engine.playing(),
+            "the outgoing keeps playing until the fire"
+        );
+    }
+
+    /// Mode Off is the historical path, byte-identical: hard route, no seq
+    /// stamp, no generation bump, no window latch.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_mode_off_stays_hard() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let gen_before = engine.source_generation();
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::Hard(_)));
+        assert_eq!(engine.source_generation(), gen_before);
+        assert_eq!(seq_counter.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// A stopped app must not fade — clicks there stay instant (hard route).
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_stopped_stays_hard() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let gen_before = engine.source_generation();
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::Hard(_)));
+        assert_eq!(engine.source_generation(), gen_before);
+    }
+
+    /// A paused app must not fade either — there is nothing audible to blend.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_paused_stays_hard() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine.pause();
+        assert!(engine.immediate_paused(), "precondition");
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::Hard(_)));
+    }
+
+    /// Clicking out of a playing radio stream is M6's switch-fade domain —
+    /// the click path must not double-fade (hard route; `set_source`'s
+    /// radio→queue edge handles the fade when enabled).
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_radio_stays_hard() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine.force_infinite_for_test();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let gen_before = engine.source_generation();
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::Hard(_)));
+        assert_eq!(engine.source_generation(), gen_before);
+    }
+
+    /// Bit-perfect Strict refuses EVERY blend at the fire's format gate, so
+    /// a click must not even plan (a plan would buy a wasted network decoder
+    /// build before the same hard cut) — today's path, byte-identical.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_bit_perfect_strict_stays_hard() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Strict)
+            .await;
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let gen_before = engine.source_generation();
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::Hard(_)));
+        assert_eq!(engine.source_generation(), gen_before);
+        assert_eq!(seq_counter.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    /// Relaxed is NOT pre-gated: its blend verdict needs the incoming
+    /// format, which only exists after the build — the click must plan and
+    /// let the fire's `crossfade_blocked` decide.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_bit_perfect_relaxed_still_plans() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Relaxed)
+            .await;
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::FadePlanned { .. }));
+    }
+
+    /// Boundary Fade mode: the click routes through the M7 ease-out before
+    /// the hard load (the caller runs `run_skip_out_fade`, which self-refuses
+    /// when there is nothing audible to fade).
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_boundary_mode_playing_routes_through_ease_out() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::BoundaryFade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::BoundaryFadeThenHard(_)));
+    }
+
+    /// Boundary Fade from a stopped/paused app (or over radio) is a plain
+    /// hard click — instant, exactly as today.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_boundary_mode_stopped_stays_hard() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::BoundaryFade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let song = click_song("b");
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            Some(&song),
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::Hard(_)));
+    }
+
+    /// A defensive pool-miss (no Song metadata to build the plan from)
+    /// degrades to the hard route even in Crossfade mode.
+    #[tokio::test(flavor = "current_thread")]
+    async fn click_crossfade_mode_without_song_metadata_stays_hard() {
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+
+        let route = plan_click_play(
+            &mut engine,
+            &seq_counter,
+            effect(),
+            None,
+            "http://server/rest/stream?id=b",
+        )
+        .await;
+
+        assert!(matches!(route, ClickPlayRoute::Hard(_)));
+    }
+
+    /// Supersession: a SECOND click stamped during the first click's
+    /// unlocked decoder build must win — the first build's completion is
+    /// abandoned at the seq gate without touching the engine.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn second_click_supersedes_first_click_build() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let seq_counter = std::sync::atomic::AtomicU64::new(0);
+        let (first_plan, first_generation, first_seq);
+        {
+            let mut e = engine.lock().await;
+            e.force_playing_for_test();
+            e.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+            let song_b = click_song("b");
+            let ClickPlayRoute::FadePlanned {
+                plan,
+                generation,
+                seq,
+            } = plan_click_play(
+                &mut e,
+                &seq_counter,
+                effect(),
+                Some(&song_b),
+                "http://127.0.0.1:9/rest/stream?id=b",
+            )
+            .await
+            else {
+                panic!("first click must plan");
+            };
+            (first_plan, first_generation, first_seq) = (plan, generation, seq);
+
+            // The second click lands while the first build runs (locks
+            // released in production; here we just stamp its plan).
+            let song_c = click_song("c");
+            let second = plan_click_play(
+                &mut e,
+                &seq_counter,
+                effect(),
+                Some(&song_c),
+                "http://127.0.0.1:9/rest/stream?id=c",
+            )
+            .await;
+            assert!(matches!(second, ClickPlayRoute::FadePlanned { seq: 2, .. }));
+        }
+
+        // The FIRST click's build now completes — it must be abandoned at
+        // the seq gate (the second click owns the engine), staging nothing.
+        let result = complete_skip_fade(
+            &engine,
+            &seq_counter,
+            *first_plan,
+            first_generation,
+            first_seq,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let e = engine.lock().await;
+        assert!(
+            e.source().is_empty(),
+            "the superseded click must not stage or load anything"
+        );
+        assert!(e.playing(), "the outgoing keeps playing for the winner");
+    }
+
+    // ── M10 controller-level integration (fixture over unreachable server) ──
+    //
+    // Mirrors the queue_orchestrator fixture: real QueueService + real
+    // PlaybackController over tempfile-backed storage, with a session resumed
+    // against 127.0.0.1:9 (connection refused instantly) so stream URLs
+    // build but every network decoder init fails deterministically. The
+    // discriminating observable between the plan path and the hard path is
+    // the navigator's `current_song_id`: the plan path names the clicked
+    // song BEFORE the unlocked build, while the hard path only names it
+    // after a successful `play()` — which the unreachable URL denies.
+
+    struct ClickFixture {
+        _temp: tempfile::TempDir,
+        queue: QueueService,
+        playback: PlaybackController,
+    }
+
+    async fn click_fixture() -> Result<ClickFixture> {
+        let temp = tempfile::tempdir()?;
+        let storage_q =
+            crate::services::state_storage::StateStorage::new(temp.path().join("queue.redb"))?;
+        let storage_s =
+            crate::services::state_storage::StateStorage::new(temp.path().join("settings.redb"))?;
+        let auth = crate::backend::auth::AuthGateway::new()?;
+        auth.resume_session(
+            "http://127.0.0.1:9".to_string(),
+            "alice".to_string(),
+            "jwt".to_string(),
+            "u=alice&s=salt&t=token".to_string(),
+        )
+        .await?;
+        let queue = QueueService::new(auth, storage_q)?;
+        let settings = SettingsService::new(storage_s)?;
+        let tm = Arc::new(TaskManager::new());
+        let (playback, _loop_rx, _qc_rx) =
+            PlaybackController::new(queue.clone(), settings, tm).await?;
+        Ok(ClickFixture {
+            _temp: temp,
+            queue,
+            playback,
+        })
+    }
+
+    /// Queue click (play-from-here) in Crossfade mode while playing: the
+    /// controller must route through the skip-fade plan — queue repositioned,
+    /// the clicked song named at plan time, and (after the unreachable build
+    /// fails) the fallback stages the click target as the engine source.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn play_song_from_queue_crossfade_mode_takes_plan_path() -> Result<()> {
+        let fx = click_fixture().await?;
+        let songs = vec![click_song("a"), click_song("b")];
+        let _ = fx.queue.set_queue(songs, Some(0)).await?;
+        {
+            let engine_arc = fx.playback.audio_engine();
+            let mut e = engine_arc.lock().await;
+            e.force_playing_for_test();
+            e.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        }
+
+        // The unreachable server makes the fallback's play() fail — the
+        // routing itself is what's under test, so tolerate the Err.
+        let _ = fx.playback.play_song_from_queue("b", 1).await;
+
+        assert_eq!(
+            fx.playback.current_song_id().await.as_deref(),
+            Some("b"),
+            "the plan path names the clicked song BEFORE the decoder build"
+        );
+        let engine_arc = fx.playback.audio_engine();
+        let e = engine_arc.lock().await;
+        assert!(
+            e.source().contains("id=b"),
+            "the blocked-blend fallback must stage the click target, got {:?}",
+            e.source()
+        );
+        Ok(())
+    }
+
+    /// Browse-view play (album/playlist/songs) in Crossfade mode while
+    /// playing: `play_songs_from_index` REPLACES the queue, and the fade
+    /// plan must target the replaced queue's clicked row.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn play_songs_from_index_crossfade_mode_plans_against_replaced_queue() -> Result<()> {
+        let fx = click_fixture().await?;
+        // An old queue is loaded and audibly playing…
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("x"), click_song("y")], Some(0))
+            .await?;
+        {
+            let engine_arc = fx.playback.audio_engine();
+            let mut e = engine_arc.lock().await;
+            e.force_playing_for_test();
+            e.set_skip_fade(crate::types::player_settings::FadeOnSkip::Crossfade, 2);
+        }
+
+        // …when a browse click replaces it and starts at index 1 ("b").
+        let _ = fx
+            .playback
+            .play_songs_from_index(vec![click_song("a"), click_song("b"), click_song("c")], 1)
+            .await;
+
+        let ids: Vec<String> = fx.queue.get_songs().iter().map(|s| s.id.clone()).collect();
+        assert_eq!(ids, vec!["a", "b", "c"], "the queue was replaced");
+        assert_eq!(
+            fx.playback.current_song_id().await.as_deref(),
+            Some("b"),
+            "the fade plan must name the REPLACED queue's clicked row"
+        );
+        let engine_arc = fx.playback.audio_engine();
+        let e = engine_arc.lock().await;
+        assert!(
+            e.source().contains("id=b"),
+            "the fallback must stage the replaced queue's target, got {:?}",
+            e.source()
+        );
+        Ok(())
+    }
+
+    /// Mode Off keeps the click byte-identical to today: the hard path never
+    /// names the song at plan time (it names it only after a successful
+    /// play(), which the unreachable server denies here).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn play_song_from_queue_off_mode_keeps_hard_path() -> Result<()> {
+        let fx = click_fixture().await?;
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("a"), click_song("b")], Some(0))
+            .await?;
+        {
+            let engine_arc = fx.playback.audio_engine();
+            let mut e = engine_arc.lock().await;
+            e.force_playing_for_test();
+        }
+
+        let result = fx.playback.play_song_from_queue("b", 1).await;
+
+        assert!(result.is_err(), "hard play against 127.0.0.1:9 must fail");
+        assert_eq!(
+            fx.playback.current_song_id().await,
+            None,
+            "the hard path must not run any plan-time naming"
+        );
+        Ok(())
     }
 
     /// Regression test for the strong-Arc cycle introduced by `set_completion_callback`.

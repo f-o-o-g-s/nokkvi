@@ -15,13 +15,16 @@ use crate::types::{queue::RepeatMode, song::Song};
 /// `"crossfade"`) so the `Now Playing ... (reason)` log lines stay grep-stable.
 /// `Gapless` and `Crossfade` are the two auto-advance audio paths: `Gapless` is
 /// a seamless hard-join, `Crossfade` is a blended overlap. `Previous` is the
-/// manual step-back (M7's skip-fade plan carries it for its log line).
+/// manual step-back (M7's skip-fade plan carries it for its log line);
+/// `Click` is a user click that starts a track directly — play-from-queue or
+/// a browse-view play (M10's click-fade plan carries it for its log line).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TransitionReason {
     Repeat,
     Shuffle,
     Next,
     Previous,
+    Click,
     RepeatQueue,
     Gapless,
     Crossfade,
@@ -34,6 +37,7 @@ impl TransitionReason {
             TransitionReason::Shuffle => "shuffle",
             TransitionReason::Next => "next",
             TransitionReason::Previous => "previous",
+            TransitionReason::Click => "click",
             TransitionReason::RepeatQueue => "repeatQueue",
             TransitionReason::Gapless => "gapless",
             TransitionReason::Crossfade => "crossfade",

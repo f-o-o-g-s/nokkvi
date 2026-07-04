@@ -335,6 +335,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     #[ignore = "needs a live PipeWire graph + running Nokkvi"]
+    // Intentional stdout: this diagnostic is run with `--nocapture` (see doc
+    // above) and printing the live probe result is its whole point.
+    #[allow(clippy::print_stdout)]
     fn live_probe_smoke() {
         let holder = super::probe_sink_holder("Nokkvi");
         println!("live sink holder for 'Nokkvi': {holder:?}");

@@ -13,7 +13,7 @@ All notable changes to this project will be documented in this file.
   - **Smooth Track Starts** (on by default): ramps up the first ~20 ms of each track to remove the click when a skip or seek lands mid-waveform; off restores an instant, honest onset.
   - **Fade on Pause / Resume** and **Fade on Stop** (off by default, 20–500 ms): soft gain ramps instead of instant cuts, so pausing, resuming, and stopping no longer click.
   - **Fade Radio Switches** (off by default): a short fade when starting a radio station or returning to the queue; the fade-in waits for the stream's first real audio instead of popping at full gain after the prebuffer.
-  - **Fade on Skip** (Off / Boundary Fade / Crossfade, default Off) with a 1–4 s duration: manual Next/Previous can fade out or blend into the next track instead of hard-cutting.
+  - **Fade on Skip** (Off / Boundary Fade / Crossfade, default Off) with a 1–4 s duration: manual Next/Previous — and clicking a track in the queue or a browse view — can fade out or blend into the next track instead of hard-cutting.
   - **Skip Silence Between Tracks** (off by default): trims silent lead-ins from tracks prepared in advance and starts the blend early over a silent outro. Bit-perfect streams never trim.
   - **Gap / Overlap Trim** (−2 to +2 s): hold a moment of silence between tracks, or start blends early.
   - **Snap Crossfade to Musical Bars** (off by default): rounds the blend length to whole bars of the outgoing track's BPM tag so beats line up through the blend; ignored when a track has no BPM.

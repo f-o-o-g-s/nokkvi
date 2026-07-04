@@ -170,8 +170,9 @@ pub struct TomlSettings {
     /// instead of hard-cutting (default false — opt-in). The incoming fade
     /// waits for the stream's first real audio.
     pub fade_radio_transitions: bool,
-    /// What a manual Next/Previous does to the sound (default Off — instant
-    /// cut): boundary fade or full skip-crossfade (M7).
+    /// What a manual skip — Next/Previous or clicking a track — does to the
+    /// sound (default Off — instant cut): boundary fade or full
+    /// skip-crossfade (M7/M10).
     pub fade_on_skip: FadeOnSkip,
     /// "Fade on Skip" length in seconds (1–4, default 2).
     pub fade_skip_secs: u32,

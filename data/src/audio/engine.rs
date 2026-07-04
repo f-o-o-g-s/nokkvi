@@ -323,8 +323,9 @@ pub(crate) struct FadeCoordinator {
     /// radio-start paths) and `set_source`'s internal stop (radio→queue,
     /// detected via `stream_is_infinite`).
     fade_radio_transitions: bool,
-    /// M7 "Fade on Skip" (default Off — opt-in): what a manual Next/Previous
-    /// does to the sound. Read by the manual-skip path (via
+    /// M7/M10 "Fade on Skip" (default Off — opt-in): what a manual skip
+    /// (Next/Previous, or a click that starts a track) does to the sound.
+    /// Read by the manual-skip and click paths (via
     /// [`CustomAudioEngine::skip_fade_mode`]) to pick hard cut / boundary
     /// fade / skip-crossfade.
     fade_on_skip: crate::types::player_settings::FadeOnSkip,
@@ -578,9 +579,12 @@ struct DecodeLoopChannels {
     /// the queue has ALREADY advanced for a skip whose audio transition is
     /// still building (locks released), so track-completion machinery must
     /// stand down — advancing again would double-advance the queue.
-    /// Self-invalidating: every path out of the window bumps the generation
-    /// (the fire, the fallback's `set_source`, or any competing user
-    /// action), so a stale latch can never suppress a later completion.
+    /// Self-invalidating: every path out of the window either bumps the
+    /// generation (the fire, the fallback's `set_source`, any competing
+    /// source change) or closes the latch explicitly
+    /// (`close_skip_fade_window` on the seq-abandon exit, whose superseding
+    /// no-op skip never touches the engine), so a stale latch can never
+    /// suppress a later completion.
     skip_fade_pending: Arc<AtomicU64>,
     /// M8 positive "Gap / Overlap Trim": milliseconds of silence to inject
     /// between the outgoing track's last sample and the next track at the
@@ -2930,8 +2934,11 @@ impl CustomAudioEngine {
     ///    value) are deferred by `on_renderer_finished` / stood down by the
     ///    inline gapless swap instead of advancing the already-advanced
     ///    cursor. The latch self-invalidates: every exit from the window
-    ///    (the fire's bump, the fallback's `set_source`, any competing user
-    ///    action) moves the generation past it.
+    ///    either moves the generation past it (the fire's bump, the
+    ///    fallback's `set_source`, any competing source change) or closes it
+    ///    explicitly ([`Self::close_skip_fade_window`] on the seq-abandon
+    ///    exit — a superseding NO-OP skip stamps the sequence without ever
+    ///    bumping the generation).
     pub async fn plan_skip_fade(&mut self) {
         self.reset_next_track().await;
         let generation = self.channels.source_generation.bump_for_user_action();
@@ -2943,10 +2950,33 @@ impl CustomAudioEngine {
 
     /// Whether a planned skip-crossfade's build window is still open: the
     /// plan-time latch matches the CURRENT source generation. See
-    /// [`Self::plan_skip_fade`].
-    fn skip_fade_window_pending(&self) -> bool {
+    /// [`Self::plan_skip_fade`]. `pub(crate)` for the controller-side
+    /// regression tests over the seq-abandon exit.
+    pub(crate) fn skip_fade_window_pending(&self) -> bool {
         self.channels.skip_fade_pending.load(Ordering::Acquire)
             == self.channels.source_generation.current()
+    }
+
+    /// Close a planned skip fade's pending window WITHOUT a source change —
+    /// the controller's `complete_skip_fade` seq-abandon exit. The
+    /// superseding action normally owns the engine and bumps the generation
+    /// itself, but a NO-OP skip (Next at the end of the queue, Previous with
+    /// nothing to step back to) stamps the sequence counter without ever
+    /// touching the engine: no bump will un-match the abandoned plan's
+    /// latch, so the abandon must close it here or every end-of-track
+    /// completion defers forever at [`Self::on_renderer_finished`]. Gated on
+    /// the abandoned plan's OWN generation snapshot: a newer plan re-latches
+    /// at a strictly greater generation (its `plan_skip_fade` bump), so a
+    /// live newer window is never touched.
+    pub(crate) fn close_skip_fade_window(&self, plan_generation: u64) {
+        if self.channels.source_generation.current() == plan_generation {
+            self.channels
+                .skip_fade_pending
+                .store(NO_SKIP_FADE_PENDING, Ordering::Release);
+            debug!(
+                "🔀 [SKIP FADE] Abandoned plan closed its window (generation {plan_generation})"
+            );
+        }
     }
 
     /// Start an immediate manual-skip crossfade to `incoming_url` using an
@@ -3070,6 +3100,20 @@ impl CustomAudioEngine {
     /// `set_source` fade handles the infinite-stream edge).
     pub fn skip_crossfade_viable(&self) -> bool {
         self.immediate_playing() && !self.channels.stream_is_infinite.load(Ordering::Acquire)
+    }
+
+    /// Whether a CLICK-initiated track start (play-from-queue /
+    /// play-from-browse, M10) should even PLAN a skip-crossfade: M7's
+    /// viability ([`Self::skip_crossfade_viable`]) plus a bit-perfect
+    /// **Strict** pre-gate. Strict refuses every blend at the fire's format
+    /// gate regardless of the incoming format, so planning would only buy
+    /// the click a wasted network decoder build before the same hard cut it
+    /// takes today — the pre-gate keeps that path byte-identical. Relaxed
+    /// must still plan (its verdict needs the incoming format).
+    pub fn click_skip_crossfade_viable(&self) -> bool {
+        self.skip_crossfade_viable()
+            && self.crossfade.bit_perfect_mode
+                != crate::types::player_settings::BitPerfectMode::Strict
     }
 
     /// The M7 boundary out-fade: ramp the outgoing to silence over the
@@ -3515,6 +3559,16 @@ impl CustomAudioEngine {
         self.paused = false;
     }
 
+    /// Test-only: mark the current source as an infinite (radio) stream so
+    /// cross-module tests can drive the radio arm of the skip-fade gates
+    /// (the `channels` field is private to this module).
+    #[cfg(test)]
+    pub fn force_infinite_for_test(&mut self) {
+        self.channels
+            .stream_is_infinite
+            .store(true, Ordering::Release);
+    }
+
     /// Get current sample rate in Hz (for UI display)
     /// Uses lock-free atomic for threading consistency with live_bitrate.
     pub fn sample_rate(&self) -> u32 {
@@ -3661,8 +3715,10 @@ impl CustomAudioEngine {
         // its hard fallback) owns the transition, and if the outgoing
         // drained here, the fire detects the drained ring and falls back to
         // an immediate hard load of the skip target. The latch cannot
-        // strand — every exit from the window bumps the generation, which
-        // un-matches it.
+        // strand — every exit from the window bumps the generation (which
+        // un-matches it), except the seq-abandon exit, which closes the
+        // latch explicitly via `close_skip_fade_window` (its superseding
+        // no-op skip never touches the engine).
         if self.skip_fade_window_pending() {
             debug!(
                 " [RENDERER FINISHED] Deferred — a planned skip fade owns the transition \

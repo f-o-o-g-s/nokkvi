@@ -2631,7 +2631,7 @@ name = "sentinel preset"
         assert_eq!(out.font_family, src.font_family, "font_family residual");
         // 2. artwork_column_width_pct (f32, Interface).
         assert!(
-            (out.artwork_column_width_pct - src.artwork_column_width_pct as f32).abs() < 1e-4,
+            (out.artwork_column_width_pct - src.artwork_column_width_pct).abs() < 1e-4,
             "artwork_column_width_pct residual: {} vs {}",
             out.artwork_column_width_pct,
             src.artwork_column_width_pct

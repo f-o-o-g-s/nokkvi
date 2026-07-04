@@ -167,10 +167,10 @@ crate::player_settings_schema! {
     /// waits for the stream's first real audio.
     #[serde(default)]
     same fade_radio_transitions: bool = false,
-    /// What a manual Next/Previous does to the sound (default Off — the
-    /// historical instant cut): Boundary Fade eases the outgoing track out
-    /// before the hard load; Crossfade overlaps and blends into the
-    /// skipped-to track (M7).
+    /// What a manual skip — Next/Previous or clicking a track — does to the
+    /// sound (default Off — the historical instant cut): Boundary Fade eases
+    /// the outgoing track out before the hard load; Crossfade overlaps and
+    /// blends into the picked track (M7/M10).
     #[serde(default)]
     same fade_on_skip: FadeOnSkip = FadeOnSkip::default(),
     /// "Fade on Skip" length in seconds (1–4, default 2) — the skip-crossfade

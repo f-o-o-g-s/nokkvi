@@ -303,11 +303,11 @@ define_settings! {
                 label: "Fade on Skip",
                 category: "Fading",
                 subtitle: Some(
-                    "What Next/Previous does to the sound. Off cuts instantly. Boundary Fade \
-                     eases the old track out before the new one starts fresh. Crossfade \
-                     overlaps and blends into the skipped-to track, like an automatic track \
-                     change — falling back to the boundary fade when a blend is blocked. \
-                     Bit-perfect streams always cut instantly.",
+                    "What Next/Previous and clicking a track do to the sound. Off cuts \
+                     instantly. Boundary Fade eases the old track out before the new one \
+                     starts fresh. Crossfade overlaps and blends into the picked track, like \
+                     an automatic track change — falling back to the boundary fade when a \
+                     blend is blocked. Bit-perfect streams always cut instantly.",
                 ),
                 default: "Off",
                 options: &["Off", "Boundary Fade", "Crossfade"],
