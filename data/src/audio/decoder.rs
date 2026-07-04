@@ -269,6 +269,83 @@ pub struct AudioDecoder {
     live_icy_metadata: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     /// The short-name of the actual hardware codec (e.g., "mp3", "aac", "vorbis").
     live_codec: Option<String>,
+    /// M8 "Skip Silence Between Tracks": producer-side leading-silence scan
+    /// state. Enabled (via [`Self::set_trim_leading_silence`]) only on
+    /// prepared TRANSITION decoders — user-initiated loads keep the honest
+    /// recorded start. See [`LeadingTrim`].
+    leading_trim: LeadingTrim,
+}
+
+/// Leading-silence trim state (M8). The scan lives inside the registry-backed
+/// decode path (`read_buffer`'s decode-ok arm, right after Symphonia's
+/// encoder-delay `trim_start` handling) and is DISTINCT from that per-packet
+/// format field: `trim_start` removes encoder delay, this drops *musical*
+/// leading silence below [`super::SOURCE_SILENCE_THRESHOLD`], frame-aligned,
+/// until the first loud frame or the [`LEADING_TRIM_MAX_MS`] budget runs out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeadingTrim {
+    /// Feature off for this decoder (the default).
+    Off,
+    /// Enabled, but the frame budget isn't derived yet (format unknown until
+    /// the first decoded packet reports its spec).
+    Pending,
+    /// Scanning the leading frames; `frames_left` is the remaining budget.
+    Scanning { frames_left: u64 },
+    /// A loud frame was seen (or the budget ran out) — pass-through from here,
+    /// including after any seek.
+    Done,
+}
+
+/// Budget cap for the leading-silence scan: at most this much leading audio is
+/// ever dropped (bounds the skip on pathological pregap/hidden-track silence,
+/// and guarantees an all-silent track still plays rather than fast-forwarding
+/// to EOF).
+const LEADING_TRIM_MAX_MS: u64 = 15_000;
+
+/// How many bytes to drop from the FRONT of `decoded_bytes` for the
+/// leading-silence trim (M8). Advances `state`:
+/// - `Off` / `Done` / `Pending` → 0 (Pending is resolved by the caller, which
+///   knows the frame rate).
+/// - `Scanning`: walks whole frames; the first frame with any sample at or
+///   above [`super::SOURCE_SILENCE_THRESHOLD`] flips to `Done` and everything
+///   from that frame on survives. All-silent buffers are dropped whole until
+///   the frame budget runs out, which also flips to `Done` (the remaining
+///   silence plays honestly). Only whole frames are ever dropped — a
+///   mid-frame cut would rotate the channel interleave.
+fn leading_trim_prefix_bytes(
+    state: &mut LeadingTrim,
+    decoded_bytes: &[u8],
+    bytes_per_frame: usize,
+) -> usize {
+    let LeadingTrim::Scanning { frames_left } = *state else {
+        return 0;
+    };
+    if bytes_per_frame == 0 {
+        return 0;
+    }
+
+    let mut dropped_frames: u64 = 0;
+    for frame in decoded_bytes.chunks_exact(bytes_per_frame) {
+        let loud = frame.chunks_exact(4).any(|s| {
+            let sample = f32::from_le_bytes([s[0], s[1], s[2], s[3]]);
+            sample.abs() >= super::SOURCE_SILENCE_THRESHOLD
+        });
+        if loud {
+            *state = LeadingTrim::Done;
+            return (dropped_frames as usize) * bytes_per_frame;
+        }
+        dropped_frames += 1;
+        if dropped_frames >= frames_left {
+            // Budget exhausted: stop scanning; the remaining silence plays.
+            *state = LeadingTrim::Done;
+            return (dropped_frames as usize) * bytes_per_frame;
+        }
+    }
+
+    *state = LeadingTrim::Scanning {
+        frames_left: frames_left - dropped_frames,
+    };
+    (dropped_frames as usize) * bytes_per_frame
 }
 
 /// Append `packet_dur` frames of silence (`channel_count` channels,
@@ -380,6 +457,7 @@ impl AudioDecoder {
             seek_scale: 1.0,
             live_icy_metadata,
             live_codec: None,
+            leading_trim: LeadingTrim::Off,
         }
     }
 
@@ -388,6 +466,19 @@ impl AudioDecoder {
     /// no trustworthy metadata exists (radio, engine-internal fallback loads).
     pub fn set_expected_duration_ms(&mut self, expected_ms: Option<u64>) {
         self.expected_duration_ms = expected_ms;
+    }
+
+    /// Enable the M8 leading-silence trim for this decoder (call before any
+    /// `read_buffer`, alongside `set_expected_duration_ms`). Only prepared
+    /// TRANSITION decoders opt in — a user-initiated play keeps the honest
+    /// recorded start — and the caller gates it off under bit-perfect modes
+    /// (dropping samples is a content change).
+    pub fn set_trim_leading_silence(&mut self, enabled: bool) {
+        self.leading_trim = if enabled {
+            LeadingTrim::Pending
+        } else {
+            LeadingTrim::Off
+        };
     }
 
     /// Initialize decoder with URL (HTTP or file path)
@@ -1034,6 +1125,32 @@ impl AudioDecoder {
                         }
                     }
 
+                    // M8 leading-silence trim (content-aware, AFTER the
+                    // encoder-delay trims above — those are format bookkeeping,
+                    // this drops musical silence). Resolve the frame budget on
+                    // first use, now that the decoded spec reports the rate.
+                    if self.leading_trim == LeadingTrim::Pending {
+                        let frames_budget = LEADING_TRIM_MAX_MS * u64::from(spec.rate) / 1000;
+                        self.leading_trim = if frames_budget == 0 {
+                            LeadingTrim::Done
+                        } else {
+                            LeadingTrim::Scanning {
+                                frames_left: frames_budget,
+                            }
+                        };
+                    }
+                    if matches!(self.leading_trim, LeadingTrim::Scanning { .. }) {
+                        let drop = leading_trim_prefix_bytes(
+                            &mut self.leading_trim,
+                            decoded_bytes,
+                            bytes_per_frame,
+                        );
+                        if drop > 0 {
+                            trace!("🤫 [DECODER] Leading-silence trim: dropped {} bytes", drop);
+                            decoded_bytes = &decoded_bytes[drop..];
+                        }
+                    }
+
                     let needed = bytes.saturating_sub(output_data.len());
                     let to_take = needed.min(decoded_bytes.len());
 
@@ -1097,6 +1214,13 @@ impl AudioDecoder {
         use tracing::{debug, trace};
 
         trace!("🔍 [DECODER SEEK] Starting seek to {}ms", position_ms);
+
+        // M8: a seek ends the leading-silence scan unconditionally (even a
+        // failed/early-return seek expresses user intent to move within the
+        // track) — only the true track start is ever scanned.
+        if self.leading_trim != LeadingTrim::Off {
+            self.leading_trim = LeadingTrim::Done;
+        }
 
         if !self.initialized {
             debug!("🔍 [DECODER SEEK] Aborting - not initialized");
@@ -1192,7 +1316,7 @@ impl AudioDecoder {
     /// Test-only: stamp the reported track duration without going through
     /// `init`/`open_input` (which need real network/file I/O). Lets engine arm
     /// tests build a prepared decoder whose `duration()` clears the renderer's
-    /// `MIN_CROSSFADE_TRACK_MS` gate.
+    /// minimum-track-length arm gate (`crossfade_min_track_ms`).
     #[cfg(test)]
     pub fn set_duration_for_test(&mut self, duration_ms: u64) {
         self.duration = duration_ms;
@@ -1212,6 +1336,13 @@ impl AudioDecoder {
     #[cfg(test)]
     pub fn set_live_codec_for_test(&mut self, codec: Option<String>) {
         self.live_codec = codec;
+    }
+
+    /// Test-only: stamp decoder EOF so engine tests can drive the
+    /// track-completion path of `on_renderer_finished` without real I/O.
+    #[cfg(test)]
+    pub fn set_eof_for_test(&mut self, eof: bool) {
+        self.eof = eof;
     }
 
     /// Check if decoder is initialized
@@ -1324,6 +1455,109 @@ mod tests {
     // bitrate-extrapolated MP3 duration estimate (pdeljanov/Symphonia#516:
     // a 4:44 VBR file probed as 30:24).
     // =========================================================================
+
+    // =========================================================================
+    // M8 leading-silence trim — pure scan over interleaved f32 LE frames.
+    // =========================================================================
+
+    /// Interleaved stereo f32 LE bytes from per-sample amplitudes.
+    fn frames_bytes(samples: &[f32]) -> Vec<u8> {
+        samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+    }
+
+    const STEREO_FRAME: usize = 8; // 2 channels × 4 bytes
+
+    #[test]
+    fn leading_trim_off_and_done_pass_through() {
+        let bytes = frames_bytes(&[0.0, 0.0, 0.5, 0.5]);
+        let mut off = LeadingTrim::Off;
+        assert_eq!(leading_trim_prefix_bytes(&mut off, &bytes, STEREO_FRAME), 0);
+        assert_eq!(off, LeadingTrim::Off);
+        let mut done = LeadingTrim::Done;
+        assert_eq!(
+            leading_trim_prefix_bytes(&mut done, &bytes, STEREO_FRAME),
+            0
+        );
+        assert_eq!(done, LeadingTrim::Done);
+    }
+
+    /// The first frame with ANY sample at/above the threshold survives; the
+    /// silent frames before it are dropped, frame-aligned (a mid-frame cut
+    /// would rotate the channel interleave).
+    #[test]
+    fn leading_trim_drops_silent_frames_until_first_loud_frame() {
+        // 3 silent stereo frames, then a frame loud only in its RIGHT channel.
+        let bytes = frames_bytes(&[0.0, 0.0, 1e-4, -1e-4, 0.0, 0.0, 0.0, 0.5, 0.3, 0.3]);
+        let mut state = LeadingTrim::Scanning { frames_left: 1_000 };
+        assert_eq!(
+            leading_trim_prefix_bytes(&mut state, &bytes, STEREO_FRAME),
+            3 * STEREO_FRAME
+        );
+        assert_eq!(state, LeadingTrim::Done, "a loud frame ends the scan");
+    }
+
+    /// An all-silent buffer under budget is dropped whole and the scan
+    /// continues into the next buffer (multi-call state).
+    #[test]
+    fn leading_trim_continues_across_buffers() {
+        let silent = frames_bytes(&[0.0; 8]); // 4 stereo frames
+        let mut state = LeadingTrim::Scanning { frames_left: 10 };
+        assert_eq!(
+            leading_trim_prefix_bytes(&mut state, &silent, STEREO_FRAME),
+            silent.len()
+        );
+        assert_eq!(state, LeadingTrim::Scanning { frames_left: 6 });
+
+        // Next buffer starts loud — nothing more is dropped.
+        let loud = frames_bytes(&[0.5, 0.5, 0.1, 0.1]);
+        assert_eq!(
+            leading_trim_prefix_bytes(&mut state, &loud, STEREO_FRAME),
+            0
+        );
+        assert_eq!(state, LeadingTrim::Done);
+    }
+
+    /// Budget exhaustion mid-buffer flips to Done and the remaining silence
+    /// plays honestly (an all-silent track must still play, never
+    /// fast-forward to EOF).
+    #[test]
+    fn leading_trim_budget_exhaustion_stops_trimming() {
+        let silent = frames_bytes(&[0.0; 10]); // 5 stereo frames
+        let mut state = LeadingTrim::Scanning { frames_left: 2 };
+        assert_eq!(
+            leading_trim_prefix_bytes(&mut state, &silent, STEREO_FRAME),
+            2 * STEREO_FRAME,
+            "only the budgeted frames are dropped"
+        );
+        assert_eq!(state, LeadingTrim::Done);
+    }
+
+    /// Threshold boundary: exactly −60 dBFS (1e-3) counts as LOUD (the scan
+    /// keeps it), one ULP below stays silent.
+    #[test]
+    fn leading_trim_threshold_is_inclusive() {
+        let bytes = frames_bytes(&[9.9e-4, -9.9e-4, 1e-3, 0.0]);
+        let mut state = LeadingTrim::Scanning { frames_left: 1_000 };
+        assert_eq!(
+            leading_trim_prefix_bytes(&mut state, &bytes, STEREO_FRAME),
+            STEREO_FRAME,
+            "the sub-threshold frame drops; the at-threshold frame survives"
+        );
+        assert_eq!(state, LeadingTrim::Done);
+    }
+
+    /// A seek must end the scan: `set_trim_leading_silence(true)` arms
+    /// Pending, and `seek()` flips it to Done so a mid-track seek never trims
+    /// content (only the true track start is scanned).
+    #[test]
+    fn leading_trim_seek_disables_scan() {
+        let mut dec = AudioDecoder::default();
+        dec.set_trim_leading_silence(true);
+        assert_eq!(dec.leading_trim, LeadingTrim::Pending);
+        // Uninitialized seek returns false but must still kill the scan arm.
+        let _ = dec.seek(1_000);
+        assert_eq!(dec.leading_trim, LeadingTrim::Done);
+    }
 
     #[test]
     fn sanitize_keeps_probe_without_expectation() {

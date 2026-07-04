@@ -150,6 +150,34 @@ pub struct PlaybackSettingsData {
     /// Bit-perfect mode label ("Off" / "Strict" / "Relaxed").
     pub bit_perfect: Cow<'static, str>,
     pub crossfade_duration_secs: i64,
+    /// Crossfade curve label ("Equal Power" / "Constant Gain" / "Linear").
+    pub crossfade_curve: Cow<'static, str>,
+    /// Minimum track length (seconds) below which transitions play gapless.
+    pub crossfade_min_track_secs: i64,
+    /// Whether sequential same-album tracks skip the blend (album-continuity gate).
+    pub crossfade_album_gapless: bool,
+    /// Whether new non-bit-perfect streams get the ~20 ms de-click onset ramp.
+    pub smooth_track_starts: bool,
+    /// Whether pause/resume ramp the volume instead of cutting (opt-in).
+    pub fade_on_pause: bool,
+    /// Pause/resume ramp length in milliseconds (20–500).
+    pub fade_pause_ms: i64,
+    /// Whether stopping playback ramps the volume down instead of cutting (opt-in).
+    pub fade_on_stop: bool,
+    /// Stop ramp length in milliseconds (20–500).
+    pub fade_stop_ms: i64,
+    /// Whether radio↔queue switches fade out and back in instead of hard-cutting (opt-in).
+    pub fade_radio_transitions: bool,
+    /// "Fade on Skip" mode label ("Off" / "Boundary Fade" / "Crossfade").
+    pub fade_on_skip: Cow<'static, str>,
+    /// "Fade on Skip" length in seconds (1–4).
+    pub fade_skip_secs: i64,
+    /// Whether silent tails/lead-ins are skipped at track transitions (M8, opt-in).
+    pub skip_silence: bool,
+    /// Gap / overlap trim in seconds (−2..+2; negative = overlap, positive = gap).
+    pub crossfade_offset_secs: i64,
+    /// Whether the crossfade length snaps to whole bars of the outgoing BPM (M8, opt-in).
+    pub crossfade_bar_snap: bool,
     /// Whether Previous restarts the current track past the threshold (default false).
     pub rewind_on_previous: bool,
     /// Volume-normalization mode label ("Off" / "AGC" / "ReplayGain (Track)" / "ReplayGain (Album)")
@@ -200,6 +228,20 @@ impl Default for PlaybackSettingsData {
             crossfade_enabled: false,
             bit_perfect: Cow::Borrowed("test-default"),
             crossfade_duration_secs: 0,
+            crossfade_curve: Cow::Borrowed("test-default"),
+            crossfade_min_track_secs: 0,
+            crossfade_album_gapless: false,
+            smooth_track_starts: false,
+            fade_on_pause: false,
+            fade_pause_ms: 0,
+            fade_on_stop: false,
+            fade_stop_ms: 0,
+            fade_radio_transitions: false,
+            fade_on_skip: Cow::Borrowed("test-default"),
+            fade_skip_secs: 0,
+            skip_silence: false,
+            crossfade_offset_secs: 0,
+            crossfade_bar_snap: false,
             rewind_on_previous: false,
             volume_normalization: Cow::Borrowed("test-default"),
             normalization_level: Cow::Borrowed("test-default"),

@@ -5,6 +5,7 @@ use std::sync::{
 
 use anyhow::Result;
 use parking_lot::Mutex as PlMutex;
+use tokio::sync::Notify;
 use tracing::{debug, error, trace, warn};
 
 use crate::{
@@ -88,6 +89,54 @@ impl CrossfadePhase {
     }
 }
 
+/// Outcome of a manual-skip crossfade attempt
+/// ([`CustomAudioEngine::crossfade_to_next`], M7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipFadeOutcome {
+    /// The blend started — the incoming is fading in; finalize promotes it.
+    Fired,
+    /// A gate refused (format / durations / min-track floor / not audibly
+    /// playing a finite stream). The caller should fall back to the boundary
+    /// fade + hard load so the skip still lands.
+    Blocked,
+    /// A competing user action superseded this skip while its decoder was
+    /// building (source generation moved). The caller must do NOTHING — the
+    /// competing action owns the engine state.
+    Stale,
+}
+
+/// Effective duration for a manual-skip crossfade, or `None` when the
+/// duration gates refuse (M7). Pure — the direct-`Active` fire bypasses
+/// `arm_crossfade`, so this re-applies its duration gates (known durations,
+/// the configured minimum-track floor, the `shorter/2` clamp) plus the
+/// skip-specific remaining-audio clamp: the position trigger fires exactly
+/// `fade` before the end, but a manual skip can land anywhere — a fade
+/// longer than the outgoing's remaining audio would EOF mid-blend, drain the
+/// ring, and cut to silence.
+fn skip_fade_duration_ms(
+    requested_ms: u64,
+    outgoing_duration_ms: u64,
+    incoming_duration_ms: u64,
+    position_ms: u64,
+    min_track_ms: u64,
+) -> Option<u64> {
+    // Unknown durations can't blend: a zero incoming degenerates the
+    // `shorter/2` clamp to 0 and a zero outgoing has no known remainder.
+    if outgoing_duration_ms == 0 || incoming_duration_ms == 0 {
+        return None;
+    }
+    // The configured minimum-track floor applies to skips too — silently
+    // ignoring it here would make `crossfade_min_track_secs` a lie on
+    // every manual skip.
+    let min_dur = outgoing_duration_ms.min(incoming_duration_ms);
+    if min_dur < min_track_ms {
+        return None;
+    }
+    let remaining = outgoing_duration_ms.saturating_sub(position_ms);
+    let effective = requested_ms.min(min_dur / 2).min(remaining);
+    (effective > 0).then_some(effective)
+}
+
 /// Owns the engine-side crossfade cluster: the live phase + the crossfade
 /// config fields that gate arming/triggering. Bundling them keeps the
 /// eligibility predicate (`crossfade_eligible`) and the renderer↔engine
@@ -118,6 +167,69 @@ pub(crate) struct CrossfadeCoordinator {
     /// whether to self-arm a crossfade under Relaxed without taking the renderer
     /// lock). Kept in sync by `set_bit_perfect`.
     bit_perfect_mode: crate::types::player_settings::BitPerfectMode,
+    /// Engine-side mirror of the minimum-track-length floor, in seconds (the
+    /// renderer owns the enforcing copy at its `arm_crossfade` gate). This
+    /// copy feeds `crossfade_policy_cfg()` so the controller's prep-time
+    /// policy decision reads the same floor without taking the renderer lock.
+    /// Kept in sync by `set_crossfade_min_track_secs`.
+    min_track_secs: u32,
+    /// The opt-in album-continuity gate (M4): sequential same-album tracks
+    /// transition gapless instead of crossfading. Consumed controller-side
+    /// via `crossfade_policy_cfg()`; kept in sync by
+    /// `set_crossfade_album_gapless`.
+    album_continuity: bool,
+    /// Per-transition policy verdict for the CURRENTLY-PREPARED next track:
+    /// `true` suppresses the crossfade arm/trigger so the transition falls
+    /// through to the gapless path. Set by `store_prepared_decoder` (AFTER
+    /// its internal `reset_next_track`, BEFORE the arm), cleared by
+    /// `reset_next_track`, and gated at BOTH trigger sites
+    /// (`arm_renderer_crossfade` — which also covers the rearm-after-seek
+    /// path — and `try_start_crossfade_transition`), mirroring the
+    /// `crossfade_blocked` dual-site pairing.
+    suppress_this_transition: bool,
+    /// M7: whether the live phase is a MANUAL-SKIP fade
+    /// ([`CustomAudioEngine::crossfade_to_next`]) rather than an
+    /// auto-advance blend. A skip already advanced the queue cursor /
+    /// history / consume at skip time, so `finalize_crossfade_engine` must
+    /// NOT fire the completion callback for it (the callback's
+    /// `decide_transition` would advance the queue a second time, silently
+    /// skipping a track) and must not stamp `last_transition_was_crossfade`
+    /// (nothing consumes it — it would leak into the next transition's
+    /// label). Set by `crossfade_to_next`, cleared by `cancel_crossfade`,
+    /// read-and-cleared by `finalize_crossfade_engine`, and read (BEFORE
+    /// the cancel clears it) by `recover_stalled_crossfade`, whose
+    /// skip-aware branch hard-loads the skip target instead of routing
+    /// through the end-of-track machinery (which would advance the
+    /// already-advanced cursor past the target).
+    skip_fade: bool,
+    /// M8 "Gap / Overlap Trim" in seconds (−2..+2, default 0). Negative =
+    /// extra overlap: the renderer's Armed trigger fires |offset| early
+    /// (mirrored to `renderer.crossfade_lead_ms` by `set_crossfade_offset`).
+    /// Positive = gap: `transition_prep_cfg()` hands it to the controller,
+    /// which threads it down per-transition for the decode loop's EOF
+    /// silence injection (`inject_transition_gap`).
+    offset_secs: i32,
+    /// M8 "Snap Crossfade to Musical Bars" (default off — opt-in). Consumed
+    /// controller-side via `transition_prep_cfg()`; the snapped value rides
+    /// back down as `duration_override_ms`. Kept in sync by
+    /// `set_crossfade_bar_snap`.
+    bar_snap: bool,
+    /// M8 "Skip Silence Between Tracks" engine mirror (default off —
+    /// opt-in). Feeds `transition_prep_cfg()`'s leading-trim verdict (gated
+    /// off under bit-perfect modes: dropping samples is a content change);
+    /// the renderer holds its own mirror for the trailing trigger. Kept in
+    /// sync by `set_skip_silence`.
+    skip_silence: bool,
+    /// M8 per-transition crossfade-duration override (bar-snap), following
+    /// the `suppress_this_transition` lifecycle EXACTLY: set by
+    /// `store_prepared_decoder` (AFTER its internal `reset_next_track`,
+    /// BEFORE the arm), cleared by `reset_next_track`. Every duration read
+    /// on the arm/trigger/fire paths goes through
+    /// [`Self::effective_duration_ms`]; the `crossfade_duration_shared`
+    /// decode-loop mirror is stored/restored in lockstep so the watermark
+    /// cushion always covers the duration that will actually play
+    /// (invariant 9).
+    duration_override_ms: Option<u64>,
 }
 
 impl CrossfadeCoordinator {
@@ -127,7 +239,27 @@ impl CrossfadeCoordinator {
             enabled: false,
             duration_ms: DEFAULT_CROSSFADE_DURATION_MS,
             bit_perfect_mode: crate::types::player_settings::BitPerfectMode::Off,
+            min_track_secs: crate::types::player_settings::CROSSFADE_MIN_TRACK_DEFAULT_SECS,
+            album_continuity: false,
+            suppress_this_transition: false,
+            skip_fade: false,
+            offset_secs: 0,
+            bar_snap: false,
+            skip_silence: false,
+            duration_override_ms: None,
         }
+    }
+
+    /// The crossfade duration that applies to the CURRENTLY-PREPARED
+    /// transition: the per-transition bar-snap override when one is staged,
+    /// else the user's global setting. Every arm/trigger/fire duration read
+    /// (`arm_renderer_crossfade`, `rearm_crossfade_if_prepared`,
+    /// `try_start_crossfade_transition`, engine `start_crossfade`, and the
+    /// store's own eligibility check) goes through this accessor — reading
+    /// `duration_ms` directly would silently miss the override on the
+    /// seek-rearm / EOF-fallback paths.
+    fn effective_duration_ms(&self) -> u64 {
+        self.duration_override_ms.unwrap_or(self.duration_ms)
     }
 
     /// Whether crossfade arming is eligible at all: the user's Crossfade toggle
@@ -165,6 +297,112 @@ impl CrossfadeCoordinator {
     }
 }
 
+/// Engine-side mirror of the transport-fade settings — the "Fading"
+/// section's STOP ramp knobs (M5, pushed via
+/// [`CustomAudioEngine::set_transport_fades`]) plus the radio-switch flag
+/// (M6, pushed via [`CustomAudioEngine::set_fade_radio_transitions`]).
+///
+/// Ownership split mirrors the min-track pattern: each side keeps exactly
+/// the knobs it consumes. The PAUSE pair lives on the renderer (its two
+/// consumers — `begin_pause_fade` and the resume fade-in in `start()` — are
+/// there; `set_transport_fades` pushes it down), while the STOP pair's sole
+/// consumer is `engine.stop()`, which both starts the out-ramp and bounds
+/// its wait with the same duration — so it mirrors here. Values are clamped
+/// to the `TRANSPORT_FADE_MS_{MIN,MAX}` bounds at the setter, so a
+/// hand-edited config.toml can't stretch the stop ramp (and therefore the
+/// engine-lock hold inside `stop()`) past the slider ceiling.
+pub(crate) struct FadeCoordinator {
+    /// Whether the stop out-ramp is enabled (default off — opt-in).
+    fade_on_stop: bool,
+    /// Stop ramp length in milliseconds.
+    fade_stop_ms: u32,
+    /// M6 "Fade Radio Switches" (default off — opt-in): radio↔queue
+    /// switches run a fixed `RADIO_SWITCH_FADE_MS` out-ramp and arm the
+    /// renderer's first-audio fade-in, instead of hard-cutting. Consumed by
+    /// [`CustomAudioEngine::stop_for_radio_switch`] (queue→radio, the UI
+    /// radio-start paths) and `set_source`'s internal stop (radio→queue,
+    /// detected via `stream_is_infinite`).
+    fade_radio_transitions: bool,
+    /// M7 "Fade on Skip" (default Off — opt-in): what a manual Next/Previous
+    /// does to the sound. Read by the manual-skip path (via
+    /// [`CustomAudioEngine::skip_fade_mode`]) to pick hard cut / boundary
+    /// fade / skip-crossfade; the FadeToNext hotkey overrides it to
+    /// `Crossfade` for one skip.
+    fade_on_skip: crate::types::player_settings::FadeOnSkip,
+    /// "Fade on Skip" length in milliseconds — the skip-crossfade overlap
+    /// ([`CustomAudioEngine::crossfade_to_next`]) and the boundary ease-out
+    /// ([`CustomAudioEngine::run_skip_out_fade`]) share it. Clamped to the
+    /// `FADE_SKIP_SECS_{MIN,MAX}` bounds at the setter.
+    fade_skip_ms: u32,
+}
+
+impl FadeCoordinator {
+    fn new() -> Self {
+        Self {
+            fade_on_stop: false,
+            fade_stop_ms: crate::types::player_settings::TRANSPORT_FADE_MS_DEFAULT,
+            fade_radio_transitions: false,
+            fade_on_skip: crate::types::player_settings::FadeOnSkip::Off,
+            fade_skip_ms: crate::types::player_settings::FADE_SKIP_SECS_DEFAULT * 1000,
+        }
+    }
+}
+
+/// Per-transition verdicts the controller computes at gapless-prep time from
+/// `Song` metadata (which never crosses the engine boundary) and threads down
+/// into [`CustomAudioEngine::store_prepared_decoder`]. All three share the M4
+/// suppress-flag lifecycle: applied AFTER the store's internal
+/// `reset_next_track`, cleared BY `reset_next_track`, re-derived on every
+/// prep.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PreparedTransitionDirectives {
+    /// M4 crossfade-vs-gapless policy verdict: `true` keeps the gapless slot
+    /// prepared but suppresses the crossfade arm/trigger (hard-join).
+    pub suppress_crossfade: bool,
+    /// M8 bar-snap: the snapped crossfade duration for THIS transition, or
+    /// `None` to use the global setting. Mirrored into
+    /// `crossfade_duration_shared` so the decode cushion covers it
+    /// (invariant 9).
+    pub duration_override_ms: Option<u64>,
+    /// M8 positive gap offset: milliseconds of silence to inject between the
+    /// tracks at decoder EOF (0 = seamless as before). The controller zeroes
+    /// it for album-continuity joins — "Keep Gapless Albums Seamless" means
+    /// no gap either.
+    pub gap_offset_ms: u64,
+}
+
+impl PreparedTransitionDirectives {
+    /// The M4-only shape: a policy suppress verdict with no M8 facets.
+    pub fn from_suppress(suppress_crossfade: bool) -> Self {
+        Self {
+            suppress_crossfade,
+            ..Self::default()
+        }
+    }
+}
+
+/// Snapshot of the transition-shaping settings the controller needs at
+/// gapless-prep time, read under one brief engine lock via
+/// [`CustomAudioEngine::transition_prep_cfg`]. Extends M4's
+/// `crossfade_policy_cfg` with the M8 knobs.
+#[derive(Debug, Clone, Copy)]
+pub struct TransitionPrepCfg {
+    /// Inputs to `crossfade_policy::crossfade_decision` (M4).
+    pub policy: crate::audio::crossfade_policy::CrossfadePolicyCfg,
+    /// M8 "Snap Crossfade to Musical Bars" (controller computes the snapped
+    /// value from the OUTGOING song's BPM tag).
+    pub bar_snap: bool,
+    /// The user's global crossfade duration (ms) — the bar-snap input.
+    pub crossfade_duration_ms: u64,
+    /// M8 positive gap side of "Gap / Overlap Trim" in ms (0 when the offset
+    /// is zero or negative — the negative side lives renderer-side).
+    pub gap_offset_ms: u64,
+    /// M8 leading-silence trim verdict for the prepared decoder: the
+    /// skip-silence setting, gated off under bit-perfect modes (dropping
+    /// samples is a content change a bit-perfect listener didn't ask for).
+    pub trim_leading_silence: bool,
+}
+
 /// Info about a gapless transition that occurred in the decode loop.
 /// The decode loop writes this, and the engine reads it to update its metadata.
 #[derive(Debug, Clone)]
@@ -194,6 +432,15 @@ pub(crate) struct GaplessSlot {
     /// the decode loop sets `prepared = false` AFTER `take`-ing the
     /// decoder (so the next loop iteration knows the slot is mid-swap).
     pub prepared: bool,
+    /// ReplayGain tags of the prepared track, carried WITH the slot so a
+    /// prep landing while a blend is live never overwrites the renderer's
+    /// `pending_crossfade_replay_gain` (still owned by the LIVE blend —
+    /// finalize promotes it into `current_replay_gain`). Re-staged into the
+    /// renderer by every consumer of the slot: `rearm_crossfade_if_prepared`
+    /// (finalize-time re-arm + seek re-arm) and engine `start_crossfade`
+    /// (EOF-fallback trigger). The ordinary store path stages the renderer
+    /// copy immediately AND records it here, so the two never disagree.
+    pub replay_gain: Option<crate::types::song::ReplayGain>,
 }
 
 impl GaplessSlot {
@@ -202,6 +449,7 @@ impl GaplessSlot {
             decoder: None,
             source: String::new(),
             prepared: false,
+            replay_gain: None,
         }
     }
 
@@ -213,6 +461,7 @@ impl GaplessSlot {
         self.decoder = None;
         self.source.clear();
         self.prepared = false;
+        self.replay_gain = None;
     }
 }
 
@@ -323,7 +572,35 @@ struct DecodeLoopChannels {
     crossfade_duration_shared: Arc<AtomicU64>,
     /// Live compressed bitrate from decoder (updated per-packet in decode loop).
     live_bitrate: Arc<AtomicU32>,
+    /// M7 skip-fade plan window latch: the source generation a pending
+    /// [`SkipFadePlan`](crate::services::playback::SkipFadePlan) was stamped
+    /// with at plan time (`plan_skip_fade`), or `NO_SKIP_FADE_PENDING` when
+    /// no plan is in flight. While `latch == source_generation.current()`
+    /// the queue has ALREADY advanced for a skip whose audio transition is
+    /// still building (locks released), so track-completion machinery must
+    /// stand down — advancing again would double-advance the queue.
+    /// Self-invalidating: every path out of the window bumps the generation
+    /// (the fire, the fallback's `set_source`, or any competing user
+    /// action), so a stale latch can never suppress a later completion.
+    skip_fade_pending: Arc<AtomicU64>,
+    /// M8 positive "Gap / Overlap Trim": milliseconds of silence to inject
+    /// between the outgoing track's last sample and the next track at the
+    /// NEXT decoder EOF, or 0. Per-transition, mirroring the M4 suppress-flag
+    /// lifecycle: set by `store_prepared_decoder` (after its internal
+    /// `reset_next_track`), cleared by `reset_next_track` (the invariant-3
+    /// funnel every transition abandonment goes through), and consumed
+    /// one-shot (`swap(0)`) by the decode loop's EOF branch
+    /// (`inject_transition_gap`). Deliberately NOT cleared at
+    /// `start_decoding_loop`: the finalize-time loop restart must preserve a
+    /// gap staged by a mid-blend prep for the transition AFTER the promoted
+    /// track.
+    gap_offset_ms: Arc<AtomicU64>,
 }
+
+/// Sentinel for `DecodeLoopChannels::skip_fade_pending`: no skip-fade plan
+/// window is open. `u64::MAX` can never equal a real generation (the counter
+/// starts at 0 and increments by 1 per user action).
+const NO_SKIP_FADE_PENDING: u64 = u64::MAX;
 
 /// The subset of `DecodeLoopChannels` cloned into one spawned decode task,
 /// produced by `clone_for_decode_loop()`. Keeping the clone in one method
@@ -335,6 +612,8 @@ struct ClonedDecodeLoopChannels {
     stream_is_infinite: Arc<AtomicBool>,
     crossfade_duration_shared: Arc<AtomicU64>,
     live_bitrate: Arc<AtomicU32>,
+    skip_fade_pending: Arc<AtomicU64>,
+    gap_offset_ms: Arc<AtomicU64>,
 }
 
 impl DecodeLoopChannels {
@@ -345,6 +624,8 @@ impl DecodeLoopChannels {
             stream_is_infinite: Arc::new(AtomicBool::new(false)),
             crossfade_duration_shared: Arc::new(AtomicU64::new(DEFAULT_CROSSFADE_DURATION_MS)),
             live_bitrate: Arc::new(AtomicU32::new(0)),
+            skip_fade_pending: Arc::new(AtomicU64::new(NO_SKIP_FADE_PENDING)),
+            gap_offset_ms: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -357,6 +638,8 @@ impl DecodeLoopChannels {
             stream_is_infinite: self.stream_is_infinite.clone(),
             crossfade_duration_shared: self.crossfade_duration_shared.clone(),
             live_bitrate: self.live_bitrate.clone(),
+            skip_fade_pending: self.skip_fade_pending.clone(),
+            gap_offset_ms: self.gap_offset_ms.clone(),
         }
     }
 }
@@ -677,6 +960,13 @@ enum GaplessSwapOutcome {
     /// owns the transition: the staged decoder was put BACK so that trigger can
     /// take it.
     CrossfadeActive,
+    /// A planned manual skip-crossfade's build window is open (M7,
+    /// `plan_skip_fade`): the queue cursor has ALREADY advanced for the skip,
+    /// so an inline swap here would play the wrong track and its completion
+    /// callback would advance the cursor a second time. The staged decoder
+    /// was put BACK; the skip's fire (or its hard fallback) owns the
+    /// transition.
+    SkipFadePlanPending,
     /// The slot claimed `prepared` but its decoder was missing — the stale
     /// `prepared` flag was cleared.
     DecoderMissing,
@@ -706,6 +996,7 @@ async fn try_gapless_swap(
     source_generation: &SourceGeneration,
     completion_callback: &Option<Arc<dyn Fn(bool) + Send + Sync>>,
     current_format: &AudioFormat,
+    skip_fade_pending: &Arc<AtomicU64>,
 ) -> GaplessSwapOutcome {
     let mut slot = gapless.lock().await;
     if !slot.is_prepared() {
@@ -732,6 +1023,22 @@ async fn try_gapless_swap(
         };
         if !rg_allows_swap {
             tracing::debug!("🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap");
+        }
+
+        // M7: a planned manual skip's build window is open (latch matches
+        // the live generation) — the queue cursor ALREADY advanced for the
+        // skip, so swapping here would audibly play the wrong track and the
+        // completion callback below would advance the cursor a second time.
+        // Stand down; the skip's fire (or its hard fallback) owns the
+        // transition. Checked FIRST so the put-back happens before any
+        // side effects.
+        if skip_fade_pending.load(Ordering::Acquire) == source_generation.current() {
+            tracing::debug!(
+                "🔀 [DECODE LOOP] Skip-fade plan pending — standing down (the skip owns the transition)"
+            );
+            slot.decoder = Some(next_dec);
+            drop(slot);
+            return GaplessSwapOutcome::SkipFadePlanPending;
         }
 
         // Crossfade owns the transition: when a crossfade is
@@ -814,6 +1121,89 @@ async fn try_gapless_swap(
         slot.prepared = false;
         drop(slot);
         GaplessSwapOutcome::DecoderMissing
+    }
+}
+
+/// M8 positive "Gap / Overlap Trim": at the outgoing decoder's EOF, write the
+/// pending per-transition gap into the primary ring as silence, so exactly
+/// `gap_offset_ms` of quiet sits between the outgoing's last sample and
+/// whatever follows (the inline gapless swap's first samples, or — when no
+/// swap happens — the ring simply drains `gap` ms later, delaying the
+/// completion gate and the fresh load by the same amount).
+///
+/// One-shot: the pending value is consumed (`swap(0)`) whether or not the
+/// injection proceeds — the transition it described is being resolved right
+/// now either way. Stands down (after consuming) when:
+/// - the renderer crossfade is armed/active: the blend owns this transition
+///   (a crossfade and a gap are mutually exclusive; the crossfade wins), or
+/// - a manual skip-fade plan window is open (the skip owns the transition), or
+/// - the format is unknown (`frame_rate == 0` — nothing was ever decoded).
+///
+/// Lock discipline: brief renderer locks only (state read, chunked
+/// `write_samples`), dropped before every await; the write-retry wait mirrors
+/// the decode loop's `consumed_notify` pattern and re-checks the loop
+/// generation so a superseding action aborts the injection mid-way.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "decode-loop helper threading the loop's own captured channels; bundling them into a one-off struct would just rename the call site"
+)]
+async fn inject_transition_gap(
+    renderer: &PlMutex<AudioRenderer>,
+    gap_offset_ms: &Arc<AtomicU64>,
+    skip_fade_pending: &Arc<AtomicU64>,
+    source_generation: &SourceGeneration,
+    decode_gen: &DecodeLoopHandle,
+    my_gen: u64,
+    frame_rate: u32,
+    consumed_notify: &Arc<Notify>,
+) {
+    // One-shot consume FIRST: whichever way this EOF resolves, the pending
+    // value described exactly this transition.
+    let gap_ms = gap_offset_ms.swap(0, Ordering::AcqRel);
+    if gap_ms == 0 || frame_rate == 0 {
+        return;
+    }
+    if skip_fade_pending.load(Ordering::Acquire) == source_generation.current() {
+        debug!("⏸️ [DECODE LOOP] Gap offset stands down — skip-fade plan window open");
+        return;
+    }
+    let (cf_armed, cf_active) = {
+        let r = renderer.lock();
+        (r.is_crossfade_armed(), r.is_crossfade_active())
+    };
+    if cf_armed || cf_active {
+        debug!("⏸️ [DECODE LOOP] Gap offset stands down — crossfade owns this transition");
+        return;
+    }
+
+    let total = samples_for_duration(frame_rate, gap_ms);
+    debug!(
+        "⏸️ [DECODE LOOP] Injecting {}ms transition gap ({} silence samples)",
+        gap_ms, total
+    );
+    // Chunked writes with the decode loop's own write-retry shape: wait on
+    // consumed_notify (bounded) when the ring is full, abort if superseded.
+    const GAP_CHUNK: usize = 4_096;
+    let zeros = [0.0f32; GAP_CHUNK];
+    let mut remaining = total;
+    while remaining > 0 {
+        if decode_gen.current() != my_gen {
+            debug!("⏸️ [DECODE LOOP] Gap injection superseded — aborting");
+            return;
+        }
+        let n = remaining.min(GAP_CHUNK);
+        let written = {
+            let mut renderer_guard = renderer.lock();
+            renderer_guard.write_samples(&zeros[..n])
+        };
+        remaining -= written;
+        if written < n {
+            let _ = tokio::time::timeout(
+                tokio::time::Duration::from_millis(500),
+                consumed_notify.notified(),
+            )
+            .await;
+        }
     }
 }
 
@@ -926,6 +1316,9 @@ pub struct CustomAudioEngine {
     /// bit-perfect mirror) + the `crossfade_eligible` / `is_crossfade_live`
     /// predicates. See [`CrossfadeCoordinator`].
     crossfade: CrossfadeCoordinator,
+    /// Transport-fade settings mirror (M5): pause/stop ramp enables +
+    /// durations. See [`FadeCoordinator`].
+    fade: FadeCoordinator,
     /// Set by `finalize_crossfade_engine` so the completion path can label the
     /// "Now Playing" log line `crossfade` vs `gapless` (both reach the engine
     /// "already playing" branch). Read-and-reset via
@@ -970,6 +1363,7 @@ impl CustomAudioEngine {
             live_sample_rate: Arc::new(AtomicU32::new(0)),
             channels: DecodeLoopChannels::new(),
             crossfade: CrossfadeCoordinator::new(),
+            fade: FadeCoordinator::new(),
             last_transition_was_crossfade: false,
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             live_icy_metadata,
@@ -995,7 +1389,27 @@ impl CustomAudioEngine {
 
         if self.playing || self.paused {
             trace!(" AudioEngine: stopping current playback before changing source");
-            self.stop().await;
+            // M6 radio→queue edge: leaving a PLAYING radio stream (the
+            // outgoing is radio iff `stream_is_infinite` — still reflecting
+            // the current stream here, before the new decode loop stores its
+            // own probe) is the return half of "Fade Radio Switches": fade
+            // the radio out, then arm the first-audio fade-in for the stream
+            // the new source will build. Everything else keeps the instant
+            // internal stop: track-change fades are M7's domain (its own
+            // mode + duration), not "Fade on Stop" and not this flag.
+            let radio_switch_fade = self.fade.fade_radio_transitions
+                && self.playing
+                && !self.paused
+                && self.channels.stream_is_infinite.load(Ordering::Acquire);
+            if radio_switch_fade {
+                self.run_bounded_out_fade(crate::audio::renderer::RADIO_SWITCH_FADE_MS)
+                    .await;
+            }
+            self.stop_without_fade().await;
+            if radio_switch_fade {
+                // AFTER the teardown — renderer.stop() clears the request.
+                self.renderer.lock().request_switch_fade_in();
+            }
         }
 
         // CRITICAL FIX: Reset fields *BEFORE* creating AudioDecoder.
@@ -1264,6 +1678,8 @@ impl CustomAudioEngine {
             stream_is_infinite: stream_is_infinite_arc,
             crossfade_duration_shared,
             live_bitrate,
+            skip_fade_pending,
+            gap_offset_ms,
         } = self.channels.clone_for_decode_loop();
 
         // Gapless: pass next-track state so the decode loop can swap inline
@@ -1485,6 +1901,26 @@ impl CustomAudioEngine {
                     let current_format = decoder_guard.format().clone();
                     drop(decoder_guard); // release primary decoder lock
 
+                    // M8 positive "Gap / Overlap Trim": inject the pending
+                    // per-transition silence between the outgoing's last
+                    // sample and whatever follows — BEFORE the swap attempt
+                    // so the gap also materializes on the no-swap path (the
+                    // ring drains `gap` ms later, delaying the completion
+                    // gate / fresh load by the same amount). Stands down
+                    // when a crossfade or a skip-fade plan owns the
+                    // transition.
+                    inject_transition_gap(
+                        &renderer,
+                        &gap_offset_ms,
+                        &skip_fade_pending,
+                        &source_generation,
+                        &decode_gen,
+                        my_gen,
+                        frame_rate,
+                        &consumed_notify,
+                    )
+                    .await;
+
                     let swap_outcome = try_gapless_swap(
                         &decoder,
                         &renderer,
@@ -1493,6 +1929,7 @@ impl CustomAudioEngine {
                         &source_generation,
                         &completion_callback,
                         &current_format,
+                        &skip_fade_pending,
                     )
                     .await;
 
@@ -1552,14 +1989,107 @@ impl CustomAudioEngine {
         self.paused = true;
         self.playing = false;
         {
+            // M5: with "Fade on Pause / Resume" on, hand the renderer the
+            // out-ramp — engine state flips to Paused immediately (position
+            // captured above, UI reads paused at once) while the render
+            // thread ramps the stream down and applies the real stream-level
+            // pause at completion. When the ramp can't engage (disabled,
+            // bit-perfect stream, live crossfade, drained ring), fall back to
+            // the instant pause exactly as before.
             let mut renderer = self.renderer.lock();
-            renderer.pause();
+            if !renderer.begin_pause_fade() {
+                renderer.pause();
+            }
         }
         self.state = PlaybackState::Paused;
     }
 
+    /// Run the M5 stop out-ramp, bounded, BEFORE any teardown — the render
+    /// thread (still alive here) is what drives the ramp. Skipped entirely
+    /// when the fade is disabled, when already paused (the stream has been
+    /// silent since the pause; a ramp has nothing audible to fade and a wait
+    /// would just burn its timeout), or when the renderer refuses to engage
+    /// (bit-perfect stream, live crossfade, drained ring).
+    ///
+    /// The bounded wait polls `transport_fade_idle()` at 10 ms; the deadline
+    /// is the (clamped ≤ 500 ms) ramp length + a 250 ms margin, so a stuck
+    /// ramp can only delay — never wedge — teardown (the logout/redb-relock
+    /// path runs through here).
+    async fn run_stop_fade(&mut self) {
+        if !self.fade.fade_on_stop || self.paused || !self.playing {
+            return;
+        }
+        self.run_bounded_out_fade(u64::from(self.fade.fade_stop_ms))
+            .await;
+    }
+
+    /// The shared bounded out-ramp body of the M5 stop fade and the M6
+    /// radio-switch fade: engage the renderer's stop ramp (which may refuse
+    /// — bit-perfect stream, live crossfade, drained ring — in which case
+    /// this returns immediately) and poll `transport_fade_idle()` at 10 ms
+    /// until it completes or the deadline (`dur_ms` + 250 ms margin) trips.
+    /// Callers gate on their own enable + playing/paused state.
+    async fn run_bounded_out_fade(&mut self, dur_ms: u64) {
+        let engaged = { self.renderer.lock().begin_stop_fade(dur_ms) };
+        if !engaged {
+            return;
+        }
+        let deadline = std::time::Duration::from_millis(dur_ms + 250);
+        let started = std::time::Instant::now();
+        while started.elapsed() < deadline {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            if self.renderer.lock().transport_fade_idle() {
+                debug!("🎚️ [ENGINE] out-ramp completed in {:?}", started.elapsed());
+                return;
+            }
+        }
+        warn!(
+            "🎚️ [ENGINE] out-ramp did not complete within {:?} — proceeding with teardown",
+            deadline
+        );
+    }
+
     /// Stop
+    ///
+    /// Runs the M5 stop out-ramp first (see [`Self::run_stop_fade`]) — the
+    /// ramp needs the render thread, which the teardown below joins.
     pub async fn stop(&mut self) {
+        if !self.playing && !self.paused {
+            return;
+        }
+
+        self.run_stop_fade().await;
+        self.stop_without_fade().await;
+    }
+
+    /// Stop for a RADIO SWITCH (the UI radio-start paths: play station /
+    /// cycle station). With "Fade Radio Switches" enabled and something
+    /// audibly playing, runs the fixed `RADIO_SWITCH_FADE_MS` out-ramp and
+    /// arms the renderer's first-audio fade-in for the stream the upcoming
+    /// `set_source` + `play` will build. Otherwise delegates to
+    /// [`Self::stop`] — including its "Fade on Stop" semantics — so the
+    /// switched-off path is byte-identical to the historical explicit stop
+    /// these call sites used.
+    pub async fn stop_for_radio_switch(&mut self) {
+        if self.fade.fade_radio_transitions && self.playing && !self.paused {
+            self.run_bounded_out_fade(crate::audio::renderer::RADIO_SWITCH_FADE_MS)
+                .await;
+            self.stop_without_fade().await;
+            // Armed AFTER the teardown (renderer.stop() clears it) so the
+            // next fresh start() — the radio stream `set_source` + `play`
+            // are about to build — fades in from its first real sample.
+            self.renderer.lock().request_switch_fade_in();
+        } else {
+            self.stop().await;
+        }
+    }
+
+    /// The teardown body of [`Self::stop`], with no transport fade. This is
+    /// also the variant `set_source` uses for its internal stop on a track
+    /// change: skip transitions are M7's domain ("Fade on Skip" gets its own
+    /// mode + duration there), so "Fade on Stop" must not leak a ramp into
+    /// every manual track switch.
+    async fn stop_without_fade(&mut self) {
         if !self.playing && !self.paused {
             return;
         }
@@ -1753,12 +2283,28 @@ impl CustomAudioEngine {
     /// last, to [`AudioRenderer::arm_crossfade`] in a single statement so the
     /// sync `parking_lot` guard is born and dropped without ever straddling an
     /// `.await`. Callers keep both the eligibility (`crossfade_eligible`) and the
-    /// non-zero-duration guards at their own sites; this helper does no gating and
-    /// does not touch `self.gapless`. The renderer's own `crossfade_blocked` /
-    /// min-duration gates decide whether the arm actually takes.
+    /// non-zero-duration guards at their own sites; the one gate owned HERE is
+    /// the per-transition policy suppress flag (M4), because this helper is the
+    /// single funnel for BOTH arm sites — `store_prepared_decoder` and the
+    /// rearm-after-seek `rearm_crossfade_if_prepared` (gating only at the store
+    /// would let a seek re-arm a suppressed transition). A suppressed arm also
+    /// disarms any stale Armed state so the renderer can never disagree with
+    /// the flag (invariant 4's dual-site agreement, extended to the policy
+    /// gate). Does not touch `self.gapless`. The renderer's own
+    /// `crossfade_blocked` / min-duration gates decide whether the arm
+    /// actually takes.
     fn arm_renderer_crossfade(&self, incoming_duration_ms: u64) {
+        if self.crossfade.suppress_this_transition {
+            debug!(
+                "🔀 [ENGINE] Crossfade arm SUPPRESSED for this transition (policy: gapless join)"
+            );
+            self.renderer.lock().disarm_crossfade();
+            return;
+        }
         self.renderer.lock().arm_crossfade(
-            self.crossfade.duration_ms,
+            // Effective = per-transition bar-snap override when staged (M8),
+            // else the global setting.
+            self.crossfade.effective_duration_ms(),
             &self.next_format,
             self.duration,
             incoming_duration_ms,
@@ -1772,19 +2318,37 @@ impl CustomAudioEngine {
     /// the incoming duration from the existing prepared slot rather than a fresh
     /// decoder, so a seek doesn't need a re-prep to restore the armed trigger.
     async fn rearm_crossfade_if_prepared(&mut self) {
-        if !self.crossfade.crossfade_eligible() || self.crossfade.duration_ms == 0 {
-            return;
-        }
-        let incoming_duration = {
+        let prepared = {
             let slot = self.gapless.lock().await;
             if !slot.is_prepared() {
                 return;
             }
-            slot.decoder.as_ref().map(AudioDecoder::duration)
+            slot.decoder
+                .as_ref()
+                .map(|d| (d.duration(), d.format().clone(), slot.replay_gain.clone()))
         };
-        let Some(incoming_duration) = incoming_duration else {
+        let Some((incoming_duration, incoming_format, replay_gain)) = prepared else {
             return;
         };
+        // Re-stage the slot's ReplayGain BEFORE the eligibility gate: the
+        // finalize-time re-arm (M7 mid-fade store) runs AFTER
+        // `finalize_crossfade` consumed the live blend's staged copy into
+        // `current_replay_gain`, and the NON-crossfade gapless consumers
+        // (inline swap adopt / EOF fallback) need the staged copy too —
+        // exactly as the ordinary store path stages it regardless of
+        // crossfade eligibility. Redundant-but-consistent on the seek-rearm
+        // path (same value the store already staged).
+        self.renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(replay_gain);
+        if !self.crossfade.crossfade_eligible() || self.crossfade.effective_duration_ms() == 0 {
+            return;
+        }
+        // Re-derive the incoming format from the slot itself: the
+        // finalize-time re-arm (M7 mid-fade store) runs AFTER
+        // `finalize_crossfade_engine` cleared `next_format`, and the arm
+        // reads that field. Redundant-but-consistent on the seek-rearm path.
+        self.next_format = incoming_format;
         self.arm_renderer_crossfade(incoming_duration);
     }
 
@@ -1802,9 +2366,39 @@ impl CustomAudioEngine {
         self.set_source(url.to_string(), expected_duration_ms).await;
     }
 
+    /// Apply the controller's per-transition verdicts (M4 suppress + M8
+    /// bar-snap override + M8 gap offset) to the coordinator/channels. Called
+    /// from BOTH `store_prepared_decoder` branches, after any internal
+    /// `reset_next_track`; the counterpart clears live in `reset_next_track`.
+    fn apply_transition_directives(&mut self, directives: &PreparedTransitionDirectives) {
+        self.crossfade.suppress_this_transition = directives.suppress_crossfade;
+        self.crossfade.duration_override_ms = directives.duration_override_ms;
+        // Invariant 9: the decode-loop watermark mirror must cover the
+        // duration that will actually play — a +1-bar snap needs the bigger
+        // cushion BEFORE the fade fires. Stored unconditionally at the
+        // EFFECTIVE value (override or global) so the mid-blend store branch
+        // — which skips the internal `reset_next_track` and therefore its
+        // restore — can never leave the PREVIOUS transition's override
+        // leaking under a no-override prep. `reset_next_track` restores the
+        // global.
+        self.channels
+            .crossfade_duration_shared
+            .store(self.crossfade.effective_duration_ms(), Ordering::Relaxed);
+        self.channels
+            .gap_offset_ms
+            .store(directives.gap_offset_ms, Ordering::Release);
+    }
+
     /// Store an already-initialized decoder for gapless playback.
     /// This is the preferred method for gapless prep because it doesn't block
     /// the engine lock during network I/O, allowing the visualizer to continue.
+    ///
+    /// `directives` carries the controller's per-transition verdicts
+    /// (computed at prep time from `Song` metadata the engine boundary
+    /// doesn't have): the M4 crossfade-vs-gapless suppress flag, the M8
+    /// bar-snap duration override, and the M8 gap-offset silence length. All
+    /// three follow the same lifecycle — applied AFTER this method's internal
+    /// `reset_next_track`, cleared BY `reset_next_track`.
     ///
     /// Caller should:
     /// 1. Create and init the decoder OUTSIDE of engine lock (do the download)
@@ -1814,9 +2408,48 @@ impl CustomAudioEngine {
         decoder: AudioDecoder,
         url: String,
         replay_gain: Option<crate::types::song::ReplayGain>,
+        directives: PreparedTransitionDirectives,
     ) {
         // Check if we should store this decoder
         if url.is_empty() || url == self.source {
+            return;
+        }
+
+        // M7: a prep landing while a blend is LIVE — or while a planned
+        // manual skip's build window is open — must not reset/cancel/arm.
+        // The manual-skip fade exposes both windows for real: the cursor
+        // advances at skip time, the UI's song-change re-opens its gapless
+        // prep latch, and a prep for the track AFTER the skip target can
+        // complete mid-fade (the internal `reset_next_track` below would
+        // cancel the blend, restoring the outgoing while the queue already
+        // moved on) or mid-BUILD (arming would let the position trigger fire
+        // an auto blend against the already-advanced cursor before the
+        // skip's own fire). Store the slot WITHOUT the reset and WITHOUT
+        // arming (`arm_crossfade` would overwrite the Active variant —
+        // Armed and Active are one enum); `finalize_crossfade_engine`
+        // re-arms from the slot once the incoming is promoted.
+        //
+        // The prep's ReplayGain rides the SLOT here, never the renderer's
+        // `pending_crossfade_replay_gain`: that staging slot is owned by the
+        // LIVE (or about-to-fire) blend's incoming — finalize promotes it
+        // into `current_replay_gain`, so overwriting it would hand the
+        // promoted track the WRONG tags and leave the re-armed next blend
+        // with none. `rearm_crossfade_if_prepared` stages it after the
+        // promotion consumed the live copy.
+        if self.crossfade.is_crossfade_live(&self.renderer) || self.skip_fade_window_pending() {
+            debug!(
+                "🔀 [GAPLESS] Prep landed mid-blend/mid-skip-window — storing without reset/arm"
+            );
+            self.next_format = decoder.format().clone();
+            self.next_source = url;
+            {
+                let mut slot = self.gapless.lock().await;
+                slot.decoder = Some(decoder);
+                slot.source = self.next_source.clone();
+                slot.prepared = true;
+                slot.replay_gain = replay_gain;
+            }
+            self.apply_transition_directives(&directives);
             return;
         }
 
@@ -1824,6 +2457,15 @@ impl CustomAudioEngine {
         if self.next_source != url {
             self.reset_next_track().await;
         }
+
+        // Per-transition policy verdicts (M4 suppress + M8 override/gap).
+        // ORDERING IS LOAD-BEARING: applied AFTER the internal
+        // `reset_next_track` above (which clears all three — setting earlier
+        // would be silently wiped, losing a suppress verdict) and BEFORE the
+        // `arm_renderer_crossfade` below (which gates on the flag and reads
+        // the effective duration). Re-applied on EVERY store so a
+        // re-preparation re-derives the verdicts in both directions.
+        self.apply_transition_directives(&directives);
 
         self.next_format = decoder.format().clone();
         let incoming_duration = decoder.duration();
@@ -1833,6 +2475,10 @@ impl CustomAudioEngine {
             slot.decoder = Some(decoder);
             slot.source = self.next_source.clone();
             slot.prepared = true;
+            // Recorded on the slot too so every later slot consumer
+            // (finalize/seek re-arm, EOF-fallback fire) can re-stage it —
+            // e.g. after a cancel dropped the renderer's staged copy.
+            slot.replay_gain = replay_gain.clone();
         }
 
         // Stash the incoming track's ReplayGain so the next crossfade
@@ -1848,7 +2494,7 @@ impl CustomAudioEngine {
         // `crossfade_blocked` gate then decides per-transition (Relaxed crossfades
         // only a same-format change; Strict, which never reaches here, would
         // hard-cut all).
-        if self.crossfade.crossfade_eligible() && self.crossfade.duration_ms > 0 {
+        if self.crossfade.crossfade_eligible() && self.crossfade.effective_duration_ms() > 0 {
             self.arm_renderer_crossfade(incoming_duration);
         }
     }
@@ -1905,13 +2551,216 @@ impl CustomAudioEngine {
         }
     }
 
-    /// Set crossfade duration from settings (in seconds)
+    /// Set crossfade duration from settings (in seconds). While an M8
+    /// bar-snap override is live the shared watermark mirror keeps the
+    /// override (it describes the transition that will actually play);
+    /// `reset_next_track` re-syncs the mirror to the new global when the
+    /// override clears.
     pub fn set_crossfade_duration(&mut self, duration_secs: u32) {
         let ms = duration_secs as u64 * 1000;
         self.crossfade.duration_ms = ms;
-        self.channels
-            .crossfade_duration_shared
-            .store(ms, Ordering::Relaxed);
+        if self.crossfade.duration_override_ms.is_none() {
+            self.channels
+                .crossfade_duration_shared
+                .store(ms, Ordering::Relaxed);
+        }
+    }
+
+    /// Set the crossfade fade curve from settings — pushed to the renderer,
+    /// which owns the curve (captured into the `Active` variant at
+    /// `start_crossfade`). Like `set_crossfade_duration`, this is a bare
+    /// write with no `reset_next_track`: a curve change never flips
+    /// crossfade eligibility, and an in-flight fade keeps the curve it
+    /// started with (the renderer's capture prevents mid-fade tearing), so
+    /// cancelling a live blend would hard-cut audio for a cosmetic knob.
+    pub fn set_crossfade_curve(&mut self, curve: crate::types::player_settings::CrossfadeCurve) {
+        self.renderer.lock().set_crossfade_curve(curve);
+    }
+
+    /// Set the minimum-track-length crossfade floor from settings (seconds) —
+    /// pushed to the renderer, which owns the enforcing copy at its
+    /// `arm_crossfade` gate; the engine mirror feeds the controller's
+    /// prep-time policy decision. Like `set_crossfade_duration`, a bare
+    /// write with no `reset_next_track`: an armed transition keeps the floor
+    /// it was armed under (fires once), and cancelling a live blend on every
+    /// slider step would hard-cut audio.
+    pub fn set_crossfade_min_track_secs(&mut self, secs: u32) {
+        self.crossfade.min_track_secs = secs;
+        self.renderer.lock().set_crossfade_min_track_secs(secs);
+    }
+
+    /// Set the album-continuity gate from settings (sequential same-album
+    /// tracks transition gapless).
+    ///
+    /// On a REAL change this abandons any prepared/armed/in-flight transition
+    /// via `reset_next_track`, mirroring the `set_crossfade_enabled` /
+    /// `set_bit_perfect` mode-toggle contract: the toggle flips the policy
+    /// verdict for the prepared pair, and the next prep re-derives it under
+    /// the new setting (a same-album segue prepared as a blend must not still
+    /// blend right after the user asks for seamless albums). No-op when
+    /// unchanged so a routine settings save never disturbs an in-flight
+    /// transition.
+    pub async fn set_crossfade_album_gapless(&mut self, enabled: bool) {
+        let changed = self.crossfade.album_continuity != enabled;
+        self.crossfade.album_continuity = enabled;
+        if changed {
+            self.reset_next_track().await;
+        }
+    }
+
+    /// Set the transport-fade (pause/resume/stop ramp) settings — the M5
+    /// "Fading" section knobs. Stores the engine mirror (the stop pair's sole
+    /// consumer is [`Self::stop`]) and pushes the pause pair down to the
+    /// renderer (its consumers — `begin_pause_fade` and the resume fade-in in
+    /// `start()` — live there). Durations are defensively clamped to the
+    /// `TRANSPORT_FADE_MS_{MIN,MAX}` bounds so a hand-edited config can't
+    /// stretch the bounded wait inside `stop()`.
+    ///
+    /// Bare write, like `set_crossfade_duration`: transport fades never flip
+    /// crossfade eligibility, so the mode-toggle `reset_next_track` contract
+    /// does not apply.
+    pub fn set_transport_fades(
+        &mut self,
+        fade_on_pause: bool,
+        fade_pause_ms: u32,
+        fade_on_stop: bool,
+        fade_stop_ms: u32,
+    ) {
+        use crate::types::player_settings::{TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN};
+        let pause_ms = fade_pause_ms.clamp(TRANSPORT_FADE_MS_MIN, TRANSPORT_FADE_MS_MAX);
+        let stop_ms = fade_stop_ms.clamp(TRANSPORT_FADE_MS_MIN, TRANSPORT_FADE_MS_MAX);
+        self.fade.fade_on_stop = fade_on_stop;
+        self.fade.fade_stop_ms = stop_ms;
+        self.renderer
+            .lock()
+            .set_pause_fade(fade_on_pause, u64::from(pause_ms));
+    }
+
+    /// Set the M7 "Fade on Skip" settings (default Off). Bare write, like the
+    /// other transport-fade knobs: it never flips crossfade eligibility, so
+    /// the mode-toggle `reset_next_track` contract does not apply. Consumed
+    /// at the next manual skip. The duration is defensively clamped to the
+    /// `FADE_SKIP_SECS_{MIN,MAX}` bounds so a hand-edited config can't
+    /// stretch the skip overlap (or the boundary fade's bounded wait) past
+    /// the slider ceiling.
+    pub fn set_skip_fade(
+        &mut self,
+        mode: crate::types::player_settings::FadeOnSkip,
+        duration_secs: u32,
+    ) {
+        use crate::types::player_settings::{FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN};
+        self.fade.fade_on_skip = mode;
+        self.fade.fade_skip_ms = duration_secs.clamp(FADE_SKIP_SECS_MIN, FADE_SKIP_SECS_MAX) * 1000;
+    }
+
+    /// The current "Fade on Skip" mode — read by the manual-skip path
+    /// (`PlaybackController::next`/`previous`) to pick the skip treatment.
+    pub fn skip_fade_mode(&self) -> crate::types::player_settings::FadeOnSkip {
+        self.fade.fade_on_skip
+    }
+
+    /// Set the M6 "Fade Radio Switches" setting (default off). Bare write,
+    /// like the other transport-fade knobs: it never flips crossfade
+    /// eligibility, so the mode-toggle `reset_next_track` contract does not
+    /// apply. Consumed at the next radio↔queue switch.
+    pub fn set_fade_radio_transitions(&mut self, enabled: bool) {
+        self.fade.fade_radio_transitions = enabled;
+    }
+
+    /// Set the "Smooth Track Starts" setting (M2's de-click onset ramp gate,
+    /// default on) — pushed to the renderer, which threads it into every new
+    /// stream build. Bare write; takes effect on the next stream creation.
+    pub fn set_smooth_track_starts(&mut self, enabled: bool) {
+        self.renderer.lock().set_smooth_track_starts(enabled);
+    }
+
+    /// The controller-facing policy inputs for
+    /// [`crate::audio::crossfade_policy::crossfade_decision`], read at
+    /// gapless-prep time. `format_blocked` is always `false` here — format
+    /// gating stays owned by the dual `crossfade_blocked` sites (renderer
+    /// `arm_crossfade` + engine `try_start_crossfade_transition`), which see
+    /// the real decoded formats.
+    pub fn crossfade_policy_cfg(&self) -> crate::audio::crossfade_policy::CrossfadePolicyCfg {
+        crate::audio::crossfade_policy::CrossfadePolicyCfg {
+            min_track_secs: self.crossfade.min_track_secs,
+            album_continuity: self.crossfade.album_continuity,
+            format_blocked: false,
+        }
+    }
+
+    /// One-lock snapshot of everything the controller's gapless prep needs to
+    /// derive the per-transition directives (M4 policy inputs + the M8
+    /// transition-shaping knobs). See [`TransitionPrepCfg`].
+    pub fn transition_prep_cfg(&self) -> TransitionPrepCfg {
+        TransitionPrepCfg {
+            policy: self.crossfade_policy_cfg(),
+            bar_snap: self.crossfade.bar_snap,
+            crossfade_duration_ms: self.crossfade.duration_ms,
+            gap_offset_ms: if self.crossfade.offset_secs > 0 {
+                self.crossfade.offset_secs as u64 * 1000
+            } else {
+                0
+            },
+            // Dropping decoded samples is a content change — a bit-perfect
+            // listener opted into untouched playback, so the trim stands
+            // down under Strict AND Relaxed (mode intent, not the live
+            // `pw_volume_active` viability, so the verdict can't flap with
+            // the output backend).
+            trim_leading_silence: self.crossfade.skip_silence
+                && !self.crossfade.bit_perfect_mode.builds_bit_perfect(),
+        }
+    }
+
+    /// Set the M8 "Gap / Overlap Trim" offset from settings (seconds,
+    /// clamped to −2..+2). Negative = extra overlap (pushed to the
+    /// renderer's Armed-trigger lead); positive = gap (consumed per
+    /// transition via [`Self::transition_prep_cfg`] → the decode loop's EOF
+    /// silence injection); 0 = untouched transitions. Bare write, like the
+    /// sibling sliders: it never flips crossfade eligibility, and an armed
+    /// transition fires once at the old offset.
+    pub fn set_crossfade_offset(&mut self, secs: i32) {
+        use crate::types::player_settings::{CROSSFADE_OFFSET_MAX_SECS, CROSSFADE_OFFSET_MIN_SECS};
+        let clamped = secs.clamp(CROSSFADE_OFFSET_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS);
+        self.crossfade.offset_secs = clamped;
+        let lead_ms = if clamped < 0 {
+            clamped.unsigned_abs() as u64 * 1000
+        } else {
+            0
+        };
+        self.renderer.lock().set_crossfade_lead_ms(lead_ms);
+    }
+
+    /// Set the M8 "Snap Crossfade to Musical Bars" gate from settings.
+    ///
+    /// On a REAL change this abandons any prepared/armed transition via
+    /// `reset_next_track` (the `set_crossfade_album_gapless` contract): the
+    /// toggle changes the prepared pair's effective duration, and the next
+    /// prep re-derives the override under the new setting. No-op when
+    /// unchanged so a routine settings save never disturbs an in-flight
+    /// transition.
+    pub async fn set_crossfade_bar_snap(&mut self, enabled: bool) {
+        let changed = self.crossfade.bar_snap != enabled;
+        self.crossfade.bar_snap = enabled;
+        if changed {
+            self.reset_next_track().await;
+        }
+    }
+
+    /// Set the M8 "Skip Silence Between Tracks" gate from settings — pushed
+    /// to the renderer (trailing-tail trigger) and mirrored here for the
+    /// prep-time leading-trim verdict.
+    ///
+    /// On a REAL change this abandons any prepared/armed transition via
+    /// `reset_next_track` (the `set_crossfade_album_gapless` contract): the
+    /// prepared decoder was built with the OLD trim verdict baked in, and
+    /// the next prep re-derives it. No-op when unchanged.
+    pub async fn set_skip_silence(&mut self, enabled: bool) {
+        let changed = self.crossfade.skip_silence != enabled;
+        self.crossfade.skip_silence = enabled;
+        self.renderer.lock().set_skip_silence(enabled);
+        if changed {
+            self.reset_next_track().await;
+        }
     }
 
     /// Whether crossfade is enabled
@@ -1992,8 +2841,9 @@ impl CustomAudioEngine {
         }
 
         // Take the prepared decoder for crossfade use, ungating the slot
-        // and decoder ownership atomically.
-        let next_decoder = {
+        // and decoder ownership atomically. The slot's ReplayGain rides
+        // along so it can be re-staged below.
+        let (next_decoder, slot_replay_gain) = {
             let mut slot = self.gapless.lock().await;
             if !slot.is_prepared() {
                 drop(slot);
@@ -2002,8 +2852,9 @@ impl CustomAudioEngine {
             }
             let dec = slot.decoder.take();
             slot.prepared = false;
+            let rg = slot.replay_gain.clone();
             match dec {
-                Some(d) => d,
+                Some(d) => (d, rg),
                 None => {
                     debug!("🔀 [CROSSFADE] Prepared flag set but no decoder, skipping");
                     return false;
@@ -2012,7 +2863,9 @@ impl CustomAudioEngine {
         };
 
         let incoming_format = next_decoder.format().clone();
-        let duration_ms = self.crossfade.duration_ms;
+        // Effective = per-transition bar-snap override when staged (M8): the
+        // EOF-fallback fire must blend at the same length the arm would have.
+        let duration_ms = self.crossfade.effective_duration_ms();
         let incoming_source = self.next_source.clone();
         self.next_source.clear();
 
@@ -2033,6 +2886,15 @@ impl CustomAudioEngine {
         // on itself before this async path runs.
         {
             let mut renderer = self.renderer.lock();
+            // Re-stage the slot's ReplayGain: redundant-but-consistent on
+            // the ordinary path (the store staged the same value), and
+            // CORRECTIVE after a cancel dropped the renderer's staged copy
+            // while the slot kept the prep (e.g. a seek mid-fade) — firing
+            // with `None` would fade the incoming up at the untagged
+            // fallback gain. When the renderer already went Active it built
+            // the incoming from the identical store-time value, so this
+            // write cannot tear it (start-time reads only).
+            renderer.set_pending_crossfade_replay_gain(slot_replay_gain);
             if !renderer.is_crossfade_active() {
                 renderer.start_crossfade(duration_ms, &incoming_format);
             }
@@ -2049,9 +2911,189 @@ impl CustomAudioEngine {
         true
     }
 
+    /// Plan-time invalidation for a manual skip-crossfade (M7): called by the
+    /// queue layer (`QueueNavigator::skip_to_song`) UNDER the engine lock,
+    /// BEFORE it returns a [`SkipFadePlan`](crate::services::playback::SkipFadePlan)
+    /// and the locks are released for the incoming decoder build.
+    ///
+    /// Three steps, in order:
+    /// 1. `reset_next_track` — the pre-skip prepared/armed/in-flight
+    ///    transition is void (the queue is about to re-sequence past it);
+    ///    a LIVE blend is cancelled here so nothing can finalize — and
+    ///    advance the queue a second time — during the unlocked build.
+    /// 2. `bump_for_user_action` — the skip IS the user-driven source change
+    ///    (the audible source's fate is sealed at plan time, even though the
+    ///    actual `set_source`/fire happens later). Every completion dispatch
+    ///    snapshotted BEFORE this instant is discarded by the renderer's
+    ///    staleness gate.
+    /// 3. Latch the pending window with the post-bump generation so
+    ///    completions dispatched DURING the build (they snapshot the new
+    ///    value) are deferred by `on_renderer_finished` / stood down by the
+    ///    inline gapless swap instead of advancing the already-advanced
+    ///    cursor. The latch self-invalidates: every exit from the window
+    ///    (the fire's bump, the fallback's `set_source`, any competing user
+    ///    action) moves the generation past it.
+    pub async fn plan_skip_fade(&mut self) {
+        self.reset_next_track().await;
+        let generation = self.channels.source_generation.bump_for_user_action();
+        self.channels
+            .skip_fade_pending
+            .store(generation, Ordering::Release);
+        debug!("🔀 [SKIP FADE] Planned — window latched at generation {generation}");
+    }
+
+    /// Whether a planned skip-crossfade's build window is still open: the
+    /// plan-time latch matches the CURRENT source generation. See
+    /// [`Self::plan_skip_fade`].
+    fn skip_fade_window_pending(&self) -> bool {
+        self.channels.skip_fade_pending.load(Ordering::Acquire)
+            == self.channels.source_generation.current()
+    }
+
+    /// Start an immediate manual-skip crossfade to `incoming_url` using an
+    /// already-initialized on-demand decoder (M7 "Fade on Skip: Crossfade").
+    ///
+    /// Unlike the auto-advance path there is no `Armed` state to trigger —
+    /// the fade starts `Active` DIRECTLY, preserving the load-bearing
+    /// ordering (renderer Active strictly BEFORE the engine phase); the
+    /// cancel-live-first contract ran at PLAN time (`plan_skip_fade`, under
+    /// the locks). Because the direct fire bypasses the renderer's
+    /// `arm_crossfade`, its gates are re-applied here: the
+    /// `crossfade_blocked` format gate, the known-durations guard, the
+    /// minimum-track floor, and the `shorter/2` clamp — plus a
+    /// remaining-audio clamp `arm_crossfade` never needs (the position
+    /// trigger fires exactly `fade` before the end; a manual skip can land
+    /// anywhere, and a fade longer than the outgoing's remaining audio
+    /// would EOF mid-blend and cut to silence).
+    ///
+    /// `generation` is the caller's `source_generation()` snapshot from
+    /// skip time — taken AFTER `plan_skip_fade` bumped it under the locks
+    /// (the decoder build then runs with no locks held — invariant 14). A
+    /// mismatch means a competing user action owns the engine, so the skip
+    /// fade is abandoned (`Stale`). On `Fired` the generation is bumped
+    /// AGAIN, closing the pending window: completions dispatched during the
+    /// build snapshotted the plan generation and are discarded.
+    pub async fn crossfade_to_next(
+        &mut self,
+        decoder: AudioDecoder,
+        incoming_url: String,
+        replay_gain: Option<crate::types::song::ReplayGain>,
+        generation: u64,
+    ) -> SkipFadeOutcome {
+        if self.channels.source_generation.current() != generation {
+            debug!("🔀 [SKIP FADE] Superseded (generation moved) — abandoning");
+            return SkipFadeOutcome::Stale;
+        }
+        if !self.skip_crossfade_viable() {
+            debug!("🔀 [SKIP FADE] Not viable (not audibly playing a finite stream)");
+            return SkipFadeOutcome::Blocked;
+        }
+        // Outgoing drained during the unlocked build (its completion was
+        // deferred by the pending window, so `playing` is still true): there
+        // is nothing left to blend — refuse, so the caller's fallback
+        // hard-loads the target NOW instead of fading it in over 1-4s of
+        // silence.
+        if self.channels.decoder_eof.load(Ordering::Acquire)
+            && self.renderer.lock().is_buffer_queue_empty()
+        {
+            debug!("🔀 [SKIP FADE] Outgoing drained during the build — falling back to hard load");
+            return SkipFadeOutcome::Blocked;
+        }
+
+        // The PRE-SKIP transition (live blend + prepared slot) was already
+        // cancelled at plan time (`plan_skip_fade`, under the locks), so
+        // anything in the gapless slot NOW was stored DURING the window and
+        // targets the track AFTER the skip target — still valid; finalize
+        // re-arms from it. Only a live blend (structurally impossible while
+        // the generation still matches, but belt-and-braces) must die before
+        // the direct fire; `cancel_crossfade` leaves the slot alone.
+        if self.crossfade.is_crossfade_live(&self.renderer) {
+            self.cancel_crossfade().await;
+        }
+
+        let incoming_format = decoder.format().clone();
+        if self
+            .renderer
+            .lock()
+            .crossfade_blocked(&self.current_format, &incoming_format)
+        {
+            debug!("🔀 [SKIP FADE] Blocked by format gate (bit-perfect) — falling back");
+            return SkipFadeOutcome::Blocked;
+        }
+        let Some(fade_ms) = skip_fade_duration_ms(
+            u64::from(self.fade.fade_skip_ms),
+            self.duration,
+            decoder.duration(),
+            self.position(),
+            u64::from(self.crossfade.min_track_secs) * 1000,
+        ) else {
+            debug!("🔀 [SKIP FADE] Blocked by duration gates — falling back");
+            return SkipFadeOutcome::Blocked;
+        };
+
+        debug!(
+            "🔀 [SKIP FADE] Starting: outgoing={:?}, incoming={:?}, duration={}ms",
+            self.current_format, incoming_format, fade_ms
+        );
+
+        let decoder_arc = Arc::new(tokio::sync::Mutex::new(Some(decoder)));
+
+        // Renderer goes Active FIRST (the same ordering the auto trigger
+        // guarantees); the incoming's ReplayGain is staged so the stream
+        // build resolves the right amplify factor.
+        {
+            let mut renderer = self.renderer.lock();
+            renderer.set_pending_crossfade_replay_gain(replay_gain);
+            renderer.start_crossfade(fade_ms, &incoming_format);
+        }
+
+        self.crossfade.phase = CrossfadePhase::Active {
+            decoder: decoder_arc.clone(),
+            incoming_source: incoming_url,
+        };
+        self.crossfade.skip_fade = true;
+
+        // A manual skip is a user-driven source change: invalidate stale
+        // completion dispatches for the outgoing (set_source does the same
+        // on the hard-cut path). The outgoing's PRIMARY decode loop is
+        // unaffected — its liveness rides `decode_loop`, not this counter —
+        // and every renderer dispatch from here on snapshots the new value.
+        self.channels.source_generation.bump_for_user_action();
+
+        self.start_crossfade_decode_loop(decoder_arc);
+
+        SkipFadeOutcome::Fired
+    }
+
+    /// Whether a manual-skip crossfade can even be attempted: something must
+    /// be audibly playing (there is no outgoing to blend otherwise) and the
+    /// current stream must be finite (radio switches are M6's domain — its
+    /// `set_source` fade handles the infinite-stream edge).
+    pub fn skip_crossfade_viable(&self) -> bool {
+        self.immediate_playing() && !self.channels.stream_is_infinite.load(Ordering::Acquire)
+    }
+
+    /// The M7 boundary out-fade: ramp the outgoing to silence over the
+    /// "Fade on Skip" duration before the caller hard-loads the next track
+    /// (M2's onset ramp then softens the incoming edge). Self-refusing like
+    /// the M5/M6 out-ramps — nothing audible to fade when stopped or paused,
+    /// and `begin_stop_fade` refuses on bit-perfect streams, live
+    /// crossfades, and drained rings (the refusal degrades to the honest
+    /// instant cut).
+    pub async fn run_skip_out_fade(&mut self) {
+        if !self.playing || self.paused {
+            return;
+        }
+        self.run_bounded_out_fade(u64::from(self.fade.fade_skip_ms))
+            .await;
+    }
+
     /// Cancel an active crossfade (e.g., on skip, seek, or stop).
     pub async fn cancel_crossfade(&mut self) {
         let phase = std::mem::replace(&mut self.crossfade.phase, CrossfadePhase::Idle);
+        // A cancelled skip fade dies with its phase — a stale marker would
+        // suppress the completion callback of a LATER auto-advance finalize.
+        self.crossfade.skip_fade = false;
         // Clear the engine-side incoming decoder if the engine had already
         // acknowledged the crossfade. When only the renderer is Active (the
         // engine hasn't acked yet — see `reset_next_track`), there is no decoder
@@ -2092,12 +3134,57 @@ impl CustomAudioEngine {
         if !self.crossfade.is_crossfade_live(&self.renderer) {
             return;
         }
+
+        // M7: a stalled SKIP fade recovers differently — the queue cursor,
+        // history, and consume already advanced to the incoming at skip
+        // time, so routing through `on_decoder_finished` (whose completion
+        // callback runs `decide_transition` against that already-advanced
+        // cursor) would advance PAST the target: one Next press lands two
+        // tracks ahead and the skipped-to track never plays. Capture the
+        // target + its staged RG BEFORE the cancel wipes them (`skip_fade`
+        // is cleared with the phase; the renderer cancel drops the staged
+        // RG), then hard-load the target — the queue's current row — via
+        // the standard load path. On a dead network the reload fails
+        // honestly (engine stops, queue still names the target; Play
+        // retries it).
+        let skip_target = if self.crossfade.skip_fade {
+            match &self.crossfade.phase {
+                CrossfadePhase::Active {
+                    incoming_source, ..
+                }
+                | CrossfadePhase::OutgoingFinished {
+                    incoming_source, ..
+                } => Some((
+                    incoming_source.clone(),
+                    self.renderer.lock().take_pending_crossfade_replay_gain(),
+                )),
+                CrossfadePhase::Idle => None,
+            }
+        } else {
+            None
+        };
+
         warn!("🔀 [CROSSFADE] Incoming stalled at completion — restoring outgoing and skipping");
         self.cancel_crossfade().await;
         // The abandoned incoming source is being thrown away; invalidate any of
         // its in-flight completion callbacks.
         self.channels.source_generation.bump_for_user_action();
-        // Skip the stalled track via the standard end-of-track machinery.
+
+        if let Some((target, replay_gain)) = skip_target {
+            warn!(
+                "🔀 [SKIP FADE] Stalled blend was a manual skip — hard-loading the target \
+                 (queue already advanced): {}",
+                redact_subsonic_url(&target)
+            );
+            self.load_track_with_rg(&target, replay_gain, None).await;
+            if let Err(e) = self.play().await {
+                warn!("🔀 [SKIP FADE] Stall-recovery reload failed: {e}");
+            }
+            return;
+        }
+
+        // Auto-advance blend: skip the stalled track via the standard
+        // end-of-track machinery (the cursor has NOT advanced yet).
         self.on_decoder_finished().await;
     }
 
@@ -2120,10 +3207,21 @@ impl CustomAudioEngine {
 
         debug!("🔀 [CROSSFADE] Finalizing — incoming becomes current");
 
+        // M7: a manual-skip fade already advanced the queue (cursor, history,
+        // consume) at skip time — read-and-clear the marker so the completion
+        // callback below is skipped for it (decide_transition would advance
+        // AGAIN, silently skipping a track).
+        let was_skip_fade = std::mem::take(&mut self.crossfade.skip_fade);
+
         // Mark this advance as a crossfade so the completion path labels the
         // "Now Playing" log line `crossfade` (both gapless and crossfade reach
-        // the engine "already playing" branch). Read-and-reset by the controller.
-        self.last_transition_was_crossfade = true;
+        // the engine "already playing" branch). Read-and-reset by the
+        // controller — which never runs for a skip fade, so the label is only
+        // stamped for auto-advances (a skip stamp would leak into the NEXT
+        // transition's label).
+        if !was_skip_fade {
+            self.last_transition_was_crossfade = true;
+        }
 
         // Stop outgoing decode loop by advancing generation
         self.decode_loop.supersede();
@@ -2180,8 +3278,21 @@ impl CustomAudioEngine {
             self.start_decoding_loop();
         }
 
-        // Notify completion callback (gapless-style: a new track started)
-        if let Some(callback) = &self.completion_callback {
+        // Re-arm the next transition from a slot stored MID-fade (see the
+        // live-blend branch in `store_prepared_decoder` — arming there would
+        // overwrite the Active variant). No-op when the slot is empty, i.e.
+        // for every ordinary auto-advance finalize.
+        self.rearm_crossfade_if_prepared().await;
+
+        if was_skip_fade {
+            // The queue advanced at skip time; the UI refresh ran there too.
+            // Firing the callback would run decide_transition against an
+            // already-advanced cursor — a double advance.
+            debug!(
+                "🔀 [SKIP FADE] Finalized — completion callback suppressed (queue already advanced)"
+            );
+        } else if let Some(callback) = &self.completion_callback {
+            // Notify completion callback (gapless-style: a new track started)
             callback(false);
         }
     }
@@ -2200,6 +3311,18 @@ impl CustomAudioEngine {
         let decoder = decoder_arc;
         let renderer = self.renderer.clone();
         let crossfade_duration_shared = self.channels.crossfade_duration_shared.clone();
+
+        // M9 Part B: a fresh per-fade liveness handle. The loop brackets its
+        // blocking decode/network call with it; the renderer's completion
+        // gate reads it to tell blocked-on-socket from sleeping-on-
+        // backpressure. Per-fade (not renderer-persistent) so a superseded
+        // loop's late writes can never pollute a newer fade's verdict. Both
+        // call sites run with NO renderer lock held (their renderer scopes
+        // closed above), so this install cannot deadlock.
+        let liveness = Arc::new(crate::audio::IncomingLiveness::new());
+        self.renderer
+            .lock()
+            .set_incoming_liveness(Some(liveness.clone()));
 
         tokio::spawn(async move {
             trace!("🔀 [CROSSFADE DECODE] Loop started");
@@ -2261,7 +3384,13 @@ impl CustomAudioEngine {
 
                 frame_rate = dec.format().frame_rate();
 
+                // Bracket ONLY the blocking decode/network call: a returned
+                // call (data, error, or EOF alike) is a live socket, while
+                // the backpressure sleep above and the lock handoffs stay
+                // outside the bracket and always read as live.
+                liveness.mark_read_start();
                 let chunk = tokio::task::block_in_place(|| decode_one_chunk(dec));
+                liveness.mark_read_end();
                 drop(decoder_guard);
 
                 if let Some(samples) = chunk {
@@ -2378,6 +3507,15 @@ impl CustomAudioEngine {
         self.paused
     }
 
+    /// Test-only: force the transport flags to "audibly playing" so
+    /// navigator-level tests can drive the skip-fade eligibility path
+    /// without a real audio device.
+    #[cfg(test)]
+    pub fn force_playing_for_test(&mut self) {
+        self.playing = true;
+        self.paused = false;
+    }
+
     /// Get current sample rate in Hz (for UI display)
     /// Uses lock-free atomic for threading consistency with live_bitrate.
     pub fn sample_rate(&self) -> u32 {
@@ -2426,6 +3564,17 @@ impl CustomAudioEngine {
         self.gapless.lock().await.clear();
         self.next_source.clear();
         self.next_format = AudioFormat::invalid();
+        // The per-transition verdicts die with the transition they were
+        // derived for; the next `store_prepared_decoder` re-derives them.
+        // The M8 override restore covers the shared watermark mirror too
+        // (invariant 9 — a stale snapped value must never leak into a later
+        // spawn's `compute_watermarks`), and the pending gap is voided.
+        self.crossfade.suppress_this_transition = false;
+        self.crossfade.duration_override_ms = None;
+        self.channels
+            .crossfade_duration_shared
+            .store(self.crossfade.duration_ms, Ordering::Relaxed);
+        self.channels.gap_offset_ms.store(0, Ordering::Release);
         // Still needed for the Armed-but-not-Active case (cancel_crossfade only
         // touches Active); harmless when cancel_crossfade already disarmed.
         self.renderer.lock().disarm_crossfade();
@@ -2502,6 +3651,24 @@ impl CustomAudioEngine {
         // Don't trigger track end if we're in the middle of seeking
         if self.seeking.load(Ordering::Acquire) {
             trace!(" [RENDERER FINISHED] Ignoring - seek in progress");
+            return false;
+        }
+
+        // M7 skip-fade build window: the queue cursor ALREADY advanced for a
+        // manual skip whose blend is still building (locks released, see
+        // `plan_skip_fade`). Running the completion machinery here would
+        // advance the already-advanced cursor — a double advance (silently
+        // skipped track / now-playing desync). Defer: the skip's fire (or
+        // its hard fallback) owns the transition, and if the outgoing
+        // drained here, the fire detects the drained ring and falls back to
+        // an immediate hard load of the skip target. The latch cannot
+        // strand — every exit from the window bumps the generation, which
+        // un-matches it.
+        if self.skip_fade_window_pending() {
+            debug!(
+                " [RENDERER FINISHED] Deferred — a planned skip fade owns the transition \
+                 (queue already advanced)"
+            );
             return false;
         }
 
@@ -2604,8 +3771,21 @@ impl CustomAudioEngine {
         // `store_prepared_decoder` arm condition so both triggers agree.
         if !self.crossfade.phase.is_idle()
             || !self.crossfade.crossfade_eligible()
-            || self.crossfade.duration_ms == 0
+            || self.crossfade.effective_duration_ms() == 0
         {
+            return false;
+        }
+
+        // Per-transition policy suppression (M4: album continuation /
+        // too-short). Mirrors the gate in `arm_renderer_crossfade` — every
+        // arm/trigger site must agree (invariant 4) — so a suppressed
+        // transition can never blend through the EOF fallback. Returning
+        // false falls through to the normal gapless/track-end path.
+        if self.crossfade.suppress_this_transition {
+            debug!(
+                "🔀 [RENDERER FINISHED] Crossfade SUPPRESSED for this transition \
+                 (policy: gapless join)"
+            );
             return false;
         }
 
@@ -3147,6 +4327,534 @@ mod tests {
         );
     }
 
+    /// M4: the per-transition policy flag lifecycle. `store_prepared_decoder`
+    /// sets the flag from its argument, a suppressed prepare must NOT arm the
+    /// renderer (while the gapless slot stays prepared — invariant 10: the
+    /// suppressed transition falls through to the gapless swap, it doesn't
+    /// fight it), and `reset_next_track` clears the flag.
+    #[tokio::test]
+    async fn suppressed_prepare_sets_flag_keeps_gapless_and_does_not_arm() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.crossfade.duration_ms = 5_000;
+        engine.duration = 200_000;
+        let mut decoder = fresh_decoder();
+        decoder.set_duration_for_test(15_000);
+
+        engine
+            .store_prepared_decoder(
+                decoder,
+                "http://example.test/next".to_string(),
+                None,
+                PreparedTransitionDirectives::from_suppress(true),
+            )
+            .await;
+
+        assert!(
+            engine.crossfade.suppress_this_transition,
+            "store_prepared_decoder must set the suppress flag from its argument"
+        );
+        assert!(
+            !engine.renderer.lock().is_crossfade_armed(),
+            "a suppressed transition must not arm the renderer crossfade"
+        );
+        assert!(
+            engine.gapless.lock().await.is_prepared(),
+            "the gapless slot must stay prepared — suppression means hard-JOIN, not hard-cut"
+        );
+
+        engine.reset_next_track().await;
+        assert!(
+            !engine.crossfade.suppress_this_transition,
+            "reset_next_track must clear the suppress flag"
+        );
+    }
+
+    /// M4: the flag re-derives on EVERY prepare, in both directions. The
+    /// ordering trap this pins: `store_prepared_decoder` runs an internal
+    /// `reset_next_track` (which clears the flag) partway through — a flag
+    /// set before that reset would be silently wiped, losing a suppress
+    /// verdict (an album segue would blend) or stranding a stale one (the
+    /// next transition could never crossfade again).
+    #[tokio::test]
+    async fn repreparation_rederives_suppress_flag_in_both_directions() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.crossfade.duration_ms = 5_000;
+        engine.duration = 200_000;
+
+        let mut dec_a = fresh_decoder();
+        dec_a.set_duration_for_test(15_000);
+        engine
+            .store_prepared_decoder(
+                dec_a,
+                "http://example.test/a".to_string(),
+                None,
+                PreparedTransitionDirectives::from_suppress(false),
+            )
+            .await;
+        assert!(!engine.crossfade.suppress_this_transition);
+        assert!(
+            engine.renderer.lock().is_crossfade_armed(),
+            "an unsuppressed prepare arms as before"
+        );
+
+        // A different next track re-preps with a SUPPRESS verdict: the new
+        // flag must survive store's internal reset_next_track, and the stale
+        // arm from prep A must not survive either.
+        let mut dec_b = fresh_decoder();
+        dec_b.set_duration_for_test(15_000);
+        engine
+            .store_prepared_decoder(
+                dec_b,
+                "http://example.test/b".to_string(),
+                None,
+                PreparedTransitionDirectives::from_suppress(true),
+            )
+            .await;
+        assert!(
+            engine.crossfade.suppress_this_transition,
+            "the suppress verdict must survive store's internal reset_next_track"
+        );
+        assert!(!engine.renderer.lock().is_crossfade_armed());
+
+        // And back: a suppressed pair followed by a blendable pair re-arms —
+        // the flag is per-transition, never sticky.
+        let mut dec_c = fresh_decoder();
+        dec_c.set_duration_for_test(15_000);
+        engine
+            .store_prepared_decoder(
+                dec_c,
+                "http://example.test/c".to_string(),
+                None,
+                PreparedTransitionDirectives::from_suppress(false),
+            )
+            .await;
+        assert!(!engine.crossfade.suppress_this_transition);
+        assert!(
+            engine.renderer.lock().is_crossfade_armed(),
+            "the transition after a suppressed one must be able to crossfade again"
+        );
+    }
+
+    /// M4: the EOF-fallback trigger gates on the suppress flag too
+    /// (invariant 4 — every arm/trigger site must agree, exactly like the
+    /// `crossfade_blocked` pairing): with an eligible mode and a prepared
+    /// slot, a suppressed transition returns `false` so the completion path
+    /// falls through to the normal gapless/track-end handling.
+    #[tokio::test]
+    async fn try_start_crossfade_transition_suppressed_returns_false() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.crossfade.duration_ms = 5_000;
+        engine.duration = 200_000;
+        engine.next_format = AudioFormat::new(crate::audio::format::SampleFormat::S16, 44_100, 2);
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(fresh_decoder());
+            slot.source = "http://example.test/next".to_string();
+            slot.prepared = true;
+        }
+        engine.crossfade.suppress_this_transition = true;
+
+        let started = engine.try_start_crossfade_transition(false).await;
+
+        assert!(
+            !started,
+            "a suppressed transition must fall through to the gapless path"
+        );
+        assert!(engine.crossfade.phase.is_idle());
+    }
+
+    /// M4: the configured minimum-track floor reaches the renderer's arm gate
+    /// through the engine setter — a raised floor refuses a prepare the
+    /// default 10s floor accepts (end-to-end pin for the settings push).
+    #[tokio::test]
+    async fn store_prepared_decoder_honors_configured_min_track_floor() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.crossfade.duration_ms = 5_000;
+        engine.duration = 200_000;
+        engine.set_crossfade_min_track_secs(30);
+
+        let mut decoder = fresh_decoder();
+        decoder.set_duration_for_test(15_000);
+        engine
+            .store_prepared_decoder(
+                decoder,
+                "http://example.test/next".to_string(),
+                None,
+                PreparedTransitionDirectives::from_suppress(false),
+            )
+            .await;
+
+        assert!(
+            !engine.renderer.lock().is_crossfade_armed(),
+            "a 15s incoming track under a 30s configured floor must not arm"
+        );
+    }
+
+    /// M4: toggling the album-continuity gate mid-transition must abandon the
+    /// prepared/armed/in-flight transition (the shuffle/repeat/consume /
+    /// crossfade-enable / bit-perfect mode-toggle contract): the toggle flips
+    /// the policy verdict for the prepared pair, and the next prep re-derives
+    /// it under the new setting.
+    #[tokio::test]
+    async fn set_crossfade_album_gapless_change_cancels_active_crossfade() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        engine.set_crossfade_album_gapless(true).await;
+
+        assert!(
+            engine.crossfade.phase.is_idle(),
+            "a REAL album-gate change must cancel the in-flight transition"
+        );
+        assert!(engine.crossfade.album_continuity);
+    }
+
+    /// M4: an UNCHANGED album-gate value (routine settings save re-applies
+    /// every field) must not disturb an in-flight transition.
+    #[tokio::test]
+    async fn set_crossfade_album_gapless_unchanged_is_noop() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        // album_continuity already defaults false; re-applying false is a no-op.
+        engine.set_crossfade_album_gapless(false).await;
+
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "an unchanged album-gate value must not cancel the blend"
+        );
+    }
+
+    /// M8 bar-snap override lifecycle: `store_prepared_decoder` stages the
+    /// override + gap (after its internal reset), mirrors the override into
+    /// `crossfade_duration_shared` (invariant 9 — the watermark cushion must
+    /// cover the duration that will actually play), leaves the GLOBAL setting
+    /// untouched, and arms the renderer with the OVERRIDE. `reset_next_track`
+    /// restores all of it.
+    #[tokio::test]
+    async fn store_prepared_decoder_applies_override_and_gap_then_reset_restores() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.set_crossfade_duration(7);
+        engine.duration = 200_000;
+
+        let mut decoder = fresh_decoder();
+        decoder.set_duration_for_test(150_000);
+        engine
+            .store_prepared_decoder(
+                decoder,
+                "http://example.test/next".to_string(),
+                None,
+                PreparedTransitionDirectives {
+                    suppress_crossfade: false,
+                    duration_override_ms: Some(4_000),
+                    gap_offset_ms: 1_500,
+                },
+            )
+            .await;
+
+        assert_eq!(engine.crossfade.duration_override_ms, Some(4_000));
+        assert_eq!(
+            engine.crossfade.duration_ms, 7_000,
+            "the global setting must survive a per-transition override"
+        );
+        assert_eq!(
+            engine
+                .channels
+                .crossfade_duration_shared
+                .load(Ordering::Relaxed),
+            4_000,
+            "the decode-loop watermark mirror must follow the override (invariant 9)"
+        );
+        assert_eq!(
+            engine.channels.gap_offset_ms.load(Ordering::Relaxed),
+            1_500,
+            "the pending transition gap must be staged for the decode loop"
+        );
+        assert_eq!(
+            engine.renderer.lock().armed_duration_ms_for_test(),
+            Some(4_000),
+            "the renderer must be armed with the snapped duration, not the global"
+        );
+
+        engine.reset_next_track().await;
+        assert_eq!(engine.crossfade.duration_override_ms, None);
+        assert_eq!(
+            engine
+                .channels
+                .crossfade_duration_shared
+                .load(Ordering::Relaxed),
+            7_000,
+            "reset must restore the shared mirror to the global setting"
+        );
+        assert_eq!(
+            engine.channels.gap_offset_ms.load(Ordering::Relaxed),
+            0,
+            "reset must void the pending transition gap"
+        );
+    }
+
+    /// M8: a mid-override duration-slider change updates the GLOBAL but must
+    /// not clobber the live override's shared mirror; the next reset restores
+    /// the shared mirror to the NEW global.
+    #[tokio::test]
+    async fn set_crossfade_duration_defers_to_live_override() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.enabled = true;
+        engine.set_crossfade_duration(7);
+        engine.duration = 200_000;
+        let mut decoder = fresh_decoder();
+        decoder.set_duration_for_test(150_000);
+        engine
+            .store_prepared_decoder(
+                decoder,
+                "http://example.test/next".to_string(),
+                None,
+                PreparedTransitionDirectives {
+                    suppress_crossfade: false,
+                    duration_override_ms: Some(4_000),
+                    gap_offset_ms: 0,
+                },
+            )
+            .await;
+
+        engine.set_crossfade_duration(9);
+        assert_eq!(engine.crossfade.duration_ms, 9_000);
+        assert_eq!(
+            engine
+                .channels
+                .crossfade_duration_shared
+                .load(Ordering::Relaxed),
+            4_000,
+            "a slider change must not clobber a live per-transition override"
+        );
+
+        engine.reset_next_track().await;
+        assert_eq!(
+            engine
+                .channels
+                .crossfade_duration_shared
+                .load(Ordering::Relaxed),
+            9_000,
+            "after the override clears, the shared mirror follows the new global"
+        );
+    }
+
+    /// M8 "Gap / Overlap Trim" setter: clamps to ±2 s, pushes the NEGATIVE
+    /// side to the renderer's Armed-trigger lead, and surfaces the POSITIVE
+    /// side through `transition_prep_cfg` (each side exactly one consumer).
+    #[tokio::test]
+    async fn set_crossfade_offset_clamps_and_routes_both_sides() {
+        let mut engine = CustomAudioEngine::new();
+
+        engine.set_crossfade_offset(-5);
+        assert_eq!(
+            engine.renderer.lock().crossfade_lead_ms_for_test(),
+            2_000,
+            "-5s must clamp to the -2s floor and push a 2s lead"
+        );
+        assert_eq!(engine.transition_prep_cfg().gap_offset_ms, 0);
+
+        engine.set_crossfade_offset(1);
+        assert_eq!(
+            engine.renderer.lock().crossfade_lead_ms_for_test(),
+            0,
+            "a positive offset must clear the renderer lead"
+        );
+        assert_eq!(engine.transition_prep_cfg().gap_offset_ms, 1_000);
+
+        engine.set_crossfade_offset(5);
+        assert_eq!(engine.transition_prep_cfg().gap_offset_ms, 2_000);
+    }
+
+    /// M8: toggling "Skip Silence Between Tracks" follows the mode-toggle
+    /// contract (reset on real change — the prepared decoder was built with
+    /// the OLD trim verdict; no-op when unchanged) and pushes the renderer
+    /// mirror.
+    #[tokio::test]
+    async fn set_skip_silence_change_cancels_active_and_pushes_mirror() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        engine.set_skip_silence(true).await;
+        assert!(
+            engine.crossfade.phase.is_idle(),
+            "a REAL skip-silence change must cancel the in-flight transition"
+        );
+        assert!(engine.renderer.lock().skip_silence_for_test());
+
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        engine.set_skip_silence(true).await;
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "an unchanged skip-silence value must not cancel the blend"
+        );
+    }
+
+    /// M8: toggling "Snap Crossfade to Musical Bars" follows the same
+    /// mode-toggle contract (the prepared pair's effective duration changes).
+    #[tokio::test]
+    async fn set_crossfade_bar_snap_change_cancels_active_and_noop_when_unchanged() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+
+        engine.set_crossfade_bar_snap(true).await;
+        assert!(
+            engine.crossfade.phase.is_idle(),
+            "a REAL bar-snap change must cancel the in-flight transition"
+        );
+        assert!(engine.crossfade.bar_snap);
+
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        engine.set_crossfade_bar_snap(true).await;
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "an unchanged bar-snap value must not cancel the blend"
+        );
+    }
+
+    /// M8: the prep-time leading-trim verdict stands down under bit-perfect
+    /// modes (dropping decoded samples is a content change).
+    #[tokio::test]
+    async fn transition_prep_cfg_gates_leading_trim_under_bit_perfect() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_skip_silence(true).await;
+        assert!(engine.transition_prep_cfg().trim_leading_silence);
+
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Strict)
+            .await;
+        assert!(
+            !engine.transition_prep_cfg().trim_leading_silence,
+            "Strict must gate the leading trim off"
+        );
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Relaxed)
+            .await;
+        assert!(
+            !engine.transition_prep_cfg().trim_leading_silence,
+            "Relaxed must gate the leading trim off too"
+        );
+    }
+
+    /// M8 gap injection: the pending gap becomes exactly `gap` ms of ring
+    /// silence at the outgoing's frame rate, and the one-shot value is
+    /// consumed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inject_transition_gap_writes_silence_and_consumes_value() {
+        let engine = CustomAudioEngine::new();
+        let (_src, _handle) = engine.renderer.lock().force_primary_stream_for_test(0);
+        let gap = Arc::new(AtomicU64::new(500));
+        let skip = Arc::new(AtomicU64::new(NO_SKIP_FADE_PENDING));
+        let source_generation = SourceGeneration::new();
+        let decode_gen = DecodeLoopHandle::new();
+        let my_gen = decode_gen.current();
+        let notify = Arc::new(Notify::new());
+
+        inject_transition_gap(
+            &engine.renderer,
+            &gap,
+            &skip,
+            &source_generation,
+            &decode_gen,
+            my_gen,
+            96_000, // 48 kHz stereo
+            &notify,
+        )
+        .await;
+
+        assert_eq!(
+            engine.renderer.lock().buffer_count(),
+            48_000,
+            "500ms at 96k samples/s must land as 48_000 silence samples"
+        );
+        assert_eq!(gap.load(Ordering::Relaxed), 0, "the gap is one-shot");
+    }
+
+    /// M8 gap injection stands down (but still consumes the one-shot) when a
+    /// crossfade owns the transition or a skip-fade plan window is open.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inject_transition_gap_stands_down_for_crossfade_and_skip_window() {
+        let engine = CustomAudioEngine::new();
+        let (_src, _handle) = engine.renderer.lock().force_primary_stream_for_test(0);
+        let source_generation = SourceGeneration::new();
+        let decode_gen = DecodeLoopHandle::new();
+        let my_gen = decode_gen.current();
+        let notify = Arc::new(Notify::new());
+
+        // Armed crossfade — the blend owns the transition.
+        engine.renderer.lock().arm_crossfade(
+            5_000,
+            &AudioFormat::new(crate::audio::format::SampleFormat::F32, 48_000, 2),
+            200_000,
+            200_000,
+        );
+        assert!(engine.renderer.lock().is_crossfade_armed());
+        let gap = Arc::new(AtomicU64::new(500));
+        let skip = Arc::new(AtomicU64::new(NO_SKIP_FADE_PENDING));
+        inject_transition_gap(
+            &engine.renderer,
+            &gap,
+            &skip,
+            &source_generation,
+            &decode_gen,
+            my_gen,
+            96_000,
+            &notify,
+        )
+        .await;
+        assert_eq!(
+            engine.renderer.lock().buffer_count(),
+            0,
+            "an armed crossfade owns the transition — no silence injected"
+        );
+        assert_eq!(gap.load(Ordering::Relaxed), 0, "still consumed one-shot");
+
+        // Skip-fade window open (latch == live generation).
+        engine.renderer.lock().disarm_crossfade();
+        let gap = Arc::new(AtomicU64::new(500));
+        let skip = Arc::new(AtomicU64::new(source_generation.current()));
+        inject_transition_gap(
+            &engine.renderer,
+            &gap,
+            &skip,
+            &source_generation,
+            &decode_gen,
+            my_gen,
+            96_000,
+            &notify,
+        )
+        .await;
+        assert_eq!(
+            engine.renderer.lock().buffer_count(),
+            0,
+            "an open skip-fade window owns the transition — no silence injected"
+        );
+        assert_eq!(gap.load(Ordering::Relaxed), 0);
+    }
+
     /// `is_crossfade_live` reconciles the one-tick window where the renderer has
     /// already gone Active (render_tick swaps Armed → Active synchronously and
     /// creates the live incoming stream) but the spawned `on_renderer_finished`
@@ -3222,6 +4930,1033 @@ mod tests {
         );
     }
 
+    // ═════════════════════════════════════════════════════════════════════
+    //  M5 — transport fades: engine pause/stop wiring
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// M5: with "Fade on Pause / Resume" enabled, `engine.pause()` captures
+    /// position + flips its own state immediately (UI shows paused at once)
+    /// but hands the renderer the out-ramp instead of the instant
+    /// stream-level pause.
+    #[tokio::test]
+    async fn pause_with_fade_hands_renderer_the_out_ramp() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_transport_fades(true, 100, false, 100);
+        let (_src, handle) = engine.renderer.lock().force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+        engine.playing = true;
+
+        engine.pause();
+
+        assert!(engine.paused && !engine.playing);
+        assert!(matches!(engine.state, PlaybackState::Paused));
+        assert!(
+            engine.renderer.lock().transport_fade_is_fading_out(),
+            "pause must hand the renderer the out-ramp"
+        );
+        assert!(
+            !handle.paused.load(Ordering::Acquire),
+            "the stream-level pause is deferred to ramp completion"
+        );
+    }
+
+    /// M5 default: with the fade OFF (shipped default), `engine.pause()`
+    /// stays the instant stream-level flip it is today.
+    #[tokio::test]
+    async fn pause_without_fade_pauses_stream_instantly() {
+        let mut engine = CustomAudioEngine::new();
+        let (_src, handle) = engine.renderer.lock().force_primary_stream_for_test(4_096);
+        engine.playing = true;
+
+        engine.pause();
+
+        assert!(
+            handle.paused.load(Ordering::Acquire),
+            "default pause must flip the stream atomic immediately"
+        );
+        assert!(engine.renderer.lock().transport_fade_idle());
+    }
+
+    /// M5 stop ordering: the out-ramp must run BEFORE `stop_render_thread()`
+    /// — the render thread is what drives the ramp. A completion count of 1
+    /// proves the ramp was ticked to its end by a LIVE render thread during
+    /// `stop()`'s bounded wait; tearing the thread down first would strand
+    /// the ramp and burn the full timeout with zero completions.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stop_fade_completes_before_teardown_via_live_render_thread() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_transport_fades(false, 100, true, 60);
+        let (_src, handle) = engine.renderer.lock().force_primary_stream_for_test(48_000);
+        handle.set_volume(1.0);
+        engine.playing = true;
+        engine.start_render_thread();
+
+        engine.stop().await;
+
+        assert_eq!(
+            engine.renderer.lock().transport_fade_completions(),
+            1,
+            "the stop ramp must complete via live render ticks before teardown"
+        );
+        assert!(matches!(engine.state, PlaybackState::Stopped));
+        assert!(
+            handle.stopped.load(Ordering::Acquire),
+            "teardown must still stop the stream after the ramp"
+        );
+    }
+
+    /// M5: stop-from-pause has nothing audible to fade — `render_tick`'s
+    /// early-return froze the stream long ago — so `stop()` must go straight
+    /// to teardown instead of waiting out a ramp that can't play.
+    #[tokio::test]
+    async fn stop_from_paused_skips_the_ramp() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_transport_fades(false, 100, true, 400);
+        let (_src, _handle) = engine.renderer.lock().force_primary_stream_for_test(4_096);
+        engine.playing = false;
+        engine.paused = true;
+
+        let t0 = std::time::Instant::now();
+        engine.stop().await;
+
+        assert!(
+            t0.elapsed() < std::time::Duration::from_millis(300),
+            "stop-from-pause must not wait for a {}ms ramp (took {:?})",
+            400,
+            t0.elapsed()
+        );
+        assert_eq!(engine.renderer.lock().transport_fade_completions(), 0);
+        assert!(matches!(engine.state, PlaybackState::Stopped));
+    }
+
+    /// M5 scope pin: the internal stop inside `set_source` (every track
+    /// change while playing) must NOT take the stop fade — M7 owns skip
+    /// fades, and "Fade on Stop" means the user-facing stop. With no render
+    /// thread running, a leaked fade would burn the full bounded wait
+    /// (~650 ms); the no-fade path returns immediately.
+    #[tokio::test]
+    async fn set_source_track_change_keeps_instant_stop() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_transport_fades(false, 100, true, 400);
+        let (_src, _handle) = engine.renderer.lock().force_primary_stream_for_test(4_096);
+        engine.playing = true;
+        engine.source = "http://example.test/old".to_string();
+
+        let t0 = std::time::Instant::now();
+        engine
+            .set_source("http://example.test/new".to_string(), None)
+            .await;
+
+        assert!(
+            t0.elapsed() < std::time::Duration::from_millis(300),
+            "set_source's internal stop must skip the stop fade (took {:?})",
+            t0.elapsed()
+        );
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  M6 — radio-switch fade: engine wiring
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// M6 queue→radio edge: with "Fade Radio Switches" on and something
+    /// audibly playing, `stop_for_radio_switch()` (the UI radio-start paths)
+    /// must run the switch out-ramp to completion via live render ticks
+    /// BEFORE teardown, then arm the renderer's first-audio fade-in for the
+    /// radio stream the upcoming `set_source` + `play` will build.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn radio_switch_stop_fades_out_and_arms_first_audio_fade_in() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_fade_radio_transitions(true);
+        let (_src, handle) = engine.renderer.lock().force_primary_stream_for_test(48_000);
+        handle.set_volume(1.0);
+        engine.playing = true;
+        engine.start_render_thread();
+
+        engine.stop_for_radio_switch().await;
+
+        assert_eq!(
+            engine.renderer.lock().transport_fade_completions(),
+            1,
+            "the switch out-ramp must complete via live render ticks before teardown"
+        );
+        assert!(matches!(engine.state, PlaybackState::Stopped));
+        assert!(
+            handle.stopped.load(Ordering::Acquire),
+            "teardown must still stop the stream after the ramp"
+        );
+        assert!(
+            engine.renderer.lock().switch_fade_in_pending(),
+            "the switch must arm the first-audio fade-in for the upcoming source"
+        );
+    }
+
+    /// M6 default pin: with "Fade Radio Switches" off (shipped default),
+    /// `stop_for_radio_switch()` is byte-identical to the historical
+    /// explicit `stop()` these call sites used — instant, no ramp, no
+    /// pending fade-in.
+    #[tokio::test]
+    async fn radio_switch_stop_without_flag_is_plain_instant_stop() {
+        let mut engine = CustomAudioEngine::new();
+        let (_src, _handle) = engine.renderer.lock().force_primary_stream_for_test(4_096);
+        engine.playing = true;
+
+        let t0 = std::time::Instant::now();
+        engine.stop_for_radio_switch().await;
+
+        assert!(
+            t0.elapsed() < std::time::Duration::from_millis(300),
+            "the default switch stop must not wait out a ramp (took {:?})",
+            t0.elapsed()
+        );
+        assert_eq!(engine.renderer.lock().transport_fade_completions(), 0);
+        assert!(!engine.renderer.lock().switch_fade_in_pending());
+        assert!(matches!(engine.state, PlaybackState::Stopped));
+    }
+
+    /// M6 radio→queue edge: leaving a PLAYING radio stream (the engine knows
+    /// via `stream_is_infinite`) for a new source must fade the radio out via
+    /// live render ticks inside `set_source`'s internal stop, then arm the
+    /// first-audio fade-in for the queue stream about to be built.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn set_source_fades_out_playing_radio_and_arms_fade_in() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_fade_radio_transitions(true);
+        let (_src, handle) = engine.renderer.lock().force_primary_stream_for_test(48_000);
+        handle.set_volume(1.0);
+        engine.playing = true;
+        engine.source = "http://radio.test/stream".to_string();
+        engine
+            .channels
+            .stream_is_infinite
+            .store(true, Ordering::Release);
+        engine.start_render_thread();
+
+        engine
+            .set_source("http://example.test/next-track".to_string(), None)
+            .await;
+
+        assert_eq!(
+            engine.renderer.lock().transport_fade_completions(),
+            1,
+            "leaving a playing radio stream must fade it out before the internal stop"
+        );
+        assert!(
+            engine.renderer.lock().switch_fade_in_pending(),
+            "the radio→queue switch must arm the first-audio fade-in"
+        );
+    }
+
+    /// M6 scope pin: with "Fade Radio Switches" ON but a FINITE current
+    /// stream, `set_source` keeps its instant internal stop — the radio flag
+    /// must not leak fades into ordinary track changes (skip-transition
+    /// fades are M7's domain).
+    #[tokio::test]
+    async fn set_source_finite_source_keeps_instant_stop_with_radio_fade_on() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_fade_radio_transitions(true);
+        let (_src, _handle) = engine.renderer.lock().force_primary_stream_for_test(4_096);
+        engine.playing = true;
+        engine.source = "http://example.test/old".to_string();
+
+        let t0 = std::time::Instant::now();
+        engine
+            .set_source("http://example.test/new".to_string(), None)
+            .await;
+
+        assert!(
+            t0.elapsed() < std::time::Duration::from_millis(300),
+            "a finite→finite track change must keep the instant stop (took {:?})",
+            t0.elapsed()
+        );
+        assert_eq!(engine.renderer.lock().transport_fade_completions(), 0);
+        assert!(!engine.renderer.lock().switch_fade_in_pending());
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  M7 — manual-skip fades: crossfade_to_next + boundary fallback
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// A test decoder whose duration + format clear the skip-fade gates.
+    fn skip_ready_decoder(duration_ms: u64) -> AudioDecoder {
+        use crate::audio::format::SampleFormat;
+        let mut d = fresh_decoder();
+        d.set_duration_for_test(duration_ms);
+        d.set_format_for_test(AudioFormat::new(SampleFormat::S16, 48_000, 2));
+        d
+    }
+
+    /// Prime an engine as "audibly playing a finite 4-minute track" so the
+    /// skip-fade viability + duration gates can pass.
+    fn prime_playing_engine(engine: &mut CustomAudioEngine) {
+        use crate::audio::format::SampleFormat;
+        engine.playing = true;
+        engine.paused = false;
+        engine.duration = 240_000;
+        engine.source = "http://example.test/current".to_string();
+        engine.current_format = AudioFormat::new(SampleFormat::S16, 48_000, 2);
+    }
+
+    /// M7 duration math: normal case passes the requested length through;
+    /// the `shorter/2` clamp and the remaining-audio clamp shrink it; the
+    /// min-track floor and unknown durations refuse outright.
+    #[test]
+    fn skip_fade_duration_gates_and_clamps() {
+        // Normal: 2s fade, both tracks long, mid-track position.
+        assert_eq!(
+            skip_fade_duration_ms(2_000, 240_000, 180_000, 100_000, 10_000),
+            Some(2_000)
+        );
+        // shorter/2 clamp: 4s requested, shorter track 6s (floor 0) → 3s.
+        assert_eq!(
+            skip_fade_duration_ms(4_000, 240_000, 6_000, 0, 0),
+            Some(3_000)
+        );
+        // Min-track floor: shorter track under the floor → refuse.
+        assert_eq!(
+            skip_fade_duration_ms(2_000, 240_000, 5_000, 0, 10_000),
+            None
+        );
+        // Unknown durations → refuse (either side).
+        assert_eq!(skip_fade_duration_ms(2_000, 0, 180_000, 0, 0), None);
+        assert_eq!(skip_fade_duration_ms(2_000, 240_000, 0, 0, 0), None);
+        // Remaining-audio clamp: 1s left of the outgoing → 1s fade.
+        assert_eq!(
+            skip_fade_duration_ms(4_000, 240_000, 180_000, 239_000, 10_000),
+            Some(1_000)
+        );
+        // Nothing left of the outgoing → refuse (hard cut is honest there).
+        assert_eq!(
+            skip_fade_duration_ms(4_000, 240_000, 180_000, 240_000, 10_000),
+            None
+        );
+    }
+
+    /// M7 fire path: with the gates clear, `crossfade_to_next` starts the
+    /// engine phase `Active` DIRECTLY (no Armed hop), marks it as a skip
+    /// fade, and bumps the source generation exactly once so a racing
+    /// natural-EOF completion for the outgoing is discarded.
+    #[tokio::test]
+    async fn crossfade_to_next_fires_direct_active_marks_skip_and_bumps_generation() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let gen_before = engine.source_generation();
+
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/next".to_string(),
+                None,
+                gen_before,
+            )
+            .await;
+
+        assert_eq!(outcome, SkipFadeOutcome::Fired);
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "the skip fade must go engine-Active directly"
+        );
+        assert!(engine.crossfade.skip_fade, "the phase must be skip-marked");
+        assert_eq!(
+            engine.source_generation(),
+            gen_before + 1,
+            "a fired skip fade is a user-driven source change (stale completions discarded)"
+        );
+    }
+
+    /// M7 min-track gate: the direct fire bypasses `arm_crossfade`, so the
+    /// configured floor must be re-applied — a skip to a track under the
+    /// floor refuses the blend (caller falls back).
+    #[tokio::test]
+    async fn crossfade_to_next_blocked_by_min_track_floor() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.set_crossfade_min_track_secs(10);
+        let generation = engine.source_generation();
+
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(5_000),
+                "http://example.test/short".to_string(),
+                None,
+                generation,
+            )
+            .await;
+
+        assert_eq!(outcome, SkipFadeOutcome::Blocked);
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(!engine.crossfade.skip_fade);
+    }
+
+    /// M7 format gate (invariant 8): under viable bit-perfect Strict the
+    /// skip blend is refused via the SAME `crossfade_blocked` the two auto
+    /// triggers share — the caller falls back to the boundary fade / cut.
+    #[tokio::test]
+    async fn crossfade_to_next_blocked_under_bit_perfect_strict() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        {
+            let mut renderer = engine.renderer.lock();
+            renderer.force_pw_volume_active_for_test();
+            renderer.set_bit_perfect(crate::types::player_settings::BitPerfectMode::Strict);
+        }
+        let generation = engine.source_generation();
+
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/next".to_string(),
+                None,
+                generation,
+            )
+            .await;
+
+        assert_eq!(outcome, SkipFadeOutcome::Blocked);
+        assert!(engine.crossfade.phase.is_idle());
+    }
+
+    /// M7 supersession: a stale generation snapshot (a competing user action
+    /// landed while the skip's decoder was building, locks released) must
+    /// abandon the fade WITHOUT touching engine state.
+    #[tokio::test]
+    async fn crossfade_to_next_stale_generation_is_noop() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let stale = engine.source_generation();
+        engine.channels.source_generation.bump_for_user_action();
+
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/next".to_string(),
+                None,
+                stale,
+            )
+            .await;
+
+        assert_eq!(outcome, SkipFadeOutcome::Stale);
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(engine.playing, "a stale skip must not disturb playback");
+    }
+
+    /// M7 viability: nothing audibly playing (or an infinite/radio stream)
+    /// refuses the blend — the caller's hard path handles those.
+    #[tokio::test]
+    async fn crossfade_to_next_blocked_when_not_playing_or_infinite() {
+        let mut engine = CustomAudioEngine::new();
+        let generation = engine.source_generation();
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/next".to_string(),
+                None,
+                generation,
+            )
+            .await;
+        assert_eq!(outcome, SkipFadeOutcome::Blocked, "stopped engine");
+
+        prime_playing_engine(&mut engine);
+        engine
+            .channels
+            .stream_is_infinite
+            .store(true, Ordering::Release);
+        let generation = engine.source_generation();
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/next".to_string(),
+                None,
+                generation,
+            )
+            .await;
+        assert_eq!(outcome, SkipFadeOutcome::Blocked, "infinite outgoing");
+    }
+
+    /// M7 finalize split: a skip fade already advanced the queue at skip
+    /// time, so its finalize must NOT fire the completion callback (the
+    /// callback's decide_transition would advance AGAIN — a silently skipped
+    /// track) and must not stamp the crossfade label. A normal auto-advance
+    /// finalize keeps both.
+    #[tokio::test]
+    async fn finalize_after_skip_fade_suppresses_completion_callback_and_label() {
+        let fired = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut engine = CustomAudioEngine::new();
+        let fired_cb = fired.clone();
+        engine.set_completion_callback(move |_| {
+            fired_cb.fetch_add(1, Ordering::SeqCst);
+        });
+
+        // Skip-fade finalize: callback suppressed, label unset, marker cleared.
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        engine.crossfade.skip_fade = true;
+        engine.finalize_crossfade_engine().await;
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "a skip-fade finalize must not fire the completion callback (double advance)"
+        );
+        assert!(
+            !engine.take_last_transition_was_crossfade(),
+            "a skip-fade finalize must not stamp the auto-advance crossfade label"
+        );
+        assert!(!engine.crossfade.skip_fade, "marker is read-and-cleared");
+
+        // Normal auto-advance finalize: callback + label intact.
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/next2".to_string(),
+        };
+        engine.finalize_crossfade_engine().await;
+        assert_eq!(fired.load(Ordering::SeqCst), 1);
+        assert!(engine.take_last_transition_was_crossfade());
+    }
+
+    /// M7 mid-fade gapless prep: a background prep landing while a blend is
+    /// LIVE must not reset/cancel it (the skip fade re-opens the UI's prep
+    /// latch, so this window is real). The slot is stored WITHOUT the
+    /// internal reset and WITHOUT arming (Armed would overwrite the Active
+    /// variant); finalize then re-arms from the stored slot.
+    #[tokio::test]
+    async fn store_prepared_decoder_mid_fade_stores_without_cancelling_the_blend() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.enabled = true;
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/inbound".to_string(),
+        };
+        // The LIVE blend's incoming RG is staged on the renderer — finalize
+        // will promote it into `current_replay_gain`.
+        engine
+            .renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(Some(rg(-1.0)));
+
+        engine
+            .store_prepared_decoder(
+                skip_ready_decoder(200_000),
+                "http://example.test/after-next".to_string(),
+                Some(rg(-7.0)),
+                PreparedTransitionDirectives {
+                    suppress_crossfade: false,
+                    duration_override_ms: Some(6_000),
+                    gap_offset_ms: 1_000,
+                },
+            )
+            .await;
+
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "a mid-fade store must not cancel the live blend"
+        );
+        // M8: the mid-blend branch stages the directives too — the finalize
+        // re-arm reads the override, and the stored transition's gap must
+        // survive the finalize-time decode-loop restart.
+        assert_eq!(
+            engine.crossfade.duration_override_ms,
+            Some(6_000),
+            "the mid-fade store must stage the bar-snap override for the re-arm"
+        );
+        assert_eq!(
+            engine.channels.gap_offset_ms.load(Ordering::Relaxed),
+            1_000,
+            "the mid-fade store must stage the stored transition's gap"
+        );
+        assert!(
+            engine.is_next_track_prepared().await,
+            "the prep must still land in the gapless slot"
+        );
+        assert!(
+            !engine.renderer.lock().is_crossfade_armed(),
+            "arming while Active would overwrite the Active variant"
+        );
+        assert_eq!(engine.next_source, "http://example.test/after-next");
+        assert_eq!(
+            engine
+                .renderer
+                .lock()
+                .pending_crossfade_replay_gain_for_test(),
+            Some(rg(-1.0)),
+            "the live blend's staged RG must survive the mid-fade store — \
+             overwriting it makes finalize promote the WRONG track's tags"
+        );
+        assert_eq!(
+            engine.gapless.lock().await.replay_gain,
+            Some(rg(-7.0)),
+            "the mid-fade prep's RG rides the slot until the finalize re-arm"
+        );
+    }
+
+    /// M7 finalize re-arm: after a finalize that promoted the incoming, a
+    /// slot stored mid-fade must arm the NEXT transition (the promoted track
+    /// → the stored one), re-deriving the incoming format from the slot
+    /// (finalize clears `next_format`) and re-staging the slot's RG (the
+    /// promoted track keeps ITS OWN tags — `current_replay_gain` — while the
+    /// re-armed blend gets the stored track's).
+    #[tokio::test]
+    async fn finalize_rearms_mid_fade_stored_prep() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.enabled = true;
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/inbound".to_string(),
+        };
+        // The renderer half must be genuinely Active too, so its
+        // `finalize_crossfade` runs the real promotion (pending RG →
+        // current) instead of early-returning.
+        let _keepalive = engine.renderer.lock().force_crossfade_active_for_test();
+        // The LIVE blend's incoming RG, staged when that blend was fired.
+        engine
+            .renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(Some(rg(-1.0)));
+        engine
+            .store_prepared_decoder(
+                skip_ready_decoder(200_000),
+                "http://example.test/after-next".to_string(),
+                Some(rg(-7.0)),
+                PreparedTransitionDirectives::from_suppress(false),
+            )
+            .await;
+
+        engine.finalize_crossfade_engine().await;
+
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(
+            engine.renderer.lock().is_crossfade_armed(),
+            "finalize must re-arm the transition for a slot stored mid-fade"
+        );
+        assert_eq!(
+            engine.renderer.lock().current_replay_gain_for_test(),
+            Some(rg(-1.0)),
+            "finalize must promote the LIVE blend's RG — a seek in the \
+             promoted track rebuilds its stream from current_replay_gain"
+        );
+        assert_eq!(
+            engine
+                .renderer
+                .lock()
+                .pending_crossfade_replay_gain_for_test(),
+            Some(rg(-7.0)),
+            "the re-armed next blend must carry the stored track's RG, not \
+             fire later with none"
+        );
+    }
+
+    /// M7 invariant-3 route: `reset_next_track` (every mode toggle / queue
+    /// mutation) still cancels a LIVE skip fade and clears its marker, so a
+    /// stale marker can never suppress a later auto-advance finalize.
+    #[tokio::test]
+    async fn reset_next_track_cancels_skip_fade_and_clears_marker() {
+        let mut engine = CustomAudioEngine::new();
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        engine.crossfade.skip_fade = true;
+
+        engine.reset_next_track().await;
+
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(
+            !engine.crossfade.skip_fade,
+            "a cancelled skip fade must clear its marker"
+        );
+    }
+
+    /// A distinct ReplayGain per track so the RG-lifecycle tests can tell
+    /// exactly whose tags ended up where.
+    fn rg(track_gain: f64) -> crate::types::song::ReplayGain {
+        crate::types::song::ReplayGain {
+            album_gain: None,
+            track_gain: Some(track_gain),
+            album_peak: None,
+            track_peak: None,
+        }
+    }
+
+    /// M7 review cycle 1 — plan-time invalidation: `plan_skip_fade` must
+    /// cancel the pre-skip transition (live blend + prepared slot), bump the
+    /// source generation (discarding every completion dispatch snapshotted
+    /// before plan time), and latch the pending window with the post-bump
+    /// generation. The latch must self-invalidate when any later action
+    /// bumps the generation again.
+    #[tokio::test]
+    async fn plan_skip_fade_invalidates_and_latches_window() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/live-incoming".to_string(),
+        };
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(skip_ready_decoder(200_000));
+            slot.source = "http://example.test/pre-skip-next".to_string();
+            slot.prepared = true;
+        }
+        let gen_before = engine.source_generation();
+
+        engine.plan_skip_fade().await;
+
+        assert!(
+            engine.crossfade.phase.is_idle(),
+            "a live blend must be cancelled at PLAN time — its finalize during \
+             the unlocked build window would advance the queue a second time"
+        );
+        assert!(
+            !engine.is_next_track_prepared().await,
+            "the pre-skip prepared slot is void once the queue re-sequences"
+        );
+        assert_eq!(
+            engine.source_generation(),
+            gen_before + 1,
+            "the skip is the user-driven source change — bump at plan time, \
+             under the lock, not at fire time"
+        );
+        assert!(
+            engine.skip_fade_window_pending(),
+            "the pending window must be latched with the post-bump generation"
+        );
+
+        // Self-invalidation: any competing bump closes the window.
+        engine.channels.source_generation.bump_for_user_action();
+        assert!(
+            !engine.skip_fade_window_pending(),
+            "a competing generation bump must invalidate the latch (no \
+             stranded suppression possible)"
+        );
+    }
+
+    /// M7 review cycle 1 — deferred completion: a track completion processed
+    /// while the skip-fade build window is open must NOT run the completion
+    /// machinery (the queue cursor already advanced at skip time; advancing
+    /// again silently skips a track / desyncs now-playing). After the window
+    /// closes (generation moves), completions flow normally again.
+    #[tokio::test]
+    async fn completion_deferred_while_skip_fade_window_pending() {
+        let fired = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut engine = CustomAudioEngine::new();
+        let fired_cb = fired.clone();
+        engine.set_completion_callback(move |_| {
+            fired_cb.fetch_add(1, Ordering::SeqCst);
+        });
+        engine.plan_skip_fade().await;
+        // Prime a state that WOULD complete: the primary decoder reports EOF
+        // (the completion path then routes through `on_decoder_finished`,
+        // whose no-prep branch fires the completion callback).
+        engine.decoder.lock().await.set_eof_for_test(true);
+
+        let finished = engine.on_renderer_finished().await;
+
+        assert!(!finished, "the completion must be deferred, not consumed");
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "no completion callback while the skip plan owns the transition"
+        );
+
+        // Window closes (fire / fallback / competing action bumps) →
+        // completions run normally again.
+        engine.channels.source_generation.bump_for_user_action();
+        engine.on_renderer_finished().await;
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            1,
+            "a stale latch must never suppress completions after the window"
+        );
+    }
+
+    /// M7 review cycle 1 — prep landing during the build window: stored
+    /// WITHOUT arming (the armed position trigger could fire an auto blend
+    /// against the already-advanced cursor before the skip's own fire) and
+    /// WITHOUT staging its RG on the renderer (the fire stages the skip
+    /// target's RG; the slot carries this one until the finalize re-arm).
+    #[tokio::test]
+    async fn store_prepared_decoder_during_skip_window_stores_without_arming() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.enabled = true;
+        engine.plan_skip_fade().await;
+
+        engine
+            .store_prepared_decoder(
+                skip_ready_decoder(200_000),
+                "http://example.test/after-skip-target".to_string(),
+                Some(rg(-3.0)),
+                PreparedTransitionDirectives::from_suppress(false),
+            )
+            .await;
+
+        assert!(
+            engine.is_next_track_prepared().await,
+            "the prep must still land in the gapless slot"
+        );
+        assert!(
+            !engine.renderer.lock().is_crossfade_armed(),
+            "arming during the window would let the auto trigger fire against \
+             the already-advanced cursor"
+        );
+        assert!(
+            engine.skip_fade_window_pending(),
+            "the store must not disturb the pending window"
+        );
+        assert_eq!(
+            engine.gapless.lock().await.replay_gain,
+            Some(rg(-3.0)),
+            "the slot must carry the prep's RG"
+        );
+        assert_eq!(
+            engine
+                .renderer
+                .lock()
+                .pending_crossfade_replay_gain_for_test(),
+            None,
+            "the window store must not stage RG on the renderer (the skip \
+             fire stages the skip target's own RG there)"
+        );
+    }
+
+    /// M7 review cycle 1 — the inline EOF gapless swap must stand down while
+    /// a skip-fade build window is open: the cursor already advanced for the
+    /// skip, so a swap would audibly play the wrong track and its completion
+    /// callback would advance the cursor a second time.
+    #[tokio::test]
+    async fn gapless_swap_stands_down_while_skip_window_pending() {
+        let mut engine = CustomAudioEngine::new();
+        let cb_count = install_callback_counter(&mut engine);
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(staged_decoder(matching_format(), 222_000, "flac"));
+            slot.source = "http://example.test/window-prep".to_string();
+            slot.prepared = true;
+        }
+        // Open the window: latch == current generation.
+        engine
+            .channels
+            .skip_fade_pending
+            .store(engine.source_generation(), Ordering::Release);
+        let gen_before = engine.source_generation();
+
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.channels.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+            &engine.channels.skip_fade_pending,
+        )
+        .await;
+
+        assert_eq!(outcome, GaplessSwapOutcome::SkipFadePlanPending);
+        assert!(
+            engine.gapless.lock().await.is_prepared(),
+            "the staged decoder must be put back for the fire/finalize to use"
+        );
+        assert_eq!(cb_count.load(Ordering::SeqCst), 0, "no completion callback");
+        assert_eq!(
+            engine.source_generation(),
+            gen_before,
+            "a stood-down swap must not bump the generation"
+        );
+    }
+
+    /// M7 review cycle 1 — the fire must PRESERVE a slot stored during the
+    /// build window: it targets the track AFTER the skip target (the UI's
+    /// prep re-dispatched at skip time), so finalize can re-arm from it.
+    /// Only the pre-skip slot is void — and that was cleared at plan time.
+    #[tokio::test]
+    async fn crossfade_to_next_preserves_window_stored_prep() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(skip_ready_decoder(200_000));
+            slot.source = "http://example.test/after-skip-target".to_string();
+            slot.prepared = true;
+            slot.replay_gain = Some(rg(-4.5));
+        }
+        let generation = engine.source_generation();
+
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/skip-target".to_string(),
+                None,
+                generation,
+            )
+            .await;
+
+        assert_eq!(outcome, SkipFadeOutcome::Fired);
+        assert!(
+            engine.is_next_track_prepared().await,
+            "a window-stored prep targets the post-skip next track — the fire \
+             must not wipe it"
+        );
+    }
+
+    /// M7 review cycle 1 — outgoing drained during the build window (its
+    /// completion was deferred, so `playing` is still true): there is
+    /// nothing left to blend, so the fire must refuse and let the caller's
+    /// hard fallback load the target instantly instead of fading in over
+    /// 1–4s of silence.
+    #[tokio::test]
+    async fn crossfade_to_next_blocked_when_outgoing_drained() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.channels.decoder_eof.store(true, Ordering::Release);
+        assert!(
+            engine.renderer.lock().is_buffer_queue_empty(),
+            "precondition: the outgoing ring is drained"
+        );
+        let generation = engine.source_generation();
+
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/next".to_string(),
+                None,
+                generation,
+            )
+            .await;
+
+        assert_eq!(outcome, SkipFadeOutcome::Blocked);
+        assert!(engine.crossfade.phase.is_idle());
+    }
+
+    /// M7 review cycle 1 — engine `start_crossfade` (the EOF-fallback
+    /// trigger) must stage the SLOT's ReplayGain before building the
+    /// incoming stream: a cancelled blend nulls the renderer's staged copy
+    /// while the slot retains the prep, and firing with `None` would fade
+    /// the incoming up at the untagged-fallback gain.
+    #[tokio::test]
+    async fn start_crossfade_stages_slot_replay_gain() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.enabled = true;
+        {
+            let mut slot = engine.gapless.lock().await;
+            slot.decoder = Some(skip_ready_decoder(200_000));
+            slot.source = "http://example.test/next".to_string();
+            slot.prepared = true;
+            slot.replay_gain = Some(rg(-6.0));
+        }
+        engine.next_source = "http://example.test/next".to_string();
+        assert_eq!(
+            engine
+                .renderer
+                .lock()
+                .pending_crossfade_replay_gain_for_test(),
+            None,
+            "precondition: the renderer's staged copy was dropped (cancel path)"
+        );
+
+        engine.start_crossfade().await;
+
+        assert_eq!(
+            engine
+                .renderer
+                .lock()
+                .pending_crossfade_replay_gain_for_test(),
+            Some(rg(-6.0)),
+            "the EOF-fallback fire must re-stage the slot's RG"
+        );
+    }
+
+    /// M7 review cycle 1 — stall recovery during a SKIP fade must hard-load
+    /// the skip target (the queue's already-current row) instead of routing
+    /// through the end-of-track machinery, whose completion callback would
+    /// advance the already-advanced cursor: one Next press would land two
+    /// tracks ahead and the target would never play.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn recover_stalled_skip_fade_hard_loads_target_without_advancing() {
+        let fired = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut engine = CustomAudioEngine::new();
+        let fired_cb = fired.clone();
+        engine.set_completion_callback(move |_| {
+            fired_cb.fetch_add(1, Ordering::SeqCst);
+        });
+        prime_playing_engine(&mut engine);
+        // The target port never listens (connection refused, fast + offline
+        // safe): the reload attempt fails, which is the honest outcome on a
+        // dead network — what matters is WHERE the engine points afterwards.
+        let target = "http://127.0.0.1:9/skip-target".to_string();
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: target.clone(),
+        };
+        engine.crossfade.skip_fade = true;
+        engine
+            .renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(Some(rg(-2.0)));
+
+        engine.recover_stalled_crossfade().await;
+
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "no completion callback — the queue already advanced at skip time"
+        );
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(!engine.crossfade.skip_fade, "marker cleared with the phase");
+        assert!(
+            engine.is_playing_source(&target),
+            "recovery must retry the SKIP TARGET (the queue's current row), \
+             not advance past it; engine source is {}",
+            redact_subsonic_url(engine.source())
+        );
+    }
+
+    /// M7 boundary fade: from an audible playing state the skip out-ramp
+    /// completes via live render ticks (same contract as the M5 stop fade);
+    /// from paused it returns immediately — nothing audible to fade.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_skip_out_fade_completes_via_live_render_thread() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::BoundaryFade, 1);
+        let (_src, handle) = engine.renderer.lock().force_primary_stream_for_test(48_000);
+        handle.set_volume(1.0);
+        engine.playing = true;
+        engine.start_render_thread();
+
+        engine.run_skip_out_fade().await;
+
+        assert_eq!(
+            engine.renderer.lock().transport_fade_completions(),
+            1,
+            "the skip out-ramp must complete via live render ticks"
+        );
+        engine.stop_render_thread();
+    }
+
+    /// M7 boundary fade from paused: `render_tick`'s early-return froze the
+    /// stream at pause time, so the out-ramp must return immediately instead
+    /// of burning its bounded wait.
+    #[tokio::test]
+    async fn run_skip_out_fade_from_paused_returns_immediately() {
+        let mut engine = CustomAudioEngine::new();
+        engine.set_skip_fade(crate::types::player_settings::FadeOnSkip::BoundaryFade, 4);
+        let (_src, _handle) = engine.renderer.lock().force_primary_stream_for_test(4_096);
+        engine.playing = false;
+        engine.paused = true;
+
+        let t0 = std::time::Instant::now();
+        engine.run_skip_out_fade().await;
+
+        assert!(
+            t0.elapsed() < std::time::Duration::from_millis(300),
+            "paused skip fade must not wait out a 4s ramp (took {:?})",
+            t0.elapsed()
+        );
+        assert_eq!(engine.renderer.lock().transport_fade_completions(), 0);
+    }
+
     /// The stall recovery must recover the DESYNCED case: renderer Active
     /// (mid-fade, incoming ring empty) while the engine phase is Idle because
     /// its half never started (e.g. the settings-toggle desync routed the
@@ -3248,6 +5983,24 @@ mod tests {
             "recovery must tear down the renderer's orphaned blend, not no-op",
         );
         assert!(engine.crossfade.phase.is_idle());
+    }
+
+    /// M9 Part B wiring: `start_crossfade_decode_loop` must install its
+    /// per-fade `IncomingLiveness` handle on the renderer so `tick_crossfade`
+    /// can read the socket-blocked-vs-backpressure discriminator at fade
+    /// completion. A decoder-less Arc makes the spawned loop exit
+    /// immediately; the install is synchronous and must land regardless.
+    #[tokio::test]
+    async fn start_crossfade_decode_loop_installs_liveness_on_renderer() {
+        let mut engine = CustomAudioEngine::new();
+        assert!(!engine.renderer.lock().has_incoming_liveness_for_test());
+
+        engine.start_crossfade_decode_loop(Arc::new(tokio::sync::Mutex::new(None)));
+
+        assert!(
+            engine.renderer.lock().has_incoming_liveness_for_test(),
+            "the loop's per-fade liveness handle must be installed on the renderer"
+        );
     }
 
     /// Toggling bit-perfect mid-transition must abandon the in-flight crossfade
@@ -3365,7 +6118,12 @@ mod tests {
         decoder.set_duration_for_test(15_000);
 
         engine
-            .store_prepared_decoder(decoder, "http://example.test/next".to_string(), None)
+            .store_prepared_decoder(
+                decoder,
+                "http://example.test/next".to_string(),
+                None,
+                PreparedTransitionDirectives::from_suppress(false),
+            )
             .await;
 
         let renderer = engine.renderer.lock();
@@ -3505,6 +6263,7 @@ mod tests {
             &engine.channels.source_generation,
             &engine.completion_callback,
             &matching_format(),
+            &engine.channels.skip_fade_pending,
         )
         .await;
 
@@ -3556,6 +6315,7 @@ mod tests {
             &engine.channels.source_generation,
             &engine.completion_callback,
             &current_format,
+            &engine.channels.skip_fade_pending,
         )
         .await;
 
@@ -3635,6 +6395,7 @@ mod tests {
             &engine.channels.source_generation,
             &engine.completion_callback,
             &current_format,
+            &engine.channels.skip_fade_pending,
         )
         .await;
 
@@ -3677,7 +6438,12 @@ mod tests {
         let mut arming_dec = fresh_decoder();
         arming_dec.set_duration_for_test(180_000);
         engine
-            .store_prepared_decoder(arming_dec, "http://example.test/armer".to_string(), None)
+            .store_prepared_decoder(
+                arming_dec,
+                "http://example.test/armer".to_string(),
+                None,
+                PreparedTransitionDirectives::from_suppress(false),
+            )
             .await;
         assert!(
             engine.renderer.lock().is_crossfade_armed(),
@@ -3703,6 +6469,7 @@ mod tests {
             &engine.channels.source_generation,
             &engine.completion_callback,
             &current_format,
+            &engine.channels.skip_fade_pending,
         )
         .await;
 
@@ -3764,6 +6531,7 @@ mod tests {
             &engine.channels.source_generation,
             &engine.completion_callback,
             &matching_format(),
+            &engine.channels.skip_fade_pending,
         )
         .await;
 
@@ -3955,10 +6723,12 @@ mod tests {
             NonZero::new(48000).unwrap(),
             viz,
             1.0,
+            1.0,
             None,
             notify,
             true,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            true,
             false,
         );
 

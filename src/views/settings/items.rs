@@ -650,6 +650,7 @@ mod tests {
             header_labels(&entries),
             vec![
                 "Transitions",
+                "Fading",
                 "Volume Normalization",
                 "Scrobbling",
                 "Radio Scrobbling",
@@ -664,8 +665,22 @@ mod tests {
             vec![
                 "general.crossfade_enabled",
                 "general.crossfade_duration",
+                "general.crossfade_curve",
+                "general.crossfade_min_track",
+                "general.crossfade_album_gapless",
                 "general.bit_perfect",
                 "general.rewind_on_previous",
+                // Fading (the fade enables / skip mode default off, so their
+                // duration rows are gated out here — see the enabled-variant
+                // test).
+                "general.smooth_track_starts",
+                "general.fade_on_pause",
+                "general.fade_on_stop",
+                "general.fade_on_skip",
+                "general.fade_radio_transitions",
+                "general.skip_silence",
+                "general.crossfade_offset",
+                "general.crossfade_bar_snap",
                 "general.volume_normalization",
                 "general.scrobbling_enabled",
                 "general.scrobble_threshold",
@@ -684,6 +699,80 @@ mod tests {
                 "general.queue_show_default_playlist",
             ],
             "Playback tab Off-mode item keys diverge (order matters)",
+        );
+    }
+
+    /// M5: each fade duration row appears only when its enable is on (the
+    /// AGC-target / rating-reminder conditional pattern — rows are taken
+    /// unconditionally so `finish()` stays data-independent, pushed
+    /// conditionally).
+    #[test]
+    fn playback_items_structure_fading_enables_gate_duration_rows() {
+        use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        let both = PlaybackSettingsData {
+            fade_on_pause: true,
+            fade_on_stop: true,
+            fade_on_skip: "Crossfade".into(),
+            ..Default::default()
+        };
+        assert_section_keys(
+            &build_playback_items(&both),
+            "Fading",
+            &[
+                "general.smooth_track_starts",
+                "general.fade_on_pause",
+                "general.fade_pause_ms",
+                "general.fade_on_stop",
+                "general.fade_stop_ms",
+                "general.fade_on_skip",
+                "general.fade_skip_secs",
+                "general.fade_radio_transitions",
+                "general.skip_silence",
+                "general.crossfade_offset",
+                "general.crossfade_bar_snap",
+            ],
+        );
+
+        let pause_only = PlaybackSettingsData {
+            fade_on_pause: true,
+            ..Default::default()
+        };
+        assert_section_keys(
+            &build_playback_items(&pause_only),
+            "Fading",
+            &[
+                "general.smooth_track_starts",
+                "general.fade_on_pause",
+                "general.fade_pause_ms",
+                "general.fade_on_stop",
+                "general.fade_on_skip",
+                "general.fade_radio_transitions",
+                "general.skip_silence",
+                "general.crossfade_offset",
+                "general.crossfade_bar_snap",
+            ],
+        );
+
+        // M7: the skip duration row also follows Boundary Fade (either real
+        // mode shows it; the Off / test-default labels keep it hidden).
+        let skip_boundary = PlaybackSettingsData {
+            fade_on_skip: "Boundary Fade".into(),
+            ..Default::default()
+        };
+        assert_section_keys(
+            &build_playback_items(&skip_boundary),
+            "Fading",
+            &[
+                "general.smooth_track_starts",
+                "general.fade_on_pause",
+                "general.fade_on_stop",
+                "general.fade_on_skip",
+                "general.fade_skip_secs",
+                "general.fade_radio_transitions",
+                "general.skip_silence",
+                "general.crossfade_offset",
+                "general.crossfade_bar_snap",
+            ],
         );
     }
 

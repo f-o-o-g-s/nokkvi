@@ -23,7 +23,10 @@ use crate::{
     types::{
         player_settings::{
             BitPerfectMode, CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
-            NormalizationLevel, RatingReminderTrigger, RoundedMode, VolumeNormalizationMode,
+            CROSSFADE_MIN_TRACK_MAX_SECS, CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS,
+            CROSSFADE_OFFSET_MIN_SECS, CrossfadeCurve, FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN,
+            FadeOnSkip, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+            TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN, VolumeNormalizationMode,
         },
         settings_data::PlaybackSettingsData,
     },
@@ -54,9 +57,8 @@ define_settings! {
                 category: "Playback",
                 subtitle: Some(
                     "Overlap and blend the end of each track into the next. Off plays tracks \
-                     gapless with no overlap. Tracks under 10 seconds always play gapless. \
-                     Mutually exclusive with Bit-Perfect — turning Crossfade on switches \
-                     Bit-Perfect off.",
+                     gapless with no overlap. Mutually exclusive with Bit-Perfect — turning \
+                     Crossfade on switches Bit-Perfect off.",
                 ),
                 default: true,
                 read_field: |d| d.crossfade_enabled,
@@ -106,6 +108,295 @@ define_settings! {
                 step: 1_i64,
                 unit: "s",
                 read_field: |d| d.crossfade_duration_secs,
+            },
+        },
+        CrossfadeCurveKey {
+            key: "general.crossfade_curve",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_crossfade_curve(CrossfadeCurve::from_label(&v)),
+            toml_apply: |ts, p| p.crossfade_curve = ts.crossfade_curve,
+            read: |src, out| out.crossfade_curve = src.crossfade_curve,
+            write: |ps, ts| ts.crossfade_curve = ps.crossfade_curve,
+            ui_meta: {
+                label: "Crossfade Curve",
+                category: "Playback",
+                subtitle: Some(
+                    "Equal Power holds the volume steady through the blend — best for different \
+                     songs, no mid-fade dip. Constant Gain dips about 3 dB in the middle — \
+                     smoother for same-album material. Linear is a plain straight-line fade with \
+                     harder ends.",
+                ),
+                default: "Equal Power",
+                options: &["Equal Power", "Constant Gain", "Linear"],
+                read_field: |d| d.crossfade_curve.as_ref(),
+            },
+        },
+        CrossfadeMinTrack {
+            key: "general.crossfade_min_track",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_crossfade_min_track(v as u32),
+            toml_apply: |ts, p| p.crossfade_min_track_secs = ts.crossfade_min_track_secs,
+            read: |src, out| out.crossfade_min_track_secs = src.crossfade_min_track_secs,
+            write: |ps, ts| ts.crossfade_min_track_secs = ps.crossfade_min_track_secs,
+            ui_meta: {
+                label: "Minimum Track Length to Crossfade",
+                category: "Playback",
+                subtitle: Some(
+                    "Tracks shorter than this play gapless instead of crossfading. 0 blends \
+                     everything including interludes; 30 keeps segues sharp and only blends \
+                     full-length songs.",
+                ),
+                default: 10_i64,
+                min: i64::from(CROSSFADE_MIN_TRACK_MIN_SECS),
+                max: i64::from(CROSSFADE_MIN_TRACK_MAX_SECS),
+                step: 1_i64,
+                unit: "s",
+                read_field: |d| d.crossfade_min_track_secs,
+            },
+        },
+        CrossfadeAlbumGapless {
+            key: "general.crossfade_album_gapless",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_crossfade_album_gapless(v),
+            toml_apply: |ts, p| p.crossfade_album_gapless = ts.crossfade_album_gapless,
+            read: |src, out| out.crossfade_album_gapless = src.crossfade_album_gapless,
+            write: |ps, ts| ts.crossfade_album_gapless = ps.crossfade_album_gapless,
+            ui_meta: {
+                label: "Keep Gapless Albums Seamless",
+                category: "Playback",
+                subtitle: Some(
+                    "Skip the blend when the next track continues the same album, so intended \
+                     gapless segues stay tight. Crossfade still applies between different \
+                     albums, on shuffle, and on compilations.",
+                ),
+                default: false,
+                read_field: |d| d.crossfade_album_gapless,
+            },
+        },
+        // -- Fading (M5) -------------------------------------------------------
+        SmoothTrackStarts {
+            key: "general.smooth_track_starts",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_smooth_track_starts(v),
+            toml_apply: |ts, p| p.smooth_track_starts = ts.smooth_track_starts,
+            read: |src, out| out.smooth_track_starts = src.smooth_track_starts,
+            write: |ps, ts| ts.smooth_track_starts = ps.smooth_track_starts,
+            ui_meta: {
+                label: "Smooth Track Starts",
+                category: "Fading",
+                subtitle: Some(
+                    "Ramp up the first ~20 ms of each track to remove the click when a skip or \
+                     seek lands mid-waveform. Off restores an instant, honest onset. Bit-perfect \
+                     streams always start instantly.",
+                ),
+                default: true,
+                read_field: |d| d.smooth_track_starts,
+            },
+        },
+        FadeOnPause {
+            key: "general.fade_on_pause",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_fade_on_pause(v),
+            toml_apply: |ts, p| p.fade_on_pause = ts.fade_on_pause,
+            read: |src, out| out.fade_on_pause = src.fade_on_pause,
+            write: |ps, ts| ts.fade_on_pause = ps.fade_on_pause,
+            ui_meta: {
+                label: "Fade on Pause / Resume",
+                category: "Fading",
+                subtitle: Some(
+                    "Dip the volume out when pausing and swell back in on resume, instead of \
+                     cutting mid-waveform. Off pauses and resumes instantly. Bit-perfect streams \
+                     always cut instantly.",
+                ),
+                default: false,
+                read_field: |d| d.fade_on_pause,
+            },
+        },
+        FadePauseMs {
+            key: "general.fade_pause_ms",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_fade_pause_ms(v as u32),
+            toml_apply: |ts, p| p.fade_pause_ms = ts.fade_pause_ms,
+            read: |src, out| out.fade_pause_ms = src.fade_pause_ms,
+            write: |ps, ts| ts.fade_pause_ms = ps.fade_pause_ms,
+            ui_meta: {
+                label: "Pause Fade Duration",
+                category: "Fading",
+                subtitle: Some(
+                    "20ms barely rounds the cut edge; 500ms is a slow dip and swell.",
+                ),
+                default: 100_i64,
+                min: i64::from(TRANSPORT_FADE_MS_MIN),
+                max: i64::from(TRANSPORT_FADE_MS_MAX),
+                step: 10_i64,
+                unit: "ms",
+                read_field: |d| d.fade_pause_ms,
+            },
+        },
+        FadeOnStop {
+            key: "general.fade_on_stop",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_fade_on_stop(v),
+            toml_apply: |ts, p| p.fade_on_stop = ts.fade_on_stop,
+            read: |src, out| out.fade_on_stop = src.fade_on_stop,
+            write: |ps, ts| ts.fade_on_stop = ps.fade_on_stop,
+            ui_meta: {
+                label: "Fade on Stop",
+                category: "Fading",
+                subtitle: Some(
+                    "Ease the sound out when playback stops instead of a hard cut. Track \
+                     changes are not affected. Off stops instantly.",
+                ),
+                default: false,
+                read_field: |d| d.fade_on_stop,
+            },
+        },
+        FadeStopMs {
+            key: "general.fade_stop_ms",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_fade_stop_ms(v as u32),
+            toml_apply: |ts, p| p.fade_stop_ms = ts.fade_stop_ms,
+            read: |src, out| out.fade_stop_ms = src.fade_stop_ms,
+            write: |ps, ts| ts.fade_stop_ms = ps.fade_stop_ms,
+            ui_meta: {
+                label: "Stop Fade Duration",
+                category: "Fading",
+                subtitle: Some(
+                    "20ms barely rounds the cut edge; 500ms is a long ease-out — stopping \
+                     waits for it to finish.",
+                ),
+                default: 100_i64,
+                min: i64::from(TRANSPORT_FADE_MS_MIN),
+                max: i64::from(TRANSPORT_FADE_MS_MAX),
+                step: 10_i64,
+                unit: "ms",
+                read_field: |d| d.fade_stop_ms,
+            },
+        },
+        FadeRadioTransitions {
+            key: "general.fade_radio_transitions",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_fade_radio_transitions(v),
+            toml_apply: |ts, p| p.fade_radio_transitions = ts.fade_radio_transitions,
+            read: |src, out| out.fade_radio_transitions = src.fade_radio_transitions,
+            write: |ps, ts| ts.fade_radio_transitions = ps.fade_radio_transitions,
+            ui_meta: {
+                label: "Fade Radio Switches",
+                category: "Fading",
+                subtitle: Some(
+                    "Fade out and back in (about a quarter second each way) when starting a \
+                     radio station or returning to the queue, instead of a hard cut. The \
+                     fade-in waits for the station's first audio. Off switches instantly.",
+                ),
+                default: false,
+                read_field: |d| d.fade_radio_transitions,
+            },
+        },
+        FadeOnSkipKey {
+            key: "general.fade_on_skip",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_fade_on_skip(FadeOnSkip::from_label(&v)),
+            toml_apply: |ts, p| p.fade_on_skip = ts.fade_on_skip,
+            read: |src, out| out.fade_on_skip = src.fade_on_skip,
+            write: |ps, ts| ts.fade_on_skip = ps.fade_on_skip,
+            ui_meta: {
+                label: "Fade on Skip",
+                category: "Fading",
+                subtitle: Some(
+                    "What Next/Previous does to the sound. Off cuts instantly. Boundary Fade \
+                     eases the old track out before the new one starts fresh. Crossfade \
+                     overlaps and blends into the skipped-to track, like an automatic track \
+                     change — falling back to the boundary fade when a blend is blocked. \
+                     Bit-perfect streams always cut instantly.",
+                ),
+                default: "Off",
+                options: &["Off", "Boundary Fade", "Crossfade"],
+                read_field: |d| d.fade_on_skip.as_ref(),
+            },
+        },
+        FadeSkipSecs {
+            key: "general.fade_skip_secs",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_fade_skip_secs(v as u32),
+            toml_apply: |ts, p| p.fade_skip_secs = ts.fade_skip_secs,
+            read: |src, out| out.fade_skip_secs = src.fade_skip_secs,
+            write: |ps, ts| ts.fade_skip_secs = ps.fade_skip_secs,
+            ui_meta: {
+                label: "Skip Fade Duration",
+                category: "Fading",
+                subtitle: Some(
+                    "1s = quick blend on every manual skip, 4s = long overlap. Also the \
+                     Boundary Fade ease-out length.",
+                ),
+                default: 2_i64,
+                min: i64::from(FADE_SKIP_SECS_MIN),
+                max: i64::from(FADE_SKIP_SECS_MAX),
+                step: 1_i64,
+                unit: "s",
+                read_field: |d| d.fade_skip_secs,
+            },
+        },
+        SkipSilence {
+            key: "general.skip_silence",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_skip_silence(v),
+            toml_apply: |ts, p| p.skip_silence = ts.skip_silence,
+            read: |src, out| out.skip_silence = src.skip_silence,
+            write: |ps, ts| ts.skip_silence = ps.skip_silence,
+            ui_meta: {
+                label: "Skip Silence Between Tracks",
+                category: "Fading",
+                subtitle: Some(
+                    "Skip near-silent endings and lead-ins at track changes: a silent tail \
+                     starts the next transition early, and a silent intro is dropped when the \
+                     next track was prepared in advance. Off plays every recorded second. \
+                     Bit-perfect streams never trim.",
+                ),
+                default: false,
+                read_field: |d| d.skip_silence,
+            },
+        },
+        CrossfadeOffset {
+            key: "general.crossfade_offset",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_crossfade_offset_secs(v as i32),
+            toml_apply: |ts, p| p.crossfade_offset_secs = ts.crossfade_offset_secs,
+            read: |src, out| out.crossfade_offset_secs = src.crossfade_offset_secs,
+            write: |ps, ts| ts.crossfade_offset_secs = ps.crossfade_offset_secs,
+            ui_meta: {
+                label: "Gap / Overlap Trim",
+                category: "Fading",
+                subtitle: Some(
+                    "0 leaves track changes untouched. -2 starts the crossfade two seconds \
+                     early, folding the old track's tail into the blend. +2 holds two seconds \
+                     of silence between tracks on gapless joins — a live crossfade overrides \
+                     the gap, and seamless-album joins stay tight.",
+                ),
+                default: 0_i64,
+                min: i64::from(CROSSFADE_OFFSET_MIN_SECS),
+                max: i64::from(CROSSFADE_OFFSET_MAX_SECS),
+                step: 1_i64,
+                unit: "s",
+                read_field: |d| d.crossfade_offset_secs,
+            },
+        },
+        CrossfadeBarSnap {
+            key: "general.crossfade_bar_snap",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_crossfade_bar_snap(v),
+            toml_apply: |ts, p| p.crossfade_bar_snap = ts.crossfade_bar_snap,
+            read: |src, out| out.crossfade_bar_snap = src.crossfade_bar_snap,
+            write: |ps, ts| ts.crossfade_bar_snap = ps.crossfade_bar_snap,
+            ui_meta: {
+                label: "Snap Crossfade to Musical Bars",
+                category: "Fading",
+                subtitle: Some(
+                    "Round the crossfade to whole bars of the track's tempo so beats line up \
+                     through the blend. Needs BPM tags; ignored when a track has none. No \
+                     effect between tracks at different tempos.",
+                ),
+                default: false,
+                read_field: |d| d.crossfade_bar_snap,
             },
         },
         RewindOnPrevious {
@@ -544,6 +835,20 @@ mod tests {
             crossfade_enabled: false,
             bit_perfect: "Off".into(),
             crossfade_duration_secs: 5,
+            crossfade_curve: "Equal Power".into(),
+            crossfade_min_track_secs: 10,
+            crossfade_album_gapless: false,
+            smooth_track_starts: true,
+            fade_on_pause: false,
+            fade_pause_ms: 100,
+            fade_on_stop: false,
+            fade_stop_ms: 100,
+            fade_radio_transitions: false,
+            fade_on_skip: "Off".into(),
+            fade_skip_secs: 2,
+            skip_silence: false,
+            crossfade_offset_secs: 0,
+            crossfade_bar_snap: false,
             rewind_on_previous: false,
             volume_normalization: "Off".into(),
             normalization_level: "Normal".into(),
@@ -569,20 +874,28 @@ mod tests {
         }
     }
 
-    /// 12 entries get ui_meta: 4 unconditional Playback rows (crossfade enable,
-    /// crossfade duration, rewind-on-previous, volume normalization), 2
-    /// Scrobbling, 4 Rating Reminder (enable, change-notification, trigger,
-    /// percentage), and 2 Playlists. The 5 conditional AGC/RG knobs and the
-    /// `default_playlist_name` dialog row stay hand-written; the 6
-    /// lifecycle-only entries (queue column visibility, opacity_gradient,
-    /// rounded_mode) emit nothing here. The Rating Reminder trigger/percentage
-    /// rows are emitted here unconditionally but the UI builder
-    /// (`items_playback.rs`) only splices them in when the feature is enabled.
+    /// 30 entries get ui_meta: 8 unconditional Playback rows (crossfade
+    /// enable, bit-perfect, crossfade duration, crossfade curve, minimum
+    /// track length, keep-gapless-albums, rewind-on-previous, volume
+    /// normalization), 11 Fading rows (smooth starts, fade-on-pause + its
+    /// duration, fade-on-stop + its duration, fade-on-skip + its duration —
+    /// the duration rows are emitted here unconditionally but the UI builder
+    /// only splices each in when its enable/mode is on — plus
+    /// fade-radio-transitions and the three M8 rows: skip-silence,
+    /// gap/overlap trim, bar-snap), 3 Radio Scrobbling, 2 Scrobbling,
+    /// 4 Rating Reminder (enable, change-notification, trigger, percentage),
+    /// and 2 Playlists.
+    /// The 5 conditional AGC/RG knobs and the `default_playlist_name` dialog
+    /// row stay hand-written; the lifecycle-only entries (queue column
+    /// visibility, opacity_gradient, rounded_mode) emit nothing here. The
+    /// Rating Reminder trigger/percentage rows are emitted here
+    /// unconditionally but the UI builder (`items_playback.rs`) only splices
+    /// them in when the feature is enabled.
     #[test]
-    fn build_playback_tab_settings_items_emits_sixteen_rows() {
+    fn build_playback_tab_settings_items_emits_thirty_rows() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 16);
+        assert_eq!(entries.len(), 30);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -652,9 +965,239 @@ mod tests {
         );
     }
 
+    /// M4 Int round-trip: `general.crossfade_min_track` arrives as `Int`,
+    /// the setter clamps + persists, and `get_player_settings()` reports the
+    /// new floor — plus the same single-source-of-truth slider-max interlock
+    /// the duration slider has (both sides derive from
+    /// `CROSSFADE_MIN_TRACK_MAX_SECS`).
+    #[test]
+    fn dispatch_playback_int_round_trip_crossfade_min_track_with_clamp_interlock() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert_eq!(
+            mgr.get_player_settings().crossfade_min_track_secs,
+            10,
+            "default floor must be the historical 10s"
+        );
+
+        let result = dispatch_playback_tab_setting(
+            "general.crossfade_min_track",
+            SettingValue::Int {
+                val: 30,
+                min: 0,
+                max: 60,
+                step: 1,
+                unit: "s",
+            },
+            &mut mgr,
+        );
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
+        assert_eq!(mgr.get_player_settings().crossfade_min_track_secs, 30);
+
+        // Slider-max interlock: the declared max round-trips unchanged, one
+        // step past it clamps down to exactly the declared max.
+        let entries = build_playback_tab_settings_items(&default_playback_data());
+        let slider_max = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.crossfade_min_track" => {
+                    match &item.value {
+                        SettingValue::Int { max, .. } => Some(*max),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("crossfade_min_track row with an Int value");
+        mgr.set_crossfade_min_track(slider_max as u32)
+            .expect("set to slider max");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().crossfade_min_track_secs),
+            slider_max,
+            "slider max {slider_max}s is silently truncated by the persistence clamp"
+        );
+        mgr.set_crossfade_min_track(slider_max as u32 + 1)
+            .expect("set above slider max");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().crossfade_min_track_secs),
+            slider_max,
+            "values above the slider max must clamp to the slider max"
+        );
+    }
+
+    /// M4 Bool round-trip: `general.crossfade_album_gapless` defaults off
+    /// (opt-in); flip via the dispatcher and confirm `get_player_settings()`
+    /// reports the new value.
+    #[test]
+    fn dispatch_playback_bool_round_trip_crossfade_album_gapless() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert!(
+            !mgr.get_player_settings().crossfade_album_gapless,
+            "album-continuity gate must default OFF (opt-in)"
+        );
+
+        let result = dispatch_playback_tab_setting(
+            "general.crossfade_album_gapless",
+            SettingValue::Bool(true),
+            &mut mgr,
+        );
+
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
+        assert!(mgr.get_player_settings().crossfade_album_gapless);
+    }
+
+    /// M5 Bool round-trips: the three Fading enables dispatch through the
+    /// table and land on `get_player_settings()`. `smooth_track_starts`
+    /// defaults ON (M2's ramp is the shipped default); the two fade enables
+    /// default OFF (opt-in — not among the pre-authorized audible changes).
+    #[test]
+    fn dispatch_playback_bool_round_trips_fading_enables() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert!(
+            mgr.get_player_settings().smooth_track_starts,
+            "smooth_track_starts must default ON"
+        );
+        assert!(
+            !mgr.get_player_settings().fade_on_pause,
+            "fade_on_pause must default OFF (opt-in)"
+        );
+        assert!(
+            !mgr.get_player_settings().fade_on_stop,
+            "fade_on_stop must default OFF (opt-in)"
+        );
+        assert!(
+            !mgr.get_player_settings().fade_radio_transitions,
+            "fade_radio_transitions must default OFF (opt-in — M6)"
+        );
+
+        type Read = fn(&crate::types::player_settings::LivePlayerSettings) -> bool;
+        let cases: [(&str, Read); 4] = [
+            ("general.smooth_track_starts", |ps| ps.smooth_track_starts),
+            ("general.fade_on_pause", |ps| ps.fade_on_pause),
+            ("general.fade_on_stop", |ps| ps.fade_on_stop),
+            ("general.fade_radio_transitions", |ps| {
+                ps.fade_radio_transitions
+            }),
+        ];
+        for (key, read) in cases {
+            // Flip each away from its default.
+            let flipped = key != "general.smooth_track_starts";
+            let result = dispatch_playback_tab_setting(key, SettingValue::Bool(flipped), &mut mgr);
+            assert!(
+                matches!(
+                    result,
+                    Some(Ok(
+                        crate::types::settings_side_effect::SettingsSideEffect::None
+                    ))
+                ),
+                "{key} must dispatch through the playback table"
+            );
+            assert_eq!(
+                read(&mgr.get_player_settings()),
+                flipped,
+                "{key} must round-trip"
+            );
+        }
+    }
+
+    /// M5 Int round-trip with the slider-max clamp interlock (same contract
+    /// as crossfade duration / min-track): both fade duration sliders'
+    /// declared bounds must equal what their setters persist.
+    #[test]
+    fn dispatch_playback_int_round_trips_fade_durations_with_clamp_interlock() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert_eq!(mgr.get_player_settings().fade_pause_ms, 100);
+        assert_eq!(mgr.get_player_settings().fade_stop_ms, 100);
+
+        let entries = build_playback_tab_settings_items(&default_playback_data());
+        for key in ["general.fade_pause_ms", "general.fade_stop_ms"] {
+            let result = dispatch_playback_tab_setting(
+                key,
+                SettingValue::Int {
+                    val: 250,
+                    min: 20,
+                    max: 500,
+                    step: 10,
+                    unit: "ms",
+                },
+                &mut mgr,
+            );
+            assert!(
+                matches!(
+                    result,
+                    Some(Ok(
+                        crate::types::settings_side_effect::SettingsSideEffect::None
+                    ))
+                ),
+                "{key} must dispatch through the playback table"
+            );
+
+            let (slider_min, slider_max) = entries
+                .iter()
+                .find_map(|e| match e {
+                    SettingsEntry::Item(item) if item.key.as_ref() == key => match &item.value {
+                        SettingValue::Int { min, max, .. } => Some((*min, *max)),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{key} row with an Int value"));
+            assert_eq!(
+                slider_min,
+                i64::from(crate::types::player_settings::TRANSPORT_FADE_MS_MIN)
+            );
+            assert_eq!(
+                slider_max,
+                i64::from(crate::types::player_settings::TRANSPORT_FADE_MS_MAX)
+            );
+
+            // The slider max round-trips unchanged; one step past clamps down.
+            let set = |mgr: &mut SettingsManager, v: u32| match key {
+                "general.fade_pause_ms" => mgr.set_fade_pause_ms(v),
+                _ => mgr.set_fade_stop_ms(v),
+            };
+            let get = |mgr: &SettingsManager| match key {
+                "general.fade_pause_ms" => mgr.get_player_settings().fade_pause_ms,
+                _ => mgr.get_player_settings().fade_stop_ms,
+            };
+            set(&mut mgr, slider_max as u32).expect("set to slider max");
+            assert_eq!(i64::from(get(&mgr)), slider_max);
+            set(&mut mgr, slider_max as u32 + 1).expect("set above slider max");
+            assert_eq!(
+                i64::from(get(&mgr)),
+                slider_max,
+                "{key}: values above the slider max must clamp to the slider max"
+            );
+        }
+        assert_eq!(mgr.get_player_settings().fade_pause_ms, 500);
+    }
+
     #[test]
     fn tab_playback_contains_recognizes_declared_keys() {
         assert!(tab_playback_contains("general.crossfade_enabled"));
+        assert!(tab_playback_contains("general.crossfade_curve"));
+        assert!(tab_playback_contains("general.crossfade_min_track"));
+        assert!(tab_playback_contains("general.crossfade_album_gapless"));
+        assert!(tab_playback_contains("general.smooth_track_starts"));
+        assert!(tab_playback_contains("general.fade_on_pause"));
+        assert!(tab_playback_contains("general.fade_pause_ms"));
+        assert!(tab_playback_contains("general.fade_on_stop"));
+        assert!(tab_playback_contains("general.fade_stop_ms"));
+        assert!(tab_playback_contains("general.fade_radio_transitions"));
+        assert!(tab_playback_contains("general.fade_on_skip"));
+        assert!(tab_playback_contains("general.fade_skip_secs"));
+        assert!(tab_playback_contains("general.skip_silence"));
+        assert!(tab_playback_contains("general.crossfade_offset"));
+        assert!(tab_playback_contains("general.crossfade_bar_snap"));
         assert!(tab_playback_contains("general.volume_normalization"));
         assert!(tab_playback_contains("general.replay_gain_preamp_db"));
         assert!(tab_playback_contains("general.scrobble_threshold"));
@@ -665,6 +1208,106 @@ mod tests {
         ));
         assert!(!tab_playback_contains("general.light_mode"));
         assert!(!tab_playback_contains("general.stable_viewport"));
+    }
+
+    /// M8 Bool round-trips: `general.skip_silence` and
+    /// `general.crossfade_bar_snap` both default OFF (opt-in) and dispatch
+    /// through the table onto `get_player_settings()`.
+    #[test]
+    fn dispatch_playback_bool_round_trips_m8_gates() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert!(
+            !mgr.get_player_settings().skip_silence,
+            "skip_silence must default OFF (opt-in)"
+        );
+        assert!(
+            !mgr.get_player_settings().crossfade_bar_snap,
+            "crossfade_bar_snap must default OFF (opt-in)"
+        );
+
+        for key in ["general.skip_silence", "general.crossfade_bar_snap"] {
+            let result = dispatch_playback_tab_setting(key, SettingValue::Bool(true), &mut mgr);
+            assert!(
+                matches!(
+                    result,
+                    Some(Ok(
+                        crate::types::settings_side_effect::SettingsSideEffect::None
+                    ))
+                ),
+                "{key} must dispatch"
+            );
+        }
+        assert!(mgr.get_player_settings().skip_silence);
+        assert!(mgr.get_player_settings().crossfade_bar_snap);
+    }
+
+    /// M8 Int round-trip for the SIGNED `general.crossfade_offset` slider:
+    /// negative values round-trip (the first negative Int row in the table),
+    /// and both slider ends match the persistence clamp exactly (the M4
+    /// single-source-of-truth interlock).
+    #[test]
+    fn dispatch_playback_int_round_trip_crossfade_offset_with_signed_clamp() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert_eq!(
+            mgr.get_player_settings().crossfade_offset_secs,
+            0,
+            "offset must default to 0 (untouched transitions)"
+        );
+
+        let result = dispatch_playback_tab_setting(
+            "general.crossfade_offset",
+            SettingValue::Int {
+                val: -2,
+                min: -2,
+                max: 2,
+                step: 1,
+                unit: "s",
+            },
+            &mut mgr,
+        );
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
+        assert_eq!(mgr.get_player_settings().crossfade_offset_secs, -2);
+
+        // Slider-bounds interlock, both signs: the declared min/max round-trip
+        // unchanged, one step past either end clamps to exactly that end.
+        let entries = build_playback_tab_settings_items(&default_playback_data());
+        let (slider_min, slider_max) = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.crossfade_offset" => {
+                    match &item.value {
+                        SettingValue::Int { min, max, .. } => Some((*min, *max)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("crossfade_offset row with an Int value");
+        mgr.set_crossfade_offset_secs(slider_min as i32)
+            .expect("set to slider min");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().crossfade_offset_secs),
+            slider_min
+        );
+        mgr.set_crossfade_offset_secs(slider_min as i32 - 1)
+            .expect("set below slider min");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().crossfade_offset_secs),
+            slider_min,
+            "values below the slider min must clamp to the slider min"
+        );
+        mgr.set_crossfade_offset_secs(slider_max as i32 + 1)
+            .expect("set above slider max");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().crossfade_offset_secs),
+            slider_max,
+            "values above the slider max must clamp to the slider max"
+        );
     }
 
     #[test]
@@ -759,6 +1402,143 @@ mod tests {
         );
     }
 
+    /// Enum round-trip (M7): `general.fade_on_skip` arrives as `Enum` with a
+    /// label, the setter parses it to `FadeOnSkip`, and
+    /// `get_player_settings()` reports the matching enum variant. Default is
+    /// Off (opt-in — a skip fade is an audible behavior change).
+    #[test]
+    fn dispatch_playback_enum_round_trip_fade_on_skip() {
+        use crate::types::player_settings::FadeOnSkip;
+        let (mut mgr, _tmp) = make_test_manager();
+        assert_eq!(
+            mgr.get_player_settings().fade_on_skip,
+            FadeOnSkip::Off,
+            "fade_on_skip must default Off (opt-in)"
+        );
+
+        let result = dispatch_playback_tab_setting(
+            "general.fade_on_skip",
+            SettingValue::Enum {
+                val: "Crossfade".to_string(),
+                options: vec!["Off", "Boundary Fade", "Crossfade"],
+            },
+            &mut mgr,
+        );
+
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
+        assert_eq!(
+            mgr.get_player_settings().fade_on_skip,
+            FadeOnSkip::Crossfade
+        );
+    }
+
+    /// M7 Int round-trip with the slider-max clamp interlock (same contract
+    /// as the pause/stop fade durations): the skip-fade slider's declared
+    /// bounds must equal what `set_fade_skip_secs` persists.
+    #[test]
+    fn dispatch_playback_int_round_trip_fade_skip_secs_with_clamp_interlock() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert_eq!(
+            mgr.get_player_settings().fade_skip_secs,
+            crate::types::player_settings::FADE_SKIP_SECS_DEFAULT
+        );
+
+        let result = dispatch_playback_tab_setting(
+            "general.fade_skip_secs",
+            SettingValue::Int {
+                val: 3,
+                min: 1,
+                max: 4,
+                step: 1,
+                unit: "s",
+            },
+            &mut mgr,
+        );
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
+        assert_eq!(mgr.get_player_settings().fade_skip_secs, 3);
+
+        let entries = build_playback_tab_settings_items(&default_playback_data());
+        let (slider_min, slider_max) = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.fade_skip_secs" => {
+                    match &item.value {
+                        SettingValue::Int { min, max, .. } => Some((*min, *max)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("fade_skip_secs row with an Int value");
+        assert_eq!(
+            slider_min,
+            i64::from(crate::types::player_settings::FADE_SKIP_SECS_MIN)
+        );
+        assert_eq!(
+            slider_max,
+            i64::from(crate::types::player_settings::FADE_SKIP_SECS_MAX)
+        );
+
+        // The slider max round-trips unchanged; one step past clamps down.
+        mgr.set_fade_skip_secs(slider_max as u32)
+            .expect("set to slider max");
+        assert_eq!(i64::from(mgr.get_player_settings().fade_skip_secs), {
+            slider_max
+        });
+        mgr.set_fade_skip_secs(slider_max as u32 + 1)
+            .expect("set above slider max");
+        assert_eq!(
+            i64::from(mgr.get_player_settings().fade_skip_secs),
+            slider_max,
+            "values above the slider max must clamp to the slider max"
+        );
+    }
+
+    /// Enum round-trip (M3): `general.crossfade_curve` arrives as `Enum` with
+    /// a label, the setter parses it to `CrossfadeCurve`, and
+    /// `get_player_settings()` reports the matching enum variant — the
+    /// config-write half of the curve setting's round trip.
+    #[test]
+    fn dispatch_playback_enum_round_trip_crossfade_curve() {
+        use crate::types::player_settings::CrossfadeCurve;
+        let (mut mgr, _tmp) = make_test_manager();
+        assert_eq!(
+            mgr.get_player_settings().crossfade_curve,
+            CrossfadeCurve::EqualPower,
+            "default must be Equal Power"
+        );
+
+        let result = dispatch_playback_tab_setting(
+            "general.crossfade_curve",
+            SettingValue::Enum {
+                val: "Constant Gain".to_string(),
+                options: vec!["Equal Power", "Constant Gain", "Linear"],
+            },
+            &mut mgr,
+        );
+
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
+        assert_eq!(
+            mgr.get_player_settings().crossfade_curve,
+            CrossfadeCurve::ConstantGain
+        );
+    }
+
     /// Type-mismatch path: feeding `Bool` to a key declared as `Int`
     /// should yield `Some(Err(_))` — proves the macro's per-variant
     /// dispatch arm is rejecting wrong types instead of silently coercing.
@@ -808,6 +1588,7 @@ mod tests {
         let mut ts = TomlSettings::default();
         ts.crossfade_enabled = true;
         ts.crossfade_duration_secs = 9;
+        ts.crossfade_curve = crate::types::player_settings::CrossfadeCurve::Linear;
         ts.rewind_on_previous = true;
         ts.replay_gain_preamp_db = 4.0;
         ts.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
@@ -821,6 +1602,10 @@ mod tests {
 
         assert!(p.crossfade_enabled);
         assert_eq!(p.crossfade_duration_secs, 9);
+        assert_eq!(
+            p.crossfade_curve,
+            crate::types::player_settings::CrossfadeCurve::Linear
+        );
         assert!(p.rewind_on_previous);
         assert_eq!(p.replay_gain_preamp_db, 4.0);
         assert_eq!(
@@ -844,6 +1629,7 @@ mod tests {
         let mut src = PersistedPlayerSettings::default();
         src.crossfade_enabled = true;
         src.crossfade_duration_secs = 9;
+        src.crossfade_curve = crate::types::player_settings::CrossfadeCurve::ConstantGain;
         src.rewind_on_previous = true;
         src.replay_gain_preamp_db = 4.0;
         src.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
@@ -857,6 +1643,10 @@ mod tests {
 
         assert!(ui.crossfade_enabled);
         assert_eq!(ui.crossfade_duration_secs, 9);
+        assert_eq!(
+            ui.crossfade_curve,
+            crate::types::player_settings::CrossfadeCurve::ConstantGain
+        );
         assert!(ui.rewind_on_previous);
         assert_eq!(ui.replay_gain_preamp_db, 4.0);
         assert_eq!(
@@ -881,6 +1671,7 @@ mod tests {
         let mut ps = crate::types::player_settings::LivePlayerSettings::default();
         ps.crossfade_enabled = true;
         ps.crossfade_duration_secs = 9;
+        ps.crossfade_curve = crate::types::player_settings::CrossfadeCurve::Linear;
         ps.rewind_on_previous = true;
         ps.replay_gain_preamp_db = 4.0;
         ps.replay_gain_fallback_db = 1.5;
@@ -904,6 +1695,10 @@ mod tests {
 
         assert!(ts.crossfade_enabled);
         assert_eq!(ts.crossfade_duration_secs, 9);
+        assert_eq!(
+            ts.crossfade_curve,
+            crate::types::player_settings::CrossfadeCurve::Linear
+        );
         assert!(ts.rewind_on_previous);
         assert!((ts.replay_gain_preamp_db - 4.0).abs() < f32::EPSILON);
         assert!((ts.replay_gain_fallback_db - 1.5).abs() < f32::EPSILON);
@@ -947,6 +1742,20 @@ mod tests {
             crossfade_enabled: live.crossfade_enabled,
             bit_perfect: live.bit_perfect.as_label().into(),
             crossfade_duration_secs: i64::from(live.crossfade_duration_secs),
+            crossfade_curve: live.crossfade_curve.as_label().into(),
+            crossfade_min_track_secs: i64::from(live.crossfade_min_track_secs),
+            crossfade_album_gapless: live.crossfade_album_gapless,
+            smooth_track_starts: live.smooth_track_starts,
+            fade_on_pause: live.fade_on_pause,
+            fade_pause_ms: i64::from(live.fade_pause_ms),
+            fade_on_stop: live.fade_on_stop,
+            fade_stop_ms: i64::from(live.fade_stop_ms),
+            fade_radio_transitions: live.fade_radio_transitions,
+            fade_on_skip: live.fade_on_skip.as_label().into(),
+            fade_skip_secs: i64::from(live.fade_skip_secs),
+            skip_silence: live.skip_silence,
+            crossfade_offset_secs: i64::from(live.crossfade_offset_secs),
+            crossfade_bar_snap: live.crossfade_bar_snap,
             rewind_on_previous: live.rewind_on_previous,
             volume_normalization: live.volume_normalization.as_label().into(),
             normalization_level: live.normalization_level.as_label().into(),

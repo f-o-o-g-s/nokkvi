@@ -133,6 +133,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::CycleVisualization => Message::Playback(PlaybackMessage::CycleVisualization),
         HotkeyAction::ToggleEqModal => Message::EqModal(crate::widgets::EqModalMessage::Toggle),
         HotkeyAction::ToggleCrossfade => Message::Playback(PlaybackMessage::ToggleCrossfade),
+        HotkeyAction::FadeToNext => Message::Playback(PlaybackMessage::FadeToNext),
         HotkeyAction::ToggleBitPerfect => Message::Playback(PlaybackMessage::ToggleBitPerfect),
         // Slot List
         HotkeyAction::SlotListUp => Message::SlotList(SlotListMessage::NavigateUp),
@@ -220,6 +221,27 @@ mod tests {
         let msg = action_to_message(action);
         // We verify that it dispatches the correct Message variant
         assert!(matches!(msg, Message::Hotkey(HotkeyMessage::RefreshView)));
+    }
+
+    /// M7 Fade-to-Next: the default Shift+F binding resolves to
+    /// `HotkeyAction::FadeToNext` and dispatches
+    /// `PlaybackMessage::FadeToNext`. This routing is the extent of what a
+    /// UI test can prove — the skip-fade behavior itself (blend / fallbacks)
+    /// is covered by the data-crate engine + navigator tests, since
+    /// `test_app()` has no `app_service` to reach the controller.
+    #[test]
+    fn fade_to_next_hotkey_routes_to_playback_message() {
+        let config = HotkeyConfig::default();
+        let action = config
+            .lookup(&KeyCode::Char('f'), true, false, false)
+            .unwrap();
+        assert_eq!(action, HotkeyAction::FadeToNext);
+
+        let msg = action_to_message(action);
+        assert!(matches!(
+            msg,
+            Message::Playback(PlaybackMessage::FadeToNext)
+        ));
     }
 
     #[test]

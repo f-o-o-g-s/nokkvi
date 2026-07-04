@@ -6,11 +6,12 @@ use crate::{
         hotkey_config::HotkeyConfig,
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
-            CollapsedAppearance, EnterBehavior, IconSet, LibraryPageSize, NavDisplayMode,
-            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VerboseConfig,
-            VisualizationMode, VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
-            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
+            CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
+            LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger,
+            RoundedMode, ScrollbarVisibility, SlotRowHeight, StripClickAction, StripSeparator,
+            TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
+            deserialize_verbose_config_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -125,6 +126,73 @@ crate::player_settings_schema! {
     /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]
     same crossfade_duration_secs: u32 = default_crossfade_duration_secs(),
+    /// Crossfade gain curve (default Equal Power — flat loudness through the
+    /// blend for uncorrelated tracks; Constant Gain is the historical
+    /// cos²/sin² pair; Linear is a plain ramp)
+    #[serde(default)]
+    same crossfade_curve: CrossfadeCurve = CrossfadeCurve::default(),
+    /// Minimum track length in seconds for crossfade eligibility (0–60,
+    /// default 10 — the historical hardcoded floor). Shorter tracks play
+    /// gapless; 0 blends everything with a known duration.
+    #[serde(default = "default_crossfade_min_track_secs")]
+    same crossfade_min_track_secs: u32 = default_crossfade_min_track_secs(),
+    /// Album-continuity gate (default false — opt-in): skip the blend when
+    /// the next track continues the same album sequentially, so authored
+    /// gapless segues stay tight. Crossfade still applies between different
+    /// albums, on shuffle, across disc boundaries, and on compilations.
+    #[serde(default)]
+    same crossfade_album_gapless: bool = false,
+    /// Whether new non-bit-perfect streams ramp up their first ~20 ms (the
+    /// M2 de-click onset ramp; default true). Off restores an instant,
+    /// honest onset. Bit-perfect streams never ramp regardless.
+    #[serde(default = "default_true")]
+    same smooth_track_starts: bool = true,
+    /// Whether pause/resume ramp the volume over `fade_pause_ms` instead of
+    /// cutting mid-waveform (default false — opt-in).
+    #[serde(default)]
+    same fade_on_pause: bool = false,
+    /// Pause/resume ramp length in milliseconds (20–500, default 100).
+    #[serde(default = "default_transport_fade_ms")]
+    same fade_pause_ms: u32 = default_transport_fade_ms(),
+    /// Whether stopping playback ramps the volume down over `fade_stop_ms`
+    /// instead of cutting (default false — opt-in). Applies to user stops,
+    /// not track changes.
+    #[serde(default)]
+    same fade_on_stop: bool = false,
+    /// Stop ramp length in milliseconds (20–500, default 100).
+    #[serde(default = "default_transport_fade_ms")]
+    same fade_stop_ms: u32 = default_transport_fade_ms(),
+    /// Whether radio↔queue switches fade out and back in (~250 ms each way)
+    /// instead of hard-cutting (default false — opt-in). The incoming fade
+    /// waits for the stream's first real audio.
+    #[serde(default)]
+    same fade_radio_transitions: bool = false,
+    /// What a manual Next/Previous does to the sound (default Off — the
+    /// historical instant cut): Boundary Fade eases the outgoing track out
+    /// before the hard load; Crossfade overlaps and blends into the
+    /// skipped-to track (M7).
+    #[serde(default)]
+    same fade_on_skip: FadeOnSkip = FadeOnSkip::default(),
+    /// "Fade on Skip" length in seconds (1–4, default 2) — the skip-crossfade
+    /// overlap and the Boundary Fade ease-out share it.
+    #[serde(default = "default_fade_skip_secs")]
+    same fade_skip_secs: u32 = default_fade_skip_secs(),
+    /// M8 "Skip Silence Between Tracks" (default false — opt-in): a silent
+    /// outgoing tail triggers the next transition early, and a silent lead-in
+    /// is dropped from prepared transition decoders. Off plays every recorded
+    /// second; bit-perfect streams never trim.
+    #[serde(default)]
+    same skip_silence: bool = false,
+    /// M8 "Gap / Overlap Trim" in seconds (−2..+2, default 0): negative
+    /// starts the crossfade early (trims the outgoing tail into the blend);
+    /// positive holds that much silence between tracks on gapless joins.
+    #[serde(default)]
+    same crossfade_offset_secs: i32 = 0,
+    /// M8 "Snap Crossfade to Musical Bars" (default false — opt-in): round
+    /// the crossfade length to whole 4/4 bars of the outgoing track's BPM tag
+    /// so beats line up through the blend. Untagged tracks are unaffected.
+    #[serde(default)]
+    same crossfade_bar_snap: bool = false,
     /// Whether the Previous button restarts the current track once it has
     /// played past the threshold (default false).
     #[serde(default)]
@@ -385,6 +453,15 @@ fn default_opacity_gradient() -> bool {
 }
 fn default_crossfade_duration_secs() -> u32 {
     7
+}
+fn default_crossfade_min_track_secs() -> u32 {
+    crate::types::player_settings::CROSSFADE_MIN_TRACK_DEFAULT_SECS
+}
+fn default_transport_fade_ms() -> u32 {
+    crate::types::player_settings::TRANSPORT_FADE_MS_DEFAULT
+}
+fn default_fade_skip_secs() -> u32 {
+    crate::types::player_settings::FADE_SKIP_SECS_DEFAULT
 }
 fn default_autohide_toolbar_height() -> u32 {
     4

@@ -1,6 +1,8 @@
 //! Playback tab setting entries.
 //!
-//! Contains five sections: Transitions (crossfade), Volume Normalization
+//! Contains six sections: Transitions (crossfade), Fading (smooth track
+//! starts + pause/resume/stop transport fades + the M8 content-aware overlap
+//! knobs — skip-silence, gap/overlap trim, bar-snap), Volume Normalization
 //! (mode dropdown + AGC target knob + ReplayGain knobs), Scrobbling, Rating
 //! Reminder (enable + conditional timing/percentage), and Playlists. Flat
 //! rows come from `define_settings!` via `build_playback_tab_settings_items`.
@@ -9,7 +11,9 @@
 //! when the reminder is enabled / in percentage mode), and the
 //! `default_playlist_name` dialog sentinel row stay hand-written so the
 //! conditional logic and the picker dialog construction live next to the rows
-//! they gate.
+//! they gate. The three fade duration rows follow the same
+//! take-unconditionally-push-conditionally convention (shown only while
+//! their enable / skip mode is on).
 
 // See `items_general.rs` for why the data struct lives in the data crate.
 use nokkvi_data::services::{
@@ -37,6 +41,7 @@ fn radio_cred_value(source: CredSource) -> &'static str {
 /// Build settings entries for the Playback tab.
 pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsEntry> {
     const TRANSITIONS: &str = "assets/icons/audio-waveform.svg";
+    const FADING: &str = "assets/icons/blend.svg";
     const NORMALIZATION: &str = "assets/icons/sliders-vertical.svg";
     const SCR: &str = "assets/icons/radio-tower.svg";
     const CHECK: &str = "assets/icons/check.svg";
@@ -64,15 +69,55 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
         },
         macro_rows.take("general.crossfade_enabled"),
         macro_rows.take("general.crossfade_duration"),
+        macro_rows.take("general.crossfade_curve"),
+        macro_rows.take("general.crossfade_min_track"),
+        macro_rows.take("general.crossfade_album_gapless"),
         macro_rows.take("general.bit_perfect"),
         macro_rows.take("general.rewind_on_previous"),
+        // --- Fading ---
+        SettingsEntry::Header {
+            label: "Fading",
+            icon: FADING,
+        },
+        macro_rows.take("general.smooth_track_starts"),
+        macro_rows.take("general.fade_on_pause"),
+    ];
+
+    // Each fade duration knob only matters while its enable is on. Taken
+    // unconditionally, pushed conditionally — same convention as the Rating
+    // Reminder timing rows, so `finish()` stays data-independent.
+    let pause_ms_row = macro_rows.take("general.fade_pause_ms");
+    if data.fade_on_pause {
+        items.push(pause_ms_row);
+    }
+    items.push(macro_rows.take("general.fade_on_stop"));
+    let stop_ms_row = macro_rows.take("general.fade_stop_ms");
+    if data.fade_on_stop {
+        items.push(stop_ms_row);
+    }
+    // The skip-fade duration knob only matters while a skip-fade mode is
+    // selected — same take-unconditionally-push-conditionally convention.
+    // Matched positively against the two real modes (not `!= "Off"`) so the
+    // test-default sentinel data keeps the row gated off too.
+    items.push(macro_rows.take("general.fade_on_skip"));
+    let skip_secs_row = macro_rows.take("general.fade_skip_secs");
+    if matches!(data.fade_on_skip.as_ref(), "Boundary Fade" | "Crossfade") {
+        items.push(skip_secs_row);
+    }
+    items.push(macro_rows.take("general.fade_radio_transitions"));
+    // M8 content-aware overlap knobs close out the Fading section.
+    items.push(macro_rows.take("general.skip_silence"));
+    items.push(macro_rows.take("general.crossfade_offset"));
+    items.push(macro_rows.take("general.crossfade_bar_snap"));
+
+    items.extend([
         // --- Volume Normalization ---
         SettingsEntry::Header {
             label: "Volume Normalization",
             icon: NORMALIZATION,
         },
         macro_rows.take("general.volume_normalization"),
-    ];
+    ]);
 
     // AGC-only knob: target loudness applies only when AGC is selected.
     if data.volume_normalization.as_ref() == "AGC" {

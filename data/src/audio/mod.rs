@@ -8,9 +8,12 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 pub mod buffer;
+mod crossfade_liveness;
+pub mod crossfade_policy;
 pub mod decoder;
 pub mod engine;
 pub mod eq;
+pub mod fade_curve;
 pub mod format;
 mod generation;
 pub mod normalization;
@@ -30,6 +33,7 @@ pub mod streaming_source;
 pub mod symphonia_registry;
 
 pub use buffer::AudioBuffer;
+pub(crate) use crossfade_liveness::IncomingLiveness;
 pub use decoder::AudioDecoder;
 pub use eq::{EqProcessor, EqState};
 pub use format::{AudioFormat, SampleFormat};
@@ -41,6 +45,16 @@ pub use rodio_output::{ActiveStream, RING_BUFFER_CAPACITY, RodioOutput};
 pub use sfx_engine::{SfxEngine, SfxType};
 pub use spectrum::{SpectrumEngine, SpectrumError};
 pub use streaming_source::VisualizerCallback;
+
+/// Peak-amplitude threshold below which decoded source content counts as
+/// "silence" for the M8 Skip-Silence facets (−60 dBFS on normalized f32
+/// samples). Shared by the decoder-side leading-silence scan
+/// (`decoder::leading_trim_prefix_bytes`) and the renderer-side trailing-tail
+/// detector (`AudioRenderer::tick_trailing_silence` reading the
+/// `StreamHandle` level meter) so the two facets can never disagree on what
+/// "silent" means. Deliberately conservative: dither/noise floors and vinyl
+/// surface noise sit well above it, so only near-digital silence is skipped.
+pub(crate) const SOURCE_SILENCE_THRESHOLD: f32 = 1e-3;
 
 /// Lock-free `f32` ↔ `AtomicU32` shim using `Relaxed` ordering. Used for
 /// volume-style shared atomics where the operative discipline is "the next

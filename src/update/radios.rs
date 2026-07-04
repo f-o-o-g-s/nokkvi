@@ -204,9 +204,12 @@ impl Nokkvi {
                     logo_task,
                     self.shell_action_task(
                         move |shell| async move {
-                            shell.playback().stop().await?;
                             let engine_arc = shell.playback().audio_engine();
                             let mut engine = engine_arc.lock().await;
+                            // Radio-switch stop (M6): fades out + arms the
+                            // first-audio fade-in when "Fade Radio Switches"
+                            // is on; a plain stop otherwise.
+                            engine.stop_for_radio_switch().await;
                             // Radio: infinite stream, no metadata duration to expect.
                             engine.set_source(stream_url, None).await;
                             engine.play().await?;

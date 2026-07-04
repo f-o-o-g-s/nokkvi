@@ -1144,6 +1144,39 @@ impl Nokkvi {
         )
     }
 
+    /// M7 Fade-to-Next hotkey: skip forward with a one-shot skip-crossfade
+    /// override, regardless of the "Fade on Skip" setting (with the usual
+    /// engine-side fallbacks when a blend is blocked). Mirrors
+    /// [`Self::handle_next_track`] — including the radio branch, where "next
+    /// with a fade" is the station cycle (M6's switch fade owns any radio
+    /// softening).
+    pub(crate) fn handle_fade_to_next(&mut self) -> Task<Message> {
+        if self.active_playback.is_radio() {
+            return self.cycle_radio_station(true);
+        }
+        let is_consume = self.modes.consume;
+        self.shell_task(
+            move |shell| async move {
+                let advanced = shell.next_with_fade().await.unwrap_or(false);
+                (advanced, is_consume)
+            },
+            |(advanced, consume)| {
+                if !advanced {
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            "No next track",
+                            nokkvi_data::types::toast::ToastLevel::Info,
+                        ),
+                    ))
+                } else if consume {
+                    Message::LoadQueue
+                } else {
+                    Message::Playback(PlaybackMessage::Tick)
+                }
+            },
+        )
+    }
+
     pub(crate) fn handle_prev_track(&mut self) -> Task<Message> {
         if self.active_playback.is_radio() {
             return self.cycle_radio_station(false);
@@ -1243,9 +1276,12 @@ impl Nokkvi {
 
             tasks.push(self.shell_action_task(
                 move |shell| async move {
-                    shell.playback().stop().await?;
                     let engine_arc = shell.playback().audio_engine();
                     let mut engine = engine_arc.lock().await;
+                    // Radio-switch stop (M6): fades out + arms the
+                    // first-audio fade-in when "Fade Radio Switches" is on;
+                    // a plain stop otherwise.
+                    engine.stop_for_radio_switch().await;
                     // Radio: infinite stream, no metadata duration to expect.
                     engine.set_source(stream_url, None).await;
                     engine.play().await?;
@@ -1830,6 +1866,20 @@ impl Nokkvi {
             let enabled = settings.crossfade_enabled;
             let bit_perfect = settings.bit_perfect;
             let duration_secs = settings.crossfade_duration_secs;
+            let curve = settings.crossfade_curve;
+            let min_track_secs = settings.crossfade_min_track_secs;
+            let album_gapless = settings.crossfade_album_gapless;
+            let smooth_starts = settings.smooth_track_starts;
+            let fade_on_pause = settings.fade_on_pause;
+            let fade_pause_ms = settings.fade_pause_ms;
+            let fade_on_stop = settings.fade_on_stop;
+            let fade_stop_ms = settings.fade_stop_ms;
+            let fade_radio = settings.fade_radio_transitions;
+            let fade_on_skip = settings.fade_on_skip;
+            let fade_skip_secs = settings.fade_skip_secs;
+            let skip_silence = settings.skip_silence;
+            let crossfade_offset = settings.crossfade_offset_secs;
+            let bar_snap = settings.crossfade_bar_snap;
             let mode = settings.volume_normalization;
             let norm_target = settings.normalization_level.target_level();
             let preamp_db = settings.replay_gain_preamp_db;
@@ -1844,6 +1894,23 @@ impl Nokkvi {
                     engine_guard.set_crossfade_enabled(enabled).await;
                     engine_guard.set_bit_perfect(bit_perfect).await;
                     engine_guard.set_crossfade_duration(duration_secs);
+                    engine_guard.set_crossfade_curve(curve);
+                    engine_guard.set_crossfade_min_track_secs(min_track_secs);
+                    engine_guard
+                        .set_crossfade_album_gapless(album_gapless)
+                        .await;
+                    engine_guard.set_smooth_track_starts(smooth_starts);
+                    engine_guard.set_transport_fades(
+                        fade_on_pause,
+                        fade_pause_ms,
+                        fade_on_stop,
+                        fade_stop_ms,
+                    );
+                    engine_guard.set_fade_radio_transitions(fade_radio);
+                    engine_guard.set_skip_fade(fade_on_skip, fade_skip_secs);
+                    engine_guard.set_skip_silence(skip_silence).await;
+                    engine_guard.set_crossfade_offset(crossfade_offset);
+                    engine_guard.set_crossfade_bar_snap(bar_snap).await;
                     engine_guard.set_volume_normalization(
                         mode,
                         norm_target,
@@ -2233,6 +2300,7 @@ impl Nokkvi {
             PlaybackMessage::Pause => self.handle_pause(),
             PlaybackMessage::Stop => self.handle_stop(),
             PlaybackMessage::NextTrack => self.handle_next_track(),
+            PlaybackMessage::FadeToNext => self.handle_fade_to_next(),
             PlaybackMessage::PrevTrack => self.handle_prev_track(),
             PlaybackMessage::ToggleRandom => self.handle_toggle_random(),
             PlaybackMessage::RandomToggled(random) => self.handle_random_toggled(random),

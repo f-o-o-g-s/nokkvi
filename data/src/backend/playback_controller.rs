@@ -38,6 +38,14 @@ pub struct PlaybackController {
     queue_service: QueueService,
     settings_service: SettingsService,
     task_manager: Arc<TaskManager>,
+    /// M7 skip supersession counter: stamped (under the engine+navigator
+    /// locks) at the START of every manual next/previous, and re-checked
+    /// before a [`SkipFadePlan`](crate::services::playback::SkipFadePlan)
+    /// fires — the plan's decoder builds with NO locks held, so a newer skip
+    /// can land mid-build and must win (only the LATEST skip may drive the
+    /// engine). Competing NON-skip actions are covered separately by the
+    /// source-generation snapshot inside `crossfade_to_next`.
+    skip_fade_seq: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl std::fmt::Debug for PlaybackController {
@@ -163,6 +171,7 @@ impl PlaybackController {
                 queue_service,
                 settings_service,
                 task_manager,
+                skip_fade_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             },
             loop_rx,
             queue_changed_rx,
@@ -331,6 +340,24 @@ impl PlaybackController {
 
     /// Play next track. Returns `true` if a next track was played, `false` if at end of queue.
     pub async fn next(&self) -> Result<bool> {
+        self.next_inner(None).await
+    }
+
+    /// Play next track with a one-shot skip-crossfade override (the M7
+    /// FadeToNext hotkey): blends into the next track regardless of the
+    /// "Fade on Skip" setting, with the usual fallbacks when a blend is
+    /// blocked.
+    pub async fn next_with_fade(&self) -> Result<bool> {
+        self.next_inner(Some(crate::types::player_settings::FadeOnSkip::Crossfade))
+            .await
+    }
+
+    async fn next_inner(
+        &self,
+        override_mode: Option<crate::types::player_settings::FadeOnSkip>,
+    ) -> Result<bool> {
+        use crate::services::playback::NextOutcome;
+
         let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
         if server_url.is_empty() {
             return Ok(false);
@@ -339,17 +366,45 @@ impl PlaybackController {
         let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
 
+        // Stamp this skip as the latest (any in-flight skip-fade build is
+        // superseded), and resolve the effective mode under the locks.
+        let seq = self
+            .skip_fade_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        let skip_fade = override_mode.unwrap_or_else(|| engine.skip_fade_mode());
+
         match queue_navigator
-            .play_next(&mut engine, &server_url, &subsonic_credential)
+            .play_next(&mut engine, &server_url, &subsonic_credential, skip_fade)
             .await
         {
-            Ok(result) => {
-                let advanced = result.is_some();
+            Ok(NextOutcome::NoNext) => {
                 drop(queue_navigator);
                 drop(engine);
                 // Sync reactive current_index for UI highlighting
                 self.queue_service.refresh_from_queue().await?;
-                Ok(advanced)
+                Ok(false)
+            }
+            Ok(NextOutcome::Played(..)) => {
+                drop(queue_navigator);
+                drop(engine);
+                self.queue_service.refresh_from_queue().await?;
+                Ok(true)
+            }
+            Ok(NextOutcome::FadePlanned(plan)) => {
+                // Snapshot for the fire-time staleness check while the lock
+                // is still held — this reads the POST-plan value
+                // (`plan_skip_fade` bumped it inside `play_next`), so every
+                // completion dispatch from before the plan is already stale.
+                let generation = engine.source_generation();
+                drop(queue_navigator);
+                drop(engine);
+                // Refresh FIRST — the queue already advanced (cursor, history,
+                // consume), so the UI reflects the skip immediately while the
+                // incoming decoder builds.
+                self.queue_service.refresh_from_queue().await?;
+                self.complete_skip_fade(plan, generation, seq).await?;
+                Ok(true)
             }
             Err(e) => {
                 drop(queue_navigator);
@@ -369,17 +424,27 @@ impl PlaybackController {
         let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
 
+        let seq = self
+            .skip_fade_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        let skip_fade = engine.skip_fade_mode();
+
         match queue_navigator
-            .play_previous(&mut engine, &server_url, &subsonic_credential)
+            .play_previous(&mut engine, &server_url, &subsonic_credential, skip_fade)
             .await
         {
-            Ok(outcome) => {
+            Ok((outcome, plan)) => {
+                let generation = engine.source_generation();
                 drop(queue_navigator);
                 drop(engine);
                 // A blocked step-back changed nothing, so skip the reactive
                 // refresh; otherwise sync current_index for UI highlighting.
                 if outcome == PreviousOutcome::Stepped {
                     self.queue_service.refresh_from_queue().await?;
+                }
+                if let Some(plan) = plan {
+                    self.complete_skip_fade(plan, generation, seq).await?;
                 }
                 Ok(outcome)
             }
@@ -389,6 +454,33 @@ impl PlaybackController {
                 Err(e)
             }
         }
+    }
+
+    /// Complete a queue-layer [`SkipFadePlan`](crate::services::playback::SkipFadePlan):
+    /// build the incoming decoder with NO locks held (invariants 13 + 14 —
+    /// through the shared registry via `AudioDecoder::init`, never under the
+    /// engine lock), then briefly lock the engine to fire the blend. When
+    /// the blend is refused (`Blocked`) or the build failed, fall back to
+    /// the boundary out-fade (self-refusing) + a plain hard load so the skip
+    /// still lands; when superseded (`Stale` / a newer skip stamped the
+    /// sequence), do nothing — the competing action owns the engine.
+    ///
+    /// Body lives in the module-level [`complete_skip_fade`] so the fallback
+    /// branches are testable without constructing a full controller.
+    async fn complete_skip_fade(
+        &self,
+        plan: crate::services::playback::SkipFadePlan,
+        generation: u64,
+        seq: u64,
+    ) -> Result<()> {
+        complete_skip_fade(
+            &self.audio_engine,
+            &self.skip_fade_seq,
+            plan,
+            generation,
+            seq,
+        )
+        .await
     }
 
     /// Seek to position
@@ -542,51 +634,114 @@ impl PlaybackController {
     /// The engine lock is only held briefly to store the already-downloaded decoder.
     /// Returns true if preparation was triggered, false if not needed
     pub async fn prepare_next_for_gapless(&self) -> bool {
-        // Quick check if already prepared (minimal lock time)
-        {
+        // Quick check if already prepared (minimal lock time); also snapshot
+        // the crossfade-policy inputs (min-track floor + album-continuity
+        // gate) for the M4 decision below, plus the M8 transition-shaping
+        // knobs (bar-snap, gap offset, leading-trim verdict).
+        let prep_cfg = {
             let engine = self.audio_engine.lock().await;
             if engine.is_next_track_prepared().await {
                 return false; // Already prepared
             }
-        }
+            engine.transition_prep_cfg()
+        };
 
         let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
         if server_url.is_empty() {
             return false;
         }
 
-        // Get the next track URL from queue manager WITHOUT holding the engine lock
-        let (stream_url, replay_gain, expected_duration_ms, is_repeat_track): (
-            Option<String>,
-            Option<crate::types::song::ReplayGain>,
-            Option<u64>,
-            bool,
-        ) = {
+        // Get the next track URL from queue manager WITHOUT holding the engine
+        // lock. Also resolve the CURRENT song + the transition reason — the
+        // engine boundary carries no Song metadata, so the crossfade-vs-gapless
+        // policy decision (M4) is computed here, controller-side.
+        struct PeekedPrep {
+            url: String,
+            replay_gain: Option<crate::types::song::ReplayGain>,
+            expected_duration_ms: Option<u64>,
+            directives: crate::audio::engine::PreparedTransitionDirectives,
+        }
+        let (prep, is_repeat_track): (Option<PeekedPrep>, bool) = {
             let queue_manager_arc = self.queue_service.queue_manager();
             let mut queue_manager = queue_manager_arc.lock().await;
             let repeat_track =
                 queue_manager.get_queue().repeat == crate::types::queue::RepeatMode::Track;
+            let current_song = queue_manager.get_current_song();
 
             if let Some(peeked) = queue_manager.peek_next_song() {
                 let next_song = peeked.song().clone();
+                let reason = peeked.reason();
                 drop(peeked); // explicit: clears queued; gapless prep proceeds with the captured data
                 let url = crate::utils::artwork_url::build_stream_url(
                     &next_song.id,
                     &server_url,
                     &subsonic_credential,
                 );
+                // The per-transition verdicts ride down to
+                // `store_prepared_decoder` (the engine boundary carries no
+                // Song metadata). An unresolvable current song can't prove a
+                // continuation and carries no BPM — default to not
+                // suppressing / no snap (crossfade proceeds exactly as
+                // before M4/M8); the gap offset still applies (it is a
+                // spacing preference, not a metadata verdict).
+                let (decision, outgoing_bpm) = match &current_song {
+                    Some(current) => (
+                        Some(crate::audio::crossfade_policy::crossfade_decision(
+                            current,
+                            &next_song,
+                            reason,
+                            &prep_cfg.policy,
+                        )),
+                        current.bpm,
+                    ),
+                    None => (None, None),
+                };
+                let suppress_crossfade = decision.is_some_and(|d| d.suppresses_crossfade());
+                // Bar-snap only shapes a transition that will actually blend.
+                let duration_override_ms = if prep_cfg.bar_snap && !suppress_crossfade {
+                    crate::audio::crossfade_policy::bar_snapped_crossfade_ms(
+                        prep_cfg.crossfade_duration_ms,
+                        outgoing_bpm,
+                    )
+                } else {
+                    None
+                };
+                // "Keep Gapless Albums Seamless" means no gap either —
+                // an authored segue stays tight; every other gapless join
+                // honors the user's spacing.
+                let gap_offset_ms = if decision
+                    == Some(
+                        crate::audio::crossfade_policy::CrossfadeDecision::GaplessAlbumContinuation,
+                    ) {
+                    0
+                } else {
+                    prep_cfg.gap_offset_ms
+                };
                 (
-                    Some(url),
-                    next_song.replay_gain.clone(),
-                    next_song.expected_duration_ms(),
+                    Some(PeekedPrep {
+                        url,
+                        replay_gain: next_song.replay_gain.clone(),
+                        expected_duration_ms: next_song.expected_duration_ms(),
+                        directives: crate::audio::engine::PreparedTransitionDirectives {
+                            suppress_crossfade,
+                            duration_override_ms,
+                            gap_offset_ms,
+                        },
+                    }),
                     repeat_track,
                 )
             } else {
-                (None, None, None, repeat_track)
+                (None, repeat_track)
             }
         };
 
-        let Some(url) = stream_url else {
+        let Some(PeekedPrep {
+            url,
+            replay_gain,
+            expected_duration_ms,
+            directives,
+        }) = prep
+        else {
             return false;
         };
 
@@ -619,18 +774,23 @@ impl PlaybackController {
         let url_for_task = url.clone();
         let rg_for_task = replay_gain;
 
+        let trim_leading_silence = prep_cfg.trim_leading_silence;
         self.task_manager
             .spawn_result("gapless_prep", move || async move {
                 // Create and initialize decoder OUTSIDE the engine lock
                 // This is the slow part - downloads ~20MB of audio
                 let mut decoder = crate::audio::AudioDecoder::default();
                 decoder.set_expected_duration_ms(expected_duration_ms);
+                // M8: transition decoders opt into the leading-silence trim
+                // (user-initiated loads stay honest; bit-perfect gated off
+                // engine-side in `transition_prep_cfg`).
+                decoder.set_trim_leading_silence(trim_leading_silence);
                 decoder.init(&url_for_task).await?;
 
                 // BRIEF lock to store the already-downloaded decoder
                 let mut engine = audio_engine.lock().await;
                 engine
-                    .store_prepared_decoder(decoder, url_for_task.clone(), rg_for_task)
+                    .store_prepared_decoder(decoder, url_for_task.clone(), rg_for_task, directives)
                     .await;
                 drop(engine);
                 debug!(
@@ -1016,6 +1176,104 @@ impl PlaybackController {
     }
 }
 
+/// Body of [`PlaybackController::complete_skip_fade`] — see its doc. A
+/// module-level function over the shared engine mutex + supersession counter
+/// (rather than `&self`) so the phase-3 fire/fallback branches are unit
+/// testable without a full controller.
+async fn complete_skip_fade(
+    audio_engine: &Mutex<CustomAudioEngine>,
+    skip_fade_seq: &std::sync::atomic::AtomicU64,
+    plan: crate::services::playback::SkipFadePlan,
+    generation: u64,
+    seq: u64,
+) -> Result<()> {
+    // Phase 2 — the slow network part, no locks held.
+    let mut decoder = crate::audio::AudioDecoder::default();
+    decoder.set_expected_duration_ms(plan.song.expected_duration_ms());
+    let built = decoder.init(&plan.stream_url).await;
+
+    // Phase 3 — brief engine lock to fire (or fall back).
+    let mut engine = audio_engine.lock().await;
+    if skip_fade_seq.load(std::sync::atomic::Ordering::SeqCst) != seq {
+        debug!("🔀 [SKIP FADE] Superseded by a newer skip — abandoning build");
+        return Ok(());
+    }
+
+    match built {
+        Ok(()) => {
+            use crate::audio::engine::SkipFadeOutcome;
+            match engine
+                .crossfade_to_next(
+                    decoder,
+                    plan.stream_url.clone(),
+                    plan.song.replay_gain.clone(),
+                    generation,
+                )
+                .await
+            {
+                SkipFadeOutcome::Fired => {
+                    debug!(
+                        "▶️ Now Playing: {} - {} ({}, skip fade)",
+                        plan.song.title, plan.song.artist, plan.reason
+                    );
+                    return Ok(());
+                }
+                SkipFadeOutcome::Stale => return Ok(()),
+                SkipFadeOutcome::Blocked => {
+                    debug!("🔀 [SKIP FADE] Blend blocked — boundary fallback");
+                }
+            }
+        }
+        Err(e) => {
+            debug!("🔀 [SKIP FADE] Incoming decoder build failed ({e}) — hard fallback");
+        }
+    }
+
+    // Fallback: the queue already advanced, so the skip MUST still land.
+    // Guard against a competing action that took the engine while the build
+    // ran (its load owns the state).
+    if engine.source_generation() != generation {
+        return Ok(());
+    }
+    // A Stop or Pause pressed during the unlocked build window flips
+    // transport state WITHOUT bumping the source generation (only source
+    // CHANGES bump), so the guard above cannot see it — and it must WIN:
+    // hard-loading + `play()` here would audibly override the user's
+    // action. Stage the skip target as the engine source WITHOUT playing
+    // (`load_track_with_rg` on a silent engine does no network I/O): the
+    // queue already names the target, and the engine's stale source would
+    // otherwise make a later Play resume the OUTGOING against the advanced
+    // queue. The `set_source` bump also closes the pending window.
+    if !engine.immediate_playing() {
+        engine
+            .load_track_with_rg(
+                &plan.stream_url,
+                plan.song.replay_gain.clone(),
+                plan.song.expected_duration_ms(),
+            )
+            .await;
+        debug!(
+            "⏹️ [SKIP FADE] Engine stopped/paused during build — staged {} - {} without playing",
+            plan.song.title, plan.song.artist
+        );
+        return Ok(());
+    }
+    engine.run_skip_out_fade().await;
+    engine
+        .load_track_with_rg(
+            &plan.stream_url,
+            plan.song.replay_gain.clone(),
+            plan.song.expected_duration_ms(),
+        )
+        .await;
+    engine.play().await?;
+    debug!(
+        "▶️ Now Playing: {} - {} ({}, skip-fade fallback)",
+        plan.song.title, plan.song.artist, plan.reason
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1039,6 +1297,95 @@ mod tests {
         assert!(
             !PlaybackController::should_reanchor_for_play(PlaybackState::Playing),
             "Playing must keep plain reposition (mid-session listen)"
+        );
+    }
+
+    /// A `SkipFadePlan` aimed at a port that never listens (connection
+    /// refused — fast + offline-safe), so the phase-2 decoder build fails
+    /// deterministically and `complete_skip_fade` runs its fallback branch.
+    fn unreachable_plan() -> crate::services::playback::SkipFadePlan {
+        crate::services::playback::SkipFadePlan {
+            song: crate::types::song::Song::test_default("b", "Song b"),
+            reason: crate::services::queue::TransitionReason::Next,
+            stream_url: "http://127.0.0.1:9/rest/stream?id=b".to_string(),
+        }
+    }
+
+    /// M7 review cycle 1 — a Stop pressed during the unlocked decoder-build
+    /// window must WIN: stop flips transport state without bumping the
+    /// source generation, so the fallback's generation guard cannot see it.
+    /// The fallback must not hard-load + `play()` (audible override of the
+    /// user's stop); it stages the skip target as the engine source WITHOUT
+    /// playing, so a later Play starts the target the queue already names —
+    /// not the stale outgoing.
+    ///
+    /// (On the unreachable test URL a `play()` attempt would surface as an
+    /// `Err` from decoder init — `is_ok()` therefore pins "no play attempt".)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skip_fade_fallback_respects_stop_during_build() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let seq = std::sync::atomic::AtomicU64::new(1);
+        let generation;
+        {
+            let mut e = engine.lock().await;
+            e.force_playing_for_test();
+            e.plan_skip_fade().await;
+            generation = e.source_generation();
+            // The user presses Stop while the incoming decoder builds
+            // (locks released).
+            e.stop().await;
+            assert!(!e.playing(), "precondition: the user stop landed");
+        }
+
+        let result = complete_skip_fade(&engine, &seq, unreachable_plan(), generation, 1).await;
+
+        let e = engine.lock().await;
+        assert!(
+            result.is_ok(),
+            "the fallback must not attempt play() after a user stop: {result:?}"
+        );
+        assert!(
+            !e.playing(),
+            "the user's Stop must win over the skip fallback"
+        );
+        assert!(
+            e.is_playing_source("http://127.0.0.1:9/rest/stream?id=b"),
+            "the skip target must be staged as the engine source (queue is \
+             already on it; a later Play then starts IT, not the outgoing)"
+        );
+    }
+
+    /// M7 review cycle 1 — the Pause variant of the same window: pre-M7,
+    /// Next-then-Pause ended silent on the new track; the fallback must not
+    /// end PLAYING it. Like the stop case, the target is staged un-played.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skip_fade_fallback_respects_pause_during_build() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let seq = std::sync::atomic::AtomicU64::new(7);
+        let generation;
+        {
+            let mut e = engine.lock().await;
+            e.force_playing_for_test();
+            e.plan_skip_fade().await;
+            generation = e.source_generation();
+            e.pause();
+            assert!(e.immediate_paused(), "precondition: the user pause landed");
+        }
+
+        let result = complete_skip_fade(&engine, &seq, unreachable_plan(), generation, 7).await;
+
+        let e = engine.lock().await;
+        assert!(
+            result.is_ok(),
+            "the fallback must not attempt play() after a user pause: {result:?}"
+        );
+        assert!(
+            !e.playing(),
+            "the user's Pause must win — the skip fallback must not resume"
+        );
+        assert!(
+            e.is_playing_source("http://127.0.0.1:9/rest/stream?id=b"),
+            "the skip target must be staged so a later Play starts it"
         );
     }
 

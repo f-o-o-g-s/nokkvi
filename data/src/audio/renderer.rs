@@ -18,14 +18,14 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     audio::{
-        AudioFormat, NormalizationConfig, NormalizationContext, SourceGeneration,
+        AudioFormat, IncomingLiveness, NormalizationConfig, NormalizationContext, SourceGeneration,
         format::samples_for_duration,
         resolve_normalization,
         rodio_output::{ActiveStream, RodioOutput},
         streaming_source::SharedVisualizerCallback,
     },
     types::{
-        player_settings::{BitPerfectMode, VolumeNormalizationMode},
+        player_settings::{BitPerfectMode, CrossfadeCurve, VolumeNormalizationMode},
         song::ReplayGain,
     },
 };
@@ -60,8 +60,113 @@ enum CrossfadeState {
         /// When `Some`, the crossfade is currently paused; the span since this
         /// instant is folded into `paused_accum` on resume.
         paused_at: Option<std::time::Instant>,
+        /// Fade curve CAPTURED from the live setting at `start_crossfade`.
+        /// `tick_crossfade` reads this, never `self.crossfade_curve`, so a
+        /// mid-fade settings change cannot tear the in-flight envelope (the
+        /// new curve applies from the next crossfade).
+        curve: CrossfadeCurve,
     },
 }
+
+/// What a completed transport fade-out resolves into (M5).
+///
+/// `Pause` ends in the real stream-level `pause()` (position freezes, ring
+/// kept); `Stop` ends in `silence_and_stop()` (stream removed from the mixer
+/// — the engine's teardown then proceeds). The M7 boundary skip fade
+/// (`engine.run_skip_out_fade`) reuses the `Stop` target — its end action
+/// is identical, and the engine's follow-up (`set_source`'s internal stop +
+/// fresh load) owns the difference — so no separate `Skip` variant exists
+/// (M6's radio-switch fade set the precedent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransportFadeTarget {
+    Pause,
+    Stop,
+}
+
+/// Renderer-side transport-fade state machine (M5): short gain ramps for
+/// pause / resume / stop instead of flipping the `paused`/`stopped` atomics
+/// mid-waveform (a guaranteed click). Driven by the 20 ms render thread.
+///
+/// SEPARATE from [`CrossfadeState`] by design (mirroring the deliberate
+/// engine-phase/renderer-state split): a transport fade engages only while
+/// the crossfade machine is `Idle` and never fights a blend.
+///
+/// Guard-lift design: `begin_pause_fade` / `begin_stop_fade` set
+/// `self.paused = true` IMMEDIATELY (freezing the completion gate, the
+/// rebuffer path, and the armed crossfade trigger below `render_tick`'s
+/// early-return), and the ramp itself is ticked ABOVE that early-return.
+/// Deferring `paused` until ramp completion would leave `render_tick` fully
+/// live for the whole ~100 ms — a pause near end-of-track could then fire
+/// `on_renderer_finished` and advance the queue mid-ramp.
+///
+/// `gen` is the per-fade generation token: a completion applies only when it
+/// matches the renderer's live counter, so a ramp that was interrupted (or
+/// cancelled) can never apply its stale end-state action.
+enum TransportFade {
+    Idle,
+    FadingOut {
+        target: TransportFadeTarget,
+        started_at: std::time::Instant,
+        duration_ms: u64,
+        generation: u64,
+        /// Volume seed captured from the stream's last-written `volume`
+        /// atomic at begin time — an interrupting ramp continues from the
+        /// audible level instead of snapping.
+        from: f32,
+        /// One-tick hold between the ramp floor and the end-state action.
+        /// The audible gain is the consumer-side ~5 ms-tau EMA in
+        /// `StreamingSource::next()`, which LAGS the `volume` atomic — and
+        /// `next()` emits silence the instant the paused/stopped atomic
+        /// flips, so applying the end action in the same tick as the final
+        /// 0.0 write cuts at the EMA's pre-floor gain (at the 20 ms slider
+        /// minimum ≈ one tick period, a near/full-amplitude hard cut — the
+        /// exact click the ramp exists to remove). The floor tick sets this
+        /// and returns; the NEXT tick (20 ms ≈ 4 EMA time constants at
+        /// silence) applies the real pause / silence_and_stop.
+        settling: bool,
+    },
+    FadingIn {
+        started_at: std::time::Instant,
+        duration_ms: u64,
+        generation: u64,
+        /// See `FadingOut::from`.
+        from: f32,
+    },
+    /// M6 radio-switch fade-in: hold the fresh primary SILENT — ignoring
+    /// wall clock — until the mixer pulls real samples past
+    /// `baseline_samples` (`samples_consumed` counts only real pulls, never
+    /// paused or ring-starvation silence), then ramp 0 → `stream_volume()`
+    /// over [`RADIO_SWITCH_FADE_MS`]. A wall-clock ramp from stream creation
+    /// would finish during the radio prebuffer silence and pop to full gain
+    /// when audio finally arrives.
+    ///
+    /// Unlike the M5 ramps, this fade SURVIVES pause/start cycles: the radio
+    /// jitter prebuffer re-issues `pause()` every decoded chunk until ~5 s
+    /// is buffered, then unpauses via `start()`. `pause()` RE-ARMS the fade
+    /// (back to holding, with a fresh baseline) instead of cancelling —
+    /// play()'s prebuffer lets the mixer pull a silent TRICKLE of real
+    /// samples before the first jitter pause, and without the re-baseline
+    /// that trickle would start (and silently burn) the ramp during the
+    /// hold, popping the true onset at full gain.
+    SwitchFadeIn {
+        /// `None` while holding for real consumption past
+        /// `baseline_samples`; `Some(ramp start)` once audio flows.
+        started_at: Option<std::time::Instant>,
+        /// `samples_consumed` snapshot at (re)arm time — the ramp starts
+        /// only once consumption moves PAST this. A read BELOW it means the
+        /// counter was reset (new-track bookkeeping); re-baseline then, or
+        /// the fade could hold at silence forever.
+        baseline_samples: u64,
+        generation: u64,
+    },
+}
+
+/// Radio-switch fade length in milliseconds (M6, "Fade Radio Switches").
+/// Fixed by design — the setting is a single Bool with no duration knob: a
+/// deliberate soft edge for the out-ramp and the first-audio in-ramp without
+/// noticeably delaying the switch (the out-ramp bounds the engine's
+/// switch-stop at ~270 ms including the settle tick).
+pub(crate) const RADIO_SWITCH_FADE_MS: u64 = 250;
 
 /// Outcome of a single [`AudioRenderer::tick_crossfade`] call.
 ///
@@ -153,6 +258,18 @@ pub(crate) const MUSIC_SINK_DEFAULT_RATE: u32 = 48_000;
 /// so give up rebuffering and let the completion/empty-buffer path run instead of
 /// pausing indefinitely.
 const MAX_REBUFFER_TICKS: u32 = 500;
+
+/// M8 trailing-silence trim: how far before the NORMAL trigger point
+/// (`track_dur − fade`) the Armed branch starts watching the level meter.
+/// Bounds the early trigger to a genuine trailing tail — a quiet passage
+/// mid-song can never fire it. 15 s covers real-world fade-outs and hidden
+/// pregap silence without swallowing whole quiet outros.
+const TRAILING_SILENCE_WINDOW_MS: u64 = 15_000;
+
+/// M8 trailing-silence trim: consecutive sub-threshold render ticks (20 ms
+/// each ⇒ 500 ms of sustained near-digital silence) required before the
+/// early trigger fires. One noisy meter window resets the count.
+const TRAILING_SILENCE_SUSTAIN_TICKS: u32 = 25;
 
 /// What `render_tick` should do about the network rebuffer this tick.
 #[derive(PartialEq, Eq, Debug)]
@@ -275,11 +392,98 @@ pub struct AudioRenderer {
 
     /// Crossfade phase + per-phase data. See [`CrossfadeState`].
     crossfade_state: CrossfadeState,
+    /// Fade curve applied to NEW crossfades (pushed from settings via
+    /// [`Self::set_crossfade_curve`]). `start_crossfade` captures it into the
+    /// `Active` variant; an in-flight fade keeps its captured curve.
+    crossfade_curve: CrossfadeCurve,
+    /// Minimum track length (ms) for crossfade eligibility — the
+    /// [`Self::arm_crossfade`] floor, pushed from settings via
+    /// [`Self::set_crossfade_min_track_secs`] (M4; historically the
+    /// hardcoded 10 s `MIN_CROSSFADE_TRACK_MS`). Tracks shorter than this
+    /// fall back to a gapless transition.
+    crossfade_min_track_ms: u64,
     /// Elapsed crossfade time (ms) staged after `finalize_crossfade` so the
     /// engine can read it on the next render tick as a position offset.
     /// Lives outside `CrossfadeState` because it survives the Active→Idle
     /// transition by exactly one tick.
     crossfade_finalized_elapsed_ms: u64,
+    /// M8 negative "Gap / Overlap Trim": how much EARLIER (ms) the Armed
+    /// position trigger fires than `track_dur − fade` — the blend starts
+    /// early and `try_finalize_crossfade` discards the outgoing's last
+    /// `crossfade_lead_ms` of tail (invariant 5's finalize-before-EOF path).
+    /// 0 for a zero/positive offset (the gap side lives in the engine decode
+    /// loop, not here). Pushed from settings via
+    /// [`Self::set_crossfade_lead_ms`].
+    crossfade_lead_ms: u64,
+    /// M8 "Skip Silence Between Tracks" renderer mirror — gates the
+    /// trailing-silence early trigger in `render_tick`'s Armed branch (the
+    /// leading-trim half lives decoder-side). Pushed from settings via
+    /// [`Self::set_skip_silence`].
+    skip_silence: bool,
+    /// M8 trailing-silence sustain counter: consecutive render ticks (20 ms
+    /// each) inside the trailing window whose meter reading sat below
+    /// [`crate::audio::SOURCE_SILENCE_THRESHOLD`]. Reset by any loud
+    /// reading, by leaving the window, and by `arm_crossfade` (each armed
+    /// transition starts fresh). The early trigger fires at
+    /// [`TRAILING_SILENCE_SUSTAIN_TICKS`].
+    trailing_silence_ticks: u32,
+    /// M9 "already-signalled" latch: set the first time a completed fade's
+    /// stall is signalled to the engine, so `render_tick` (20 ms cadence)
+    /// cannot respawn `recover_stalled_crossfade` every tick while the one
+    /// spawned recovery task waits on the engine lock. Cleared whenever the
+    /// Active fade it guards is torn down or replaced (`start_crossfade`,
+    /// `cancel_crossfade`, `finalize_crossfade` — every cancel path,
+    /// including recovery itself and `stop()`, funnels through
+    /// `cancel_crossfade`, so a stranded latch is structurally impossible).
+    stall_recovery_signalled: bool,
+    /// M9 Part B liveness handle for the CURRENT fade's incoming decode
+    /// loop, installed by the engine's `start_crossfade_decode_loop` right
+    /// after it spawns the loop (a fresh per-fade instance, so a superseded
+    /// loop's late writes can never pollute a newer fade's verdict) and
+    /// cleared on the same lifecycle edges as the stall latch. `None` (no
+    /// loop installed yet, or a fade whose engine half never started) always
+    /// reads as live — the empty-ring completion gate still covers that.
+    incoming_liveness: Option<Arc<IncomingLiveness>>,
+
+    /// Transport-fade phase + per-phase data (M5). See [`TransportFade`].
+    transport_fade: TransportFade,
+    /// Live generation counter for transport fades. Every `begin_*` bumps it
+    /// and stamps the new value into the state; `cancel_transport_fade` bumps
+    /// it without starting a ramp. A completion whose stamped `gen` no longer
+    /// matches is stale and applies no end-state action.
+    transport_fade_gen: u64,
+    /// Renderer-side mirror of the "Fade on Pause / Resume" setting — the
+    /// renderer owns the enforcing copy because BOTH consumers are here
+    /// (`begin_pause_fade` and `start()`'s resume fade-in). The stop pair
+    /// lives on the engine's `FadeCoordinator` (its consumer is
+    /// `engine.stop()`). Pushed via [`Self::set_pause_fade`].
+    fade_on_pause: bool,
+    /// Pause/resume ramp length in milliseconds (mirror, see `fade_on_pause`).
+    fade_pause_ms: u64,
+    /// Whether new NON-bit-perfect streams get the M2 de-click onset ramp
+    /// (the "Smooth Track Starts" setting, default on). Threaded into every
+    /// stream build; `false` restores the instant, honest onset. Bit-perfect
+    /// streams never ramp regardless (invariant 8).
+    smooth_track_starts: bool,
+    /// M6 "Fade Radio Switches": one-shot request set by the engine after a
+    /// radio-switch teardown (queue→radio via `stop_for_radio_switch`,
+    /// radio→queue via `set_source`'s internal stop). Consumed at the next
+    /// fresh primary-stream build (`init()`, with a fresh-`start()`
+    /// belt-and-braces) — which arms the first-audio fade-in on the new
+    /// primary — and cleared by `stop()` so it can never leak past a
+    /// teardown into an unrelated later play.
+    pending_switch_fade_in: bool,
+    /// Count of REAL transport-fade completions (ramp reached 1.0 and its
+    /// end-state action applied — never cancels, never stale discards).
+    /// Test observability only: the engine's stop-ordering test asserts the
+    /// fade completed via live render ticks rather than timing heuristics.
+    #[cfg(test)]
+    transport_fade_completions: u64,
+    /// Count of stall-recovery signals actually sent past the M9 latch.
+    /// Test observability only: pins that a stalled fade signals recovery
+    /// exactly once, not once per 20 ms tick.
+    #[cfg(test)]
+    stall_signals_sent: u64,
 
     /// Shared visualizer callback slot. Owned by the renderer, shared with
     /// all `RodioOutput` instances and their `StreamingSource`s.
@@ -395,6 +599,27 @@ impl AudioRenderer {
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
     }
 
+    /// Take the staged crossfade RG out (leaving `None`). Used by the
+    /// engine's skip-fade stall recovery to carry the skip target's RG into
+    /// the hard reload BEFORE `cancel_crossfade` drops the staged copy.
+    pub fn take_pending_crossfade_replay_gain(&mut self) -> Option<ReplayGain> {
+        self.pending_crossfade_replay_gain.take()
+    }
+
+    /// Test-only: the promoted stream's ReplayGain bookkeeping, so engine
+    /// tests can pin the finalize-time RG promotion.
+    #[cfg(test)]
+    pub fn current_replay_gain_for_test(&self) -> Option<ReplayGain> {
+        self.current_replay_gain.clone()
+    }
+
+    /// Test-only: the staged next-transition ReplayGain, so engine tests can
+    /// pin that a mid-blend prep never clobbers the live blend's staged copy.
+    #[cfg(test)]
+    pub fn pending_crossfade_replay_gain_for_test(&self) -> Option<ReplayGain> {
+        self.pending_crossfade_replay_gain.clone()
+    }
+
     /// In ReplayGain-track mode, the rodio chain's `amplify` factor is
     /// baked in at stream creation. The decode-loop's gapless swap reuses
     /// the same primary stream, which would mis-level the next track.
@@ -461,7 +686,26 @@ impl AudioRenderer {
             rebuffer_primed: false,
             rebuffer_ticks: 0,
             crossfade_state: CrossfadeState::Idle,
+            crossfade_curve: CrossfadeCurve::default(),
+            crossfade_min_track_ms: u64::from(
+                crate::types::player_settings::CROSSFADE_MIN_TRACK_DEFAULT_SECS,
+            ) * 1000,
             crossfade_finalized_elapsed_ms: 0,
+            crossfade_lead_ms: 0,
+            skip_silence: false,
+            trailing_silence_ticks: 0,
+            stall_recovery_signalled: false,
+            incoming_liveness: None,
+            transport_fade: TransportFade::Idle,
+            transport_fade_gen: 0,
+            fade_on_pause: false,
+            fade_pause_ms: u64::from(crate::types::player_settings::TRANSPORT_FADE_MS_DEFAULT),
+            smooth_track_starts: true,
+            pending_switch_fade_in: false,
+            #[cfg(test)]
+            transport_fade_completions: 0,
+            #[cfg(test)]
+            stall_signals_sent: 0,
             viz_callback: std::sync::Arc::new(parking_lot::RwLock::new(None)),
             viz_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             music_sink: None,
@@ -530,6 +774,23 @@ impl AudioRenderer {
             anyhow::bail!("Cannot initialize with invalid format");
         }
 
+        // New-track lifecycle: any in-flight transport ramp (M5) belonged to
+        // the previous stream — abandon it so it can't ramp/pause/stop the
+        // stream this init installs (or reuses, on the gapless path). On the
+        // GAPLESS-REUSE path the volume atomic must also be restored: this is
+        // the one cancel site that keeps the existing stream, and under
+        // `pw_volume_active` nothing downstream rewrites the atomic
+        // (`set_volume` early-returns; `start()` early-returns while already
+        // playing) — a resume fade-in interrupted here would otherwise strand
+        // the next track at the mid-ramp level until the next rebuild. The
+        // fresh-stream path overwrites the volume at `create_stream` anyway.
+        if !self.transport_fade_idle() {
+            self.cancel_transport_fade();
+            if let Some(ref stream) = self.primary_stream {
+                stream.set_volume(self.stream_volume());
+            }
+        }
+
         let old_format = self.format.clone();
         self.prev_format = prev_format.cloned().unwrap_or_else(|| old_format.clone());
 
@@ -591,10 +852,12 @@ impl AudioRenderer {
             format.sample_rate(),
             format.channel_count() as u16,
             self.stream_volume(),
+            1.0, // fresh stream — no fade in progress
             norm,
             Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             true,
+            self.smooth_track_starts,
             self.bit_perfect_active(),
         );
 
@@ -622,6 +885,12 @@ impl AudioRenderer {
         self.current_stream_bit_perfect = self.bit_perfect_active();
         self.current_replay_gain = self.pending_replay_gain.clone();
         self.position_offset = 0;
+
+        // M6: arm a requested switch fade-in HERE, on the just-built stream —
+        // the mixer starts pulling the moment play()'s prebuffer writes
+        // samples (before `start()`), so arming any later would let the
+        // switch onset escape at full gain ahead of the hold.
+        self.maybe_arm_pending_switch_fade();
 
         Ok(())
     }
@@ -717,6 +986,10 @@ impl AudioRenderer {
             return;
         }
 
+        // Captured BEFORE clearing: `start()` is both the fresh-play and the
+        // resume path, and only a resume (paused → playing) may fade back in.
+        let was_paused = self.paused;
+
         self.playing = true;
         self.paused = false;
 
@@ -748,10 +1021,37 @@ impl AudioRenderer {
         // Restore primary volume (it may have been changed via set_volume while
         // paused) only when NOT crossfading — during an active crossfade the
         // stream volumes are owned by the crossfade tick.
+        //
+        // M5 resume fade-in: when this start() is a RESUME and the pause fade
+        // is enabled (and the stream is rampable — never bit-perfect, never
+        // mid-crossfade), ramp back up from the stream's last-written volume
+        // atomic instead of snapping: 0.0 after a completed pause fade, the
+        // interrupted mid-level when resuming during the out-ramp, and a
+        // no-op ramp (from == target) after an instant pause. Otherwise any
+        // stale ramp is cancelled and the volume restored instantly, exactly
+        // as before.
         if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
-            && let Some(ref stream) = self.primary_stream
+            && self.primary_stream.is_some()
         {
-            stream.set_volume(self.stream_volume());
+            if matches!(self.transport_fade, TransportFade::SwitchFadeIn { .. }) {
+                // M6: an armed switch fade-in survives pause/start cycles —
+                // the radio jitter prebuffer pauses and restarts the
+                // renderer before real playback begins (pause() re-armed it
+                // back to holding), and cancelling or restoring full volume
+                // here would snap the eventual onset to full gain.
+            } else if !was_paused && self.pending_switch_fade_in {
+                // M6 belt-and-braces: in production the init-time arm has
+                // already consumed the request; this covers a fresh start
+                // that somehow skipped init (and is the unit-testable arm).
+                self.maybe_arm_pending_switch_fade();
+            } else if was_paused && self.fade_on_pause && self.transport_fade_engageable() {
+                self.begin_fade_in(self.fade_pause_ms);
+            } else {
+                self.cancel_transport_fade();
+                if let Some(ref stream) = self.primary_stream {
+                    stream.set_volume(self.stream_volume());
+                }
+            }
         }
 
         trace!("▶ Renderer::start() completed — stream active");
@@ -764,6 +1064,12 @@ impl AudioRenderer {
         self.paused = false;
         self.finished_called = false;
         self.reset_rebuffer_latch();
+        // Abandon any in-flight transport ramp (M5) — the stream is being
+        // torn down; its deferred end-state action must not apply. Also drop
+        // an unconsumed switch fade-in request (M6): a torn-down switch must
+        // never leak a soft start into an unrelated later play.
+        self.cancel_transport_fade();
+        self.pending_switch_fade_in = false;
 
         // Cancel crossfade and disarm any pending crossfade trigger
         self.cancel_crossfade();
@@ -791,6 +1097,33 @@ impl AudioRenderer {
 
     /// Pause playback.
     pub fn pause(&mut self) {
+        // An instant pause supersedes any in-flight transport ramp (M5) — the
+        // stream flips silent right here, so the ramp's deferred end-state
+        // action must never apply afterwards. EXCEPTION (M6): a switch
+        // fade-in is RE-ARMED back to holding (fresh baseline) instead — the
+        // radio jitter prebuffer re-issues pause() every decoded chunk until
+        // ~5 s is buffered, and play()'s prebuffer lets the mixer pull a
+        // silent trickle beforehand; cancelling (or letting a
+        // trickle-started ramp burn off during the hold) would pop the true
+        // onset at full gain. It has no deferred end action, so keeping it
+        // is safe.
+        if let TransportFade::SwitchFadeIn {
+            started_at,
+            baseline_samples,
+            ..
+        } = &mut self.transport_fade
+        {
+            *started_at = None;
+            *baseline_samples = self
+                .primary_stream
+                .as_ref()
+                .map_or(0, |s| s.handle.samples_consumed.load(Ordering::Relaxed));
+            if let Some(ref stream) = self.primary_stream {
+                stream.set_volume(0.0);
+            }
+        } else {
+            self.cancel_transport_fade();
+        }
         self.paused = true;
         // A user pause subsumes any in-progress network rebuffer (the stream is
         // paused either way); clear the flag so resume goes through start().
@@ -818,6 +1151,9 @@ impl AudioRenderer {
     pub fn seek(&mut self, position_ms: u64) {
         // Cancel crossfade on seek
         self.cancel_crossfade();
+        // The primary is about to be recreated — a stale transport ramp (M5)
+        // must not keep writing volumes to (or pause/stop) the NEW stream.
+        self.cancel_transport_fade();
 
         self.position_offset = position_ms;
         self.finished_called = false;
@@ -843,10 +1179,12 @@ impl AudioRenderer {
                 self.format.sample_rate(),
                 self.format.channel_count() as u16,
                 self.stream_volume(),
+                1.0, // seek recreates a non-fading stream
                 norm,
                 Some(self.eq_state.clone()),
                 self.consumed_notify.clone(),
                 true,
+                self.smooth_track_starts,
                 self.bit_perfect_active(),
             );
             self.primary_stream = Some(stream);
@@ -885,11 +1223,28 @@ impl AudioRenderer {
             return;
         }
         if matches!(self.crossfade_state, CrossfadeState::Active { .. }) {
-            // During crossfade, volumes are managed by the crossfade tick.
-            // Just store the new volume — next tick applies it proportionally.
+            // During a crossfade the tick writes only `fade_coeff`, so a
+            // mid-fade user-volume change must be pushed to BOTH streams'
+            // `volume` atomics here — and UNCONDITIONALLY (no `!self.paused`
+            // gate): the tick doesn't run while paused and `start()` skips the
+            // volume restore when Active, so a change made while paused
+            // mid-crossfade would otherwise be permanently lost. Pushing to a
+            // paused stream is harmless (it emits silence regardless).
+            if let Some(ref stream) = self.primary_stream {
+                stream.set_volume(volume as f32);
+            }
+            if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+                stream.set_volume(volume as f32);
+            }
         } else if !self.paused
+            && !self.transport_fade_awaiting_first_audio()
             && let Some(ref stream) = self.primary_stream
         {
+            // The awaiting-first-audio guard (M6): while a switch fade-in
+            // holds the fresh stream silent, a user volume change must not
+            // punch through the hold — `self.volume` is updated above, and
+            // the fade's target (`stream_volume()`) picks it up when the
+            // ramp runs.
             stream.set_volume(volume as f32);
         }
     }
@@ -1131,6 +1486,59 @@ impl AudioRenderer {
         changed
     }
 
+    /// Set the crossfade fade curve from settings. Applies to the NEXT
+    /// crossfade: `start_crossfade` captures the live value into the `Active`
+    /// variant, so an in-flight fade keeps the curve it started with (a
+    /// mid-fade change must not tear the envelope). A curve change never
+    /// flips crossfade eligibility, so — like `set_crossfade_duration` — this
+    /// is a bare write with no `reset_next_track`.
+    pub fn set_crossfade_curve(&mut self, curve: CrossfadeCurve) {
+        if self.crossfade_curve != curve {
+            tracing::info!("🔀 Renderer: crossfade curve {}", curve);
+        }
+        self.crossfade_curve = curve;
+    }
+
+    /// Set the minimum-track-length crossfade floor from settings (seconds).
+    /// Applies at the NEXT [`Self::arm_crossfade`]; like
+    /// [`Self::set_crossfade_curve`] and the duration slider this is a bare
+    /// write with no `reset_next_track` — an already-armed transition keeps
+    /// the floor it was armed under (fires once), and cancelling a live
+    /// blend on every slider step would hard-cut audio.
+    pub fn set_crossfade_min_track_secs(&mut self, secs: u32) {
+        let ms = u64::from(secs) * 1000;
+        if self.crossfade_min_track_ms != ms {
+            tracing::info!("🔀 Renderer: crossfade min track length {}s", secs);
+        }
+        self.crossfade_min_track_ms = ms;
+    }
+
+    /// Set the M8 negative-offset lead (ms): how much earlier than
+    /// `track_dur − fade` the Armed trigger fires. The engine's
+    /// `set_crossfade_offset` pushes the NEGATIVE side of the "Gap / Overlap
+    /// Trim" knob here (0 for zero/positive offsets — the gap side lives in
+    /// the decode loop). Bare write, like the sibling sliders: it never
+    /// flips eligibility. Unlike the duration (captured into the Armed
+    /// variant), the trigger reads this field live, so a slider change
+    /// applies to an already-armed transition too — moving a trigger point
+    /// is tear-free (nothing in-flight to tear).
+    pub fn set_crossfade_lead_ms(&mut self, lead_ms: u64) {
+        if self.crossfade_lead_ms != lead_ms {
+            tracing::info!("🔀 Renderer: crossfade overlap lead {}ms", lead_ms);
+        }
+        self.crossfade_lead_ms = lead_ms;
+    }
+
+    /// Set the M8 "Skip Silence Between Tracks" renderer mirror (gates the
+    /// trailing-silence early trigger; the engine setter owns the
+    /// reset-on-change mode-toggle contract).
+    pub fn set_skip_silence(&mut self, enabled: bool) {
+        if self.skip_silence != enabled {
+            tracing::info!("🤫 Renderer: skip silence between tracks {}", enabled);
+        }
+        self.skip_silence = enabled;
+    }
+
     /// Whether bit-perfect stream-building is both requested AND viable. True
     /// for both Strict and Relaxed (both feed the DAC untouched PCM). It is only
     /// honored on the native PipeWire path (`pw_volume_active`): bit-perfect
@@ -1200,16 +1608,15 @@ impl AudioRenderer {
     // Crossfade API
     // =========================================================================
 
-    /// Minimum song duration for crossfade eligibility.
-    /// Songs shorter than this fall back to gapless transition.
-    /// MPD uses 20s; we use 10s since our crossfade is user-configurable (1-12s).
-    const MIN_CROSSFADE_TRACK_MS: u64 = 10_000;
-
     /// Arm the renderer for crossfade with duration clamping.
     ///
     /// Guards (inspired by MPD's `CanCrossFadeSong`):
-    /// 1. Both songs must be >= MIN_CROSSFADE_TRACK_MS (10s)
-    /// 2. Effective duration is clamped to `min(xfade, track/2)` so the
+    /// 1. Both durations must be KNOWN (non-zero) — a zero
+    ///    `track_duration_ms` would make the Armed position trigger
+    ///    (`pos >= track_duration − fade`) fire immediately at track start
+    /// 2. Both songs must be >= the configured minimum track length
+    ///    (`crossfade_min_track_ms`, default 10s; 0 = blend everything known)
+    /// 3. Effective duration is clamped to `min(xfade, track/2)` so the
     ///    outgoing track always has real audio for at least half the fade
     pub fn arm_crossfade(
         &mut self,
@@ -1233,13 +1640,25 @@ impl AudioRenderer {
             return;
         }
 
+        // Guard: unknown durations can't crossfade at ANY floor — with a zero
+        // outgoing duration the position trigger would fire immediately, and a
+        // zero incoming duration degenerates the `shorter/2` clamp to a 0ms
+        // fade. Unreachable while the floor was a hardcoded 10s; load-bearing
+        // now that the configured floor may be 0.
+        if track_duration_ms == 0 || incoming_duration_ms == 0 {
+            debug!(
+                "🔀 [RENDERER] Crossfade SKIPPED: unknown duration (track={}ms, incoming={}ms)",
+                track_duration_ms, incoming_duration_ms,
+            );
+            return;
+        }
+
         // Guard: skip crossfade for short songs (fall back to gapless)
         let min_dur = track_duration_ms.min(incoming_duration_ms);
-        if min_dur < Self::MIN_CROSSFADE_TRACK_MS {
+        if min_dur < self.crossfade_min_track_ms {
             debug!(
                 "🔀 [RENDERER] Crossfade SKIPPED: shortest track {}ms < {}ms minimum",
-                min_dur,
-                Self::MIN_CROSSFADE_TRACK_MS,
+                min_dur, self.crossfade_min_track_ms,
             );
             return;
         }
@@ -1260,6 +1679,8 @@ impl AudioRenderer {
             incoming_format: incoming_format.clone(),
             track_duration_ms,
         };
+        // M8: each armed transition's trailing-silence sustain starts fresh.
+        self.trailing_silence_ticks = 0;
         debug!(
             "🔀 [RENDERER] Crossfade ARMED: duration={}ms, track={}ms, incoming={:?}",
             effective, track_duration_ms, incoming_format
@@ -1284,6 +1705,19 @@ impl AudioRenderer {
             return;
         }
 
+        // Belt-and-braces vs the transport machine (M5): a resume fade-in can
+        // still be mid-ramp when the EOF-fallback trigger fires near track
+        // end. During `Active` the crossfade tick owns the streams' fades and
+        // `set_volume`'s Active branch owns the volume pushes — cancel the
+        // transport ramp and restore full user volume so two writers never
+        // fight over the primary's `volume` atomic.
+        if !self.transport_fade_idle() {
+            self.cancel_transport_fade();
+            if let Some(ref stream) = self.primary_stream {
+                stream.set_volume(self.stream_volume());
+            }
+        }
+
         // Create the crossfade stream
         let output = match self.output.as_ref() {
             Some(o) => o,
@@ -1301,13 +1735,18 @@ impl AudioRenderer {
         let cf_stream = output.create_stream(
             incoming_format.sample_rate(),
             incoming_format.channel_count() as u16,
-            0.0, // Start silent, volume will ramp up
+            self.stream_volume(), // correct user volume from the start
+            0.0,                  // incoming fades in via its fade_coeff, from true silence
             cf_norm,
             Some(self.eq_state.clone()),
             self.consumed_notify.clone(),
             false,
+            self.smooth_track_starts,
             self.bit_perfect_active(),
         );
+        // Belt-and-braces: the constructor already seeded both the atomic and
+        // the smoother from `initial_fade = 0.0`, so they cannot disagree.
+        cf_stream.set_fade_coeff(0.0);
 
         self.crossfade_state = CrossfadeState::Active {
             stream: cf_stream,
@@ -1316,7 +1755,16 @@ impl AudioRenderer {
             incoming_format: incoming_format.clone(),
             paused_accum: std::time::Duration::ZERO,
             paused_at: None,
+            // Capture the curve for the whole fade — the tick reads this,
+            // never the live setting, so a mid-fade change can't tear it.
+            curve: self.crossfade_curve,
         };
+        // Fresh fade, fresh watchdog (M9): un-latch the stall signal and
+        // drop any stale liveness handle — the engine installs this fade's
+        // own handle right after it spawns the incoming decode loop
+        // (belt-and-braces; cancel/finalize already cleared both).
+        self.stall_recovery_signalled = false;
+        self.incoming_liveness = None;
         // The blend itself is never bit-perfect — two streams mixed under a gain
         // envelope. Drop the honest badge for the duration of the overlap (even
         // under Relaxed, where both bodies are bit-perfect); `finalize_crossfade`
@@ -1367,6 +1815,29 @@ impl AudioRenderer {
         // Drop the staged RG since the incoming stream is being thrown away.
         self.pending_crossfade_replay_gain = None;
 
+        // Reset the restored outgoing's fade multiplier UNCONDITIONALLY —
+        // outside the `!self.paused` guard below. The resume path `start()`
+        // restores only `volume`, never `fade_coeff`, so a cancel that runs
+        // while paused (reset_next_track / mode toggle mid-crossfade) would
+        // otherwise leave the outgoing stuck at reduced gain with nothing to
+        // reset it until the next track change.
+        //
+        // Restore the visualizer feed too (M9 / invariant 11): a cancel past
+        // the fade midpoint lands after `tick_crossfade` handed the feed to
+        // the (now discarded) incoming — without this the restored outgoing
+        // plays with a frozen spectrum until the next track change. Mirrors
+        // `finalize_crossfade`'s reaffirmation on the promoted primary.
+        if let Some(ref stream) = self.primary_stream {
+            stream.set_fade_coeff(1.0);
+            stream.set_feeds_visualizer(true);
+        }
+
+        // The fade this watchdog state described is gone: unlatch the stall
+        // signal and drop the per-fade liveness handle so the NEXT fade
+        // starts with a clean watchdog (M9).
+        self.stall_recovery_signalled = false;
+        self.incoming_liveness = None;
+
         // Restore primary volume
         if !self.paused
             && let Some(ref stream) = self.primary_stream
@@ -1394,6 +1865,15 @@ impl AudioRenderer {
     /// Whether a crossfade is currently in progress.
     pub fn is_crossfade_active(&self) -> bool {
         matches!(self.crossfade_state, CrossfadeState::Active { .. })
+    }
+
+    /// Install (or clear) the M9 liveness handle for the current fade's
+    /// incoming decode loop. The engine calls this with a fresh per-fade
+    /// instance right after spawning `start_crossfade_decode_loop`;
+    /// `start_crossfade` / `cancel_crossfade` / `finalize_crossfade` clear it
+    /// with the fade it described.
+    pub(crate) fn set_incoming_liveness(&mut self, liveness: Option<Arc<IncomingLiveness>>) {
+        self.incoming_liveness = liveness;
     }
 
     /// Get crossfade buffer count (approximate samples in crossfade ring buffer).
@@ -1424,6 +1904,7 @@ impl AudioRenderer {
                 duration_ms,
                 paused_accum,
                 paused_at,
+                curve,
                 ..
             } => {
                 // Include any in-progress pause span (paused_at) so a tick that
@@ -1432,32 +1913,33 @@ impl AudioRenderer {
                 let elapsed_ms = started_at.elapsed().as_millis() as u64;
                 let progress =
                     crossfade_progress(elapsed_ms, live_paused.as_millis() as u64, *duration_ms);
-                // Equal-power crossfade using cos²/sin² curves.
-                let fade_out = (progress * std::f64::consts::FRAC_PI_2).cos().powi(2);
-                let fade_in = (progress * std::f64::consts::FRAC_PI_2).sin().powi(2);
+                // Gains from the curve CAPTURED at `start_crossfade` — never
+                // the live `self.crossfade_curve` — so a mid-fade settings
+                // change can't tear the in-flight envelope. See `fade_curve`
+                // for the per-curve contracts (Equal Power / Constant Gain /
+                // Linear).
+                let (fade_out, fade_in) = crate::audio::fade_curve::fade_gains(*curve, progress);
                 (fade_out, fade_in, progress)
             }
             _ => return CrossfadeTick::Continue,
         };
 
-        // When PipeWire handles user volume, software only applies the fade
-        // coefficient. PipeWire applies the user's volume uniformly to the
-        // combined mixer output, so the product is correctly fade × user_vol.
-        let user_vol = if self.pw_volume_active {
-            1.0
-        } else {
-            self.volume as f32
-        };
+        // The fade is independent of user volume: write the raw curve
+        // coefficients to the streams' `fade_coeff` atomic (applied linearly
+        // in the source — never re-curved through the perceptual taper) and
+        // leave the user volume on `volume`. Mid-fade volume changes are
+        // pushed by `set_volume`'s Active branch.
         if let Some(ref stream) = self.primary_stream {
-            stream.set_volume((fade_out * user_vol as f64) as f32);
+            stream.set_fade_coeff(fade_out as f32);
         }
         if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
-            stream.set_volume((fade_in * user_vol as f64) as f32);
+            stream.set_fade_coeff(fade_in as f32);
         }
 
-        // Hand off the visualizer feed at the equal-power midpoint. Before
-        // 50% the outgoing dominates audio and drives viz; after 50% the
-        // incoming dominates and takes over. Without this swap the outgoing
+        // Hand off the visualizer feed at the fade midpoint (progress 0.5 —
+        // where every curve's gains cross, so the handoff stays
+        // curve-independent). Before 50% the outgoing dominates audio and
+        // drives viz; after 50% the incoming dominates and takes over. Without this swap the outgoing
         // primary's ring buffer drains during the crossfade tail (its decoder
         // is already at EOF for tracks long enough to fill the ring) and the
         // visualizer freezes — the incoming's viz feed is gated off until
@@ -1479,12 +1961,26 @@ impl AudioRenderer {
             return CrossfadeTick::Continue;
         }
 
-        // Fade reached completion. Gate the promotion on the incoming stream
-        // having actually produced audio: a stalled/failed incoming decoder
-        // writes nothing, so its ring stays empty. Promoting it would fade the
-        // audible outgoing track into silence with no recovery, so report the
-        // stall instead and let the caller restore the outgoing + skip.
-        if self.crossfade_buffer_count() == 0 {
+        // Fade reached completion. Gate the promotion on the incoming
+        // producer being healthy, on two discriminators:
+        // - Empty ring: a stalled/failed incoming decoder that never produced
+        //   audio (or whose few KB already drained) — promoting it would fade
+        //   the audible outgoing into silence with no recovery.
+        // - Read liveness (M9 Part B): a producer blocked inside ONE
+        //   decode/network read past the stall threshold, even though the
+        //   ring still holds residue. Promoting it plays the residue and
+        //   then hangs — the ring may never reach the rebuffer prime target,
+        //   and EOF never fires, so nothing can ever finish the track. The
+        //   flag comes from the decode loop (`IncomingLiveness`), NOT from a
+        //   buffer-count heuristic — counts grow and shrink for healthy
+        //   reasons; sleeping on backpressure and EOF both read as live.
+        // Either way, report the stall and let the caller restore the
+        // outgoing + skip.
+        let producer_stalled = self
+            .incoming_liveness
+            .as_ref()
+            .is_some_and(|liveness| liveness.is_stalled());
+        if self.crossfade_buffer_count() == 0 || producer_stalled {
             CrossfadeTick::IncomingStalled
         } else {
             CrossfadeTick::Finalize
@@ -1501,6 +1997,7 @@ impl AudioRenderer {
             incoming_format,
             paused_accum,
             paused_at,
+            curve: _,
         } = std::mem::replace(&mut self.crossfade_state, CrossfadeState::Idle)
         else {
             return 0;
@@ -1531,12 +2028,15 @@ impl AudioRenderer {
         // cancels the crossfade via `reset_next_track`, so it can't drift.
         self.current_stream_bit_perfect = self.bit_perfect_active();
 
-        // Set new primary to full user volume and promote it to visualizer
-        // feeder (it was created silent for the viz to avoid the two-stream
+        // Set new primary to full user volume, reset its fade multiplier to
+        // unity (it was built with `initial_fade = 0.0` and the tick drove it
+        // toward 1; nothing else re-establishes it), and promote it to
+        // visualizer feeder (it was created viz-gated to avoid the two-stream
         // rate thrash; now that it's the only stream alive, it should drive
         // the spectrum).
         if let Some(ref stream) = self.primary_stream {
             stream.set_volume(self.stream_volume());
+            stream.set_fade_coeff(1.0);
             stream.set_feeds_visualizer(true);
         }
 
@@ -1548,6 +2048,11 @@ impl AudioRenderer {
         // is unreachable (issue #9 crossfade carryover). Reset the latch exactly
         // as start()/stop()/seek() do.
         self.reset_rebuffer_latch();
+        // The completed fade's stall watchdog is done with (M9): the promoted
+        // primary is fed by the PRIMARY decode loop from here on, which the
+        // fade's liveness handle never described.
+        self.stall_recovery_signalled = false;
+        self.incoming_liveness = None;
         // Promote the crossfade RG to "current" — it's now baked into the
         // new primary stream's `amplify` factor.
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
@@ -1604,10 +2109,12 @@ impl AudioRenderer {
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
             0.0,
+            0.0,
             None,
             Arc::new(Notify::new()),
             false,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            true,
             false,
         );
         let stream = crate::audio::ActiveStream {
@@ -1623,6 +2130,7 @@ impl AudioRenderer {
             incoming_format: AudioFormat::invalid(),
             paused_accum: std::time::Duration::ZERO,
             paused_at: None,
+            curve: self.crossfade_curve,
         };
         source
     }
@@ -1634,6 +2142,35 @@ impl AudioRenderer {
     #[cfg(test)]
     pub fn source_generation_handle(&self) -> &SourceGeneration {
         &self.source_generation
+    }
+
+    /// The effective duration captured into the Armed variant, for engine
+    /// tests pinning that the arm read the M8 bar-snap override.
+    #[cfg(test)]
+    pub(crate) fn armed_duration_ms_for_test(&self) -> Option<u64> {
+        match &self.crossfade_state {
+            CrossfadeState::Armed { duration_ms, .. } => Some(*duration_ms),
+            _ => None,
+        }
+    }
+
+    /// The M8 negative-offset lead mirror, for engine setter-push tests.
+    #[cfg(test)]
+    pub(crate) fn crossfade_lead_ms_for_test(&self) -> u64 {
+        self.crossfade_lead_ms
+    }
+
+    /// The M8 skip-silence mirror, for engine setter-push tests.
+    #[cfg(test)]
+    pub(crate) fn skip_silence_for_test(&self) -> bool {
+        self.skip_silence
+    }
+
+    /// Whether an M9 incoming-liveness handle is installed, for the engine's
+    /// `start_crossfade_decode_loop` wiring test.
+    #[cfg(test)]
+    pub(crate) fn has_incoming_liveness_for_test(&self) -> bool {
+        self.incoming_liveness.is_some()
     }
 
     /// Renderer's copy of the engine-shared `decoder_eof` Arc, for the wiring
@@ -1651,8 +2188,559 @@ impl AudioRenderer {
     }
 
     // =========================================================================
+    // Transport fades (M5) — pause / resume / stop gain ramps
+    // =========================================================================
+
+    /// Push the pause/resume fade config from settings. The renderer owns the
+    /// enforcing copy (both consumers — `begin_pause_fade` and the resume
+    /// fade-in in `start()` — live here); the stop pair stays on the engine's
+    /// `FadeCoordinator`. Bare write: transport fades never flip crossfade
+    /// eligibility, so no `reset_next_track` contract applies.
+    pub(crate) fn set_pause_fade(&mut self, enabled: bool, duration_ms: u64) {
+        self.fade_on_pause = enabled;
+        self.fade_pause_ms = duration_ms;
+    }
+
+    /// Push the "Smooth Track Starts" setting (M2's de-click onset ramp gate,
+    /// default on). Bare write — takes effect on the next stream creation
+    /// (play / seek / crossfade incoming), like the normalization settings.
+    pub(crate) fn set_smooth_track_starts(&mut self, enabled: bool) {
+        if self.smooth_track_starts != enabled {
+            tracing::info!("🎚️ Renderer: smooth track starts {}", enabled);
+        }
+        self.smooth_track_starts = enabled;
+    }
+
+    /// Whether a transport fade can ramp the current primary stream at all:
+    /// - `CrossfadeState` must be `Idle` — a transport fade never fights a
+    ///   blend (the crossfade tick owns the streams during `Active`).
+    /// - The primary must NOT be bit-perfect (invariant 8): its `next()` arm
+    ///   reads only `fade_coeff`, so the `volume` ramp would be inaudible —
+    ///   a delay ending in the same hard cut. Bit-perfect keeps its honest
+    ///   instant transport edges.
+    /// - The ring must hold audio: a drained ring (natural end-of-queue
+    ///   stop, mid-rebuffer) has nothing audible to fade, so the ramp would
+    ///   only delay teardown for silence.
+    fn transport_fade_engageable(&self) -> bool {
+        matches!(self.crossfade_state, CrossfadeState::Idle)
+            && !self.current_stream_bit_perfect
+            && self.primary_stream.is_some()
+            && self.buffer_count() > 0
+    }
+
+    /// Whether the M6 first-audio switch fade-in can arm on the fresh
+    /// primary. Same gates as [`Self::transport_fade_engageable`] MINUS the
+    /// ring check — the whole point of the first-audio trigger is that the
+    /// ring may still be empty (radio prebuffer / decoder fill latency). The
+    /// bit-perfect refusal is the M6 "skip the fade on a bit-perfect queue
+    /// edge" conservative default (the `volume` ramp would be inaudible
+    /// there anyway; ramping `fade_coeff` instead would break bit-identity).
+    fn switch_fade_engageable(&self) -> bool {
+        matches!(self.crossfade_state, CrossfadeState::Idle)
+            && !self.current_stream_bit_perfect
+            && self.primary_stream.is_some()
+    }
+
+    /// One-shot M6 request: the next fresh primary-stream build arms the
+    /// first-audio switch fade-in. Set by the engine AFTER a radio-switch
+    /// teardown (so the `stop()` inside that teardown cannot clear it);
+    /// consumed by `maybe_arm_pending_switch_fade` (init + fresh start),
+    /// cleared by `stop()`.
+    pub(crate) fn request_switch_fade_in(&mut self) {
+        self.pending_switch_fade_in = true;
+    }
+
+    /// Whether the in-flight transport fade is an M6 switch fade-in still
+    /// HOLDING for real consumption past its baseline. Such a fade survives
+    /// pause/start cycles (the radio jitter prebuffer dance) — see
+    /// [`TransportFade::SwitchFadeIn`].
+    fn transport_fade_awaiting_first_audio(&self) -> bool {
+        matches!(
+            self.transport_fade,
+            TransportFade::SwitchFadeIn {
+                started_at: None,
+                ..
+            }
+        )
+    }
+
+    /// The primary stream's real-samples-consumed counter (0 without a
+    /// stream) — the M6 switch fade's baseline/flip source.
+    fn primary_samples_consumed(&self) -> u64 {
+        self.primary_stream
+            .as_ref()
+            .map_or(0, |s| s.handle.samples_consumed.load(Ordering::Relaxed))
+    }
+
+    /// Arm the M6 switch fade-in: hold the fresh primary silent; the ramp
+    /// clock starts only when the mixer pulls real samples past the baseline
+    /// (the hold + flip live in `tick_transport_fade`).
+    fn begin_switch_fade_in(&mut self) {
+        if let Some(ref stream) = self.primary_stream {
+            stream.set_volume(0.0);
+        }
+        self.transport_fade_gen = self.transport_fade_gen.wrapping_add(1);
+        self.transport_fade = TransportFade::SwitchFadeIn {
+            started_at: None,
+            baseline_samples: self.primary_samples_consumed(),
+            generation: self.transport_fade_gen,
+        };
+        debug!(
+            "🎚️ [TRANSPORT FADE] switch fade-in armed — awaiting first audio \
+             ({RADIO_SWITCH_FADE_MS}ms ramp)"
+        );
+    }
+
+    /// Consume the one-shot switch fade-in request and arm it when the fresh
+    /// primary can take it (never bit-perfect, never mid-crossfade). Called
+    /// from `init()` — BEFORE `play()`'s prebuffer can feed the mixer, so
+    /// not a single full-gain sample escapes ahead of the hold — and from
+    /// `start()`'s fresh-start path as the unit-tested belt-and-braces (in
+    /// production the init-time arm has already consumed the request by
+    /// then). The request is consumed even when the arm is refused, so a
+    /// refused request can't linger into an unrelated later play.
+    fn maybe_arm_pending_switch_fade(&mut self) {
+        if !std::mem::take(&mut self.pending_switch_fade_in) {
+            return;
+        }
+        if self.switch_fade_engageable() {
+            self.begin_switch_fade_in();
+        }
+    }
+
+    /// Test observability: whether the one-shot switch fade-in request is
+    /// pending (set by the engine, not yet consumed by `start()`).
+    #[cfg(test)]
+    pub(crate) fn switch_fade_in_pending(&self) -> bool {
+        self.pending_switch_fade_in
+    }
+
+    /// Test observability: whether an armed switch fade-in is still holding
+    /// for its stream's first real sample.
+    #[cfg(test)]
+    pub(crate) fn transport_fade_is_awaiting_first_audio(&self) -> bool {
+        self.transport_fade_awaiting_first_audio()
+    }
+
+    /// Arm a fade-out ramp: bump the generation, seed `from` from the
+    /// stream's last-written `volume` atomic (so an interrupted in-ramp
+    /// continues from the audible level), and stamp the state.
+    fn begin_fade_out(&mut self, target: TransportFadeTarget, duration_ms: u64) {
+        let from = self
+            .primary_stream
+            .as_ref()
+            .map_or(1.0, |s| crate::audio::load_f32(&s.handle.volume));
+        self.transport_fade_gen = self.transport_fade_gen.wrapping_add(1);
+        self.transport_fade = TransportFade::FadingOut {
+            target,
+            started_at: std::time::Instant::now(),
+            duration_ms: duration_ms.max(1),
+            generation: self.transport_fade_gen,
+            from,
+            settling: false,
+        };
+        debug!(
+            "🎚️ [TRANSPORT FADE] out-ramp begun: target={target:?}, {duration_ms}ms, from={from:.3}"
+        );
+    }
+
+    /// Arm a fade-in ramp (resume). Seeds `from` from the last-written
+    /// `volume` atomic — 0.0 after a completed pause fade, mid-level when
+    /// interrupting an out-ramp, `stream_volume()` (no-op ramp) after an
+    /// instant pause.
+    fn begin_fade_in(&mut self, duration_ms: u64) {
+        let from = self
+            .primary_stream
+            .as_ref()
+            .map_or(0.0, |s| crate::audio::load_f32(&s.handle.volume));
+        self.transport_fade_gen = self.transport_fade_gen.wrapping_add(1);
+        self.transport_fade = TransportFade::FadingIn {
+            started_at: std::time::Instant::now(),
+            duration_ms: duration_ms.max(1),
+            generation: self.transport_fade_gen,
+            from,
+        };
+        debug!("🎚️ [TRANSPORT FADE] in-ramp begun: {duration_ms}ms, from={from:.3}");
+    }
+
+    /// Begin the pause fade-out (guard-lift). Returns whether the ramp
+    /// engaged; `false` means the caller must fall back to the instant
+    /// [`Self::pause`]. Gated on the renderer-owned "Fade on Pause / Resume"
+    /// mirror; the duration comes from the same mirror.
+    pub(crate) fn begin_pause_fade(&mut self) -> bool {
+        if !self.fade_on_pause || !self.playing || self.paused || !self.transport_fade_engageable()
+        {
+            return false;
+        }
+        // Guard-lift: freeze the completion gate / rebuffer / armed trigger
+        // NOW (they all sit below render_tick's paused early-return), while
+        // the stream keeps producing audio for the ramp. Mirrors pause()'s
+        // bookkeeping except the stream-level flip, which the ramp completion
+        // applies.
+        self.paused = true;
+        self.rebuffering = false;
+        self.begin_fade_out(TransportFadeTarget::Pause, self.fade_pause_ms);
+        true
+    }
+
+    /// Begin the stop fade-out (guard-lift). Returns whether the ramp
+    /// engaged; on `false` the engine proceeds straight to teardown. The
+    /// duration is passed in because the stop pair lives on the engine's
+    /// `FadeCoordinator` (its sole consumer is `engine.stop()`, which also
+    /// bounds its wait with the same value).
+    pub(crate) fn begin_stop_fade(&mut self, duration_ms: u64) -> bool {
+        if !self.playing || self.paused || !self.transport_fade_engageable() {
+            return false;
+        }
+        // Same guard-lift as the pause ramp: a stop near end-of-track must
+        // not let the completion gate advance the queue mid-ramp.
+        self.paused = true;
+        self.rebuffering = false;
+        self.begin_fade_out(TransportFadeTarget::Stop, duration_ms);
+        true
+    }
+
+    /// Whether no transport fade is in flight. The engine's `stop()` polls
+    /// this to bound its wait for the out-ramp.
+    pub(crate) fn transport_fade_idle(&self) -> bool {
+        matches!(self.transport_fade, TransportFade::Idle)
+    }
+
+    /// Abandon any in-flight transport fade without applying its end-state
+    /// action. Bumps the generation so an already-matched completion in the
+    /// same tick can't apply either. Called by every lifecycle transition
+    /// that invalidates the ramp's stream (stop / seek / fresh init /
+    /// crossfade start / instant pause).
+    fn cancel_transport_fade(&mut self) {
+        self.transport_fade_gen = self.transport_fade_gen.wrapping_add(1);
+        self.transport_fade = TransportFade::Idle;
+    }
+
+    /// Drive the in-flight transport fade one tick: write the ramped volume
+    /// to the primary stream and apply the end-state action on completion.
+    /// An out-ramp completes one tick AFTER reaching its floor (the settle
+    /// tick — see `TransportFade::FadingOut::settling`), so the source-side
+    /// EMA realizes silence before the paused/stopped atomic flips.
+    /// Called from `render_tick` ABOVE the playing/paused early-return (the
+    /// guard-lift sets `self.paused` at fade START, so the ramp must be
+    /// ticked from a point that gate cannot freeze).
+    ///
+    /// The ramp writes the `volume` atomic linearly; the source's perceptual
+    /// taper then realizes it as a perceptually-even fade on the software
+    /// path (and a plain amplitude ramp under `pw_volume_active`, where the
+    /// atomic sits at 1.0 and PipeWire owns the user volume on top).
+    fn tick_transport_fade(&mut self) {
+        /// One tick's verdict on the in-flight ramp.
+        enum RampTick {
+            /// Still ramping — volume written, nothing else to do.
+            Running,
+            /// Out-ramp floor reached THIS tick — hold one settle tick.
+            EnterSettle,
+            /// Apply the end-state action.
+            Complete,
+        }
+
+        // M6: a HOLDING switch fade-in ignores wall clock entirely — it
+        // keeps the stream silent until the mixer pulls real samples PAST
+        // its baseline (`samples_consumed` counts only real pulls, never
+        // paused or ring-starvation silence), then stamps the ramp clock
+        // from that moment. Holding on wall clock instead would let the
+        // ramp finish during the radio prebuffer silence and pop to full
+        // gain when audio finally arrives.
+        if let TransportFade::SwitchFadeIn {
+            started_at: started_at @ None,
+            baseline_samples,
+            ..
+        } = &mut self.transport_fade
+        {
+            let consumed = self
+                .primary_stream
+                .as_ref()
+                .map_or(0, |s| s.handle.samples_consumed.load(Ordering::Relaxed));
+            if consumed < *baseline_samples {
+                // The counter was reset (new-track bookkeeping) — without a
+                // re-baseline the fade would hold at silence forever.
+                *baseline_samples = consumed;
+            }
+            if consumed <= *baseline_samples {
+                // Still holding. Re-assert the silent hold: on the
+                // software-volume path a concurrent user volume write can
+                // land on the stream atomic between ticks; the worst-case
+                // exposure is one tick (≤ 20 ms), softened further by the
+                // M2 onset EMA.
+                if let Some(ref stream) = self.primary_stream {
+                    stream.set_volume(0.0);
+                }
+                return;
+            }
+            *started_at = Some(std::time::Instant::now());
+            debug!("🎚️ [TRANSPORT FADE] first audio pulled — switch fade-in ramp started");
+            // Fall through to the normal ramp tick below (progress ≈ 0).
+        }
+
+        let verdict = match &self.transport_fade {
+            TransportFade::Idle => return,
+            TransportFade::FadingOut {
+                started_at,
+                duration_ms,
+                from,
+                settling,
+                ..
+            } => {
+                let progress =
+                    crossfade_progress(started_at.elapsed().as_millis() as u64, 0, *duration_ms);
+                if let Some(ref stream) = self.primary_stream {
+                    stream.set_volume(*from * (1.0 - progress as f32));
+                }
+                if progress < 1.0 {
+                    RampTick::Running
+                } else if *settling {
+                    RampTick::Complete
+                } else {
+                    RampTick::EnterSettle
+                }
+            }
+            TransportFade::FadingIn {
+                started_at,
+                duration_ms,
+                from,
+                ..
+            } => {
+                let progress =
+                    crossfade_progress(started_at.elapsed().as_millis() as u64, 0, *duration_ms);
+                let target = self.stream_volume();
+                if let Some(ref stream) = self.primary_stream {
+                    stream.set_volume(*from + (target - *from) * progress as f32);
+                }
+                // No settle phase: the fade-in end action only pins the
+                // target volume — no paused/stopped atomic flips, no cut.
+                if progress >= 1.0 {
+                    RampTick::Complete
+                } else {
+                    RampTick::Running
+                }
+            }
+            TransportFade::SwitchFadeIn {
+                started_at: Some(started_at),
+                ..
+            } => {
+                // M6 running phase: ramp 0 → target from the first-audio
+                // stamp. Same no-settle rule as `FadingIn`.
+                let progress = crossfade_progress(
+                    started_at.elapsed().as_millis() as u64,
+                    0,
+                    RADIO_SWITCH_FADE_MS,
+                );
+                let target = self.stream_volume();
+                if let Some(ref stream) = self.primary_stream {
+                    stream.set_volume(target * progress as f32);
+                }
+                if progress >= 1.0 {
+                    RampTick::Complete
+                } else {
+                    RampTick::Running
+                }
+            }
+            // Unreachable: the holding pre-step above always returns (or
+            // stamps `Some` and falls through to the arm above).
+            TransportFade::SwitchFadeIn {
+                started_at: None, ..
+            } => return,
+        };
+        match verdict {
+            RampTick::Running => return,
+            RampTick::EnterSettle => {
+                // The volume atomic now reads 0.0, but the realized gain is
+                // the source's ~5 ms-tau EMA, which lags it. Hold the end
+                // action one render tick (20 ms ≈ 4 EMA time constants at
+                // silence) so the audible level settles to zero BEFORE the
+                // paused/stopped atomic flips — otherwise short ramps end in
+                // the very hard cut they exist to remove (see the `settling`
+                // field doc).
+                if let TransportFade::FadingOut { settling, .. } = &mut self.transport_fade {
+                    *settling = true;
+                }
+                debug!("🎚️ [TRANSPORT FADE] out-ramp floor reached — settling one tick");
+                return;
+            }
+            RampTick::Complete => {}
+        }
+
+        // Completion: take the state, apply the end action only when the
+        // stamped generation is still live — a superseded ramp (interrupt /
+        // cancel raced with this tick) must not apply its stale end-state.
+        let state = std::mem::replace(&mut self.transport_fade, TransportFade::Idle);
+        let (target, generation) = match state {
+            TransportFade::FadingOut {
+                target, generation, ..
+            } => (Some(target), generation),
+            TransportFade::FadingIn { generation, .. }
+            | TransportFade::SwitchFadeIn { generation, .. } => (None, generation),
+            TransportFade::Idle => return, // unreachable — matched above
+        };
+        if generation != self.transport_fade_gen {
+            debug!("🎚️ [TRANSPORT FADE] stale completion discarded (superseded ramp)");
+            return;
+        }
+
+        match target {
+            Some(TransportFadeTarget::Pause) => {
+                // The REAL pause the guard-lift deferred: silence is already
+                // reached, now freeze the stream (position stops counting).
+                if let Some(ref stream) = self.primary_stream {
+                    stream.set_volume(0.0);
+                    stream.pause();
+                }
+                debug!("🎚️ [TRANSPORT FADE] pause ramp complete — stream paused");
+            }
+            Some(TransportFadeTarget::Stop) => {
+                // The REAL silence_and_stop the engine's teardown expects.
+                if let Some(stream) = self.primary_stream.take() {
+                    stream.silence_and_stop();
+                }
+                debug!("🎚️ [TRANSPORT FADE] stop ramp complete — stream stopped");
+            }
+            None => {
+                // Fade-in settled — pin the exact target so EMA drift or a
+                // coarse final tick can't leave it fractionally short.
+                if let Some(ref stream) = self.primary_stream {
+                    stream.set_volume(self.stream_volume());
+                }
+                debug!("🎚️ [TRANSPORT FADE] resume ramp complete");
+            }
+        }
+        #[cfg(test)]
+        {
+            self.transport_fade_completions += 1;
+        }
+    }
+
+    /// Test observability: whether a fade-out ramp is in flight.
+    #[cfg(test)]
+    pub(crate) fn transport_fade_is_fading_out(&self) -> bool {
+        matches!(self.transport_fade, TransportFade::FadingOut { .. })
+    }
+
+    /// Test-only: force the native-PipeWire volume flag so the bit-perfect
+    /// gates (`crossfade_blocked`, bit-perfect stream builds) engage in
+    /// engine-level tests without a real PipeWire sink.
+    #[cfg(test)]
+    pub(crate) fn force_pw_volume_active_for_test(&mut self) {
+        self.pw_volume_active = true;
+    }
+
+    /// Test observability: count of REAL ramp completions (see field doc).
+    #[cfg(test)]
+    pub(crate) fn transport_fade_completions(&self) -> u64 {
+        self.transport_fade_completions
+    }
+
+    /// Force a detached primary stream for tests WITHOUT a real audio output
+    /// (mirrors [`Self::force_crossfade_active_for_test`]). Pre-fills the
+    /// ring with `prefill` samples (the transport-fade engageable gate skips
+    /// a drained ring), marks the renderer playing, and returns the throwaway
+    /// source (keep it alive — it owns the handle's shared atomics) plus a
+    /// clone of the stream handle for atomic-level assertions.
+    #[cfg(test)]
+    pub(crate) fn force_primary_stream_for_test(
+        &mut self,
+        prefill: usize,
+    ) -> (
+        crate::audio::streaming_source::StreamingSource,
+        crate::audio::streaming_source::StreamHandle,
+    ) {
+        use std::num::NonZero;
+
+        use ringbuf::{HeapRb, traits::Split};
+        let rb = HeapRb::<f32>::new(crate::audio::RING_BUFFER_CAPACITY);
+        let (mut producer, consumer) = rb.split();
+        if prefill > 0 {
+            use ringbuf::traits::Producer;
+            let data: Vec<f32> = (0..prefill).map(|i| i as f32 * 0.001).collect();
+            producer.push_slice(&data);
+        }
+        let viz: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(None));
+        let (source, handle) = crate::audio::streaming_source::StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(48_000).expect("48000 is nonzero"),
+            viz,
+            1.0,
+            1.0,
+            None,
+            Arc::new(Notify::new()),
+            true,
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            true,
+            false,
+        );
+        self.primary_stream = Some(crate::audio::ActiveStream {
+            producer,
+            handle: handle.clone(),
+            sample_rate: 48_000,
+            channels: 2,
+        });
+        self.playing = true;
+        self.paused = false;
+        (source, handle)
+    }
+
+    // =========================================================================
     // Render loop (called periodically from engine render thread)
     // =========================================================================
+
+    /// M8 trailing-silence detector, ticked from `render_tick`'s Armed branch
+    /// (20 ms cadence, playing and un-paused by construction). Returns `true`
+    /// when the early trigger should fire: the "Skip Silence Between Tracks"
+    /// setting is on, the position is inside the trailing window
+    /// (`track_dur − fade − TRAILING_SILENCE_WINDOW_MS` onward — a mid-song
+    /// quiet passage can never fire), and the primary's level meter has read
+    /// below [`crate::audio::SOURCE_SILENCE_THRESHOLD`] for
+    /// [`TRAILING_SILENCE_SUSTAIN_TICKS`] consecutive ticks.
+    ///
+    /// The meter is enabled LAZILY on the first in-window tick, so streams
+    /// carry zero metering cost until a fade is armed near a track end with
+    /// the feature on. Until the first metered window completes the handle
+    /// reports its LOUD seed, which simply delays the count by one window
+    /// (~11 ms). Ring starvation never updates the meter (see
+    /// `StreamingSource`), so a network stall holds the last REAL reading
+    /// instead of faking silence.
+    ///
+    /// Stands down under bit-perfect (Strict AND Relaxed — mode intent, not
+    /// the live `pw_volume_active` viability), mirroring the leading-trim
+    /// gate in the engine's `transition_prep_cfg`: discarding decoded tail
+    /// samples is a content change a bit-perfect listener opted out of, and
+    /// Relaxed self-arms same-format crossfades, so this branch IS reachable
+    /// there. The two halves of the one setting must agree.
+    fn tick_trailing_silence(&mut self, pos: u64, track_dur: u64, xfade_dur: u64) -> bool {
+        if !self.skip_silence || self.bit_perfect_mode.builds_bit_perfect() {
+            return false;
+        }
+        let window_start = track_dur.saturating_sub(xfade_dur + TRAILING_SILENCE_WINDOW_MS);
+        if pos < window_start {
+            self.trailing_silence_ticks = 0;
+            return false;
+        }
+        let Some(ref stream) = self.primary_stream else {
+            self.trailing_silence_ticks = 0;
+            return false;
+        };
+        stream.handle.enable_level_meter();
+        if stream.handle.recent_source_peak() < crate::audio::SOURCE_SILENCE_THRESHOLD {
+            self.trailing_silence_ticks += 1;
+        } else {
+            self.trailing_silence_ticks = 0;
+        }
+        if self.trailing_silence_ticks >= TRAILING_SILENCE_SUSTAIN_TICKS {
+            debug!(
+                "🤫 [RENDER_TICK] Trailing silence sustained {}ms at pos={}ms — early crossfade trigger",
+                u64::from(TRAILING_SILENCE_SUSTAIN_TICKS) * 20,
+                pos
+            );
+            return true;
+        }
+        false
+    }
 
     /// Check for track completion and crossfade trigger.
     /// This replaces the old `render_buffers()` — with rodio, the actual audio
@@ -1678,6 +2766,13 @@ impl AudioRenderer {
             );
         }
 
+        // Transport fades tick ABOVE the playing/paused early-return: the
+        // guard-lift design flips `self.paused = true` at fade START (so the
+        // completion gate, the rebuffer path, and the armed crossfade trigger
+        // below are frozen for the whole ramp), which means the early-return
+        // would starve the ramp if it were ticked any later.
+        self.tick_transport_fade();
+
         if !self.playing || self.paused {
             return;
         }
@@ -1700,15 +2795,15 @@ impl AudioRenderer {
                     return; // Don't run further checks this tick
                 }
                 CrossfadeTick::IncomingStalled => {
-                    // Fade completed on wall clock but the incoming decoder never
-                    // produced audio. Do NOT promote the silent stream. Signal the
-                    // engine to cancel the crossfade (restoring the outgoing as
-                    // primary at full volume) and skip the bad track via the
-                    // normal end-of-track path.
-                    warn!(
-                        "🔀 [RENDER_TICK] Crossfade completed but incoming stream is empty \
-                         (stalled decode) — recovering by restoring outgoing + skipping"
-                    );
+                    // Fade completed on wall clock but the incoming producer
+                    // stalled (empty ring, or blocked on the socket past the
+                    // liveness threshold). Do NOT promote the stalled stream.
+                    // Signal the engine to cancel the crossfade (restoring the
+                    // outgoing as primary at full volume) and skip the bad
+                    // track via the normal end-of-track path. The state stays
+                    // Active until that recovery lands, so this arm re-runs
+                    // every 20 ms tick — the signal itself (and its warn) is
+                    // latched to fire once per fade.
                     self.on_renderer_crossfade_stalled();
                     return; // Don't run further checks this tick
                 }
@@ -1718,18 +2813,30 @@ impl AudioRenderer {
         // Check for crossfade trigger: position-based, NOT EOF-based.
         // We start the crossfade `duration_ms` before the track ends, so the
         // outgoing track still has audio in its buffer to fade out. Falls back
-        // to EOF if duration is unknown (0).
-        if let CrossfadeState::Armed {
+        // to EOF if duration is unknown (0). (The params are copied out of the
+        // Armed variant so the M8 helpers below can borrow `self` mutably;
+        // the synchronous `mem::replace` trigger itself is unchanged —
+        // invariant 2.)
+        let armed_params = if let CrossfadeState::Armed {
             duration_ms,
             track_duration_ms,
             ..
         } = &self.crossfade_state
         {
+            Some((*duration_ms, *track_duration_ms))
+        } else {
+            None
+        };
+        if let Some((xfade_dur, track_dur)) = armed_params {
             let pos = self.position();
-            let track_dur = *track_duration_ms;
-            let xfade_dur = *duration_ms;
             let trigger = if track_dur > 0 && xfade_dur > 0 {
-                pos >= track_dur.saturating_sub(xfade_dur)
+                // M8 negative "Gap / Overlap Trim": the lead moves the trigger
+                // point earlier; the outgoing's trailing `lead` ms is discarded
+                // at finalize (invariant 5's finalize-before-EOF path). The
+                // trailing-silence detector may fire even earlier, but only
+                // inside its bounded window on sustained sub-threshold content.
+                pos >= track_dur.saturating_sub(xfade_dur + self.crossfade_lead_ms)
+                    || self.tick_trailing_silence(pos, track_dur, xfade_dur)
             } else {
                 // Unknown duration — fall back to EOF
                 self.decoder_eof.load(Ordering::Acquire)
@@ -1861,6 +2968,22 @@ impl AudioRenderer {
     /// engine lock is acquired off the render thread, matching the
     /// deadlock-safety rationale on `on_renderer_finished`.
     fn on_renderer_crossfade_stalled(&mut self) {
+        // M9 "already-signalled" latch: the stalled state stays Active (and
+        // keeps reporting `IncomingStalled`) until the ONE spawned recovery
+        // task wins the engine lock and cancels it — without the latch every
+        // 20 ms tick would respawn `recover_stalled_crossfade`. Cleared with
+        // the fade at `start_crossfade` / `cancel_crossfade` /
+        // `finalize_crossfade`, so recovery can never be starved: every path
+        // out of the latched state runs one of those.
+        if self.stall_recovery_signalled {
+            return;
+        }
+        self.stall_recovery_signalled = true;
+        #[cfg(test)]
+        {
+            self.stall_signals_sent += 1;
+        }
+
         let generation = self.source_generation.current();
         warn!("🔀 [RENDERER] Crossfade incoming stalled (generation={generation}) — recovering");
 
@@ -2319,6 +3442,7 @@ mod tests {
             incoming_format: AudioFormat::new(crate::audio::format::SampleFormat::S16, 96_000, 2),
             paused_accum: std::time::Duration::ZERO,
             paused_at: None,
+            curve: CrossfadeCurve::default(),
         };
 
         renderer.finalize_crossfade();
@@ -2358,10 +3482,12 @@ mod tests {
             NonZero::new(48_000).expect("48000 is nonzero"),
             viz,
             0.0,
+            0.0,
             None,
             Arc::new(Notify::new()),
             false,
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            true,
             false,
         );
         let stream = ActiveStream {
@@ -2385,6 +3511,7 @@ mod tests {
             incoming_format: AudioFormat::invalid(),
             paused_accum: std::time::Duration::ZERO,
             paused_at: None,
+            curve: CrossfadeCurve::default(),
         }
     }
 
@@ -2415,6 +3542,213 @@ mod tests {
         );
     }
 
+    /// M8 negative offset: with a crossfade lead pushed, the Armed position
+    /// trigger fires `lead` ms EARLIER than `track_dur − fade`. The baseline
+    /// tick (no lead) at the same position must leave Armed untouched — the
+    /// consumed Armed state is the observable for "the trigger fired".
+    #[tokio::test]
+    async fn armed_trigger_fires_early_with_crossfade_lead() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, _handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 2_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 100_000,
+        };
+        // Normal trigger point is 98_000; the lead moves it to 96_000.
+        renderer.reset_position_with_offset(96_500);
+
+        renderer.render_tick();
+        assert!(
+            renderer.is_crossfade_armed(),
+            "without a lead, 96.5s of 100s (fade 2s) must NOT trigger yet"
+        );
+
+        renderer.set_crossfade_lead_ms(2_000);
+        renderer.render_tick();
+        assert!(
+            !renderer.is_crossfade_armed(),
+            "a 2s lead moves the trigger to 96s — the tick at 96.5s must fire (consume Armed)"
+        );
+    }
+
+    /// M8 trailing-silence trim: inside the trailing window with the setting
+    /// on, a sustained sub-threshold meter reading fires the trigger early —
+    /// and the first windowed tick lazily enables the stream's level meter.
+    #[tokio::test]
+    async fn trailing_silence_fires_early_trigger_after_sustain() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_skip_silence(true);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 2_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 100_000,
+        };
+        // Window opens at 100_000 − 2_000 − 15_000 = 83_000; normal trigger
+        // at 98_000. 90s is inside the window, well before the trigger.
+        renderer.reset_position_with_offset(90_000);
+        // Fake a silent meter reading (the meter itself is unit-tested in
+        // streaming_source; here we pin the renderer's sustain logic).
+        handle
+            .recent_source_peak
+            .store(1e-4_f32.to_bits(), Ordering::Relaxed);
+
+        renderer.render_tick();
+        assert!(
+            handle
+                .level_meter_enabled
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "the first in-window tick must lazily enable the primary's level meter"
+        );
+
+        for _ in 0..(TRAILING_SILENCE_SUSTAIN_TICKS - 2) {
+            renderer.render_tick();
+        }
+        assert!(
+            renderer.is_crossfade_armed(),
+            "one tick short of the sustain threshold must not fire"
+        );
+        renderer.render_tick();
+        assert!(
+            !renderer.is_crossfade_armed(),
+            "{TRAILING_SILENCE_SUSTAIN_TICKS} sustained silent ticks must fire the early trigger"
+        );
+    }
+
+    /// M8 trailing-silence trim: a silent reading OUTSIDE the trailing window
+    /// (mid-song quiet passage) must never fire, no matter how long.
+    #[tokio::test]
+    async fn trailing_silence_outside_window_never_fires() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_skip_silence(true);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 2_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 100_000,
+        };
+        renderer.reset_position_with_offset(50_000); // far from the window
+        handle
+            .recent_source_peak
+            .store(1e-4_f32.to_bits(), Ordering::Relaxed);
+
+        for _ in 0..(2 * TRAILING_SILENCE_SUSTAIN_TICKS) {
+            renderer.render_tick();
+        }
+        assert!(
+            renderer.is_crossfade_armed(),
+            "a mid-song quiet passage must never fire the trailing-silence trigger"
+        );
+    }
+
+    /// M8 trailing-silence trim is gated on the setting (default off).
+    #[tokio::test]
+    async fn trailing_silence_requires_skip_silence_setting() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 2_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 100_000,
+        };
+        renderer.reset_position_with_offset(90_000);
+        handle
+            .recent_source_peak
+            .store(1e-4_f32.to_bits(), Ordering::Relaxed);
+
+        for _ in 0..(2 * TRAILING_SILENCE_SUSTAIN_TICKS) {
+            renderer.render_tick();
+        }
+        assert!(
+            renderer.is_crossfade_armed(),
+            "with Skip Silence OFF the trailing trigger must never fire"
+        );
+    }
+
+    /// M8 trailing-silence trim stands down under bit-perfect — mode intent
+    /// (`builds_bit_perfect()`, Strict AND Relaxed), mirroring the engine's
+    /// leading-trim gate in `transition_prep_cfg` so the two halves of the
+    /// same setting can never disagree. Dropping decoded samples is a content
+    /// change a bit-perfect listener opted out of. Relaxed is the live case:
+    /// it self-arms same-format crossfades, so without this gate a silent
+    /// outgoing tail would fire the blend early and discard the remainder.
+    #[tokio::test]
+    async fn trailing_silence_stands_down_under_bit_perfect_relaxed() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_skip_silence(true);
+        renderer.set_bit_perfect(BitPerfectMode::Relaxed);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 2_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 100_000,
+        };
+        renderer.reset_position_with_offset(90_000);
+        handle
+            .recent_source_peak
+            .store(1e-4_f32.to_bits(), Ordering::Relaxed);
+
+        for _ in 0..(2 * TRAILING_SILENCE_SUSTAIN_TICKS) {
+            renderer.render_tick();
+        }
+        assert!(
+            renderer.is_crossfade_armed(),
+            "bit-perfect Relaxed must never fire the trailing-silence trigger — \
+             trimming decoded tail samples violates the bit-perfect contract"
+        );
+        assert!(
+            !handle
+                .level_meter_enabled
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "the stand-down must return before lazily enabling the level meter"
+        );
+    }
+
+    /// M8 trailing-silence trim: one loud meter window resets the sustain
+    /// count — the silence must be CONSECUTIVE.
+    #[tokio::test]
+    async fn trailing_silence_loud_reading_resets_sustain() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_skip_silence(true);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 2_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 100_000,
+        };
+        renderer.reset_position_with_offset(90_000);
+
+        // Almost-sustained silence…
+        handle
+            .recent_source_peak
+            .store(1e-4_f32.to_bits(), Ordering::Relaxed);
+        for _ in 0..(TRAILING_SILENCE_SUSTAIN_TICKS - 1) {
+            renderer.render_tick();
+        }
+        // …interrupted by one loud window…
+        handle
+            .recent_source_peak
+            .store(0.5_f32.to_bits(), Ordering::Relaxed);
+        renderer.render_tick();
+        // …then silence again: the count must restart from zero.
+        handle
+            .recent_source_peak
+            .store(1e-4_f32.to_bits(), Ordering::Relaxed);
+        for _ in 0..(TRAILING_SILENCE_SUSTAIN_TICKS - 1) {
+            renderer.render_tick();
+        }
+        assert!(
+            renderer.is_crossfade_armed(),
+            "a loud window mid-run must reset the sustain counter"
+        );
+        renderer.render_tick();
+        assert!(
+            !renderer.is_crossfade_armed(),
+            "a fresh full sustain run after the reset fires normally"
+        );
+    }
+
     /// Regression (Relaxed bit-perfect): `cancel_crossfade` must restore the
     /// honest badge to the outgoing stream's build-time fact. `start_crossfade`
     /// drops `current_stream_bit_perfect` to false for the (non-bit-perfect)
@@ -2436,6 +3770,227 @@ mod tests {
         assert!(
             renderer.current_stream_bit_perfect,
             "cancel_crossfade under viable Relaxed must restore the bit-perfect badge"
+        );
+    }
+
+    /// M1: `tick_crossfade` must write the raw curve coefficients to the
+    /// streams' `fade_coeff` atomic (applied linearly in the source) and leave
+    /// the `volume` atomic alone — user volume and fade are no longer
+    /// overloaded onto one value.
+    #[tokio::test]
+    async fn tick_crossfade_writes_fade_coeff_and_leaves_volume_alone() {
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        let (primary, _psrc) = test_active_stream(4_096);
+        let primary_handle = primary.handle.clone();
+        primary_handle.set_volume(0.77);
+        renderer.primary_stream = Some(primary);
+        let (incoming, _isrc) = test_active_stream(4_096);
+        let incoming_handle = incoming.handle.clone();
+        // Exactly mid-fade (progress ≈ 0.5): the long duration makes the
+        // wall-clock skew between `Instant::now()` here and the tick negligible
+        // (1 ms of skew = 1e-5 progress). ConstantGain is the cos²/sin² pair
+        // this test's 0.5-midpoint assertions are written against.
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream: incoming,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(50),
+            duration_ms: 100_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+            curve: CrossfadeCurve::ConstantGain,
+        };
+
+        assert_eq!(renderer.tick_crossfade(), CrossfadeTick::Continue);
+
+        // cos²/sin² midpoint = 0.5 each.
+        let out = crate::audio::load_f32(&primary_handle.fade_coeff);
+        let inc = crate::audio::load_f32(&incoming_handle.fade_coeff);
+        assert!(
+            (out - 0.5).abs() < 0.01,
+            "outgoing fade_coeff must carry cos²(p·π/2) ≈ 0.5, got {out}"
+        );
+        assert!(
+            (inc - 0.5).abs() < 0.01,
+            "incoming fade_coeff must carry sin²(p·π/2) ≈ 0.5, got {inc}"
+        );
+        assert!(
+            (crate::audio::load_f32(&primary_handle.volume) - 0.77).abs() < 1e-6,
+            "the tick must not fold the fade into the volume atomic any more"
+        );
+    }
+
+    /// M1: `finalize_crossfade` must reset the promoted primary's `fade_coeff`
+    /// to 1.0 — the incoming stream was built with `initial_fade = 0.0`, and
+    /// nothing else ever re-establishes the fade on a promoted stream.
+    #[tokio::test]
+    async fn finalize_crossfade_resets_promoted_fade_coeff() {
+        let mut renderer = AudioRenderer::new();
+        let (incoming, _isrc) = test_active_stream(4_096);
+        let incoming_handle = incoming.handle.clone();
+        renderer.crossfade_state = completed_active_state(incoming);
+
+        renderer.finalize_crossfade();
+
+        assert_eq!(
+            crate::audio::load_f32(&incoming_handle.fade_coeff),
+            1.0,
+            "finalize must reset the promoted primary's fade_coeff to unity"
+        );
+    }
+
+    /// M1: `cancel_crossfade` (the seek-during-crossfade path) must reset the
+    /// restored outgoing primary's `fade_coeff` to 1.0 — the tick had been
+    /// driving it toward 0.
+    #[tokio::test]
+    async fn cancel_crossfade_resets_outgoing_fade_coeff() {
+        let mut renderer = AudioRenderer::new();
+        let (primary, _psrc) = test_active_stream(0);
+        let primary_handle = primary.handle.clone();
+        primary_handle.set_fade_coeff(0.3); // mid-fade attenuation
+        renderer.primary_stream = Some(primary);
+        let (incoming, _isrc) = test_active_stream(0);
+        renderer.crossfade_state = completed_active_state(incoming);
+
+        renderer.cancel_crossfade();
+
+        assert_eq!(
+            crate::audio::load_f32(&primary_handle.fade_coeff),
+            1.0,
+            "cancel must reset the restored outgoing's fade_coeff to unity"
+        );
+    }
+
+    /// M1 blocker guard: the `fade_coeff` reset in `cancel_crossfade` must be
+    /// UNCONDITIONAL — outside the `!self.paused` guard that gates the volume
+    /// restore. The resume path `start()` restores only `volume` and never
+    /// re-establishes `fade_coeff`, so a `reset_next_track` / mode toggle that
+    /// cancels a crossfade WHILE PAUSED would otherwise leave the outgoing
+    /// stuck at reduced gain until the next track change.
+    #[tokio::test]
+    async fn cancel_crossfade_resets_outgoing_fade_coeff_while_paused() {
+        let mut renderer = AudioRenderer::new();
+        renderer.paused = true;
+        let (primary, _psrc) = test_active_stream(0);
+        let primary_handle = primary.handle.clone();
+        primary_handle.set_fade_coeff(0.3);
+        renderer.primary_stream = Some(primary);
+        let (incoming, _isrc) = test_active_stream(0);
+        renderer.crossfade_state = completed_active_state(incoming);
+
+        renderer.cancel_crossfade();
+
+        assert_eq!(
+            crate::audio::load_f32(&primary_handle.fade_coeff),
+            1.0,
+            "the fade_coeff reset must run even while paused"
+        );
+    }
+
+    /// M1: after the volume/fade split the crossfade tick writes only
+    /// `fade_coeff`, so a mid-crossfade user-volume change must be pushed to
+    /// BOTH streams' `volume` atomics by `set_volume` itself — unconditionally.
+    /// Paused is the harder case: the tick doesn't run while paused and
+    /// `start()` skips the volume restore when Active, so this push is the
+    /// only way the change ever reaches the streams.
+    #[tokio::test]
+    async fn set_volume_during_active_crossfade_pushes_to_both_streams() {
+        let mut renderer = AudioRenderer::new();
+        let (primary, _psrc) = test_active_stream(0);
+        let primary_handle = primary.handle.clone();
+        renderer.primary_stream = Some(primary);
+        let (incoming, _isrc) = test_active_stream(0);
+        let incoming_handle = incoming.handle.clone();
+        renderer.crossfade_state = completed_active_state(incoming);
+        renderer.paused = true;
+
+        renderer.set_volume(0.42);
+
+        assert!(
+            (crate::audio::load_f32(&primary_handle.volume) - 0.42).abs() < 1e-6,
+            "set_volume during Active must push the user volume to the primary"
+        );
+        assert!(
+            (crate::audio::load_f32(&incoming_handle.volume) - 0.42).abs() < 1e-6,
+            "set_volume during Active must push the user volume to the incoming stream"
+        );
+    }
+
+    /// M3: an `Active` crossfade carrying `curve: EqualPower` must realize the
+    /// true equal-power gains — 1/√2 ≈ 0.7071 each at the midpoint (power sum
+    /// 1), NOT the cos²/sin² 0.5 that would dip ~3 dB for uncorrelated
+    /// material.
+    #[tokio::test]
+    async fn tick_crossfade_equal_power_midpoint_holds_power() {
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        let (primary, _psrc) = test_active_stream(4_096);
+        let primary_handle = primary.handle.clone();
+        renderer.primary_stream = Some(primary);
+        let (incoming, _isrc) = test_active_stream(4_096);
+        let incoming_handle = incoming.handle.clone();
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream: incoming,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(50),
+            duration_ms: 100_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+            curve: CrossfadeCurve::EqualPower,
+        };
+
+        assert_eq!(renderer.tick_crossfade(), CrossfadeTick::Continue);
+
+        let expected = std::f64::consts::FRAC_1_SQRT_2 as f32;
+        let out = crate::audio::load_f32(&primary_handle.fade_coeff);
+        let inc = crate::audio::load_f32(&incoming_handle.fade_coeff);
+        assert!(
+            (out - expected).abs() < 0.01,
+            "EqualPower outgoing midpoint gain must be ≈ 0.707, got {out}"
+        );
+        assert!(
+            (inc - expected).abs() < 0.01,
+            "EqualPower incoming midpoint gain must be ≈ 0.707, got {inc}"
+        );
+        let power = out * out + inc * inc;
+        assert!(
+            (power - 1.0).abs() < 0.03,
+            "EqualPower midpoint power sum must be ≈ 1, got {power}"
+        );
+    }
+
+    /// M3 no-tear guard: the tick must apply the curve CAPTURED in the
+    /// `Active` variant, not the live `self.crossfade_curve` setting — a
+    /// mid-fade settings change must leave the in-flight envelope on the
+    /// curve it started with.
+    #[tokio::test]
+    async fn tick_crossfade_uses_captured_curve_not_live_setting() {
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        let (primary, _psrc) = test_active_stream(4_096);
+        let primary_handle = primary.handle.clone();
+        renderer.primary_stream = Some(primary);
+        let (incoming, _isrc) = test_active_stream(4_096);
+        renderer.crossfade_state = CrossfadeState::Active {
+            stream: incoming,
+            started_at: std::time::Instant::now() - std::time::Duration::from_secs(50),
+            duration_ms: 100_000,
+            incoming_format: AudioFormat::invalid(),
+            paused_accum: std::time::Duration::ZERO,
+            paused_at: None,
+            curve: CrossfadeCurve::EqualPower,
+        };
+
+        // Mid-fade settings change: must NOT reach the in-flight fade.
+        renderer.set_crossfade_curve(CrossfadeCurve::ConstantGain);
+        assert_eq!(renderer.tick_crossfade(), CrossfadeTick::Continue);
+
+        let out = crate::audio::load_f32(&primary_handle.fade_coeff);
+        let expected = std::f64::consts::FRAC_1_SQRT_2 as f32;
+        assert!(
+            (out - expected).abs() < 0.01,
+            "mid-fade curve change must not tear: expected the captured \
+             EqualPower midpoint ≈ 0.707, got {out} (ConstantGain would be 0.5)"
         );
     }
 
@@ -2463,6 +4018,62 @@ mod tests {
         renderer.disarm_crossfade();
 
         assert!(matches!(renderer.crossfade_state, CrossfadeState::Idle));
+    }
+
+    /// M4: the arm gate's minimum-track floor follows the configured setting,
+    /// not the historical hardcoded 10 s — a raised floor (30 s) must refuse a
+    /// 20 s pair that the default floor accepts.
+    #[tokio::test]
+    async fn arm_crossfade_honors_configured_min_track_floor() {
+        use crate::audio::format::SampleFormat;
+        let f44 = AudioFormat::new(SampleFormat::S16, 44_100, 2);
+        let mut renderer = AudioRenderer::new();
+
+        renderer.set_crossfade_min_track_secs(30);
+        renderer.arm_crossfade(5_000, &f44, 20_000, 20_000);
+        assert!(
+            !renderer.is_crossfade_armed(),
+            "a 20s pair must NOT arm under a 30s configured floor"
+        );
+
+        renderer.set_crossfade_min_track_secs(10);
+        renderer.arm_crossfade(5_000, &f44, 20_000, 20_000);
+        assert!(
+            renderer.is_crossfade_armed(),
+            "the same 20s pair must arm once the floor drops back to 10s"
+        );
+    }
+
+    /// M4: a floor of 0 means "blend everything with a KNOWN duration" —
+    /// short tracks arm, but an unknown (zero) duration must still refuse:
+    /// a zero `track_duration_ms` would make the Armed position trigger
+    /// (`pos >= track_duration − fade`) fire immediately at track start.
+    /// Unreachable under the historical 10s constant, exposed by the
+    /// configurable 0 floor.
+    #[tokio::test]
+    async fn arm_crossfade_zero_floor_blends_short_tracks_but_skips_unknown_duration() {
+        use crate::audio::format::SampleFormat;
+        let f44 = AudioFormat::new(SampleFormat::S16, 44_100, 2);
+        let mut renderer = AudioRenderer::new();
+        renderer.set_crossfade_min_track_secs(0);
+
+        renderer.arm_crossfade(5_000, &f44, 0, 20_000);
+        assert!(
+            !renderer.is_crossfade_armed(),
+            "an unknown (0) outgoing duration must never arm — the position \
+             trigger would fire immediately"
+        );
+        renderer.arm_crossfade(5_000, &f44, 20_000, 0);
+        assert!(
+            !renderer.is_crossfade_armed(),
+            "an unknown (0) incoming duration must never arm"
+        );
+
+        renderer.arm_crossfade(5_000, &f44, 5_000, 5_000);
+        assert!(
+            renderer.is_crossfade_armed(),
+            "a 5s pair must arm under a 0 floor (blend everything known)"
+        );
     }
 
     /// I5: crossfade progress must exclude time spent paused. Pausing mid-fade
@@ -2538,6 +4149,159 @@ mod tests {
         );
     }
 
+    /// M9 Part B: a completed fade whose incoming ring still holds residue
+    /// (the old empty-only gate would promote) but whose producer has been
+    /// blocked inside ONE network read past the stall threshold must report
+    /// `IncomingStalled` — promoting it yields a stream that plays its
+    /// residue and then hangs silent with no completion path. The tick only
+    /// REPORTS; teardown happens later in `cancel_crossfade` (driven by the
+    /// engine's `recover_stalled_crossfade`).
+    #[tokio::test]
+    async fn tick_crossfade_reports_stall_when_incoming_liveness_dead() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = completed_active_state(stream);
+        renderer.set_incoming_liveness(Some(Arc::new(
+            crate::audio::IncomingLiveness::new_blocked_for_test(
+                crate::audio::crossfade_liveness::CROSSFADE_STALL_READ_MS + 500,
+            ),
+        )));
+
+        assert!(
+            renderer.crossfade_buffer_count() > 0,
+            "residue in the ring — the empty-only gate alone would promote"
+        );
+        assert_eq!(
+            renderer.tick_crossfade(),
+            CrossfadeTick::IncomingStalled,
+            "a producer blocked on the socket past the threshold must not be promoted"
+        );
+        assert!(
+            matches!(renderer.crossfade_state, CrossfadeState::Active { .. }),
+            "the tick only reports the stall; the state stays Active for the recovery"
+        );
+    }
+
+    /// M9 Part B control: an in-flight read BELOW the stall threshold is a
+    /// healthy fetch mid-flight (slow networks routinely hold a read for
+    /// hundreds of ms) — the completed fade must promote exactly as before.
+    #[tokio::test]
+    async fn tick_crossfade_finalizes_when_incoming_liveness_alive() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = completed_active_state(stream);
+        let liveness = Arc::new(crate::audio::IncomingLiveness::new());
+        liveness.mark_read_start();
+        renderer.set_incoming_liveness(Some(liveness));
+
+        assert_eq!(
+            renderer.tick_crossfade(),
+            CrossfadeTick::Finalize,
+            "an in-flight read below the stall threshold is healthy — promote as before"
+        );
+    }
+
+    /// M9 Part A: a late-stage cancel (seek / mode toggle / stall recovery
+    /// after the midpoint handoff) restores the outgoing as the SOLE live
+    /// stream — it must feed the visualizer again, or the spectrum freezes
+    /// until the next track change.
+    #[tokio::test]
+    async fn cancel_crossfade_restores_visualizer_feed_on_outgoing() {
+        let mut renderer = AudioRenderer::new();
+        let (_primary_src, primary_handle) = renderer.force_primary_stream_for_test(4_096);
+        let (stream, _incoming_src) = test_active_stream(4_096);
+        renderer.crossfade_state = completed_active_state(stream);
+
+        // Drive the REAL midpoint handoff (progress >= 0.5): the tick mutes
+        // the outgoing primary's feed and promotes the incoming's.
+        renderer.tick_crossfade();
+        assert!(
+            !primary_handle.feeds_visualizer(),
+            "precondition: the midpoint handoff muted the outgoing's viz feed"
+        );
+
+        renderer.cancel_crossfade();
+
+        assert!(
+            primary_handle.feeds_visualizer(),
+            "cancel_crossfade must restore the visualizer feed on the restored outgoing"
+        );
+    }
+
+    /// M9 Part A: once a stalled fade signals recovery, the 20 ms render tick
+    /// must NOT respawn `recover_stalled_crossfade` every tick while the one
+    /// spawned task waits on the engine lock — the signal latches.
+    #[tokio::test]
+    async fn stalled_fade_signals_recovery_once_not_every_tick() {
+        let (stream, _source) = test_active_stream(0);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = completed_active_state(stream);
+
+        renderer.render_tick();
+        renderer.render_tick();
+        renderer.render_tick();
+
+        assert!(
+            matches!(renderer.crossfade_state, CrossfadeState::Active { .. }),
+            "the stalled fade stays Active until the engine's recovery lands"
+        );
+        assert_eq!(
+            renderer.stall_signals_sent, 1,
+            "recovery must be signalled exactly once per stalled fade, not per tick"
+        );
+        assert!(renderer.stall_recovery_signalled);
+    }
+
+    /// M9 Part A: `cancel_crossfade` (the renderer half of every recovery /
+    /// teardown path, including `stop()`) resets the stall latch and drops
+    /// the fade's liveness handle so the NEXT fade starts with a clean
+    /// watchdog.
+    #[tokio::test]
+    async fn cancel_crossfade_clears_stall_watchdog_state() {
+        let (stream, _source) = test_active_stream(0);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = completed_active_state(stream);
+        renderer.set_incoming_liveness(Some(Arc::new(crate::audio::IncomingLiveness::new())));
+        renderer.render_tick(); // stalls + latches
+        assert!(
+            renderer.stall_recovery_signalled,
+            "precondition: the stalled tick latched the signal"
+        );
+
+        renderer.cancel_crossfade();
+
+        assert!(
+            !renderer.stall_recovery_signalled,
+            "the latch must reset with the fade it guards"
+        );
+        assert!(
+            renderer.incoming_liveness.is_none(),
+            "the dead fade's liveness handle must not describe a later fade"
+        );
+    }
+
+    /// M9 Part A: `finalize_crossfade` (healthy promotion) clears the same
+    /// watchdog state — the promoted primary is no longer the stream the
+    /// fade's liveness handle described.
+    #[tokio::test]
+    async fn finalize_crossfade_clears_stall_watchdog_state() {
+        let (stream, _source) = test_active_stream(4_096);
+        let mut renderer = AudioRenderer::new();
+        renderer.playing = true;
+        renderer.crossfade_state = completed_active_state(stream);
+        renderer.set_incoming_liveness(Some(Arc::new(crate::audio::IncomingLiveness::new())));
+        renderer.stall_recovery_signalled = true;
+
+        renderer.finalize_crossfade();
+
+        assert!(renderer.incoming_liveness.is_none());
+        assert!(!renderer.stall_recovery_signalled);
+    }
+
     /// N16: a fresh renderer always carries an `EqState` (no `Option`), so
     /// every stream it creates gets an `EqProcessor` even before `set_eq_state`
     /// is called. Previously the field defaulted to `None`, so a stream created
@@ -2585,6 +4349,7 @@ mod tests {
             incoming_format: AudioFormat::invalid(),
             paused_accum: std::time::Duration::ZERO,
             paused_at: None,
+            curve: CrossfadeCurve::default(),
         };
 
         assert_eq!(renderer.tick_crossfade(), CrossfadeTick::Continue);
@@ -2614,6 +4379,7 @@ mod tests {
             incoming_format: AudioFormat::invalid(),
             paused_accum: std::time::Duration::ZERO,
             paused_at: Some(std::time::Instant::now() - std::time::Duration::from_secs(8)),
+            curve: CrossfadeCurve::default(),
         };
 
         // Unpause through the real engine path.
@@ -2656,6 +4422,7 @@ mod tests {
             incoming_format: AudioFormat::invalid(),
             paused_accum: std::time::Duration::ZERO,
             paused_at: None,
+            curve: CrossfadeCurve::default(),
         };
 
         // First pause/resume cycle.
@@ -2701,6 +4468,704 @@ mod tests {
         assert!(
             paused_at.is_none(),
             "second unpause via start() must clear paused_at"
+        );
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  M5 — transport fades (pause / resume / stop gain ramps)
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// Rewind the in-flight transport fade's `started_at` by `ms` so a test
+    /// can place the ramp at an exact wall-clock progress without sleeping.
+    fn rewind_transport_fade(renderer: &mut AudioRenderer, ms: u64) {
+        match &mut renderer.transport_fade {
+            TransportFade::FadingOut { started_at, .. }
+            | TransportFade::FadingIn { started_at, .. } => {
+                *started_at = std::time::Instant::now() - std::time::Duration::from_millis(ms);
+            }
+            TransportFade::SwitchFadeIn {
+                started_at: Some(started_at),
+                ..
+            } => {
+                *started_at = std::time::Instant::now() - std::time::Duration::from_millis(ms);
+            }
+            TransportFade::SwitchFadeIn {
+                started_at: None, ..
+            } => panic!("switch fade still holding — no ramp clock to rewind"),
+            TransportFade::Idle => panic!("no transport fade in flight to rewind"),
+        }
+    }
+
+    /// M7 interlock (M5 review-cycle-2 survivor): `init()`'s GAPLESS-REUSE
+    /// branch is the one transport-fade cancel site that reuses the existing
+    /// stream — cancelling an in-flight resume fade-in there without
+    /// restoring the `volume` atomic strands the next track at the mid-ramp
+    /// level (under `pw_volume_active` nothing downstream rewrites it:
+    /// `set_volume` early-returns and `start()` early-returns while already
+    /// playing). The cancel must restore `stream_volume()` on the reused
+    /// primary.
+    #[tokio::test]
+    async fn init_gapless_reuse_restores_volume_after_interrupted_transport_fade() {
+        use crate::audio::format::SampleFormat;
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 200);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        let fmt = AudioFormat::new(SampleFormat::S16, 48_000, 2);
+        renderer.format = fmt.clone();
+
+        // A resume fade-in mid-ramp: paused at some point, volume atomic at
+        // its mid-ramp value, start() re-arms the in-ramp from it.
+        handle.set_volume(0.25);
+        renderer.playing = false;
+        renderer.paused = true;
+        renderer.start();
+        assert!(
+            matches!(renderer.transport_fade, TransportFade::FadingIn { .. }),
+            "precondition: a resume fade-in is in flight"
+        );
+
+        // Gapless-reuse init (same format, no force_reload) — the EOF-fallback
+        // `load_prepared_track` path for a format-matched next track.
+        renderer
+            .init(&fmt, false, None)
+            .expect("gapless-reuse init must succeed");
+
+        assert!(
+            renderer.transport_fade_idle(),
+            "init must abandon the previous track's ramp"
+        );
+        let vol = crate::audio::load_f32(&handle.volume);
+        assert!(
+            (vol - renderer.stream_volume()).abs() < f32::EPSILON,
+            "the reused stream's volume must be restored (got {vol}, want {})",
+            renderer.stream_volume()
+        );
+    }
+
+    /// M5 guard-lift: `begin_pause_fade` flips `self.paused` IMMEDIATELY
+    /// (freezing the completion gate / rebuffer / armed trigger) while the
+    /// stream-level pause is deferred to ramp completion — the audio keeps
+    /// flowing for the ramp.
+    #[tokio::test]
+    async fn begin_pause_fade_lifts_paused_guard_and_defers_stream_pause() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+
+        assert!(renderer.begin_pause_fade(), "the pause fade must engage");
+
+        assert!(
+            renderer.paused,
+            "guard-lift: self.paused must flip at fade START"
+        );
+        assert!(
+            !handle.paused.load(Ordering::Acquire),
+            "the stream-level pause is deferred until the ramp completes"
+        );
+        assert!(renderer.transport_fade_is_fading_out());
+    }
+
+    /// M5: the pause ramp writes intermediate volumes toward 0 and invokes
+    /// the REAL stream-level pause only after reaching completion.
+    #[tokio::test]
+    async fn pause_fade_ramps_volume_then_pauses_stream() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+        assert!(renderer.begin_pause_fade());
+
+        // Mid-ramp (~50%): volume ≈ from · (1 − progress) = 0.5, no pause yet.
+        rewind_transport_fade(&mut renderer, 50);
+        renderer.tick_transport_fade();
+        let mid = crate::audio::load_f32(&handle.volume);
+        assert!(
+            (mid - 0.5).abs() < 0.1,
+            "mid-ramp volume must be ≈ 0.5, got {mid}"
+        );
+        assert!(
+            !handle.paused.load(Ordering::Acquire),
+            "the stream must keep playing mid-ramp"
+        );
+
+        // Past completion: volume 0, then (after the one-tick EMA settle)
+        // stream paused, machine Idle.
+        rewind_transport_fade(&mut renderer, 200);
+        renderer.tick_transport_fade(); // floor — writes 0.0, enters settle
+        renderer.tick_transport_fade(); // settle — applies the real pause
+        assert!(
+            handle.paused.load(Ordering::Acquire),
+            "ramp completion must invoke the real stream-level pause"
+        );
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the completed out-ramp must end at volume 0"
+        );
+        assert!(renderer.transport_fade_idle());
+        assert_eq!(renderer.transport_fade_completions(), 1);
+    }
+
+    /// M5 review fix (settle tick): the out-ramp's end action must NOT fire
+    /// in the same render tick as the final volume write. The audible gain
+    /// is the consumer-side ~5 ms-tau EMA in `StreamingSource::next()`,
+    /// which lags the atomic write — and `next()` emits silence the instant
+    /// the paused atomic flips, so a same-tick pause cuts at the EMA's
+    /// pre-floor gain. At the 20 ms slider minimum (= one 20 ms tick period)
+    /// that degenerates to a near/full-amplitude hard cut — the exact click
+    /// the fade exists to remove. The floor tick must instead HOLD one
+    /// settle tick (20 ms ≈ 4 EMA time constants at volume 0.0) before the
+    /// real stream-level pause.
+    #[tokio::test]
+    async fn pause_fade_floor_holds_one_settle_tick_before_stream_pause() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 20); // slider minimum — the worst case
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+        assert!(renderer.begin_pause_fade());
+
+        // Floor tick: the ramp reaches volume 0.0, but the stream must NOT
+        // pause yet — the EMA needs a full tick at silence first.
+        rewind_transport_fade(&mut renderer, 20);
+        renderer.tick_transport_fade();
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the floor tick must write volume 0.0"
+        );
+        assert!(
+            !handle.paused.load(Ordering::Acquire),
+            "the stream-level pause must be deferred one settle tick past \
+             the floor (a same-tick pause cuts at the EMA's lagging gain)"
+        );
+        assert!(
+            !renderer.transport_fade_idle(),
+            "the fade must stay in flight through the settle tick"
+        );
+        assert_eq!(renderer.transport_fade_completions(), 0);
+
+        // Settle tick: NOW the real pause applies.
+        renderer.tick_transport_fade();
+        assert!(
+            handle.paused.load(Ordering::Acquire),
+            "the settle tick must invoke the real stream-level pause"
+        );
+        assert!(renderer.transport_fade_idle());
+        assert_eq!(renderer.transport_fade_completions(), 1);
+    }
+
+    /// M5 call-site pin: `render_tick` must drive the ramp even though the
+    /// guard-lift already set `self.paused = true` — i.e. the transport-fade
+    /// tick sits ABOVE the playing/paused early-return. Placing it below
+    /// starves the ramp forever (this test then hangs at volume 1.0).
+    #[tokio::test]
+    async fn render_tick_drives_pause_fade_while_paused() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+        assert!(renderer.begin_pause_fade());
+        assert!(renderer.paused, "precondition: guard already lifted");
+
+        rewind_transport_fade(&mut renderer, 200);
+        renderer.render_tick(); // floor — writes 0.0, enters settle
+        renderer.render_tick(); // settle — applies the real pause
+
+        assert!(
+            handle.paused.load(Ordering::Acquire),
+            "render_tick must complete the ramp despite self.paused being set"
+        );
+        assert!(renderer.transport_fade_idle());
+    }
+
+    /// M5: resuming mid-fade-out (or after a completed one) fades back in,
+    /// seeded from the stream's LAST-WRITTEN `volume` atomic — the observable
+    /// value the renderer can actually read — so an interrupted ramp
+    /// continues from the audible level instead of snapping.
+    #[tokio::test]
+    async fn resume_fade_in_seeds_from_last_written_volume() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+        assert!(renderer.begin_pause_fade());
+        rewind_transport_fade(&mut renderer, 50);
+        renderer.tick_transport_fade();
+        let interrupted_at = crate::audio::load_f32(&handle.volume);
+        assert!(
+            (interrupted_at - 0.5).abs() < 0.1,
+            "precondition: mid-ramp volume ≈ 0.5"
+        );
+
+        // Resume: start() is the engine's unpause path.
+        renderer.start();
+
+        assert!(!renderer.paused, "start() must clear the paused guard");
+        assert!(
+            !handle.paused.load(Ordering::Acquire),
+            "start() must resume the stream immediately (audio under the in-ramp)"
+        );
+        match renderer.transport_fade {
+            TransportFade::FadingIn { from, .. } => {
+                assert!(
+                    (from - interrupted_at).abs() < 1e-6,
+                    "the in-ramp must seed from the last-written volume atomic \
+                     ({interrupted_at}), got {from}"
+                );
+            }
+            _ => panic!("start() with the pause fade enabled must begin a FadingIn ramp"),
+        }
+
+        // Completion restores the exact target volume.
+        rewind_transport_fade(&mut renderer, 200);
+        renderer.tick_transport_fade();
+        let restored = crate::audio::load_f32(&handle.volume);
+        assert!(
+            (restored - 1.0).abs() < 1e-6,
+            "the completed in-ramp must end at stream_volume(), got {restored}"
+        );
+        assert!(renderer.transport_fade_idle());
+    }
+
+    /// M5 generation token: a completion whose stamped generation no longer
+    /// matches the live counter is stale — it must apply NO end-state action
+    /// (no stream pause, no completion count), only clear itself.
+    #[tokio::test]
+    async fn stale_transport_fade_completion_is_ignored() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+        renderer.transport_fade_gen = 5;
+        renderer.transport_fade = TransportFade::FadingOut {
+            target: TransportFadeTarget::Pause,
+            started_at: std::time::Instant::now() - std::time::Duration::from_millis(200),
+            duration_ms: 100,
+            generation: 0, // stale — a newer begin/cancel superseded this ramp
+            from: 1.0,
+            settling: true, // already settled — this tick reaches completion
+        };
+
+        renderer.tick_transport_fade();
+
+        assert!(
+            !handle.paused.load(Ordering::Acquire),
+            "a stale completion must not pause the stream"
+        );
+        assert!(
+            renderer.transport_fade_idle(),
+            "the stale state must still be discarded"
+        );
+        assert_eq!(renderer.transport_fade_completions(), 0);
+    }
+
+    /// M5 / invariant 8: the volume atomic is inert on the bit-perfect arm
+    /// (`next()` reads only `fade_coeff` there), so a transport fade on a
+    /// bit-perfect stream would be an inaudible delay ending in the same hard
+    /// cut. Skip the ramp — the caller falls back to the instant pause.
+    #[tokio::test]
+    async fn pause_fade_not_engaged_for_bit_perfect_stream() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, _handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.current_stream_bit_perfect = true;
+
+        assert!(!renderer.begin_pause_fade());
+        assert!(
+            !renderer.paused,
+            "a refused fade must not lift the guard — the instant pause() does"
+        );
+        assert!(renderer.transport_fade_idle());
+    }
+
+    /// M5 guard: a transport fade never fights a live crossfade — engage only
+    /// while `CrossfadeState` is `Idle`.
+    #[tokio::test]
+    async fn pause_fade_not_engaged_during_active_crossfade() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, _handle) = renderer.force_primary_stream_for_test(4_096);
+        let (incoming, _isrc) = test_active_stream(0);
+        renderer.crossfade_state = completed_active_state(incoming);
+
+        assert!(!renderer.begin_pause_fade());
+        assert!(renderer.transport_fade_idle());
+    }
+
+    /// M5 default: with "Fade on Pause / Resume" OFF (the shipped default),
+    /// the fade never engages — pause stays the instant flip it is today.
+    #[tokio::test]
+    async fn pause_fade_not_engaged_when_disabled() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, _handle) = renderer.force_primary_stream_for_test(4_096);
+
+        assert!(!renderer.begin_pause_fade());
+        assert!(renderer.transport_fade_idle());
+    }
+
+    /// M5: the stop ramp completes into the REAL `silence_and_stop()` — the
+    /// primary is taken and removed from the mixer, so the engine's teardown
+    /// that follows the bounded wait finds a silent renderer.
+    #[tokio::test]
+    async fn stop_fade_completion_silences_and_stops_primary() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+
+        assert!(renderer.begin_stop_fade(100), "the stop fade must engage");
+        assert!(
+            renderer.paused,
+            "guard-lift applies to the stop ramp too (a stop near end-of-track \
+             must not let the completion gate advance the queue mid-ramp)"
+        );
+
+        rewind_transport_fade(&mut renderer, 200);
+        renderer.tick_transport_fade(); // floor — writes 0.0, enters settle
+        renderer.tick_transport_fade(); // settle — applies silence_and_stop
+
+        assert!(
+            renderer.primary_stream.is_none(),
+            "stop completion must take the primary via silence_and_stop()"
+        );
+        assert!(
+            handle.stopped.load(Ordering::Acquire),
+            "the stream must be flagged stopped (removed from the mixer)"
+        );
+        assert!(renderer.transport_fade_idle());
+        assert_eq!(renderer.transport_fade_completions(), 1);
+    }
+
+    /// M5 review fix (settle tick), stop flavor: `silence_and_stop()` flips
+    /// the stopped atomic, which ends the source instantly — same lagging-EMA
+    /// hard cut as the pause flavor when it fires in the floor tick. The
+    /// stop ramp must also hold one settle tick at volume 0.0 before the
+    /// real `silence_and_stop()`.
+    #[tokio::test]
+    async fn stop_fade_floor_holds_one_settle_tick_before_silence_and_stop() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        handle.set_volume(1.0);
+        assert!(renderer.begin_stop_fade(20)); // slider minimum — worst case
+
+        // Floor tick: volume 0.0, stream still live (not stopped, not taken).
+        rewind_transport_fade(&mut renderer, 20);
+        renderer.tick_transport_fade();
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the floor tick must write volume 0.0"
+        );
+        assert!(
+            renderer.primary_stream.is_some(),
+            "the primary must survive the floor tick (settle at silence)"
+        );
+        assert!(
+            !handle.stopped.load(Ordering::Acquire),
+            "silence_and_stop must be deferred one settle tick past the floor"
+        );
+        assert_eq!(renderer.transport_fade_completions(), 0);
+
+        // Settle tick: NOW the real silence_and_stop applies.
+        renderer.tick_transport_fade();
+        assert!(
+            renderer.primary_stream.is_none(),
+            "the settle tick must take the primary via silence_and_stop()"
+        );
+        assert!(handle.stopped.load(Ordering::Acquire));
+        assert!(renderer.transport_fade_idle());
+        assert_eq!(renderer.transport_fade_completions(), 1);
+    }
+
+    /// M5: a drained ring has nothing audible to fade (natural end-of-queue
+    /// stop, mid-rebuffer) — skip the ramp so teardown isn't delayed for
+    /// silence.
+    #[tokio::test]
+    async fn stop_fade_not_engaged_on_drained_ring() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, _handle) = renderer.force_primary_stream_for_test(0);
+
+        assert!(!renderer.begin_stop_fade(100));
+        assert!(renderer.transport_fade_idle());
+    }
+
+    /// M5: `stop()` abandons any in-flight transport fade without applying
+    /// its end-state action (the stream is being torn down anyway).
+    #[tokio::test]
+    async fn renderer_stop_cancels_transport_fade() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, _handle) = renderer.force_primary_stream_for_test(4_096);
+        assert!(renderer.begin_pause_fade());
+
+        renderer.stop();
+
+        assert!(renderer.transport_fade_idle());
+        assert_eq!(
+            renderer.transport_fade_completions(),
+            0,
+            "a cancel is not a completion"
+        );
+    }
+
+    /// M5 / invariant 8: with the pause fade enabled but a BIT-PERFECT
+    /// primary, resume must restore volume instantly (the in-ramp would be
+    /// inert on that arm) — same conservative skip as the out-ramp.
+    #[tokio::test]
+    async fn resume_fade_skipped_for_bit_perfect_stream() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.current_stream_bit_perfect = true;
+        renderer.pause();
+
+        renderer.start();
+
+        assert!(
+            renderer.transport_fade_idle(),
+            "no in-ramp may start for a bit-perfect stream"
+        );
+        assert!(
+            (crate::audio::load_f32(&handle.volume) - 1.0).abs() < 1e-6,
+            "resume must restore full volume instantly"
+        );
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  M6 — radio-switch fade (first-audio fade-in)
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// M6: a pending switch fade-in request is consumed by the next FRESH
+    /// `start()`, which holds the new primary silent — ignoring wall clock —
+    /// until the mixer pulls the stream's first REAL sample, and only then
+    /// runs the ramp to the target volume. A wall-clock ramp from stream
+    /// creation would burn off during the radio prebuffer silence and pop to
+    /// full gain when audio finally arrives.
+    #[tokio::test]
+    async fn switch_fade_in_holds_silence_until_first_audio_then_ramps() {
+        let mut renderer = AudioRenderer::new();
+        // Empty ring — the radio decoder hasn't produced anything yet.
+        let (mut src, handle) = renderer.force_primary_stream_for_test(0);
+        renderer.playing = false; // fresh start, not the helper's "already playing"
+        renderer.request_switch_fade_in();
+
+        renderer.start();
+
+        assert!(
+            !renderer.switch_fade_in_pending(),
+            "start() must consume the one-shot request"
+        );
+        assert!(
+            renderer.transport_fade_is_awaiting_first_audio(),
+            "the switch fade must arm in the awaiting-first-audio state"
+        );
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the fresh stream must be held silent while awaiting"
+        );
+
+        // Starved pulls (ring empty → silence) must NOT count as audio, and
+        // the holding phase carries NO ramp clock at all — wall clock spent
+        // buffering can never advance it.
+        assert_eq!(src.next(), Some(0.0));
+        renderer.tick_transport_fade();
+        assert!(
+            renderer.transport_fade_is_awaiting_first_audio(),
+            "silence pulls must not start the ramp"
+        );
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the hold must keep the stream silent through buffering"
+        );
+
+        // First REAL sample pulled → the tick starts the ramp from zero.
+        renderer.write_samples(&[0.25; 256]);
+        for _ in 0..8 {
+            let _ = src.next();
+        }
+        renderer.tick_transport_fade();
+        assert!(
+            !renderer.transport_fade_is_awaiting_first_audio(),
+            "the first real pull must start the ramp"
+        );
+        assert!(
+            !renderer.transport_fade_idle(),
+            "the ramp must now be running"
+        );
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 0.2,
+            "a just-started ramp must begin near silence (clock re-stamped at first audio)"
+        );
+
+        // Completion pins the exact target.
+        rewind_transport_fade(&mut renderer, RADIO_SWITCH_FADE_MS + 20);
+        renderer.tick_transport_fade();
+        assert!(renderer.transport_fade_idle());
+        assert_eq!(renderer.transport_fade_completions(), 1);
+        assert!(
+            (crate::audio::load_f32(&handle.volume) - 1.0).abs() < 1e-6,
+            "the completed fade must pin the target volume"
+        );
+    }
+
+    /// M6: the radio jitter prebuffer repeatedly calls `renderer.pause()`
+    /// until ~5 s is buffered, then `renderer.start()`. Both would normally
+    /// cancel a transport fade / restore full volume — an awaiting switch
+    /// fade-in must SURVIVE that dance (its audio has not flowed yet, and it
+    /// has no deferred end action), otherwise the radio onset pops at full
+    /// gain. `fade_on_pause` is enabled here deliberately: it is the config
+    /// where `start()`'s resume branch is most eager to hijack the fade.
+    #[tokio::test]
+    async fn switch_fade_survives_radio_jitter_pause_start_dance() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pause_fade(true, 100);
+        let (mut src, handle) = renderer.force_primary_stream_for_test(0);
+        renderer.playing = false;
+        renderer.request_switch_fade_in();
+        renderer.start();
+        assert!(renderer.transport_fade_is_awaiting_first_audio());
+
+        // Jitter prebuffer: pause until the buffer target is reached…
+        renderer.pause();
+        assert!(
+            renderer.transport_fade_is_awaiting_first_audio(),
+            "pause() must NOT cancel an awaiting switch fade"
+        );
+        renderer.tick_transport_fade();
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the hold must persist while paused"
+        );
+
+        // …buffer filled, decode loop unpauses via start().
+        renderer.write_samples(&[0.5; 4_096]);
+        renderer.start();
+        assert!(
+            renderer.transport_fade_is_awaiting_first_audio(),
+            "start() must leave the armed switch fade alone"
+        );
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the unpause must not snap the volume up past the hold"
+        );
+
+        // Audio finally flows → ramp runs to the target.
+        for _ in 0..8 {
+            let _ = src.next();
+        }
+        renderer.tick_transport_fade();
+        assert!(!renderer.transport_fade_is_awaiting_first_audio());
+        rewind_transport_fade(&mut renderer, RADIO_SWITCH_FADE_MS + 20);
+        renderer.tick_transport_fade();
+        assert!(renderer.transport_fade_idle());
+        assert!(
+            (crate::audio::load_f32(&handle.volume) - 1.0).abs() < 1e-6,
+            "the fade must complete at the target volume after the dance"
+        );
+    }
+
+    /// M6 / invariant 8: a bit-perfect fresh stream drops the pending switch
+    /// fade-in (the `volume` ramp is inaudible on that arm, and ramping
+    /// `fade_coeff` would break bit-identity) — the one-shot is still
+    /// consumed and the volume restored instantly, exactly like the M5
+    /// bit-perfect skips.
+    #[tokio::test]
+    async fn switch_fade_dropped_for_bit_perfect_stream() {
+        let mut renderer = AudioRenderer::new();
+        let (_src, handle) = renderer.force_primary_stream_for_test(4_096);
+        renderer.current_stream_bit_perfect = true;
+        renderer.playing = false;
+        renderer.request_switch_fade_in();
+
+        renderer.start();
+
+        assert!(
+            !renderer.switch_fade_in_pending(),
+            "the one-shot request must be consumed even when refused"
+        );
+        assert!(
+            renderer.transport_fade_idle(),
+            "no fade may arm on a bit-perfect stream"
+        );
+        assert!(
+            (crate::audio::load_f32(&handle.volume) - 1.0).abs() < 1e-6,
+            "volume must be restored instantly"
+        );
+    }
+
+    /// M6: play()'s prebuffer lets the mixer pull a TRICKLE of real samples
+    /// (silently, at the volume-0 hold) BEFORE the decode loop's jitter
+    /// prebuffer pauses the renderer for ~5 s — flipping the fade to running
+    /// too early. `pause()` must RE-ARM the switch fade with a fresh
+    /// consumed-samples baseline instead of cancelling it (or letting the
+    /// ramp burn off silently during the hold), so the ramp starts at the
+    /// TRUE audible onset when the jitter fill unpauses.
+    #[tokio::test]
+    async fn switch_fade_rearms_on_pause_after_pre_jitter_trickle() {
+        let mut renderer = AudioRenderer::new();
+        let (mut src, handle) = renderer.force_primary_stream_for_test(0);
+        renderer.playing = false;
+        renderer.request_switch_fade_in();
+        renderer.start();
+        assert!(renderer.transport_fade_is_awaiting_first_audio());
+
+        // Pre-jitter trickle: a few real samples pulled at the silent hold.
+        renderer.write_samples(&[0.5; 512]);
+        for _ in 0..16 {
+            let _ = src.next();
+        }
+        renderer.tick_transport_fade();
+        assert!(
+            !renderer.transport_fade_is_awaiting_first_audio(),
+            "the trickle flips the fade to running (precondition)"
+        );
+
+        // Jitter prebuffer hold: pause must RE-ARM, not cancel/burn.
+        renderer.pause();
+        assert!(
+            renderer.transport_fade_is_awaiting_first_audio(),
+            "pause() must re-arm the running switch fade to awaiting"
+        );
+        renderer.tick_transport_fade();
+        assert!(
+            crate::audio::load_f32(&handle.volume) < 1e-6,
+            "the re-armed hold must keep the stream silent through the jitter window"
+        );
+
+        // Jitter fill: buffer builds while paused (no pulls), then unpause.
+        renderer.write_samples(&[0.5; 4_096]);
+        renderer.start();
+        assert!(
+            renderer.transport_fade_is_awaiting_first_audio(),
+            "start() must leave the re-armed switch fade holding"
+        );
+
+        // TRUE onset: real playback begins → ramp restarts from silence.
+        for _ in 0..16 {
+            let _ = src.next();
+        }
+        renderer.tick_transport_fade();
+        assert!(
+            !renderer.transport_fade_is_awaiting_first_audio(),
+            "consumption past the re-baselined count must start the ramp"
+        );
+        rewind_transport_fade(&mut renderer, RADIO_SWITCH_FADE_MS + 20);
+        renderer.tick_transport_fade();
+        assert!(renderer.transport_fade_idle());
+        assert!(
+            (crate::audio::load_f32(&handle.volume) - 1.0).abs() < 1e-6,
+            "the fade must complete at the target after the re-armed onset"
+        );
+    }
+
+    /// M6: `stop()` clears an unconsumed switch fade-in request — a torn-down
+    /// switch must never leak a soft start into an unrelated later play.
+    #[tokio::test]
+    async fn renderer_stop_clears_pending_switch_fade() {
+        let mut renderer = AudioRenderer::new();
+        renderer.request_switch_fade_in();
+
+        renderer.stop();
+
+        assert!(
+            !renderer.switch_fade_in_pending(),
+            "stop() must clear the pending switch fade-in"
         );
     }
 }

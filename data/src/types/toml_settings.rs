@@ -11,11 +11,12 @@ use crate::{
     types::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
-            CollapsedAppearance, EnterBehavior, IconSet, LibraryPageSize, NavDisplayMode,
-            NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, TrackInfoDisplay, VerboseConfig, VisualizationMode,
-            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
-            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
+            CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
+            LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger,
+            RoundedMode, ScrollbarVisibility, SlotRowHeight, StripClickAction, TrackInfoDisplay,
+            VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
+            deserialize_verbose_config_with_bool_compat,
         },
         view_columns::ViewColumns,
     },
@@ -137,6 +138,52 @@ pub struct TomlSettings {
     #[serde(deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
     pub bit_perfect: BitPerfectMode,
     pub crossfade_duration_secs: u32,
+    /// Crossfade gain curve: Equal Power (default) holds loudness flat
+    /// through the blend; Constant Gain (cos²/sin²) dips ~3 dB at the
+    /// midpoint; Linear is a plain ramp. Missing keys fill from the container
+    /// `#[serde(default)]` -> `TomlSettings::default()`.
+    pub crossfade_curve: CrossfadeCurve,
+    /// Minimum track length in seconds for crossfade eligibility (0–60,
+    /// default 10). Shorter tracks play gapless; 0 blends everything with a
+    /// known duration.
+    pub crossfade_min_track_secs: u32,
+    /// Album-continuity gate (default false — opt-in): sequential same-album
+    /// tracks play gapless so authored segues stay tight; crossfade still
+    /// applies between albums, on shuffle, and on compilations.
+    pub crossfade_album_gapless: bool,
+    /// Whether new non-bit-perfect streams ramp up their first ~20 ms (the
+    /// M2 de-click onset ramp; default true). Off restores an instant,
+    /// honest onset. Missing keys fill from the container `#[serde(default)]`
+    /// -> `TomlSettings::default()`.
+    pub smooth_track_starts: bool,
+    /// Whether pause/resume ramp the volume instead of cutting mid-waveform
+    /// (default false — opt-in).
+    pub fade_on_pause: bool,
+    /// Pause/resume ramp length in milliseconds (20–500, default 100).
+    pub fade_pause_ms: u32,
+    /// Whether stopping playback ramps the volume down instead of cutting
+    /// (default false — opt-in). User stops only, not track changes.
+    pub fade_on_stop: bool,
+    /// Stop ramp length in milliseconds (20–500, default 100).
+    pub fade_stop_ms: u32,
+    /// Whether radio↔queue switches fade out and back in (~250 ms each way)
+    /// instead of hard-cutting (default false — opt-in). The incoming fade
+    /// waits for the stream's first real audio.
+    pub fade_radio_transitions: bool,
+    /// What a manual Next/Previous does to the sound (default Off — instant
+    /// cut): boundary fade or full skip-crossfade (M7).
+    pub fade_on_skip: FadeOnSkip,
+    /// "Fade on Skip" length in seconds (1–4, default 2).
+    pub fade_skip_secs: u32,
+    /// M8 "Skip Silence Between Tracks" (default false — opt-in): early
+    /// trigger on a silent outgoing tail + leading-silence trim on prepared
+    /// transition decoders. Bit-perfect streams never trim.
+    pub skip_silence: bool,
+    /// M8 "Gap / Overlap Trim" in seconds (−2..+2, default 0): negative =
+    /// blend starts early; positive = silence held between tracks.
+    pub crossfade_offset_secs: i32,
+    /// M8 "Snap Crossfade to Musical Bars" (default false — opt-in).
+    pub crossfade_bar_snap: bool,
     /// Whether the Previous button restarts the current track (instead of
     /// stepping back) once it has played past the threshold. Default false.
     pub rewind_on_previous: bool,
@@ -297,6 +344,21 @@ impl Default for TomlSettings {
             crossfade_enabled: true,
             bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: 7,
+            crossfade_curve: CrossfadeCurve::default(),
+            crossfade_min_track_secs:
+                crate::types::player_settings::CROSSFADE_MIN_TRACK_DEFAULT_SECS,
+            crossfade_album_gapless: false,
+            smooth_track_starts: true,
+            fade_on_pause: false,
+            fade_pause_ms: crate::types::player_settings::TRANSPORT_FADE_MS_DEFAULT,
+            fade_on_stop: false,
+            fade_stop_ms: crate::types::player_settings::TRANSPORT_FADE_MS_DEFAULT,
+            fade_radio_transitions: false,
+            fade_on_skip: FadeOnSkip::default(),
+            fade_skip_secs: crate::types::player_settings::FADE_SKIP_SECS_DEFAULT,
+            skip_silence: false,
+            crossfade_offset_secs: 0,
+            crossfade_bar_snap: false,
             rewind_on_previous: false,
             volume_normalization: VolumeNormalizationMode::default(),
             normalization_level: NormalizationLevel::default(),

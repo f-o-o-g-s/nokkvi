@@ -7,8 +7,39 @@ use tracing::debug;
 use crate::{
     audio::engine::CustomAudioEngine,
     services::queue::{PreviousOutcome, QueueManager, TransitionReason},
-    types::{NextTrackResetEffect, song::Song},
+    types::{NextTrackResetEffect, player_settings::FadeOnSkip, song::Song},
 };
+
+/// A manual skip that the queue layer has fully sequenced (cursor advanced,
+/// history recorded, consume applied, `current_song_id` set) but whose
+/// AUDIO transition is a skip-crossfade the caller must complete: build the
+/// incoming decoder with NO locks held (invariant 14 — the navigator runs
+/// under the engine lock, where a network decoder build must never happen),
+/// then fire `engine.crossfade_to_next` (M7).
+#[derive(Debug, Clone)]
+pub struct SkipFadePlan {
+    /// The skipped-to song (already the queue's current row).
+    pub song: Song,
+    /// Why the queue advanced — for the caller's "Now Playing" log line.
+    pub reason: TransitionReason,
+    /// The song's stream URL (built under the lock so the plan is
+    /// self-contained).
+    pub stream_url: String,
+}
+
+/// What a manual Next resolved to at the queue layer (M7).
+#[derive(Debug)]
+pub enum NextOutcome {
+    /// End of order — nothing to advance to (under consume the queue was
+    /// drained and the engine stopped, exactly as before).
+    NoNext,
+    /// The queue advanced and the engine was told to play (hard cut or
+    /// boundary fade) — the historical behavior.
+    Played(Song, TransitionReason),
+    /// The queue advanced; the caller must complete the skip-crossfade
+    /// (see [`SkipFadePlan`]). The engine is still playing the outgoing.
+    FadePlanned(SkipFadePlan),
+}
 
 /// Plan describing what the audio engine still needs to do after the queue
 /// has been advanced to the next track.
@@ -519,13 +550,79 @@ impl QueueNavigator {
         Ok(())
     }
 
+    /// Complete a manual skip to `song` per the "Fade on Skip" mode (M7):
+    /// hard load (`Off`, the historical path), boundary ease-out then hard
+    /// load (`BoundaryFade` — the ramp self-refuses when there is nothing
+    /// audible to fade), or — when the engine can blend — hand back a
+    /// [`SkipFadePlan`] for the caller to complete (`Crossfade`; the decoder
+    /// build must run with no locks held, so it cannot happen here).
+    ///
+    /// The `Crossfade`-but-not-viable case (paused / stopped / radio
+    /// outgoing) falls through to the hard path: there is no audible
+    /// outgoing to blend, and a radio outgoing is M6's domain (its
+    /// `set_source` fade handles that edge when enabled).
+    async fn skip_to_song(
+        &self,
+        engine: &mut CustomAudioEngine,
+        song: &Song,
+        reason: TransitionReason,
+        server_url: &str,
+        subsonic_credential: &str,
+        skip_fade: FadeOnSkip,
+    ) -> Result<Option<SkipFadePlan>> {
+        match skip_fade {
+            FadeOnSkip::Crossfade if engine.skip_crossfade_viable() => {
+                debug!(
+                    "🔀 Skip fade planned: {} - {} (id: {})",
+                    song.title, song.artist, song.id
+                );
+                // Plan-time invalidation, UNDER the engine lock: cancel the
+                // pre-skip transition, bump the source generation, and latch
+                // the pending window — a natural EOF / live-blend finalize
+                // processed during the unlocked decoder build would
+                // otherwise run `decide_transition` against the cursor this
+                // skip is about to advance (a double advance). See
+                // `CustomAudioEngine::plan_skip_fade`.
+                engine.plan_skip_fade().await;
+                *self.current_song_id.lock().await = Some(song.id.clone());
+                let stream_url = crate::utils::artwork_url::build_stream_url(
+                    &song.id,
+                    server_url,
+                    subsonic_credential,
+                );
+                Ok(Some(SkipFadePlan {
+                    song: song.clone(),
+                    reason,
+                    stream_url,
+                }))
+            }
+            FadeOnSkip::BoundaryFade => {
+                engine.run_skip_out_fade().await;
+                self.play_song_direct(engine, song, server_url, subsonic_credential)
+                    .await?;
+                Ok(None)
+            }
+            FadeOnSkip::Off | FadeOnSkip::Crossfade => {
+                self.play_song_direct(engine, song, server_url, subsonic_credential)
+                    .await?;
+                Ok(None)
+            }
+        }
+    }
+
     /// Play next song (manual skip via button/hotkey/MPRIS).
+    ///
+    /// `skip_fade` is the EFFECTIVE "Fade on Skip" mode for this skip — the
+    /// controller resolves it (engine mirror, or the FadeToNext hotkey's
+    /// one-shot `Crossfade` override) and threads it down so the queue layer
+    /// stays settings-free.
     pub async fn play_next(
         &self,
         engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
-    ) -> Result<Option<(Song, TransitionReason)>> {
+        skip_fade: FadeOnSkip,
+    ) -> Result<NextOutcome> {
         let mut queue_manager = self.queue_manager.lock().await;
         let current_index = queue_manager.current_index();
         let is_consume = queue_manager.get_queue().consume;
@@ -570,16 +667,30 @@ impl QueueNavigator {
             } else {
                 drop(queue_manager);
             }
-            return Ok(None);
+            return Ok(NextOutcome::NoNext);
         };
         drop(queue_manager);
 
-        self.play_song_direct(engine, &result.song, server_url, subsonic_credential)
+        let plan = self
+            .skip_to_song(
+                engine,
+                &result.song,
+                result.reason,
+                server_url,
+                subsonic_credential,
+                skip_fade,
+            )
             .await?;
 
         // Consume: remove the previously played song after starting the next.
         // Resolve by the entry_id captured before the await so a concurrent
         // queue mutation can't desync the removal target (drift-immune).
+        //
+        // M7 ordering note: on the FadePlanned path this runs BEFORE the fade
+        // fires (the caller completes the fade after we return), so the
+        // removal's `NextTrackResetEffect` — whose `reset_next_track` cancels
+        // any LIVE blend — can never kill the skip fade it precedes. The row
+        // is consumed at skip time, exactly as on the historical hard path.
         if let Some(eid) = consume_entry {
             let mut qm = self.queue_manager.lock().await;
             let effect = qm.remove_entry_by_id(eid).ok();
@@ -589,16 +700,25 @@ impl QueueNavigator {
             }
         }
 
-        Ok(Some((result.song, result.reason)))
+        Ok(match plan {
+            Some(plan) => NextOutcome::FadePlanned(plan),
+            None => NextOutcome::Played(result.song, result.reason),
+        })
     }
 
     /// Play previous song (manual skip via button/hotkey/MPRIS).
+    ///
+    /// `skip_fade` mirrors [`Self::play_next`]: the effective "Fade on Skip"
+    /// mode, resolved by the controller. Returns the outcome plus an
+    /// optional [`SkipFadePlan`] the caller must complete (Crossfade mode
+    /// with an audible finite outgoing).
     pub async fn play_previous(
         &self,
         engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
-    ) -> Result<PreviousOutcome> {
+        skip_fade: FadeOnSkip,
+    ) -> Result<(PreviousOutcome, Option<SkipFadePlan>)> {
         use crate::services::queue::PreviousSongResult;
 
         let mut queue_manager = self.queue_manager.lock().await;
@@ -624,11 +744,21 @@ impl QueueNavigator {
                 *self.current_song_id.lock().await = Some(song.id.clone());
                 drop(queue_manager);
 
-                self.play_song_direct(engine, &song, server_url, subsonic_credential)
+                let plan = self
+                    .skip_to_song(
+                        engine,
+                        &song,
+                        TransitionReason::Previous,
+                        server_url,
+                        subsonic_credential,
+                        skip_fade,
+                    )
                     .await?;
 
                 // Consume: remove the previously played song after starting prev.
                 // Resolve by the captured entry_id (drift-immune, duplicate-safe).
+                // On the FadePlanned path this runs BEFORE the fade fires (see
+                // the matching note in `play_next`).
                 if let Some(eid) = consume_entry {
                     let mut qm = self.queue_manager.lock().await;
                     let effect = qm.remove_entry_by_id(eid).ok();
@@ -639,7 +769,7 @@ impl QueueNavigator {
                 }
 
                 debug!("▶️ Now Playing: {} - {}", song.title, song.artist);
-                Ok(PreviousOutcome::Stepped)
+                Ok((PreviousOutcome::Stepped, plan))
             }
             PreviousSongResult::Removed(song) => {
                 debug!(
@@ -655,14 +785,22 @@ impl QueueNavigator {
                 drop(queue_manager);
                 insert_effect.apply_locked(engine).await;
 
-                self.play_song_direct(engine, &song, server_url, subsonic_credential)
+                let plan = self
+                    .skip_to_song(
+                        engine,
+                        &song,
+                        TransitionReason::Previous,
+                        server_url,
+                        subsonic_credential,
+                        skip_fade,
+                    )
                     .await?;
 
                 debug!(
                     "▶️ Now Playing (re-inserted): {} - {}",
                     song.title, song.artist
                 );
-                Ok(PreviousOutcome::Stepped)
+                Ok((PreviousOutcome::Stepped, plan))
             }
             PreviousSongResult::BlockedConsumeShuffle => {
                 // Consumed-track step-back under shuffle. History was left
@@ -670,12 +808,12 @@ impl QueueNavigator {
                 // signal the UI to surface an explanatory toast.
                 drop(queue_manager);
                 debug!("⏮️ Previous blocked: consumed track under shuffle");
-                Ok(PreviousOutcome::BlockedConsumeShuffle)
+                Ok((PreviousOutcome::BlockedConsumeShuffle, None))
             }
             PreviousSongResult::None => {
                 drop(queue_manager);
                 debug!("⏮️ No previous song available");
-                Ok(PreviousOutcome::Stepped)
+                Ok((PreviousOutcome::Stepped, None))
             }
         }
     }
@@ -941,11 +1079,19 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let result = nav
-            .play_next(&mut engine, "http://server", "u=test&p=test")
+            .play_next(
+                &mut engine,
+                "http://server",
+                "u=test&p=test",
+                FadeOnSkip::Off,
+            )
             .await
             .expect("play_next ok");
 
-        assert!(result.is_none(), "no next track at end of queue");
+        assert!(
+            matches!(result, NextOutcome::NoNext),
+            "no next track at end of queue"
+        );
         let q = qm.lock().await;
         assert!(q.is_queue_empty(), "the finished song must be consumed",);
         assert_eq!(q.current_index(), None);
@@ -963,11 +1109,16 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let result = nav
-            .play_next(&mut engine, "http://server", "u=test&p=test")
+            .play_next(
+                &mut engine,
+                "http://server",
+                "u=test&p=test",
+                FadeOnSkip::Off,
+            )
             .await
             .expect("play_next ok");
 
-        assert!(result.is_none());
+        assert!(matches!(result, NextOutcome::NoNext));
         let q = qm.lock().await;
         assert_eq!(q.song_ids_snapshot(), vec!["a"], "b consumed");
         assert_eq!(q.current_index(), None);
@@ -984,11 +1135,16 @@ mod tests {
 
         let mut engine = CustomAudioEngine::new();
         let result = nav
-            .play_next(&mut engine, "http://server", "u=test&p=test")
+            .play_next(
+                &mut engine,
+                "http://server",
+                "u=test&p=test",
+                FadeOnSkip::Off,
+            )
             .await
             .expect("play_next ok");
 
-        assert!(result.is_none());
+        assert!(matches!(result, NextOutcome::NoNext));
         let q = qm.lock().await;
         assert_eq!(
             q.song_ids_snapshot(),
@@ -996,6 +1152,140 @@ mod tests {
             "song stays without consume"
         );
         assert_eq!(q.current_index(), Some(0));
+    }
+
+    // ── M7 manual-skip fade plans ──
+
+    /// M7 skip-overlap: with "Fade on Skip: Crossfade" and the engine
+    /// audibly playing a finite stream, `play_next` fully sequences the
+    /// queue (cursor, history, `current_song_id`) but returns a
+    /// `FadePlanned` instead of loading — the ENGINE keeps playing the
+    /// outgoing untouched (its source never changes here; the caller builds
+    /// the incoming decoder lock-free and fires `crossfade_to_next`).
+    #[tokio::test(flavor = "current_thread")]
+    async fn play_next_crossfade_mode_returns_fade_plan_and_leaves_outgoing_playing() {
+        let qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(0));
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        let gen_before = engine.source_generation();
+
+        let result = nav
+            .play_next(
+                &mut engine,
+                "http://server",
+                "u=test&p=test",
+                FadeOnSkip::Crossfade,
+            )
+            .await
+            .expect("play_next ok");
+
+        let NextOutcome::FadePlanned(plan) = result else {
+            panic!("expected FadePlanned, got {result:?}");
+        };
+        assert_eq!(
+            engine.source_generation(),
+            gen_before + 1,
+            "the plan must invalidate in-flight completions AT PLAN TIME \
+             (plan_skip_fade bumps under the lock) — a natural EOF processed \
+             during the unlocked decoder build would otherwise advance the \
+             already-advanced cursor"
+        );
+        assert_eq!(plan.song.id, "b");
+        assert_eq!(plan.reason, TransitionReason::Next);
+        assert!(
+            plan.stream_url.contains("id=b"),
+            "the plan must carry b's stream URL, got {}",
+            plan.stream_url
+        );
+        assert_eq!(
+            nav.get_current_song_id().await.as_deref(),
+            Some("b"),
+            "the queue layer must already name the skipped-to song"
+        );
+        assert_eq!(qm.lock().await.current_index(), Some(1));
+        assert!(
+            engine.source().is_empty(),
+            "the engine must keep the outgoing untouched (no load happened)"
+        );
+    }
+
+    /// M7 consume ordering: under consume the outgoing's row is removed at
+    /// skip time — BEFORE the fade fires (the plan is completed by the
+    /// caller afterwards), so the removal's `NextTrackResetEffect` can never
+    /// cancel the blend it precedes.
+    #[tokio::test(flavor = "current_thread")]
+    async fn play_next_crossfade_mode_with_consume_removes_row_before_fade() {
+        let mut qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(0));
+        qm.queue.consume = true;
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+
+        let result = nav
+            .play_next(
+                &mut engine,
+                "http://server",
+                "u=test&p=test",
+                FadeOnSkip::Crossfade,
+            )
+            .await
+            .expect("play_next ok");
+
+        assert!(
+            matches!(result, NextOutcome::FadePlanned(_)),
+            "consume must not downgrade the skip fade, got {result:?}"
+        );
+        let q = qm.lock().await;
+        assert_eq!(
+            q.song_ids_snapshot(),
+            vec!["b"],
+            "the skipped-away row is consumed at skip time"
+        );
+    }
+
+    /// M7 Previous: the step-back takes the same plan path — queue fully
+    /// sequenced, engine untouched, plan carries the previous song.
+    #[tokio::test(flavor = "current_thread")]
+    async fn play_previous_crossfade_mode_returns_fade_plan() {
+        let qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(1));
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("b".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        let gen_before = engine.source_generation();
+
+        let (outcome, plan) = nav
+            .play_previous(
+                &mut engine,
+                "http://server",
+                "u=test&p=test",
+                FadeOnSkip::Crossfade,
+            )
+            .await
+            .expect("play_previous ok");
+
+        assert_eq!(outcome, PreviousOutcome::Stepped);
+        let plan = plan.expect("a fade plan for the step-back");
+        assert_eq!(plan.song.id, "a");
+        assert_eq!(plan.reason, TransitionReason::Previous);
+        assert_eq!(
+            engine.source_generation(),
+            gen_before + 1,
+            "the step-back plan must run the same plan-time invalidation"
+        );
+        assert!(
+            engine.source().is_empty(),
+            "the engine must keep the outgoing untouched (no load happened)"
+        );
     }
 
     // ── decide_removal_aftermath unit tests ──

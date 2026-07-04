@@ -313,6 +313,11 @@ impl AppService {
     pub async fn next(&self) -> Result<bool> {
         self.playback.next().await
     }
+    /// M7 FadeToNext hotkey: skip forward with a one-shot skip-crossfade
+    /// override, regardless of the "Fade on Skip" setting.
+    pub async fn next_with_fade(&self) -> Result<bool> {
+        self.playback.next_with_fade().await
+    }
     pub async fn previous(&self) -> Result<crate::services::queue::PreviousOutcome> {
         self.playback.previous().await
     }

@@ -56,6 +56,13 @@ impl ActiveStream {
         self.handle.set_volume(vol);
     }
 
+    /// Set the fade multiplier (0.0–1.0). The crossfade tick writes the raw
+    /// curve coefficient here; it is applied linearly in the source (never
+    /// re-curved through the perceptual volume taper).
+    pub fn set_fade_coeff(&self, fade: f32) {
+        self.handle.set_fade_coeff(fade);
+    }
+
     /// Get playback position in milliseconds.
     pub fn position_ms(&self) -> u64 {
         self.handle
@@ -76,6 +83,9 @@ impl ActiveStream {
     /// Takes `self` by value since callers always `.take()` the stream from its `Option` first.
     pub fn silence_and_stop(self) {
         self.set_volume(0.0);
+        // Bit-perfect streams apply only `fade_coeff` (the `volume` atomic is
+        // ignored there), so zero the fade too for silencing parity.
+        self.set_fade_coeff(0.0);
         self.stop();
     }
 
@@ -139,6 +149,9 @@ impl RodioOutput {
     /// - `sample_rate`: Sample rate of the decoded audio.
     /// - `channels`: Channel count of the decoded audio.
     /// - `initial_volume`: Starting volume (0.0–1.0).
+    /// - `initial_fade`: Starting fade multiplier (0.0–1.0). Pass `1.0` for
+    ///   fresh play/seek streams and `0.0` for a crossfade incoming stream
+    ///   (it fades in via its `fade_coeff`, from true silence).
     /// - `norm`: Resolved normalization decision for this stream
     ///   (off, AGC at target level, or static linear gain).
     /// - `consumed_notify`: Notify primitive fired every ~512 consumed samples.
@@ -147,6 +160,8 @@ impl RodioOutput {
     ///   shared visualizer callback. Pass `true` for primary streams; pass
     ///   `false` for a crossfade incoming stream, then call
     ///   `ActiveStream::set_feeds_visualizer(true)` after promotion to primary.
+    /// - `smooth_starts`: whether the M2 de-click onset ramp applies (the
+    ///   "Smooth Track Starts" setting); inert for bit-perfect streams.
     #[expect(
         clippy::too_many_arguments,
         reason = "thin pass-through to StreamingSource::new; same independent-config rationale applies"
@@ -156,10 +171,12 @@ impl RodioOutput {
         sample_rate: u32,
         channels: u16,
         initial_volume: f32,
+        initial_fade: f32,
         norm: super::NormalizationConfig,
         eq_state: Option<super::eq::EqState>,
         consumed_notify: Arc<Notify>,
         feeds_visualizer: bool,
+        smooth_starts: bool,
         bit_perfect: bool,
     ) -> ActiveStream {
         // Create lock-free ring buffer
@@ -177,10 +194,12 @@ impl RodioOutput {
             sample_rate_nz,
             self.visualizer_callback.clone(),
             initial_volume,
+            initial_fade,
             eq_state,
             consumed_notify,
             feeds_visualizer,
             self.viz_enabled.clone(),
+            smooth_starts,
             bit_perfect,
         );
 

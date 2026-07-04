@@ -423,6 +423,91 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_crossfade_curve(
+        &mut self,
+        curve: crate::types::player_settings::CrossfadeCurve,
+    ) -> Result<()> {
+        self.settings.player.crossfade_curve = curve;
+        self.save()
+    }
+
+    pub fn set_crossfade_min_track(&mut self, secs: u32) -> Result<()> {
+        use crate::types::player_settings::{
+            CROSSFADE_MIN_TRACK_MAX_SECS, CROSSFADE_MIN_TRACK_MIN_SECS,
+        };
+        self.settings.player.crossfade_min_track_secs =
+            secs.clamp(CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_MIN_TRACK_MAX_SECS);
+        self.save()
+    }
+
+    pub fn set_crossfade_album_gapless(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.crossfade_album_gapless = enabled;
+        self.save()
+    }
+
+    pub fn set_smooth_track_starts(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.smooth_track_starts = enabled;
+        self.save()
+    }
+
+    pub fn set_fade_on_pause(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.fade_on_pause = enabled;
+        self.save()
+    }
+
+    pub fn set_fade_pause_ms(&mut self, ms: u32) -> Result<()> {
+        use crate::types::player_settings::{TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN};
+        self.settings.player.fade_pause_ms = ms.clamp(TRANSPORT_FADE_MS_MIN, TRANSPORT_FADE_MS_MAX);
+        self.save()
+    }
+
+    pub fn set_fade_on_stop(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.fade_on_stop = enabled;
+        self.save()
+    }
+
+    pub fn set_fade_stop_ms(&mut self, ms: u32) -> Result<()> {
+        use crate::types::player_settings::{TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN};
+        self.settings.player.fade_stop_ms = ms.clamp(TRANSPORT_FADE_MS_MIN, TRANSPORT_FADE_MS_MAX);
+        self.save()
+    }
+
+    pub fn set_fade_radio_transitions(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.fade_radio_transitions = enabled;
+        self.save()
+    }
+
+    pub fn set_fade_on_skip(
+        &mut self,
+        mode: crate::types::player_settings::FadeOnSkip,
+    ) -> Result<()> {
+        self.settings.player.fade_on_skip = mode;
+        self.save()
+    }
+
+    pub fn set_fade_skip_secs(&mut self, secs: u32) -> Result<()> {
+        use crate::types::player_settings::{FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN};
+        self.settings.player.fade_skip_secs = secs.clamp(FADE_SKIP_SECS_MIN, FADE_SKIP_SECS_MAX);
+        self.save()
+    }
+
+    pub fn set_skip_silence(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.skip_silence = enabled;
+        self.save()
+    }
+
+    pub fn set_crossfade_offset_secs(&mut self, secs: i32) -> Result<()> {
+        use crate::types::player_settings::{CROSSFADE_OFFSET_MAX_SECS, CROSSFADE_OFFSET_MIN_SECS};
+        self.settings.player.crossfade_offset_secs =
+            secs.clamp(CROSSFADE_OFFSET_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS);
+        self.save()
+    }
+
+    pub fn set_crossfade_bar_snap(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.crossfade_bar_snap = enabled;
+        self.save()
+    }
+
     pub fn set_rating_reminder_enabled(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.rating_reminder_enabled = enabled;
         self.save()
@@ -1203,9 +1288,9 @@ mod sentinel_roundtrip_tests {
         audio::eq::CustomEqPreset,
         types::{
             player_settings::{
-                ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior,
-                LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, RoundedMode,
-                SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
+                ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, CrossfadeCurve,
+                EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
+                RoundedMode, SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
                 VisualizationMode, VolumeNormalizationMode,
             },
             settings::PersistedPlayerSettings,
@@ -1272,10 +1357,24 @@ mod sentinel_roundtrip_tests {
             icon_set: crate::types::player_settings::IconSet::Lucide, // default Phosphor
 
             // Playback / crossfade
-            crossfade_enabled: true,             // default false
-            bit_perfect: BitPerfectMode::Strict, // default Off
-            crossfade_duration_secs: 9,          // default 5
-            rewind_on_previous: true,            // default false
+            crossfade_enabled: true,                 // default false
+            bit_perfect: BitPerfectMode::Strict,     // default Off
+            crossfade_duration_secs: 9,              // default 5
+            crossfade_curve: CrossfadeCurve::Linear, // default EqualPower
+            crossfade_min_track_secs: 25,            // default 10
+            crossfade_album_gapless: true,           // default false
+            smooth_track_starts: false,              // default true
+            fade_on_pause: true,                     // default false
+            fade_pause_ms: 250,                      // default 100
+            fade_on_stop: true,                      // default false
+            fade_stop_ms: 350,                       // default 100
+            fade_radio_transitions: true,            // default false
+            fade_on_skip: crate::types::player_settings::FadeOnSkip::Crossfade, // default Off
+            fade_skip_secs: 3,                       // default 2
+            skip_silence: true,                      // default false
+            crossfade_offset_secs: -2,               // default 0
+            crossfade_bar_snap: true,                // default false
+            rewind_on_previous: true,                // default false
 
             // Playlists
             quick_add_to_playlist: true,       // default false
@@ -1491,6 +1590,30 @@ mod sentinel_roundtrip_tests {
             ui_ps1.crossfade_duration_secs,
             ui_ps2.crossfade_duration_secs
         );
+        assert_eq!(ui_ps1.crossfade_curve, ui_ps2.crossfade_curve);
+        assert_eq!(
+            ui_ps1.crossfade_min_track_secs,
+            ui_ps2.crossfade_min_track_secs
+        );
+        assert_eq!(
+            ui_ps1.crossfade_album_gapless,
+            ui_ps2.crossfade_album_gapless
+        );
+
+        // Transport fades / smooth starts (M5)
+        assert_eq!(ui_ps1.smooth_track_starts, ui_ps2.smooth_track_starts);
+        assert_eq!(ui_ps1.fade_on_pause, ui_ps2.fade_on_pause);
+        assert_eq!(ui_ps1.fade_pause_ms, ui_ps2.fade_pause_ms);
+        assert_eq!(ui_ps1.fade_on_stop, ui_ps2.fade_on_stop);
+        assert_eq!(ui_ps1.fade_stop_ms, ui_ps2.fade_stop_ms);
+        assert_eq!(ui_ps1.fade_radio_transitions, ui_ps2.fade_radio_transitions);
+        assert_eq!(ui_ps1.fade_on_skip, ui_ps2.fade_on_skip);
+        assert_eq!(ui_ps1.fade_skip_secs, ui_ps2.fade_skip_secs);
+
+        // Content-aware overlap (M8)
+        assert_eq!(ui_ps1.skip_silence, ui_ps2.skip_silence);
+        assert_eq!(ui_ps1.crossfade_offset_secs, ui_ps2.crossfade_offset_secs);
+        assert_eq!(ui_ps1.crossfade_bar_snap, ui_ps2.crossfade_bar_snap);
 
         // Rating reminder
         assert_eq!(

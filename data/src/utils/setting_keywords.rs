@@ -84,6 +84,43 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         // ── Playback · Transitions ───────────────────────────────────────────
         "general.crossfade_enabled" => &["fade", "blend", "gapless"],
         "general.crossfade_duration" => &["fade time", "fade length"],
+        "general.crossfade_curve" => &["equal power", "constant gain", "fade shape", "fade curve"],
+        "general.crossfade_min_track" => &["short tracks", "interlude", "skit", "minimum length"],
+        "general.crossfade_album_gapless" => &[
+            "segue",
+            "attacca",
+            "live album",
+            "seamless",
+            "album continuity",
+        ],
+
+        // ── Playback · Fading ────────────────────────────────────────────────
+        "general.smooth_track_starts" => &["declick", "de-click", "onset ramp", "pop", "click"],
+        "general.fade_on_pause" => &["pause fade", "resume fade", "soft pause", "click"],
+        "general.fade_pause_ms" => &["pause fade length", "ramp"],
+        "general.fade_on_stop" => &["stop fade", "soft stop", "ease out", "click"],
+        "general.fade_stop_ms" => &["stop fade length", "ramp"],
+        "general.fade_radio_transitions" => {
+            &["radio fade", "station switch", "soft switch", "click"]
+        }
+        "general.fade_on_skip" => &[
+            "skip fade",
+            "next fade",
+            "manual crossfade",
+            "fade to next",
+            "soft skip",
+        ],
+        "general.fade_skip_secs" => &["skip fade length", "overlap", "blend"],
+        "general.skip_silence" => &[
+            "silence",
+            "silent intro",
+            "silent outro",
+            "trim",
+            "dead air",
+            "quiet",
+        ],
+        "general.crossfade_offset" => &["gap", "overlap", "spacing", "pause between tracks"],
+        "general.crossfade_bar_snap" => &["bpm", "beat", "tempo", "bars", "beatmatch"],
         "general.bit_perfect" => &[
             "lossless",
             "audiophile",

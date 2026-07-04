@@ -6,9 +6,29 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Crossfade Curve** picker (Settings → Playback → Transitions): **Equal Power** (the new default) holds loudness steady through the blend, **Constant Gain** (the previous curve) dips about 3 dB in the middle for a softer same-album feel, and **Linear** is a plain straight-line fade.
+- **Minimum Track Length to Crossfade** slider (0–60 s): the old hardcoded 10-second floor is now configurable, so 0 blends everything including interludes and 30 only blends full-length songs.
+- **Keep Gapless Albums Seamless** (off by default): skips the blend when the next track continues the same album, so authored segues stay tight. Crossfade still applies between different albums, on shuffle, and on compilations.
+- A new **Fading** section under Settings → Playback:
+  - **Smooth Track Starts** (on by default): ramps up the first ~20 ms of each track to remove the click when a skip or seek lands mid-waveform; off restores an instant, honest onset.
+  - **Fade on Pause / Resume** and **Fade on Stop** (off by default, 20–500 ms): soft gain ramps instead of instant cuts, so pausing, resuming, and stopping no longer click.
+  - **Fade Radio Switches** (off by default): a short fade when starting a radio station or returning to the queue; the fade-in waits for the stream's first real audio instead of popping at full gain after the prebuffer.
+  - **Fade on Skip** (Off / Boundary Fade / Crossfade, default Off) with a 1–4 s duration: manual Next/Previous can fade out or blend into the next track instead of hard-cutting.
+  - **Skip Silence Between Tracks** (off by default): trims silent lead-ins from tracks prepared in advance and starts the blend early over a silent outro. Bit-perfect streams never trim.
+  - **Gap / Overlap Trim** (−2 to +2 s): hold a moment of silence between tracks, or start blends early.
+  - **Snap Crossfade to Musical Bars** (off by default): rounds the blend length to whole bars of the outgoing track's BPM tag so beats line up through the blend; ignored when a track has no BPM.
+- **Fade to Next** hotkey (default Shift+F): a one-shot crossfade into the next track, regardless of the Fade on Skip mode.
+
 ### Changed
 
+- The default crossfade curve is now true **Equal Power**, removing the ~3 dB loudness dip in the middle of blends between different songs; the previous curve remains selectable as Constant Gain.
+- Fresh streams (play, seek, skip) now start with the ~20 ms de-click ramp from Smooth Track Starts; bit-perfect streams keep their instant onset.
+
 ### Fixed
+
+- Crossfades on the default path (Crossfade on, Bit-Perfect off) no longer collapse to near-silence mid-blend: the fade coefficient was re-curved through the perceptual volume taper, putting every fade midpoint at roughly −24 dB. Fades now apply linearly on their own channel, independent of user volume.
+- A crossfade whose incoming network stream pushes a few KB and then stalls now recovers (the outgoing track is restored and the stall skipped past) instead of promoting a stream that plays its residue and hangs; a stalled fade also signals recovery once instead of retrying every 20 ms.
+- Cancelling a crossfade after its midpoint no longer leaves the visualizer spectrum frozen until the next track change.
 
 ### Removed
 
