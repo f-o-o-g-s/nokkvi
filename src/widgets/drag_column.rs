@@ -23,6 +23,43 @@ use tracing::debug;
 /// Minimum vertical movement (px) before a press becomes a drag.
 const DRAG_THRESHOLD: f32 = 5.0;
 
+/// Vertical band (px) at the top/bottom of the drag column within which the
+/// cursor arms edge auto-scroll during a within-list drag.
+const DRAG_EDGE_ZONE_PX: f32 = 48.0;
+
+/// Which vertical edge band (if any) the drag cursor currently occupies. Emitted
+/// on the [`DragEvent::Dragged`] channel so the app can drive tick-based edge
+/// auto-scroll during a within-list drag. `None` when the cursor is centred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EdgeZone {
+    #[default]
+    None,
+    Top,
+    Bottom,
+}
+
+impl EdgeZone {
+    /// Classify a cursor Y (window space) against a widget's vertical bounds:
+    /// within `edge_px` of the top (or above it) → `Top`, within `edge_px` of
+    /// the bottom (or below it) → `Bottom`, otherwise `None`. When the bounds
+    /// are shorter than `2 * edge_px` the zones overlap and `Top` wins; such
+    /// short lists top-pack and auto-scroll is a no-op there anyway.
+    pub(crate) fn from_cursor(
+        cursor_y: f32,
+        bounds_top: f32,
+        bounds_height: f32,
+        edge_px: f32,
+    ) -> Self {
+        if cursor_y <= bounds_top + edge_px {
+            EdgeZone::Top
+        } else if cursor_y >= bounds_top + bounds_height - edge_px {
+            EdgeZone::Bottom
+        } else {
+            EdgeZone::None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum DragState {
     Idle,
@@ -39,8 +76,25 @@ pub(crate) enum DragState {
 
 #[derive(Debug, Clone)]
 pub enum DragEvent {
-    Picked { index: usize },
-    Dropped { index: usize, target_index: usize },
+    Picked {
+        index: usize,
+    },
+    /// Fired on every cursor move during an active drag. Carries the RAW
+    /// (unclamped) cursor so the app-level floating ghost tracks the pointer and
+    /// edge detection can see past the list edge; the live `edge` band drives
+    /// tick auto-scroll; `target_slot` (from `compute_target_index`) drives the
+    /// drop-indicator line. DragColumn never handles the wheel event at all, so
+    /// wheel-scroll-during-drag keeps working (the outer scroll `mouse_area`
+    /// still sees it).
+    Dragged {
+        cursor: Point,
+        edge: EdgeZone,
+        target_slot: usize,
+    },
+    Dropped {
+        index: usize,
+        target_index: usize,
+    },
 }
 
 #[allow(missing_debug_implementations)]
@@ -54,8 +108,6 @@ pub struct DragColumn<'a, Message, Theme = iced::Theme, Renderer = iced::Rendere
     clip: bool,
     children: Vec<Element<'a, Message, Theme, Renderer>>,
     on_drag: Option<Box<dyn Fn(DragEvent) -> Message + 'a>>,
-    /// When > 1, a count badge is drawn on top of the dragged item.
-    drag_badge_count: usize,
 }
 
 impl<'a, Message, Theme, Renderer> DragColumn<'a, Message, Theme, Renderer>
@@ -88,7 +140,6 @@ where
             clip: false,
             children,
             on_drag: None,
-            drag_badge_count: 1,
         }
     }
 
@@ -148,12 +199,6 @@ where
     /// Set the callback for drag events. When `None`, the widget acts as a normal column.
     pub fn on_drag(mut self, on_drag: impl Fn(DragEvent) -> Message + 'a) -> Self {
         self.on_drag = Some(Box::new(on_drag));
-        self
-    }
-
-    /// Set the drag badge count. When > 1, a "×N" badge is overlaid on the dragged item.
-    pub fn drag_badge_count(mut self, count: usize) -> Self {
-        self.drag_badge_count = count;
         self
     }
 
@@ -334,6 +379,29 @@ where
                                     index,
                                 };
 
+                                // Surface the RAW cursor (so the app-level ghost
+                                // follows the pointer and edge detection sees
+                                // past-edge), the edge band, and the live
+                                // drop-target slot. A plain publish on a
+                                // CursorMoved: DragColumn never matches the wheel
+                                // event, so wheel-scroll-during-drag still reaches
+                                // the outer scroll `mouse_area`.
+                                if let Some(on_drag) = &self.on_drag {
+                                    let edge = EdgeZone::from_cursor(
+                                        cursor_position.y,
+                                        bounds.y,
+                                        bounds.height,
+                                        DRAG_EDGE_ZONE_PX,
+                                    );
+                                    let target_slot =
+                                        self.compute_target_index(clamped_cursor, layout, index);
+                                    shell.publish(on_drag(DragEvent::Dragged {
+                                        cursor: cursor_position,
+                                        edge,
+                                        target_slot,
+                                    }));
+                                }
+
                                 shell.request_redraw();
                             }
                         }
@@ -432,153 +500,26 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        let action = tree.state.downcast_ref::<DragState>();
-
-        if let DragState::Dragging {
-            index,
-            last_cursor,
-            origin,
-            ..
-        } = action
+        // Every row draws normally in every state — including during a drag.
+        //
+        // The slot list is a virtualized data-offset window: lifting the grabbed
+        // child by its FROZEN slot position (as this widget used to) redraws
+        // whatever item currently occupies that slot, so the ghost's content
+        // cycled as the list scrolled under the drag. Instead the grabbed row is
+        // represented by an app-level floating ghost rendered from data BY
+        // IDENTITY (`Nokkvi::render_within_list_drag_slot`), and the destination
+        // by the drop-indicator line (`slot_list_view_with_drag`'s
+        // `drop_indicator_slot`, fed by the live `DragEvent::Dragged.target_slot`).
+        // So the widget never translates a child, and nothing cycles.
+        for ((child, state), layout) in self
+            .children
+            .iter()
+            .zip(&tree.children)
+            .zip(layout.children())
         {
-            let child_count = self.children.len();
-            let target_index = self
-                .compute_target_index(*last_cursor, layout, *index)
-                .min(child_count);
-
-            let Some(drag_layout) = layout.children().nth(*index) else {
-                return;
-            };
-            let drag_bounds = drag_layout.bounds();
-            let drag_height = drag_bounds.height + self.spacing;
-
-            for i in 0..child_count {
-                let child = &self.children[i];
-                let state = &tree.children[i];
-                let Some(child_layout) = layout.children().nth(i) else {
-                    continue;
-                };
-
-                if i == *index {
-                    // Draw dragged item at cursor Y offset
-                    let translation_y = last_cursor.y - origin.y;
-                    renderer.with_translation(
-                        Vector {
-                            x: 0.0,
-                            y: translation_y,
-                        },
-                        |renderer| {
-                            renderer.with_layer(child_layout.bounds(), |renderer| {
-                                child.as_widget().draw(
-                                    state,
-                                    renderer,
-                                    theme,
-                                    defaults,
-                                    child_layout,
-                                    cursor,
-                                    viewport,
-                                );
-
-                                // Badge overlay for multi-selection drags
-                                if self.drag_badge_count > 1 {
-                                    let badge_text = format!("\u{00d7}{}", self.drag_badge_count);
-                                    let badge_bounds = child_layout.bounds();
-
-                                    let font = crate::theme::ui_font();
-                                    let badge_font_size: Pixels = 13.0.into();
-
-                                    // Fixed pill width based on digit count
-                                    let digit_count = if self.drag_badge_count >= 100 {
-                                        3
-                                    } else if self.drag_badge_count >= 10 {
-                                        2
-                                    } else {
-                                        1
-                                    };
-                                    let pill_h = 18.0_f32;
-                                    let pill_w = 16.0 + digit_count as f32 * 8.0; // × + digits
-                                    let pill_x = badge_bounds.x + badge_bounds.width - pill_w - 8.0;
-                                    let pill_y = badge_bounds.y + 4.0;
-                                    let pill_rect = Rectangle {
-                                        x: pill_x,
-                                        y: pill_y,
-                                        width: pill_w,
-                                        height: pill_h,
-                                    };
-
-                                    // Draw pill background — `pill` scale so
-                                    // the drag-count badge rounds into a
-                                    // proper capsule in rounded mode.
-                                    renderer.fill_quad(
-                                        renderer::Quad {
-                                            bounds: pill_rect,
-                                            border: iced::Border {
-                                                radius: crate::theme::ui_radius_pill(),
-                                                ..Default::default()
-                                            },
-                                            ..Default::default()
-                                        },
-                                        iced::Background::Color(crate::theme::accent()),
-                                    );
-
-                                    // Draw badge text centered in pill
-                                    renderer.fill_text(
-                                        iced::advanced::text::Text {
-                                            content: badge_text,
-                                            bounds: Size::new(pill_w, pill_h),
-                                            size: badge_font_size,
-                                            font,
-                                            align_x: alignment::Horizontal::Center.into(),
-                                            align_y: alignment::Vertical::Center,
-                                            line_height: iced::advanced::text::LineHeight::default(
-                                            ),
-                                            shaping: iced::advanced::text::Shaping::Advanced,
-                                            wrapping: iced::advanced::text::Wrapping::None,
-                                            ellipsis: iced::advanced::text::Ellipsis::default(),
-                                            hint_factor: Some(1.0),
-                                        },
-                                        Point::new(pill_rect.center_x(), pill_rect.center_y()),
-                                        crate::theme::fg0(),
-                                        pill_rect,
-                                    );
-                                }
-                            });
-                        },
-                    );
-                } else {
-                    // Shift non-dragged items to make room
-                    let offset: i32 = match target_index.cmp(index) {
-                        std::cmp::Ordering::Less if i >= target_index && i < *index => 1,
-                        std::cmp::Ordering::Greater if i > *index && i < target_index => -1,
-                        _ => 0,
-                    };
-
-                    let translation = Vector::new(0.0, offset as f32 * drag_height);
-                    renderer.with_translation(translation, |renderer| {
-                        child.as_widget().draw(
-                            state,
-                            renderer,
-                            theme,
-                            defaults,
-                            child_layout,
-                            cursor,
-                            viewport,
-                        );
-                    });
-                }
-            }
-        } else {
-            // Normal draw — no drag active
-            for ((child, state), layout) in self
-                .children
-                .iter()
-                .zip(&tree.children)
-                .zip(layout.children())
-            {
-                child
-                    .as_widget()
-                    .draw(state, renderer, theme, defaults, layout, cursor, viewport);
-            }
+            child
+                .as_widget()
+                .draw(state, renderer, theme, defaults, layout, cursor, viewport);
         }
     }
 
@@ -610,5 +551,67 @@ where
 {
     fn from(column: DragColumn<'a, Message, Theme, Renderer>) -> Self {
         Self::new(column)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EdgeZone;
+
+    // bounds: top = 100, height = 400 → bottom = 500, edge band = 48px.
+    const TOP: f32 = 100.0;
+    const HEIGHT: f32 = 400.0;
+    const EDGE: f32 = 48.0;
+
+    #[test]
+    fn edge_zone_middle_is_none() {
+        assert_eq!(
+            EdgeZone::from_cursor(300.0, TOP, HEIGHT, EDGE),
+            EdgeZone::None
+        );
+    }
+
+    #[test]
+    fn edge_zone_just_inside_top() {
+        // 148 is exactly top+edge → Top (inclusive).
+        assert_eq!(
+            EdgeZone::from_cursor(148.0, TOP, HEIGHT, EDGE),
+            EdgeZone::Top
+        );
+        assert_eq!(
+            EdgeZone::from_cursor(120.0, TOP, HEIGHT, EDGE),
+            EdgeZone::Top
+        );
+    }
+
+    #[test]
+    fn edge_zone_just_inside_bottom() {
+        // 452 is exactly bottom-edge → Bottom (inclusive).
+        assert_eq!(
+            EdgeZone::from_cursor(452.0, TOP, HEIGHT, EDGE),
+            EdgeZone::Bottom
+        );
+        assert_eq!(
+            EdgeZone::from_cursor(480.0, TOP, HEIGHT, EDGE),
+            EdgeZone::Bottom
+        );
+    }
+
+    #[test]
+    fn edge_zone_past_edges_clamp_to_bands() {
+        // Above the top / below the bottom still classify as Top / Bottom.
+        assert_eq!(
+            EdgeZone::from_cursor(90.0, TOP, HEIGHT, EDGE),
+            EdgeZone::Top
+        );
+        assert_eq!(
+            EdgeZone::from_cursor(520.0, TOP, HEIGHT, EDGE),
+            EdgeZone::Bottom
+        );
+    }
+
+    #[test]
+    fn edge_zone_default_is_none() {
+        assert_eq!(EdgeZone::default(), EdgeZone::None);
     }
 }

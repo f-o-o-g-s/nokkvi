@@ -16,6 +16,11 @@ use crate::{
 /// seconds), so restart engages once the clock reaches 0:05.
 const PREV_RESTART_THRESHOLD_SECS: u32 = 5;
 
+/// Rows the viewport advances per 100 ms tick while a within-list drag cursor is
+/// held at a top/bottom edge (≈10 rows/sec at 1). Modest so overshoot is easy to
+/// correct; the move is bounded by the slot list's own end clamps.
+const AUTOSCROLL_ROWS_PER_TICK: usize = 1;
+
 /// Resolve which of the open ALSA playback rates is the OUTPUT DEVICE's — for
 /// the honest bit-perfect indicator — given the track's rate. The device-rate
 /// READ lives in the data crate ([`nokkvi_data::audio::active_alsa_playback_rates`]);
@@ -155,6 +160,60 @@ struct MprisUpdate<'a> {
 }
 
 impl Nokkvi {
+    /// One edge-hold auto-scroll step for an in-progress within-list reorder
+    /// drag: nudge the active surface's viewport toward the edge the cursor sits
+    /// in. Gating mirrors [`Self::active_within_list_drag`] (a cross-pane drag
+    /// owns the gesture; editor precedence; an accepted pick; no active search).
+    /// Bounded by the slot list's `move_up`/`move_down` end clamps, so it stops
+    /// at the list ends rather than running away.
+    fn tick_within_list_autoscroll(&mut self) {
+        use crate::widgets::drag_column::EdgeZone;
+
+        // A cross-pane drag owns the gesture — never auto-scroll under it.
+        if self.cross_pane_drag.active.is_some() {
+            return;
+        }
+
+        // Editor precedence: while mounted it owns the left pane, so a queue drag
+        // can't be active. Gate on an accepted pick + no active search.
+        if let Some(editor) = self.playlist_editor.as_mut() {
+            if editor.drag_source.is_some() && editor.common.search_query.is_empty() {
+                let total = editor.songs.len();
+                match editor.drag_edge {
+                    EdgeZone::Top => {
+                        for _ in 0..AUTOSCROLL_ROWS_PER_TICK {
+                            editor.common.slot_list.move_up(total);
+                        }
+                    }
+                    EdgeZone::Bottom => {
+                        for _ in 0..AUTOSCROLL_ROWS_PER_TICK {
+                            editor.common.slot_list.move_down(total);
+                        }
+                    }
+                    EdgeZone::None => {}
+                }
+            }
+            return;
+        }
+
+        if self.queue_page.drag_source.is_some() && self.queue_page.common.search_query.is_empty() {
+            let total = self.library.queue_songs.len();
+            match self.queue_page.drag_edge {
+                EdgeZone::Top => {
+                    for _ in 0..AUTOSCROLL_ROWS_PER_TICK {
+                        self.queue_page.common.slot_list.move_up(total);
+                    }
+                }
+                EdgeZone::Bottom => {
+                    for _ in 0..AUTOSCROLL_ROWS_PER_TICK {
+                        self.queue_page.common.slot_list.move_down(total);
+                    }
+                }
+                EdgeZone::None => {}
+            }
+        }
+    }
+
     pub(crate) fn handle_tick(&mut self) -> Task<Message> {
         // Pre-login: nothing to poll. Returning early avoids `shell_task`
         // logging a "called before app_service initialized" warning every
@@ -2256,6 +2315,15 @@ impl Nokkvi {
                         stale_views.join(", ")
                     ));
                 }
+
+                // ── Within-list drag edge auto-scroll ───────────────────
+                // Advance the dragged surface's viewport while the cursor is
+                // held at a top/bottom edge. Inline here (not in handle_tick,
+                // which early-returns without an app_service) so it runs in
+                // tests and without a live session, and as a direct viewport
+                // mutation (NOT a dispatched Navigate message) so it never
+                // fires the navigation SFX at 10 Hz.
+                self.tick_within_list_autoscroll();
 
                 self.handle_tick()
             }

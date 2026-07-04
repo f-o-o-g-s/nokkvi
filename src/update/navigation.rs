@@ -205,6 +205,24 @@ impl Nokkvi {
         }
     }
 
+    /// Clear any in-progress within-list reorder drag on both the queue and the
+    /// editor. Called on the same unmount / focus-loss edges as
+    /// [`Self::clear_all_toolbar_reveal_locks`]: a held drag that loses its
+    /// `ButtonReleased` (a hotkey main-view switch, logout, or the OS window
+    /// losing focus so an unfocused Wayland surface stops delivering pointer
+    /// events) would otherwise strand `drag_source`, keeping the floating ghost
+    /// alive and driving edge auto-scroll when the surface re-mounts. There is no
+    /// heartbeat/timeout — these clears (called on every unmount edge) are the
+    /// recovery, and even before one fires the auto-scroll is bounded by the slot
+    /// list's `move_up`/`move_down` end clamps, so a stranded drag cannot run
+    /// away. Idempotent.
+    pub(crate) fn clear_stranded_within_list_drag(&mut self) {
+        self.queue_page.clear_drag();
+        if let Some(editor) = self.playlist_editor.as_mut() {
+            editor.clear_drag();
+        }
+    }
+
     /// Mark every slot-list page as OS-window-focused or not. The auto-hide
     /// toolbar's transient reveals (hover / open dropdown / hotkey timer /
     /// focused-but-empty search) are gated on this in `toolbar_revealed`, so
@@ -247,6 +265,11 @@ impl Nokkvi {
         // reveal-lock — a keyboard-driven switch would otherwise leave the
         // toolbar stuck revealed on return. Mirrors clear_browsing_panel_reveal_locks.
         self.clear_all_toolbar_reveal_locks();
+
+        // A keyboard-driven main-view switch mid-drag unmounts the queue/editor
+        // DragColumn before its ButtonReleased fires, so clear any stranded
+        // within-list drag (floating ghost + edge auto-scroll) on the same edge.
+        self.clear_stranded_within_list_drag();
 
         // Cancel any in-progress roulette when leaving its host view —
         // continuing the spin on a different view's slot list would scroll

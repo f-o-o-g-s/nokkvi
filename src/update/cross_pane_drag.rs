@@ -18,6 +18,7 @@
 //! no stored-vs-inline `slot_count` divergence.
 
 use iced::Task;
+use nokkvi_data::backend::queue::QueueSongUIViewData;
 use tracing::debug;
 
 use crate::{
@@ -30,6 +31,37 @@ use crate::{
 
 /// Minimum pixel distance before a press becomes a drag
 const DRAG_THRESHOLD: f32 = 5.0;
+
+/// A resolved in-progress within-list reorder drag for the currently-active
+/// surface — the play queue, or the playlist editor when it is mounted (the
+/// editor replaces the left pane, so the two are mutually exclusive). Borrows
+/// the live drag fields plus the surface's song buffer so the floating identity
+/// ghost and the drop-indicator line can render from data by identity.
+pub(crate) struct WithinListDrag<'a> {
+    /// Snapshotted `entry_id`s of the grabbed row(s) (1 = single, >1 = batch).
+    pub(crate) source_entry_ids: &'a [u64],
+    /// Live RAW cursor, `None` until the first cursor move after the pick.
+    pub(crate) cursor: Option<iced::Point>,
+    /// Live drop-target slot (feeds the drop-indicator line).
+    pub(crate) target_slot: Option<usize>,
+    /// The active surface's song buffer (queue or editor), for identity lookup.
+    songs: &'a [QueueSongUIViewData],
+}
+
+impl<'a> WithinListDrag<'a> {
+    /// The grabbed row, resolved from the live buffer by its snapshotted
+    /// `entry_id`, so the ghost stays pinned to the same track even as the list
+    /// scrolls under the drag. `None` if that row was removed mid-drag.
+    pub(crate) fn ghost_song(&self) -> Option<&'a QueueSongUIViewData> {
+        let first = *self.source_entry_ids.first()?;
+        self.songs.iter().find(|s| s.entry_id == first)
+    }
+
+    /// Row count in the drag (1 = single, >1 = multi-selection batch).
+    pub(crate) fn selection_count(&self) -> usize {
+        self.source_entry_ids.len()
+    }
+}
 
 impl Nokkvi {
     /// Dispatch `CrossPaneDragMessage` sub-enum variants to their per-variant
@@ -331,7 +363,7 @@ impl Nokkvi {
     /// Uses the same shared helpers (`slot_list_artwork_column`, `slot_list_text_column`,
     /// `slot_list_metadata_column`) as the actual views for pixel-perfect fidelity.
     pub(crate) fn render_drag_slot(&self) -> iced::Element<'_, Message> {
-        use iced::{Element, Length};
+        use iced::Element;
 
         let panel = match self.browsing_panel.as_ref() {
             Some(p) => p,
@@ -418,12 +450,23 @@ impl Nokkvi {
                 .into(),
         };
 
-        // Wrap in the bold drag-preview ghost style (loud fill + legible text +
-        // ring) — NOT the quiet border-only in-list selection look.
+        Self::wrap_drag_preview_slot(slot_content, selection_count)
+    }
+
+    /// Wrap a drag-preview row in the bold ghost style (loud accent fill, legible
+    /// text, accent ring — not the quiet border-only in-list selection look),
+    /// overlaying a `×N` count badge for multi-selection drags. Shared by the
+    /// cross-pane ghost ([`render_drag_slot`]) and the within-list reorder ghost
+    /// ([`render_within_list_drag_slot`]).
+    pub(crate) fn wrap_drag_preview_slot(
+        slot_content: iced::Element<'_, Message>,
+        selection_count: usize,
+    ) -> iced::Element<'_, Message> {
+        use iced::Length;
+
         use crate::widgets::slot_list::SlotListSlotStyle;
         let style = SlotListSlotStyle::drag_preview();
 
-        // For multi-selection drags, overlay a count badge
         if selection_count > 1 {
             let badge = iced::widget::container(
                 iced::widget::text(format!("×{selection_count}"))
@@ -524,6 +567,92 @@ impl Nokkvi {
         .align_y(Alignment::Center)
         .height(Length::Fill)
         .into()
+    }
+
+    /// The active within-list reorder drag for the current surface (the playlist
+    /// editor if mounted, else the play queue), gated on an accepted pick and no
+    /// active search. `None` when nothing is being dragged in the current
+    /// surface. Consumed by the floating ghost and the drop-indicator line.
+    pub(crate) fn active_within_list_drag(&self) -> Option<WithinListDrag<'_>> {
+        // A cross-pane drag owns the floating ghost + drop indicator; the two
+        // drag systems are mutually exclusive, so never surface both at once.
+        if self.cross_pane_drag.active.is_some() {
+            return None;
+        }
+        // The editor replaces the left pane while mounted, so it takes
+        // precedence; a mounted editor with no active drag never falls through
+        // to the (hidden) queue.
+        if let Some(editor) = self.playlist_editor.as_ref() {
+            if editor.drag_source.is_some() && editor.common.search_query.is_empty() {
+                return Some(WithinListDrag {
+                    source_entry_ids: editor.drag_source.as_deref().unwrap_or(&[]),
+                    cursor: editor.drag_cursor,
+                    target_slot: editor.drag_target_slot,
+                    songs: editor.songs.as_slice(),
+                });
+            }
+            return None;
+        }
+        if self.queue_page.drag_source.is_some() && self.queue_page.common.search_query.is_empty() {
+            return Some(WithinListDrag {
+                source_entry_ids: self.queue_page.drag_source.as_deref().unwrap_or(&[]),
+                cursor: self.queue_page.drag_cursor,
+                target_slot: self.queue_page.drag_target_slot,
+                songs: self.library.queue_songs.as_slice(),
+            });
+        }
+        None
+    }
+
+    /// The floating identity ghost for an in-progress within-list reorder drag,
+    /// positioned at the live cursor. Pushed into the top-level `Stack` (outside
+    /// the slot list's clip). Rendered from the grabbed row's data BY IDENTITY,
+    /// so it stays pinned to the same track even as the list scrolls under the
+    /// drag. `None` when no within-list drag is active, before the first cursor
+    /// move, or if the grabbed row was removed mid-drag.
+    pub(crate) fn render_within_list_drag_slot(&self) -> Option<iced::Element<'_, Message>> {
+        use iced::{Length, widget::container};
+
+        let drag = self.active_within_list_drag()?;
+        let cursor = drag.cursor?;
+        let song = drag.ghost_song()?;
+        let selection_count = drag.selection_count();
+
+        let art = self.artwork.album_art.peek(&song.album_id);
+        let row = Self::build_drag_preview_row(
+            art,
+            song.title.clone(),
+            song.artist.clone(),
+            song.album.clone(),
+        );
+        let slot_element = Self::wrap_drag_preview_slot(row, selection_count);
+
+        // Position near the cursor, mirroring the cross-pane ghost.
+        let slot_width = (self.window.width * 0.42).min(600.0);
+        let slot_height = 64.0_f32;
+        let offset_x = 12.0_f32;
+        let offset_y = -(slot_height / 2.0);
+        // `.max(0.0)` on the upper bound: f32::clamp panics when min > max, which
+        // happens if the window is narrower/shorter than the ghost (sub-64px).
+        let pad_left =
+            (cursor.x + offset_x).clamp(0.0, (self.window.width - slot_width - 20.0).max(0.0));
+        let pad_top = (cursor.y + offset_y).clamp(0.0, (self.window.height - slot_height).max(0.0));
+
+        let overlay = container(
+            container(slot_element)
+                .width(Length::Fixed(slot_width))
+                .height(Length::Fixed(slot_height)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(iced::Padding {
+            top: pad_top,
+            left: pad_left,
+            right: 0.0,
+            bottom: 0.0,
+        });
+
+        Some(overlay.into())
     }
 
     /// Translate a *filtered* queue row index (slot-list space when a queue

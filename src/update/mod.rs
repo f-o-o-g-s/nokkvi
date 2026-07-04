@@ -353,6 +353,10 @@ impl Nokkvi {
                 // filter (query) is preserved.
                 self.set_all_window_focused(false);
                 self.clear_all_toolbar_reveal_locks();
+                // An unfocused Wayland surface stops delivering pointer events,
+                // so a held drag can never get its ButtonReleased — clear any
+                // stranded within-list drag on focus loss too.
+                self.clear_stranded_within_list_drag();
                 self.clear_all_search_input_focus();
                 if matches!(
                     self.open_menu,

@@ -72,6 +72,15 @@ pub struct QueuePage {
     /// paths. `len() == 1` is a single-row drag, `> 1` a multi-selection batch.
     /// Taken (cleared) on drop, and on any aborted/search-swallowed drag.
     pub drag_source: Option<Vec<u64>>,
+    /// Live RAW cursor position of an in-progress within-list drag, updated on
+    /// every `DragEvent::Dragged`. Drives the app-level floating identity ghost.
+    /// `None` between the pick and the first cursor move, and whenever idle.
+    pub drag_cursor: Option<iced::Point>,
+    /// Which vertical edge band the drag cursor currently sits in — drives
+    /// tick-based edge auto-scroll. `EdgeZone::None` when centred or idle.
+    pub drag_edge: crate::widgets::drag_column::EdgeZone,
+    /// Live drop-target slot for the drag, feeding the drop-indicator line.
+    pub drag_target_slot: Option<usize>,
 }
 
 // Toggleable queue columns, in columns-dropdown order (declaration order ==
@@ -303,6 +312,9 @@ impl Default for QueuePage {
             last_sort_signature: None,
             playlist_strip_expanded: false,
             drag_source: None,
+            drag_cursor: None,
+            drag_edge: crate::widgets::drag_column::EdgeZone::None,
+            drag_target_slot: None,
         }
     }
 }
@@ -310,6 +322,17 @@ impl Default for QueuePage {
 impl QueuePage {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Reset all in-progress within-list drag state — called when a drag ends
+    /// (drop, or an aborted / search-swallowed gesture) so a stranded drag can
+    /// never keep the ghost alive or drive auto-scroll. The mid-drag unmount
+    /// paths (view switch, session reset) call this too, wired in M5.
+    pub fn clear_drag(&mut self) {
+        self.drag_source = None;
+        self.drag_cursor = None;
+        self.drag_edge = crate::widgets::drag_column::EdgeZone::None;
+        self.drag_target_slot = None;
     }
 }
 

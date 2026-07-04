@@ -1533,6 +1533,7 @@ impl Nokkvi {
         // mouse_area unmount on the Login-screen swap, so their on_close /
         // on_exit can't fire to clear the flag.
         self.clear_all_toolbar_reveal_locks();
+        self.clear_stranded_within_list_drag();
         self.playlist_editor = None;
         self.server_version = None;
         self.last_queue_current_index = None;

@@ -52,6 +52,19 @@ pub struct PlaylistEditorState {
     /// are gated on `Loaded` so a failed/in-flight resolve can never overwrite
     /// the server playlist with a partial buffer.
     pub load_state: EditorLoadState,
+    /// Per-row `entry_id`s grabbed by an in-progress within-list drag,
+    /// snapshotted at pick time so the drop resolves its source by identity
+    /// (immune to a mid-drag viewport shift) and the floating drag ghost can
+    /// render the grabbed row. `None` when no drag is active. Mirrors
+    /// `QueuePage.drag_source`.
+    pub drag_source: Option<Vec<u64>>,
+    /// Live RAW cursor of an in-progress within-list drag, driving the floating
+    /// identity ghost. `None` between the pick and the first cursor move.
+    pub drag_cursor: Option<iced::Point>,
+    /// Which vertical edge band the drag cursor sits in — drives tick auto-scroll.
+    pub drag_edge: crate::widgets::drag_column::EdgeZone,
+    /// Live drop-target slot for the drag, feeding the drop-indicator line.
+    pub drag_target_slot: Option<usize>,
 }
 
 impl PlaylistEditorState {
@@ -71,6 +84,20 @@ impl PlaylistEditorState {
             // (→ Failed). Defaulting inside `new()` keeps every call site (one
             // production, several tests) unchanged.
             load_state: EditorLoadState::Loading,
+            drag_source: None,
+            drag_cursor: None,
+            drag_edge: crate::widgets::drag_column::EdgeZone::None,
+            drag_target_slot: None,
         }
+    }
+
+    /// Reset all in-progress within-list drag state. Called on drop; the editor's
+    /// drag state also auto-clears when the whole session is torn down
+    /// (`playlist_editor = None`).
+    pub fn clear_drag(&mut self) {
+        self.drag_source = None;
+        self.drag_cursor = None;
+        self.drag_edge = crate::widgets::drag_column::EdgeZone::None;
+        self.drag_target_slot = None;
     }
 }

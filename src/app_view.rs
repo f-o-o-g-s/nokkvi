@@ -1036,9 +1036,12 @@ impl Nokkvi {
 
             let offset_x = 12.0_f32;
             let offset_y = -(slot_height / 2.0); // Center vertically on cursor
-            let pad_left =
-                (drag.cursor.x + offset_x).clamp(0.0, self.window.width - slot_width - 20.0);
-            let pad_top = (drag.cursor.y + offset_y).clamp(0.0, self.window.height - slot_height);
+            // `.max(0.0)` on the upper bound: f32::clamp panics when min > max,
+            // which happens if the window is narrower/shorter than the ghost.
+            let pad_left = (drag.cursor.x + offset_x)
+                .clamp(0.0, (self.window.width - slot_width - 20.0).max(0.0));
+            let pad_top =
+                (drag.cursor.y + offset_y).clamp(0.0, (self.window.height - slot_height).max(0.0));
 
             let drag_overlay = container(
                 container(slot_element)
@@ -1062,22 +1065,36 @@ impl Nokkvi {
             // chrome reconstruction needed at the window level.
         }
 
+        // Floating identity ghost for a within-list reorder drag (queue or
+        // playlist editor). Mutually exclusive with the cross-pane ghost above;
+        // pinned to the grabbed row's identity so it never cycles on scroll.
+        if let Some(ghost) = self.render_within_list_drag_slot() {
+            stack = stack.push(ghost);
+        }
+
         stack.into()
     }
 
-    /// Visual slot index for the cross-pane drag's drop indicator, or
-    /// `None` if no drag is active or the cursor is not over any queue
-    /// slot. Read by [`crate::views::QueueViewData::drop_indicator_slot`].
-    fn cross_pane_drop_indicator_slot(&self) -> Option<usize> {
-        self.cross_pane_drag.active.as_ref()?;
-        // While editing, the LEFT pane is the playlist editor, so the drop
-        // indicator tracks the editor's own hovered slot (its slot-list state
-        // is independent of the live queue's). Otherwise read the queue pane.
-        let slot_list = match self.playlist_editor.as_ref() {
-            Some(editor) => &editor.common.slot_list,
-            None => &self.queue_page.common.slot_list,
-        };
-        slot_list.hovered_slot.map(|h| h.slot_index())
+    /// Visual slot index for the active drag's drop indicator, or `None`.
+    ///
+    /// A cross-pane drag (browser → queue/editor) reads the hovered slot in the
+    /// target pane. A within-list reorder drag reads its live `target_slot`
+    /// (from `DragEvent::Dragged`). The two drag systems are mutually exclusive.
+    /// Read by [`crate::views::QueueViewData::drop_indicator_slot`] and the
+    /// playlist editor's equivalent.
+    fn drop_indicator_slot(&self) -> Option<usize> {
+        if self.cross_pane_drag.active.is_some() {
+            // While editing, the LEFT pane is the playlist editor, so the drop
+            // indicator tracks the editor's own hovered slot (its slot-list
+            // state is independent of the live queue's). Otherwise the queue.
+            let slot_list = match self.playlist_editor.as_ref() {
+                Some(editor) => &editor.common.slot_list,
+                None => &self.queue_page.common.slot_list,
+            };
+            return slot_list.hovered_slot.map(|h| h.slot_index());
+        }
+        // Within-list reorder drag: the live drop-target slot from DragColumn.
+        self.active_within_list_drag().and_then(|d| d.target_slot)
     }
 
     /// Resolve the active playlist's strip cover handle: the collage's first
@@ -1349,7 +1366,7 @@ impl Nokkvi {
             },
             show_default_playlist_chip: self.settings.queue_show_default_playlist,
             default_playlist_name: &self.settings.default_playlist_name,
-            drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
+            drop_indicator_slot: self.drop_indicator_slot(),
             // Over-cover visualizer + surfing boat (Scope always; Bars/Lines when
             // placed OverCover), shared with the Radios station-art panel via
             // `over_cover_overlays`. Rendered regardless of play state, so it
@@ -1483,7 +1500,7 @@ impl Nokkvi {
                         comment: editor.edit.playlist_comment.clone(),
                         public: editor.edit.playlist_public,
                         dirty,
-                        drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
+                        drop_indicator_slot: self.drop_indicator_slot(),
                         open_menu: self.open_menu.as_ref(),
                     };
                     editor.view(editor_data).map(Message::Editor)

@@ -1392,6 +1392,465 @@ fn drag_reorder_batch_captured_at_pick_survives_selection_clear() {
 }
 
 #[test]
+fn queue_dragged_stores_live_state_when_pick_active() {
+    // A DragEvent::Dragged during an accepted drag records the live cursor, edge
+    // band, and drop-target slot (which drive the floating ghost + auto-scroll).
+    use crate::{
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    assert!(app.queue_page.drag_source.is_some());
+
+    let p = iced::Point::new(120.0, 456.0);
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dragged {
+            cursor: p,
+            edge: EdgeZone::Bottom,
+            target_slot: 7,
+        }),
+        &songs,
+    );
+
+    assert_eq!(app.queue_page.drag_cursor, Some(p));
+    assert_eq!(app.queue_page.drag_edge, EdgeZone::Bottom);
+    assert_eq!(app.queue_page.drag_target_slot, Some(7));
+}
+
+#[test]
+fn queue_dragged_does_not_clear_captured_source() {
+    // Regression guard: the explicit Dragged arm MUST precede the `_` catch-all
+    // (which clears drag_source). Without it, every cursor move would drop the
+    // pick and the drop would silently no-op.
+    use crate::{
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dragged {
+            cursor: iced::Point::new(1.0, 2.0),
+            edge: EdgeZone::None,
+            target_slot: 4,
+        }),
+        &songs,
+    );
+
+    assert!(
+        app.queue_page.drag_source.is_some(),
+        "Dragged must not clear the captured source (the catch-all trap)"
+    );
+}
+
+#[test]
+fn queue_dragged_ignored_without_accepted_pick() {
+    // With no accepted pick (drag_source None), a Dragged is inert — no ghost or
+    // auto-scroll state leaks in (e.g. from a search-swallowed drag).
+    use crate::{
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dragged {
+            cursor: iced::Point::new(9.0, 9.0),
+            edge: EdgeZone::Bottom,
+            target_slot: 2,
+        }),
+        &songs,
+    );
+
+    assert_eq!(app.queue_page.drag_cursor, None);
+    assert_eq!(app.queue_page.drag_edge, EdgeZone::None);
+    assert_eq!(app.queue_page.drag_target_slot, None);
+}
+
+#[test]
+fn within_list_drag_ghost_identity_constant_across_offset_shift() {
+    // THE regression for the reported bug: the floating ghost resolves from the
+    // grabbed row's snapshotted entry_id, so it stays pinned to the same track
+    // even as the viewport scrolls (or auto-scrolls) under the drag — it no
+    // longer cycles content each tick.
+    use crate::{views::QueueMessage, widgets::drag_column::DragEvent};
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+
+    // At offset 5 (effective_center 4): slot 3 → item 4 (id "s4").
+    let ghost_before = app
+        .active_within_list_drag()
+        .and_then(|d| d.ghost_song().map(|s| s.id.clone()));
+    assert_eq!(ghost_before.as_deref(), Some("s4"));
+
+    // Scroll the window under the drag.
+    app.queue_page.common.slot_list.set_offset(11, 20);
+
+    let ghost_after = app
+        .active_within_list_drag()
+        .and_then(|d| d.ghost_song().map(|s| s.id.clone()));
+    assert_eq!(
+        ghost_after, ghost_before,
+        "the ghost must stay pinned to the grabbed track across a mid-drag \
+         viewport shift (no cycling)"
+    );
+}
+
+#[test]
+fn within_list_drag_tracks_cursor_and_target() {
+    use crate::{
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    let p = iced::Point::new(200.0, 300.0);
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dragged {
+            cursor: p,
+            edge: EdgeZone::None,
+            target_slot: 5,
+        }),
+        &songs,
+    );
+
+    assert_eq!(
+        app.active_within_list_drag().and_then(|d| d.cursor),
+        Some(p)
+    );
+    assert_eq!(
+        app.active_within_list_drag().and_then(|d| d.target_slot),
+        Some(5)
+    );
+}
+
+#[test]
+fn within_list_drag_gated_off_by_no_pick_search_and_editor() {
+    use crate::{views::QueueMessage, widgets::drag_column::DragEvent};
+
+    let mut app = app_with_numbered_queue(20);
+    let songs = app.library.queue_songs.clone();
+
+    // No pick → no active drag.
+    assert!(app.active_within_list_drag().is_none());
+
+    // Pick → active.
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    assert!(app.active_within_list_drag().is_some());
+
+    // Active search → gated off (slot indices would be filtered).
+    app.queue_page.common.search_query = "s1".to_string();
+    assert!(
+        app.active_within_list_drag().is_none(),
+        "an active search must gate off the within-list drag"
+    );
+    app.queue_page.common.search_query.clear();
+    assert!(app.active_within_list_drag().is_some());
+
+    // Editor mounted → it owns the left pane, so the queue drag is not the
+    // active surface even though drag_source is still set.
+    app.playlist_editor = Some(crate::state::PlaylistEditorState::new(
+        nokkvi_data::types::playlist_edit::PlaylistEditState::new(
+            "p".into(),
+            "n".into(),
+            "c".into(),
+            true,
+            Vec::new(),
+        ),
+    ));
+    assert!(
+        app.active_within_list_drag().is_none(),
+        "editor precedence: a queue drag is hidden while the editor is mounted"
+    );
+}
+
+#[test]
+fn tick_edge_bottom_autoscrolls_queue_viewport() {
+    use crate::{
+        app_message::{Message, PlaybackMessage},
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    // Accept a pick, then hold the cursor at the bottom edge.
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    app.queue_page.drag_edge = EdgeZone::Bottom;
+
+    // The first tick is absorbed by the pick's focus-marker snap (move_down's
+    // selected_offset.take() re-centers on the pick before +1). Steady-state
+    // advance shows from the second tick on.
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    let v1 = app.queue_page.common.slot_list.viewport_offset;
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    let v2 = app.queue_page.common.slot_list.viewport_offset;
+
+    assert!(
+        v2 > v1,
+        "holding the bottom edge must advance the viewport each tick (v1={v1}, v2={v2})"
+    );
+}
+
+#[test]
+fn tick_edge_none_does_not_autoscroll() {
+    use crate::{
+        app_message::{Message, PlaybackMessage},
+        views::QueueMessage,
+        widgets::drag_column::DragEvent,
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    // drag_edge defaults to None (cursor centred).
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 5,
+        "a centred cursor (edge None) must not auto-scroll"
+    );
+}
+
+#[test]
+fn tick_after_drop_does_not_autoscroll() {
+    use crate::{
+        app_message::{Message, PlaybackMessage},
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    app.queue_page.drag_edge = EdgeZone::Bottom;
+    // Drop clears all drag state (clear_drag), so a held edge can't keep
+    // scrolling after release.
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dropped {
+            index: 3,
+            target_index: 7,
+        }),
+        &songs,
+    );
+    let before = app.queue_page.common.slot_list.viewport_offset;
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, before,
+        "no auto-scroll after the drag ends (drag_source + drag_edge cleared)"
+    );
+}
+
+#[test]
+fn tick_without_drag_does_not_autoscroll() {
+    use crate::{
+        app_message::{Message, PlaybackMessage},
+        widgets::drag_column::EdgeZone,
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    // An edge set without an accepted pick must stay inert (proves the
+    // drag_source gate; also proves the normal Tick path is untouched).
+    app.queue_page.drag_edge = EdgeZone::Bottom;
+
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 5,
+        "no auto-scroll without an accepted pick (drag_source is None)"
+    );
+}
+
+#[test]
+fn view_switch_clears_stranded_queue_drag() {
+    use crate::{
+        View,
+        app_message::{Message, PlaybackMessage},
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    let songs = app.library.queue_songs.clone();
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    app.queue_page.drag_edge = EdgeZone::Bottom;
+    assert!(app.queue_page.drag_source.is_some());
+
+    // A keyboard-driven main-view switch mid-drag unmounts the queue DragColumn
+    // before its ButtonReleased fires — the stranded drag must clear here.
+    let _ = app.handle_switch_view(View::Albums);
+
+    assert!(
+        app.queue_page.drag_source.is_none(),
+        "a main-view switch must clear a stranded queue drag"
+    );
+    assert_eq!(app.queue_page.drag_edge, EdgeZone::None);
+
+    // And a subsequent tick must not auto-scroll.
+    let before = app.queue_page.common.slot_list.viewport_offset;
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    assert_eq!(app.queue_page.common.slot_list.viewport_offset, before);
+}
+
+#[test]
+fn clear_stranded_within_list_drag_clears_queue_and_editor() {
+    use crate::widgets::drag_column::EdgeZone;
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.drag_source = Some(vec![1]);
+    app.queue_page.drag_edge = EdgeZone::Top;
+    app.queue_page.drag_cursor = Some(iced::Point::new(3.0, 4.0));
+    app.queue_page.drag_target_slot = Some(5);
+
+    // Mount an editor carrying its own stranded drag.
+    app.playlist_editor = Some(crate::state::PlaylistEditorState::new(
+        nokkvi_data::types::playlist_edit::PlaylistEditState::new(
+            "p".into(),
+            "n".into(),
+            "c".into(),
+            true,
+            Vec::new(),
+        ),
+    ));
+    {
+        let editor = app.playlist_editor.as_mut().unwrap();
+        editor.drag_source = Some(vec![2]);
+        editor.drag_edge = EdgeZone::Bottom;
+    }
+
+    app.clear_stranded_within_list_drag();
+
+    assert!(app.queue_page.drag_source.is_none());
+    assert_eq!(app.queue_page.drag_edge, EdgeZone::None);
+    assert!(app.queue_page.drag_cursor.is_none());
+    assert!(app.queue_page.drag_target_slot.is_none());
+    let editor = app.playlist_editor.as_ref().unwrap();
+    assert!(
+        editor.drag_source.is_none(),
+        "the editor's drag must clear on the same unmount edge"
+    );
+    assert_eq!(editor.drag_edge, EdgeZone::None);
+}
+
+#[test]
+fn tick_edge_top_autoscrolls_queue_viewport_upward() {
+    use crate::{
+        app_message::{Message, PlaybackMessage},
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(15, 20);
+    let songs = app.library.queue_songs.clone();
+
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    app.queue_page.drag_edge = EdgeZone::Top;
+
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    let v1 = app.queue_page.common.slot_list.viewport_offset;
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    let v2 = app.queue_page.common.slot_list.viewport_offset;
+
+    assert!(
+        v2 < v1,
+        "holding the top edge must move the viewport up each tick (v1={v1}, v2={v2})"
+    );
+}
+
+#[test]
+fn queue_dragged_during_search_cancels_drag() {
+    // A search activating mid-drag cancels the queue gesture (clears the captured
+    // source), matching the editor — so it can't silently resume when the search
+    // clears while the button is still held.
+    use crate::{
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    let songs = app.library.queue_songs.clone();
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    assert!(app.queue_page.drag_source.is_some());
+
+    app.queue_page.common.search_query = "s1".to_string();
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Dragged {
+            cursor: iced::Point::new(1.0, 2.0),
+            edge: EdgeZone::Bottom,
+            target_slot: 4,
+        }),
+        &songs,
+    );
+
+    assert!(
+        app.queue_page.drag_source.is_none(),
+        "a search activating mid-drag must cancel the queue drag"
+    );
+}
+
+#[test]
 fn drag_reorder_drop_past_last_row_appends_to_end() {
     use crate::{
         views::{QueueAction, QueueMessage},

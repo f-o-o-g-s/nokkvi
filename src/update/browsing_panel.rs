@@ -262,6 +262,10 @@ impl Nokkvi {
             info!(" Exiting playlist edit mode: \"{}\"", name);
         }
 
+        // A queue within-list drag stranded under the editor session (dormant
+        // while the editor owns the pane) would resurface when the editor closes
+        // — clear it here too, mirroring reset_session_state.
+        self.clear_stranded_within_list_drag();
         self.playlist_editor = None;
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;

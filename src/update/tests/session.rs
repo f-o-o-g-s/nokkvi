@@ -16,6 +16,25 @@ use super::SSE_SLOT_TEST_LOCK;
 use crate::test_helpers::*;
 
 #[test]
+fn reset_session_state_clears_stranded_within_list_drag() {
+    // A logout (hotkey/IPC) mid-drag must not leave the queue's drag state set,
+    // or the floating ghost + edge auto-scroll would resume on the next session.
+    use crate::widgets::drag_column::EdgeZone;
+    let _guard = SSE_SLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+
+    app.queue_page.drag_source = Some(vec![42]);
+    app.queue_page.drag_edge = EdgeZone::Bottom;
+    app.queue_page.drag_cursor = Some(iced::Point::new(1.0, 2.0));
+
+    let _ = app.reset_session_state();
+
+    assert!(app.queue_page.drag_source.is_none());
+    assert_eq!(app.queue_page.drag_edge, EdgeZone::None);
+    assert!(app.queue_page.drag_cursor.is_none());
+}
+
+#[test]
 fn reset_session_state_clears_artwork_cache() {
     // `reset_session_state()` calls `navidrome_sse::clear()`; serialize against
     // the other SSE-slot tests so the shared static cannot race.

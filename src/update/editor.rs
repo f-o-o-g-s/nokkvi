@@ -115,24 +115,64 @@ impl Nokkvi {
             return Task::none();
         };
         // Guard while a search query is active — same as the queue. A filtered
-        // view changes the slot→item mapping, so a raw reorder is unsafe.
+        // view changes the slot→item mapping, so a raw reorder is unsafe. Clear
+        // any half-captured source (mirrors the queue's search-blocked Pick/Drop
+        // arms) so a later search-cleared drop can't replay stale pick state.
         if !editor.common.search_query.is_empty() {
+            editor.clear_drag();
             return Task::none();
         }
 
         let total = editor.songs.len();
         match event {
             DragEvent::Picked { index } => {
-                // Match the queue: highlight the picked row unless it's part of
-                // an existing multi-selection (batch drag preserves it).
-                if let Some(item_index) = editor.common.slot_list.slot_to_item_index(index, total)
-                    && !editor
-                        .common
-                        .slot_list
-                        .selected_indices
-                        .contains(&item_index)
-                {
-                    editor.common.slot_list.set_selected(item_index, total);
+                // Snapshot the dragged source row(s) by per-row `entry_id` NOW so
+                // the source survives a mid-drag viewport shift (auto-follow
+                // re-center or a wheel scroll); the frozen pick SLOT is unusable
+                // at drop time once the window scrolls. Mirrors the queue's
+                // `DragReorder` Picked handler.
+                if let Some(item_index) = editor.common.slot_list.slot_to_item_index(index, total) {
+                    let is_batch = editor.common.slot_list.selected_indices.len() > 1
+                        && editor
+                            .common
+                            .slot_list
+                            .selected_indices
+                            .contains(&item_index);
+                    if is_batch {
+                        // Batch drag moves the whole selection; capture every
+                        // selected row's `entry_id` and keep the highlight.
+                        let ids: Vec<u64> = editor
+                            .common
+                            .slot_list
+                            .selected_indices
+                            .iter()
+                            .filter_map(|&i| editor.songs.get(i).map(|s| s.entry_id))
+                            .collect();
+                        editor.drag_source = (!ids.is_empty()).then_some(ids);
+                    } else {
+                        // Single drag: highlight only this row and capture its
+                        // identity.
+                        editor.common.slot_list.set_selected(item_index, total);
+                        editor.drag_source = editor.songs.get(item_index).map(|s| vec![s.entry_id]);
+                    }
+                } else {
+                    // Picked an empty/padding slot — nothing to drag.
+                    editor.drag_source = None;
+                }
+                Task::none()
+            }
+            DragEvent::Dragged {
+                cursor,
+                edge,
+                target_slot,
+            } => {
+                // Track live drag state for the floating ghost + tick auto-scroll,
+                // only once a pick was accepted. The search-active guard above
+                // already blocks (and clears) this while a filter is applied.
+                if editor.drag_source.is_some() {
+                    editor.drag_cursor = Some(cursor);
+                    editor.drag_edge = edge;
+                    editor.drag_target_slot = Some(target_slot);
                 }
                 Task::none()
             }
@@ -140,33 +180,55 @@ impl Nokkvi {
                 index,
                 target_index,
             } => {
-                let from = editor.common.slot_list.slot_to_item_index(index, total);
+                // SOURCE: snapshotted by per-row `entry_id` at PICK time, so it
+                // survives a mid-drag viewport shift. The frozen pick SLOT
+                // (`index`) is intentionally unused.
+                let _ = index;
+                let source = editor.drag_source.take();
+                // Gesture ended — clear the live ghost/scroll state.
+                editor.clear_drag();
+
+                // DESTINATION: follows the live cursor against the CURRENT
+                // viewport.
                 let to = editor
                     .common
                     .slot_list
                     .slot_to_item_index_for_drop(target_index, total);
 
-                // Multi-selection batch drag: if several rows are selected and
-                // the dragged row is one of them, move the whole batch — same
-                // condition the queue uses before dispatching `MoveBatch`.
-                let selected = &editor.common.slot_list.selected_indices;
-                if selected.len() > 1
-                    && from.is_some_and(|f| selected.contains(&f))
-                    && let Some(t) = to
-                {
-                    let mut indices: Vec<usize> = selected.iter().copied().collect();
-                    editor.common.clear_multi_selection();
-                    Self::reorder_buffer_batch(&mut editor.songs, &mut indices, t);
-                } else if let (Some(f), Some(t)) = (from, to)
-                    && f != t
-                {
-                    let item = editor.songs.remove(f);
-                    let insert_at = if f < t { t - 1 } else { t };
-                    editor.songs.insert(insert_at, item);
-                    // Keep the highlight on the moved row at its new position
-                    // (mirrors the queue's `set_selected(insert_at, ..)`).
-                    let new_total = editor.songs.len();
-                    editor.common.slot_list.set_selected(insert_at, new_total);
+                match source {
+                    // Multi-selection batch drag: resolve the batch rows by
+                    // identity (same as the single-row path), so the move
+                    // survives a mid-drag viewport shift AND a clean reload that
+                    // would clear `selected_indices`. `reorder_buffer_batch`
+                    // stays index-based — it takes the resolved live positions.
+                    Some(ids) if ids.len() > 1 => {
+                        if let Some(t) = to {
+                            let mut indices: Vec<usize> = ids
+                                .iter()
+                                .filter_map(|eid| {
+                                    editor.songs.iter().position(|s| s.entry_id == *eid)
+                                })
+                                .collect();
+                            editor.common.clear_multi_selection();
+                            Self::reorder_buffer_batch(&mut editor.songs, &mut indices, t);
+                        }
+                    }
+                    // Single-row drag: resolve the source by identity.
+                    Some(ids) => {
+                        if let (Some(&eid), Some(t)) = (ids.first(), to)
+                            && let Some(f) = editor.songs.iter().position(|s| s.entry_id == eid)
+                            && f != t
+                        {
+                            let item = editor.songs.remove(f);
+                            let insert_at = if f < t { t - 1 } else { t };
+                            editor.songs.insert(insert_at, item);
+                            // Keep the highlight on the moved row at its new
+                            // position (mirrors the queue's `set_selected`).
+                            let new_total = editor.songs.len();
+                            editor.common.slot_list.set_selected(insert_at, new_total);
+                        }
+                    }
+                    None => {}
                 }
                 Task::none()
             }

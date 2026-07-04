@@ -490,6 +490,9 @@ fn editor_drag_reorder_moves_row() {
     seeded_editor(&mut app);
 
     let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 0 },
+    )));
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
         DragEvent::Dropped {
             index: 0,
             target_index: 2,
@@ -500,6 +503,65 @@ fn editor_drag_reorder_moves_row() {
         editor_ids(&app),
         vec!["b", "a", "c"],
         "drag-reorder must move the dragged row to its new buffer position"
+    );
+}
+
+#[test]
+fn editor_drop_moves_pick_time_row_after_midwait_viewport_shift() {
+    // Regression: the editor drop must move the row grabbed at PICK time, not
+    // whatever the frozen pick slot re-resolves to after a mid-drag viewport
+    // shift (reachable today via a mid-drag wheel scroll). Mirror of the queue's
+    // `drag_reorder_moves_pick_time_row_after_midwait_viewport_shift`.
+    let mut app = test_app();
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        "Original comment".into(),
+        true,
+        Vec::new(),
+    )));
+    let rows: Vec<_> = (0..20)
+        .map(|i| make_queue_song(&format!("s{i}"), &format!("T{i}"), "Artist", "Album"))
+        .collect();
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(rows)));
+
+    {
+        let editor = app.playlist_editor.as_mut().unwrap();
+        // Pin a deterministic 9-slot window (center 4) so the math is fixed.
+        editor.common.slot_list.slot_count = 9;
+        editor.common.slot_list.set_offset(5, 20);
+    }
+
+    // At offset 5 (effective_center 4): slot 3 → item 4.
+    let pick_id = app.playlist_editor.as_ref().unwrap().songs[4].id.clone();
+
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 3 },
+    )));
+
+    // Mid-drag the viewport shifts (auto-follow re-center / wheel scroll).
+    app.playlist_editor
+        .as_mut()
+        .unwrap()
+        .common
+        .slot_list
+        .set_offset(11, 20);
+
+    // Release over slot 7. At offset 11: slot 7 → item 14 (destination follows
+    // the live cursor). The frozen pick slot 3 would map to item 10 — the bug.
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Dropped {
+            index: 3,
+            target_index: 7,
+        },
+    )));
+
+    let songs = &app.playlist_editor.as_ref().unwrap().songs;
+    assert_eq!(
+        songs.iter().position(|s| s.id == pick_id),
+        Some(13),
+        "the row grabbed at pick time (item 4) must be the one that moved to 13, \
+         not whatever the frozen pick slot 3 resolves to after the viewport shifted"
     );
 }
 
@@ -533,6 +595,9 @@ fn editor_becomes_dirty_after_reorder() {
         "a freshly-loaded editor must be clean before any mutation"
     );
 
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 0 },
+    )));
     let _ = app.update(Message::Editor(EditorMessage::DragReorder(
         DragEvent::Dropped {
             index: 0,
@@ -616,6 +681,16 @@ fn editor_reorder_under_active_search_is_guarded() {
     let mut app = test_app();
     seeded_editor(&mut app);
 
+    // Pick a row while clean so a source is actually captured — otherwise the
+    // guard is untested (a bare Dropped no-ops via the `None` arm regardless).
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 0 },
+    )));
+    assert!(
+        app.playlist_editor.as_ref().unwrap().drag_source.is_some(),
+        "a clean pick must capture a source before the guard clears it"
+    );
+
     if let Some(editor) = app.playlist_editor.as_mut() {
         editor.common.search_query = "song".to_string();
     }
@@ -632,6 +707,218 @@ fn editor_reorder_under_active_search_is_guarded() {
         editor_ids(&app),
         before,
         "reorder must be a no-op (guarded) while a search query is active"
+    );
+    assert!(
+        app.playlist_editor.as_ref().unwrap().drag_source.is_none(),
+        "the search-active guard must clear the captured source so a later \
+         search-cleared drop cannot replay it"
+    );
+}
+
+#[test]
+fn editor_batch_drag_moves_whole_selection() {
+    // Batch drag: two rows selected, pick one of them, drop before a later row.
+    // The whole selection moves as a contiguous block and the selection clears.
+    // Covers the new batch capture (Picked) + reorder (Dropped) path.
+    use crate::widgets::SlotListPageMessage;
+
+    let mut app = test_app();
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        "Original comment".into(),
+        true,
+        Vec::new(),
+    )));
+    let rows: Vec<_> = (0..6)
+        .map(|i| make_queue_song(&format!("s{i}"), &format!("T{i}"), "Artist", "Album"))
+        .collect();
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(rows)));
+    // Top-pack the window so slot index == item index for a deterministic map.
+    app.playlist_editor
+        .as_mut()
+        .unwrap()
+        .common
+        .slot_list
+        .slot_count = 9;
+
+    // Select items 0 and 1.
+    let _ = app.update(Message::Editor(EditorMessage::SlotList(
+        SlotListPageMessage::SelectionToggle(0),
+    )));
+    let _ = app.update(Message::Editor(EditorMessage::SlotList(
+        SlotListPageMessage::SelectionToggle(1),
+    )));
+
+    // Pick a selected row (→ batch), drop before item 4.
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 0 },
+    )));
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Dropped {
+            index: 0,
+            target_index: 4,
+        },
+    )));
+
+    // [s0,s1,s2,s3,s4,s5] moving {s0,s1} before item 4 → [s2,s3,s0,s1,s4,s5].
+    assert_eq!(
+        editor_ids(&app),
+        vec!["s2", "s3", "s0", "s1", "s4", "s5"],
+        "batch drag must move the whole selection as a contiguous block before the target"
+    );
+    assert!(
+        app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .common
+            .slot_list
+            .selected_indices
+            .is_empty(),
+        "selection must be cleared after a batch drag"
+    );
+}
+
+#[test]
+fn editor_dragged_stores_live_state_when_pick_active() {
+    // A DragEvent::Dragged during an accepted drag records the live cursor,
+    // edge band, and drop-target slot (drives the ghost + auto-scroll).
+    use crate::widgets::drag_column::EdgeZone;
+
+    let mut app = test_app();
+    seeded_editor(&mut app);
+
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 0 },
+    )));
+    assert!(
+        app.playlist_editor.as_ref().unwrap().drag_source.is_some(),
+        "pick must capture a source before Dragged is meaningful"
+    );
+
+    let p = iced::Point::new(50.0, 99.0);
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Dragged {
+            cursor: p,
+            edge: EdgeZone::Top,
+            target_slot: 1,
+        },
+    )));
+
+    let editor = app.playlist_editor.as_ref().unwrap();
+    assert_eq!(editor.drag_cursor, Some(p));
+    assert_eq!(editor.drag_edge, EdgeZone::Top);
+    assert_eq!(editor.drag_target_slot, Some(1));
+    assert!(
+        editor.drag_source.is_some(),
+        "Dragged must NOT clear the captured source"
+    );
+}
+
+#[test]
+fn editor_within_list_drag_ghost_identity_constant_across_offset_shift() {
+    // Editor parity for the ghost-identity contract: the floating ghost resolves
+    // the grabbed row by entry_id, so it stays pinned to the same track across a
+    // mid-drag viewport shift (no cycling) — mirrors the queue's test.
+    use crate::widgets::drag_column::DragEvent;
+
+    let mut app = test_app();
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        "Original comment".into(),
+        true,
+        Vec::new(),
+    )));
+    let rows: Vec<_> = (0..20)
+        .map(|i| make_queue_song(&format!("s{i}"), &format!("T{i}"), "Artist", "Album"))
+        .collect();
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(rows)));
+    {
+        let editor = app.playlist_editor.as_mut().unwrap();
+        editor.common.slot_list.slot_count = 9;
+        editor.common.slot_list.set_offset(5, 20);
+    }
+
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 3 },
+    )));
+
+    // At offset 5 (effective_center 4): slot 3 → item 4 (id "s4").
+    let ghost_before = app
+        .active_within_list_drag()
+        .and_then(|d| d.ghost_song().map(|s| s.id.clone()));
+    assert_eq!(ghost_before.as_deref(), Some("s4"));
+
+    app.playlist_editor
+        .as_mut()
+        .unwrap()
+        .common
+        .slot_list
+        .set_offset(11, 20);
+
+    let ghost_after = app
+        .active_within_list_drag()
+        .and_then(|d| d.ghost_song().map(|s| s.id.clone()));
+    assert_eq!(
+        ghost_after, ghost_before,
+        "editor ghost must stay pinned to the grabbed track across a viewport shift"
+    );
+}
+
+#[test]
+fn tick_edge_bottom_autoscrolls_editor_viewport() {
+    // Editor-surface parity for edge auto-scroll (the editor branch of
+    // tick_within_list_autoscroll is structurally parallel to the queue's and
+    // must not drift).
+    use crate::{app_message::PlaybackMessage, widgets::drag_column::EdgeZone};
+
+    let mut app = test_app();
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        "Original comment".into(),
+        true,
+        Vec::new(),
+    )));
+    let rows: Vec<_> = (0..20)
+        .map(|i| make_queue_song(&format!("s{i}"), &format!("T{i}"), "Artist", "Album"))
+        .collect();
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(rows)));
+    {
+        let editor = app.playlist_editor.as_mut().unwrap();
+        editor.common.slot_list.slot_count = 9;
+        editor.common.slot_list.set_offset(5, 20);
+    }
+
+    // Accept a pick, then hold the cursor at the bottom edge.
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 3 },
+    )));
+    app.playlist_editor.as_mut().unwrap().drag_edge = EdgeZone::Bottom;
+
+    // First tick is absorbed by the pick's focus-marker snap; steady-state
+    // advance shows from the second tick.
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    let v1 = app
+        .playlist_editor
+        .as_ref()
+        .unwrap()
+        .common
+        .slot_list
+        .viewport_offset;
+    let _ = app.update(Message::Playback(PlaybackMessage::Tick));
+    let v2 = app
+        .playlist_editor
+        .as_ref()
+        .unwrap()
+        .common
+        .slot_list
+        .viewport_offset;
+
+    assert!(
+        v2 > v1,
+        "editor: holding the bottom edge must advance the viewport each tick (v1={v1}, v2={v2})"
     );
 }
 
@@ -844,6 +1131,9 @@ fn save_success_seeds_snapshot_from_editor_buffer() {
     let mut app = test_app();
     seeded_editor(&mut app);
 
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 0 },
+    )));
     let _ = app.update(Message::Editor(EditorMessage::DragReorder(
         DragEvent::Dropped {
             index: 0,

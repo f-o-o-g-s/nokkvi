@@ -861,11 +861,6 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
 
     let total_items = items.len();
     let row_height = config.row_height();
-    let badge_count = if sl.selected_indices.len() > 1 {
-        sl.selected_indices.len()
-    } else {
-        1
-    };
     let slots = build_slot_list_slots(sl, items, config, &mut render_item, on_hover);
 
     let drag_column: Element<'a, Message> = DragColumn::from_vec(slots)
@@ -873,13 +868,23 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .on_drag(on_drag_event)
-        .drag_badge_count(badge_count)
         .into();
 
     // Drop indicator rendered inside the slot list's own coordinate space,
     // so its y-position is `slot_index * (row_height + SLOT_SPACING)` with
     // no chrome math involved. Empty stack when no drag is active.
-    let content: Element<'a, Message> = if let Some(slot_idx) = drop_indicator_slot {
+    // The DragColumn is ALWAYS wrapped in a Stack — even with no drop indicator —
+    // so its tree position (and therefore its widget-tree `DragState`) stays
+    // stable whether or not a drag is active. Toggling between a bare
+    // `drag_column` and `stack![drag_column, indicator]` mid-drag reparents the
+    // DragColumn; its tag then mismatches on the next diff and `DragState` resets
+    // to `Idle`, killing the drag on its FIRST gesture — the within-list drop
+    // indicator appears the instant a drag reports a target slot, so this toggle
+    // fires mid-gesture. Adding/removing the indicator as child 1 leaves child 0
+    // (the DragColumn) untouched, so keeping the Stack unconditional is load-
+    // bearing: do not collapse it back to a bare element.
+    let mut content_stack: Stack<'a, Message> = stack![drag_column];
+    if let Some(slot_idx) = drop_indicator_slot {
         let slot_step = row_height + SLOT_SPACING;
         let indicator_y = ((slot_idx as f32 * slot_step) - SLOT_SPACING / 2.0).max(0.0);
         let line = container(Space::new())
@@ -899,12 +904,9 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
             right: 0.0,
             bottom: 0.0,
         });
-        let mut s: Stack<'a, Message> = stack![drag_column];
-        s = s.push(indicator);
-        s.into()
-    } else {
-        drag_column
-    };
+        content_stack = content_stack.push(indicator);
+    }
+    let content: Element<'a, Message> = content_stack.into();
 
     let inner: Element<'a, Message> = container(content)
         .width(Length::Fill)
