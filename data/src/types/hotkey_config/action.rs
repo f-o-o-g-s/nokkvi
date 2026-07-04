@@ -255,14 +255,6 @@ define_hotkey_actions! {
             settings_key: "hotkey.toggle_crossfade",
             default: KeyCombo::key(KeyCode::Char('f')),
         },
-        FadeToNext {
-            display: "Fade to Next",
-            description: "Skip to the next track with a crossfade",
-            category: "Playback",
-            toml_key: "fade_to_next",
-            settings_key: "hotkey.fade_to_next",
-            default: KeyCombo::shift(KeyCode::Char('f')),
-        },
         ToggleBitPerfect {
             display: "Toggle Bit-Perfect",
             description: "Enable or disable bit-perfect output (disables crossfade)",

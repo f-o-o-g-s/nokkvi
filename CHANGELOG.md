@@ -17,7 +17,6 @@ All notable changes to this project will be documented in this file.
   - **Skip Silence Between Tracks** (off by default): trims silent lead-ins from tracks prepared in advance and starts the blend early over a silent outro. Bit-perfect streams never trim.
   - **Gap / Overlap Trim** (−2 to +2 s): hold a moment of silence between tracks, or start blends early.
   - **Snap Crossfade to Musical Bars** (off by default): rounds the blend length to whole bars of the outgoing track's BPM tag so beats line up through the blend; ignored when a track has no BPM.
-- **Fade to Next** hotkey (default Shift+F): a one-shot crossfade into the next track, regardless of the Fade on Skip mode.
 
 ### Changed
 

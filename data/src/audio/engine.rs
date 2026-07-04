@@ -326,8 +326,7 @@ pub(crate) struct FadeCoordinator {
     /// M7 "Fade on Skip" (default Off — opt-in): what a manual Next/Previous
     /// does to the sound. Read by the manual-skip path (via
     /// [`CustomAudioEngine::skip_fade_mode`]) to pick hard cut / boundary
-    /// fade / skip-crossfade; the FadeToNext hotkey overrides it to
-    /// `Crossfade` for one skip.
+    /// fade / skip-crossfade.
     fade_on_skip: crate::types::player_settings::FadeOnSkip,
     /// "Fade on Skip" length in milliseconds — the skip-crossfade overlap
     /// ([`CustomAudioEngine::crossfade_to_next`]) and the boundary ease-out

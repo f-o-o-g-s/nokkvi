@@ -340,22 +340,6 @@ impl PlaybackController {
 
     /// Play next track. Returns `true` if a next track was played, `false` if at end of queue.
     pub async fn next(&self) -> Result<bool> {
-        self.next_inner(None).await
-    }
-
-    /// Play next track with a one-shot skip-crossfade override (the M7
-    /// FadeToNext hotkey): blends into the next track regardless of the
-    /// "Fade on Skip" setting, with the usual fallbacks when a blend is
-    /// blocked.
-    pub async fn next_with_fade(&self) -> Result<bool> {
-        self.next_inner(Some(crate::types::player_settings::FadeOnSkip::Crossfade))
-            .await
-    }
-
-    async fn next_inner(
-        &self,
-        override_mode: Option<crate::types::player_settings::FadeOnSkip>,
-    ) -> Result<bool> {
         use crate::services::playback::NextOutcome;
 
         let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
@@ -372,7 +356,7 @@ impl PlaybackController {
             .skip_fade_seq
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             + 1;
-        let skip_fade = override_mode.unwrap_or_else(|| engine.skip_fade_mode());
+        let skip_fade = engine.skip_fade_mode();
 
         match queue_navigator
             .play_next(&mut engine, &server_url, &subsonic_credential, skip_fade)

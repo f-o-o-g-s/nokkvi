@@ -115,9 +115,6 @@ pub enum PlaybackMessage {
     Pause,
     Stop,
     NextTrack,
-    /// M7 Fade-to-Next hotkey: skip forward with a one-shot skip-crossfade
-    /// override, regardless of the "Fade on Skip" setting.
-    FadeToNext,
     PrevTrack,
     ToggleRandom,
     RandomToggled(bool),

@@ -613,9 +613,8 @@ impl QueueNavigator {
     /// Play next song (manual skip via button/hotkey/MPRIS).
     ///
     /// `skip_fade` is the EFFECTIVE "Fade on Skip" mode for this skip — the
-    /// controller resolves it (engine mirror, or the FadeToNext hotkey's
-    /// one-shot `Crossfade` override) and threads it down so the queue layer
-    /// stays settings-free.
+    /// controller resolves it from the engine mirror and threads it down so
+    /// the queue layer stays settings-free.
     pub async fn play_next(
         &self,
         engine: &mut CustomAudioEngine,

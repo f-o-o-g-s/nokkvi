@@ -1144,39 +1144,6 @@ impl Nokkvi {
         )
     }
 
-    /// M7 Fade-to-Next hotkey: skip forward with a one-shot skip-crossfade
-    /// override, regardless of the "Fade on Skip" setting (with the usual
-    /// engine-side fallbacks when a blend is blocked). Mirrors
-    /// [`Self::handle_next_track`] — including the radio branch, where "next
-    /// with a fade" is the station cycle (M6's switch fade owns any radio
-    /// softening).
-    pub(crate) fn handle_fade_to_next(&mut self) -> Task<Message> {
-        if self.active_playback.is_radio() {
-            return self.cycle_radio_station(true);
-        }
-        let is_consume = self.modes.consume;
-        self.shell_task(
-            move |shell| async move {
-                let advanced = shell.next_with_fade().await.unwrap_or(false);
-                (advanced, is_consume)
-            },
-            |(advanced, consume)| {
-                if !advanced {
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            "No next track",
-                            nokkvi_data::types::toast::ToastLevel::Info,
-                        ),
-                    ))
-                } else if consume {
-                    Message::LoadQueue
-                } else {
-                    Message::Playback(PlaybackMessage::Tick)
-                }
-            },
-        )
-    }
-
     pub(crate) fn handle_prev_track(&mut self) -> Task<Message> {
         if self.active_playback.is_radio() {
             return self.cycle_radio_station(false);
@@ -2300,7 +2267,6 @@ impl Nokkvi {
             PlaybackMessage::Pause => self.handle_pause(),
             PlaybackMessage::Stop => self.handle_stop(),
             PlaybackMessage::NextTrack => self.handle_next_track(),
-            PlaybackMessage::FadeToNext => self.handle_fade_to_next(),
             PlaybackMessage::PrevTrack => self.handle_prev_track(),
             PlaybackMessage::ToggleRandom => self.handle_toggle_random(),
             PlaybackMessage::RandomToggled(random) => self.handle_random_toggled(random),
