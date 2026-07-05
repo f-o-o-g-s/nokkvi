@@ -6,16 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **Drag to the edge to auto-scroll**: while reordering a track in the queue or playlist editor, holding the drag near the top or bottom of the list now scrolls it automatically (about 10 rows per second), so moving a track a long way no longer needs wheel-juggling. Wheel-scrolling during a drag still works too.
-
 ### Changed
 
 ### Fixed
 
-- Reordering a queue or playlist track no longer makes the lifted row cycle through other tracks when you scroll the list mid-drag. The floating drag preview now stays pinned to the track you picked up, however far the list moves under it.
-- The playlist editor could drop a drag on the wrong track when the list scrolled (or playback advanced the view) between picking a row up and releasing it. It now always moves the track you grabbed, matching the queue.
-
 ### Removed
+
+## v0.14.1 — 2026-07-05
+
+### Added
+
+- **Drag to the edge to auto-scroll**: dragging a queue or playlist track near the top or bottom edge now scrolls the list automatically (about 10 rows per second).
+
+### Fixed
+
+- Reordering a queue or playlist track no longer makes the lifted row cycle through other tracks when you scroll the list mid-drag.
+- The playlist editor no longer drops a reorder on the wrong track when the list scrolls between grabbing a row and releasing it.
 
 ## v0.14.0 — 2026-07-04
 
