@@ -8,7 +8,7 @@ use tracing::{debug, warn};
 use crate::{
     services::api::{
         client::ApiClient,
-        pagination,
+        pagination, parse,
         sort::{self, SortDomain},
         subsonic,
     },
@@ -82,35 +82,20 @@ impl PlaylistsApiService {
 
         // Map viewType to API sort parameter
         let sort_param = sort::map_sort_mode(SortDomain::Playlists, actual_sort_mode);
-        let default_order = sort::default_order(SortDomain::Playlists, actual_sort_mode);
-        let order_param = if sort_order.is_empty() {
-            default_order
-        } else {
-            sort_order
-        };
+        let order_param = sort::resolve_order(SortDomain::Playlists, actual_sort_mode, sort_order);
 
-        // Build query parameters for native API
-        let mut params = vec![
-            ("_sort", sort_param),
-            ("_order", order_param),
-            ("_start", "0"),
-            ("_end", pagination::NO_LIMIT_END_STR),
-        ];
-
-        // Add search query if provided (playlists use "q" parameter)
-        let search_query_string: String;
-        if let Some(query) = search_query
-            && !query.is_empty()
-        {
-            search_query_string = query.to_string();
-            params.push(("q", &search_query_string));
-        }
+        let params = Self::build_playlist_params(sort_param, order_param, search_query);
 
         // Fetch from native API
         let result = self.client.get_with_headers("/api/playlist", &params).await;
 
+        // Parse failures degrade to an empty list like the network-error arm
+        // below, but are logged — a malformed body must never yield a
+        // silently empty Playlists view.
         let mut playlists: Vec<Playlist> = match result {
-            Ok((response_text, _)) => serde_json::from_str(&response_text).unwrap_or_default(),
+            Ok((response_text, _)) => {
+                parse::parse_json_or_default(&response_text, "playlists JSON response")
+            }
             Err(e) => {
                 warn!(" PlaylistsApiService: Native API failed: {}", e);
                 Vec::new()
@@ -130,6 +115,32 @@ impl PlaylistsApiService {
         debug!(" PlaylistsService: Loaded {} playlists", total_count);
 
         Ok((playlists, total_count))
+    }
+
+    /// Build the `_sort` / `_order` / search params for an `/api/playlist`
+    /// browse request. Extracted (mirroring `SongsApiService::
+    /// build_song_params`) so the wire shape is pinned by tests — playlists
+    /// search on `q` (not `name`/`title`) and NEVER send `library_id`; see
+    /// [`Self::load_playlists_with_libraries`] for the Navidrome citation.
+    fn build_playlist_params<'a>(
+        sort_param: &'a str,
+        order_param: &'a str,
+        search_query: Option<&'a str>,
+    ) -> Vec<(&'a str, &'a str)> {
+        let mut params = vec![
+            ("_sort", sort_param),
+            ("_order", order_param),
+            ("_start", "0"),
+            ("_end", pagination::NO_LIMIT_END_STR),
+        ];
+
+        // Add search query if provided (playlists use "q" parameter)
+        if let Some(query) = search_query
+            && !query.is_empty()
+        {
+            params.push(("q", query));
+        }
+        params
     }
 
     /// Load songs from a playlist (for playback)
@@ -691,5 +702,42 @@ mod tests {
         assert_eq!(name, "New");
         assert_eq!(comment, "new c");
         assert!(public);
+    }
+
+    /// Pin the `/api/playlist` browse wire shape: full-set load, search on
+    /// `q` — NOT `name`/`title`, which are the other endpoints' search keys.
+    #[test]
+    fn browse_params_pin_wire_shape_with_q_search() {
+        let params = PlaylistsApiService::build_playlist_params("name", "ASC", Some("road"));
+        assert_eq!(
+            params,
+            vec![
+                ("_sort", "name"),
+                ("_order", "ASC"),
+                ("_start", "0"),
+                ("_end", pagination::NO_LIMIT_END_STR),
+                ("q", "road"),
+            ]
+        );
+    }
+
+    /// `/api/playlist` registers only `q` + `smart` filters
+    /// (`reference-navidrome/persistence/playlist_repository.go:48-60`) and
+    /// the playlist table has no `library_id` column. The builder's
+    /// signature deliberately has no library input, so forwarding one
+    /// requires a signature change that breaks this test's call site at
+    /// compile time; the assert pins the exact base-only shape.
+    #[test]
+    fn browse_params_never_emit_library_id() {
+        let params = PlaylistsApiService::build_playlist_params("name", "ASC", None);
+        assert_eq!(
+            params,
+            vec![
+                ("_sort", "name"),
+                ("_order", "ASC"),
+                ("_start", "0"),
+                ("_end", pagination::NO_LIMIT_END_STR),
+            ]
+        );
     }
 }

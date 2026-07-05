@@ -72,47 +72,29 @@ impl GenresApiService {
 
         // Map viewType to API sort parameter
         let sort_param = sort::map_sort_mode(SortDomain::Genres, actual_sort_mode);
-        let default_order = sort::default_order(SortDomain::Genres, actual_sort_mode);
-        let order_param = if sort_order.is_empty() {
-            default_order
-        } else {
-            sort_order
-        };
-
-        // Build query parameters for native API
-        let mut params = vec![
-            ("_sort", sort_param),
-            ("_order", order_param),
-            ("_start", "0"),
-            ("_end", pagination::NO_LIMIT_END_STR),
-        ];
-
-        // Add search query if provided
-        let search_query_string: String;
-        if let Some(query) = search_query
-            && !query.is_empty()
-        {
-            search_query_string = query.to_string();
-            params.push(("name", &search_query_string));
-        }
+        let order_param = sort::resolve_order(SortDomain::Genres, actual_sort_mode, sort_order);
 
         // Owned `String`s for any `library_id` filter param values. Owned
-        // alongside `params` so the `&str` borrows pushed below outlive
+        // alongside `params` so the `&str` borrows built below outlive
         // the call to `get_with_headers`. `/api/genre` has no `LibraryFilter`
         // slot, so the shared helper is called with `None`.
         let library_id_strings =
             crate::services::api::songs::collect_library_id_strings(library_ids, None);
-        for s in &library_id_strings {
-            params.push(("library_id", s.as_str()));
-        }
+
+        let params =
+            Self::build_genre_params(sort_param, order_param, search_query, &library_id_strings);
 
         // Fetch from both APIs in parallel
         let native_result = self.client.get_with_headers("/api/genre", &params).await;
         let subsonic_result = self.fetch_subsonic_genres().await;
 
-        // Parse native API response (for IDs)
+        // Parse native API response (for IDs). Parse failures degrade to an
+        // empty list like the network-error arm below, but are logged — a
+        // malformed body must never yield a silently empty Genres view.
         let native_genres: Vec<Genre> = match native_result {
-            Ok((response_text, _)) => serde_json::from_str(&response_text).unwrap_or_default(),
+            Ok((response_text, _)) => {
+                parse::parse_json_or_default(&response_text, "genres JSON response")
+            }
             Err(e) => {
                 warn!(" GenresApiService: Native API failed: {}", e);
                 Vec::new()
@@ -184,6 +166,38 @@ impl GenresApiService {
         Ok((merged_genres, total_count))
     }
 
+    /// Build the `_sort` / `_order` / search / `library_id` params for an
+    /// `/api/genre` browse request. Extracted (mirroring
+    /// `SongsApiService::build_song_params`) so the wire shape is pinned by
+    /// tests. Genres always load the full set (`_end` = no-limit) — counts
+    /// come from a parallel Subsonic call, and sorting by count happens
+    /// client-side after the merge.
+    fn build_genre_params<'a>(
+        sort_param: &'a str,
+        order_param: &'a str,
+        search_query: Option<&'a str>,
+        library_id_strings: &'a [String],
+    ) -> Vec<(&'a str, &'a str)> {
+        let mut params = vec![
+            ("_sort", sort_param),
+            ("_order", order_param),
+            ("_start", "0"),
+            ("_end", pagination::NO_LIMIT_END_STR),
+        ];
+
+        // Add search query if provided
+        if let Some(query) = search_query
+            && !query.is_empty()
+        {
+            params.push(("name", query));
+        }
+
+        for s in library_id_strings {
+            params.push(("library_id", s.as_str()));
+        }
+        params
+    }
+
     /// Fetch genres from Subsonic API (for counts)
     async fn fetch_subsonic_genres(&self) -> Result<Vec<(String, u32, u32)>> {
         let inner: GenresInner = crate::services::api::subsonic::subsonic_get_envelope(
@@ -233,9 +247,11 @@ impl GenresApiService {
 
         match result {
             Ok((response_text, _)) => {
-                // Parse as array of album objects, extract IDs
+                // Parse as array of album objects, extract IDs. Collage
+                // artwork is optional, so a malformed body degrades to an
+                // empty collage — logged, mirroring the Err arm below.
                 let albums: Vec<serde_json::Value> =
-                    serde_json::from_str(&response_text).unwrap_or_default();
+                    parse::parse_json_or_default(&response_text, "genre collage albums JSON");
 
                 let album_ids: Vec<String> = albums
                     .iter()
@@ -285,5 +301,45 @@ impl GenresApiService {
         );
 
         Ok(albums)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pin the `/api/genre` browse wire shape: full-set load (no-limit
+    /// `_end`), text search on `name`, `library_id` repeats last.
+    #[test]
+    fn browse_params_pin_wire_shape() {
+        let ids = vec!["1".to_string(), "2".to_string()];
+        let params = GenresApiService::build_genre_params("name", "ASC", Some("trip"), &ids);
+        assert_eq!(
+            params,
+            vec![
+                ("_sort", "name"),
+                ("_order", "ASC"),
+                ("_start", "0"),
+                ("_end", pagination::NO_LIMIT_END_STR),
+                ("name", "trip"),
+                ("library_id", "1"),
+                ("library_id", "2"),
+            ]
+        );
+    }
+
+    /// Empty search and no library scope → base params only.
+    #[test]
+    fn browse_params_omit_empty_search_and_library_scope() {
+        let params = GenresApiService::build_genre_params("name", "ASC", Some(""), &[]);
+        assert_eq!(
+            params,
+            vec![
+                ("_sort", "name"),
+                ("_order", "ASC"),
+                ("_start", "0"),
+                ("_end", pagination::NO_LIMIT_END_STR),
+            ]
+        );
     }
 }

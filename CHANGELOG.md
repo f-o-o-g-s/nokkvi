@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A malformed server response on the Genres or Playlists views is now logged with a response preview instead of silently showing an empty list.
+
 ### Removed
 
 ## v0.14.1 — 2026-07-05

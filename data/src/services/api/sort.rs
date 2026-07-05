@@ -44,6 +44,22 @@ pub(crate) fn default_order(domain: SortDomain, sort_mode: &str) -> &'static str
     }
 }
 
+/// Resolve the effective `_order` param: an explicit caller-provided order
+/// wins; an empty string falls back to the per-mode [`default_order`] for
+/// the domain. Folds the `if sort_order.is_empty() { default } else { .. }`
+/// idiom previously transcribed into every browse loader.
+pub(crate) fn resolve_order<'a>(
+    domain: SortDomain,
+    sort_mode: &str,
+    sort_order: &'a str,
+) -> &'a str {
+    if sort_order.is_empty() {
+        default_order(domain, sort_mode)
+    } else {
+        sort_order
+    }
+}
+
 /// Resolve the client-side-random sort convention shared by the artists,
 /// genres, and playlists loaders.
 ///
@@ -215,6 +231,29 @@ fn default_order_playlists(sort_mode: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // `resolve_order` — explicit order wins; empty falls back per-mode.
+    // =========================================================================
+
+    #[test]
+    fn resolve_order_prefers_explicit_caller_order() {
+        // recentlyAdded defaults DESC, but an explicit ASC wins.
+        assert_eq!(
+            resolve_order(SortDomain::Albums, "recentlyAdded", "ASC"),
+            "ASC"
+        );
+    }
+
+    #[test]
+    fn resolve_order_falls_back_to_per_mode_default_when_empty() {
+        assert_eq!(
+            resolve_order(SortDomain::Albums, "recentlyAdded", ""),
+            "DESC"
+        );
+        assert_eq!(resolve_order(SortDomain::Albums, "name", ""), "ASC");
+        assert_eq!(resolve_order(SortDomain::Artists, "mostPlayed", ""), "DESC");
+    }
 
     // =========================================================================
     // `mostPlayed` mapping — pins per-domain behavior including preserved drift.

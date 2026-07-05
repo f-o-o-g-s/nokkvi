@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
+use tracing::warn;
 
 /// Maximum characters included in a parse-error preview.
 pub(crate) const PARSE_PREVIEW_LIMIT: usize = 500;
@@ -29,6 +30,23 @@ where
 /// multiple shapes) but you still want a consistent preview.
 pub(crate) fn preview(body: &str) -> String {
     body.chars().take(PARSE_PREVIEW_LIMIT).collect()
+}
+
+/// Parse a JSON body into `T`, logging a `warn!` with the UTF-8-safe preview
+/// and returning `T::default()` on failure.
+///
+/// For graceful-degradation loaders (genres / playlists browse, collage
+/// artwork) where an empty result is preferable to a hard error — but the
+/// malformed response must never be silent. Propagating paths keep using
+/// [`parse_json_with_preview`]; this is the deliberate lenient variant.
+pub(crate) fn parse_json_or_default<T>(body: &str, label: &str) -> T
+where
+    T: DeserializeOwned + Default,
+{
+    parse_json_with_preview(body, label).unwrap_or_else(|e| {
+        warn!("{e:#}");
+        T::default()
+    })
 }
 
 #[cfg(test)]
@@ -73,5 +91,20 @@ mod tests {
         // for a hypothetical byte-slice of length 200. Helper must not panic.
         let body = format!("{}{}", "a".repeat(199), "🎶");
         let _ = parse_json_with_preview::<serde_json::Value>(&body, "demo");
+    }
+
+    #[test]
+    fn parse_json_or_default_returns_parsed_value_on_valid_json() {
+        let v: Vec<u32> = parse_json_or_default("[1, 2, 3]", "test list");
+        assert_eq!(v, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn parse_json_or_default_degrades_to_default_on_malformed_body() {
+        // A proxy HTML error page instead of the expected JSON array —
+        // the graceful-degradation contract is an empty Vec, never a panic
+        // or propagated error. The warn! side effect is the loggable trace.
+        let v: Vec<u32> = parse_json_or_default("<html>502 Bad Gateway</html>", "test list");
+        assert!(v.is_empty());
     }
 }

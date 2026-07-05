@@ -64,11 +64,7 @@ impl SongsApiService {
         limit: Option<usize>,
     ) -> Result<(Vec<Song>, usize)> {
         let sort_param = sort::map_sort_mode(SortDomain::Songs, sort_mode);
-        let order = if sort_order.is_empty() {
-            sort::default_order(SortDomain::Songs, sort_mode)
-        } else {
-            sort_order
-        };
+        let order = sort::resolve_order(SortDomain::Songs, sort_mode, sort_order);
         let offset_val = offset.unwrap_or(0) as u32;
         let shape = SongQueryShape {
             sort_param,

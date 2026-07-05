@@ -41,60 +41,27 @@ impl AlbumsApiService {
     ) -> Result<(Vec<Album>, u32)> {
         // Map viewType to API sort parameter
         let sort_param = sort::map_sort_mode(SortDomain::Albums, sort_mode);
-        let default_order = sort::default_order(SortDomain::Albums, sort_mode);
-        let order_param = if sort_order.is_empty() {
-            default_order
-        } else {
-            sort_order
-        };
+        let order_param = sort::resolve_order(SortDomain::Albums, sort_mode, sort_order);
 
-        // Build query parameters
-        let mut params = vec![
-            ("_sort", sort_param),
-            ("_order", order_param),
-            ("filter", "{}"),
-        ];
-
-        // Add pagination parameters (Navidrome uses _start and _end, not _offset and _limit).
+        // Pagination range (Navidrome uses _start and _end, not _offset and
+        // _limit) and owned `library_id` strings — both owned alongside
+        // `params` so the `&str` borrows built below outlive the call to
+        // `get_with_headers`. The fold combines the orthogonal `library_ids`
+        // argument with any `LibraryFilter::LibraryIds` routed through the
+        // filter slot (both express "scope by music folder", just from
+        // different navigation surfaces).
         let range = pagination::paged_range(offset.unwrap_or(0) as u32, limit.map(|x| x as u32));
-        params.push(("_start", &range.start));
-        params.push(("_end", &range.end));
-
-        // Owned `String`s for any `library_id` filter param values. Owned
-        // alongside `params` so the `&str` borrows pushed below outlive
-        // the call to `get_with_headers`. Combines the orthogonal
-        // `library_ids` argument with any `LibraryFilter::LibraryIds`
-        // routed through the filter slot (both express "scope by music
-        // folder", just from different navigation surfaces).
         let library_id_strings =
             crate::services::api::songs::collect_library_id_strings(library_ids, filter);
 
-        // Apply ID filter if present
-        if let Some(f) = filter {
-            match f {
-                crate::types::filter::LibraryFilter::ArtistId { id, .. } => {
-                    params.push(("artist_id", id));
-                }
-                crate::types::filter::LibraryFilter::GenreId { name, .. } => {
-                    params.push(("genre_id", name));
-                }
-                crate::types::filter::LibraryFilter::AlbumId { id, .. } => params.push(("id", id)),
-                // `LibraryFilter::LibraryIds` is folded into
-                // `library_id_strings` above via the shared helper.
-                crate::types::filter::LibraryFilter::LibraryIds(_) => {}
-            }
-        } else if let Some(query) = search_query
-            && !query.is_empty()
-        {
-            // Only fall back to text search if no ID filter is active
-            params.push(("name", query));
-        }
-
-        // Push the accumulated `library_id` repeats last — borrows into
-        // `library_id_strings`, which is owned for the rest of the fn.
-        for s in &library_id_strings {
-            params.push(("library_id", s.as_str()));
-        }
+        let params = Self::build_album_params(
+            sort_param,
+            order_param,
+            &range,
+            search_query,
+            filter,
+            &library_id_strings,
+        );
 
         // Make API request
         let (response_text, total_count_header) = self
@@ -126,5 +93,140 @@ impl AlbumsApiService {
         );
 
         Ok((albums, total_count))
+    }
+
+    /// Build the `_sort` / `_order` / filter / search / pagination /
+    /// `library_id` params for an `/api/album` browse request. Extracted
+    /// (mirroring [`SongsApiService::build_song_params`]) so the wire shape
+    /// is pinned by tests — including the `artist_id` key spelling, which
+    /// deliberately differs from `/api/song`'s `artists_id` (each matches
+    /// its Navidrome repository's filter registry).
+    ///
+    /// [`SongsApiService::build_song_params`]: crate::services::api::songs::SongsApiService
+    fn build_album_params<'a>(
+        sort_param: &'a str,
+        order_param: &'a str,
+        range: &'a pagination::PagedRange,
+        search_query: Option<&'a str>,
+        filter: Option<&'a crate::types::filter::LibraryFilter>,
+        library_id_strings: &'a [String],
+    ) -> Vec<(&'a str, &'a str)> {
+        let mut params = vec![
+            ("_sort", sort_param),
+            ("_order", order_param),
+            ("filter", "{}"),
+            ("_start", range.start.as_str()),
+            ("_end", range.end.as_str()),
+        ];
+
+        // Apply ID filter if present
+        if let Some(f) = filter {
+            match f {
+                crate::types::filter::LibraryFilter::ArtistId { id, .. } => {
+                    params.push(("artist_id", id));
+                }
+                crate::types::filter::LibraryFilter::GenreId { name, .. } => {
+                    params.push(("genre_id", name));
+                }
+                crate::types::filter::LibraryFilter::AlbumId { id, .. } => params.push(("id", id)),
+                // `LibraryFilter::LibraryIds` is folded into
+                // `library_id_strings` by the caller via the shared helper.
+                crate::types::filter::LibraryFilter::LibraryIds(_) => {}
+            }
+        } else if let Some(query) = search_query
+            && !query.is_empty()
+        {
+            // Only fall back to text search if no ID filter is active
+            params.push(("name", query));
+        }
+
+        for s in library_id_strings {
+            params.push(("library_id", s.as_str()));
+        }
+        params
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::filter::LibraryFilter;
+
+    fn range(start: &str, end: &str) -> pagination::PagedRange {
+        pagination::PagedRange {
+            start: start.to_string(),
+            end: end.to_string(),
+        }
+    }
+
+    /// Pin the full `/api/album` browse wire shape: base params in order,
+    /// text search on `name`, `library_id` repeats last.
+    #[test]
+    fn browse_params_pin_wire_shape() {
+        let r = range("0", "36");
+        let ids = vec!["1".to_string(), "2".to_string()];
+        let params = AlbumsApiService::build_album_params(
+            "recently_added",
+            "DESC",
+            &r,
+            Some("mezzanine"),
+            None,
+            &ids,
+        );
+        assert_eq!(
+            params,
+            vec![
+                ("_sort", "recently_added"),
+                ("_order", "DESC"),
+                ("filter", "{}"),
+                ("_start", "0"),
+                ("_end", "36"),
+                ("name", "mezzanine"),
+                ("library_id", "1"),
+                ("library_id", "2"),
+            ]
+        );
+    }
+
+    /// `/api/album` filters by artist via `artist_id` — NOT `artists_id`,
+    /// which is `/api/song`'s spelling. Each key matches its Navidrome
+    /// repository's filter registry (`album_repository.go` registers
+    /// `artist_id`; `mediafile_repository.go` registers `artists_id`), so a
+    /// future "unification" of the two spellings must turn this test or its
+    /// songs-side companion red, whichever endpoint's spelling changed.
+    /// Companion pin on the songs side:
+    /// `songs::tests::library_filter_artist_id_does_not_contribute_library_ids`.
+    #[test]
+    fn artist_filter_uses_album_endpoint_spelling() {
+        let r = range("0", "36");
+        let filter = LibraryFilter::ArtistId {
+            id: "ar-1".to_string(),
+            name: "Massive Attack".to_string(),
+        };
+        let params =
+            AlbumsApiService::build_album_params("name", "ASC", &r, None, Some(&filter), &[]);
+        assert!(params.contains(&("artist_id", "ar-1")));
+        assert!(!params.iter().any(|(k, _)| *k == "artists_id"));
+    }
+
+    /// An active ID filter suppresses the text-search fallback — search only
+    /// applies when no filter occupies the slot.
+    #[test]
+    fn search_is_ignored_when_id_filter_active() {
+        let r = range("0", "36");
+        let filter = LibraryFilter::GenreId {
+            id: "g-1".to_string(),
+            name: "Trip-Hop".to_string(),
+        };
+        let params = AlbumsApiService::build_album_params(
+            "name",
+            "ASC",
+            &r,
+            Some("mezzanine"),
+            Some(&filter),
+            &[],
+        );
+        assert!(params.contains(&("genre_id", "Trip-Hop")));
+        assert!(!params.iter().any(|(k, _)| *k == "name"));
     }
 }
