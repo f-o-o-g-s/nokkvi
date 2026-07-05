@@ -385,6 +385,10 @@ crate::player_settings_schema! {
     /// or the `nokkvi rate` IPC verb (default false).
     #[serde(default)]
     same rating_change_notification_enabled: bool = false,
+    /// Whether a desktop notification fires when a track is loved/unloved via
+    /// the love hotkey or the `nokkvi love` IPC verb (default false).
+    #[serde(default)]
+    same love_change_notification_enabled: bool = false,
     /// When the rating reminder fires (default: on scrobble).
     #[serde(default)]
     same rating_reminder_trigger: RatingReminderTrigger = RatingReminderTrigger::default(),

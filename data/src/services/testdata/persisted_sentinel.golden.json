@@ -173,6 +173,7 @@
   "close_to_tray": true,
   "rating_reminder_enabled": true,
   "rating_change_notification_enabled": true,
+  "love_change_notification_enabled": true,
   "rating_reminder_trigger": "percentage_played",
   "rating_reminder_percent": 85
 }

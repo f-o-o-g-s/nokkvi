@@ -518,6 +518,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_love_change_notification_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.love_change_notification_enabled = enabled;
+        self.save()
+    }
+
     pub fn set_rating_reminder_trigger(&mut self, trigger: RatingReminderTrigger) -> Result<()> {
         self.settings.player.rating_reminder_trigger = trigger;
         self.save()
@@ -1511,6 +1516,7 @@ mod sentinel_roundtrip_tests {
             // Rating reminder
             rating_reminder_enabled: true,            // default false
             rating_change_notification_enabled: true, // default false
+            love_change_notification_enabled: true,   // default false
             rating_reminder_trigger: RatingReminderTrigger::PercentagePlayed, // default OnScrobble
             rating_reminder_percent: 85,              // default 75
         }
@@ -1623,6 +1629,10 @@ mod sentinel_roundtrip_tests {
         assert_eq!(
             ui_ps1.rating_change_notification_enabled,
             ui_ps2.rating_change_notification_enabled
+        );
+        assert_eq!(
+            ui_ps1.love_change_notification_enabled,
+            ui_ps2.love_change_notification_enabled
         );
         assert_eq!(
             ui_ps1.rating_reminder_trigger,

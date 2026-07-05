@@ -244,6 +244,10 @@ pub struct TomlSettings {
     /// hotkey or the `nokkvi rate` IPC verb (default false).
     #[serde(default)]
     pub rating_change_notification_enabled: bool,
+    /// Whether to fire a desktop notification when a track is loved/unloved via
+    /// the love hotkey or the `nokkvi love` IPC verb (default false).
+    #[serde(default)]
+    pub love_change_notification_enabled: bool,
     #[serde(default)]
     pub rating_reminder_trigger: RatingReminderTrigger,
     #[serde(default = "default_rating_reminder_percent")]
@@ -384,6 +388,7 @@ impl Default for TomlSettings {
             close_to_tray: false,
             rating_reminder_enabled: false,
             rating_change_notification_enabled: false,
+            love_change_notification_enabled: false,
             rating_reminder_trigger: RatingReminderTrigger::default(),
             rating_reminder_percent: 75,
         }

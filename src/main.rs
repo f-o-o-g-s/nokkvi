@@ -583,6 +583,7 @@ impl Nokkvi {
         // shared connection only carries the commands the user opted into.
         let notifications = if self.settings.rating_reminder_enabled
             || self.settings.rating_change_notification_enabled
+            || self.settings.love_change_notification_enabled
         {
             iced::Subscription::run(services::notifications::run).map(Message::Notification)
         } else {

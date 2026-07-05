@@ -154,6 +154,9 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
             "hotkey",
             "notify",
         ],
+        "general.love_change_notification_enabled" => {
+            &["heart", "favorite", "loved", "star", "hotkey", "notify"]
+        }
         "general.rating_reminder_trigger" => &["stars", "when to remind", "rate prompt"],
         "general.quick_add_to_playlist" => &["skip dialog", "one click add", "fast add"],
         "general.default_playlist_name" => {

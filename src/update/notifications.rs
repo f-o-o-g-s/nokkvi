@@ -101,4 +101,19 @@ impl Nokkvi {
             connection.show_rating_changed(name.to_string(), artist.to_string(), rating);
         }
     }
+
+    /// Fire a love-change desktop notification for `name` / `artist` set to
+    /// `loved` (true = loved, false = unloved), when the feature is enabled and
+    /// the notification service is connected — a no-op otherwise. Like
+    /// [`Self::notify_rating_changed`] it has no suppression latch: it is driven
+    /// directly from the love hotkey and IPC handlers, which fire it on every
+    /// toggle (the star state always flips, so there is no no-op boundary).
+    pub(crate) fn notify_love_changed(&self, name: &str, artist: &str, loved: bool) {
+        if !self.settings.love_change_notification_enabled {
+            return;
+        }
+        if let Some(connection) = &self.notification_connection {
+            connection.show_love_changed(name.to_string(), artist.to_string(), loved);
+        }
+    }
 }

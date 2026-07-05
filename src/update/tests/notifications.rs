@@ -148,3 +148,24 @@ fn notify_rating_changed_is_safe_noop_without_connection() {
     assert!(app.notification_connection.is_none());
     app.notify_rating_changed("Song", "Artist", 4);
 }
+
+// --- Love-change confirmation gate ---------------------------------------------
+
+#[test]
+fn notify_love_changed_is_safe_noop_when_disabled() {
+    let mut app = test_app();
+    app.settings.love_change_notification_enabled = false;
+    // No dbus connection in tests; the disabled gate must short-circuit
+    // without touching the (absent) connection handle.
+    app.notify_love_changed("Song", "Artist", true);
+}
+
+#[test]
+fn notify_love_changed_is_safe_noop_without_connection() {
+    let mut app = test_app();
+    app.settings.love_change_notification_enabled = true;
+    // Enabled, but the service never connected (notification_connection is
+    // None) — the send must be skipped, not unwrap a missing handle.
+    assert!(app.notification_connection.is_none());
+    app.notify_love_changed("Song", "Artist", false);
+}

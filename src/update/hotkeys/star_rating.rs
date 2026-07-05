@@ -202,6 +202,13 @@ impl Nokkvi {
             "☆ Unstarred"
         };
         self.toast_success(format!("{label}: {}", info.name));
+        // Confirm with a desktop notification (opt-in) for when the window is
+        // minimized / on another workspace — the same rationale as the
+        // rating-change notification. The star state always flips on a toggle,
+        // so there is no no-op boundary to guard. Kind-agnostic: fires for a
+        // centered song, album, or artist alike (an artist carries an empty
+        // artist field, which the body handles).
+        self.notify_love_changed(&info.name, &info.artist, new_starred);
 
         self.toggle_star_with_revert_task(info.id, info.kind, new_starred)
     }

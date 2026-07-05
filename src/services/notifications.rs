@@ -36,6 +36,9 @@ const NOTIFICATION_SUMMARY: &str = "Rate this track";
 /// Summary line of the rate-change confirmation. Distinct from the reminder so
 /// the two notifications read differently even though they coalesce.
 const NOTIFICATION_RATING_CHANGED_SUMMARY: &str = "Rating updated";
+/// Summary line of the love-change confirmation. Distinct from the rate-change
+/// summary so the two read differently even though they share the service.
+const NOTIFICATION_LOVE_CHANGED_SUMMARY: &str = "Favorite updated";
 /// How long (ms) the reminder stays up before the daemon auto-dismisses it.
 /// Generous on purpose — the feature exists to catch a user who has drifted to
 /// another task. Daemons may override this with their own policy.
@@ -44,6 +47,9 @@ const RATING_REMINDER_EXPIRE_MS: i32 = 30_000;
 /// reminder: a confirmation is a transient acknowledgement, not a lingering
 /// call to action.
 const RATING_CHANGED_EXPIRE_MS: i32 = 5_000;
+/// How long (ms) the love-change confirmation stays up. Same rationale as the
+/// rate-change confirmation — a transient acknowledgement.
+const LOVE_CHANGED_EXPIRE_MS: i32 = 5_000;
 
 /// Hand-rolled proxy for the freedesktop notification spec. zbus generates the
 /// `notify` call from this trait.
@@ -68,6 +74,10 @@ trait Notifications {
 }
 
 /// Commands sent from the app to the notification service.
+// The `Show` prefix is a deliberate command-verb convention that pairs each
+// variant with its `show_*` connection method; keep it rather than stripping the
+// shared prefix the lint flags.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub(crate) enum NotificationCommand {
     /// Show (or coalesce-replace) the rate-this-track reminder.
@@ -78,6 +88,14 @@ pub(crate) enum NotificationCommand {
         title: String,
         artist: String,
         rating: u32,
+    },
+    /// Show (or coalesce-replace) a confirmation that a track was loved or
+    /// unloved, fired when the user toggles love via the love hotkey or the
+    /// `nokkvi love` IPC verb.
+    ShowLoveChanged {
+        title: String,
+        artist: String,
+        loved: bool,
     },
 }
 
@@ -105,6 +123,16 @@ impl NotificationConnection {
             title,
             artist,
             rating,
+        });
+    }
+
+    /// Show (or coalesce-replace) a confirmation that the given track was loved
+    /// (`loved == true`) or unloved (`loved == false`).
+    pub(crate) fn show_love_changed(&self, title: String, artist: String, loved: bool) {
+        let _ = self.sender.send(NotificationCommand::ShowLoveChanged {
+            title,
+            artist,
+            loved,
         });
     }
 }
@@ -139,6 +167,19 @@ fn rating_changed_body(title: &str, artist: &str, rating: u32) -> String {
     let filled = rating.min(5) as usize;
     let stars: String = "★".repeat(filled) + &"☆".repeat(5 - filled);
     format!("{stars} · {rating}/5 · {tail}")
+}
+
+/// Build the love-change confirmation body from the track, its artist, and the
+/// new love state. Pairs a heart glyph with the explicit "Loved"/"Unloved"
+/// word: the glyph gives at-a-glance shape, the word stays unambiguous on
+/// daemons that render ♥/♡ alike and for screen readers.
+fn love_changed_body(title: &str, artist: &str, loved: bool) -> String {
+    let tail = reminder_body(title, artist);
+    if loved {
+        format!("♥ Loved · {tail}")
+    } else {
+        format!("♡ Unloved · {tail}")
+    }
 }
 
 /// Run the notification service as an Iced subscription.
@@ -189,6 +230,15 @@ pub(crate) fn run() -> impl Sipper<Never, NotificationEvent> {
                     NOTIFICATION_RATING_CHANGED_SUMMARY,
                     rating_changed_body(&title, &artist, rating),
                     RATING_CHANGED_EXPIRE_MS,
+                ),
+                NotificationCommand::ShowLoveChanged {
+                    title,
+                    artist,
+                    loved,
+                } => (
+                    NOTIFICATION_LOVE_CHANGED_SUMMARY,
+                    love_changed_body(&title, &artist, loved),
+                    LOVE_CHANGED_EXPIRE_MS,
                 ),
             };
             let hints: HashMap<&str, Value> = HashMap::new();
@@ -259,6 +309,31 @@ mod tests {
         assert_eq!(
             rating_changed_body("Radiohead", "", 5),
             "★★★★★ · 5/5 · Radiohead"
+        );
+    }
+
+    #[test]
+    fn love_changed_body_loved_reads_as_loved() {
+        assert_eq!(
+            love_changed_body("Song", "Artist", true),
+            "♥ Loved · Song · Artist"
+        );
+    }
+
+    #[test]
+    fn love_changed_body_unloved_reads_as_unloved() {
+        assert_eq!(
+            love_changed_body("Song", "Artist", false),
+            "♡ Unloved · Song · Artist"
+        );
+    }
+
+    #[test]
+    fn love_changed_body_omits_artist_when_blank() {
+        // An artist item (loved via hotkey) carries an empty artist field.
+        assert_eq!(
+            love_changed_body("Radiohead", "", true),
+            "♥ Loved · Radiohead"
         );
     }
 }

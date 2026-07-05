@@ -216,6 +216,9 @@ pub struct PlaybackSettingsData {
     /// Whether a desktop notification fires when a rating changes via a hotkey
     /// or the `nokkvi rate` IPC verb.
     pub rating_change_notification_enabled: bool,
+    /// Whether a desktop notification fires when a track is loved/unloved via
+    /// the love hotkey or the `nokkvi love` IPC verb.
+    pub love_change_notification_enabled: bool,
     /// Reminder trigger label ("On Scrobble" / "Percentage Played").
     pub rating_reminder_trigger: Cow<'static, str>,
     /// Percent of the track played that fires the reminder (percentage mode).
@@ -262,6 +265,7 @@ impl Default for PlaybackSettingsData {
             queue_show_default_playlist: false,
             rating_reminder_enabled: false,
             rating_change_notification_enabled: false,
+            love_change_notification_enabled: false,
             rating_reminder_trigger: Cow::Borrowed("test-default"),
             rating_reminder_percent: 0,
         }

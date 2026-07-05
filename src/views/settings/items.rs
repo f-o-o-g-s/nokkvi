@@ -694,6 +694,7 @@ mod tests {
                 "__disconnect_lastfm",
                 "general.rating_reminder_enabled",
                 "general.rating_change_notification_enabled",
+                "general.love_change_notification_enabled",
                 "general.quick_add_to_playlist",
                 "general.default_playlist_name",
                 "general.queue_show_default_playlist",
@@ -792,6 +793,7 @@ mod tests {
             &[
                 "general.rating_reminder_enabled",
                 "general.rating_change_notification_enabled",
+                "general.love_change_notification_enabled",
                 "general.rating_reminder_trigger",
                 "general.rating_reminder_percent",
             ],
@@ -809,6 +811,7 @@ mod tests {
             &[
                 "general.rating_reminder_enabled",
                 "general.rating_change_notification_enabled",
+                "general.love_change_notification_enabled",
                 "general.rating_reminder_trigger",
             ],
         );

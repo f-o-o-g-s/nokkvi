@@ -617,6 +617,29 @@ define_settings! {
                 read_field: |d| d.rating_change_notification_enabled,
             },
         },
+        LoveChangeNotificationEnabled {
+            key: "general.love_change_notification_enabled",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_love_change_notification_enabled(v),
+            toml_apply: |ts, p| {
+                p.love_change_notification_enabled = ts.love_change_notification_enabled;
+            },
+            read: |src, out| {
+                out.love_change_notification_enabled = src.love_change_notification_enabled;
+            },
+            write: |ps, ts| {
+                ts.love_change_notification_enabled = ps.love_change_notification_enabled;
+            },
+            ui_meta: {
+                label: "Love Change Notification",
+                category: "Rating Reminder",
+                subtitle: Some(
+                    "Desktop notification when you love or unlove by hotkey or CLI · silent when you click in-window",
+                ),
+                default: false,
+                read_field: |d| d.love_change_notification_enabled,
+            },
+        },
         RatingReminderTriggerKey {
             key: "general.rating_reminder_trigger",
             value_type: Enum,
@@ -869,6 +892,7 @@ mod tests {
             queue_show_default_playlist: false,
             rating_reminder_enabled: false,
             rating_change_notification_enabled: false,
+            love_change_notification_enabled: false,
             rating_reminder_trigger: "On Scrobble".into(),
             rating_reminder_percent: 75,
         }
@@ -883,8 +907,8 @@ mod tests {
     /// only splices each in when its enable/mode is on — plus
     /// fade-radio-transitions and the three M8 rows: skip-silence,
     /// gap/overlap trim, bar-snap), 3 Radio Scrobbling, 2 Scrobbling,
-    /// 4 Rating Reminder (enable, change-notification, trigger, percentage),
-    /// and 2 Playlists.
+    /// 5 Rating Reminder (enable, rating-change-notification,
+    /// love-change-notification, trigger, percentage), and 2 Playlists.
     /// The 5 conditional AGC/RG knobs and the `default_playlist_name` dialog
     /// row stay hand-written; the lifecycle-only entries (queue column
     /// visibility, opacity_gradient, rounded_mode) emit nothing here. The
@@ -892,10 +916,10 @@ mod tests {
     /// unconditionally but the UI builder (`items_playback.rs`) only splices
     /// them in when the feature is enabled.
     #[test]
-    fn build_playback_tab_settings_items_emits_thirty_rows() {
+    fn build_playback_tab_settings_items_emits_thirty_one_rows() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 30);
+        assert_eq!(entries.len(), 31);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -1778,6 +1802,7 @@ mod tests {
             queue_show_default_playlist: live.queue_show_default_playlist,
             rating_reminder_enabled: live.rating_reminder_enabled,
             rating_change_notification_enabled: live.rating_change_notification_enabled,
+            love_change_notification_enabled: live.love_change_notification_enabled,
             rating_reminder_trigger: live.rating_reminder_trigger.as_label().into(),
             rating_reminder_percent: i64::from(live.rating_reminder_percent),
         };

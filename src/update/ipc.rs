@@ -562,6 +562,12 @@ define_commands! {
         let marker = if loved { "★ Starred" } else { "☆ Unstarred" };
         let label = format!("{marker}: {}", app.playback.title);
         app.toast_success(label);
+        // Confirm the change with a desktop notification (opt-in), for when the
+        // window is minimized / on another workspace. Acts on the playing
+        // track, so its title/artist are the player-bar fields. The toggle
+        // always flips the star state, so — unlike `rate` — there is no no-op
+        // to guard against.
+        app.notify_love_changed(&app.playback.title, &app.playback.artist, loved);
         let task = app.toggle_star_with_revert_task(song_id, ItemKind::Song, loved);
         Ok((task, json!({ "loved": loved })))
     });
