@@ -111,6 +111,9 @@ const NAME_MAP: &[(&str, &str)] = &[
         "list-tree",
         "assets/icons-phosphor/tree-structure-regular.svg",
     ),
+    // Lucide `list-video` (list rows + play arrow) mirrors Phosphor's queue
+    // glyph, so it shares the same Phosphor target as `music-4`/`list-end`.
+    ("list-video", "assets/icons-phosphor/queue-regular.svg"),
     ("locate", "assets/icons-phosphor/crosshair-regular.svg"),
     ("lock", "assets/icons-phosphor/lock-regular.svg"),
     ("lock-open", "assets/icons-phosphor/lock-open-regular.svg"),
@@ -120,6 +123,7 @@ const NAME_MAP: &[(&str, &str)] = &[
     ("monitor", "assets/icons-phosphor/monitor-regular.svg"),
     ("mouse-pointer", "assets/icons-phosphor/cursor-regular.svg"),
     ("music", "assets/icons-phosphor/music-note-regular.svg"),
+    ("music-2", "assets/icons-phosphor/music-note-regular.svg"),
     ("music-4", "assets/icons-phosphor/queue-regular.svg"),
     ("palette", "assets/icons-phosphor/palette-regular.svg"),
     (

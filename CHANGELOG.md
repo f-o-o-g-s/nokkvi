@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- On the Lucide icon set, the Songs and Queue top-nav tabs now use clearer glyphs (a single note; a list with a play arrow) instead of two near-identical beamed notes.
+
 ### Fixed
 
 ### Removed

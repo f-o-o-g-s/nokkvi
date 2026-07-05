@@ -179,10 +179,14 @@ const NAV_DIVIDER_HEIGHT: f32 = 22.0;
 /// Ordered list of navigation tabs — single source of truth shared with `side_nav_bar`.
 /// Each entry: (label, icon_path, NavView).
 pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
-    ("Queue", "assets/icons/music-4.svg", NavView::Queue),
+    // Queue deliberately uses Lucide `list-video`: it renders as list rows with
+    // a play arrow, matching this app's Phosphor `queue-regular` counterpart.
+    // It is NOT a mislabel — keep it here rather than "correcting" it back to a
+    // note/`music-*` glyph (which reads as a playlist, not a play queue).
+    ("Queue", "assets/icons/list-video.svg", NavView::Queue),
     ("Albums", "assets/icons/disc-3.svg", NavView::Albums),
     ("Artists", "assets/icons/mic.svg", NavView::Artists),
-    ("Songs", "assets/icons/music.svg", NavView::Songs),
+    ("Songs", "assets/icons/music-2.svg", NavView::Songs),
     ("Genres", "assets/icons/tags.svg", NavView::Genres),
     (
         "Playlists",
