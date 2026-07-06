@@ -1,0 +1,130 @@
+# Enthroned — derived from the cover of Soudiere - "PIRELLI VOL. 8" (2024): a
+# scarlet-robed reaper on a gothic throne, flanked by skeletal nuns, over a
+# hellish near-black mountainscape lit by a blood eclipse. A dark phonk record,
+# so the theme is unapologetically funereal: a warm near-black canvas (the void
+# and black frame, sampled ~#0C0C0C / #240C0C) under candle-lit bone text.
+#
+# Every red in the painting is WARM (the robe/title sample ~#BC2B1C at hue ~6 deg;
+# the eclipse/firelit rim ~#9C240C / #84240C at ~11-13 deg), so the palette stays
+# inside that warm band and lets state read by hue POSITION, not by cooling out of
+# gamut:
+#   - accent  = the robe/title SCARLET (#BE261B / #DA3A24) — links, active nav, the
+#     now-playing + selection fills. Warm and deep, the way the robe reads.
+#   - danger  = the hotter EMBER-ORANGE of the eclipse glow (#DF5620), pushed ~13 deg
+#     past the accent so an error is the *oranger, brighter* red, never hidden in it.
+# success is a muted MORGUE-GREEN lifted from the sickly nun flesh (~#383A34, itself
+# too dark to use, so raised to an indicator green that stays cold and sickly, not
+# cheerful). warning + star are the tarnished BRONZE-GOLD of the throne filigree
+# (~#543C24) — the one warm metal in the scene — with star pulled to a brighter
+# rating-gold so it reads distinct from an amber warning.
+#
+# Visualizer — unique but unmistakably this cover: bars rise from shadowed oxblood
+# through the crimson robe to a firelit ember tip (a river of blood catching the
+# eclipse), and the peak caps are cold BONE (the skull sample #C4C6C3) hovering
+# above the blood. Dark uses black inter-bar seams for a hellish-LED read; light
+# inverts to oxblood caps on a bone-to-ember field.
+#
+# The light section is a coherent "bleached bone" companion: aged bone/parchment
+# stained with dried blood — warm bone surfaces, blackened-blood ink, deep-crimson
+# accents that DEEPEN (not brighten) to oxblood so they read as dark-on-light links.
+# Every pair was checked against Nokkvi's contrast machinery (WCAG luminance, the
+# derived playing/selected fills, the 3:1 selection ring, AA text floors) and
+# adversarially reviewed by an art-authenticity, an accessibility, and a
+# theme-cohesion pass.
+name = "Enthroned"
+
+[dark]
+border = "#1C0E0C"
+
+[dark.background]
+hard = "#0A0605"
+default = "#120B0A"
+soft = "#1A1210"
+level1 = "#221715"
+level2 = "#2A1D1A"
+level3 = "#33231F"
+
+[dark.foreground]
+bright = "#ECE8E4"
+level1 = "#D6CEC8"
+level2 = "#ADABA5"
+level3 = "#888480"
+level4 = "#6C6763"
+
+[dark.accent]
+primary = "#BE261B"
+bright = "#DA3A24"
+border_light = "#DE4028"
+now_playing = "#BE261B"
+selected = "#DA3A24"
+
+[dark.danger]
+base = "#DF5620"
+bright = "#F2703A"
+
+[dark.success]
+base = "#6F8478"
+bright = "#8CA093"
+
+[dark.warning]
+base = "#C88A34"
+bright = "#E4AB4E"
+
+[dark.star]
+base = "#CE9E30"
+bright = "#EABE52"
+
+[dark.visualizer]
+bar_gradient_colors = ["#3A0C0C", "#701414", "#9C1A1A", "#C0281C", "#DB3A28", "#EE5A34"]
+border_color = "#080505"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#EDEAE4", "#C4C6C3", "#EDEAE4", "#C4C6C3", "#EDEAE4", "#C4C6C3"]
+
+[light]
+border = "#D2C3B6"
+
+[light.background]
+hard = "#E7DED5"
+default = "#EEE9E2"
+soft = "#ECE4DC"
+level1 = "#E3D9CF"
+level2 = "#D6CABE"
+level3 = "#C4B5A8"
+
+[light.foreground]
+bright = "#1E1210"
+level1 = "#33211E"
+level2 = "#4E3833"
+level3 = "#6E5751"
+level4 = "#856E67"
+
+[light.accent]
+primary = "#A81E14"
+bright = "#D0381E"
+border_light = "#C63C24"
+now_playing = "#A81E14"
+selected = "#D0381E"
+
+[light.danger]
+base = "#B2320E"
+bright = "#C44010"
+
+[light.success]
+base = "#4E655B"
+bright = "#63796E"
+
+[light.warning]
+base = "#845A18"
+bright = "#94661A"
+
+[light.star]
+base = "#7A5814"
+bright = "#846014"
+
+[light.visualizer]
+bar_gradient_colors = ["#5A1010", "#7C1616", "#9E1C1C", "#B82228", "#CE3A2A", "#E05A34"]
+border_color = "#EEE9E2"
+border_opacity = 0.40
+led_border_opacity = 1.0
+peak_gradient_colors = ["#3A0C0C", "#1E0808", "#3A0C0C", "#1E0808", "#3A0C0C", "#1E0808"]

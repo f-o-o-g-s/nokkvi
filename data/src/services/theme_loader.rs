@@ -64,6 +64,10 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
         content: include_str!("../../../themes/ember.toml"),
     },
     BuiltinTheme {
+        stem: "enthroned",
+        content: include_str!("../../../themes/enthroned.toml"),
+    },
+    BuiltinTheme {
         stem: "firmium",
         content: include_str!("../../../themes/firmium.toml"),
     },
@@ -78,10 +82,6 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
     BuiltinTheme {
         stem: "iced",
         content: include_str!("../../../themes/iced.toml"),
-    },
-    BuiltinTheme {
-        stem: "kanagawa_dragon",
-        content: include_str!("../../../themes/kanagawa_dragon.toml"),
     },
     BuiltinTheme {
         stem: "kanagawa",

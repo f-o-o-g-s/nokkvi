@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **Love Change Notification** (Settings → Playback → Rating Reminder, off by default): an opt-in desktop notification when you love or unlove from the love hotkey or `nokkvi love`, for when the window is minimized or on another workspace. Clicking to star in-window stays silent. Mirrors the existing Rating Change Notification.
+- **Enthroned theme**: a new original dark theme derived from the cover of Soudiere's *PIRELLI VOL. 8*. A warm near-black canvas under bone-white text, a deep robe-scarlet accent, ember-orange alerts, tarnished bronze-gold ratings, and a visualizer of blood-red bars capped with cold bone-white skull peaks. Ships with a matching "bleached bone" light companion.
+
+  <img src="assets/enthroned_theme.webp" width="640" alt="The Enthroned theme: a queue of Soudiere tracks with a scarlet now-playing row and gold star ratings beside the album cover art" />
 
 ### Changed
 
@@ -17,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - A malformed server response on the Genres or Playlists views is now logged with a response preview instead of silently showing an empty list.
 
 ### Removed
+
+- The **Kanagawa Dragon** theme (the base **Kanagawa** theme stays).
 
 ## v0.14.1 — 2026-07-05
 

@@ -326,7 +326,7 @@ pub(crate) fn legible_strip_text(color: Color, surface: Color) -> Color {
 // accent tokens — the per-theme `now_playing` / `selected` TOML values are no
 // longer consumed — so a new theme inherits readable, mutually-distinct
 // highlights for free instead of hand-tuning two colors that could (and did,
-// e.g. Everforest light / Kanagawa Dragon dark) land unreadable.
+// e.g. Everforest light) land unreadable.
 
 /// Minimum WCAG contrast kept between the now-playing fill and the selected
 /// fill, so the playing row stays distinguishable from the keyboard-cursor row
@@ -371,7 +371,7 @@ pub(super) const SELECTION_RING_MIN_CONTRAST: f32 = 3.0;
 /// like the theme picker swatch list) and only nudges it toward `bg`'s
 /// contrasting extreme when the raw accent sits too close to `bg` to register as
 /// a thin 2 px ring — so a selection is never invisible on a low-contrast theme
-/// (e.g. Firmium light's near-bg gold, Kanagawa-Dragon dark's near-bg navy). On
+/// (e.g. Firmium light's near-bg gold). On
 /// the great majority of themes the accent already clears the floor and is
 /// returned unchanged. Pure in its inputs so the all-themes gauntlet can sweep
 /// it; [`selection_ring_on`] is the live-theme wrapper.

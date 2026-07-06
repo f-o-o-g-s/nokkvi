@@ -104,7 +104,7 @@ fn legible_text_on_is_always_legible() {
         Color::from_rgb(0.5, 0.5, 0.5),
         Color::from_rgb(0.45, 0.45, 0.45),
         Color::from_rgb(0.40, 0.40, 0.40),
-        rgb(0x22, 0x32, 0x49), // Kanagawa Dragon primary (dark navy)
+        rgb(0x22, 0x32, 0x49), // a dark-navy accent (near-black legibility hard case)
         rgb(0x93, 0xB2, 0x59), // Everforest light accent_bright
         rgb(0xA6, 0xB0, 0xA0), // Everforest light old `selected` grey
     ];
@@ -119,7 +119,7 @@ fn legible_text_on_is_always_legible() {
 
 /// The forced row text reads against BOTH derived highlight fills on every
 /// shipped theme/mode — the systemic fix for the unreadable Everforest-light
-/// selection and Kanagawa-Dragon-dark now-playing rows.
+/// selection and other near-bg now-playing rows.
 #[test]
 fn forced_text_reads_on_every_highlight_fill() {
     for (name, mode, t) in all_builtin_palettes() {
@@ -192,8 +192,8 @@ fn highlight_border_contrasts_its_fill() {
 /// The in-list selection RING clears the UI-component contrast floor against the
 /// row background at every depth on every shipped theme/mode. A border-only
 /// selection has no fill or text fallback, so an invisible ring would mean an
-/// invisible selection — this is the systemic guard (cf. the near-bg accents on
-/// Firmium light and Kanagawa-Dragon dark that a raw-accent ring would hide).
+/// invisible selection — this is the systemic guard (cf. the near-bg accent on
+/// Firmium light that a raw-accent ring would hide).
 #[test]
 fn selection_ring_clears_contrast_floor_on_every_theme() {
     for (name, mode, t) in all_builtin_palettes() {
@@ -214,7 +214,7 @@ fn selection_ring_clears_contrast_floor_on_every_theme() {
 /// a light surface is darkened — both reaching WCAG AA.
 #[test]
 fn legible_against_is_bidirectional() {
-    // Kanagawa Dragon dark: navy "Hemp Dub" text over the near-black strip.
+    // A dark-navy accent used as text over a near-black strip.
     let navy = rgb(0x22, 0x32, 0x49);
     let dark_surface = rgb(0x0f, 0x0e, 0x0e);
     let lifted = legible_against(navy, dark_surface, LEGIBLE_TEXT_CONTRAST);
@@ -266,8 +266,8 @@ fn light_status_strip_band_separates_from_chrome() {
 }
 
 /// Strip text tiers (`fg2`/`fg3`) made legible over the painted strip
-/// surface clear WCAG AA on every theme/mode — including Kanagawa Dragon
-/// dark, where the old now_playing/selected-as-text path was unreadable.
+/// surface clear WCAG AA on every theme/mode, where the old
+/// now_playing/selected-as-text path could be unreadable.
 #[test]
 fn strip_text_tiers_read_on_their_surface() {
     for (name, mode, t) in all_builtin_palettes() {
