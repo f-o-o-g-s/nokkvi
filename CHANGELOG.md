@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.14.2 — 2026-07-06
+
+### Added
+
 - **Love Change Notification** (Settings → Playback → Rating Reminder, off by default): an opt-in desktop notification when you love or unlove from the love hotkey or `nokkvi love`, for when the window is minimized or on another workspace. Clicking to star in-window stays silent. Mirrors the existing Rating Change Notification.
 - **Enthroned theme**: a new original dark theme derived from the cover of Soudiere's *PIRELLI VOL. 8*. A warm near-black canvas under bone-white text, a deep robe-scarlet accent, ember-orange alerts, tarnished bronze-gold ratings, and a visualizer of blood-red bars capped with cold bone-white skull peaks. Ships with a matching "bleached bone" light companion.
 
