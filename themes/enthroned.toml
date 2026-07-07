@@ -2,7 +2,9 @@
 # scarlet-robed reaper on a gothic throne, flanked by skeletal nuns, over a
 # hellish near-black mountainscape lit by a blood eclipse. A dark phonk record,
 # so the theme is unapologetically funereal: a warm near-black canvas (the void
-# and black frame, sampled ~#0C0C0C / #240C0C) under candle-lit bone text.
+# and black frame, sampled ~#0C0C0C / #240C0C) under warm aged-ivory bone text:
+# a dirty aged bone keyed to the reaper's own skull/hands (~#D9CCAA, b* +18 yellow),
+# not a bleached white.
 #
 # Every red in the painting is WARM (the robe/title sample ~#BC2B1C at hue ~6 deg;
 # the eclipse/firelit rim ~#9C240C / #84240C at ~11-13 deg), so the palette stays
@@ -20,7 +22,7 @@
 #
 # Visualizer — unique but unmistakably this cover: bars rise from shadowed oxblood
 # through the crimson robe to a firelit ember tip (a river of blood catching the
-# eclipse), and the peak caps are cold BONE (the skull sample #C4C6C3) hovering
+# eclipse), and the peak caps are the warm aged-ivory skull (~#D9CCAA) hovering
 # above the blood. Dark uses black inter-bar seams for a hellish-LED read; light
 # inverts to oxblood caps on a bone-to-ember field.
 #
@@ -45,11 +47,11 @@ level2 = "#2A1D1A"
 level3 = "#33231F"
 
 [dark.foreground]
-bright = "#ECE8E4"
-level1 = "#D6CEC8"
-level2 = "#ADABA5"
-level3 = "#888480"
-level4 = "#6C6763"
+bright = "#E2D3B6"
+level1 = "#C8BAA2"
+level2 = "#AEA592"
+level3 = "#8B8378"
+level4 = "#70675E"
 
 [dark.accent]
 primary = "#BE261B"
@@ -79,7 +81,7 @@ bar_gradient_colors = ["#3A0C0C", "#701414", "#9C1A1A", "#C0281C", "#DB3A28", "#
 border_color = "#080505"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#EDEAE4", "#C4C6C3", "#EDEAE4", "#C4C6C3", "#EDEAE4", "#C4C6C3"]
+peak_gradient_colors = ["#EDDEC3", "#D8C7A8", "#EDDEC3", "#D8C7A8", "#EDDEC3", "#D8C7A8"]
 
 [light]
 border = "#D2C3B6"
