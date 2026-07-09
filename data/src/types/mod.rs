@@ -16,6 +16,7 @@ pub mod info_modal;
 pub mod item_kind;
 pub mod labeled_enum;
 pub mod library;
+pub mod library_search;
 pub mod next_track_reset;
 pub mod one_shot_shuffle;
 pub mod paged_buffer;

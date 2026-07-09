@@ -114,7 +114,12 @@ impl Nokkvi {
             View::Artists => self.artists_page.expansion.clear(),
             View::Genres => self.genres_page.expansion.clear(),
             View::Playlists => self.playlists_page.expansion.clear(),
-            View::Queue | View::Songs | View::Radios | View::Settings | View::PlaylistEditor => {}
+            View::Queue
+            | View::Songs
+            | View::Radios
+            | View::Harbour
+            | View::Settings
+            | View::PlaylistEditor => {}
         }
 
         // Clear any prior click-driven selection so the centered row gets
@@ -349,7 +354,7 @@ impl Nokkvi {
             View::Genres => self.library.genres.len(),
             View::Playlists => self.library.playlists.len(),
             View::Radios => self.library.radio_stations.len(),
-            View::Settings | View::PlaylistEditor => 0,
+            View::Harbour | View::Settings | View::PlaylistEditor => 0,
         }
     }
 
@@ -406,7 +411,7 @@ impl Nokkvi {
             // (`roulette_view_total` returns 0 for both and
             // `handle_roulette_start` gates on total == 0), kept exhaustive
             // so a new view must place itself explicitly.
-            View::Settings | View::PlaylistEditor => Task::none(),
+            View::Harbour | View::Settings | View::PlaylistEditor => Task::none(),
             View::Queue | View::Songs | View::Albums | View::Playlists | View::Radios => {
                 let Some(page) = self.view_page_mut(view) else {
                     return Task::none();

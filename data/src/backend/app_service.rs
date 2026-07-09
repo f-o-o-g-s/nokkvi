@@ -837,7 +837,14 @@ macro_rules! subsonic_api_factory {
 
 // === API factory methods ===
 impl AppService {
-    native_api_factory!((songs_api, crate::services::api::songs::SongsApiService),);
+    native_api_factory!(
+        (songs_api, crate::services::api::songs::SongsApiService),
+        (albums_api, crate::services::api::albums::AlbumsApiService),
+        (
+            artists_api,
+            crate::services::api::artists::ArtistsApiService
+        ),
+    );
 
     subsonic_api_factory!(
         (genres_api, crate::services::api::genres::GenresApiService),
@@ -1164,6 +1171,125 @@ impl AppService {
             |c| async move { c.scrobble(track, started_at).await },
         )
         .await
+    }
+
+    // =========================================================================
+    // Whole-library search
+    // =========================================================================
+
+    /// Search the entire library across all five entity types at once and
+    /// return them as separate typed groups.
+    ///
+    /// Fans out the five per-entity browse loaders concurrently (each already
+    /// maps the right search param: albums/artists/genres by `name`, songs by
+    /// `title`, playlists by `q`) and merges via
+    /// [`LibrarySearchResults::from_partial`], which is partial-tolerant — one
+    /// flaky endpoint degrades to an empty group rather than blanking the whole
+    /// search; `Err` only when all five fail (network down / session gone).
+    ///
+    /// `per_type_limit` caps every group: albums/artists/songs are limited
+    /// server-side, genres/playlists (whose loaders have no limit param) are
+    /// truncated inside `from_partial`. Callers should gate on a minimum query
+    /// length before invoking — this method itself makes five network calls
+    /// unconditionally.
+    pub async fn search_library(
+        &self,
+        query: &str,
+        per_type_limit: usize,
+        library_ids: &[i32],
+    ) -> Result<crate::types::library_search::LibrarySearchResults> {
+        let q = query.trim();
+
+        // Albums / artists / songs go through per-call native API services
+        // (constructed by the `*_api()` factories), NOT the shared
+        // Albums/Artists/Songs service singletons. Those singletons' raw-page
+        // loaders write `total_count` on a process-wide reactive property that
+        // the Albums/Artists/Songs browse views read to drive pagination — a
+        // search fan-out firing on every keystroke would clobber their totals
+        // mid-scroll. A freshly-constructed API service has no such shared
+        // state; the search total is unused, so it is dropped like the
+        // genres/playlists groups below. Artists: `album_artists_only = false`
+        // so a search sees every artist, not just album artists. Each factory's
+        // "not authenticated" error folds into the group's Result so one
+        // failure degrades that group rather than failing the whole search.
+        let albums_fut = async {
+            let svc = self.albums_api().await?;
+            svc.load_albums(
+                "name",
+                "ASC",
+                Some(q),
+                None,
+                library_ids,
+                Some(0),
+                Some(per_type_limit),
+            )
+            .await
+            .map(|(albums, _total)| albums)
+        };
+        let artists_fut = async {
+            let svc = self.artists_api().await?;
+            svc.load_artists(
+                "name",
+                "ASC",
+                Some(q),
+                None,
+                library_ids,
+                false,
+                Some(0),
+                Some(per_type_limit),
+            )
+            .await
+            .map(|(artists, _total)| artists)
+        };
+        let songs_fut = async {
+            let svc = self.songs_api().await?;
+            svc.load_songs(
+                "title",
+                "ASC",
+                Some(q),
+                None,
+                library_ids,
+                Some(0),
+                Some(per_type_limit),
+            )
+            .await
+            .map(|(songs, _total)| songs)
+        };
+
+        // Genres / playlists are Subsonic-factory services; fold the
+        // "not authenticated" construction error into the group's Result so a
+        // single failure degrades that group instead of failing the whole
+        // search (from_partial only errs when ALL five fail). Their loaders
+        // return `(Vec, total)` — drop the count.
+        let genres_fut = async {
+            let svc = self.genres_api().await?;
+            svc.load_genres_with_libraries("name", "ASC", Some(q), library_ids)
+                .await
+                .map(|(genres, _total)| genres)
+        };
+        let playlists_fut = async {
+            let svc = self.playlists_api().await?;
+            svc.load_playlists_with_libraries("name", "ASC", Some(q), library_ids)
+                .await
+                .map(|(playlists, _total)| playlists)
+        };
+
+        let (artists, albums, songs, genres, playlists) = futures::join!(
+            artists_fut,
+            albums_fut,
+            songs_fut,
+            genres_fut,
+            playlists_fut
+        );
+
+        crate::types::library_search::LibrarySearchResults::from_partial(
+            artists,
+            albums,
+            songs,
+            genres,
+            playlists,
+            per_type_limit,
+        )
     }
 
     // =========================================================================

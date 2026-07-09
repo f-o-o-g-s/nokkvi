@@ -126,6 +126,10 @@ impl Nokkvi {
         self.library.songs.clear();
         self.library.genres.clear();
         self.library.playlists.clear();
+        // Harbour's shelves are library-scoped too — drop them so the next
+        // visit (or the eager refetch below, when Harbour is current) rebuilds
+        // against the new filter.
+        self.harbour.invalidate_shelves();
 
         // Refetch the currently-visible view eagerly. Queue / Radios /
         // Settings have no library-scoped paged buffer, so they
@@ -138,6 +142,21 @@ impl Nokkvi {
             View::Songs => self.handle_load_songs(false, None),
             View::Genres => self.handle_load_genres(),
             View::Playlists => self.handle_load_playlists(),
+            // Reload the shelves for the new scope; if a whole-library search is
+            // active, ALSO re-fire it against the new active-library ids. The
+            // shelf reload alone would leave the view in search mode showing the
+            // OLD scope's results — `invalidate_shelves` clears the shelves and
+            // the search side-maps but deliberately keeps `search_query` /
+            // `search_results`, and nothing else re-dispatches the search.
+            View::Harbour => {
+                let shelves = self.handle_load_harbour();
+                if self.harbour.search_query.trim().is_empty() {
+                    shelves
+                } else {
+                    let query = self.harbour.search_query.clone();
+                    Task::batch([shelves, self.handle_harbour_search(query)])
+                }
+            }
             View::Queue | View::Radios | View::Settings | View::PlaylistEditor => Task::none(),
         }
     }

@@ -64,6 +64,9 @@ pub(crate) struct NavBarViewData {
     /// suppress the regular tabs' active state, since `current_view` falls back
     /// to `Queue` for the tab-less editor view).
     pub editor_active: bool,
+    /// Harbour is the current destination — highlight the pinned longship
+    /// button at the right edge of the bar.
+    pub harbour_active: bool,
     pub track_title: String,
     pub track_artist: String,
     pub track_album: String,
@@ -131,6 +134,9 @@ pub enum NavBarMessage {
     /// Navigate to the contextual playlist-editor view (the "Editing" pill).
     /// Carries no `NavView` — the editor has no permanent tab.
     SwitchToEditor,
+    /// Navigate to the Harbour home view (the pinned longship button). Carries
+    /// no `NavView` — Harbour is not a `NAV_TABS` tab.
+    SwitchToHarbour,
     ToggleLightMode,
     OpenSettings,
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
@@ -391,18 +397,84 @@ fn tab_content<'a>(
     }
 }
 
+/// The pinned longship nav button's themed SVG handle, cached and rebuilt only
+/// when the active theme changes (the mark recolors per theme). Keyed on
+/// `theme::theme_generation()` so a theme flip re-rasterizes it exactly once —
+/// rebuilding every frame would churn the handle id and force a re-raster each
+/// render. `themed_boat_svg(0, false, false)` = the upright, theme-following
+/// longship (no tilt/mirror, which are for the animated sprite).
+fn harbour_icon_handle() -> iced::widget::svg::Handle {
+    use std::cell::RefCell;
+    thread_local! {
+        static CACHE: RefCell<Option<(u64, iced::widget::svg::Handle)>> =
+            const { RefCell::new(None) };
+    }
+    let build = || {
+        iced::widget::svg::Handle::from_memory(
+            crate::embedded_svg::themed_boat_svg(0.0, false, false).into_bytes(),
+        )
+    };
+    let generation = theme::theme_generation();
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.as_ref().map(|(g, _)| *g) != Some(generation) {
+            *cache = Some((generation, build()));
+        }
+        cache
+            .as_ref()
+            .map_or_else(build, |(_, handle)| handle.clone())
+    })
+}
+
+/// The pinned Harbour button (the themed longship) shared by both nav layouts.
+/// `cell` is the square size; the icon is inset within it. Highlights with an
+/// accent fill when Harbour is the current destination, mirroring the active
+/// nav-tab treatment.
+pub(crate) fn harbour_nav_button(active: bool, cell: f32) -> Element<'static, NavBarMessage> {
+    let icon_px = cell * 0.62;
+    let icon = iced::widget::svg(harbour_icon_handle())
+        .width(Length::Fixed(icon_px))
+        .height(Length::Fixed(icon_px));
+    let radius = theme::ui_radius_pill();
+    let inner = container(icon)
+        .width(Length::Fixed(cell))
+        .height(Length::Fixed(cell))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_: &iced::Theme| container::Style {
+            background: active.then(|| Background::Color(theme::accent_bright())),
+            border: Border {
+                radius,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    mouse_area(
+        super::hover_overlay::HoverOverlay::new(inner)
+            .border_radius(radius)
+            .on_accent_surface(active),
+    )
+    .on_press(NavBarMessage::SwitchToHarbour)
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into()
+}
+
 /// Build the Waybar-style navigation bar
 ///
 /// Three-section layout:
 /// - Left: Hamburger menu, library-filter trigger, flat navigation tabs with active highlight
 /// - Center: Track info text
-/// - Right: Audio format info
+/// - Right: Audio format info + the pinned Harbour longship button
 pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // -------------------------------------------------------------------------
     // Left Section: Hamburger + Library Filter + Navigation Tabs
     // -------------------------------------------------------------------------
     let settings_open = data.settings_open;
     let editor_active = data.editor_active;
+    // Harbour has no `NavView` (its `current_view` falls back to Queue), so
+    // without this the Queue tab would light up alongside the pinned longship
+    // whenever Harbour is active — mirror the `editor_active` suppression.
+    let harbour_active = data.harbour_active;
     let window_width = data.window_width;
 
     // Whenever the metadata strip lives elsewhere (Off / Player Bar / Mini
@@ -665,7 +737,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             // No regular tab is active while editing (current_view falls back
             // to Queue for the tab-less editor view) — the editor pill carries
             // the active state instead.
-            let is_active = !settings_open && !editor_active && current == view;
+            let is_active = !settings_open && !editor_active && !harbour_active && current == view;
             tabs = tabs.push(nav_tab(
                 label,
                 icon_path,
@@ -1014,6 +1086,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         iced::Padding::ZERO
     };
 
+    // Pinned Harbour longship — the LAST child of the outer row, so the Fill in
+    // `left_section` (or the center track-info) pushes it to the right edge,
+    // mirroring the hamburger cluster on the left.
+    let harbour_button = harbour_nav_button(data.harbour_active, cluster_pill_h);
+
     let nav_content = container(
         row![
             // Left: Hamburger + Library filter trigger + navigation tabs
@@ -1022,6 +1099,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             center_section,
             // Format info (stays visible independently)
             format_section,
+            // Right edge: pinned Harbour longship button
+            harbour_button,
         ]
         .align_y(Alignment::Center)
         .padding(tray_padding)

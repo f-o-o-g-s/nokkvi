@@ -37,6 +37,9 @@ impl From<View> for Option<widgets::NavView> {
             View::Settings => None,
             // Contextual destinations with no permanent nav tab.
             View::PlaylistEditor => None,
+            // Harbour has a nav presence, but a *pinned* longship button (M6),
+            // not a `NAV_TABS` tab — so it has no `NavView`.
+            View::Harbour => None,
         }
     }
 }
@@ -138,6 +141,9 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         }
         widgets::NavBarMessage::SwitchToEditor => {
             Message::Navigation(NavigationMessage::SwitchView(View::PlaylistEditor))
+        }
+        widgets::NavBarMessage::SwitchToHarbour => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Harbour))
         }
         widgets::NavBarMessage::ToggleLightMode => Message::ToggleLightMode,
         widgets::NavBarMessage::OpenSettings => {
@@ -685,6 +691,7 @@ impl Nokkvi {
                     settings_open: self.current_view == View::Settings,
                     editor_session_active: self.playlist_editor.is_some(),
                     editor_active: matches!(self.current_view, View::PlaylistEditor),
+                    harbour_active: matches!(self.current_view, View::Harbour),
                     library_count: lib.count,
                     active_library_count: lib.active_count,
                     library_selector_open: lib.popover_open,
@@ -1427,6 +1434,7 @@ impl Nokkvi {
             current_view: current_nav_view,
             editor_session_active: self.playlist_editor.is_some(),
             editor_active: matches!(self.current_view, View::PlaylistEditor),
+            harbour_active: matches!(self.current_view, View::Harbour),
             track_title,
             track_artist,
             track_album,
@@ -1749,6 +1757,23 @@ impl Nokkvi {
                 .settings_page
                 .view(self.window.width, self.window.height)
                 .map(Message::Settings),
+            View::Harbour => self
+                .harbour_page
+                .view(views::HarbourViewData {
+                    harbour: &self.harbour,
+                    album_art: &self.artwork.album_art.snapshot,
+                    large_artwork: &self.artwork.large_artwork.snapshot,
+                    playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,
+                    playlist_custom_large_art: &self.artwork.playlist_custom_large_art.snapshot,
+                    playlist_collage: &self.artwork.playlist.collage.snapshot,
+                    genre_collage: &self.artwork.genre.collage.snapshot,
+                    window_width: self.content_pane_width(),
+                    window_height: self.window.height,
+                    modifiers: self.window.keyboard_modifiers,
+                    elevated,
+                    stable_viewport: self.settings.stable_viewport,
+                })
+                .map(Message::Harbour),
             View::Radios => {
                 let filtered_stations = self.filter_radio_stations();
                 // Over-cover visualizer + boat over the station artwork — the
@@ -1792,17 +1817,19 @@ impl Nokkvi {
 mod tests {
     use super::*;
 
-    /// Every `View` variant must convert to either `Some(NavView)` or `None`
-    /// (the contextual, no-permanent-tab views: Settings and PlaylistEditor)
-    /// — the table doubles as a length-anchor: adding a `View` variant without
-    /// updating the conversion fails this test, not just at compile time.
+    /// Every `View` variant must convert to either `Some(NavView)` or `None`.
+    /// The `None` set is the views with no permanent nav tab: the contextual
+    /// Settings and PlaylistEditor, plus Harbour (reached via a *pinned*
+    /// longship button, not a `NAV_TABS` tab). The table doubles as a
+    /// length-anchor: adding a `View` variant without updating the conversion
+    /// fails this test, not just at compile time.
     #[test]
     fn view_to_nav_view_covers_every_variant() {
         for &v in View::ALL {
             let nav: Option<widgets::NavView> = v.into();
             match v {
-                View::Settings | View::PlaylistEditor => {
-                    assert!(nav.is_none(), "{v:?} is contextual — no NavView");
+                View::Settings | View::PlaylistEditor | View::Harbour => {
+                    assert!(nav.is_none(), "{v:?} has no NavView tab");
                 }
                 _ => assert!(nav.is_some(), "{v:?} must map to a NavView"),
             }
@@ -1819,6 +1846,17 @@ mod tests {
             let back: Option<widgets::NavView> = v.into();
             assert_eq!(back, Some(nav), "round-trip failed for {nav:?}");
         }
+    }
+
+    /// The pinned Harbour longship button (no `NavView`) maps to a Harbour
+    /// view switch, mirroring the contextual editor pill's `SwitchToEditor`.
+    #[test]
+    fn nav_bar_switch_to_harbour_maps_to_harbour_view() {
+        let msg = map_nav_bar_message(widgets::NavBarMessage::SwitchToHarbour);
+        assert!(matches!(
+            msg,
+            Message::Navigation(NavigationMessage::SwitchView(View::Harbour))
+        ));
     }
 
     /// Spot-check each name-paired conversion direction to keep the renaming

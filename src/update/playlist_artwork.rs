@@ -188,9 +188,28 @@ impl Nokkvi {
         playlist_id: String,
     ) -> Task<Message> {
         // Only custom-cover playlists have anything to fetch; read the LIVE
-        // library field so an SSE reload that cleared it stops the fetch.
-        let cache_buster = match self.library.playlists.iter().find(|p| p.id == playlist_id) {
-            Some(p) if p.uploaded_image.is_some() => p.updated_at.clone(),
+        // library field so an SSE reload that cleared it stops the fetch. The
+        // Harbour home view holds its own playlist lists — the Random Playlists
+        // shelf AND the whole-library search results — so fall back to them for
+        // a playlist centered there that the library view never loaded. The
+        // search rows carry raw `Playlist`s, which gate custom art on
+        // `custom_image()` (the empty-string form must not count).
+        let live = self
+            .library
+            .playlists
+            .iter()
+            .find(|p| p.id == playlist_id)
+            .or_else(|| self.harbour.playlists.iter().find(|p| p.id == playlist_id))
+            .map(|p| (p.uploaded_image.is_some(), p.updated_at.clone()))
+            .or_else(|| {
+                self.harbour
+                    .search_results
+                    .as_ref()
+                    .and_then(|r| r.playlists.iter().find(|p| p.id == playlist_id))
+                    .map(|p| (p.custom_image().is_some(), p.updated_at.clone()))
+            });
+        let cache_buster = match live {
+            Some((has_custom_cover, updated_at)) if has_custom_cover => updated_at,
             _ => return Task::none(),
         };
         // Serve from cache for instant back-navigation (the Loaded handler

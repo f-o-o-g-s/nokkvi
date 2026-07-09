@@ -181,6 +181,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.switch_to_radios",
             default: KeyCombo::key(KeyCode::Char('7')),
         },
+        SwitchToHarbour {
+            display: "Harbour",
+            description: "Switch to the Harbour home view",
+            category: "Views",
+            toml_key: "switch_to_harbour",
+            settings_key: "hotkey.switch_to_harbour",
+            default: KeyCombo::key(KeyCode::Char('8')),
+        },
         SwitchToSettings {
             display: "Settings",
             description: "Open the settings panel",

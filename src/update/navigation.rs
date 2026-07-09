@@ -172,11 +172,15 @@ impl Nokkvi {
     }
 
     /// Mutable references to every slot-list page's shared `SlotListPageState`.
-    /// The whole-app fan-outs below share this one array instead of each
-    /// repeating the eight page fields. It stays hand-maintained — adding a page
-    /// means adding it here; the `; 8` length only forces the count to match the
-    /// elements listed, it won't catch a page silently left out.
-    fn all_slot_list_commons_mut(&mut self) -> [&mut crate::widgets::SlotListPageState; 8] {
+    /// The whole-app fan-outs (reveal-lock clears, window-focus propagation,
+    /// search-focus clears, the resize slot-count loop in `update/window.rs`)
+    /// share this one array instead of each repeating the nine page fields. It
+    /// stays hand-maintained — adding a page means adding it here; the `; 9`
+    /// length only forces the count to match the elements listed, it won't
+    /// catch a page silently left out.
+    pub(super) fn all_slot_list_commons_mut(
+        &mut self,
+    ) -> [&mut crate::widgets::SlotListPageState; 9] {
         [
             &mut self.albums_page.common,
             &mut self.artists_page.common,
@@ -186,6 +190,7 @@ impl Nokkvi {
             &mut self.songs_page.common,
             &mut self.radios_page.common,
             &mut self.similar_page.common,
+            &mut self.harbour_page.common,
         ]
     }
 
@@ -345,6 +350,33 @@ impl Nokkvi {
             }
             View::Radios if self.library.radio_stations.is_empty() => {
                 Task::done(Message::LoadRadioStations)
+            }
+            // Harbour's artwork warm-up is loader-driven, not slot-list-viewport
+            // driven, so it doesn't join the `prefetch_viewport_artwork` group
+            // below — it re-warms explicitly on every entry instead (the LRUs
+            // may have evicted its covers while the user browsed other views;
+            // every warm is cache/pending/failed-gated, so a warm cache re-runs
+            // free).
+            View::Harbour => {
+                let mut tasks = Vec::new();
+                if self.harbour.shelves_empty() {
+                    tasks.push(Task::done(Message::LoadHarbour));
+                }
+                // A library-scope change made from ANOTHER view dropped the old
+                // search results (`invalidate_shelves`) but kept the query —
+                // re-fire it here so re-entry shows new-scope results instead
+                // of the previous scope's (or a stuck hint).
+                if !self.harbour.search_query.trim().is_empty()
+                    && self.harbour.search_results.is_none()
+                    && !self.harbour.search_loading
+                {
+                    let query = self.harbour.search_query.clone();
+                    tasks.push(self.handle_harbour_search(query));
+                }
+                let generation = self.harbour.shelves_generation;
+                tasks.push(self.warm_harbour_artwork(generation));
+                tasks.push(self.warm_harbour_current_center());
+                Task::batch(tasks)
             }
             View::Queue => Task::done(Message::LoadQueue), // Always reload queue to reflect changes
             View::Settings => {
@@ -733,6 +765,7 @@ impl Nokkvi {
             View::Queue
             | View::Playlists
             | View::Radios
+            | View::Harbour
             | View::Settings
             | View::PlaylistEditor => {}
         }
@@ -746,10 +779,58 @@ impl Nokkvi {
             View::Queue
             | View::Playlists
             | View::Radios
+            | View::Harbour
             | View::Settings
             | View::PlaylistEditor => Task::none(),
         };
 
+        Task::batch([switch_task, load_task])
+    }
+
+    /// Cross-view navigation that lands in a library view with a free-text
+    /// search applied — the "See all" affordance on a Harbour search-result
+    /// group. Unlike [`Self::handle_navigate_and_filter`] (which carries a
+    /// typed `LibraryFilter`), this sets the target view's plain search query
+    /// and forces a reload so the server re-queries with it. Works for all five
+    /// searchable library views (Playlists included, which `NavigateAndFilter`
+    /// never supported).
+    pub(crate) fn handle_navigate_with_search(
+        &mut self,
+        view: View,
+        query: String,
+    ) -> Task<Message> {
+        let switch_task = self.handle_switch_view(view);
+        let load_task = match view {
+            View::Albums => {
+                self.albums_page.common.active_filter = None;
+                self.albums_page.common.search_query = query;
+                Task::done(Message::LoadAlbums)
+            }
+            View::Artists => {
+                self.artists_page.common.active_filter = None;
+                self.artists_page.common.search_query = query;
+                Task::done(Message::LoadArtists)
+            }
+            View::Songs => {
+                self.songs_page.common.active_filter = None;
+                self.songs_page.common.search_query = query;
+                Task::done(Message::LoadSongs)
+            }
+            View::Genres => {
+                self.genres_page.common.active_filter = None;
+                self.genres_page.common.search_query = query;
+                Task::done(Message::LoadGenres)
+            }
+            View::Playlists => {
+                self.playlists_page.common.active_filter = None;
+                self.playlists_page.common.search_query = query;
+                Task::done(Message::LoadPlaylists)
+            }
+            // Non-searchable targets: just the view switch.
+            View::Queue | View::Radios | View::Harbour | View::Settings | View::PlaylistEditor => {
+                Task::none()
+            }
+        };
         Task::batch([switch_task, load_task])
     }
 
@@ -972,6 +1053,7 @@ impl Nokkvi {
             View::Queue
             | View::Playlists
             | View::Radios
+            | View::Harbour
             | View::Settings
             | View::PlaylistEditor => None,
         };
@@ -1010,6 +1092,7 @@ impl Nokkvi {
             View::Queue
             | View::Playlists
             | View::Radios
+            | View::Harbour
             | View::Settings
             | View::PlaylistEditor => {}
         }
@@ -1023,6 +1106,7 @@ impl Nokkvi {
             View::Queue
             | View::Playlists
             | View::Radios
+            | View::Harbour
             | View::Settings
             | View::PlaylistEditor => Task::none(),
         };

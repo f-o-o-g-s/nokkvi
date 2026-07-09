@@ -139,6 +139,12 @@ impl Nokkvi {
         match view {
             View::Queue => self.load_queue_viewport_artwork(),
             View::Settings | View::PlaylistEditor => Task::none(),
+            View::Harbour => {
+                // Same crisp single-cover + 300px collage warm the keyboard /
+                // scroll center path uses — see `warm_harbour_center_art`.
+                let (rows, center) = self.harbour_centered_rows();
+                self.warm_harbour_center_art(center.and_then(|i| rows.get(i)))
+            }
             View::Albums
             | View::Artists
             | View::Songs
@@ -236,55 +242,74 @@ impl Nokkvi {
         let target_view = self.current_target_view();
         // Play enter/activate sound (settings handles its own SFX)
         if target_view != Some(View::Settings) {
-            // Check if the focused list is empty (accounts for search filtering).
-            // We use the same filter_* helpers as view() to detect when the
-            // results are empty even if the raw library is not. `None` means
-            // the Similar browser tab is focused — read its songs list so the
-            // SFX matches the focused list rather than the host view.
-            let is_empty = match target_view {
-                Some(View::Queue) => self.filter_queue_songs().is_empty(),
-                Some(View::Albums) => self.filter_albums().is_empty(),
-                Some(View::Songs) => {
-                    // Filter songs manually since there's no main.rs helper for it yet
-                    nokkvi_data::utils::search::filter_items(
-                        &self.library.songs,
-                        &self.songs_page.common.search_query,
-                    )
-                    .is_empty()
+            // Harbour is special: activating a centered *section header* toggles
+            // its collapse (an expand/collapse action, not an item activation), so
+            // it plays the expand SFX; a centered item activates (enter). Every
+            // other view activates an item, so empty → escape, else → enter.
+            let sfx = if target_view == Some(View::Harbour) {
+                let (rows, center) = self.harbour_centered_rows();
+                match center.and_then(|i| rows.get(i)) {
+                    Some(crate::views::harbour::HarbourRow::Section { .. }) => {
+                        audio::SfxType::ExpandCollapse
+                    }
+                    Some(crate::views::harbour::HarbourRow::Item { .. }) => audio::SfxType::Enter,
+                    // A Hint row (keep-typing / searching / no matches)
+                    // activates nothing — same escape cue as an empty list.
+                    Some(crate::views::harbour::HarbourRow::Hint(_)) | None => {
+                        audio::SfxType::Escape
+                    }
                 }
-                Some(View::Artists) => nokkvi_data::utils::search::filter_items(
-                    &self.library.artists,
-                    &self.artists_page.common.search_query,
-                )
-                .is_empty(),
-                Some(View::Genres) => nokkvi_data::utils::search::filter_items(
-                    &self.library.genres,
-                    &self.genres_page.common.search_query,
-                )
-                .is_empty(),
-                Some(View::Playlists) => nokkvi_data::utils::search::filter_items(
-                    &self.library.playlists,
-                    &self.playlists_page.common.search_query,
-                )
-                .is_empty(),
-                Some(View::Radios) => self.filter_radio_stations().is_empty(),
-                Some(View::Settings) => false,
-                Some(View::PlaylistEditor) => self
-                    .playlist_editor
-                    .as_ref()
-                    .is_none_or(|e| e.songs.is_empty()),
-                // Similar browser tab focused (no `View` variant).
-                None => self
-                    .similar_songs
-                    .as_ref()
-                    .is_none_or(|s| s.songs.is_empty()),
-            };
-
-            if is_empty {
-                self.sfx_engine.play(audio::SfxType::Escape);
             } else {
-                self.sfx_engine.play(audio::SfxType::Enter);
-            }
+                // Check if the focused list is empty (accounts for search
+                // filtering). We use the same filter_* helpers as view() to detect
+                // when the results are empty even if the raw library is not. `None`
+                // means the Similar browser tab is focused — read its songs list so
+                // the SFX matches the focused list rather than the host view.
+                let is_empty = match target_view {
+                    Some(View::Queue) => self.filter_queue_songs().is_empty(),
+                    Some(View::Albums) => self.filter_albums().is_empty(),
+                    Some(View::Songs) => {
+                        // Filter songs manually since there's no main.rs helper for it yet
+                        nokkvi_data::utils::search::filter_items(
+                            &self.library.songs,
+                            &self.songs_page.common.search_query,
+                        )
+                        .is_empty()
+                    }
+                    Some(View::Artists) => nokkvi_data::utils::search::filter_items(
+                        &self.library.artists,
+                        &self.artists_page.common.search_query,
+                    )
+                    .is_empty(),
+                    Some(View::Genres) => nokkvi_data::utils::search::filter_items(
+                        &self.library.genres,
+                        &self.genres_page.common.search_query,
+                    )
+                    .is_empty(),
+                    Some(View::Playlists) => nokkvi_data::utils::search::filter_items(
+                        &self.library.playlists,
+                        &self.playlists_page.common.search_query,
+                    )
+                    .is_empty(),
+                    Some(View::Radios) => self.filter_radio_stations().is_empty(),
+                    Some(View::Harbour | View::Settings) => false,
+                    Some(View::PlaylistEditor) => self
+                        .playlist_editor
+                        .as_ref()
+                        .is_none_or(|e| e.songs.is_empty()),
+                    // Similar browser tab focused (no `View` variant).
+                    None => self
+                        .similar_songs
+                        .as_ref()
+                        .is_none_or(|s| s.songs.is_empty()),
+                };
+                if is_empty {
+                    audio::SfxType::Escape
+                } else {
+                    audio::SfxType::Enter
+                }
+            };
+            self.sfx_engine.play(sfx);
         }
         if target_view == Some(View::Settings) {
             return Task::done(Message::Settings(views::SettingsMessage::EditActivate));

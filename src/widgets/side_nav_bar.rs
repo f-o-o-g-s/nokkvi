@@ -98,6 +98,9 @@ pub(crate) struct SideNavBarData {
     pub editor_session_active: bool,
     /// The editor view is the current destination — highlight that cell.
     pub editor_active: bool,
+    /// Harbour is the current destination — highlight the pinned longship cell
+    /// at the bottom of the sidebar.
+    pub harbour_active: bool,
     /// Total libraries known to the client. `<= 1` hides the footer
     /// library trigger entirely (same suppression rule as the top-nav
     /// variant — see `libraries_imp_plan.md` §2).
@@ -228,6 +231,9 @@ fn side_nav_tab_content(
 pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessage> {
     let settings_open = data.settings_open;
     let editor_active = data.editor_active;
+    // See the top-nav note: suppress the (fallback-Queue) tab highlight while
+    // Harbour is the active destination — the pinned longship carries it.
+    let harbour_active = data.harbour_active;
     let current = data.current_view;
     let is_rounded = theme::is_rounded_mode();
 
@@ -513,7 +519,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     for &(label, icon_path, view) in NAV_TABS {
         // No regular tab is active while editing — the editor cell carries the
         // active state (current_view falls back to Queue for the editor view).
-        let is_active = !settings_open && !editor_active && current == view;
+        let is_active = !settings_open && !editor_active && !harbour_active && current == view;
         tabs = tabs
             .push(wrap_in_gutter(
                 nav_tab(label, icon_path, is_active, NavBarMessage::SwitchView(view)),
@@ -544,6 +550,18 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             ))
             .push(separator());
     }
+
+    // Pinned Harbour longship — a FIXED-height cell appended after the
+    // `FillPortion(1)` tabs, so the tabs expand and push it to the BOTTOM edge
+    // (the mirror of the fixed hamburger/library cluster pinned at the top).
+    tabs = tabs.push(separator()).push(
+        container(super::nav_bar::harbour_nav_button(
+            data.harbour_active,
+            ICON_TAB_HEIGHT,
+        ))
+        .width(Length::Fixed(nav_width))
+        .center_x(Length::Fixed(nav_width)),
+    );
 
     // Apply top/bottom tray padding in rounded mode (matches the design's
     // `padding: 8px 4px` on the rounded `.nk-sidenav`).

@@ -95,19 +95,11 @@ impl Nokkvi {
         let sc_expanded = sc(false);
         let sc_collapsed = if autohide { sc(true) } else { sc_expanded };
 
-        // One loop over the (disjoint) page commons keeps the read and write
-        // for each page on the same binding — no parallel-list drift where a
-        // mismatched pair could size one page from another's collapse state.
-        for common in [
-            &mut self.albums_page.common,
-            &mut self.artists_page.common,
-            &mut self.songs_page.common,
-            &mut self.genres_page.common,
-            &mut self.playlists_page.common,
-            &mut self.queue_page.common,
-            &mut self.radios_page.common,
-            &mut self.similar_page.common,
-        ] {
+        // One loop over the shared page-commons array keeps the read and write
+        // for each page on the same binding — and reusing
+        // `all_slot_list_commons_mut` (instead of a second hand-maintained
+        // list) means a page added there is sized here automatically.
+        for common in self.all_slot_list_commons_mut() {
             common.slot_list.slot_count = if common.toolbar_collapsed(autohide, false) {
                 sc_collapsed
             } else {
@@ -241,7 +233,13 @@ impl Nokkvi {
                 }
                 Task::batch(tasks)
             }
-            View::Genres | View::Playlists | View::Settings | View::PlaylistEditor => Task::none(),
+            // Harbour warms its shelf artwork through the Harbour loader,
+            // not the slot-list viewport prefetch.
+            View::Harbour
+            | View::Genres
+            | View::Playlists
+            | View::Settings
+            | View::PlaylistEditor => Task::none(),
         }
     }
 
@@ -333,7 +331,11 @@ impl Nokkvi {
             // Shared with the `RadiosAction::None` browse arm so both center-load
             // paths agree on which station to load (see the helper).
             View::Radios => self.radio_center_large_load_task(),
-            View::Genres | View::Playlists | View::Settings | View::PlaylistEditor => None,
+            View::Harbour
+            | View::Genres
+            | View::Playlists
+            | View::Settings
+            | View::PlaylistEditor => None,
         }
     }
 

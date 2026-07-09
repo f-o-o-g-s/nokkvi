@@ -13,8 +13,8 @@ use iced::Task;
 use crate::{
     app_message::{Message, OpenMenu, RouletteMessage},
     views::{
-        AlbumsMessage, ArtistsMessage, GenresMessage, PlaylistsMessage, QueueMessage,
-        RadiosMessage, SimilarMessage, SongsMessage,
+        AlbumsMessage, ArtistsMessage, GenresMessage, HarbourMessage, PlaylistsMessage,
+        QueueMessage, RadiosMessage, SimilarMessage, SongsMessage,
     },
     widgets::artwork_split_handle::DragEvent,
 };
@@ -110,6 +110,11 @@ macro_rules! impl_view_chrome {
     (@expand yes, $self:ident) => {
         matches!($self, Self::CollapseExpansion | Self::ExpandCenter)
     };
+    // Harbour collapses/expands its own sections via `ToggleSection` (a click on a
+    // header) and `ExpandCenter` (Shift+Enter), not the shared `CollapseExpansion`.
+    (@expand harbour, $self:ident) => {
+        matches!($self, Self::ToggleSection(_) | Self::ExpandCenter)
+    };
     (@expand no, $self:ident) => {
         false
     };
@@ -200,6 +205,14 @@ impl_view_chrome!(RadiosMessage {
 impl_view_chrome!(SimilarMessage {
     roulette: no,
     expand: no,
+    drag: yes
+});
+// Harbour is a slot-list view with an artwork pane but no roulette (its rows
+// are a curated home list, not a shuffled library) and no inline expansion
+// (sections toggle via `ToggleSection`, not the expand SFX).
+impl_view_chrome!(HarbourMessage {
+    roulette: no,
+    expand: harbour,
     drag: yes
 });
 
@@ -365,6 +378,33 @@ mod tests {
     }
 
     #[test]
+    fn harbour_extracts_column_drag() {
+        let msg = HarbourMessage::ArtworkColumnDrag(CHANGE);
+        assert_eq!(msg.extract_artwork_column_drag(), Some(&CHANGE));
+        assert_eq!(msg.extract_artwork_vertical_drag(), None);
+    }
+
+    #[test]
+    fn harbour_extracts_vertical_drag() {
+        let msg = HarbourMessage::ArtworkColumnVerticalDrag(COMMIT);
+        assert_eq!(msg.extract_artwork_vertical_drag(), Some(&COMMIT));
+        assert_eq!(msg.extract_artwork_column_drag(), None);
+    }
+
+    #[test]
+    fn harbour_unrelated_variant_returns_none() {
+        let msg = HarbourMessage::NoOp;
+        assert_eq!(msg.extract_artwork_column_drag(), None);
+        assert_eq!(msg.extract_artwork_vertical_drag(), None);
+    }
+
+    #[test]
+    fn harbour_is_roulette_permanently_false() {
+        // HarbourMessage has no `Roulette` variant.
+        assert!(!HarbourMessage::NoOp.is_roulette());
+    }
+
+    #[test]
     fn radios_has_no_drag_variants() {
         // Radios is the one slot-list view without an artwork pane; both
         // extractors are permanently `None` regardless of variant. Use a
@@ -395,6 +435,16 @@ mod tests {
         assert!(ArtistsMessage::CollapseExpansion.is_expand_action());
         assert!(GenresMessage::ExpandCenter.is_expand_action());
         assert!(PlaylistsMessage::CollapseExpansion.is_expand_action());
+        // Harbour toggles sections via ToggleSection (click) + ExpandCenter
+        // (Shift+Enter), so both must play the expand SFX — not the enter sound.
+        use crate::views::harbour::{HarbourMessage, HarbourSectionId};
+        assert!(HarbourMessage::ToggleSection(HarbourSectionId::RecentlyPlayed).is_expand_action());
+        assert!(HarbourMessage::ExpandCenter.is_expand_action());
+        // A plain slot-list activation (Enter on an item) is NOT an expand action.
+        assert!(
+            !HarbourMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter(false))
+                .is_expand_action()
+        );
     }
 
     #[test]

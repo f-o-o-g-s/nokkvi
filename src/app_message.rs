@@ -787,6 +787,61 @@ pub enum QueueLoaderMessage {
     Loaded(Result<Vec<nokkvi_data::backend::queue::QueueSongUIViewData>, String>),
 }
 
+/// All Harbour shelves, delivered by one joined fetch. Boxed inside
+/// [`HarbourLoaderMessage::ShelvesLoaded`] to keep the `Message` enum small.
+#[derive(Debug, Clone)]
+pub struct HarbourShelvesData {
+    pub recently_played: Vec<nokkvi_data::types::song::Song>,
+    pub recently_added: Vec<nokkvi_data::backend::albums::AlbumUIViewData>,
+    pub playlists: Vec<nokkvi_data::backend::playlists::PlaylistUIViewData>,
+    pub genres: Vec<nokkvi_data::backend::genres::GenreUIViewData>,
+    pub most_played_songs: Vec<nokkvi_data::types::song::Song>,
+    pub most_played_albums: Vec<nokkvi_data::backend::albums::AlbumUIViewData>,
+    pub most_played_artists: Vec<nokkvi_data::types::artist::Artist>,
+    pub most_played_genres: Vec<nokkvi_data::backend::genres::GenreUIViewData>,
+}
+
+/// Backend results for the Harbour home view. Each variant carries the
+/// `generation` captured when its fetch was dispatched; the handler drops any
+/// result whose generation no longer matches `HarbourState::shelves_generation`
+/// (stale-load rejection, Similar-view precedent).
+// Every variant is a loader result, so the shared `Loaded` postfix reads as
+// intent, not noise.
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Clone)]
+pub enum HarbourLoaderMessage {
+    /// The joined shelf fetch completed.
+    ShelvesLoaded {
+        generation: u64,
+        result: Result<Box<HarbourShelvesData>, String>,
+    },
+    /// Per-playlist album-id lists for the 2×2 quad covers arrived
+    /// (`(playlist_id, album_ids)` pairs).
+    PlaylistQuadIdsLoaded {
+        generation: u64,
+        results: Vec<(String, Vec<String>)>,
+    },
+    /// Per-genre album-id lists for the 2×2 quad covers arrived
+    /// (`(genre_id, album_ids)` pairs).
+    GenreQuadIdsLoaded {
+        generation: u64,
+        results: Vec<(String, Vec<String>)>,
+    },
+    /// The whole-library search fan-out completed for a keystroke.
+    SearchLoaded {
+        generation: u64,
+        result: Result<Box<nokkvi_data::types::library_search::LibrarySearchResults>, String>,
+    },
+    /// Per-entity album-id lists for search-result genre/playlist quad covers
+    /// arrived (`(entity_id, album_ids)` pairs). `target` selects the genre or
+    /// playlist side-map; gated on `search_generation`.
+    SearchCollageIdsLoaded {
+        generation: u64,
+        target: CollageTarget,
+        results: Vec<(String, Vec<String>)>,
+    },
+}
+
 /// Identifies the single overlay menu that may be open across the app.
 ///
 /// Only one of these can be active at a time; opening any new menu replaces the
@@ -897,6 +952,10 @@ pub enum Message {
     LoadPlaylists,
     /// Load internet radio stations from Subsonic API
     LoadRadioStations,
+    /// Load the Harbour home view's shelves (one joined fetch)
+    LoadHarbour,
+    /// Harbour backend results (shelves + hero pool, playlist quad ids)
+    HarbourLoader(HarbourLoaderMessage),
     /// Playlist was mutated (created/deleted/renamed/overwritten/appended) — toast and reload
     PlaylistMutated(PlaylistMutation),
     /// Playlists fetched on-demand for Save Queue as Playlist dialog
@@ -998,6 +1057,8 @@ pub enum Message {
     Similar(views::SimilarMessage),
     /// Internet Radio page messages
     Radios(views::RadiosMessage),
+    /// Harbour home view messages
+    Harbour(views::HarbourMessage),
 
     // --- MPRIS D-Bus Integration ---
     Mpris(services::mpris::MprisEvent),

@@ -27,6 +27,7 @@ mod cross_pane_drag;
 mod default_playlist_picker;
 mod editor;
 mod general;
+mod harbour;
 mod hotkeys;
 mod ipc;
 mod library;

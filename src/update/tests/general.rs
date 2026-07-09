@@ -711,6 +711,11 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
         .artists
         .set_from_vec(vec![make_artist("ar1", "Artist")]);
     app.similar_songs_generation = 7;
+    app.harbour.search_query = "night".into();
+    app.harbour.shelves_generation = 3;
+    app.harbour
+        .recently_added
+        .push(make_album("a1", "A", "Artist"));
     app.active_playlist_info = Some(crate::state::ActivePlaylistContext::minimal(
         "pl1".into(),
         "Mix".into(),
@@ -756,6 +761,13 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.library.artists.is_empty(), "library artists reset");
     assert!(app.similar_songs.is_none());
     assert_eq!(app.similar_songs_generation, 0);
+    assert!(app.harbour.shelves_empty(), "harbour shelves reset");
+    assert!(app.harbour.search_query.is_empty(), "harbour query reset");
+    assert_eq!(
+        app.harbour.shelves_generation, 4,
+        "harbour generation carries forward bumped (seeded 3) — zeroing it \
+         would let a pre-logout in-flight fetch match a fresh post-login load"
+    );
     assert!(app.active_playlist_info.is_none());
     assert!(app.playlist_editor.is_none());
     assert!(app.server_version.is_none());

@@ -106,6 +106,7 @@ impl Nokkvi {
             View::Playlists => Some(&self.playlists_page),
             View::Queue => Some(&self.queue_page),
             View::Radios => Some(&self.radios_page),
+            View::Harbour => Some(&self.harbour_page),
             // No `ViewPage` impl — the editor routes its slot events through
             // `EditorMessage::SlotList`, not the generic page dispatch.
             View::Settings | View::PlaylistEditor => None,
@@ -122,6 +123,7 @@ impl Nokkvi {
             View::Playlists => Some(&mut self.playlists_page),
             View::Queue => Some(&mut self.queue_page),
             View::Radios => Some(&mut self.radios_page),
+            View::Harbour => Some(&mut self.harbour_page),
             View::Settings | View::PlaylistEditor => None,
         }
     }
@@ -310,7 +312,7 @@ impl Nokkvi {
             }
             // Exhaustive on purpose — a new view must decide whether Get Info
             // applies to it rather than silently landing here.
-            View::Genres | View::Radios | View::Settings | View::PlaylistEditor => {
+            View::Genres | View::Radios | View::Harbour | View::Settings | View::PlaylistEditor => {
                 self.toast_info("Get Info is not available in this view");
                 return Task::none();
             }

@@ -40,6 +40,7 @@
 
 mod artwork;
 mod audio;
+mod harbour;
 mod library;
 mod panes;
 mod pending;
@@ -55,6 +56,7 @@ mod window;
 
 pub(crate) use artwork::*;
 pub(crate) use audio::*;
+pub(crate) use harbour::*;
 pub(crate) use library::*;
 pub(crate) use panes::*;
 pub(crate) use pending::*;

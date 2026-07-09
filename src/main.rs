@@ -59,6 +59,14 @@ pub enum View {
     Genres,
     Playlists,
     Radios,
+    /// Harbour home / landing view. A start-view-eligible top-level destination
+    /// reached via a pinned longship button (right edge of the top nav, bottom
+    /// of the side nav) rather than a regular `NAV_TABS` tab — so it maps to
+    /// `None` in the `View ↔ NavView` conversions. It IS a slot-list view: it
+    /// impls `ViewPage` and `view_page(View::Harbour)` returns its page (unlike
+    /// Settings, which returns `None`), so the generic slot-list handlers
+    /// (navigate / activate / seek) drive it. Rendered by `HarbourPage::view`.
+    Harbour,
     Settings,
     /// Playlist editor — a contextual destination with no permanent nav tab
     /// (like `Settings`). Reached only while an edit session is active, via
@@ -77,6 +85,7 @@ impl View {
         View::Genres,
         View::Playlists,
         View::Radios,
+        View::Harbour,
         View::Settings,
         View::PlaylistEditor,
     ];
@@ -97,6 +106,7 @@ impl View {
             View::Songs => Some("Songs"),
             View::Genres => Some("Genres"),
             View::Playlists => Some("Playlists"),
+            View::Harbour => Some("Harbour"),
             // None = not start-view eligible: Settings and PlaylistEditor
             // are contextual destinations, and Radios has stayed out of the
             // start-view dropdown since the setting shipped.
@@ -117,8 +127,8 @@ impl View {
 // Length anchor: adding a `View` variant without extending `ALL` fails to
 // compile. Both directions are needed — a single subtraction passes if
 // either side is too small.
-const _: [(); 9 - View::ALL.len()] = [];
-const _: [(); View::ALL.len() - 9] = [];
+const _: [(); 10 - View::ALL.len()] = [];
+const _: [(); View::ALL.len() - 10] = [];
 
 // ============================================================================
 // SECTION: Application State (KEEP IN main.rs)
@@ -142,6 +152,7 @@ pub struct Nokkvi {
     pub radios_page: views::RadiosPage,
     pub settings_page: views::SettingsPage,
     pub similar_page: views::SimilarPage,
+    pub harbour_page: views::HarbourPage,
 
     // -------------------------------------------------------------------------
     // Core Services
@@ -179,6 +190,10 @@ pub struct Nokkvi {
     pub similar_songs: Option<crate::state::SimilarSongsState>,
     /// Generation counter for stale response rejection
     pub similar_songs_generation: u64,
+
+    /// Harbour home view state — discovery shelves + whole-library
+    /// search results. Populated on first visit / library-filter change.
+    pub harbour: crate::state::HarbourState,
 
     // -------------------------------------------------------------------------
     // Consolidated State Structs
@@ -369,6 +384,7 @@ impl Default for Nokkvi {
             radios_page: views::RadiosPage::new(),
             settings_page: views::SettingsPage::new(),
             similar_page: views::SimilarPage::new(),
+            harbour_page: views::HarbourPage::new(),
             app_service: None,
             cached_storage: None,
             sfx_engine: nokkvi_data::audio::SfxEngine::default(),
@@ -381,6 +397,7 @@ impl Default for Nokkvi {
             library: crate::state::LibraryData::default(),
             similar_songs: None,
             similar_songs_generation: 0,
+            harbour: crate::state::HarbourState::default(),
             // Persisted player settings (overridden by PlayerSettingsLoaded).
             // LivePlayerSettings derives Default, which zeros every scalar
             // field (view_columns carries the real shipped column defaults

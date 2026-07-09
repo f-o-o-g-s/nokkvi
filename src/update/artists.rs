@@ -135,9 +135,11 @@ impl Nokkvi {
     }
 
     /// Fetch the 500 px artist artwork and stash it in `large_artwork`.
-    /// Skipped when already cached; the artist must be present in
-    /// `library.artists` so we can resolve `image_url` (Navidrome may return
-    /// an external poster URL).
+    /// Skipped when already cached. The external poster URL (Navidrome may
+    /// return one) resolves from `library.artists`, falling back to Harbour's
+    /// artist lists (Most Played shelf / search results) for artists never
+    /// loaded into the Artists view; unresolved falls back to the `ar-{id}`
+    /// cover endpoint.
     ///
     /// Shared by `LoadLargeArtwork` (settled-scroll / hotkey navigation) and
     /// the `ExpandArtist` action — `FocusAndExpand` from a queue/songs link
@@ -154,7 +156,28 @@ impl Nokkvi {
             .artists
             .iter()
             .find(|a| a.id == artist_id)
-            .and_then(|a| a.image_url.clone());
+            .and_then(|a| a.image_url.clone())
+            .or_else(|| {
+                // Harbour rows (Most Played Artists shelf / search results)
+                // hold raw `Artist`s that may never enter the Artists view's
+                // paged buffer — resolve their external poster the same way
+                // `ArtistUIViewData` does (large, falling back to medium).
+                self.harbour
+                    .most_played_artists
+                    .iter()
+                    .chain(
+                        self.harbour
+                            .search_results
+                            .iter()
+                            .flat_map(|r| r.artists.iter()),
+                    )
+                    .find(|a| a.id == artist_id)
+                    .and_then(|a| {
+                        a.large_image_url
+                            .clone()
+                            .or_else(|| a.medium_image_url.clone())
+                    })
+            });
 
         // Set the in-flight marker before the `app_service` check so it
         // matches the Albums helper's ordering — the marker is the

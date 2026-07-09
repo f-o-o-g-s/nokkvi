@@ -43,6 +43,7 @@ pub(crate) use artwork_prefetch::should_refetch;
 pub(super) use artwork_prefetch::{
     expansion_album_artwork_tasks, expansion_child_album_ids, passive_artwork_version,
     prefetch_album_artwork_tasks, prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,
+    quad_album_artwork_tasks_for_ids,
 };
 
 /// Map an `anyhow::Error` chain to [`Message::SessionExpired`] when its
@@ -653,6 +654,7 @@ impl Nokkvi {
                         crate::View::Queue
                         | crate::View::Playlists
                         | crate::View::Radios
+                        | crate::View::Harbour
                         | crate::View::Settings
                         | crate::View::PlaylistEditor => None,
                     };
@@ -1526,6 +1528,17 @@ impl Nokkvi {
         self.artwork = crate::state::ArtworkState::default();
         self.similar_songs = None;
         self.similar_songs_generation = 0;
+        // Harbour shelves + search results are keyed on the prior server's IDs
+        // — drop them, but carry the stale-drop generations FORWARD (bumped)
+        // instead of zeroing them: iced Tasks aren't cancelled by logout, so a
+        // pre-logout in-flight fetch holds a captured generation that a
+        // zeroed-then-bumped counter would re-mint, letting server A's response
+        // populate server B's shelves after re-login.
+        self.harbour = crate::state::HarbourState {
+            shelves_generation: self.harbour.shelves_generation.wrapping_add(1),
+            search_generation: self.harbour.search_generation.wrapping_add(1),
+            ..Default::default()
+        };
         self.active_playlist_info = None;
         self.queue_page.playlist_strip_expanded = false;
         // A sort dropdown / hover lock set at logout or session-expiry would

@@ -171,7 +171,7 @@ impl Nokkvi {
                 }),
             // No starrable/ratable centered item on these views — a new view
             // must opt in to the star/rating hotkeys explicitly.
-            View::Radios | View::Settings | View::PlaylistEditor => None,
+            View::Radios | View::Harbour | View::Settings | View::PlaylistEditor => None,
         }
     }
 

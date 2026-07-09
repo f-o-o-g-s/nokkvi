@@ -306,6 +306,62 @@ where
     (queued_ids, tasks)
 }
 
+/// Non-slot-list sibling of [`prefetch_quad_album_artwork_tasks`]: fetch quad
+/// tiles for a flat set of album ids that is NOT viewport-driven (the Harbour
+/// playlist shelf has no `SlotListView`). Same membership-based dedup
+/// (`cached_ids` / `pending_ids` / `failed`), same retry-wrapped
+/// `fetch_album_artwork_with_retry` at `THUMBNAIL_SIZE`, same `(queued_ids,
+/// tasks)` return convention — the caller inserts `queued_ids` into
+/// `album_art_pending` and `handle_artwork_loaded` releases them.
+///
+/// `album_ids_per_item` yields each item's ordered album ids; only the first
+/// `QUAD_TILE_COUNT` of each are taken (a quad needs at most four).
+pub(crate) fn quad_album_artwork_tasks_for_ids<'a, I>(
+    cached_ids: &HashSet<&String>,
+    failed: &HashMap<String, Option<String>>,
+    pending_ids: &HashSet<String>,
+    albums_vm: AlbumsService,
+    album_ids_per_item: I,
+) -> (Vec<String>, Vec<Task<Message>>)
+where
+    I: IntoIterator<Item = &'a [String]>,
+{
+    use crate::services::collage_artwork::QUAD_TILE_COUNT;
+
+    let mut queued_ids: Vec<String> = Vec::new();
+    let mut already_queued: HashSet<String> = HashSet::new();
+    let mut tasks: Vec<Task<Message>> = Vec::new();
+
+    for ids in album_ids_per_item {
+        for id in ids.iter().take(QUAD_TILE_COUNT) {
+            if id.is_empty()
+                || already_queued.contains(id)
+                || cached_ids.contains(id)
+                || pending_ids.contains(id)
+                || failed.contains_key(id)
+            {
+                continue;
+            }
+            already_queued.insert(id.clone());
+            queued_ids.push(id.clone());
+            let vm = albums_vm.clone();
+            let id = id.clone();
+            tasks.push(Task::perform(
+                async move {
+                    let art = MiniArt::from_fetch(
+                        vm.fetch_album_artwork_with_retry(&id, Some(THUMBNAIL_SIZE), None)
+                            .await,
+                    );
+                    (id, art)
+                },
+                |(id, art)| Message::Artwork(ArtworkMessage::Loaded(id, None, art)),
+            ));
+        }
+    }
+
+    (queued_ids, tasks)
+}
+
 /// Fan-out 80px album artwork fetches for albums newly delivered into a
 /// view's expansion children (Artists→Album, Genres→Album). Skips ids
 /// already in the cache; each surviving id dispatches an

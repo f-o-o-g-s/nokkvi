@@ -76,9 +76,10 @@ pub(crate) fn sort_mode_to_api_string(view: View, sort_mode: SortMode) -> &'stat
         (V::Playlists, S::UpdatedAt) => "updatedAt",
         (V::Playlists, _) => "name",
 
-        // Other views (Queue, Radios, Settings, PlaylistEditor) do not query
-        // the server's sort API. Returning a benign default keeps the type total.
-        (V::Queue | V::Radios | V::Settings | V::PlaylistEditor, _) => "name",
+        // Other views (Queue, Radios, Harbour, Settings, PlaylistEditor) do not
+        // query the server's sort API. Returning a benign default keeps the type
+        // total.
+        (V::Queue | V::Radios | V::Harbour | V::Settings | V::PlaylistEditor, _) => "name",
     }
 }
 
@@ -136,6 +137,8 @@ pub(crate) fn sort_modes_for_view(view: View) -> &'static [SortMode] {
         View::Playlists => &[S::Name, S::SongCount, S::Duration, S::UpdatedAt, S::Random],
         View::Queue => &[],
         View::Radios => &[],
+        // Harbour is not a slot-list view — no sort dropdown.
+        View::Harbour => &[],
         View::Settings => &[],
         View::PlaylistEditor => &[],
     }

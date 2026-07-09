@@ -9,6 +9,7 @@ pub(crate) mod artists;
 pub(crate) mod browsing_panel;
 pub(crate) mod expansion;
 pub(crate) mod genres;
+pub(crate) mod harbour;
 pub(crate) mod login;
 pub(crate) mod playlist_editor;
 pub(crate) mod playlists;
@@ -25,6 +26,7 @@ pub(crate) use albums::{AlbumsAction, AlbumsMessage, AlbumsPage, AlbumsViewData}
 pub(crate) use artists::{ArtistsAction, ArtistsMessage, ArtistsPage, ArtistsViewData};
 pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingView};
 pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData};
+pub(crate) use harbour::{HarbourMessage, HarbourPage, HarbourViewData};
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
 pub(crate) use playlist_editor::EditorViewData;
 pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
@@ -341,6 +343,9 @@ pub(crate) const SIMILAR_SEARCH_ID: &str = "similar_search_input";
 
 /// Search input ID for Radios view
 pub(crate) const RADIOS_SEARCH_ID: &str = "radios_search_input";
+
+/// Search input ID for the Harbour home view's whole-library search
+pub(crate) const HARBOUR_SEARCH_ID: &str = "harbour_search_input";
 
 // ============================================================================
 // define_view_columns! macro — generates a paired `{Name}Column` enum and

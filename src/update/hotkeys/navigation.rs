@@ -249,8 +249,8 @@ impl Nokkvi {
                     None
                 }
             }
-            View::Playlists | View::Settings | View::PlaylistEditor => {
-                // No meaningful match for playlists, settings, or the editor
+            View::Playlists | View::Harbour | View::Settings | View::PlaylistEditor => {
+                // No meaningful match for playlists, Harbour, settings, or the editor
                 trace!(" CenterOnPlaying: No-op for {:?} view", self.current_view);
                 return Task::none();
             }
@@ -312,7 +312,9 @@ impl Nokkvi {
                     let total = self.library.radio_stations.len();
                     self.radios_page.common.handle_set_offset(i, total);
                 }
-                View::Playlists | View::Settings | View::PlaylistEditor => return Task::none(),
+                View::Playlists | View::Harbour | View::Settings | View::PlaylistEditor => {
+                    return Task::none();
+                }
             }
             // Dispatch phase: uniform via `slot_list_message` so the
             // per-view handler's artwork-loading code still runs.
@@ -359,6 +361,7 @@ impl Nokkvi {
                 View::Queue
                 | View::Playlists
                 | View::Radios
+                | View::Harbour
                 | View::Settings
                 | View::PlaylistEditor => {
                     return Task::none();

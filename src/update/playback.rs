@@ -2032,6 +2032,7 @@ impl Nokkvi {
                 crate::View::Songs => Task::done(Message::LoadSongs),
                 crate::View::Genres => Task::done(Message::LoadGenres),
                 crate::View::Playlists => Task::done(Message::LoadPlaylists),
+                crate::View::Harbour => Task::done(Message::LoadHarbour),
                 // Queue always loaded in handle_login_result. The editor is
                 // never a start view (an edit session can't be restored).
                 crate::View::Queue

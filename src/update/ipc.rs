@@ -364,6 +364,7 @@ const fn ipc_switchable(view: View) -> bool {
         | View::Genres
         | View::Playlists
         | View::Radios
+        | View::Harbour
         | View::Settings => true,
         // Contextual destination — never a switch-view target.
         View::PlaylistEditor => false,
@@ -383,6 +384,7 @@ fn view_name(view: View) -> &'static str {
         View::Genres => "genres",
         View::Playlists => "playlists",
         View::Radios => "radios",
+        View::Harbour => "harbour",
         View::Settings => "settings",
         View::PlaylistEditor => "playlist-editor",
     }

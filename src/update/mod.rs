@@ -51,6 +51,7 @@ mod default_playlist_picker;
 mod editor;
 mod eq_modal;
 mod genres;
+mod harbour;
 mod hotkeys;
 mod info_modal;
 mod ipc;
@@ -475,6 +476,19 @@ impl Nokkvi {
                 )
             }
             Message::Settings(msg) => self.handle_settings(msg),
+            Message::Harbour(msg) => {
+                dispatch_view_with_seek!(
+                    self,
+                    msg,
+                    handle_harbour,
+                    crate::views::HarbourMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::ScrollSeek(_)
+                    ),
+                    View::Harbour
+                )
+            }
+            Message::LoadHarbour => self.handle_load_harbour(),
+            Message::HarbourLoader(msg) => self.handle_harbour_loader(msg),
 
             // -----------------------------------------------------------------
             // MPRIS D-Bus Integration

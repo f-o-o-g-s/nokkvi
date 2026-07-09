@@ -123,6 +123,9 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::SwitchToRadios => {
             Message::Navigation(NavigationMessage::SwitchView(View::Radios))
         }
+        HotkeyAction::SwitchToHarbour => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Harbour))
+        }
         HotkeyAction::SwitchToSettings => Message::ToggleSettings,
         // Playback
         HotkeyAction::TogglePlay => Message::Playback(PlaybackMessage::TogglePlay),
