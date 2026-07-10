@@ -24,7 +24,7 @@ use crate::{
 };
 
 mod update;
-mod view;
+pub(crate) mod view;
 
 /// Playlists page local state
 #[derive(Debug)]

@@ -51,10 +51,11 @@ pub(crate) fn playlists_updated_at_visible(
 /// `has_custom_art` (the playlist's `uploaded_image.is_some()`) gates the
 /// "Reset Artwork" entry — there is nothing to reset without an uploaded
 /// cover.
-fn playlist_context_entries(has_custom_art: bool) -> Vec<PlaylistContextEntry> {
+pub(crate) fn playlist_context_entries(has_custom_art: bool) -> Vec<PlaylistContextEntry> {
     use crate::widgets::context_menu::LibraryContextEntry;
     let mut entries = vec![
         PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue),
+        PlaylistContextEntry::Library(LibraryContextEntry::AddToMix),
         PlaylistContextEntry::Separator,
         PlaylistContextEntry::EditPlaylist,
         PlaylistContextEntry::Rename,

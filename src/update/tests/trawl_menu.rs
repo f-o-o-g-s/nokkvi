@@ -188,3 +188,23 @@ fn duplicate_menu_add_toasts_already_in_the_mix() {
         "duplicate add is acknowledged, not silent"
     );
 }
+
+#[test]
+fn playlists_menu_list_offers_add_to_mix() {
+    // The handler chain was tested from day one, but the playlists view
+    // builds its own LOCAL entry list (not the five shared builders) — and
+    // that list shipped without AddToMix, an invisible gap the docs found.
+    // Pin the list itself.
+    for has_custom_art in [false, true] {
+        let entries = crate::views::playlists::view::playlist_context_entries(has_custom_art);
+        assert!(
+            entries.iter().any(|e| matches!(
+                e,
+                crate::views::playlists::PlaylistContextEntry::Library(
+                    LibraryContextEntry::AddToMix
+                )
+            )),
+            "playlist parent rows must offer Add to Mix (has_custom_art={has_custom_art})"
+        );
+    }
+}
