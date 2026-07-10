@@ -255,6 +255,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.toggle_eq_modal",
             default: KeyCombo::key(KeyCode::Char('q')),
         },
+        OpenTrawl {
+            display: "Open Trawl",
+            description: "Open the Trawl mix-builder modal",
+            category: "Playback",
+            toml_key: "open_trawl",
+            settings_key: "hotkey.open_trawl",
+            default: KeyCombo::key(KeyCode::Char('t')),
+        },
         ToggleCrossfade {
             display: "Toggle Crossfade",
             description: "Enable or disable gapless crossfading",

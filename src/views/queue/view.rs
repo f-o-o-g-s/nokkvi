@@ -190,6 +190,8 @@ impl QueuePage {
                         QueueMessage::FocusCurrentPlaying(entry_id, true),
                     ));
                 }
+                // Trawl door for mouse users — the anchor is the feature's mark.
+                btns.push(HeaderButton::Trawl(QueueMessage::OpenTrawl));
                 // Default-playlist chip is gated by a user setting; when on,
                 // it sits left of the columns dropdown in the trailing region.
                 if data.show_default_playlist_chip {
@@ -666,6 +668,7 @@ impl QueuePage {
                     QueueContextEntry::RemoveFromQueue,
                     QueueContextEntry::Separator,
                     QueueContextEntry::AddToPlaylist,
+                    QueueContextEntry::AddToMix,
                     QueueContextEntry::SaveAsPlaylist,
                     QueueContextEntry::Separator,
                     QueueContextEntry::OpenBrowsingPanel,
@@ -710,6 +713,11 @@ impl QueuePage {
                                 item_idx,
                                 QueueContextEntry::AddToPlaylist,
                             ),
+                        ),
+                        QueueContextEntry::AddToMix => menu_button(
+                            Some("assets/icons/anchor.svg"),
+                            "Add to Mix",
+                            QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::AddToMix),
                         ),
                         QueueContextEntry::SaveAsPlaylist => menu_button(
                             Some("assets/icons/list-music.svg"),

@@ -247,7 +247,7 @@ pub(crate) fn about_modal_overlay<'a>(
     .width(Length::Fixed(MODAL_WIDTH));
 
     // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
-    // ui_radius_lg corners. Five overlay modals route through this helper.
+    // ui_radius_lg corners. Six overlay modals route through this helper.
     let dialog_box = container(content)
         .style(theme::modal_frame_style)
         .width(Length::Shrink);

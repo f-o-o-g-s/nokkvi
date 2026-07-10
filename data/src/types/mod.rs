@@ -42,6 +42,7 @@ pub mod theme_file;
 pub mod toast;
 pub mod toml_settings;
 pub mod toml_views;
+pub mod trawl;
 pub mod view_columns;
 pub mod view_preferences;
 pub mod visualizer_config;

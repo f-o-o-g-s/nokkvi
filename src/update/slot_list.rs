@@ -50,6 +50,44 @@ impl Nokkvi {
                 _ => Task::none(),
             };
         }
+
+        // Trawl modal — same priority tier as the picker (which wins the
+        // theoretical double-open; the tiers stay consistent across the gate,
+        // this intercept, and the Escape cascade). Enter toggles the centered
+        // seed; Ctrl+Enter plays the mix — the one playable thing in here.
+        if self.trawl_modal.is_some() {
+            use crate::widgets::trawl_modal::TrawlModalMessage;
+            return match msg {
+                SlotListMessage::NavigateUp => {
+                    // Deliberately no unfocus: Backspace (default SlotListUp)
+                    // must keep deleting text in the search field — the same
+                    // asymmetry as handle_slot_list_navigate_down below.
+                    self.handle_trawl_modal(TrawlModalMessage::SlotListUp)
+                }
+                SlotListMessage::NavigateDown => {
+                    // Tab doubles as "exit search", mirroring the regular
+                    // views: drop focus so bare-key hotkeys stop landing in
+                    // the input, and navigate in the same keypress.
+                    let unfocus = if let Some(state) = self.trawl_modal.as_mut()
+                        && state.search_input_focused
+                    {
+                        state.search_input_focused = false;
+                        iced::widget::operation::focus("__unfocus_all__")
+                    } else {
+                        Task::none()
+                    };
+                    let nav = self.handle_trawl_modal(TrawlModalMessage::SlotListDown);
+                    Task::batch([unfocus, nav])
+                }
+                SlotListMessage::ActivateCenter => {
+                    self.handle_trawl_modal(TrawlModalMessage::ActivateCenter)
+                }
+                SlotListMessage::ActivateCenterShuffled => {
+                    self.handle_trawl_modal(TrawlModalMessage::PlayMix)
+                }
+                _ => Task::none(),
+            };
+        }
         match msg {
             SlotListMessage::NavigateUp => {
                 let task = self.handle_slot_list_navigate_up();
@@ -253,6 +291,8 @@ impl Nokkvi {
                         audio::SfxType::ExpandCollapse
                     }
                     Some(crate::views::harbour::HarbourRow::Item { .. }) => audio::SfxType::Enter,
+                    // The Trawl row activates something (the modal) — Enter cue.
+                    Some(crate::views::harbour::HarbourRow::Trawl { .. }) => audio::SfxType::Enter,
                     // A Hint row (keep-typing / searching / no matches)
                     // activates nothing — same escape cue as an empty list.
                     Some(crate::views::harbour::HarbourRow::Hint(_)) | None => {

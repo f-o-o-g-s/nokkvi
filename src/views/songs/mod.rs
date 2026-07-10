@@ -129,6 +129,8 @@ pub enum SongsAction {
     PlaySongFromIndex(usize, bool), // (index, force_shuffle) - play songs starting from index
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
+    /// Add the resolved selection to the Trawl crate as labeled seeds.
+    AddBatchToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),
     ToggleStar(String, bool), // (song_id, star)
     SetRating(String, usize), // (song_id, rating) - set absolute rating
     LoadLargeArtwork(String), // album_id for artwork

@@ -188,6 +188,23 @@ impl SongsPage {
                                 (Task::none(), SongsAction::None)
                             }
                         }
+                        LibraryContextEntry::AddToMix => {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let seeds =
+                                super::super::expansion::build_trawl_seeds(target_indices, |i| {
+                                    songs.get(i).map(|s| {
+                                        let item: nokkvi_data::types::song::Song = s.clone().into();
+                                        nokkvi_data::types::trawl::TrawlSeed::new(
+                                            nokkvi_data::types::batch::BatchItem::Song(Box::new(
+                                                item,
+                                            )),
+                                            s.title.clone(),
+                                            s.artist.clone(),
+                                        )
+                                    })
+                                });
+                            (Task::none(), SongsAction::AddBatchToMix(seeds))
+                        }
                         LibraryContextEntry::Separator
                         | LibraryContextEntry::ReplaceQueueWithAllFound
                         | LibraryContextEntry::AddAllFoundToQueue

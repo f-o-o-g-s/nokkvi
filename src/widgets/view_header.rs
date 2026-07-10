@@ -46,6 +46,8 @@ pub(crate) enum HeaderButton<'a, Message> {
     CenterOnPlaying(Message),
     /// `(tooltip_label, on_press)` — the plus-icon "add" button.
     Add(&'static str, Message),
+    /// Anchor-icon button opening the Trawl mix builder.
+    Trawl(Message),
     /// Arbitrary element rendered between the built-in buttons and the
     /// search field (e.g. the columns-cog dropdown).
     Trailing(Element<'a, Message>),
@@ -262,6 +264,7 @@ pub(crate) fn view_header<
                         HeaderButton::Refresh(_) => Some("assets/icons/refresh-cw.svg"),
                         HeaderButton::CenterOnPlaying(_) => Some("assets/icons/locate.svg"),
                         HeaderButton::Add(_, _) => Some("assets/icons/plus.svg"),
+                        HeaderButton::Trawl(_) => Some("assets/icons/anchor.svg"),
                         HeaderButton::SortToggle(_) | HeaderButton::Trailing(_) => None,
                     };
                     if let Some(p) = path {
@@ -454,6 +457,13 @@ pub(crate) fn view_header<
             }
             HeaderButton::Add(tooltip, add_msg) => {
                 button_cells.push(header_icon_cell("assets/icons/plus.svg", tooltip, add_msg));
+            }
+            HeaderButton::Trawl(msg) => {
+                button_cells.push(header_icon_cell(
+                    "assets/icons/anchor.svg",
+                    "Trawl — build a mix",
+                    msg,
+                ));
             }
             HeaderButton::Trailing(element) => {
                 // External elements (columns dropdown, shuffle button) come

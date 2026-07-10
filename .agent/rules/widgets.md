@@ -86,7 +86,7 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 
 ## Modal Frame Style
 
-`theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, and `default_playlist_picker` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
+`theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, `default_playlist_picker`, and `trawl_modal` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
 
 The settings **font + theme pickers** are the exception: they share their own chrome via `render_picker_modal()` (`src/views/settings/view.rs`) — a dimmed backdrop (press → Escape, wheel → slot Up/Down) behind a centered `bg0_hard()` + 1.5 px `accent()` panel with an X-back title bar, a search bar, and a caller-built slot-list body. `render_font_modal` / `render_theme_modal` differ only in title/placeholder/search-input-id and their row renderer; the theme picker passes `.without_hover_wash()` so each row stays in its own palette (selection shows via a per-row accent ring).
 

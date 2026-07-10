@@ -334,6 +334,9 @@ pub(crate) enum ArtworkPlaceholder {
     /// Centered radio-tower glyph on the artwork background — Radios stations
     /// with no logo / not-yet-loaded now-playing art.
     RadioTower,
+    /// Centered anchor glyph — the Trawl mix-builder's mark (Harbour's
+    /// centered Trawl row previews no artwork; the anchor holds the panel).
+    Anchor,
 }
 
 impl ArtworkPlaceholder {
@@ -352,6 +355,15 @@ impl ArtworkPlaceholder {
                 color: Some(theme::fg2()),
             })
             .into(),
+            ArtworkPlaceholder::Anchor => {
+                crate::embedded_svg::svg_widget("assets/icons/anchor.svg")
+                    .width(Length::Fixed(96.0))
+                    .height(Length::Fixed(96.0))
+                    .style(|_, _| iced::widget::svg::Style {
+                        color: Some(theme::fg2()),
+                    })
+                    .into()
+            }
         })
         .width(width)
         .height(height)
@@ -720,7 +732,7 @@ pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
 /// on top of `base_panel`. Corners are always flat — rounded mode is
 /// intentionally ignored here so the overlay reads as a banded strip rather
 /// than a floating pill.
-fn wrap_with_pill_overlay<'a, Message: 'a>(
+pub(crate) fn wrap_with_pill_overlay<'a, Message: 'a>(
     base_panel: Element<'a, Message>,
     content: Element<'a, Message>,
 ) -> Element<'a, Message> {

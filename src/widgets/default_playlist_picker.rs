@@ -230,7 +230,7 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
     };
 
     // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
-    // ui_radius_lg corners. Five overlay modals route through this helper
+    // ui_radius_lg corners. Six overlay modals route through this helper
     // so a future per-theme tweak to the modal vocabulary lands at one site.
     let modal_panel = container(
         column![title_bar, search_bar, main_area]

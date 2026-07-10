@@ -50,6 +50,7 @@ impl Nokkvi {
             SimilarAction::AddBatchToPlaylist(payload) => {
                 self.handle_add_batch_to_playlist(payload)
             }
+            SimilarAction::AddBatchToMix(seeds) => self.add_seeds_to_mix(seeds),
             SimilarAction::ToggleStar(song_id, starred) => {
                 self.toggle_star_with_revert_task(song_id, ItemKind::Song, starred)
             }

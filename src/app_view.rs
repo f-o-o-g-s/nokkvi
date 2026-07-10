@@ -980,6 +980,18 @@ impl Nokkvi {
             stack = stack.push(picker_overlay.map(Message::DefaultPlaylistPicker));
         }
 
+        // Trawl mix-builder modal — same tier as the picker, below toasts so
+        // "Added N songs to queue" stays visible over the open modal.
+        if let Some(trawl_state) = &self.trawl_modal {
+            let trawl_overlay = crate::widgets::trawl_modal::trawl_modal_overlay(
+                trawl_state,
+                &self.trawl_crate,
+                self.window.height,
+                &self.artwork.album_art.snapshot,
+            );
+            stack = stack.push(trawl_overlay.map(Message::TrawlModal));
+        }
+
         // Add toast status bar overlay (if any active toast)
         if let Some(toast) = self.toast.current() {
             // Toast icon prefix based on level
@@ -1761,6 +1773,7 @@ impl Nokkvi {
                 .harbour_page
                 .view(views::HarbourViewData {
                     harbour: &self.harbour,
+                    trawl_crate: &self.trawl_crate,
                     album_art: &self.artwork.album_art.snapshot,
                     large_artwork: &self.artwork.large_artwork.snapshot,
                     playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,

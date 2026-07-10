@@ -456,6 +456,9 @@ impl Nokkvi {
             ArtistsAction::LoadPage(offset) => {
                 return self.handle_artists_load_page(offset);
             }
+            ArtistsAction::AddBatchToMix(seeds) => {
+                return self.add_seeds_to_mix(seeds);
+            }
             ArtistsAction::AddBatchToPlaylist(payload) => {
                 return self.handle_add_batch_to_playlist(payload);
             }

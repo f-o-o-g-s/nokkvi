@@ -135,6 +135,9 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::ToggleSoundEffects => Message::Playback(PlaybackMessage::ToggleSoundEffects),
         HotkeyAction::CycleVisualization => Message::Playback(PlaybackMessage::CycleVisualization),
         HotkeyAction::ToggleEqModal => Message::EqModal(crate::widgets::EqModalMessage::Toggle),
+        HotkeyAction::OpenTrawl => {
+            Message::TrawlModal(crate::widgets::trawl_modal::TrawlModalMessage::Open)
+        }
         HotkeyAction::ToggleCrossfade => Message::Playback(PlaybackMessage::ToggleCrossfade),
         HotkeyAction::ToggleBitPerfect => Message::Playback(PlaybackMessage::ToggleBitPerfect),
         // Slot List

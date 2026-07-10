@@ -149,6 +149,8 @@ pub enum GenresAction {
     ToggleStar(String, ItemKind, bool), // (item_id, kind, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
+    /// Add the resolved selection to the Trawl crate as labeled seeds.
+    AddBatchToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),
     FindSimilar(String, String), // (entity_id, label) - open similar tab
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowAlbumInFolder(String),   // album_id - fetch a song path and open containing folder

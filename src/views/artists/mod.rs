@@ -166,6 +166,8 @@ pub enum ArtistsAction {
     RefreshViewData,       // trigger reload
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload), // artist_id or album_id - insert after currently playing
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
+    /// Add the resolved selection to the Trawl crate as labeled seeds.
+    AddBatchToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowAlbumInFolder(String), // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String),  // song path - open containing folder directly

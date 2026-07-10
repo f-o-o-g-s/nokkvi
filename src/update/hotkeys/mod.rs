@@ -505,6 +505,7 @@ impl Nokkvi {
             || self.info_modal.visible
             || self.text_input_dialog.visible
             || self.default_playlist_picker.is_some()
+            || self.trawl_modal.is_some()
         {
             let is_picker_nav = self.default_playlist_picker.is_some()
                 && matches!(
@@ -515,7 +516,22 @@ impl Nokkvi {
                             | crate::app_message::SlotListMessage::ActivateCenter
                     ))
                 );
-            if !is_escape && !is_picker_nav {
+            // The trawl modal additionally admits Ctrl+Enter
+            // (ActivateCenterShuffled): its slot-list intercept maps it to
+            // PlayMix — the one playable thing inside the modal is the mix.
+            let is_trawl_nav = self.trawl_modal.is_some()
+                && matches!(
+                    resolved,
+                    Some(
+                        Message::SlotList(
+                            crate::app_message::SlotListMessage::NavigateUp
+                                | crate::app_message::SlotListMessage::NavigateDown
+                                | crate::app_message::SlotListMessage::ActivateCenter
+                                | crate::app_message::SlotListMessage::ActivateCenterShuffled
+                        ) | Message::Hotkey(crate::app_message::HotkeyMessage::FocusSearch)
+                    )
+                );
+            if !is_escape && !is_picker_nav && !is_trawl_nav {
                 return Task::none();
             }
         }

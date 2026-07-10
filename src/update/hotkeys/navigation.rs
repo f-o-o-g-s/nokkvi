@@ -35,6 +35,15 @@ impl Nokkvi {
             ));
         }
 
+        // Trawl modal closes at the same overlay tier (after the picker — the
+        // tiers agree across all three interception points). The crate itself
+        // survives; only the editor closes.
+        if self.trawl_modal.is_some() {
+            return Task::done(Message::TrawlModal(
+                crate::widgets::trawl_modal::TrawlModalMessage::Close,
+            ));
+        }
+
         // Cancel active cross-pane drag first
         if self.cross_pane_drag.active.is_some() || self.cross_pane_drag.press_origin.is_some() {
             return self.handle_cross_pane_drag_cancel();
@@ -381,6 +390,16 @@ impl Nokkvi {
         // Settings has its own search — must be checked before current_view_page_mut()
         // which would incorrectly route to the browsing panel's page when it's open
         // with browser focus (same priority pattern as handle_clear_search).
+        // Trawl modal open — `/` returns the keyboard to its search field
+        // (the complement of Tab-to-exit; without it a keyboard user who
+        // tabbed into the list can't type again without the mouse).
+        if let Some(state) = self.trawl_modal.as_mut() {
+            state.search_input_focused = true;
+            return iced::widget::operation::focus(
+                crate::widgets::trawl_modal::TRAWL_SEARCH_INPUT_ID,
+            );
+        }
+
         if self.current_view == View::Settings && self.settings_page.theme_sub_list.is_some() {
             // Theme picker is open — focus its search field
             return iced::widget::operation::focus(crate::views::settings::THEME_SEARCH_INPUT_ID);

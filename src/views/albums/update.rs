@@ -312,6 +312,32 @@ impl AlbumsPage {
                     use crate::widgets::context_menu::LibraryContextEntry;
 
                     match entry {
+                        LibraryContextEntry::AddToMix => {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let seeds =
+                                super::super::expansion::build_trawl_seeds(target_indices, |i| {
+                                    match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                                        Some(SlotListEntry::Parent(album)) => {
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                                BatchItem::Album(album.id.clone()),
+                                                album.name.clone(),
+                                                album.artist.clone(),
+                                            ))
+                                        }
+                                        Some(SlotListEntry::Child(song, _)) => {
+                                            let item: nokkvi_data::types::song::Song =
+                                                song.clone().into();
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                                BatchItem::Song(Box::new(item)),
+                                                song.title.clone(),
+                                                song.artist.clone(),
+                                            ))
+                                        }
+                                        None => None,
+                                    }
+                                });
+                            (Task::none(), AlbumsAction::AddBatchToMix(seeds))
+                        }
                         LibraryContextEntry::ShufflePlay
                         | LibraryContextEntry::AddToQueue
                         | LibraryContextEntry::AddToPlaylist => {

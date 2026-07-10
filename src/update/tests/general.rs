@@ -726,6 +726,15 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
     app.pending_expand.target = Some(pending_album("a1"));
     app.pending_expand.center_only = true;
 
+    app.trawl_modal = Some(crate::widgets::trawl_modal::TrawlModalState::default());
+    app.trawl_crate
+        .add(nokkvi_data::types::trawl::TrawlSeed::new(
+            nokkvi_data::types::batch::BatchItem::Album("al1".into()),
+            "A",
+            "Artist",
+        ));
+    app.trawl_search_generation = 9;
+
     app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
     app.cross_pane_drag.selection_count = 5;
     app.cross_pane_drag.pending_queue_insert_position = Some(2);
@@ -767,6 +776,15 @@ fn reset_session_state_clears_all_session_bound_fields() {
         app.harbour.shelves_generation, 4,
         "harbour generation carries forward bumped (seeded 3) — zeroing it \
          would let a pre-logout in-flight fetch match a fresh post-login load"
+    );
+    assert!(app.trawl_modal.is_none(), "trawl modal reset");
+    assert!(
+        app.trawl_crate.is_empty(),
+        "trawl seeds reference the old server — cleared"
+    );
+    assert_eq!(
+        app.trawl_search_generation, 10,
+        "trawl generation carries forward bumped (seeded 9), like harbour's"
     );
     assert!(app.active_playlist_info.is_none());
     assert!(app.playlist_editor.is_none());

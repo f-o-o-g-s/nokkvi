@@ -596,6 +596,9 @@ impl Nokkvi {
             AlbumsAction::ToggleStar(item_id, kind, star) => {
                 return self.toggle_star_with_revert_task(item_id, kind, star);
             }
+            AlbumsAction::AddBatchToMix(seeds) => {
+                return self.add_seeds_to_mix(seeds);
+            }
             AlbumsAction::AddBatchToPlaylist(payload) => {
                 return self.handle_add_batch_to_playlist(payload);
             }

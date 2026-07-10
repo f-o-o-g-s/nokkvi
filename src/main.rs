@@ -228,6 +228,17 @@ pub struct Nokkvi {
     /// Default-playlist picker overlay state. `Some` = picker is open.
     pub default_playlist_picker:
         Option<crate::widgets::default_playlist_picker::DefaultPlaylistPickerState>,
+    /// Trawl mix-builder modal overlay state. `Some` = modal is open. The
+    /// crate being edited lives on `trawl_crate` and survives closing.
+    pub trawl_modal: Option<crate::widgets::trawl_modal::TrawlModalState>,
+    /// The persistent Trawl crate: seeds + blend + min-length. Root-owned so
+    /// the Harbour row and context menus can accrue seeds while the modal is
+    /// closed; cleared on logout (seeds reference server ids).
+    pub trawl_crate: nokkvi_data::types::trawl::TrawlCrate,
+    /// Stale-drop generation for the modal's search fan-outs. Root-owned
+    /// (NOT on `TrawlModalState`) so close/reopen can never re-mint a
+    /// generation an in-flight fan-out already captured.
+    pub trawl_search_generation: u64,
 
     /// The single overlay menu currently open, if any. Mutated only by
     /// `Message::SetOpenMenu` so opening a new menu implicitly closes any
@@ -460,6 +471,9 @@ impl Default for Nokkvi {
             about_modal: crate::widgets::about_modal::AboutModalState::default(),
             eq_modal: crate::widgets::eq_modal::EqModalState::default(),
             default_playlist_picker: None,
+            trawl_modal: None,
+            trawl_crate: nokkvi_data::types::trawl::TrawlCrate::default(),
+            trawl_search_generation: 0,
             open_menu: None,
             roulette: None,
         }

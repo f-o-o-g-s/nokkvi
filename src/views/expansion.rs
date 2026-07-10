@@ -402,6 +402,16 @@ pub(crate) fn build_batch_payload(
         .fold(BatchPayload::new(), |p, item| p.with_item(item))
 }
 
+/// Sibling of [`build_batch_payload`] for Trawl seeds — same universal fold,
+/// but the mapper carries display labels alongside the `BatchItem` so crate
+/// chips read as real names, never raw server ids.
+pub(crate) fn build_trawl_seeds(
+    indices: impl IntoIterator<Item = usize>,
+    mut mapper: impl FnMut(usize) -> Option<nokkvi_data::types::trawl::TrawlSeed>,
+) -> Vec<nokkvi_data::types::trawl::TrawlSeed> {
+    indices.into_iter().filter_map(&mut mapper).collect()
+}
+
 // ── Shared child row renderers ──────────────────────────────────────────────
 
 use iced::{

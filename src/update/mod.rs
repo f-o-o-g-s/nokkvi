@@ -87,6 +87,7 @@ mod tests_queue_filter;
 mod tests_star_rating;
 mod text_input_dialog;
 mod toast;
+mod trawl_modal;
 mod tray;
 mod window;
 
@@ -568,6 +569,11 @@ impl Nokkvi {
             // Default Playlist Picker (header chip → modal overlay)
             // -----------------------------------------------------------------
             Message::DefaultPlaylistPicker(msg) => self.handle_default_playlist_picker(msg),
+
+            // -----------------------------------------------------------------
+            // Trawl Mix Builder (Harbour row → modal overlay)
+            // -----------------------------------------------------------------
+            Message::TrawlModal(msg) => self.handle_trawl_modal(msg),
 
             // -----------------------------------------------------------------
             // Cross-Pane Drag (browsing panel → queue)

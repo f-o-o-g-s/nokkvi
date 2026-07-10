@@ -33,6 +33,8 @@ fn normalize(key: &str) -> &str {
 /// repeating words the visible text already carries.
 pub fn keywords_for(key: &str) -> &'static [&'static str] {
     match normalize(key) {
+        // ── Hotkeys ──────────────────────────────────────────────────────────
+        "hotkey.open_trawl" => &["mix", "trawl", "crate", "builder", "blend", "anchor"],
         // ── General · Library / Display / Behavior ───────────────────────────
         "general.library_page_size" => &["pagination", "batch size", "fetch count"],
         "general.artwork_resolution" => {

@@ -1129,6 +1129,8 @@ pub enum Message {
     EqModal(crate::widgets::EqModalMessage),
     /// Default-playlist picker (modal overlay opened from the header chip)
     DefaultPlaylistPicker(crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage),
+    /// Trawl mix-builder (modal overlay opened from the Harbour row)
+    TrawlModal(crate::widgets::trawl_modal::TrawlModalMessage),
 
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),

@@ -93,6 +93,8 @@ pub enum SimilarAction {
     PlayBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
+    /// Add the resolved selection to the Trawl crate as labeled seeds.
+    AddBatchToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),
     ToggleStar(String, bool),
     LoadLargeArtwork(String),
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>),
@@ -257,6 +259,19 @@ impl SimilarPage {
                                 format!("Top Songs: {}", song.artist),
                             ),
                         ),
+                        LibraryContextEntry::AddToMix => {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let seeds = super::expansion::build_trawl_seeds(target_indices, |i| {
+                                songs.get(i).map(|s| {
+                                    nokkvi_data::types::trawl::TrawlSeed::new(
+                                        BatchItem::Song(Box::new(s.clone())),
+                                        s.title.clone(),
+                                        s.artist.clone(),
+                                    )
+                                })
+                            });
+                            (Task::none(), SimilarAction::AddBatchToMix(seeds))
+                        }
                         LibraryContextEntry::Separator => (Task::none(), SimilarAction::None),
                         // Shuffle Play is intentionally omitted from the Similar/Top Songs
                         // menu (use the batch "Replace Queue with All Found" instead).
@@ -802,6 +817,24 @@ mod tests {
                 assert_eq!(batch.items.len(), 2, "Batch should contain all found songs");
             }
             other => panic!("expected AddBatchToQueue, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn context_add_to_mix_emits_labeled_song_seed() {
+        let mut page = SimilarPage::new();
+        let songs = vec![test_song("s1", "Archangel", "Burial")];
+        let (_, action) = page.update(
+            SimilarMessage::ContextMenuAction(0, LibraryContextEntry::AddToMix),
+            &songs,
+        );
+        match action {
+            SimilarAction::AddBatchToMix(seeds) => {
+                assert_eq!(seeds.len(), 1);
+                assert_eq!(seeds[0].label, "Archangel");
+                assert_eq!(seeds[0].sublabel, "Burial");
+            }
+            other => panic!("expected AddBatchToMix, got {other:?}"),
         }
     }
 

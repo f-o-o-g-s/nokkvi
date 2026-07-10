@@ -175,6 +175,8 @@ pub enum PlaylistsAction {
     /// the batch once (context-menu Shuffle Play); `false` honors `enter_shuffle`.
     PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
+    /// Add the resolved selection to the Trawl crate as labeled seeds.
+    AddBatchToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),
     ExpandPlaylist(String), // playlist_id - load tracks for expansion
     PlayPlaylistFromTrack(String, usize, bool), // (playlist_id, track_index, force_shuffle)
     LoadArtwork(String),    // playlist_id - load artwork for centered playlist on slot list scroll

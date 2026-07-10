@@ -252,6 +252,30 @@ impl ArtistsPage {
                     use crate::widgets::context_menu::LibraryContextEntry;
 
                     match entry {
+                        LibraryContextEntry::AddToMix => {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let seeds =
+                                super::super::expansion::build_trawl_seeds(target_indices, |i| {
+                                    match self.expansion.get_entry_at(i, artists, |a| &a.id) {
+                                        Some(SlotListEntry::Parent(artist)) => {
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                                BatchItem::Artist(artist.id.clone()),
+                                                artist.name.clone(),
+                                                "Artist",
+                                            ))
+                                        }
+                                        Some(SlotListEntry::Child(album, _)) => {
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                                BatchItem::Album(album.id.clone()),
+                                                album.name.clone(),
+                                                album.artist.clone(),
+                                            ))
+                                        }
+                                        None => None,
+                                    }
+                                });
+                            (Task::none(), ArtistsAction::AddBatchToMix(seeds))
+                        }
                         LibraryContextEntry::ShufflePlay
                         | LibraryContextEntry::AddToQueue
                         | LibraryContextEntry::AddToPlaylist => {

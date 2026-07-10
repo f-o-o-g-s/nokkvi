@@ -50,6 +50,7 @@ pub(crate) mod info_modal;
 pub(crate) mod progress_bar;
 pub(crate) mod slot_list_view;
 pub(crate) mod text_input_dialog;
+pub(crate) mod trawl_modal;
 pub(crate) mod view_header;
 pub(crate) mod volume_slider;
 

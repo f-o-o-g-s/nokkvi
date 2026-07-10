@@ -1343,6 +1343,36 @@ impl AppService {
             .await
     }
 
+    // =========================================================================
+    // Trawl Mix Methods
+    //
+    // A trawl crate resolves through `LibraryOrchestrator::resolve_trawl`
+    // (per-seed fetch → min-length filter → sample cap → blend) and then
+    // dispatches the pre-blended list as `SongSource::Preloaded` — the blend
+    // IS the ordering, so no one-shot shuffle is layered on top.
+    // =========================================================================
+
+    /// Resolve the trawl crate and replace the queue with the blended mix.
+    pub async fn play_trawl(&self, mix: &crate::types::trawl::TrawlCrate) -> Result<()> {
+        let songs = self.library_orchestrator().resolve_trawl(mix).await?;
+        self.dispatch_shuffled(
+            SongSource::Preloaded(songs),
+            QueueVerb::Play(StartPosition::First),
+            OneShotShuffle::None,
+        )
+        .await
+    }
+
+    /// Resolve the trawl crate and append the blended mix to the queue.
+    /// Returns the number of songs added, for the confirmation toast.
+    pub async fn add_trawl_to_queue(&self, mix: &crate::types::trawl::TrawlCrate) -> Result<usize> {
+        let songs = self.library_orchestrator().resolve_trawl(mix).await?;
+        let count = songs.len();
+        self.dispatch(SongSource::Preloaded(songs), QueueVerb::Enqueue)
+            .await?;
+        Ok(count)
+    }
+
     /// Remove queue rows by per-row `entry_id` and keep the audio engine in
     /// sync. Targets specific rows rather than every row matching a song_id,
     /// so right-click "Remove from queue" on one of several duplicate rows

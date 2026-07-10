@@ -239,6 +239,32 @@ impl GenresPage {
                     use crate::widgets::context_menu::LibraryContextEntry;
 
                     match entry {
+                        LibraryContextEntry::AddToMix => {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let seeds =
+                                super::super::expansion::build_trawl_seeds(target_indices, |i| {
+                                    match self.expansion.get_entry_at(i, genres, |g| &g.id) {
+                                        Some(SlotListEntry::Parent(genre)) => {
+                                            let albums = genre.album_count;
+                                            let noun = if albums == 1 { "album" } else { "albums" };
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                                BatchItem::Genre(genre.name.clone()),
+                                                genre.name.clone(),
+                                                format!("{albums} {noun}"),
+                                            ))
+                                        }
+                                        Some(SlotListEntry::Child(album, _)) => {
+                                            Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                                BatchItem::Album(album.id.clone()),
+                                                album.name.clone(),
+                                                album.artist.clone(),
+                                            ))
+                                        }
+                                        None => None,
+                                    }
+                                });
+                            (Task::none(), GenresAction::AddBatchToMix(seeds))
+                        }
                         LibraryContextEntry::ShufflePlay
                         | LibraryContextEntry::AddToQueue
                         | LibraryContextEntry::AddToPlaylist => {

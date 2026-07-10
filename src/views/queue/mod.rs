@@ -184,6 +184,8 @@ pub enum QueueContextEntry {
     Separator,
     RemoveFromQueue,
     AddToPlaylist,
+    /// Add the selection to the Trawl crate as song seeds.
+    AddToMix,
     SaveAsPlaylist,
     OpenBrowsingPanel,
     GetInfo,
@@ -242,6 +244,8 @@ pub enum QueueMessage {
     ArtworkColumnVerticalDrag(crate::widgets::artwork_split_handle::DragEvent),
     /// Header chip clicked — bubble to root, opens the default-playlist picker.
     OpenDefaultPlaylistPicker,
+    /// Header anchor button — open the Trawl mix builder.
+    OpenTrawl,
     /// Pointer entered the read-only playlist context strip — expand its detail
     /// block (hover mode). Handled locally; no root action.
     PlaylistStripHoverEnter,
@@ -285,12 +289,14 @@ pub enum QueueAction {
     SaveAsPlaylist,             // open dialog to save queue as new playlist
     OpenBrowsingPanel,          // toggle the library browser panel
     AddToPlaylist(Vec<String>), // song_ids - add to playlist dialog
-    EditPlaylist,               // enter edit mode from playlist context bar
-    ShowInfo(usize),            // Open info modal (queue index for full Song lookup)
-    ShowInFolder(usize),        // Open containing folder (queue index, path fetched via API)
-    RefreshArtwork(String),     // album_id - refresh artwork from server
-    FindSimilar(usize),         // Open Find Similar panel for queue index
-    TopSongs(usize),            // Open Top Songs panel for queue index
+    /// Add the resolved selection to the Trawl crate as labeled song seeds.
+    AddToMix(Vec<nokkvi_data::types::trawl::TrawlSeed>),
+    EditPlaylist,           // enter edit mode from playlist context bar
+    ShowInfo(usize),        // Open info modal (queue index for full Song lookup)
+    ShowInFolder(usize),    // Open containing folder (queue index, path fetched via API)
+    RefreshArtwork(String), // album_id - refresh artwork from server
+    FindSimilar(usize),     // Open Find Similar panel for queue index
+    TopSongs(usize),        // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
@@ -299,6 +305,8 @@ pub enum QueueAction {
     ColumnVisibilityChanged(QueueColumn, bool),
     /// Bubble to root: open the default-playlist picker overlay.
     OpenDefaultPlaylistPicker,
+    /// Header anchor button — open the Trawl mix builder.
+    OpenTrawl,
     None,
 }
 

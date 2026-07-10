@@ -421,6 +421,9 @@ impl Nokkvi {
             SongsAction::LoadPage(offset) => {
                 return self.handle_songs_load_page(offset);
             }
+            SongsAction::AddBatchToMix(seeds) => {
+                return self.add_seeds_to_mix(seeds);
+            }
             SongsAction::AddBatchToPlaylist(payload) => {
                 // Wait! To add to playlist we need a flat list of `song_ids`.
                 // Currently `fetch_playlists_for_add_to_playlist` takes a `Vec<String>` of song_ids!

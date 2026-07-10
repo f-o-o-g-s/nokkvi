@@ -24,7 +24,9 @@ pub struct ReplayGain {
     pub track_peak: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, bincode_next::Encode, bincode_next::Decode)]
+#[derive(
+    Debug, Clone, Default, Serialize, Deserialize, bincode_next::Encode, bincode_next::Decode,
+)]
 pub struct Song {
     #[serde(rename = "id")]
     pub id: String,

@@ -550,6 +550,9 @@ impl Nokkvi {
             QueueAction::ShowToast(msg) => {
                 self.toast_info(msg);
             }
+            QueueAction::AddToMix(seeds) => {
+                return self.add_seeds_to_mix(seeds);
+            }
             QueueAction::AddToPlaylist(song_ids) => {
                 return self.fetch_playlists_for_add_to_playlist(song_ids);
             }
@@ -708,6 +711,10 @@ impl Nokkvi {
             }
             QueueAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);
+            }
+            QueueAction::OpenTrawl => {
+                return self
+                    .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
             }
             QueueAction::OpenDefaultPlaylistPicker => {
                 return Task::done(Message::DefaultPlaylistPicker(

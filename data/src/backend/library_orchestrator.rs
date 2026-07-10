@@ -26,8 +26,43 @@ use crate::{
         batch::{BatchItem, BatchPayload},
         song::Song,
         song_source::SongSource,
+        trawl::TrawlCrate,
     },
 };
+
+/// Error for a trawl resolve that produced nothing. When songs existed
+/// before the filters ran, name the active filter(s) so the user knows what
+/// to loosen; otherwise it's the generic empty-resolve failure.
+fn empty_trawl_error(
+    pre_filter_total: usize,
+    min_length: crate::types::trawl::TrawlMinLength,
+    max_length: crate::types::trawl::TrawlMaxLength,
+    min_rating: crate::types::trawl::TrawlMinRating,
+) -> anyhow::Error {
+    let active = usize::from(min_length.secs().is_some())
+        + usize::from(max_length.secs().is_some())
+        + usize::from(min_rating.stars().is_some());
+    if pre_filter_total == 0 || active == 0 {
+        anyhow::anyhow!("No songs found for the mix")
+    } else if active > 1 {
+        anyhow::anyhow!("Mix is empty — the active filters removed every song. Loosen them.")
+    } else if min_length.secs().is_some() {
+        anyhow::anyhow!(
+            "Mix is empty — every song was under {}. Lower the minimum length.",
+            min_length.threshold_label()
+        )
+    } else if max_length.secs().is_some() {
+        anyhow::anyhow!(
+            "Mix is empty — every song was over {}. Raise the maximum length.",
+            max_length.threshold_label()
+        )
+    } else {
+        anyhow::anyhow!(
+            "Mix is empty — no song met \"{}\". Lower the rating filter.",
+            min_rating.label()
+        )
+    }
+}
 
 pub struct LibraryOrchestrator<'a> {
     auth: &'a AuthGateway,
@@ -125,6 +160,75 @@ impl<'a> LibraryOrchestrator<'a> {
             Err(anyhow::anyhow!("No songs found in batch payload"))
         } else {
             Ok(resolved)
+        }
+    }
+
+    /// Resolve a trawl crate into its blended track list.
+    ///
+    /// Per seed: fetch songs through the per-entity `resolve_*` helpers
+    /// (skip-on-fail with `warn!`, like [`Self::resolve_batch`]), apply the
+    /// min-length filter (hand-picked Song seeds exempt), sample artist and
+    /// genre seeds down to [`crate::types::trawl::TRAWL_SEED_SAMPLE_CAP`],
+    /// then merge everything with [`crate::types::trawl::blend_trawl`].
+    /// Empty output is a hard error, with dedicated copy when the min-length
+    /// filter alone emptied the mix.
+    pub async fn resolve_trawl(&self, mix: &TrawlCrate) -> Result<Vec<Song>> {
+        use crate::types::trawl::{
+            TRAWL_SEED_SAMPLE_CAP, blend_trawl, filter_max_length, filter_min_length,
+            filter_min_rating, sample_cap,
+        };
+
+        if mix.is_empty() {
+            return Err(anyhow::anyhow!("The crate is empty"));
+        }
+
+        let mut lists: Vec<(Vec<Song>, u8)> = Vec::new();
+        let mut pre_filter_total = 0usize;
+
+        for seed in &mix.seeds {
+            let songs_result = match &seed.item {
+                BatchItem::Song(song) => Ok(vec![(**song).clone()]),
+                BatchItem::Album(id) => self.resolve_album(id).await,
+                BatchItem::Artist(id) => self.resolve_artist(id).await,
+                BatchItem::Genre(name) => self.resolve_genre(name).await,
+                BatchItem::Playlist(id) => self.resolve_playlist(id).await,
+            };
+            match songs_result {
+                Ok(mut songs) => {
+                    pre_filter_total += songs.len();
+                    // Hand-picked songs are exempt from the length and
+                    // rating filters — the user meant them.
+                    if !matches!(seed.item, BatchItem::Song(_)) {
+                        songs = filter_min_length(songs, mix.min_length);
+                        songs = filter_max_length(songs, mix.max_length);
+                        songs = filter_min_rating(songs, mix.min_rating);
+                    }
+                    // Unbounded seeds get sampled so one genre can't swamp
+                    // the mix; albums and playlists go in whole.
+                    if matches!(seed.item, BatchItem::Artist(_) | BatchItem::Genre(_)) {
+                        sample_cap(&mut songs, TRAWL_SEED_SAMPLE_CAP, &mut rand::rng());
+                    }
+                    lists.push((songs, seed.weight));
+                }
+                Err(e) => tracing::warn!("Trawl seed resolution failed, skipping: {e}"),
+            }
+        }
+
+        let mut blended = blend_trawl(lists, mix.blend, &mut rand::rng());
+        // Cap AFTER blending so the blend's character survives into the head
+        // (Shuffle all thereby becomes a uniform sample).
+        if let Some(cap) = mix.max_tracks.limit() {
+            blended.truncate(cap);
+        }
+        if blended.is_empty() {
+            Err(empty_trawl_error(
+                pre_filter_total,
+                mix.min_length,
+                mix.max_length,
+                mix.min_rating,
+            ))
+        } else {
+            Ok(blended)
         }
     }
 }
@@ -276,5 +380,198 @@ mod tests {
             .expect("song-only batch resolves");
         let ids: Vec<String> = out.iter().map(|s| s.id.clone()).collect();
         assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    // ---- resolve_trawl ---------------------------------------------------
+
+    use crate::types::trawl::{TrawlCrate, TrawlMinLength, TrawlSeed};
+
+    fn song_seed(id: &str, duration: u32) -> TrawlSeed {
+        let mut song = Song::test_default(id, &format!("Song {id}"));
+        song.duration = duration;
+        TrawlSeed::new(BatchItem::Song(Box::new(song)), id, "Artist")
+    }
+
+    #[tokio::test]
+    async fn resolve_trawl_empty_crate_errors() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let err = orch
+            .resolve_trawl(&TrawlCrate::default())
+            .await
+            .expect_err("empty crate must error");
+        assert!(
+            err.to_string().contains("crate is empty"),
+            "expected empty-crate error, got: {err}"
+        );
+    }
+
+    /// Song seeds resolve offline; the default Interleave blend of singleton
+    /// lists preserves crate order.
+    #[tokio::test]
+    async fn resolve_trawl_song_seeds_blend_in_crate_order() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let mut mix = TrawlCrate::default();
+        mix.add(song_seed("a", 200));
+        mix.add(song_seed("b", 200));
+        mix.add(song_seed("c", 200));
+
+        let out = orch
+            .resolve_trawl(&mix)
+            .await
+            .expect("song-only crate resolves");
+        let ids: Vec<String> = out.iter().map(|s| s.id.clone()).collect();
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    }
+
+    /// Hand-picked song seeds bypass the min-length filter entirely.
+    #[tokio::test]
+    async fn resolve_trawl_song_seeds_exempt_from_min_length() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let mut mix = TrawlCrate {
+            min_length: TrawlMinLength::S120,
+            ..TrawlCrate::default()
+        };
+        mix.add(song_seed("skit", 24));
+
+        let out = orch
+            .resolve_trawl(&mix)
+            .await
+            .expect("hand-picked short song must survive");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "skit");
+    }
+
+    /// Failing seeds (unauthenticated album fetch) are skipped with a warn,
+    /// not fatal — the surviving song seed still resolves.
+    #[tokio::test]
+    async fn resolve_trawl_skips_failing_seeds() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let mut mix = TrawlCrate::default();
+        mix.add(TrawlSeed::new(
+            BatchItem::Album("nonexistent".into()),
+            "Ghost Album",
+            "Nobody",
+        ));
+        mix.add(song_seed("a", 200));
+
+        let out = orch.resolve_trawl(&mix).await.expect("song seed survives");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "a");
+    }
+
+    /// All seeds failing → generic empty error (nothing was filtered away).
+    #[tokio::test]
+    async fn resolve_trawl_all_seeds_failing_errors_generic() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let mut mix = TrawlCrate::default();
+        mix.add(TrawlSeed::new(
+            BatchItem::Album("nonexistent".into()),
+            "Ghost Album",
+            "Nobody",
+        ));
+
+        let err = orch.resolve_trawl(&mix).await.expect_err("must error");
+        assert!(
+            err.to_string().contains("No songs found for the mix"),
+            "expected generic empty error, got: {err}"
+        );
+    }
+
+    /// The max-tracks cap truncates the blended output — Interleave order
+    /// survives into the head (one per seed, crate order).
+    #[tokio::test]
+    async fn resolve_trawl_caps_total_tracks_after_blending() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let mut mix = TrawlCrate {
+            max_tracks: crate::types::trawl::TrawlMaxTracks::T25,
+            ..TrawlCrate::default()
+        };
+        for i in 0..30 {
+            mix.add(song_seed(&format!("s{i}"), 200));
+        }
+
+        let out = orch.resolve_trawl(&mix).await.expect("resolves");
+        assert_eq!(out.len(), 25, "capped after blend");
+        let ids: Vec<String> = out.iter().map(|s| s.id.clone()).collect();
+        let expected: Vec<String> = (0..25).map(|i| format!("s{i}")).collect();
+        assert_eq!(
+            ids, expected,
+            "blend order survives into the truncated head"
+        );
+    }
+
+    #[test]
+    fn empty_trawl_error_names_the_active_filters() {
+        use crate::types::trawl::{TrawlMaxLength, TrawlMinRating};
+
+        let min_only = empty_trawl_error(
+            12,
+            TrawlMinLength::S60,
+            TrawlMaxLength::Off,
+            TrawlMinRating::Off,
+        );
+        assert!(
+            min_only.to_string().contains("under 1:00"),
+            "min-length case names the threshold, got: {min_only}"
+        );
+        let max_only = empty_trawl_error(
+            12,
+            TrawlMinLength::Off,
+            TrawlMaxLength::S480,
+            TrawlMinRating::Off,
+        );
+        assert!(
+            max_only.to_string().contains("over 8:00"),
+            "max-length case names the threshold, got: {max_only}"
+        );
+        let rating_only = empty_trawl_error(
+            12,
+            TrawlMinLength::Off,
+            TrawlMaxLength::Off,
+            TrawlMinRating::R4,
+        );
+        assert!(
+            rating_only.to_string().contains("4 stars and up"),
+            "rating-only case names the filter, got: {rating_only}"
+        );
+        let combo = empty_trawl_error(
+            12,
+            TrawlMinLength::S60,
+            TrawlMaxLength::S480,
+            TrawlMinRating::Off,
+        );
+        assert!(
+            combo.to_string().contains("the active filters"),
+            "multi-filter case collapses honestly, got: {combo}"
+        );
+        let generic = empty_trawl_error(
+            0,
+            TrawlMinLength::S60,
+            TrawlMaxLength::S480,
+            TrawlMinRating::R4,
+        );
+        assert!(generic.to_string().contains("No songs found for the mix"));
+        let all_off = empty_trawl_error(
+            12,
+            TrawlMinLength::Off,
+            TrawlMaxLength::Off,
+            TrawlMinRating::Off,
+        );
+        assert!(
+            all_off.to_string().contains("No songs found for the mix"),
+            "filters off cannot blame the filters"
+        );
     }
 }

@@ -1109,6 +1109,31 @@ impl Nokkvi {
         )
     }
 
+    /// Fold context-menu seeds into the Trawl crate, deduped by identity.
+    /// Toasts the count (the crate is edited blind from a menu — feedback
+    /// matters); a fully-duplicate add gets an info toast instead.
+    pub(crate) fn add_seeds_to_mix(
+        &mut self,
+        seeds: Vec<nokkvi_data::types::trawl::TrawlSeed>,
+    ) -> Task<Message> {
+        if seeds.is_empty() {
+            return Task::none();
+        }
+        let mut added = 0usize;
+        for seed in seeds {
+            if self.trawl_crate.add(seed) {
+                added += 1;
+            }
+        }
+        if added == 0 {
+            self.toast_info("Already in the mix");
+        } else {
+            let noun = if added == 1 { "seed" } else { "seeds" };
+            self.toast_success(format!("Added {added} {noun} to the mix"));
+        }
+        Task::none()
+    }
+
     /// Fire a play-next-batch task, warning if shuffle is active.
     pub(crate) fn play_next_batch_task(
         &mut self,
@@ -1418,7 +1443,10 @@ impl Nokkvi {
     /// - **Server-specific data pointing at gone IDs**: library, artwork,
     ///   similar_songs(+generation), active_playlist_info, playlist_editor,
     ///   server_version, last_queue_current_index,
-    ///   pending_expand (whole `PendingExpandState`), roulette.
+    ///   pending_expand (whole `PendingExpandState`), roulette,
+    ///   trawl_crate + trawl_modal (+trawl_search_generation carried forward
+    ///   bumped — seeds and search results reference the old server's ids;
+    ///   unlike the retained picker shell, the trawl modal holds server data).
     /// - **Transient UI work tied to the prior session**: open_menu,
     ///   browsing_panel, cross_pane_drag (whole `CrossPaneDragUi`),
     ///   start_view_applied, suppress_next_auto_center.
@@ -1539,6 +1567,11 @@ impl Nokkvi {
             search_generation: self.harbour.search_generation.wrapping_add(1),
             ..Default::default()
         };
+        // Trawl: seeds + search results are keyed on the prior server's ids.
+        // Same generation carry-forward rationale as Harbour above.
+        self.trawl_modal = None;
+        self.trawl_crate = nokkvi_data::types::trawl::TrawlCrate::default();
+        self.trawl_search_generation = self.trawl_search_generation.wrapping_add(1);
         self.active_playlist_info = None;
         self.queue_page.playlist_strip_expanded = false;
         // A sort dropdown / hover lock set at logout or session-expiry would

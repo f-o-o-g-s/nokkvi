@@ -52,6 +52,10 @@ pub(crate) const HOT_PICKS_PER_SECTION: usize = 4;
 /// length (fetch short-circuits while the view already left the hint state).
 pub(crate) const SEARCH_MIN_CHARS: usize = 2;
 
+/// Per-type result cap for whole-library search fan-outs (Harbour's grouped
+/// preview AND the Trawl modal share it — refine the query rather than page).
+pub(crate) const SEARCH_PREVIEW_LIMIT: usize = 8;
+
 /// Stable identity for every collapsible Harbour section (shelf + search
 /// group). Membership in the page's `collapsed` set is keyed on this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,19 +115,114 @@ fn join_facts(parts: Vec<Option<String>>) -> String {
     parts.into_iter().flatten().collect::<Vec<_>>().join(" • ")
 }
 
+/// The section identity glyph — one mapping consumed by BOTH the header's
+/// expanded/empty art square and [`section_preview_panel`]'s pill eyebrow, so
+/// the two can never drift. Search groups share their shelf sibling's glyph.
+pub(crate) fn section_icon(id: HarbourSectionId) -> &'static str {
+    match id {
+        HarbourSectionId::RecentlyPlayed => "assets/icons/clock.svg",
+        HarbourSectionId::RecentlyAdded => "assets/icons/calendar.svg",
+        HarbourSectionId::MostPlayedTracks | HarbourSectionId::SearchSongs => {
+            "assets/icons/music-2.svg"
+        }
+        HarbourSectionId::MostPlayedAlbums | HarbourSectionId::SearchAlbums => {
+            "assets/icons/disc-3.svg"
+        }
+        HarbourSectionId::MostPlayedArtists | HarbourSectionId::SearchArtists => {
+            "assets/icons/mic.svg"
+        }
+        HarbourSectionId::MostPlayedGenres
+        | HarbourSectionId::Genres
+        | HarbourSectionId::SearchGenres => "assets/icons/tags.svg",
+        HarbourSectionId::Playlists | HarbourSectionId::SearchPlaylists => {
+            "assets/icons/list-music.svg"
+        }
+    }
+}
+
+/// A collapsed section header's first-pick teaser: the concrete subtitle line
+/// plus the art keys the header square resolves through the same
+/// custom→quad→single ladder as item rows ([`harbour_art_element`]).
+#[derive(Debug)]
+pub(crate) struct SectionTeaser {
+    /// The first pick's ` • `-joined line ("Karma Police • Radiohead •
+    /// Played 2 hours ago"). Missing facts drop — never a placeholder.
+    pub subtitle: String,
+    /// Single-mini key (album id, or artist id for artist sections).
+    pub art_album_id: Option<String>,
+    /// Album ids feeding the 2×2 quad (fewer than 2 = single mini).
+    pub art_album_ids: Vec<String>,
+    /// Custom playlist cover key — wins outright when its 80px mini is cached.
+    pub custom_playlist_id: Option<String>,
+}
+
+/// The section header's subtitle line, resolved from its state:
+/// - an empty shelf reads "Nothing here yet" in BOTH states (never a fake
+///   pick, never a permanently-blank line);
+/// - an expanded header quantifies its contents — "{count} picks" for shelves,
+///   "{n} matches" for search groups below [`SEARCH_PREVIEW_LIMIT`] (the
+///   fan-out returned under its cap, so it IS the true total) and
+///   "8+ matches" at the cap, an honest floor;
+/// - a collapsed header shows its first pick's concrete teaser line.
+pub(crate) fn section_header_subtitle(
+    teaser: Option<&SectionTeaser>,
+    expanded: bool,
+    count: usize,
+    is_search: bool,
+) -> String {
+    let Some(teaser) = teaser else {
+        return "Nothing here yet".to_string();
+    };
+    if !expanded {
+        return teaser.subtitle.clone();
+    }
+    if is_search {
+        if count >= SEARCH_PREVIEW_LIMIT {
+            format!("{SEARCH_PREVIEW_LIMIT}+ matches")
+        } else if count == 1 {
+            "1 match".to_string()
+        } else {
+            format!("{count} matches")
+        }
+    } else if count == 1 {
+        "1 pick".to_string()
+    } else {
+        format!("{count} picks")
+    }
+}
+
 /// One flattened Harbour row. The single source of row order is
 /// [`build_harbour_rows`], consumed by both the view (render) and the update
 /// handler (which resolves the centered row into an action).
 #[derive(Debug)]
 pub(crate) enum HarbourRow {
+    /// The Trawl mix-builder door — a fixed action row (first slot in
+    /// shelves mode; absent during search). Activation opens the modal
+    /// instead of expanding/playing; deliberately NOT a Section so it never
+    /// joins the collapse machinery.
+    Trawl {
+        /// Seed count for the live subtitle ("3 seeds • Interleave").
+        seeds: usize,
+        /// Active blend, the subtitle's second fact.
+        blend: nokkvi_data::types::trawl::TrawlBlend,
+    },
     /// A collapsible section header. `see_all` is `Some` for search groups
     /// (routes to the full library view) and `None` for shelves.
     Section {
         id: HarbourSectionId,
         title: String,
+        /// Items under this header (capped at the hot-picks / preview limit).
+        /// Not rendered inline anymore — it feeds the view-header "N items"
+        /// sum and the expanded "{count} picks" / "{n} matches" subtitle.
         count: usize,
         expanded: bool,
         see_all: Option<HarbourSection>,
+        /// Section identity glyph ([`section_icon`]) — the art square of an
+        /// expanded or empty header.
+        glyph: &'static str,
+        /// First-pick teaser (cover + concrete subtitle) a collapsed header
+        /// shows; `None` for an empty shelf.
+        teaser: Option<SectionTeaser>,
     },
     /// A playable item under an expanded section.
     Item {
@@ -139,18 +238,39 @@ pub(crate) enum HarbourRow {
     Hint(String),
 }
 
+/// The Trawl row's live subtitle: an invitation when the crate is empty,
+/// otherwise the crate's two facts joined app-style ("3 seeds • Interleave").
+pub(crate) fn trawl_row_subtitle(
+    seeds: usize,
+    blend: nokkvi_data::types::trawl::TrawlBlend,
+) -> String {
+    if seeds == 0 {
+        "Build a mix from anything in the library".to_string()
+    } else {
+        let noun = if seeds == 1 { "seed" } else { "seeds" };
+        format!("{seeds} {noun} • {}", blend.label())
+    }
+}
+
 /// Build the flattened Harbour row list. The ONE source of row order —
 /// [`HarbourPage::view`] renders it and `handle_harbour` re-derives it to
 /// resolve the centered row into an action, so the two never drift.
 pub(crate) fn build_harbour_rows(
     harbour: &crate::state::HarbourState,
     collapsed: &HashSet<HarbourSectionId>,
+    trawl: &nokkvi_data::types::trawl::TrawlCrate,
 ) -> Vec<HarbourRow> {
     let mut rows = Vec::new();
     let query = harbour.search_query.trim();
 
     if query.is_empty() {
         // ── Shelves mode ──────────────────────────────────────────────────
+        // The Trawl door leads the index — a stable first slot (the picker's
+        // pinned "Clear default" precedent), hidden during search.
+        rows.push(HarbourRow::Trawl {
+            seeds: trawl.len(),
+            blend: trawl.blend,
+        });
         push_song_section(
             &mut rows,
             HarbourSectionId::RecentlyPlayed,
@@ -270,6 +390,14 @@ pub(crate) fn build_harbour_rows(
     // Search sections default EXPANDED: they start OUT of the collapsed set,
     // so `!collapsed.contains(id)` is `true` until the user collapses one.
     if !results.artists.is_empty() {
+        // Teaser: the bare name — the item rows' constant "Artist" fact would
+        // be redundant beside the "Artists" section title.
+        let teaser = results.artists.first().map(|a| SectionTeaser {
+            subtitle: a.name.clone(),
+            art_album_id: Some(a.id.clone()),
+            art_album_ids: Vec::new(),
+            custom_playlist_id: None,
+        });
         let expanded = push_search_header(
             &mut rows,
             HarbourSectionId::SearchArtists,
@@ -277,6 +405,7 @@ pub(crate) fn build_harbour_rows(
             HarbourSection::Artists,
             results.artists.len(),
             collapsed,
+            teaser,
         );
         if expanded {
             for a in &results.artists {
@@ -294,6 +423,18 @@ pub(crate) fn build_harbour_rows(
         }
     }
     if !results.albums.is_empty() {
+        let teaser = results.albums.first().map(|a| SectionTeaser {
+            subtitle: join_facts(vec![
+                Some(a.name.clone()),
+                a.artist
+                    .clone()
+                    .or_else(|| a.album_artist.clone())
+                    .filter(|s| !s.is_empty()),
+            ]),
+            art_album_id: Some(a.id.clone()),
+            art_album_ids: vec![a.id.clone()],
+            custom_playlist_id: None,
+        });
         let expanded = push_search_header(
             &mut rows,
             HarbourSectionId::SearchAlbums,
@@ -301,6 +442,7 @@ pub(crate) fn build_harbour_rows(
             HarbourSection::Albums,
             results.albums.len(),
             collapsed,
+            teaser,
         );
         if expanded {
             for a in &results.albums {
@@ -320,6 +462,15 @@ pub(crate) fn build_harbour_rows(
         }
     }
     if !results.songs.is_empty() {
+        let teaser = results.songs.first().map(|s| SectionTeaser {
+            subtitle: join_facts(vec![
+                Some(s.title.clone()),
+                (!s.artist.is_empty()).then(|| s.artist.clone()),
+            ]),
+            art_album_id: s.album_id.clone(),
+            art_album_ids: s.album_id.clone().into_iter().collect(),
+            custom_playlist_id: None,
+        });
         let expanded = push_search_header(
             &mut rows,
             HarbourSectionId::SearchSongs,
@@ -327,6 +478,7 @@ pub(crate) fn build_harbour_rows(
             HarbourSection::Songs,
             results.songs.len(),
             collapsed,
+            teaser,
         );
         if expanded {
             for s in &results.songs {
@@ -341,6 +493,21 @@ pub(crate) fn build_harbour_rows(
         }
     }
     if !results.genres.is_empty() {
+        // Teaser quad from the same resolved side-map the item rows read
+        // (blank chassis until the fan-out lands, then atomic upgrade).
+        let teaser = results.genres.first().map(|g| {
+            let album_ids = harbour
+                .search_genre_album_ids
+                .get(&g.name)
+                .cloned()
+                .unwrap_or_default();
+            SectionTeaser {
+                subtitle: format!("{} • {} albums", g.name, g.album_count),
+                art_album_id: album_ids.first().cloned(),
+                art_album_ids: album_ids,
+                custom_playlist_id: None,
+            }
+        });
         let expanded = push_search_header(
             &mut rows,
             HarbourSectionId::SearchGenres,
@@ -348,6 +515,7 @@ pub(crate) fn build_harbour_rows(
             HarbourSection::Genres,
             results.genres.len(),
             collapsed,
+            teaser,
         );
         if expanded {
             for g in &results.genres {
@@ -370,6 +538,19 @@ pub(crate) fn build_harbour_rows(
         }
     }
     if !results.playlists.is_empty() {
+        let teaser = results.playlists.first().map(|p| {
+            let album_ids = harbour
+                .search_playlist_album_ids
+                .get(&p.id)
+                .cloned()
+                .unwrap_or_default();
+            SectionTeaser {
+                subtitle: format!("{} • {} songs", p.name, p.song_count),
+                art_album_id: album_ids.first().cloned(),
+                art_album_ids: album_ids,
+                custom_playlist_id: Some(p.id.clone()),
+            }
+        });
         let expanded = push_search_header(
             &mut rows,
             HarbourSectionId::SearchPlaylists,
@@ -377,6 +558,7 @@ pub(crate) fn build_harbour_rows(
             HarbourSection::Playlists,
             results.playlists.len(),
             collapsed,
+            teaser,
         );
         if expanded {
             for p in &results.playlists {
@@ -421,25 +603,44 @@ fn push_song_section(
     most_played: bool,
 ) {
     let expanded = !collapsed.contains(&id);
+    // One fact builder for the teaser AND the item rows, so the header's
+    // first-pick line can't drift from the row it previews.
+    let song_fact = |s: &Song| {
+        if most_played {
+            Some(plays_label(s.play_count.unwrap_or(0)))
+        } else {
+            s.play_date
+                .as_deref()
+                .map(|d| format!("Played {}", format_relative_time(d)))
+        }
+    };
+    let teaser = songs.first().map(|s| SectionTeaser {
+        subtitle: join_facts(vec![
+            Some(s.title.clone()),
+            (!s.artist.is_empty()).then(|| s.artist.clone()),
+            song_fact(s),
+        ]),
+        art_album_id: s.album_id.clone(),
+        art_album_ids: s.album_id.clone().into_iter().collect(),
+        custom_playlist_id: None,
+    });
     rows.push(HarbourRow::Section {
         id,
         title: title.to_string(),
         count: songs.len().min(HOT_PICKS_PER_SECTION),
         expanded,
         see_all: None,
+        glyph: section_icon(id),
+        teaser,
     });
     if expanded {
         for s in songs.iter().take(HOT_PICKS_PER_SECTION) {
-            let fact = if most_played {
-                Some(plays_label(s.play_count.unwrap_or(0)))
-            } else {
-                s.play_date
-                    .as_deref()
-                    .map(|d| format!("Played {}", format_relative_time(d)))
-            };
             rows.push(HarbourRow::Item {
                 title: s.title.clone(),
-                subtitle: join_facts(vec![(!s.artist.is_empty()).then(|| s.artist.clone()), fact]),
+                subtitle: join_facts(vec![
+                    (!s.artist.is_empty()).then(|| s.artist.clone()),
+                    song_fact(s),
+                ]),
                 art_album_id: s.album_id.clone(),
                 art_album_ids: s.album_id.clone().into_iter().collect(),
                 play: PlayTarget::Item(BatchItem::Song(Box::new(s.clone()))),
@@ -459,19 +660,42 @@ fn push_album_section(
     most_played: bool,
 ) {
     let expanded = !collapsed.contains(&id);
+    // Shared fact builder (teaser + most-played item rows). The teaser drops
+    // the item rows' release-year fact — the pick's title occupies the line.
+    let album_fact = |a: &AlbumUIViewData| {
+        if most_played {
+            Some(plays_label(a.play_count.unwrap_or(0)))
+        } else {
+            a.created_at
+                .as_deref()
+                .map(|d| format!("Added {}", format_relative_time(d)))
+        }
+    };
+    let teaser = albums.first().map(|a| SectionTeaser {
+        subtitle: join_facts(vec![
+            Some(a.name.clone()),
+            (!a.artist.is_empty()).then(|| a.artist.clone()),
+            album_fact(a),
+        ]),
+        art_album_id: Some(a.id.clone()),
+        art_album_ids: vec![a.id.clone()],
+        custom_playlist_id: None,
+    });
     rows.push(HarbourRow::Section {
         id,
         title: title.to_string(),
         count: albums.len().min(HOT_PICKS_PER_SECTION),
         expanded,
         see_all: None,
+        glyph: section_icon(id),
+        teaser,
     });
     if expanded {
         for a in albums.iter().take(HOT_PICKS_PER_SECTION) {
             let subtitle = if most_played {
                 join_facts(vec![
                     (!a.artist.is_empty()).then(|| a.artist.clone()),
-                    Some(plays_label(a.play_count.unwrap_or(0))),
+                    album_fact(a),
                 ])
             } else {
                 album_item_subtitle(a)
@@ -499,12 +723,23 @@ fn push_artist_section(
     collapsed: &HashSet<HarbourSectionId>,
 ) {
     let expanded = !collapsed.contains(&id);
+    let teaser = artists.first().map(|a| SectionTeaser {
+        subtitle: join_facts(vec![
+            Some(a.name.clone()),
+            Some(plays_label(a.play_count.unwrap_or(0))),
+        ]),
+        art_album_id: Some(a.id.clone()),
+        art_album_ids: Vec::new(),
+        custom_playlist_id: None,
+    });
     rows.push(HarbourRow::Section {
         id,
         title: title.to_string(),
         count: artists.len().min(HOT_PICKS_PER_SECTION),
         expanded,
         see_all: None,
+        glyph: section_icon(id),
+        teaser,
     });
     if expanded {
         for a in artists.iter().take(HOT_PICKS_PER_SECTION) {
@@ -540,22 +775,37 @@ fn push_playlist_section(
     collapsed: &HashSet<HarbourSectionId>,
 ) {
     let expanded = !collapsed.contains(&id);
+    // Shared facts line (teaser + item rows): the pick's OWN counts, not the
+    // preview panel's section-wide sums.
+    let playlist_facts = |p: &PlaylistUIViewData| {
+        format!(
+            "{} songs • {}",
+            p.song_count,
+            format_duration_short(p.duration as f64)
+        )
+    };
+    let teaser = playlists.first().map(|p| SectionTeaser {
+        // Bare pick name — no "Featuring" prefix in headers (denser; the
+        // preview-panel pill keeps its "Featuring").
+        subtitle: format!("{} • {}", p.name, playlist_facts(p)),
+        art_album_id: p.artwork_album_ids.first().cloned(),
+        art_album_ids: p.artwork_album_ids.clone(),
+        custom_playlist_id: Some(p.id.clone()),
+    });
     rows.push(HarbourRow::Section {
         id,
         title: title.to_string(),
         count: playlists.len().min(HOT_PICKS_PER_SECTION),
         expanded,
         see_all: None,
+        glyph: section_icon(id),
+        teaser,
     });
     if expanded {
         for p in playlists.iter().take(HOT_PICKS_PER_SECTION) {
             rows.push(HarbourRow::Item {
                 title: p.name.clone(),
-                subtitle: format!(
-                    "{} songs • {}",
-                    p.song_count,
-                    format_duration_short(p.duration as f64)
-                ),
+                subtitle: playlist_facts(p),
                 art_album_id: p.artwork_album_ids.first().cloned(),
                 art_album_ids: p.artwork_album_ids.clone(),
                 play: PlayTarget::Item(BatchItem::Playlist(p.id.clone())),
@@ -576,27 +826,39 @@ fn push_genre_section(
     most_played: bool,
 ) {
     let expanded = !collapsed.contains(&id);
+    // Shared facts line (teaser + item rows) — the tally copy for Most Played,
+    // library counts for Random Genres.
+    let genre_facts = |g: &GenreUIViewData| {
+        if most_played {
+            let n = g.song_count;
+            format!(
+                "{n} of your top {}",
+                if n == 1 { "track" } else { "tracks" }
+            )
+        } else {
+            format!("{} albums • {} songs", g.album_count, g.song_count)
+        }
+    };
+    let teaser = genres.first().map(|g| SectionTeaser {
+        subtitle: format!("{} • {}", g.name, genre_facts(g)),
+        art_album_id: g.artwork_album_ids.first().cloned(),
+        art_album_ids: g.artwork_album_ids.clone(),
+        custom_playlist_id: None,
+    });
     rows.push(HarbourRow::Section {
         id,
         title: title.to_string(),
         count: genres.len().min(HOT_PICKS_PER_SECTION),
         expanded,
         see_all: None,
+        glyph: section_icon(id),
+        teaser,
     });
     if expanded {
         for g in genres.iter().take(HOT_PICKS_PER_SECTION) {
-            let subtitle = if most_played {
-                let n = g.song_count;
-                format!(
-                    "{n} of your top {}",
-                    if n == 1 { "track" } else { "tracks" }
-                )
-            } else {
-                format!("{} albums • {} songs", g.album_count, g.song_count)
-            };
             rows.push(HarbourRow::Item {
                 title: g.name.clone(),
-                subtitle,
+                subtitle: genre_facts(g),
                 art_album_id: g.artwork_album_ids.first().cloned(),
                 art_album_ids: g.artwork_album_ids.clone(),
                 play: PlayTarget::GenreRandom(g.name.clone()),
@@ -606,6 +868,8 @@ fn push_genre_section(
 }
 
 /// Push a search-group `Section` header and return whether it is expanded.
+/// `teaser` carries the group's first match (built at the call site, which
+/// knows the entity type) for the collapsed-header teaser.
 fn push_search_header(
     rows: &mut Vec<HarbourRow>,
     id: HarbourSectionId,
@@ -613,6 +877,7 @@ fn push_search_header(
     section: HarbourSection,
     count: usize,
     collapsed: &HashSet<HarbourSectionId>,
+    teaser: Option<SectionTeaser>,
 ) -> bool {
     let expanded = !collapsed.contains(&id);
     rows.push(HarbourRow::Section {
@@ -621,6 +886,8 @@ fn push_search_header(
         count,
         expanded,
         see_all: Some(section),
+        glyph: section_icon(id),
+        teaser,
     });
     expanded
 }
@@ -695,6 +962,8 @@ pub enum HarbourMessage {
 /// Borrowed app state the Harbour view renders from.
 pub(crate) struct HarbourViewData<'a> {
     pub harbour: &'a crate::state::HarbourState,
+    /// The Trawl crate — seed count + blend feed the Trawl row's subtitle.
+    pub trawl_crate: &'a nokkvi_data::types::trawl::TrawlCrate,
     /// 80px album-cover cache (row thumbnails).
     pub album_art: &'a HashMap<String, image::Handle>,
     /// Large-cover cache (side artwork panel).
@@ -720,7 +989,7 @@ pub(crate) struct HarbourViewData<'a> {
 impl HarbourPage {
     /// Render the Harbour view — mirrors Similar's slot-list layout.
     pub(crate) fn view<'a>(&'a self, data: HarbourViewData<'a>) -> Element<'a, HarbourMessage> {
-        let rows = build_harbour_rows(data.harbour, &self.collapsed);
+        let rows = build_harbour_rows(data.harbour, &self.collapsed, data.trawl_crate);
         // Count items across every section (expanded or not) via each Section's
         // `count`, so the header total reflects the populated home rather than
         // dropping to "0 items" when all sections are collapsed — the default
@@ -889,6 +1158,36 @@ impl HarbourPage {
             Some(HarbourRow::Section {
                 id, see_all: None, ..
             }) => section_preview_panel(*id, &data),
+            // The centered Trawl door: anchor placeholder + a quiet pill
+            // naming the crate's state (kept fg2-level — Harbour opens
+            // centered on this row, so the landing view must not shout).
+            Some(HarbourRow::Trawl { seeds, blend }) => {
+                let panel = crate::widgets::base_slot_list_layout::
+                    single_artwork_panel_with_visualizer_and_menu::<HarbourMessage>(
+                    None,
+                    None,
+                    None,
+                    crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Anchor,
+                    Vec::new(),
+                    false,
+                    None,
+                    |_| HarbourMessage::NoOp,
+                );
+                let meta = if *seeds == 0 {
+                    "The crate is empty".to_string()
+                } else {
+                    trawl_row_subtitle(*seeds, *blend)
+                };
+                crate::widgets::base_slot_list_layout::wrap_with_pill_overlay(
+                    panel,
+                    section_pill(
+                        "assets/icons/anchor.svg",
+                        "TRAWL",
+                        "Build a mix".to_string(),
+                        meta,
+                    ),
+                )
+            }
             _ => blank_panel(),
         });
 
@@ -910,8 +1209,8 @@ fn render_row<'a>(
     data: &HarbourViewData<'a>,
 ) -> Element<'a, HarbourMessage> {
     use crate::widgets::slot_list::{
-        SLOT_LIST_SLOT_PADDING, child_slot_button, slot_list_artwork_column,
-        slot_list_artwork_quad_column, slot_list_static_icon_color, slot_list_text_column,
+        SLOT_LIST_SLOT_PADDING, child_slot_button, slot_list_static_icon_color,
+        slot_list_text_column,
     };
 
     match row {
@@ -921,6 +1220,8 @@ fn render_row<'a>(
             count,
             expanded,
             see_all,
+            glyph,
+            teaser,
         } => {
             let m = ctx.metrics;
             // Parent style from the shared state machine (mirrors
@@ -929,36 +1230,76 @@ fn render_row<'a>(
             // accent selection ring — both fall out of `to_container_style`.
             let style = ctx.slot_style(*expanded, false, 0);
 
-            let mut header_row = iced::widget::Row::new()
-                .spacing(8.0)
-                .align_y(Alignment::Center)
-                .push(caret_icon(
-                    *expanded,
-                    slot_list_static_icon_color(style, theme::fg2(), ctx.opacity),
-                ))
-                .push(
-                    text(title.clone())
-                        .size(m.title_size)
-                        .font(theme::weighted_ui_font(iced::font::Weight::Bold))
-                        .color(style.text_color),
-                );
+            // Header art square: a collapsed populated header teases its first
+            // pick's cover through the same ladder as item rows; an expanded or
+            // empty header shows the section identity glyph on the quiet fg2
+            // channel (accent stays exclusive to the Trawl CTA and See-all —
+            // the loud expanded fill forces it legible anyway). The cover→glyph
+            // swap co-occurs with the fill flip so the expanded header never
+            // stacks an identical cover directly above child row 1.
+            let art_el: Element<'a, HarbourMessage> = match teaser {
+                Some(t) if !*expanded => harbour_art_element(
+                    t.custom_playlist_id.as_deref(),
+                    t.art_album_id.as_ref(),
+                    &t.art_album_ids,
+                    data,
+                    m.artwork_size,
+                    ctx.is_center,
+                    ctx.opacity,
+                ),
+                _ => glyph_art_square(glyph, m.artwork_size, style, ctx.opacity, theme::fg2()),
+            };
 
-            // Show an exact count only on shelf sections. Search groups are
-            // capped previews that carry a "See all"; a "(8)" beside it would
-            // misread the preview cap as the true match total.
-            if see_all.is_none() {
-                header_row =
-                    header_row.push(text(format!("({count})")).size(m.metadata_size).color(
-                        slot_list_static_icon_color(style, theme::fg3(), ctx.opacity),
-                    ));
-            }
-            header_row = header_row.push(Space::new().width(Length::Fill));
+            let subtitle =
+                section_header_subtitle(teaser.as_ref(), *expanded, *count, see_all.is_some());
+
+            // Two-line text column in BOTH states so the title baseline never
+            // jitters on toggle. Title keeps `m.title_size` bold — a step below
+            // the items' `title_size_lg`, the retained parent/child cue.
+            use iced::widget::text::{Ellipsis, Wrapping};
+            let text_col = container(
+                iced::widget::Column::new()
+                    .push(
+                        text(title.clone())
+                            .size(m.title_size)
+                            .font(theme::weighted_ui_font(iced::font::Weight::Bold))
+                            .color(style.text_color)
+                            .wrapping(Wrapping::None)
+                            .ellipsis(Ellipsis::End),
+                    )
+                    .push(
+                        text(subtitle)
+                            .size(m.subtitle_size)
+                            .color(slot_list_static_icon_color(
+                                style,
+                                theme::fg3(),
+                                ctx.opacity,
+                            ))
+                            .wrapping(Wrapping::None)
+                            .ellipsis(Ellipsis::End),
+                    ),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .align_y(Alignment::Center);
+
+            // Item-mirroring geometry — [pad 8][art][6][text⋯][See-all][caret]
+            // — so the header square shares one left rail with the Trawl
+            // anchor and every item cover; the caret moves to the RIGHT edge.
+            let mut header_row = iced::widget::Row::new()
+                .spacing(6.0)
+                .align_y(Alignment::Center)
+                .height(Length::Fill)
+                .push(Space::new().width(Length::Fixed(SLOT_LIST_SLOT_PADDING)))
+                .push(art_el)
+                .push(text_col);
 
             if let Some(section) = see_all {
                 let section = *section;
                 // On a forced-legible filled (expanded) header this resolves to
                 // style.text_color; on a plain/collapsed header it stays
-                // accent_bright at ctx.opacity — mirrors the caret + count above.
+                // accent_bright at ctx.opacity — mirrors the caret.
                 let see_all_color =
                     slot_list_static_icon_color(style, theme::accent_bright(), ctx.opacity);
                 // "See all" label + a chevron-right SVG (no unicode arrow).
@@ -985,9 +1326,13 @@ fn render_row<'a>(
                     .interaction(iced::mouse::Interaction::Pointer),
                 );
             }
+            header_row = header_row.push(caret_icon(
+                *expanded,
+                slot_list_static_icon_color(style, theme::fg2(), ctx.opacity),
+            ));
 
             let styled = container(header_row.padding(iced::Padding {
-                left: SLOT_LIST_SLOT_PADDING,
+                left: 0.0,
                 right: 8.0,
                 top: 4.0,
                 bottom: 4.0,
@@ -1003,6 +1348,48 @@ fn render_row<'a>(
                 .interaction(iced::mouse::Interaction::Pointer)
                 .into()
         }
+        HarbourRow::Trawl { seeds, blend } => {
+            // The mix-builder door: anchor glyph (the feature's CTA mark) in
+            // the art square, live crate subtitle, standard slot-button
+            // plumbing — activation opens the modal (update/harbour.rs).
+            // Accent tint (the CTA's exclusive channel) through the shared
+            // chassis — section headers use the same square with a quiet fg2.
+            let m = ctx.metrics;
+            let style = ctx.slot_style(false, false, 0);
+            let anchor = glyph_art_square(
+                "assets/icons/anchor.svg",
+                m.artwork_size,
+                style,
+                ctx.opacity,
+                theme::accent(),
+            );
+
+            let content_row = iced::widget::Row::new()
+                .spacing(6.0)
+                .align_y(Alignment::Center)
+                .height(Length::Fill)
+                .push(Space::new().width(Length::Fixed(SLOT_LIST_SLOT_PADDING)))
+                .push(anchor)
+                .push(slot_list_text_column(
+                    "Trawl".to_string(),
+                    None,
+                    trawl_row_subtitle(*seeds, *blend),
+                    None,
+                    m.title_size_lg,
+                    m.subtitle_size,
+                    style,
+                    ctx.is_center,
+                    100,
+                ));
+
+            child_slot_button(
+                content_row,
+                &ctx,
+                style,
+                data.stable_viewport,
+                HarbourMessage::SlotList,
+            )
+        }
         HarbourRow::Item {
             title,
             subtitle,
@@ -1013,43 +1400,21 @@ fn render_row<'a>(
             let m = ctx.metrics;
             let style = ctx.slot_style(false, false, 1);
 
-            // A user-uploaded playlist cover wins outright and suppresses the
-            // collage quad; otherwise items resolve their cover from the
-            // album-art cache (single mini) or a quad of their own album ids.
-            let custom_art = match play {
-                PlayTarget::Item(BatchItem::Playlist(pid)) => data.playlist_custom_art.get(pid),
+            // Cover via the shared custom→quad→single ladder (also the
+            // collapsed section headers' teaser square).
+            let custom_playlist_id = match play {
+                PlayTarget::Item(BatchItem::Playlist(pid)) => Some(pid.as_str()),
                 _ => None,
             };
-            let art_handle =
-                custom_art.or_else(|| art_album_id.as_ref().and_then(|id| data.album_art.get(id)));
-
-            // Prefer a 2×2 quad from the item's own album ids (playlists,
-            // genres); atomically upgrades from the single mini once all four
-            // tiles land — identical to the Genres/Playlists rows.
-            let quad = if custom_art.is_some() {
-                None
-            } else {
-                crate::services::collage_artwork::resolve_quad_handles(
-                    art_album_ids,
-                    data.album_art,
-                )
-            };
-            let art_el = match quad {
-                Some(tiles) => slot_list_artwork_quad_column(
-                    &tiles,
-                    m.artwork_size,
-                    ctx.is_center,
-                    false,
-                    ctx.opacity,
-                ),
-                None => slot_list_artwork_column(
-                    art_handle,
-                    m.artwork_size,
-                    ctx.is_center,
-                    false,
-                    ctx.opacity,
-                ),
-            };
+            let art_el: Element<'a, HarbourMessage> = harbour_art_element(
+                custom_playlist_id,
+                art_album_id.as_ref(),
+                art_album_ids,
+                data,
+                m.artwork_size,
+                ctx.is_center,
+                ctx.opacity,
+            );
 
             let content_row = iced::widget::Row::new()
                 .spacing(6.0)
@@ -1088,6 +1453,74 @@ fn render_row<'a>(
         .align_y(Alignment::Center)
         .into(),
     }
+}
+
+/// Resolve a Harbour row's 80px art square through the shared ladder:
+/// user-uploaded playlist cover (wins outright, suppresses the quad) → 2×2
+/// quad from the row's own album ids (atomic upgrade once all tiles land) →
+/// single mini → blank `bg2` chassis until a cover warms. ONE ladder for Item
+/// rows AND collapsed teaser headers, so the two can't drift.
+#[allow(clippy::too_many_arguments)]
+fn harbour_art_element<'a, M: 'a>(
+    custom_playlist_id: Option<&str>,
+    art_album_id: Option<&String>,
+    art_album_ids: &[String],
+    data: &HarbourViewData<'a>,
+    art_size: f32,
+    is_center: bool,
+    opacity: f32,
+) -> Element<'a, M> {
+    use crate::widgets::slot_list::{slot_list_artwork_column, slot_list_artwork_quad_column};
+
+    let custom_art = custom_playlist_id.and_then(|pid| data.playlist_custom_art.get(pid));
+    let art_handle = custom_art.or_else(|| art_album_id.and_then(|id| data.album_art.get(id)));
+    let quad = if custom_art.is_some() {
+        None
+    } else {
+        crate::services::collage_artwork::resolve_quad_handles(art_album_ids, data.album_art)
+    };
+    match quad {
+        Some(tiles) => slot_list_artwork_quad_column(&tiles, art_size, is_center, false, opacity),
+        None => slot_list_artwork_column(art_handle, art_size, is_center, false, opacity),
+    }
+}
+
+/// A centered SVG glyph in a `bg2` chassis square — the Trawl anchor block,
+/// shared with the expanded/empty section headers so the two squares stay
+/// pixel-identical. `tint` is the glyph's fallback color (accent for the Trawl
+/// CTA, quiet `fg2` for headers), routed through [`slot_list_static_icon_color`]
+/// so loud-fill (forced-legible) rows swap it for the row's legible text color.
+///
+/// [`slot_list_static_icon_color`]: crate::widgets::slot_list::slot_list_static_icon_color
+fn glyph_art_square<'a, M: 'a>(
+    icon: &'static str,
+    art_size: f32,
+    style: crate::widgets::slot_list::SlotListSlotStyle,
+    opacity: f32,
+    tint: iced::Color,
+) -> Element<'a, M> {
+    let tint = crate::widgets::slot_list::slot_list_static_icon_color(style, tint, opacity);
+    container(
+        crate::embedded_svg::svg_widget(icon)
+            .width(Length::Fixed(art_size * 0.55))
+            .height(Length::Fixed(art_size * 0.55))
+            .style(move |_theme, _status| iced::widget::svg::Style { color: Some(tint) }),
+    )
+    .width(Length::Fixed(art_size))
+    .height(Length::Fixed(art_size))
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center)
+    .style(move |_theme: &iced::Theme| container::Style {
+        background: Some(
+            iced::Color {
+                a: opacity,
+                ..theme::bg2()
+            }
+            .into(),
+        ),
+        ..Default::default()
+    })
+    .into()
 }
 
 /// The section-header caret: chevron-down when expanded, chevron-right when
@@ -1131,9 +1564,10 @@ fn section_preview_panel<'a>(
         .as_ref()
         .and_then(|a| data.large_artwork.get(a).or_else(|| data.album_art.get(a)));
 
-    // Resolve (icon, eyebrow label, title, meta line) for the section, or bail
-    // to a blank square when the section has no data.
-    let resolved: Option<(&'static str, &'static str, String, String)> = match id {
+    // Resolve (eyebrow label, title, meta line) for the section, or bail to a
+    // blank square when the section has no data. The eyebrow icon comes from
+    // the shared [`section_icon`] mapping (also the header glyph — no drift).
+    let resolved: Option<(&'static str, String, String)> = match id {
         HarbourSectionId::RecentlyPlayed => harbour.recently_played.first().map(|s| {
             let meta = join_facts(vec![
                 (!s.artist.is_empty()).then(|| s.artist.clone()),
@@ -1141,12 +1575,7 @@ fn section_preview_panel<'a>(
                     .as_deref()
                     .map(|d| format!("Played {}", format_relative_time(d))),
             ]);
-            (
-                "assets/icons/clock.svg",
-                "Recently Played",
-                s.title.clone(),
-                meta,
-            )
+            ("Recently Played", s.title.clone(), meta)
         }),
         HarbourSectionId::RecentlyAdded => harbour.recently_added.first().map(|a| {
             let meta = join_facts(vec![
@@ -1156,12 +1585,7 @@ fn section_preview_panel<'a>(
                     .map(|d| format!("Added {}", format_relative_time(d))),
                 a.year.map(|y| y.to_string()),
             ]);
-            (
-                "assets/icons/calendar.svg",
-                "Recently Added",
-                a.name.clone(),
-                meta,
-            )
+            ("Recently Added", a.name.clone(), meta)
         }),
         HarbourSectionId::Playlists => harbour.playlists.first().map(|first| {
             let songs: u32 = harbour.playlists.iter().map(|p| p.song_count).sum();
@@ -1171,7 +1595,6 @@ fn section_preview_panel<'a>(
                 Some(format_duration_short(duration)),
             ]);
             (
-                "assets/icons/list-music.svg",
                 "Random Playlists",
                 format!("Featuring {}", first.name),
                 meta,
@@ -1184,40 +1607,24 @@ fn section_preview_panel<'a>(
                 Some(format!("{albums} albums")),
                 Some(format!("{songs} songs")),
             ]);
-            (
-                "assets/icons/tags.svg",
-                "Random Genres",
-                format!("Featuring {}", first.name),
-                meta,
-            )
+            ("Random Genres", format!("Featuring {}", first.name), meta)
         }),
         HarbourSectionId::MostPlayedTracks => harbour.most_played_songs.first().map(|s| {
             let meta = join_facts(vec![
                 (!s.artist.is_empty()).then(|| s.artist.clone()),
                 Some(plays_label(s.play_count.unwrap_or(0))),
             ]);
-            (
-                "assets/icons/music.svg",
-                "Most Played Tracks",
-                s.title.clone(),
-                meta,
-            )
+            ("Most Played Tracks", s.title.clone(), meta)
         }),
         HarbourSectionId::MostPlayedAlbums => harbour.most_played_albums.first().map(|a| {
             let meta = join_facts(vec![
                 (!a.artist.is_empty()).then(|| a.artist.clone()),
                 Some(plays_label(a.play_count.unwrap_or(0))),
             ]);
-            (
-                "assets/icons/disc-3.svg",
-                "Most Played Albums",
-                a.name.clone(),
-                meta,
-            )
+            ("Most Played Albums", a.name.clone(), meta)
         }),
         HarbourSectionId::MostPlayedArtists => harbour.most_played_artists.first().map(|a| {
             (
-                "assets/icons/mic.svg",
                 "Most Played Artists",
                 a.name.clone(),
                 plays_label(a.play_count.unwrap_or(0)),
@@ -1230,7 +1637,6 @@ fn section_preview_panel<'a>(
                 if n == 1 { "track" } else { "tracks" }
             );
             (
-                "assets/icons/tags.svg",
                 "Most Played Genres",
                 format!("Featuring {}", first.name),
                 meta,
@@ -1248,8 +1654,8 @@ fn section_preview_panel<'a>(
     let collage = section_first_collage(id, data).filter(|v| !v.is_empty());
 
     match resolved {
-        Some((icon, label, title, meta)) => {
-            let pill = Some(section_pill(icon, label, title, meta));
+        Some((label, title, meta)) => {
+            let pill = Some(section_pill(section_icon(id), label, title, meta));
             match collage {
                 Some(handles) => collage_artwork_panel_with_pill::<HarbourMessage>(
                     handles,

@@ -33,15 +33,10 @@ use crate::{
         HarbourMessage,
         harbour::{
             HOT_PICKS_PER_SECTION, HarbourRow, HarbourSectionId, PlayTarget, SEARCH_MIN_CHARS,
-            build_harbour_rows,
+            SEARCH_PREVIEW_LIMIT, build_harbour_rows,
         },
     },
 };
-
-/// Per-entity result cap for the live grouped preview (kept small so five
-/// immediate parallel calls per keystroke stay cheap; "See all" opens the full
-/// list). Feishin uses 4; we allow a few more.
-const SEARCH_PREVIEW_LIMIT: usize = 8;
 
 /// Degrade a secondary shelf's fetch to an empty list on failure (warn-logged),
 /// so one flaky sort never blanks the whole home view. A free fn rather than a
@@ -210,7 +205,11 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::widgets::{SlotListPageAction, SlotListPageMessage};
 
-        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed);
+        let rows = build_harbour_rows(
+            &self.harbour,
+            &self.harbour_page.collapsed,
+            &self.trawl_crate,
+        );
         let total = rows.len();
         // NavigateUp/Down/SetOffset move the center — warm the new center's art.
         let needs_art = matches!(
@@ -230,6 +229,13 @@ impl Nokkvi {
                     return self.warm_harbour_current_center();
                 }
                 let center = self.harbour_page.common.get_center_item_index(total);
+                // The Trawl door opens its modal — not a play, not a toggle.
+                // Opened synchronously (no message hop); the returned task
+                // focuses the modal's search input.
+                if let Some(HarbourRow::Trawl { .. }) = center.and_then(|i| rows.get(i)) {
+                    return self
+                        .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
+                }
                 if let Some(HarbourRow::Item { play, .. }) = center.and_then(|i| rows.get(i)) {
                     let play = play.clone();
                     // `force` carries Ctrl+Enter's one-shot shuffle intent — thread
@@ -288,7 +294,11 @@ impl Nokkvi {
     /// them. Returns the owned rows (the row enum isn't `Clone`) so each caller
     /// resolves the center via `center.and_then(|i| rows.get(i))`.
     pub(crate) fn harbour_centered_rows(&self) -> (Vec<HarbourRow>, Option<usize>) {
-        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed);
+        let rows = build_harbour_rows(
+            &self.harbour,
+            &self.harbour_page.collapsed,
+            &self.trawl_crate,
+        );
         let center = self.harbour_page.common.get_center_item_index(rows.len());
         (rows, center)
     }
@@ -389,6 +399,8 @@ impl Nokkvi {
         center: Option<&HarbourRow>,
     ) -> Option<(CollageTarget, String, Vec<String>)> {
         match center? {
+            // The Trawl action row previews no collection.
+            HarbourRow::Trawl { .. } => None,
             HarbourRow::Item {
                 art_album_ids,
                 play,
@@ -459,7 +471,11 @@ impl Nokkvi {
     /// `(&harbour, &collapsed)` inputs the view renders, so the centered index
     /// resolves to the row the user sees.
     fn handle_harbour_expand_center(&mut self) -> Task<Message> {
-        let rows = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed);
+        let rows = build_harbour_rows(
+            &self.harbour,
+            &self.harbour_page.collapsed,
+            &self.trawl_crate,
+        );
         let total = rows.len();
         if self.toggle_centered_harbour_section(&rows, total) {
             // Rows shifted under the stationary center — re-warm it.
@@ -525,7 +541,12 @@ impl Nokkvi {
         // `common.search_query` made every Escape reload-and-re-roll the random
         // shelves); the offset reset stops a deep shelf scroll from stranding
         // the viewport past the end of a short result list.
-        let total = build_harbour_rows(&self.harbour, &self.harbour_page.collapsed).len();
+        let total = build_harbour_rows(
+            &self.harbour,
+            &self.harbour_page.collapsed,
+            &self.trawl_crate,
+        )
+        .len();
         self.harbour_page
             .common
             .handle_search_query_changed(self.harbour.search_query.clone(), total);
@@ -1048,7 +1069,7 @@ impl Nokkvi {
     /// `queued_ids` and easy to omit in a copy, so it lives here once. Takes
     /// owned id groups so callers can materialize them from `self.harbour`
     /// (ending that borrow) before this `&mut self` runs.
-    fn warm_harbour_quad_ids(
+    pub(crate) fn warm_harbour_quad_ids(
         &mut self,
         albums_vm: &AlbumsService,
         id_groups: Vec<Vec<String>>,
@@ -1105,7 +1126,7 @@ impl Nokkvi {
     /// by the artist id — the single-mini path the Artists view uses), dedup-gated
     /// on cache/pending/failed. Shared by the search rows and the Most Played
     /// Artists shelf so both warm identically.
-    fn artist_mini_warm_tasks(
+    pub(crate) fn artist_mini_warm_tasks(
         &mut self,
         artist_ids: impl IntoIterator<Item = String>,
         albums_vm: &AlbumsService,

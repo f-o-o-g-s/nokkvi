@@ -319,6 +319,38 @@ impl PlaylistsPage {
 
                     if matches!(
                         entry,
+                        PlaylistContextEntry::Library(LibraryContextEntry::AddToMix)
+                    ) {
+                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                        let seeds =
+                            super::super::expansion::build_trawl_seeds(target_indices, |i| {
+                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                    Some(SlotListEntry::Parent(playlist)) => {
+                                        let songs = playlist.song_count;
+                                        let noun = if songs == 1 { "song" } else { "songs" };
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                            BatchItem::Playlist(playlist.id.clone()),
+                                            playlist.name.clone(),
+                                            format!("{songs} {noun}"),
+                                        ))
+                                    }
+                                    Some(SlotListEntry::Child(song, _)) => {
+                                        let item: nokkvi_data::types::song::Song =
+                                            song.clone().into();
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                            BatchItem::Song(Box::new(item)),
+                                            song.title.clone(),
+                                            song.artist.clone(),
+                                        ))
+                                    }
+                                    None => None,
+                                }
+                            });
+                        return (Task::none(), PlaylistsAction::AddBatchToMix(seeds));
+                    }
+
+                    if matches!(
+                        entry,
                         PlaylistContextEntry::Library(
                             LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist
                         )

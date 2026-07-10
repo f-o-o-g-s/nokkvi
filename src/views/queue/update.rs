@@ -92,6 +92,7 @@ impl QueuePage {
             QueueMessage::OpenDefaultPlaylistPicker => {
                 (Task::none(), QueueAction::OpenDefaultPlaylistPicker)
             }
+            QueueMessage::OpenTrawl => (Task::none(), QueueAction::OpenTrawl),
             QueueMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = queue_songs.get(item_index) {
                     use nokkvi_data::utils::formatters::compute_rating_toggle;
@@ -309,6 +310,43 @@ impl QueuePage {
                         (Task::none(), QueueAction::None)
                     } else {
                         (Task::none(), QueueAction::AddToPlaylist(target_songs))
+                    }
+                }
+                QueueContextEntry::AddToMix => {
+                    let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                    self.common.clear_multi_selection();
+                    // Queue rows are concrete songs — rebuild a playable Song
+                    // from the row projection (streaming keys on the id).
+                    let seeds: Vec<nokkvi_data::types::trawl::TrawlSeed> = target_indices
+                        .iter()
+                        .filter_map(|&idx| queue_songs.get(idx))
+                        .map(|row| {
+                            let song = nokkvi_data::types::song::Song {
+                                id: row.id.clone(),
+                                title: row.title.clone(),
+                                artist: row.artist.clone(),
+                                artist_id: Some(row.artist_id.clone()),
+                                album: row.album.clone(),
+                                album_id: Some(row.album_id.clone()),
+                                duration: row.duration_seconds,
+                                genre: (!row.genre.is_empty()).then(|| row.genre.clone()),
+                                starred: row.starred,
+                                rating: row.rating,
+                                play_count: row.play_count,
+                                updated_at: row.updated_at.clone(),
+                                ..Default::default()
+                            };
+                            nokkvi_data::types::trawl::TrawlSeed::new(
+                                nokkvi_data::types::batch::BatchItem::Song(Box::new(song)),
+                                row.title.clone(),
+                                row.artist.clone(),
+                            )
+                        })
+                        .collect();
+                    if seeds.is_empty() {
+                        (Task::none(), QueueAction::None)
+                    } else {
+                        (Task::none(), QueueAction::AddToMix(seeds))
                     }
                 }
                 QueueContextEntry::Separator => (Task::none(), QueueAction::None),

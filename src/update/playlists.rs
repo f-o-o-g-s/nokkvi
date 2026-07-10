@@ -183,6 +183,9 @@ impl Nokkvi {
                     .clear_selection_indices_only();
                 return self.play_batch_task(payload, force);
             }
+            views::PlaylistsAction::AddBatchToMix(seeds) => {
+                return self.add_seeds_to_mix(seeds);
+            }
             views::PlaylistsAction::AddBatchToQueue(payload) => {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
