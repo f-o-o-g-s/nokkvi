@@ -52,13 +52,14 @@ pub(crate) const HOT_PICKS_PER_SECTION: usize = 4;
 /// length (fetch short-circuits while the view already left the hint state).
 pub(crate) const SEARCH_MIN_CHARS: usize = 2;
 
-/// Left inset for Harbour's rows. Harbour rows LEAD with artwork (no index
-/// column), so the full-bleed covers form the view's leftmost content — at
-/// the index-led views' 8px content inset they read cramped against the
-/// window edge. Art-leading surfaces in the app sit a step deeper: the
-/// queue's playlist strip pads 11, the modal family's rows pad 12. 12 keeps
-/// Harbour on the modal-family rail the owner's eye signed off on.
-const HARBOUR_ROW_INSET: f32 = 12.0;
+/// Left inset for Harbour's rows — the same 8px rail the Albums/Songs
+/// covers sit on. One const, one rail: covers, teaser thumbs, and the
+/// Trawl anchor all start here. (History: the rows briefly wandered to 14
+/// via a Space-in-spaced-row compound and to 12 chasing an optical theory
+/// that turned out to be the section headers' padding being silently
+/// OVERWRITTEN to 0 by a second `.padding()` call — iced's `.padding()`
+/// is a setter, not additive. Keep exactly one padding call per row.)
+const HARBOUR_ROW_INSET: f32 = crate::widgets::slot_list::SLOT_LIST_SLOT_PADDING;
 
 /// Per-type result cap for whole-library search fan-outs (Harbour's grouped
 /// preview AND the Trawl modal share it — refine the query rather than page).
@@ -1294,14 +1295,12 @@ fn render_row<'a>(
             // Item-mirroring geometry — [pad 8][art][6][text⋯][See-all][caret]
             // — so the header square shares one left rail with the Trawl
             // anchor and every item cover; the caret moves to the RIGHT edge.
+            // NOTE: no .padding() here — the wrap below is this row's ONE
+            // padding call (a second .padding() would silently replace it).
             let mut header_row = iced::widget::Row::new()
                 .spacing(6.0)
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
-                // The inset is row PADDING, not a Space child — a leading
-                // spacer inside a spaced row compounds with .spacing() and
-                // drifts the rail. See HARBOUR_ROW_INSET for the 12px choice.
-                .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(art_el)
                 .push(text_col);
 
@@ -1342,7 +1341,7 @@ fn render_row<'a>(
             ));
 
             let styled = container(header_row.padding(iced::Padding {
-                left: 0.0,
+                left: HARBOUR_ROW_INSET,
                 right: 8.0,
                 top: 4.0,
                 bottom: 4.0,
@@ -1378,9 +1377,7 @@ fn render_row<'a>(
                 .spacing(6.0)
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
-                // The inset is row PADDING, not a Space child — a leading
-                // spacer inside a spaced row compounds with .spacing() and
-                // drifts the rail. See HARBOUR_ROW_INSET for the 12px choice.
+                // This row's ONE padding call — see HARBOUR_ROW_INSET.
                 .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(anchor)
                 .push(slot_list_text_column(
@@ -1433,9 +1430,7 @@ fn render_row<'a>(
                 .spacing(6.0)
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
-                // The inset is row PADDING, not a Space child — a leading
-                // spacer inside a spaced row compounds with .spacing() and
-                // drifts the rail. See HARBOUR_ROW_INSET for the 12px choice.
+                // This row's ONE padding call — see HARBOUR_ROW_INSET.
                 .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(art_el)
                 .push(slot_list_text_column(
