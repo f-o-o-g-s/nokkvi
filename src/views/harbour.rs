@@ -52,6 +52,14 @@ pub(crate) const HOT_PICKS_PER_SECTION: usize = 4;
 /// length (fetch short-circuits while the view already left the hint state).
 pub(crate) const SEARCH_MIN_CHARS: usize = 2;
 
+/// Left inset for Harbour's rows. Harbour rows LEAD with artwork (no index
+/// column), so the full-bleed covers form the view's leftmost content — at
+/// the index-led views' 8px content inset they read cramped against the
+/// window edge. Art-leading surfaces in the app sit a step deeper: the
+/// queue's playlist strip pads 11, the modal family's rows pad 12. 12 keeps
+/// Harbour on the modal-family rail the owner's eye signed off on.
+const HARBOUR_ROW_INSET: f32 = 12.0;
+
 /// Per-type result cap for whole-library search fan-outs (Harbour's grouped
 /// preview AND the Trawl modal share it — refine the query rather than page).
 pub(crate) const SEARCH_PREVIEW_LIMIT: usize = 8;
@@ -1209,8 +1217,7 @@ fn render_row<'a>(
     data: &HarbourViewData<'a>,
 ) -> Element<'a, HarbourMessage> {
     use crate::widgets::slot_list::{
-        SLOT_LIST_SLOT_PADDING, child_slot_button, slot_list_static_icon_color,
-        slot_list_text_column,
+        child_slot_button, slot_list_static_icon_color, slot_list_text_column,
     };
 
     match row {
@@ -1292,10 +1299,9 @@ fn render_row<'a>(
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
                 // The inset is row PADDING, not a Space child — a leading
-                // spacer inside a spaced row compounds to 8+6=14px and drifts
-                // the art rail 6px right of every other view (the canonical
-                // albums row pads left instead; see albums/view.rs).
-                .padding(iced::Padding::new(0.0).left(SLOT_LIST_SLOT_PADDING))
+                // spacer inside a spaced row compounds with .spacing() and
+                // drifts the rail. See HARBOUR_ROW_INSET for the 12px choice.
+                .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(art_el)
                 .push(text_col);
 
@@ -1373,10 +1379,9 @@ fn render_row<'a>(
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
                 // The inset is row PADDING, not a Space child — a leading
-                // spacer inside a spaced row compounds to 8+6=14px and drifts
-                // the art rail 6px right of every other view (the canonical
-                // albums row pads left instead; see albums/view.rs).
-                .padding(iced::Padding::new(0.0).left(SLOT_LIST_SLOT_PADDING))
+                // spacer inside a spaced row compounds with .spacing() and
+                // drifts the rail. See HARBOUR_ROW_INSET for the 12px choice.
+                .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(anchor)
                 .push(slot_list_text_column(
                     "Trawl".to_string(),
@@ -1429,10 +1434,9 @@ fn render_row<'a>(
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
                 // The inset is row PADDING, not a Space child — a leading
-                // spacer inside a spaced row compounds to 8+6=14px and drifts
-                // the art rail 6px right of every other view (the canonical
-                // albums row pads left instead; see albums/view.rs).
-                .padding(iced::Padding::new(0.0).left(SLOT_LIST_SLOT_PADDING))
+                // spacer inside a spaced row compounds with .spacing() and
+                // drifts the rail. See HARBOUR_ROW_INSET for the 12px choice.
+                .padding(iced::Padding::new(0.0).left(HARBOUR_ROW_INSET))
                 .push(art_el)
                 .push(slot_list_text_column(
                     title.clone(),
