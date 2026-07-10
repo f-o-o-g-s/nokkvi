@@ -806,7 +806,7 @@ impl SettingsPage {
 
                 if let Some(center_idx) = self.slot_list.get_center_item_index(total) {
                     match self.cached_entries.get(center_idx) {
-                        Some(SettingsEntry::Header { label: _, .. }) => {
+                        Some(SettingsEntry::Header { .. }) => {
                             // Detail-pane headers are section separators —
                             // non-interactive. Category drill-down moved to the
                             // sidebar slot list in the persistent two-pane
