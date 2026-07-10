@@ -359,8 +359,19 @@ impl Nokkvi {
             // free).
             View::Harbour => {
                 let mut tasks = Vec::new();
-                if self.harbour.shelves_empty() {
-                    tasks.push(Task::done(Message::LoadHarbour));
+                // Refresh the shelves on EVERY entry, not just the first:
+                // Recently Played / Most Played go stale the moment something
+                // plays, and the random shelves re-roll fresh picks. The
+                // generation + atomic-replace machinery keeps the current
+                // shelves rendered until the new data lands, so there is no
+                // flicker and no need for a header refresh button. Skip only
+                // when a load is already in flight.
+                if !self.harbour.shelves_loading {
+                    // Called synchronously (no message hop) so the loading
+                    // flag is set before this frame ends — the in-flight
+                    // guard above is exact, not one-frame-late.
+                    let load = self.handle_load_harbour();
+                    tasks.push(load);
                 }
                 // A library-scope change made from ANOTHER view dropped the old
                 // search results (`invalidate_shelves`) but kept the query —

@@ -2226,3 +2226,41 @@ fn empty_header_subtitle_reads_nothing_here_in_both_states() {
         "Nothing here yet"
     );
 }
+
+#[test]
+fn entering_harbour_refreshes_shelves_even_when_populated() {
+    // Stale-data guard: Recently Played must not freeze at the session's
+    // first load — every entry into Harbour refetches (the generation +
+    // atomic-replace machinery keeps the old shelves rendered meanwhile).
+    let mut app = test_app();
+    app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
+    app.harbour.shelves_loading = false;
+    let gen_before = app.harbour.shelves_generation;
+
+    let _ = app.handle_switch_view(View::Harbour);
+
+    assert!(
+        app.harbour.shelves_loading,
+        "re-entry must refetch — shelves were stale"
+    );
+    assert_eq!(
+        app.harbour.shelves_generation,
+        gen_before.wrapping_add(1),
+        "refetch goes through the stale-drop generation"
+    );
+}
+
+#[test]
+fn entering_harbour_does_not_stack_fetches_while_one_is_in_flight() {
+    let mut app = test_app();
+    app.harbour.recently_played = vec![make_recent_song("s1", "A", "Artist", "al1")];
+    app.harbour.shelves_loading = true;
+    let gen_before = app.harbour.shelves_generation;
+
+    let _ = app.handle_switch_view(View::Harbour);
+
+    assert_eq!(
+        app.harbour.shelves_generation, gen_before,
+        "an in-flight load is not restarted by re-entry"
+    );
+}
