@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 
 use iced::{
     Alignment, Element, Length,
-    widget::{Space, container, image, mouse_area, text},
+    widget::{container, image, mouse_area, text},
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, genres::GenreUIViewData, playlists::PlaylistUIViewData},
@@ -1291,7 +1291,11 @@ fn render_row<'a>(
                 .spacing(6.0)
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
-                .push(Space::new().width(Length::Fixed(SLOT_LIST_SLOT_PADDING)))
+                // The inset is row PADDING, not a Space child — a leading
+                // spacer inside a spaced row compounds to 8+6=14px and drifts
+                // the art rail 6px right of every other view (the canonical
+                // albums row pads left instead; see albums/view.rs).
+                .padding(iced::Padding::new(0.0).left(SLOT_LIST_SLOT_PADDING))
                 .push(art_el)
                 .push(text_col);
 
@@ -1368,7 +1372,11 @@ fn render_row<'a>(
                 .spacing(6.0)
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
-                .push(Space::new().width(Length::Fixed(SLOT_LIST_SLOT_PADDING)))
+                // The inset is row PADDING, not a Space child — a leading
+                // spacer inside a spaced row compounds to 8+6=14px and drifts
+                // the art rail 6px right of every other view (the canonical
+                // albums row pads left instead; see albums/view.rs).
+                .padding(iced::Padding::new(0.0).left(SLOT_LIST_SLOT_PADDING))
                 .push(anchor)
                 .push(slot_list_text_column(
                     "Trawl".to_string(),
@@ -1420,7 +1428,11 @@ fn render_row<'a>(
                 .spacing(6.0)
                 .align_y(Alignment::Center)
                 .height(Length::Fill)
-                .push(Space::new().width(Length::Fixed(SLOT_LIST_SLOT_PADDING)))
+                // The inset is row PADDING, not a Space child — a leading
+                // spacer inside a spaced row compounds to 8+6=14px and drifts
+                // the art rail 6px right of every other view (the canonical
+                // albums row pads left instead; see albums/view.rs).
+                .padding(iced::Padding::new(0.0).left(SLOT_LIST_SLOT_PADDING))
                 .push(art_el)
                 .push(slot_list_text_column(
                     title.clone(),
