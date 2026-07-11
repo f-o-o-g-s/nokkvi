@@ -48,8 +48,8 @@
 //!   margin is sized in the handler from the live boat sprite width
 //!   (`BOAT_WRAP_MARGIN_BOAT_WIDTHS · boat_w / area_width`) so the boat
 //!   fully exits the visible area before wrapping — the renderer draws a
-//!   single copy at `target_x` and lets the outer clip trim the off-screen
-//!   portion, so the boat is never visible in two places at once.
+//!   single copy at `target_x` and lets `OverflowPin`'s clip layer trim the
+//!   off-screen portion, so the boat is never visible in two places at once.
 //! - **Margin deadspace** — while in the margin, slope force is muted
 //!   so toroidal "across the seam" gradients can't drag the boat back
 //!   into the edge it just left. No special force is applied; sail
@@ -92,8 +92,12 @@ use iced::{
 /// boat that produces a visible "shrinking ship" artifact at the wrap
 /// seam. `OverflowPin` instead passes the parent's full limits through to
 /// the child, then translates the laid-out node — the child keeps its
-/// natural size and any portion that falls outside the parent is trimmed
-/// by the ancestor clip in `draw()`.
+/// natural size and any portion that falls outside the pin's own bounds is
+/// trimmed by the REAL clip layer its `draw()` pushes (`with_layer`). The
+/// layer matters: `container(..).clip(true)` only narrows the `viewport`
+/// culling hint, which `Svg::draw` ignores — sprite quads are scissored
+/// exclusively by render layers, so without one the boat kept painting
+/// past the area's left edge (see `draw()` below).
 struct OverflowPin<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Renderer: iced::advanced::Renderer,
@@ -233,18 +237,35 @@ where
     ) {
         let bounds = layout.bounds();
         if let Some(clipped_viewport) = bounds.intersection(viewport) {
-            self.content.as_widget().draw(
-                tree,
-                renderer,
-                theme,
-                style,
-                layout
-                    .children()
-                    .next()
-                    .expect("OverflowPin always lays out exactly one child"),
-                cursor,
-                &clipped_viewport,
-            );
+            // A REAL clip layer, not just a narrowed viewport hint. In this
+            // iced version `container(..).clip(true)` only shrinks the
+            // `viewport` argument passed down — a CULLING HINT that `Svg`'s
+            // draw ignores outright (`_viewport`), while the actual GPU
+            // scissor comes exclusively from render layers
+            // (`renderer.start_layer` → `layers.push_clip` → per-layer
+            // `set_scissor_rect`, wgpu/src/lib.rs:452). Without this layer
+            // the sprite quads draw wherever their bounds land: a boat
+            // exiting the area's LEFT edge kept painting over the sidebar
+            // (Lines bottom band) / the slot list (Harbour panel) for the
+            // entire off-screen wrap transit. The right edge only ever
+            // LOOKED correct because it usually coincides with the window
+            // edge, whose base scissor clips for free. Scoping the layer to
+            // `bounds ∩ viewport` scissors the pinned sprite to the
+            // visualizer/scene area on every edge.
+            renderer.with_layer(clipped_viewport, |renderer| {
+                self.content.as_widget().draw(
+                    tree,
+                    renderer,
+                    theme,
+                    style,
+                    layout
+                        .children()
+                        .next()
+                        .expect("OverflowPin always lays out exactly one child"),
+                    cursor,
+                    &clipped_viewport,
+                );
+            });
         }
     }
 
@@ -325,7 +346,7 @@ where
 /// because the stock `Pin` shrinks `Length::Fixed`-sized content as the
 /// position approaches the parent's far edge (silently squashing the
 /// boat). `OverflowPin` lets the boat keep its real size and trims the
-/// off-screen portion via the ancestor clip in its `draw()` path.
+/// off-screen portion via the clip layer its own `draw()` pushes.
 ///
 /// Why not `Float`: `iced::widget::Float` renders translated content via an
 /// overlay layer (`reference-iced/widget/src/float.rs:204-244`) that calls
