@@ -342,6 +342,16 @@ pub(crate) const REFERENCE_BPM: f32 = 120.0;
 pub(crate) const BPM_SCALE_MIN: f32 = 0.5;
 pub(crate) const BPM_SCALE_MAX: f32 = 2.0;
 
+/// Reference `|x_velocity|` at which a trawled anchor reaches its full
+/// backward trail offset (see `boat_overlay`'s `trail` parameter). Below
+/// this speed the trail eases linearly toward zero, so the anchor slides
+/// smoothly UNDER the hull as the boat decelerates through a tack and
+/// re-extends on the other side as it accelerates onto the new heading —
+/// no side-swap pop. Sized just below the harbour scene's cruise
+/// velocity (~0.017 ratio/sec at `HARBOUR_CRUISE_BAR_ENERGY`) so the
+/// trail sits at full extension for most of a crossing.
+pub(crate) const TRAIL_V_REF: f32 = 0.01;
+
 /// Min/max duration of an active anchor. The boat hovers in place,
 /// catching the beat as waves roll past underneath. Long enough to feel
 /// like a deliberate stop, short enough that the music's character

@@ -67,9 +67,9 @@
 #[path = "boat_physics.rs"]
 mod boat_physics;
 pub(crate) use boat_physics::{
-    ANCHOR_HEIGHT_MULTIPLE_OF_BOAT, BOAT_SINK_FRACTION, BOAT_WRAP_MARGIN_BOAT_WIDTHS, BoatState,
-    MusicSignals, OVER_COVER_WRAP_MARGIN, boat_pixel_size, effective_bars, rope_stroke_for, step,
-    wave_baseline_and_scale,
+    ANCHOR_HEIGHT_MULTIPLE_OF_BOAT, ANCHOR_INTERVAL_MAX_SECS, BOAT_SINK_FRACTION,
+    BOAT_WRAP_MARGIN_BOAT_WIDTHS, BoatState, MusicSignals, OVER_COVER_WRAP_MARGIN, boat_pixel_size,
+    effective_bars, rope_stroke_for, sample_line_height, step, wave_baseline_and_scale,
 };
 use iced::{
     Color, Element, Event, Length, Point, Rectangle, Size, Vector,
@@ -342,6 +342,19 @@ where
 /// Sizing off the smaller dimension keeps the sprite width bounded by the panel
 /// width, which is what makes the over-cover wrap margin a valid constant.
 /// `area_width` / `area_height` still set the boat's position and wave baseline.
+///
+/// `trail` switches the anchor doodad from "drop and hold" to TRAWLING: when
+/// `Some(offset)`, the anchor + rope render UNCONDITIONALLY (bypassing the
+/// `anchor_remaining_secs` gate) with the anchor dragged along the seabed
+/// BEHIND the boat's travel — at
+/// `x_ratio − signum(x_velocity) · offset · min(|x_velocity| / TRAIL_V_REF, 1)`.
+/// The velocity easing is what makes each tack graceful: as the boat stalls
+/// through the turn the anchor slides under the hull and re-extends on the
+/// other side, instead of popping across. The rope reuses the anchored
+/// geometry (hull bottom-center → anchor ring); `anchor_sway` decays to 0
+/// while un-anchored, so the trawl rope draws taut. Pass `None` for the
+/// Lines-visualizer behavior (the drop-anchor event, unchanged).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn boat_overlay<'a, M: 'a>(
     state: &BoatState,
     area_width: f32,
@@ -349,6 +362,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     size_basis: f32,
     opacity: f32,
     mirror: bool,
+    trail: Option<f32>,
 ) -> Element<'a, M> {
     // The handler is responsible for calling `cache_handle_for(tilt,
     // facing)` on the first visible tick, so by the time we render the
@@ -459,21 +473,29 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // slides through the hidden stretch.
     let mut overlay = Stack::new().push(pin_at(target_x));
 
-    // Anchor sprite + rope canvas: only rendered while anchored. The
-    // anchor sprite sits on the wave's baseline — the canvas bottom in
-    // normal mode, the canvas vertical center in mirrored mode — pinned
-    // to the x where the boat dropped the anchor. It does NOT move with
-    // the boat, so wave-driven Y-bobbing leaves the anchor planted on
-    // the floor while the boat rides above it. Reusing `baseline_y`
-    // from the boat positioning math above keeps the anchor on the
-    // same "floor" the boat is riding; pinning to `area_height`
-    // unconditionally would stretch the rope across the lower-half
-    // reflection in mirrored mode, which reads as a rendering bug. The
-    // rope is a curved canvas path drawn from the boat's bottom-center
-    // to the top of the anchor's ring; its bend is driven by
-    // `anchor_sway`, which the physics still oscillates from local
-    // wave amplitude.
-    if state.anchor_remaining_secs > 0.0 {
+    // Anchor sprite + rope canvas: rendered while anchored (drop-anchor
+    // event) OR always in trawl mode. The anchor sprite sits on the wave's
+    // baseline — the canvas bottom in normal mode, the canvas vertical
+    // center in mirrored mode. Anchored: pinned to the x where the boat
+    // dropped the anchor, NOT moving with the boat, so wave-driven
+    // Y-bobbing leaves the anchor planted on the floor while the boat
+    // rides above it. Trawling: dragged along that same floor behind the
+    // boat's travel, the velocity-eased offset making tack turns read as
+    // the anchor swinging under the hull. Reusing `baseline_y` from the
+    // boat positioning math above keeps the anchor on the same "floor"
+    // the boat is riding; pinning to `area_height` unconditionally would
+    // stretch the rope across the lower-half reflection in mirrored mode,
+    // which reads as a rendering bug. The rope is a curved canvas path
+    // drawn from the boat's bottom-center to the top of the anchor's
+    // ring; its bend is driven by `anchor_sway`, which the physics
+    // oscillates from local wave amplitude while anchored (and decays to
+    // ~0 otherwise — a taut trawl rope).
+    let trawl_anchor_x = trail.map(|offset| {
+        let ease = (state.x_velocity.abs() / boat_physics::TRAIL_V_REF).min(1.0);
+        state.x_ratio - state.x_velocity.signum() * offset * ease
+    });
+    if state.anchor_remaining_secs > 0.0 || trawl_anchor_x.is_some() {
+        let anchor_x_ratio = trawl_anchor_x.unwrap_or(state.anchor_drop_x);
         let anchor_handle = state.cached_anchor_handle().unwrap_or_else(|| {
             let bytes = crate::embedded_svg::themed_anchor_svg().into_bytes();
             svg::Handle::from_memory(bytes)
@@ -483,7 +505,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         // that it reads as a doodad rather than a second focal point.
         let anchor_total_h = boat_h * ANCHOR_HEIGHT_MULTIPLE_OF_BOAT;
         let anchor_total_w = anchor_total_h; // the anchor's viewBox is square (24² Lucide / 256² Phosphor)
-        let anchor_left_x = state.anchor_drop_x * area_width - anchor_total_w * 0.5;
+        let anchor_left_x = anchor_x_ratio * area_width - anchor_total_w * 0.5;
         let anchor_top_y = baseline_y - anchor_total_h;
 
         overlay = overlay.push(
@@ -516,7 +538,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
 
         let boat_bottom_x = cx;
         let boat_bottom_y = target_y + boat_h - boat_h * BOAT_SINK_FRACTION;
-        let anchor_ring_x = state.anchor_drop_x * area_width;
+        let anchor_ring_x = anchor_x_ratio * area_width;
         let anchor_ring_y =
             anchor_top_y + anchor_total_h * crate::embedded_svg::anchor_svg_ring_top_fraction();
 
@@ -550,7 +572,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
 /// `embedded_svg::color_to_hex`, so this is the inverse — used by the
 /// rope canvas to translate a string-formatted theme color back into
 /// an iced color for `Stroke`.
-fn parse_hex_color(s: &str) -> Option<Color> {
+pub(crate) fn parse_hex_color(s: &str) -> Option<Color> {
     let s = s.strip_prefix('#')?;
     if s.len() != 6 {
         return None;

@@ -993,6 +993,16 @@ pub(crate) struct HarbourViewData<'a> {
     pub modifiers: iced::keyboard::Modifiers,
     pub elevated: bool,
     pub stable_viewport: bool,
+    /// The trawling-longship state the centered Trawl row's animated scene
+    /// renders from (stepped per frame by `update::boat::step_harbour_scene`).
+    pub harbour_boat: &'a crate::widgets::boat::BoatState,
+    /// The sea heights that SAME step sampled — the scene draws this exact
+    /// array so the hull sits on the drawn water (coherence contract, see
+    /// `widgets::harbour_sea`).
+    pub harbour_sea_bars: &'a [f64],
+    /// Travelling phase of the procedural sea (drives the decorative back
+    /// parallax layer).
+    pub harbour_sea_phase: f32,
 }
 
 impl HarbourPage {
@@ -1167,28 +1177,20 @@ impl HarbourPage {
             Some(HarbourRow::Section {
                 id, see_all: None, ..
             }) => section_preview_panel(*id, &data),
-            // The centered Trawl door: anchor placeholder + a quiet pill
-            // naming the crate's state (kept fg2-level — Harbour opens
-            // centered on this row, so the landing view must not shout).
+            // The centered Trawl door: the trawling-longship scene — the
+            // themed logo dragging its anchor across a procedural sea — over
+            // a quiet pill naming the crate's state (kept fg2-level — Harbour
+            // opens centered on this row, so the landing view must not shout).
             Some(HarbourRow::Trawl { seeds, blend }) => {
-                let panel = crate::widgets::base_slot_list_layout::
-                    single_artwork_panel_with_visualizer_and_menu::<HarbourMessage>(
-                    None,
-                    None,
-                    None,
-                    crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Anchor,
-                    Vec::new(),
-                    false,
-                    None,
-                    |_| HarbourMessage::NoOp,
-                );
                 let meta = if *seeds == 0 {
                     "The crate is empty".to_string()
                 } else {
                     trawl_row_subtitle(*seeds, *blend)
                 };
-                crate::widgets::base_slot_list_layout::wrap_with_pill_overlay(
-                    panel,
+                crate::widgets::harbour_sea::trawl_scene(
+                    data.harbour_boat,
+                    data.harbour_sea_bars,
+                    data.harbour_sea_phase,
                     section_pill(
                         "assets/icons/anchor.svg",
                         "TRAWL",

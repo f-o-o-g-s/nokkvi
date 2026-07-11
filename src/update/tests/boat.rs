@@ -364,4 +364,200 @@ mod boat_tests {
     }
 }
 
+// Harbour Trawl Scene Handler (boat.rs::step_harbour_scene)
+// ============================================================================
+
+mod harbour_scene_tests {
+    use std::time::{Duration, Instant};
+
+    use crate::{Screen, View, app_message::Message, test_helpers::*};
+
+    /// Put the app in the state the harbour trawl scene ticks in: Home
+    /// screen, Harbour view, empty header search.
+    fn app_on_harbour() -> crate::Nokkvi {
+        let mut app = test_app();
+        app.screen = Screen::Home;
+        app.current_view = View::Harbour;
+        app
+    }
+
+    #[test]
+    fn harbour_boat_hidden_off_harbour() {
+        // Off the Harbour view the scene must hide and drop its dt baseline
+        // while PRESERVING position — the same hide contract the Lines boat
+        // honors across mode round-trips.
+        let mut app = test_app();
+        app.screen = Screen::Home;
+        app.current_view = View::Queue;
+        app.harbour_boat.visible = true;
+        app.harbour_boat.last_tick = Some(Instant::now());
+        app.harbour_boat.x_ratio = 0.37;
+
+        let _ = app.update(Message::BoatTick(Instant::now()));
+
+        assert!(
+            !app.harbour_boat.visible,
+            "harbour boat must hide when the current view is not Harbour"
+        );
+        assert!(
+            app.harbour_boat.last_tick.is_none(),
+            "last_tick must clear while hidden so re-show starts with dt=0"
+        );
+        assert_eq!(
+            app.harbour_boat.x_ratio, 0.37,
+            "position must be preserved while hidden"
+        );
+    }
+
+    #[test]
+    fn harbour_boat_sails_in_silence() {
+        // The scene's sea is procedural: with NOTHING playing the boat must
+        // still gain forward velocity from the synthetic bars' presence
+        // cruise. The first tick seats last_tick (dt=0); the second
+        // integrates a real gap.
+        let mut app = app_on_harbour();
+        app.playback.playing = false;
+        app.playback.paused = false;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+
+        assert!(
+            app.harbour_boat.visible,
+            "harbour boat must be visible on the Harbour view"
+        );
+        assert!(
+            app.harbour_boat.x_velocity != 0.0,
+            "the procedural sea must propel the boat in silence \
+             (x_velocity stayed 0)"
+        );
+        assert!(
+            !app.harbour_sea_bars.is_empty(),
+            "the stepped sea bars must be stored for the view to draw"
+        );
+    }
+
+    #[test]
+    fn harbour_scene_ticks_while_audio_paused() {
+        // The Lines boat freezes on `playback.paused` because its wave source
+        // (the FFT buffer) drains. The harbour sea is procedural, so the
+        // scene must keep animating through an audio pause.
+        let mut app = app_on_harbour();
+        app.playback.paused = true;
+        app.harbour_boat.x_velocity = 0.05;
+        app.harbour_boat.facing = 1.0;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let x0 = app.harbour_boat.x_ratio;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+
+        assert_ne!(
+            app.harbour_boat.x_ratio, x0,
+            "harbour boat must keep sailing while audio is paused"
+        );
+    }
+
+    #[test]
+    fn harbour_drop_anchor_suppressed() {
+        // Trawling is the OPPOSITE of the built-in drop-anchor-and-hold: the
+        // handler must pin the countdown BEFORE step() every tick so the
+        // anchor event can never fire, even with the countdown about to
+        // expire in the firing safe zone.
+        let mut app = app_on_harbour();
+        app.harbour_boat.x_ratio = 0.5; // inside [ANCHOR_SAFE_LO, ANCHOR_SAFE_HI]
+        app.harbour_boat.secs_until_next_anchor = 0.001;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+
+        assert_eq!(
+            app.harbour_boat.anchor_remaining_secs, 0.0,
+            "the built-in drop-anchor must never fire while trawling"
+        );
+        // Pinned BEFORE the step, which then decrements it by dt — so the
+        // observable value sits just under MAX and can never approach zero.
+        assert!(
+            app.harbour_boat.secs_until_next_anchor
+                > crate::widgets::boat::ANCHOR_INTERVAL_MAX_SECS - 1.0,
+            "the anchor countdown must be re-pinned every tick, got {}",
+            app.harbour_boat.secs_until_next_anchor
+        );
+    }
+
+    #[test]
+    fn harbour_boat_hides_during_search() {
+        // During a header search the Trawl row leaves the row list entirely,
+        // so the scene stops ticking — hidden, dt baseline dropped, position
+        // preserved (same contract as leaving the view).
+        let mut app = app_on_harbour();
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        assert!(app.harbour_boat.visible);
+        let x = app.harbour_boat.x_ratio;
+
+        app.harbour.search_query = "abba".to_string();
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+
+        assert!(
+            !app.harbour_boat.visible,
+            "harbour boat must hide while a search is active"
+        );
+        assert!(
+            app.harbour_boat.last_tick.is_none(),
+            "last_tick must clear while hidden"
+        );
+        assert_eq!(
+            app.harbour_boat.x_ratio, x,
+            "position must be preserved across the search hide"
+        );
+    }
+
+    #[test]
+    fn harbour_sea_phase_advances_and_stays_wrapped() {
+        let mut app = app_on_harbour();
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let p0 = app.harbour_sea_phase;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+
+        assert_ne!(
+            app.harbour_sea_phase, p0,
+            "the sea's travelling phase must advance between ticks"
+        );
+        assert!(
+            (0.0..1.0).contains(&app.harbour_sea_phase),
+            "phase must stay wrapped into [0, 1), got {}",
+            app.harbour_sea_phase
+        );
+    }
+
+    #[test]
+    fn harbour_scene_independent_of_lines_visualizer() {
+        // The scene must tick regardless of visualization mode — the Lines
+        // boat's early-outs must not gate the harbour boat.
+        use nokkvi_data::types::player_settings::VisualizationMode;
+
+        let mut app = app_on_harbour();
+        app.engine.visualization_mode = VisualizationMode::Off;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+
+        assert!(
+            app.harbour_boat.visible,
+            "harbour boat must tick with the visualizer fully off"
+        );
+        assert!(
+            !app.boat.visible,
+            "the Lines boat must stay governed by its own gates"
+        );
+    }
+}
+
 // ============================================================================

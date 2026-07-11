@@ -289,6 +289,23 @@ pub struct Nokkvi {
     /// `Message::BoatTick`; visibility derived from
     /// `engine.visualization_mode == Lines && config.enabled && config.lines.boat`.
     pub boat: crate::widgets::boat::BoatState,
+    /// Trawling-longship state for the Harbour Trawl panel — a SEPARATE
+    /// `BoatState` from the Lines-visualizer `boat` above, driven by the same
+    /// per-frame `Message::BoatTick` but stepped against a procedural sea
+    /// (`widgets::harbour_sea::sea_bars`) so it sails with no audio playing.
+    /// Ticks only while the Harbour view is showing with an empty search
+    /// (`update::boat::step_harbour_scene`); hidden otherwise with position
+    /// preserved, mirroring the Lines boat's hide contract.
+    pub harbour_boat: crate::widgets::boat::BoatState,
+    /// Travelling phase of the Harbour panel's procedural sea, in `[0, 1)`.
+    /// Advanced by the boat tick at `harbour_sea::SEA_DRIFT_HZ`; wrap-safe
+    /// because every layer's phase multiplier is an integer (see
+    /// `widgets::harbour_sea::sea_bars`).
+    pub harbour_sea_phase: f32,
+    /// The sea heights the harbour boat was stepped against this frame —
+    /// stored so the view draws the SAME array the physics sampled (the
+    /// coherence guarantee that keeps the hull sitting ON the drawn water).
+    pub harbour_sea_bars: Vec<f64>,
 
     // -------------------------------------------------------------------------
     // MPRIS D-Bus Integration
@@ -457,6 +474,15 @@ impl Default for Nokkvi {
             visualizer: None,
             visualizer_config: crate::visualizer_config::create_shared_config(),
             boat: crate::widgets::boat::BoatState::default(),
+            harbour_boat: crate::widgets::boat::BoatState {
+                // Start mid-panel so the first Harbour open doesn't watch the
+                // boat surface from a corner; every other field lazily seeds
+                // in `boat_physics::step()` (facing, rng, timers).
+                x_ratio: 0.5,
+                ..Default::default()
+            },
+            harbour_sea_phase: 0.0,
+            harbour_sea_bars: Vec::new(),
             mpris_connection: None,
             last_mpris_position_us: 0,
             notification_connection: None,

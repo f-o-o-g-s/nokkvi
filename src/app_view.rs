@@ -898,6 +898,9 @@ impl Nokkvi {
                         visualizer_height,
                         viz_opacity,
                         lines_mirror,
+                        // No trawl trail — the Lines boat keeps its
+                        // drop-anchor-and-rest doodad.
+                        None,
                     ),
                 ]
                 .width(Length::Fill)
@@ -1785,6 +1788,9 @@ impl Nokkvi {
                     modifiers: self.window.keyboard_modifiers,
                     elevated,
                     stable_viewport: self.settings.stable_viewport,
+                    harbour_boat: &self.harbour_boat,
+                    harbour_sea_bars: &self.harbour_sea_bars,
+                    harbour_sea_phase: self.harbour_sea_phase,
                 })
                 .map(Message::Harbour),
             View::Radios => {

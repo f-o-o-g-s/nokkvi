@@ -36,6 +36,13 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
         crate::widgets::slot_list::set_now_playing_phase(phase);
     }
 
+    // The Harbour Trawl scene ticks BEFORE the Lines boat's early-outs: its
+    // sea is procedural (a pure function of a phase this handler advances),
+    // so it is independent of the visualizer mode, the `lines.boat` toggle,
+    // AND the audio-pause freeze below — the scene keeps breathing while the
+    // player is paused or stopped.
+    step_harbour_scene(app, now);
+
     // Read mode + config snapshot once per tick. The "visualizer enabled"
     // check is `engine.visualization_mode != VisualizationMode::Off` — that's
     // what gates the shader element in the app_view visualizer-element build
@@ -197,4 +204,80 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     }
 
     Task::none()
+}
+
+/// Per-frame step for the Harbour Trawl panel's trawling-longship scene.
+///
+/// A SEPARATE `BoatState` (`app.harbour_boat`) from the Lines boat, stepped
+/// against a procedural sea instead of the FFT buffer:
+/// - **Gate**: runs only on the Home screen with the Harbour view active and
+///   an empty header search (during a search the Trawl row leaves the row
+///   list entirely). Off-gate the boat hides and drops its dt baseline,
+///   position preserved — the Lines boat's hide contract.
+/// - **Sea**: `harbour_sea_phase` advances at `SEA_DRIFT_HZ` (wrapped with
+///   `rem_euclid` so long sessions can't decay f32 sin precision), then ONE
+///   `sea_bars` array is built, stepped against, and stored for the view —
+///   the coherence contract that keeps the hull on the drawn water.
+/// - **No audio coupling**: the bars are fed straight to `step()` (never
+///   through `effective_bars`, which would empty them in silence and sink
+///   the boat) with a fixed `bar_energy` cruise, so the scene animates
+///   identically stopped, paused, or playing.
+/// - **Trawl, not drop-anchor**: the built-in drop-anchor-and-hold event is
+///   the thematic OPPOSITE of trawling, so both its fields are pinned BEFORE
+///   `step()` each tick — pinning after would let the fire-check inside the
+///   step land first and stall the boat for a frame every 45–120 s.
+fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
+    let on_harbour = app.screen == crate::Screen::Home
+        && app.current_view == crate::View::Harbour
+        && app.harbour.search_query.trim().is_empty();
+    if !on_harbour {
+        app.harbour_boat.visible = false;
+        app.harbour_boat.last_tick = None;
+        return;
+    }
+
+    let dt = match app.harbour_boat.last_tick {
+        Some(prev) => now.saturating_duration_since(prev),
+        None => std::time::Duration::ZERO,
+    };
+    app.harbour_boat.last_tick = Some(now);
+
+    // Advance the travelling sea and build the ONE bars array this frame's
+    // physics and render both consume.
+    app.harbour_sea_phase = (app.harbour_sea_phase
+        + dt.as_secs_f32() * crate::widgets::harbour_sea::SEA_DRIFT_HZ)
+        .rem_euclid(1.0);
+    let bars = crate::widgets::harbour_sea::sea_bars(app.harbour_sea_phase);
+
+    // Suppress the drop-anchor state machine BEFORE the step (see docs).
+    app.harbour_boat.anchor_remaining_secs = 0.0;
+    app.harbour_boat.secs_until_next_anchor = boat::ANCHOR_INTERVAL_MAX_SECS;
+    // The panel is ~square, so the same panel-size-independent wrap margin
+    // the over-cover boat uses applies (the sprite sizes off min(w, h)).
+    app.harbour_boat.x_wrap_margin = boat::OVER_COVER_WRAP_MARGIN;
+
+    let music = MusicSignals {
+        bpm: None,
+        onset_energy: 0.0,
+        long_onset_energy: 0.0,
+        // Fixed presence cruise — the scene's calm lever (deliberately NOT
+        // the sea's mean; see HARBOUR_CRUISE_BAR_ENERGY docs).
+        bar_energy: crate::widgets::harbour_sea::HARBOUR_CRUISE_BAR_ENERGY,
+    };
+    boat::step(&mut app.harbour_boat, dt, &bars, false, music);
+    // `step()` toggles `inverted` on every wrap for mirrored Lines mode; the
+    // harbour scene never mirrors, so clear it (same as the Lines handler's
+    // non-mirror path) to keep the render-cache key stable.
+    app.harbour_boat.inverted = false;
+
+    // Warm the SVG caches so the pure view path is a cheap handle clone.
+    // Unlike the Lines path, the anchor handle is warmed EVERY tick — the
+    // trawl draws the anchor unconditionally.
+    let tilt = app.harbour_boat.tilt;
+    let facing = app.harbour_boat.facing;
+    let _ = app.harbour_boat.cache_handle_for(tilt, facing, false);
+    let _ = app.harbour_boat.cache_anchor_handle();
+
+    app.harbour_sea_bars = bars;
+    app.harbour_boat.visible = true;
 }

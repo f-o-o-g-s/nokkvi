@@ -334,9 +334,6 @@ pub(crate) enum ArtworkPlaceholder {
     /// Centered radio-tower glyph on the artwork background — Radios stations
     /// with no logo / not-yet-loaded now-playing art.
     RadioTower,
-    /// Centered anchor glyph — the Trawl mix-builder's mark (Harbour's
-    /// centered Trawl row previews no artwork; the anchor holds the panel).
-    Anchor,
 }
 
 impl ArtworkPlaceholder {
@@ -355,15 +352,6 @@ impl ArtworkPlaceholder {
                 color: Some(theme::fg2()),
             })
             .into(),
-            ArtworkPlaceholder::Anchor => {
-                crate::embedded_svg::svg_widget("assets/icons/anchor.svg")
-                    .width(Length::Fixed(96.0))
-                    .height(Length::Fixed(96.0))
-                    .style(|_, _| iced::widget::svg::Style {
-                        color: Some(theme::fg2()),
-                    })
-                    .into()
-            }
         })
         .width(width)
         .height(height)
@@ -530,6 +518,8 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
                         size.width.min(band_h),
                         b.opacity,
                         b.mirror,
+                        // Lines over-cover boat keeps the drop-anchor doodad.
+                        None,
                     );
                     let boat_layer = column![
                         container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
@@ -625,6 +615,8 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
                     square_size.min(band_h),
                     b.opacity,
                     b.mirror,
+                    // Lines over-cover boat keeps the drop-anchor doodad.
+                    None,
                 );
                 let boat_layer = column![
                     container(iced::widget::Space::new()).height(Length::Fixed(top_pad)),
@@ -738,6 +730,21 @@ pub(crate) fn wrap_with_pill_overlay<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     use iced::widget::{container, stack};
 
+    let overlay = container(banded_pill(content))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(iced::Alignment::End);
+
+    stack![base_panel, overlay].into()
+}
+
+/// The banded pill strip itself — `content` centered on a fixed `bg0_hard()`
+/// bar sandwiched between 1 px `theme::border()` rules. Shared by
+/// [`wrap_with_pill_overlay`] (which floats it over an artwork panel) and the
+/// Harbour Trawl scene (which DOCKS it below the sea in a column, so the
+/// seabed lands on the band's top rail instead of hiding behind it). One
+/// builder, so the two placements can't drift.
+pub(crate) fn banded_pill<'a, Message: 'a>(content: Element<'a, Message>) -> Element<'a, Message> {
     let separator = || {
         container(iced::widget::Space::new())
             .width(Length::Fill)
@@ -757,14 +764,7 @@ pub(crate) fn wrap_with_pill_overlay<'a, Message: 'a>(
             ..Default::default()
         });
 
-    let banded = column![separator(), bar, separator()];
-
-    let overlay = container(banded)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_y(iced::Alignment::End);
-
-    stack![base_panel, overlay].into()
+    column![separator(), bar, separator()].into()
 }
 
 /// Create a single-image artwork panel with a bottom-anchored, full-width bar overlay
