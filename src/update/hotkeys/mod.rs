@@ -453,10 +453,14 @@ impl Nokkvi {
         }
 
         // Escape always reaches the dispatcher: it closes overlays / clears
-        // search. Hoisted so both guard blocks below can read it.
+        // search. Hoisted (with Tab) so the guard blocks below can read them.
         let is_escape = matches!(
             key,
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+        );
+        let is_tab = matches!(
+            key,
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
         );
 
         // When a widget (e.g. text_input search bar) has captured the
@@ -471,10 +475,6 @@ impl Nokkvi {
         //     must stay suppressed, otherwise e.g. a capital D fires
         //     ClearQueue (destructive) mid-edit.
         if status == iced::event::Status::Captured {
-            let is_tab = matches!(
-                key,
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
-            );
             let is_shift_nav = modifiers.shift()
                 && matches!(
                     key,
@@ -517,8 +517,16 @@ impl Nokkvi {
                     ))
                 );
             // The trawl modal additionally admits Ctrl+Enter
-            // (ActivateCenterShuffled): its slot-list intercept maps it to
-            // PlayMix — the one playable thing inside the modal is the mix.
+            // (ActivateCenterShuffled) and Shift+A (AddToQueue): the slot-list
+            // intercept maps the former to PlayMix and handle_add_to_queue
+            // routes the latter to AddMixToQueue — the one playable/enqueueable
+            // thing inside the modal is the mix.
+            // Shift+Tab/Shift+Backspace (SettingsCategoryMotion) and Left/Right
+            // (CycleSortMode) drive the tray-controls keyboard cursor. All of
+            // these handlers route trawl-first, so admitting them here never
+            // leaks to the obscured view. These arms live INSIDE this
+            // trawl-gated allowlist on purpose — the EQ/Info/About modals must
+            // keep swallowing the same keys.
             let is_trawl_nav = self.trawl_modal.is_some()
                 && matches!(
                     resolved,
@@ -528,10 +536,40 @@ impl Nokkvi {
                                 | crate::app_message::SlotListMessage::NavigateDown
                                 | crate::app_message::SlotListMessage::ActivateCenter
                                 | crate::app_message::SlotListMessage::ActivateCenterShuffled
-                        ) | Message::Hotkey(crate::app_message::HotkeyMessage::FocusSearch)
+                        ) | Message::Hotkey(
+                            crate::app_message::HotkeyMessage::FocusSearch
+                                | crate::app_message::HotkeyMessage::CycleSortMode(_)
+                                | crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
+                                | crate::app_message::HotkeyMessage::AddToQueue
+                        )
                     )
                 );
             if !is_escape && !is_picker_nav && !is_trawl_nav {
+                return Task::none();
+            }
+            // A key the trawl search field CAPTURED already did something in
+            // the field — Shift+Backspace deleted a character, a rebound
+            // Ctrl+V pasted — and must not ALSO drive the tray or enqueue the
+            // mix: one press, one meaning. Keyed on the event status rather
+            // than the `search_input_focused` mirror (the flag goes stale
+            // around mouse clicks — iced sends no focus events) and matched on
+            // EVERY tray action in BOTH directions plus AddToQueue so user
+            // rebinds can't open a double-handling hole. Tab is exempt: a
+            // focused text_input never captures Tab, and the settings
+            // precedent (is_shift_nav + its pinned test) admits even a
+            // theoretically-captured Shift+Tab.
+            if self.trawl_modal.is_some()
+                && status == iced::event::Status::Captured
+                && !is_tab
+                && matches!(
+                    resolved,
+                    Some(Message::Hotkey(
+                        crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
+                            | crate::app_message::HotkeyMessage::CycleSortMode(_)
+                            | crate::app_message::HotkeyMessage::AddToQueue
+                    ))
+                )
+            {
                 return Task::none();
             }
         }
@@ -547,7 +585,14 @@ impl Nokkvi {
     /// previous. Routes to `SettingsMessage::SidebarDown`/`SidebarUp` when the
     /// settings view is active; no-op everywhere else (the hotkey config can
     /// bind these globally without bleeding into other views).
+    ///
+    /// The trawl branch sits FIRST: with the mix builder open, the same
+    /// action steps the tray-controls focus ring instead — `current_view`
+    /// still names the obscured view, so falling through would drive it.
     pub(crate) fn handle_settings_category_motion(&mut self, forward: bool) -> Task<Message> {
+        if self.trawl_modal.is_some() {
+            return self.handle_trawl_tray_focus_move(forward);
+        }
         if self.current_view != View::Settings {
             return Task::none();
         }

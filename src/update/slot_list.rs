@@ -72,7 +72,7 @@ impl Nokkvi {
                         && state.search_input_focused
                     {
                         state.search_input_focused = false;
-                        iced::widget::operation::focus("__unfocus_all__")
+                        super::components::unfocus_all()
                     } else {
                         Task::none()
                     };
@@ -231,12 +231,12 @@ impl Nokkvi {
                 // remain visible and navigable (Tab moves into search results,
                 // Escape fully clears search).
             }
-            iced::widget::operation::focus("__unfocus_all__")
+            super::components::unfocus_all()
         } else if let Some(page) = self.current_view_page_mut()
             && page.common().search_input_focused
         {
             page.common_mut().search_input_focused = false;
-            iced::widget::operation::focus("__unfocus_all__")
+            super::components::unfocus_all()
         } else {
             Task::none()
         };

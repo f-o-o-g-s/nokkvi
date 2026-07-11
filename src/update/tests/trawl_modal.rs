@@ -14,7 +14,7 @@ use nokkvi_data::types::{
 
 use crate::{
     test_helpers::test_app,
-    widgets::trawl_modal::{TrawlModalMessage, TrawlModalState},
+    widgets::trawl_modal::{TrawlModalMessage, TrawlModalState, TrawlTrayControl},
 };
 
 fn seed(id: &str) -> TrawlSeed {
@@ -693,5 +693,755 @@ fn slash_refocuses_the_modal_search() {
             .as_ref()
             .is_some_and(|s| s.search_input_focused),
         "/ refocuses the modal's search from the list"
+    );
+}
+
+// ---- tray keyboard cursor (Shift+Tab ring, Left/Right value cycling) ------------
+
+/// Like [`send_raw_key`], but with `Status::Captured` — a focused text_input
+/// swallowed the event. Shift+Tab/Shift+Backspace must still act (the
+/// `is_shift_nav` carve-out), which is exactly what these tests pin.
+fn send_raw_key_captured(
+    app: &mut crate::Nokkvi,
+    key: iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+) -> iced::Task<crate::Message> {
+    app.update(crate::Message::RawKeyEvent(
+        key,
+        modifiers,
+        iced::event::Status::Captured,
+    ))
+}
+
+fn shift_tab(app: &mut crate::Nokkvi) {
+    let _ = send_raw_key(
+        app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+}
+
+fn shift_backspace(app: &mut crate::Nokkvi) {
+    let _ = send_raw_key(
+        app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+}
+
+/// Bare Left/Right — the PrevSortMode/NextSortMode bindings.
+fn arrow(app: &mut crate::Nokkvi, right: bool) {
+    let named = if right {
+        iced::keyboard::key::Named::ArrowRight
+    } else {
+        iced::keyboard::key::Named::ArrowLeft
+    };
+    let _ = send_raw_key(
+        app,
+        iced::keyboard::Key::Named(named),
+        iced::keyboard::Modifiers::empty(),
+    );
+}
+
+fn tray_cursor(app: &crate::Nokkvi) -> Option<TrawlTrayControl> {
+    app.trawl_modal.as_ref().and_then(|s| s.tray_cursor)
+}
+
+fn open_modal_over(app: &mut crate::Nokkvi, view: crate::View) {
+    app.current_view = view;
+    app.screen = crate::Screen::Home;
+    open_modal(app);
+}
+
+#[test]
+fn shift_tab_enters_the_tray_and_unfocuses_search() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| s.search_input_focused),
+        "Open focuses the search field"
+    );
+
+    // The search text_input holds iced focus, so the event arrives Captured —
+    // the is_shift_nav carve-out must still let Shift+Tab through.
+    let _ = send_raw_key_captured(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+
+    assert_eq!(
+        tray_cursor(&app),
+        Some(TrawlTrayControl::Blend),
+        "Shift+Tab enters the tray at the first control"
+    );
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| !s.search_input_focused),
+        "entering the tray unfocuses the search field so arrows go live"
+    );
+}
+
+#[test]
+fn shift_tab_cycles_the_ring_and_wraps_through_none() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+
+    let expected = [
+        Some(TrawlTrayControl::Blend),
+        Some(TrawlTrayControl::MinLength),
+        Some(TrawlTrayControl::MaxLength),
+        Some(TrawlTrayControl::MinRating),
+        Some(TrawlTrayControl::MaxTracks),
+        None,
+    ];
+    for want in expected {
+        shift_tab(&mut app);
+        assert_eq!(
+            tray_cursor(&app),
+            want,
+            "the ring walks every control then wraps to None"
+        );
+    }
+}
+
+#[test]
+fn shift_backspace_reverse_cycles_the_ring() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+    }
+
+    // From None, backward enters at the LAST control — pins that the gate
+    // admits SettingsCategoryMotion(false), not just the forward direction.
+    shift_backspace(&mut app);
+    assert_eq!(tray_cursor(&app), Some(TrawlTrayControl::MaxTracks));
+    shift_backspace(&mut app);
+    assert_eq!(tray_cursor(&app), Some(TrawlTrayControl::MinRating));
+}
+
+#[test]
+fn shift_backspace_while_search_focused_leaves_the_tray_alone() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| s.search_input_focused)
+    );
+
+    // Shift held from a capital + Backspace mid-typing: the Captured event
+    // already deleted a character — it must not ALSO move the ring or yank
+    // iced focus out of the field.
+    let _ = send_raw_key_captured(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+
+    assert_eq!(tray_cursor(&app), None, "the ring must not move mid-typing");
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| s.search_input_focused),
+        "the search field keeps focus for further deletion"
+    );
+}
+
+#[test]
+fn captured_keys_never_drive_the_tray_even_when_rebound() {
+    use nokkvi_data::types::hotkey_config::{HotkeyAction, KeyCode, KeyCombo};
+
+    // A user may invert the category pair (Shift+Backspace = NEXT). While
+    // typing in the search field that keypress is a character deletion — it
+    // must not also enter the ring or yank focus, regardless of which
+    // DIRECTION (or which tray action) the combo resolves to: the swallow is
+    // status-keyed and action-agnostic.
+    let mut app = test_app();
+    app.hotkey_config.set_binding(
+        HotkeyAction::SettingsCategoryNext,
+        KeyCombo::shift(KeyCode::Backspace),
+    );
+    open_modal_over(&mut app, crate::View::Queue);
+
+    let _ = send_raw_key_captured(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+
+    assert_eq!(
+        tray_cursor(&app),
+        None,
+        "a captured press never moves the ring, whatever it resolves to"
+    );
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| s.search_input_focused),
+        "the search field keeps focus mid-typing"
+    );
+}
+
+#[test]
+fn shift_backspace_with_stale_focus_flag_still_enters_the_ring() {
+    // The mid-typing swallow is keyed on the event's Captured status, NOT
+    // the search_input_focused mirror: after a mouse click away from the
+    // search field the flag stays stale-true while real iced focus is gone,
+    // and the keypress arrives Ignored — backward ring entry must work,
+    // not be a dead key until something resets the flag.
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| s.search_input_focused),
+        "precondition: the flag reads focused (stale)"
+    );
+
+    shift_backspace(&mut app); // Status::Ignored — nothing captured it
+
+    assert_eq!(
+        tray_cursor(&app),
+        Some(TrawlTrayControl::MaxTracks),
+        "an uncaptured Shift+Backspace enters the ring backward"
+    );
+}
+
+#[test]
+fn left_right_cycle_the_focused_value_with_wrap() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::Blend);
+    }
+    assert_eq!(app.trawl_crate.blend, TrawlBlend::ALL[0]);
+
+    arrow(&mut app, true);
+    assert_eq!(
+        app.trawl_crate.blend,
+        TrawlBlend::ALL[1],
+        "Right steps the focused control forward"
+    );
+
+    arrow(&mut app, false);
+    arrow(&mut app, false);
+    assert_eq!(
+        app.trawl_crate.blend,
+        TrawlBlend::ALL[TrawlBlend::ALL.len() - 1],
+        "Left from the first value wraps to the last"
+    );
+}
+
+#[test]
+fn all_five_controls_cycle_their_own_value() {
+    use nokkvi_data::types::trawl::{
+        TrawlMaxLength, TrawlMaxTracks, TrawlMinLength, TrawlMinRating,
+    };
+
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+    }
+
+    // Test-local re-derivation of "one step forward, wrapping" so the
+    // assertion doesn't lean on the production helper it exists to check.
+    fn next_of<T: Copy + PartialEq + std::fmt::Debug>(all: &[T], v: T) -> T {
+        let i = all
+            .iter()
+            .position(|x| *x == v)
+            .unwrap_or_else(|| panic!("{v:?} must be in its ALL array"));
+        all[(i + 1) % all.len()]
+    }
+
+    // One Right press per control: exactly that control's crate field steps
+    // to its ALL-neighbor — pins the per-variant field wiring.
+    for control in TrawlTrayControl::ALL {
+        if let Some(state) = app.trawl_modal.as_mut() {
+            state.tray_cursor = Some(control);
+        }
+        let before = app.trawl_crate.clone();
+        arrow(&mut app, true);
+        let after = &app.trawl_crate;
+
+        let stepped = |name: &str, changed: bool| {
+            assert_eq!(
+                changed,
+                matches!(
+                    (control, name),
+                    (TrawlTrayControl::Blend, "blend")
+                        | (TrawlTrayControl::MinLength, "min_length")
+                        | (TrawlTrayControl::MaxLength, "max_length")
+                        | (TrawlTrayControl::MinRating, "min_rating")
+                        | (TrawlTrayControl::MaxTracks, "max_tracks")
+                ),
+                "cursor {control:?}: only its own field may change, checked {name}"
+            );
+        };
+        stepped("blend", after.blend != before.blend);
+        stepped("min_length", after.min_length != before.min_length);
+        stepped("max_length", after.max_length != before.max_length);
+        stepped("min_rating", after.min_rating != before.min_rating);
+        stepped("max_tracks", after.max_tracks != before.max_tracks);
+
+        // ...and it landed exactly one wrapping step from where it was.
+        match control {
+            TrawlTrayControl::Blend => {
+                assert_eq!(after.blend, next_of(&TrawlBlend::ALL, before.blend));
+            }
+            TrawlTrayControl::MinLength => {
+                assert_eq!(
+                    after.min_length,
+                    next_of(&TrawlMinLength::ALL, before.min_length)
+                );
+            }
+            TrawlTrayControl::MaxLength => {
+                assert_eq!(
+                    after.max_length,
+                    next_of(&TrawlMaxLength::ALL, before.max_length)
+                );
+            }
+            TrawlTrayControl::MinRating => {
+                assert_eq!(
+                    after.min_rating,
+                    next_of(&TrawlMinRating::ALL, before.min_rating)
+                );
+            }
+            TrawlTrayControl::MaxTracks => {
+                assert_eq!(
+                    after.max_tracks,
+                    next_of(&TrawlMaxTracks::ALL, before.max_tracks)
+                );
+            }
+        }
+
+        // Left returns to the starting value — catches a hardcoded direction
+        // in any per-control arm (Right-then-Left must round-trip).
+        arrow(&mut app, false);
+        let reverted = &app.trawl_crate;
+        assert_eq!(reverted.blend, before.blend, "{control:?}: Left reverts");
+        assert_eq!(reverted.min_length, before.min_length);
+        assert_eq!(reverted.max_length, before.max_length);
+        assert_eq!(reverted.min_rating, before.min_rating);
+        assert_eq!(reverted.max_tracks, before.max_tracks);
+    }
+}
+
+#[test]
+fn arrows_with_no_tray_cursor_are_inert() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+    }
+    let before = app.trawl_crate.clone();
+
+    arrow(&mut app, true);
+    arrow(&mut app, false);
+
+    assert_eq!(tray_cursor(&app), None, "no auto-enter on bare arrows");
+    assert_eq!(app.trawl_crate.blend, before.blend);
+    assert_eq!(app.trawl_crate.min_length, before.min_length);
+    assert_eq!(app.trawl_crate.max_length, before.max_length);
+    assert_eq!(app.trawl_crate.min_rating, before.min_rating);
+    assert_eq!(app.trawl_crate.max_tracks, before.max_tracks);
+}
+
+#[test]
+fn tray_keys_do_not_touch_the_background_view() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Songs);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::Blend);
+    }
+    // The falsifiable observables are the SYNCHRONOUS side effects of
+    // handle_cycle_sort_mode's pre-branch lines: reveal_current_toolbar()
+    // sets toolbar_reveal_until and the standard-view arm clears the page's
+    // search_input_focused. (The sort mutation itself rides a Task tests
+    // never run — asserting it alone would be green-by-construction.)
+    app.songs_page.common.search_input_focused = true;
+    let sort_before = app.songs_page.common.current_sort_mode;
+
+    arrow(&mut app, true);
+    shift_tab(&mut app);
+
+    assert_eq!(
+        app.songs_page.common.current_sort_mode, sort_before,
+        "the obscured view's sort mode must not cycle"
+    );
+    assert!(
+        app.songs_page.common.toolbar_reveal_until.is_none(),
+        "no stray auto-hide toolbar reveal-lock may be stranded on the \
+         obscured view (the branch must run before reveal_current_toolbar)"
+    );
+    assert!(
+        app.songs_page.common.search_input_focused,
+        "the obscured view's search-focus flag must not be cleared \
+         (the standard-view sort arm must be unreachable)"
+    );
+}
+
+#[test]
+fn tray_keys_do_not_cycle_queue_sort() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::MinLength);
+    }
+    // Same falsifiability note as tray_keys_do_not_touch_the_background_view:
+    // the Queue sort mutation rides a discarded Task, so the real pins are
+    // the synchronous reveal-lock and the Queue arm's focus-flag clear.
+    app.queue_page.common.search_input_focused = true;
+    let mode_before = app.queue_page.queue_sort_mode;
+    let sorted_before = app.queue_page.queue_sorted;
+
+    arrow(&mut app, true);
+
+    assert_eq!(app.queue_page.queue_sort_mode, mode_before);
+    assert_eq!(
+        app.queue_page.queue_sorted, sorted_before,
+        "Left/Right must edit the tray, never the queue sort underneath"
+    );
+    assert!(
+        app.queue_page.common.toolbar_reveal_until.is_none(),
+        "no reveal-lock may be stranded on the obscured queue"
+    );
+    assert!(
+        app.queue_page.common.search_input_focused,
+        "the queue sort arm's focus-flag clear must be unreachable"
+    );
+}
+
+#[test]
+fn newly_admitted_keys_stay_swallowed_over_other_modals() {
+    // The CycleSortMode / SettingsCategoryMotion admissions live inside the
+    // trawl-gated is_trawl_nav arm — the EQ/Info/About modals must keep
+    // swallowing the same keys.
+    let mut app = test_app();
+    app.current_view = crate::View::Settings;
+    app.screen = crate::Screen::Home;
+    app.eq_modal.open = true;
+    let sidebar_before = app.settings_page.sidebar_slot_list.viewport_offset;
+    shift_tab(&mut app);
+    assert_eq!(
+        app.settings_page.sidebar_slot_list.viewport_offset, sidebar_before,
+        "Shift+Tab over the EQ modal must not move the settings sidebar"
+    );
+
+    let mut app = test_app();
+    app.current_view = crate::View::Songs;
+    app.screen = crate::Screen::Home;
+    app.info_modal.visible = true;
+    arrow(&mut app, true);
+    assert!(
+        app.songs_page.common.toolbar_reveal_until.is_none(),
+        "Right over the info modal must not reach the sort-cycle handler"
+    );
+}
+
+#[test]
+fn shift_tab_while_modal_open_does_not_move_settings_sidebar() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    let sidebar_before = app.settings_page.sidebar_slot_list.viewport_offset;
+
+    shift_tab(&mut app);
+
+    assert_eq!(
+        app.settings_page.sidebar_slot_list.viewport_offset, sidebar_before,
+        "category motion must route to the tray, not the hidden settings sidebar"
+    );
+}
+
+#[test]
+fn cycle_sort_without_modal_still_reveals_toolbar() {
+    // Over-match guard: the new trawl-first branch must not swallow the
+    // regular sort-cycle path when no modal is open.
+    let mut app = test_app();
+    app.current_view = crate::View::Songs;
+    app.screen = crate::Screen::Home;
+
+    arrow(&mut app, true);
+
+    assert!(
+        app.songs_page.common.toolbar_reveal_until.is_some(),
+        "without the modal, Left/Right still drive the view's sort cycle"
+    );
+}
+
+#[test]
+fn settings_category_motion_without_modal_still_moves_sidebar() {
+    // Over-match guard for the other handler: Settings keeps its sidebar nav.
+    let mut app = test_app();
+    app.current_view = crate::View::Settings;
+    app.screen = crate::Screen::Home;
+    let before = app.settings_page.sidebar_slot_list.viewport_offset;
+
+    shift_tab(&mut app);
+
+    assert_ne!(
+        app.settings_page.sidebar_slot_list.viewport_offset, before,
+        "Shift+Tab in Settings must still move the sidebar category"
+    );
+}
+
+#[test]
+fn slash_clears_the_tray_cursor_when_refocusing_search() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::MinRating);
+    }
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("/".into()),
+        iced::keyboard::Modifiers::empty(),
+    );
+
+    assert_eq!(
+        tray_cursor(&app),
+        None,
+        "the ring must never show while the search field owns the arrows"
+    );
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| s.search_input_focused)
+    );
+}
+
+#[test]
+fn slash_inside_modal_does_not_reveal_background_toolbar() {
+    // Same regression class the tray branches guard against: `/` with the
+    // modal open must not strand an auto-hide reveal-lock on the obscured
+    // view — its target is the modal's own always-rendered search field.
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Songs);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+    }
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("/".into()),
+        iced::keyboard::Modifiers::empty(),
+    );
+
+    assert!(
+        app.trawl_modal
+            .as_ref()
+            .is_some_and(|s| s.search_input_focused),
+        "/ still refocuses the modal search"
+    );
+    assert!(
+        app.songs_page.common.toolbar_reveal_until.is_none(),
+        "no reveal-lock may be stranded on the obscured view"
+    );
+}
+
+#[test]
+fn typing_in_search_clears_the_tray_cursor() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.tray_cursor = Some(TrawlTrayControl::MaxTracks);
+    }
+
+    let _ = app.handle_trawl_modal(TrawlModalMessage::SearchChanged("bu".into()));
+
+    assert_eq!(
+        tray_cursor(&app),
+        None,
+        "typing hands the keys to the field"
+    );
+}
+
+#[test]
+fn reopen_resets_the_tray_cursor() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.tray_cursor = Some(TrawlTrayControl::MaxLength);
+    }
+
+    let _ = app.handle_trawl_modal(TrawlModalMessage::Close);
+    open_modal(&mut app);
+
+    assert_eq!(
+        tray_cursor(&app),
+        None,
+        "a fresh modal starts with search focused and no tray ring"
+    );
+}
+
+#[test]
+fn escape_with_tray_cursor_active_is_not_two_stage() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    app.trawl_crate.add(seed("al1"));
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::Blend);
+    }
+
+    // Escape's close rides a Task tests never run, so modal closure itself
+    // is pinned by escape_closes_the_trawl_modal_and_the_crate_survives.
+    // What THIS test pins is the design decision that Escape is NOT
+    // two-stage: no synchronous first-press ring clear may creep in (the
+    // ring's None position is the in-modal dismiss; Escape always closes).
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+    );
+    assert_eq!(
+        tray_cursor(&app),
+        Some(TrawlTrayControl::Blend),
+        "Escape must not clear the ring as a first stage"
+    );
+
+    let _ = app.update(crate::Message::TrawlModal(TrawlModalMessage::Close));
+    assert!(app.trawl_modal.is_none(), "the emitted Close still closes");
+    assert_eq!(app.trawl_crate.len(), 1, "the crate persists");
+}
+
+#[test]
+fn enter_toggles_seed_with_tray_cursor_active() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    app.trawl_search_generation = 1;
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_query = "ph".into();
+        state.search_results = Some(*results_with_genre());
+        state.slot_list.set_selected(1, 2);
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::MinLength);
+    }
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+        iced::keyboard::Modifiers::empty(),
+    );
+
+    assert!(
+        app.trawl_crate
+            .contains(&BatchItem::Genre("Phonk".to_string())),
+        "Enter keeps seeding the centered row — the tray ring never captures it"
+    );
+    assert_eq!(
+        tray_cursor(&app),
+        Some(TrawlTrayControl::MinLength),
+        "seeding leaves the tray cursor in place"
+    );
+}
+
+#[test]
+fn list_nav_keeps_the_tray_cursor() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    app.trawl_search_generation = 1;
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_query = "ph".into();
+        state.search_results = Some(*results_with_genre());
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::MinRating);
+    }
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::empty(),
+    );
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
+        iced::keyboard::Modifiers::empty(),
+    );
+
+    assert_eq!(
+        tray_cursor(&app),
+        Some(TrawlTrayControl::MinRating),
+        "list nav and the tray ring are disjoint key axes — no re-entry tax"
+    );
+}
+
+// ---- Shift+A (AddToQueue) = add the mix to the queue -----------------------
+
+#[test]
+fn shift_a_in_modal_routes_to_add_mix_empty_crate_warns() {
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.screen = crate::Screen::Home;
+    open_modal(&mut app);
+
+    // Shift+A resolves to AddToQueue; inside the modal the one enqueueable
+    // thing is the mix. Empty crate → the warn toast is the observable proof
+    // the key was admitted + routed rather than swallowed by the modal gate.
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("A".into()),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+
+    assert!(
+        !app.toast.toasts.is_empty(),
+        "Shift+A must reach the trawl AddMix route (empty-crate warn), not be swallowed"
+    );
+}
+
+#[test]
+fn add_to_queue_hotkey_routes_to_the_mix_not_the_obscured_view() {
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.screen = crate::Screen::Home;
+    open_modal(&mut app);
+    app.trawl_crate.add(seed("al1"));
+
+    let _ = app.handle_add_to_queue();
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "a seeded crate routes to AddMixToQueue — not the obscured view's \
+         fallback ('No item selected' toast)"
+    );
+}
+
+#[test]
+fn rebound_add_to_queue_captured_mid_typing_does_not_double_fire() {
+    use nokkvi_data::types::hotkey_config::{HotkeyAction, KeyCode, KeyCombo};
+
+    let mut app = test_app();
+    app.current_view = crate::View::Queue;
+    app.screen = crate::Screen::Home;
+    open_modal(&mut app);
+    // Rebind AddToQueue to Shift+Backspace — a combo the focused search field
+    // captures (it deletes a character). One press, one meaning: the captured
+    // event must not ALSO drive the mix-add (whose empty-crate warn toast
+    // would betray the double-handling).
+    app.hotkey_config.set_binding(
+        HotkeyAction::AddToQueue,
+        KeyCombo::shift(KeyCode::Backspace),
+    );
+
+    let _ = send_raw_key_captured(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "captured Shift+Backspace already edited the field; it must not also fire AddMix"
     );
 }

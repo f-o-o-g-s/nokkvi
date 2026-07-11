@@ -18,7 +18,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 >
 > This entire codebase was written by AI (primarily Claude) with my direction. I'm not a developer. I come up with the ideas, test things, and use this as my daily music player, but I don't write code myself. You'll probably find patterns in here that experienced Rust developers would do differently. If you spot something that could be better, issues and PRs are welcome.
 
-**Platform:** Linux only. Built and tested on Arch Linux (Wayland/Hyprland) with PipeWire v<!-- pipewire-version -->1.6.7<!-- /pipewire-version --> and Navidrome v<!-- navidrome-version -->0.62.0<!-- /navidrome-version -->. No Windows or macOS support.
+**Platform:** Linux only. Built and tested on Arch Linux (Wayland/Hyprland) with PipeWire v<!-- pipewire-version -->1.6.7<!-- /pipewire-version --> and Navidrome v<!-- navidrome-version -->0.63.1<!-- /navidrome-version -->. No Windows or macOS support.
 **Network:** Built and tested on LAN, with background read-ahead buffering and pause-and-rebuffer on underrun so streaming over slower or remote (WAN) connections stays smooth.
 
 ## 📖 Documentation

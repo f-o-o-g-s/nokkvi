@@ -40,6 +40,14 @@ pub(crate) mod custom_artwork;
 // besides its callers inside `artwork_prefetch`, the playlist custom-cover
 // prefetch (`update/playlist_artwork.rs`) routes through it too.
 pub(crate) use artwork_prefetch::should_refetch;
+
+/// Drop iced keyboard focus everywhere by focusing a sentinel Id no widget
+/// owns — `operation::focus` unfocuses every non-matching focusable. The
+/// single home of the `"__unfocus_all__"` literal (a typo'd copy would still
+/// compile AND still unfocus, so scattered copies are undetectable drift).
+pub(crate) fn unfocus_all<M: Send + 'static>() -> Task<M> {
+    iced::widget::operation::focus("__unfocus_all__")
+}
 pub(super) use artwork_prefetch::{
     expansion_album_artwork_tasks, expansion_child_album_ids, passive_artwork_version,
     prefetch_album_artwork_tasks, prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,

@@ -139,6 +139,13 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_cycle_sort_mode(&mut self, forward: bool) -> Task<Message> {
+        // Trawl modal open: Left/Right cycle the focused tray control's value.
+        // This branch MUST stay the first statement — one line lower and the
+        // OBSCURED background view gets a stray Backspace SFX plus a stranded
+        // auto-hide toolbar reveal-lock from the two calls below.
+        if self.trawl_modal.is_some() {
+            return self.handle_trawl_tray_cycle_value(forward);
+        }
         // Play backspace navigation sound for combobox cycling (settings handles its own SFX)
         if self.current_view != View::Settings {
             self.sfx_engine.play(audio::SfxType::Backspace);
@@ -382,6 +389,23 @@ impl Nokkvi {
 
     pub(crate) fn handle_focus_search(&mut self) -> Task<Message> {
         trace!(" FocusSearch (/) hotkey pressed - focusing search field");
+        // Trawl modal open — `/` returns the keyboard to its search field
+        // (the complement of Tab-to-exit; without it a keyboard user who
+        // tabbed into the list can't type again without the mouse). The tray
+        // focus ring clears with it: the ring must never show while the
+        // search field owns the arrow keys. This branch sits ABOVE the
+        // toolbar reveal below — the modal's search field always renders, and
+        // revealing the OBSCURED view's toolbar would strand a stateful
+        // reveal-lock on it (same class as the tray branches' first-statement
+        // rule in handle_cycle_sort_mode / handle_settings_category_motion).
+        if let Some(state) = self.trawl_modal.as_mut() {
+            state.search_input_focused = true;
+            state.tray_cursor = None;
+            return iced::widget::operation::focus(
+                crate::widgets::trawl_modal::TRAWL_SEARCH_INPUT_ID,
+            );
+        }
+
         // Surface the auto-hide toolbar so the search field exists to receive
         // focus (the focus operation below targets a widget that only renders
         // while the toolbar is revealed). No-op for Settings (its own search).
@@ -390,15 +414,6 @@ impl Nokkvi {
         // Settings has its own search — must be checked before current_view_page_mut()
         // which would incorrectly route to the browsing panel's page when it's open
         // with browser focus (same priority pattern as handle_clear_search).
-        // Trawl modal open — `/` returns the keyboard to its search field
-        // (the complement of Tab-to-exit; without it a keyboard user who
-        // tabbed into the list can't type again without the mouse).
-        if let Some(state) = self.trawl_modal.as_mut() {
-            state.search_input_focused = true;
-            return iced::widget::operation::focus(
-                crate::widgets::trawl_modal::TRAWL_SEARCH_INPUT_ID,
-            );
-        }
 
         if self.current_view == View::Settings && self.settings_page.theme_sub_list.is_some() {
             // Theme picker is open — focus its search field
@@ -460,14 +475,7 @@ fn next_queue_sort_target(
     if !sorted && current != QueueSortMode::Random {
         return current;
     }
-    let types = QueueSortMode::all();
-    let idx = types.iter().position(|t| *t == current).unwrap_or(0);
-    let new_idx = if forward {
-        (idx + 1) % types.len()
-    } else {
-        (idx + types.len() - 1) % types.len()
-    };
-    types[new_idx]
+    nokkvi_data::utils::cycle::cycle_wrapping(&QueueSortMode::all(), current, forward)
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 //! Utilities — artwork URLs, formatters, fuzzy search, scaling, paths, URL redaction
 
 pub mod artwork_url;
+pub mod cycle;
 pub mod formatters;
 pub mod fuzzy;
 pub mod paths;

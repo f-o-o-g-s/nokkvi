@@ -8,6 +8,13 @@ use crate::{Nokkvi, View, app_message::Message};
 impl Nokkvi {
     pub(crate) fn handle_add_to_queue(&mut self) -> Task<Message> {
         debug!(" AddToQueue (Shift+A) hotkey pressed");
+        // Trawl-first: with the modal open the one enqueueable thing is the
+        // mix itself — the Shift+A sibling of Ctrl+Enter → PlayMix. Routing
+        // here (not just admitting the key) keeps it off the obscured view.
+        if self.trawl_modal.is_some() {
+            return self
+                .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::AddMixToQueue);
+        }
         if let Some(msg) = self
             .current_view_page()
             .and_then(|p| p.add_to_queue_message())

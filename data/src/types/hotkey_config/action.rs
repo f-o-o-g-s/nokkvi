@@ -449,7 +449,7 @@ define_hotkey_actions! {
         // --- Sort & view ---
         PrevSortMode {
             display: "Previous Sort Mode",
-            description: "Cycle sort mode backward",
+            description: "Cycle sort mode backward · previous value on the picked Trawl filter",
             category: "Sort & View",
             toml_key: "prev_sort_mode",
             settings_key: "hotkey.cycle_view_left",
@@ -457,7 +457,7 @@ define_hotkey_actions! {
         },
         NextSortMode {
             display: "Next Sort Mode",
-            description: "Cycle sort mode forward",
+            description: "Cycle sort mode forward · next value on the picked Trawl filter",
             category: "Sort & View",
             toml_key: "next_sort_mode",
             settings_key: "hotkey.cycle_view_right",
@@ -507,7 +507,7 @@ define_hotkey_actions! {
         },
         SettingsCategoryNext {
             display: "Next Settings Category",
-            description: "Move to the next category in the settings sidebar",
+            description: "Move to the next settings category · pick the next Trawl filter",
             category: "Navigation",
             toml_key: "settings_category_next",
             settings_key: "hotkey.settings_category_next",
@@ -515,7 +515,7 @@ define_hotkey_actions! {
         },
         SettingsCategoryPrev {
             display: "Previous Settings Category",
-            description: "Move to the previous category in the settings sidebar",
+            description: "Move to the previous settings category · pick the previous Trawl filter",
             category: "Navigation",
             toml_key: "settings_category_prev",
             settings_key: "hotkey.settings_category_prev",

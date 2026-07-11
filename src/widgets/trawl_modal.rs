@@ -28,6 +28,57 @@ pub(crate) fn chips_scrollable_id() -> iced::advanced::widget::Id {
     iced::advanced::widget::Id::new("trawl_chips_strip")
 }
 
+/// Keyboard focus targets in the crate tray's controls row.
+///
+/// `ALL`'s order MUST match the controls row in [`render_tray`] (blend pills,
+/// then the four filter pick_lists) — Shift+Tab walks this array, so a
+/// reordered row needs a matching reorder here. The tray's Clear / Add to
+/// Queue / Play Mix buttons (in the actions row below the controls) are
+/// deliberately NOT in the ring: Enter and Ctrl+Enter already cover the
+/// CTAs, and Clear stays mouse-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrawlTrayControl {
+    Blend,
+    MinLength,
+    MaxLength,
+    MinRating,
+    MaxTracks,
+}
+
+impl TrawlTrayControl {
+    /// Render order of the controls row (see the type-level doc).
+    pub const ALL: [TrawlTrayControl; 5] = [
+        TrawlTrayControl::Blend,
+        TrawlTrayControl::MinLength,
+        TrawlTrayControl::MaxLength,
+        TrawlTrayControl::MinRating,
+        TrawlTrayControl::MaxTracks,
+    ];
+}
+
+/// One Shift+Tab / Shift+Backspace step around the tray-focus ring.
+///
+/// The ring has six positions — `None` at index 0 followed by the five
+/// controls — and wraps in both directions: `None → Blend → … → MaxTracks →
+/// None`. Including the off position matters because Escape is pinned to
+/// close-the-modal, so the ring itself must contain the non-destructive
+/// exit. Expressed as one wrapping index step so there is no second
+/// hand-rolled stepper to keep aligned with `cycle_wrapping`.
+pub(crate) fn cycle_tray_cursor(
+    current: Option<TrawlTrayControl>,
+    forward: bool,
+) -> Option<TrawlTrayControl> {
+    let all = &TrawlTrayControl::ALL;
+    let ring_len = all.len() + 1;
+    let idx = current.map_or(0, |c| all.iter().position(|x| *x == c).unwrap_or(0) + 1);
+    let next = if forward {
+        (idx + 1) % ring_len
+    } else {
+        (idx + ring_len - 1) % ring_len
+    };
+    if next == 0 { None } else { Some(all[next - 1]) }
+}
+
 /// Modal editor state. The crate itself lives on `Nokkvi.trawl_crate` and
 /// survives closing the modal; only search + viewport state lives here. The
 /// search stale-drop generation lives on `Nokkvi.trawl_search_generation`
@@ -45,6 +96,16 @@ pub struct TrawlModalState {
     pub search_results: Option<LibrarySearchResults>,
     pub search_loading: bool,
     pub slot_list: SlotListView,
+    /// Keyboard cursor over the tray's controls row (`None` = no tray focus).
+    /// Stepped by Shift+Tab / Shift+Backspace (`handle_trawl_tray_focus_move`),
+    /// read by Left/Right value cycling and by `render_tray`'s focus ring.
+    /// Cleared by `/` (FocusSearch) and by typing (SearchChanged) — the ring
+    /// must never show while the search field owns the arrow keys — and reset
+    /// on every reopen (Open rebuilds this state). Known limitation: a mouse
+    /// click INTO the search field reaches no handler (iced sends no focus
+    /// events), so a lit ring can linger with the arrows captured until the
+    /// next keystroke — `/` or typing heals it.
+    pub tray_cursor: Option<TrawlTrayControl>,
 }
 
 #[derive(Debug, Clone)]
@@ -405,7 +466,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
     };
 
     // ── Crate tray ──
-    let tray = render_tray(mix);
+    let tray = render_tray(mix, state.tray_cursor);
 
     let modal_panel = container(
         column![title_bar, search_bar, main_area, tray]
@@ -615,12 +676,16 @@ fn render_trawl_slot<'a>(
 }
 
 /// Shared style for the tray's pick_lists (min length, max tracks) — the EQ
-/// modal recipe: bg0_hard field, accent_bright border on hover/open.
-fn tray_pick_list_style(status: pick_list::Status) -> pick_list::Style {
-    pick_list::Style {
-        text_color: theme::fg1(),
-        background: theme::bg0_hard().into(),
-        border: iced::Border {
+/// modal recipe: bg0_hard field, accent_bright border on hover/open. When the
+/// tray's keyboard cursor sits on this control, the border swaps to the app's
+/// 2px selection ring and WINS over hover/open — the keyboard state must stay
+/// legible with the mouse parked on the control. Borders draw inside widget
+/// bounds, so the width change costs zero layout.
+fn tray_pick_list_style(status: pick_list::Status, focused: bool) -> pick_list::Style {
+    let border = if focused {
+        tray_focus_ring(theme::ui_border_radius())
+    } else {
+        iced::Border {
             color: match status {
                 pick_list::Status::Active | pick_list::Status::Disabled => theme::bg3(),
                 pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
@@ -629,7 +694,12 @@ fn tray_pick_list_style(status: pick_list::Status) -> pick_list::Style {
             },
             width: 1.0,
             radius: theme::ui_border_radius(),
-        },
+        }
+    };
+    pick_list::Style {
+        text_color: theme::fg1(),
+        background: theme::bg0_hard().into(),
+        border,
         placeholder_color: theme::fg3(),
         handle_color: theme::fg3(),
     }
@@ -650,8 +720,47 @@ fn tray_pick_list_menu_style() -> iced::widget::overlay::menu::Style {
     }
 }
 
+/// The tray's keyboard-focus ring — ONE definition shared by the pick_list
+/// chassis and the pill-row wrapper (only the radius follows the control's
+/// own corner shape).
+fn tray_focus_ring(radius: iced::border::Radius) -> Border {
+    Border {
+        color: theme::selection_ring_on(theme::bg0_hard()),
+        width: 2.0,
+        radius,
+    }
+}
+
+/// One tray filter pick_list — the shared chrome (font, size, padding, menu,
+/// keyboard-focus ring) for the four filters, so the ring wiring cannot
+/// silently drift per control (a missed `focused` hookup would be invisible
+/// to compile, clippy, and tests alike).
+fn tray_picker<'a, T: PartialEq + Clone + 'a>(
+    selected: T,
+    options: &'a [T],
+    label: fn(&T) -> String,
+    on_select: fn(T) -> TrawlModalMessage,
+    focused: bool,
+) -> iced::Element<'a, TrawlModalMessage> {
+    pick_list(Some(selected), options, label)
+        .on_select(on_select)
+        .font(theme::ui_font())
+        .text_size(12.0)
+        .padding([4, 8])
+        .style(move |_theme, status| tray_pick_list_style(status, focused))
+        .menu_style(|_theme| tray_pick_list_menu_style())
+        .into()
+}
+
 /// The fixed-height crate tray: chip band, controls row, hint line.
-fn render_tray<'a>(mix: &'a TrawlCrate) -> iced::Element<'a, TrawlModalMessage> {
+///
+/// `tray_cursor` is the keyboard focus ring over the controls row; every
+/// cursor state renders the SAME widget tree with style-closure-only variance
+/// (TRAY_HEIGHT feeds the slot-count math — nothing here may change size).
+fn render_tray<'a>(
+    mix: &'a TrawlCrate,
+    tray_cursor: Option<TrawlTrayControl>,
+) -> iced::Element<'a, TrawlModalMessage> {
     let empty = mix.is_empty();
 
     // ── Chip band (fixed height; content swaps, height never does) ──
@@ -659,7 +768,8 @@ fn render_tray<'a>(mix: &'a TrawlCrate) -> iced::Element<'a, TrawlModalMessage> 
         container(
             text(
                 "The crate is empty — add seeds from the search above. Enter adds a seed, \
-                 Ctrl+Enter plays the mix.",
+                 Ctrl+Enter plays the mix, Shift+A queues it. Shift+Tab picks a control \
+                 below, Left/Right change it.",
             )
             .size(12.0)
             .color(theme::fg4()),
@@ -730,54 +840,57 @@ fn render_tray<'a>(mix: &'a TrawlCrate) -> iced::Element<'a, TrawlModalMessage> 
             TrawlModalMessage::SetBlend(blend)
         },
     );
+    // Keyboard focus ring for the pill row: an ALWAYS-present wrapper whose
+    // style alone varies — the widget tree must stay shape-stable across
+    // cursor states. The padding is CONSTANT in both states and load-bearing:
+    // a container's border paints under its children, and with zero padding
+    // the opaque chips would cover the ring entirely (the pick_lists don't
+    // have this problem — their ring is the widget's own border).
+    let blend_focused = tray_cursor == Some(TrawlTrayControl::Blend);
+    let blend_pills =
+        container(blend_pills)
+            .padding(Padding::new(3.0))
+            .style(move |_theme: &iced::Theme| container::Style {
+                background: None,
+                border: if blend_focused {
+                    tray_focus_ring(theme::ui_radius_pill())
+                } else {
+                    Border::default()
+                },
+                ..Default::default()
+            });
 
-    let min_length_picker = pick_list(
-        Some(mix.min_length),
-        TrawlMinLength::ALL,
-        |m: &TrawlMinLength| m.label().to_string(),
-    )
-    .on_select(TrawlModalMessage::SetMinLength)
-    .font(theme::ui_font())
-    .text_size(12.0)
-    .padding([4, 8])
-    .style(|_theme, status| tray_pick_list_style(status))
-    .menu_style(|_theme| tray_pick_list_menu_style());
+    let min_length_picker = tray_picker(
+        mix.min_length,
+        &TrawlMinLength::ALL,
+        |m| m.label().to_string(),
+        TrawlModalMessage::SetMinLength,
+        tray_cursor == Some(TrawlTrayControl::MinLength),
+    );
 
-    let max_length_picker = pick_list(
-        Some(mix.max_length),
-        nokkvi_data::types::trawl::TrawlMaxLength::ALL,
-        |m: &nokkvi_data::types::trawl::TrawlMaxLength| m.label().to_string(),
-    )
-    .on_select(TrawlModalMessage::SetMaxLength)
-    .font(theme::ui_font())
-    .text_size(12.0)
-    .padding([4, 8])
-    .style(|_theme, status| tray_pick_list_style(status))
-    .menu_style(|_theme| tray_pick_list_menu_style());
+    let max_length_picker = tray_picker(
+        mix.max_length,
+        &nokkvi_data::types::trawl::TrawlMaxLength::ALL,
+        |m| m.label().to_string(),
+        TrawlModalMessage::SetMaxLength,
+        tray_cursor == Some(TrawlTrayControl::MaxLength),
+    );
 
-    let min_rating_picker = pick_list(
-        Some(mix.min_rating),
-        nokkvi_data::types::trawl::TrawlMinRating::ALL,
-        |m: &nokkvi_data::types::trawl::TrawlMinRating| m.label().to_string(),
-    )
-    .on_select(TrawlModalMessage::SetMinRating)
-    .font(theme::ui_font())
-    .text_size(12.0)
-    .padding([4, 8])
-    .style(|_theme, status| tray_pick_list_style(status))
-    .menu_style(|_theme| tray_pick_list_menu_style());
+    let min_rating_picker = tray_picker(
+        mix.min_rating,
+        &nokkvi_data::types::trawl::TrawlMinRating::ALL,
+        |m| m.label().to_string(),
+        TrawlModalMessage::SetMinRating,
+        tray_cursor == Some(TrawlTrayControl::MinRating),
+    );
 
-    let max_tracks_picker = pick_list(
-        Some(mix.max_tracks),
-        nokkvi_data::types::trawl::TrawlMaxTracks::ALL,
-        |m: &nokkvi_data::types::trawl::TrawlMaxTracks| m.label().to_string(),
-    )
-    .on_select(TrawlModalMessage::SetMaxTracks)
-    .font(theme::ui_font())
-    .text_size(12.0)
-    .padding([4, 8])
-    .style(|_theme, status| tray_pick_list_style(status))
-    .menu_style(|_theme| tray_pick_list_menu_style());
+    let max_tracks_picker = tray_picker(
+        mix.max_tracks,
+        &nokkvi_data::types::trawl::TrawlMaxTracks::ALL,
+        |m| m.label().to_string(),
+        TrawlModalMessage::SetMaxTracks,
+        tray_cursor == Some(TrawlTrayControl::MaxTracks),
+    );
 
     let clear_btn = {
         let label = text("Clear").size(12.0).color(theme::fg2());
@@ -855,10 +968,12 @@ fn render_tray<'a>(mix: &'a TrawlCrate) -> iced::Element<'a, TrawlModalMessage> 
         btn
     };
 
-    // ── Controls row: blend + the four filters (buttons live below) ──
+    // ── Controls row: blend + the four filters (buttons live below). The
+    // pill-to-picker spacer is 7px because the pill wrapper's constant 3px
+    // ring lane already contributes 3 — the visual gap stays 10. ──
     let controls = row![
         blend_pills,
-        Space::new().width(Length::Fixed(10.0)),
+        Space::new().width(Length::Fixed(7.0)),
         min_length_picker,
         Space::new().width(Length::Fixed(8.0)),
         max_length_picker,
@@ -890,6 +1005,21 @@ fn render_tray<'a>(mix: &'a TrawlCrate) -> iced::Element<'a, TrawlModalMessage> 
             ..Default::default()
         });
 
+    // Per-band horizontal insets instead of one shared 12px pad: the pill
+    // wrapper's constant 3px ring lane would push the pills off the tray's
+    // 12px rail, so the controls row gets a 9px inset (9 + 3 = 12 — the
+    // pills stay on the rail and a lit ring draws in the 9..12 lane) while
+    // the chip band and actions row keep the full 12px.
+    let chip_band = container(chip_band)
+        .width(Length::Fill)
+        .padding(Padding::new(0.0).left(12.0).right(12.0));
+    let controls = container(controls)
+        .width(Length::Fill)
+        .padding(Padding::new(0.0).left(9.0).right(12.0));
+    let hint_line = container(hint_line)
+        .width(Length::Fill)
+        .padding(Padding::new(0.0).left(12.0).right(12.0));
+
     container(
         column![
             rule,
@@ -898,7 +1028,7 @@ fn render_tray<'a>(mix: &'a TrawlCrate) -> iced::Element<'a, TrawlModalMessage> 
                     .spacing(6.0)
                     .width(Length::Fill),
             )
-            .padding(Padding::new(8.0).left(12.0).right(12.0))
+            .padding(Padding::new(0.0).top(8.0).bottom(8.0))
         ]
         .width(Length::Fill),
     )
@@ -1093,6 +1223,7 @@ mod tests {
             search_results: results,
             search_loading: false,
             slot_list: SlotListView::new(),
+            tray_cursor: None,
         }
     }
 
@@ -1222,6 +1353,40 @@ mod tests {
             })
             .collect();
         assert_eq!(flags, vec![false, false, true]);
+    }
+
+    #[test]
+    fn tray_cursor_ring_walks_all_six_positions_forward_and_back() {
+        // Forward: None enters at the first control, exits past the last.
+        let mut cursor = None;
+        let mut forward_walk = Vec::new();
+        for _ in 0..6 {
+            cursor = cycle_tray_cursor(cursor, true);
+            forward_walk.push(cursor);
+        }
+        assert_eq!(
+            forward_walk,
+            vec![
+                Some(TrawlTrayControl::Blend),
+                Some(TrawlTrayControl::MinLength),
+                Some(TrawlTrayControl::MaxLength),
+                Some(TrawlTrayControl::MinRating),
+                Some(TrawlTrayControl::MaxTracks),
+                None,
+            ],
+            "forward ring must visit every control then wrap to None"
+        );
+
+        // Backward: None enters at the LAST control, exits past the first.
+        assert_eq!(
+            cycle_tray_cursor(None, false),
+            Some(TrawlTrayControl::MaxTracks)
+        );
+        assert_eq!(
+            cycle_tray_cursor(Some(TrawlTrayControl::Blend), false),
+            None,
+            "backward from the first control exits the ring"
+        );
     }
 
     #[test]

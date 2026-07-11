@@ -6,9 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Trawl filters are keyboard-editable: Shift+Tab / Shift+Backspace pick a tray control, Left/Right cycle its value.
+
 ### Changed
 
 ### Fixed
+
+- Pressing `/` inside the Trawl modal no longer reveals the auto-hide toolbar of the view behind it.
+- Shift+A inside the Trawl modal now adds the mix to the queue (the keyboard sibling of Ctrl+Enter's Play Mix); with an empty crate, both keys explain the no-op with a toast instead of doing nothing.
 
 ### Removed
 

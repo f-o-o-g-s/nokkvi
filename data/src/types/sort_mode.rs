@@ -206,13 +206,7 @@ impl SortMode {
 
     /// Cycle to next/previous sort mode in a list
     pub fn cycle(current: SortMode, options: &[SortMode], forward: bool) -> SortMode {
-        let current_idx = options.iter().position(|t| *t == current).unwrap_or(0);
-        let new_idx = if forward {
-            (current_idx + 1) % options.len()
-        } else {
-            (current_idx + options.len() - 1) % options.len()
-        };
-        options[new_idx]
+        crate::utils::cycle::cycle_wrapping(options, current, forward)
     }
 }
 

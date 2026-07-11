@@ -19,7 +19,8 @@ use crate::{
     app_message::Message,
     views::harbour::{SEARCH_MIN_CHARS, SEARCH_PREVIEW_LIMIT},
     widgets::trawl_modal::{
-        TRAWL_SEARCH_INPUT_ID, TrawlModalMessage, TrawlModalState, TrawlRow, build_trawl_rows,
+        TRAWL_SEARCH_INPUT_ID, TrawlModalMessage, TrawlModalState, TrawlRow, TrawlTrayControl,
+        build_trawl_rows, cycle_tray_cursor,
     },
 };
 
@@ -162,6 +163,9 @@ impl Nokkvi {
             }
             TrawlModalMessage::PlayMix => {
                 if self.trawl_crate.is_empty() {
+                    // Reachable via Ctrl+Enter with nothing seeded — say why
+                    // nothing happened instead of silently ignoring the press.
+                    self.toast_warn("The crate is empty — add seeds first");
                     return Task::none();
                 }
                 // Same pre-play ritual as play_batch_task's callers: radio →
@@ -201,6 +205,9 @@ impl Nokkvi {
             },
             TrawlModalMessage::AddMixToQueue => {
                 if self.trawl_crate.is_empty() {
+                    // Reachable via Shift+A with nothing seeded — same warn as
+                    // PlayMix so both keyboard CTAs explain the no-op.
+                    self.toast_warn("The crate is empty — add seeds first");
                     return Task::none();
                 }
                 let mix = self.trawl_crate.clone();
@@ -249,6 +256,9 @@ impl Nokkvi {
         state.search_query = query;
         // Typing proves the field holds focus (blur events don't reach us).
         state.search_input_focused = true;
+        // ...and a focused field owns the arrow keys, so the tray focus ring
+        // clears — it must never show while Left/Right move the text caret.
+        state.tray_cursor = None;
         // Fresh query, fresh viewport — a deep scroll into the previous
         // results must not strand the center past a shorter list.
         state.slot_list = crate::widgets::slot_list_view::SlotListView::new();
@@ -275,6 +285,81 @@ impl Nokkvi {
                 })
             },
         )
+    }
+
+    /// Shift+Tab / Shift+Backspace with the modal open: one step around the
+    /// tray-controls focus ring (`None → Blend → … → MaxTracks → None`).
+    ///
+    /// Forward motion always unfocuses the search field: the flag is a
+    /// best-effort mirror of iced focus (a mouse click into the field doesn't
+    /// set it until the next keystroke), so the sentinel focus op is issued
+    /// unconditionally — harmless when nothing is focused, and it guarantees
+    /// Left/Right go live the instant the ring appears. Backward motion never
+    /// unfocuses, and a backward press that a truly focused search field
+    /// consumed as a character deletion is swallowed upstream at the raw-key
+    /// gate (status-keyed — see `handle_raw_key_event`): by the time this
+    /// runs, a backward step is always intentional.
+    pub(crate) fn handle_trawl_tray_focus_move(&mut self, forward: bool) -> Task<Message> {
+        let Some(state) = self.trawl_modal.as_mut() else {
+            return Task::none();
+        };
+        state.tray_cursor = cycle_tray_cursor(state.tray_cursor, forward);
+        if forward {
+            state.search_input_focused = false;
+            return super::components::unfocus_all();
+        }
+        Task::none()
+    }
+
+    /// Left/Right with the modal open: cycle the ring-focused tray control's
+    /// value through its const `ALL` array, wrapping both directions (the
+    /// settings Enum precedent). No focused control → no-op: the ring's
+    /// `None` position is a deliberate rest state, not an implicit re-entry.
+    ///
+    /// Delegates to the existing `Set*` arms so keyboard and mouse share ONE
+    /// crate-write path. Known accepted quirk: a mouse-opened pick_list
+    /// dropdown renders a stale menu while a value cycles underneath — iced
+    /// exposes no way to read or close the menu from the app, the crate value
+    /// stays authoritative, and the menu self-heals on close.
+    pub(crate) fn handle_trawl_tray_cycle_value(&mut self, forward: bool) -> Task<Message> {
+        use nokkvi_data::{
+            types::trawl::{
+                TrawlBlend, TrawlMaxLength, TrawlMaxTracks, TrawlMinLength, TrawlMinRating,
+            },
+            utils::cycle::cycle_wrapping,
+        };
+
+        let Some(control) = self.trawl_modal.as_ref().and_then(|s| s.tray_cursor) else {
+            return Task::none();
+        };
+        let msg = match control {
+            TrawlTrayControl::Blend => TrawlModalMessage::SetBlend(cycle_wrapping(
+                &TrawlBlend::ALL,
+                self.trawl_crate.blend,
+                forward,
+            )),
+            TrawlTrayControl::MinLength => TrawlModalMessage::SetMinLength(cycle_wrapping(
+                &TrawlMinLength::ALL,
+                self.trawl_crate.min_length,
+                forward,
+            )),
+            TrawlTrayControl::MaxLength => TrawlModalMessage::SetMaxLength(cycle_wrapping(
+                &TrawlMaxLength::ALL,
+                self.trawl_crate.max_length,
+                forward,
+            )),
+            TrawlTrayControl::MinRating => TrawlModalMessage::SetMinRating(cycle_wrapping(
+                &TrawlMinRating::ALL,
+                self.trawl_crate.min_rating,
+                forward,
+            )),
+            TrawlTrayControl::MaxTracks => TrawlModalMessage::SetMaxTracks(cycle_wrapping(
+                &TrawlMaxTracks::ALL,
+                self.trawl_crate.max_tracks,
+                forward,
+            )),
+        };
+        self.handle_trawl_modal(msg)
     }
 
     /// Toggle the seed carried by row `index` in/out of the crate. Headers,
