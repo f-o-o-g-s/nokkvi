@@ -302,6 +302,12 @@ pub struct Nokkvi {
     /// because every layer's phase multiplier is an integer (see
     /// `widgets::harbour_sea::sea_bars`).
     pub harbour_sea_phase: f32,
+    /// Completed phase cycles of the harbour sea — incremented each time
+    /// `harbour_sea_phase` wraps. Rare scene events (shooting star, leaping
+    /// fish) hash THIS to vary their timing and trajectory per ~20 s cycle,
+    /// which is what keeps a pure-phase animation from replaying an
+    /// identical event loop forever.
+    pub harbour_sea_cycle: u32,
     /// The sea heights the harbour boat was stepped against this frame —
     /// stored so the view draws the SAME array the physics sampled (the
     /// coherence guarantee that keeps the hull sitting ON the drawn water).
@@ -482,6 +488,7 @@ impl Default for Nokkvi {
                 ..Default::default()
             },
             harbour_sea_phase: 0.0,
+            harbour_sea_cycle: 0,
             harbour_sea_bars: Vec::new(),
             mpris_connection: None,
             last_mpris_position_us: 0,

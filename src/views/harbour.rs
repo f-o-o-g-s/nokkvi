@@ -1003,6 +1003,9 @@ pub(crate) struct HarbourViewData<'a> {
     /// Travelling phase of the procedural sea (drives the decorative back
     /// parallax layer).
     pub harbour_sea_phase: f32,
+    /// Completed sea-phase cycles — varies the scene's rare events
+    /// (shooting star, leaping fish) per cycle.
+    pub harbour_sea_cycle: u32,
 }
 
 impl HarbourPage {
@@ -1187,16 +1190,22 @@ impl HarbourPage {
                 } else {
                     trawl_row_subtitle(*seeds, *blend)
                 };
+                // The pill is passed as a factory: the scene's square arm
+                // builds its panel inside a repeatedly-invoked responsive
+                // closure, so it constructs the pill fresh per call.
                 crate::widgets::harbour_sea::trawl_scene(
                     data.harbour_boat,
                     data.harbour_sea_bars,
                     data.harbour_sea_phase,
-                    section_pill(
-                        "assets/icons/anchor.svg",
-                        "TRAWL",
-                        "Build a mix".to_string(),
-                        meta,
-                    ),
+                    data.harbour_sea_cycle,
+                    move || {
+                        section_pill(
+                            "assets/icons/anchor.svg",
+                            "TRAWL",
+                            "Build a mix".to_string(),
+                            meta.clone(),
+                        )
+                    },
                 )
             }
             _ => blank_panel(),

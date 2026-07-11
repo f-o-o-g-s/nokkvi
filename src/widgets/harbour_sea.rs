@@ -22,7 +22,7 @@
 //! so the scene breathes identically with the player stopped, paused, or
 //! playing.
 
-use iced::{Color, Element, Length, Point, Rectangle, widget::canvas};
+use iced::{Color, Element, Length, Point, Rectangle, Size, widget::canvas};
 
 use crate::widgets::boat::{BoatState, boat_overlay, parse_hex_color, sample_line_height};
 
@@ -81,18 +81,645 @@ const BACK_CYCLES: f64 = 2.0;
 const BACK_PHASE_K: f64 = 1.0;
 const BACK_SHIFT: f64 = 0.7;
 
-/// Layer alphas over the panel background. The sea must stay quiet —
-/// Harbour opens centered on this panel, and the landing view must not
-/// shout. All three multiply onto the theme's water/crest colors.
-// TUNE: raise for a bolder sea, lower to sink it into the background.
-const SEA_BACK_ALPHA: f32 = 0.10;
-const SEA_FILL_ALPHA: f32 = 0.16;
-const SEA_CREST_ALPHA: f32 = 0.38;
+/// Scene lighting — the design-panel repaint. The old flat washes (back
+/// 0.10 / front 0.16 / a 0.38-alpha ink crest that measured ~2/255 of
+/// effect) read as paper cutouts; these consts drive the gradient passes
+/// that replace them. The value story: a faint cold airglow gathers at the
+/// horizon (motivating every highlight below it), the far swell hazes into
+/// the sky, the near water is brightest at its lit surface and sinks
+/// toward a dark seabed that grounds the trawled anchor and mediates the
+/// old razor cut into the pill band. All light is the theme's starlight;
+/// all darkness is the theme's ink, dialed by `border_opacity` (the same
+/// light-mode legibility knob the rope uses).
+// TUNE: the sky's value story — 0.0 removes it (keep below the header wash 0.07).
+const SKY_GLOW_ALPHA: f32 = 0.045;
+// TUNE: far-swell haze — how fast the distance dissolves into sky.
+const SEA_BACK_TOP_ALPHA: f32 = 0.035;
+const SEA_BACK_BODY_ALPHA: f32 = 0.10;
+const SEA_BACK_FADE_STOP: f32 = 0.18;
+// TUNE: front water's depth ramp — lit surface, mid body, sinking deep.
+const SEA_LIT_ALPHA: f32 = 0.20;
+const SEA_MID_ALPHA: f32 = 0.13;
+const SEA_DEEP_ALPHA: f32 = 0.08;
+// TUNE: seabed ink vignette — where the darkening starts (fraction of
+// height) and its floor alpha. Cap ~0.26: beyond that the anchor's ink
+// starts to drown in its own ground.
+const SEA_BED_TOP: f32 = 0.70;
+const SEA_BED_ALPHA: f32 = 0.18;
+// TUNE: the moonlit crest — committed sprite-weight ink, a soft starlight
+// halo, and a bright catch-light that fades into the panel edges over
+// CREST_LIGHT_EDGE of the width.
+const CREST_INK_ALPHA: f32 = 0.55;
+const CREST_HALO_ALPHA: f32 = 0.05;
+const CREST_LIGHT_ALPHA: f32 = 0.18;
+const CREST_LIGHT_EDGE: f32 = 0.12;
 
 /// Horizontal pixel step between sampled points when drawing the water
 /// polylines. 3 px keeps the Catmull-Rom curve smooth without building
 /// long paths on wide panels.
 const SEA_DRAW_STEP_PX: f32 = 3.0;
+
+/// Night sky above the waves — a sparse constellation of star dots, sparkle
+/// crosses, and small music-note glyphs, each twinkling gently. Behavioural
+/// kin of the Scope visualizer's particle dust, but deliberately NOT that
+/// system: the Scope field is a stateful CPU ember sim (drift + recycle)
+/// feeding a wgpu shader, while a night sky wants STATIC, deterministic
+/// positions with only brightness moving — so this is a pure hash-scattered
+/// field drawn in the same canvas pass as the water, borrowing just the
+/// twinkle idea. Positions come from a const-seeded xorshift so every frame
+/// (and every launch) sees the same constellation.
+// TUNE: counts set density; alphas set how loud the sky reads.
+const SKY_STAR_COUNT: usize = 40;
+const SKY_SPARKLE_COUNT: usize = 3;
+/// Faint tier: tiny stars whose twinkle depth is 1.0 — they fade all the
+/// way OUT and back, so the field's population visibly breathes instead of
+/// every star merely dimming.
+const SKY_FAINT_COUNT: usize = 14;
+const SKY_FAINT_SIZE_MIN: f32 = 0.35;
+const SKY_FAINT_SIZE_SPAN: f32 = 0.30;
+/// Wandering notes: the sky's music glyphs are TRANSIENT — each cycle a few
+/// notes fade in at a cycle-hashed spot, drift gently upward, and fade out,
+/// never appearing in the same place twice.
+const SKY_WANDER_NOTES: usize = 3;
+const SKY_NOTE_DUR: f32 = 0.22;
+/// Vertical band the sky occupies, as fractions of the scene height from the
+/// top — kept above the back swell's highest crest (~0.39 from the top) so
+/// glyphs never sit IN the water.
+const SKY_BAND_TOP: f32 = 0.04;
+const SKY_BAND_BOTTOM: f32 = 0.36;
+/// Twinkle: per-glyph brightness shimmer
+/// `1 − depth·(0.5 + 0.5·sin(2π·(k·phase + offset)))`. Each glyph's rate
+/// `k` is an INTEGER (same wrap-safety rule as the sea layers) so the
+/// phase's `rem_euclid(1.0)` wrap never pops a star. Twice retuned: the
+/// original 0.6 depth at up to ~1.2 Hz BLINKED; the calm-panel floor
+/// (0.25 depth, 3.3–6.7 s) read as static. The full-send setting lands
+/// between them: ~55% of glyphs breathe at 0.45 depth over 2.2–5 s, the
+/// rest sit near-still — alive, star-by-star, never a strobe.
+// TUNE: depth = shimmer strength; K range = breath rate (MAX is exclusive).
+// Full-send retune: livelier than the panel's calm floor (0.25 / 3.3-6.7 s
+// read as static to the owner) while keeping the star-by-star hierarchy
+// that separates twinkling from blinking.
+const SKY_TWINKLE_DEPTH: f32 = 0.45;
+const SKY_TWINKLE_K_MIN: u32 = 4;
+const SKY_TWINKLE_K_MAX: u32 = 10;
+/// Fraction of glyphs assigned the full breathing depth; the rest stay
+/// near-still at `SKY_STILL_DEPTH_FACTOR` of it — a motion hierarchy, so
+/// the sky shimmers star-by-star instead of blinking as a block.
+const SKY_BREATHER_FRACTION: f32 = 0.55;
+const SKY_STILL_DEPTH_FACTOR: f32 = 0.4;
+/// Peak alphas per glyph kind. Notes sit dimmest and stillest — objects
+/// don't glow, light sources do (the bloom-threshold rule), so the note
+/// glyphs are atmosphere, not beacons.
+// TUNE: SKY_NOTE_ALPHA 0.0 hides the notes without deleting them (quick A/B).
+const SKY_STAR_ALPHA: f32 = 0.45;
+const SKY_SPARKLE_ALPHA: f32 = 0.45;
+const SKY_NOTE_ALPHA: f32 = 0.32;
+/// Extra top inset for note glyphs: their stems extend ~0.03h ABOVE the
+/// glyph center, and a note whose center lands at the raw band top clips
+/// mid-glyph against the panel edge (a shipped capture caught exactly
+/// that). Dots/sparkles have no such reach, so only notes take the inset.
+const SKY_NOTE_TOP_INSET: f32 = 0.06;
+/// Seed for the constellation scatter. Changing it deals a new sky.
+const SKY_SEED: u32 = 0x5EA_57A5;
+
+/// Aurora — two translucent ribbon bands undulating across the upper sky.
+/// The default theme is literally named Svalbard; an aurora is the most
+/// on-brand celestial object this scene could carry, and the theme's own
+/// seafoam ramp IS aurora-colored. Each ribbon is a closed band between two
+/// long sinusoids, filled with a vertical gradient that fades to nothing at
+/// both edges (a soft curtain, not a stripe). Phase multipliers are
+/// INTEGERS (wrap-safety); the two bands drift at different rates for
+/// depth. Alpha breathes gently on its own integer rate.
+// TUNE: alphas set how loud the curtain reads; amps/thickness its shape.
+const AURORA_ALPHA_A: f32 = 0.07;
+const AURORA_ALPHA_B: f32 = 0.05;
+const AURORA_BREATH_DEPTH: f32 = 0.25;
+const AURORA_BREATH_K: f64 = 2.0;
+
+/// The moon — the owner's circular smiley avatar, themed live (face fill =
+/// starlight, line work = the boat outline's ink; see
+/// `embedded_svg::themed_moon_face_svg`), anchoring the sky's upper left
+/// and motivating every starlight highlight below it. The avatar renders
+/// as an `Svg` layer in `trawl_scene` (a canvas can't draw SVGs); the
+/// canvas keeps its halo rings underneath, breathing on integer k=1.
+// TUNE: alpha 0.0 hides moon AND halo; X/Y position it (fractions of the
+// panel); radius scales the face and its halo together.
+const MOON_ALPHA: f32 = 0.60;
+const MOON_X: f32 = 0.15;
+const MOON_Y: f32 = 0.16;
+const MOON_RADIUS_PX: f32 = 16.0;
+
+/// Day scene — in LIGHT mode the night vocabulary goes invisible
+/// (starlight on a light background), so the sky trades it for daylight:
+/// the avatar becomes the SUN — a vexel fan of filled, tapered, gently
+/// bellied gold wedges over a discretized radial glow (the owner's
+/// sunburst reference is stroke-free translucent fills; the old thin ink
+/// spokes spoke the opposite language) — and seagulls glide where the
+/// stars were. Water, ship, notes, fish, and glint are shared by both
+/// scenes; notes and risers swap starlight for ink so they stay legible.
+///
+/// WRAP-SAFETY of the fan: seamlessness needs the rotation per cycle to be
+/// a multiple of the pattern's FULL symmetry angle. With major/minor rays
+/// alternating (period 2), the 12-ray fan is only 6-fold symmetric, so the
+/// spin is `TAU / 6` per cycle — `TAU / 12` would land majors on minor
+/// slots at every wrap (a visible snap every 20 s). The travelling tip
+/// wave inherits the same proof: at the wrap each ray's (angle, tip,
+/// alpha) equals ray i+2's start-of-cycle state exactly (pinned by
+/// `sun_wedge_field_is_seamless_at_the_phase_wrap`).
+// TUNE: wedge alphas = the sun's presence (keep major:minor near 2:1);
+// TAN = plumpness; BELLY = the static wave silhouette (0 = straight);
+// WAVE_DEPTH = the circulating tip wave (0 freezes it); OUTER = footprint.
+const SUN_RAY_COUNT: usize = 12;
+const SUN_WEDGE_INNER: f32 = 1.15;
+const SUN_WEDGE_TAN_MAJOR: f32 = 0.105; // ~tan 6°
+const SUN_WEDGE_TAN_MINOR: f32 = 0.070; // ~tan 4°
+const SUN_WEDGE_BELLY_MAJOR: f32 = 0.12;
+const SUN_WEDGE_BELLY_MINOR: f32 = 0.08;
+const SUN_WEDGE_ALPHA_MAJOR: f32 = 0.20;
+const SUN_WEDGE_ALPHA_MINOR: f32 = 0.11;
+const SUN_WEDGE_OUTER_MAJOR: f32 = 1.88;
+const SUN_WEDGE_OUTER_MINOR: f32 = 1.58;
+const SUN_WAVE_DEPTH_MAJOR: f32 = 0.12;
+const SUN_WAVE_DEPTH_MINOR: f32 = 0.08;
+
+/// Discretized radial glow stacks — (radius in face-radii, raw alpha),
+/// largest-first so the fills stack inward. Banding-proofed by contract
+/// (pinned by `glow_stacks_hold_the_banding_contract`): every EXPOSED rim
+/// (radius > 1.05, outside the 0.60-opaque avatar) steps at most 0.015
+/// (day, ~0.45 gold-on-pastel contrast) / 0.011 (night, ~0.7 starlight-
+/// on-dark) — under the ~2/255 visibility floor — the two bright inner
+/// steps hide beneath the avatar, and no rim sits in [0.95, 1.05] where
+/// it would coincide with the face's own edge.
+// TUNE: scale all alphas by one gain for glow strength — but keep the
+// exposed-step caps or the rings return as visible vector circles.
+const SUN_GLOW_STACK: [(f32, f32); 12] = [
+    (2.00, 0.005),
+    (1.90, 0.006),
+    (1.80, 0.008),
+    (1.70, 0.009),
+    (1.60, 0.011),
+    (1.50, 0.012),
+    (1.40, 0.013),
+    (1.30, 0.014),
+    (1.20, 0.015),
+    (1.10, 0.015),
+    (0.90, 0.030),
+    (0.72, 0.040),
+];
+const MOON_GLOW_STACK: [(f32, f32); 12] = [
+    (2.00, 0.004),
+    (1.90, 0.005),
+    (1.80, 0.006),
+    (1.70, 0.007),
+    (1.60, 0.008),
+    (1.50, 0.009),
+    (1.40, 0.010),
+    (1.30, 0.010),
+    (1.20, 0.011),
+    (1.10, 0.011),
+    (0.90, 0.022),
+    (0.72, 0.030),
+];
+
+/// Moon-halo motion. The CASCADE: each ring breathes on an integer k=1
+/// sine with a per-ring lag growing from the innermost ring outward, so
+/// one brightness swell is born at the face and rolls out through the
+/// stack (~11 s to cross, one exhale per cycle) — deliberately near-
+/// threshold quiet. The PULSE is what carries "transient": some cycles a
+/// soft two-stroke ring detaches at the halo's shoulder, expands past the
+/// rim, and dissolves (cycle-hashed timing, alpha-zero at both ends).
+// TUNE: WASH_DEPTH 0 = static halo; PULSE_CHANCE/DUR = exhale cadence.
+const MOON_WASH_LAG: f32 = 0.05;
+const MOON_WASH_DEPTH: f32 = 0.30;
+const MOON_PULSE_SALT: u32 = 0x4A10_5EE1;
+const MOON_PULSE_CHANCE: f32 = 0.30;
+const MOON_PULSE_DUR: f32 = 0.20;
+// The pulse window must sit fully inside the cycle — its hash would
+// change mid-exhale at a straddled boundary.
+const _: () = assert!(0.15 + 0.45 + MOON_PULSE_DUR < 1.0);
+
+const GULL_COUNT: usize = 6;
+const GULL_ALPHA: f32 = 0.50;
+/// Off-panel margin (px) a gliding gull fully clears before its travel
+/// fraction wraps — the same no-edge-pop contract as the boat's wrap.
+const GULL_MARGIN_PX: f32 = 30.0;
+/// Wingbeat rate (integer — wrap-safe) and depth of the glide's flap.
+const GULL_FLAP_K: f32 = 6.0;
+/// Seed for the flock's parameter stream.
+const GULL_SEED: u32 = 0x6011_5EA5;
+
+/// Edge fade for the boat-coupled passes (rising notes, lantern glint):
+/// their alpha scales by `distance-to-nearer-panel-edge / BOAT_EDGE_FADE`,
+/// so they dim out as the hull slides off and dim back in on re-entry — a
+/// hard `[0, 1]` gate would cut every mid-flight note and the glint pool
+/// in a single frame while the sprite is still half on-screen (x_ratio
+/// legitimately roams the wrap margin beyond `[0, 1]`).
+// TUNE: wider = earlier, gentler dimming near the edges.
+const BOAT_EDGE_FADE: f32 = 0.10;
+
+/// Rising notes — the longship sings. A small pool of note glyphs
+/// continuously rises from the boat's mast, swaying as they climb and
+/// fading out near the top of their run: the scene's music made visible,
+/// and the trawl's catch coming up the line. Each rider loops on an
+/// integer multiple of the sea phase; alpha is zero at both ends of its
+/// run, so the cycle wrap (a position jump) is never visible.
+// TUNE: count/alpha set how songful the boat is; rise/sway set the path.
+const RISER_COUNT: usize = 5;
+const RISER_ALPHA: f32 = 0.55;
+const RISER_RISE_FRAC: f32 = 0.34;
+const RISER_SWAY_PX: f32 = 6.0;
+const RISER_FADE_IN: f32 = 0.12;
+const RISER_FADE_OUT: f32 = 0.30;
+/// Seed for the riser parameter stream (offsets, spreads, kinds).
+const RISER_SEED: u32 = 0xB0A7_5016;
+
+/// Lantern glint — the boat pools warm light on the water it rides,
+/// breathing on a ~5 s cycle (integer k=4 at the 20 s phase). The one warm
+/// note in the scene, answering the sprite's gold trim with the SAME
+/// mode-stable accessor the logo uses.
+// TUNE: alpha sets the pool's brightness; 0.0 removes it.
+const GLINT_ALPHA: f32 = 0.10;
+const GLINT_BREATH_K: f32 = 4.0;
+
+/// Crest shimmer sweep — once per ~20 s cycle a soft band of light glides
+/// along the crest for ~6 s (30% duty), brightest where the wave actually
+/// peaks, then the sea rests. The slot-list shimmer's sweep-then-idle
+/// grammar ported to the waterline.
+// TUNE: alpha = sweep brightness; fraction = active duty; off = phase slot.
+const CREST_SHIMMER_ALPHA: f32 = 0.20;
+const CREST_SWEEP_FRACTION: f32 = 0.30;
+const CREST_SWEEP_OFF: f32 = 0.55;
+const CREST_SWEEP_HALF_WIDTH: f32 = 0.10;
+
+/// Shooting star — a rare streak across the upper sky. Timing, start
+/// point, and heading all hash the CYCLE COUNTER, so no two cycles replay
+/// the same streak (the fix for the identical-loop objection that got the
+/// pure-phase version declined).
+// TUNE: chance gates how many cycles get one; window is its duration.
+// Travel and length scale off the panel HEIGHT (the sky band is
+// height-proportioned) — width-scaling would dive the streak into the
+// water on wide panels.
+const SHOOT_CHANCE: f32 = 0.6;
+const SHOOT_WINDOW: f32 = 0.05;
+const SHOOT_TRAVEL_FRAC: f32 = 0.35;
+const SHOOT_LEN_FRAC: f32 = 0.20;
+const SHOOT_ALPHA: f32 = 0.7;
+
+/// Leaping fish — occasionally the trawl stirs one up: a small ink
+/// silhouette arcs out of the water and dives back. Cycle-hashed position
+/// and appearance chance; drawn under the boat layer, dialed by
+/// border_opacity like every other ink in the scene.
+// TUNE: chance/window/jump set how often and how high; 0.0 chance = none.
+const FISH_CHANCE: f32 = 0.45;
+const FISH_WINDOW: f32 = 0.07;
+const FISH_OFF: f32 = 0.30;
+const FISH_JUMP_FRAC: f32 = 0.10;
+const FISH_SIZE: f32 = 13.0;
+const FISH_ALPHA: f32 = 0.55;
+
+/// What a sky glyph draws as. Music glyphs are NOT constellation members —
+/// they wander (a transient per-cycle pass in the draw, never twice in the
+/// same place); the fixed field is stars and sparkles only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkyGlyphKind {
+    /// A filled dot — the bulk of the field.
+    Dot,
+    /// A 4-point plus-shaped sparkle — occasional accent.
+    Sparkle,
+}
+
+/// One member of the constellation. `x` spans `[0, 1]` of the width; `y`
+/// spans the sky band. `size` is a unit scale multiplied by the pixel base
+/// per kind at draw time. `twinkle_k` / `twinkle_off` / `twinkle_depth`
+/// drive the shimmer — depth is per-glyph so most stars sit near-still
+/// while a minority breathe (the motion hierarchy).
+#[derive(Debug, Clone, Copy)]
+struct SkyGlyph {
+    x: f32,
+    y: f32,
+    size: f32,
+    twinkle_k: u32,
+    twinkle_off: f32,
+    twinkle_depth: f32,
+    kind: SkyGlyphKind,
+}
+
+/// Tiny xorshift32 — deterministic visual scatter, no dependency (the same
+/// tool `visualizer::particles` and `boat_physics` reach for).
+fn xorshift(state: &mut u32) -> f32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    (x as f32) / (u32::MAX as f32)
+}
+
+/// Build the constellation — deterministic (const seed), so the sky is the
+/// same every frame and every launch; only the twinkle moves.
+fn sky_glyphs() -> Vec<SkyGlyph> {
+    let mut rng = SKY_SEED;
+    let mut make = |kind: SkyGlyphKind| {
+        SkyGlyph {
+            x: xorshift(&mut rng),
+            y: SKY_BAND_TOP + xorshift(&mut rng) * (SKY_BAND_BOTTOM - SKY_BAND_TOP),
+            size: 0.7 + xorshift(&mut rng) * 0.6,
+            twinkle_k: SKY_TWINKLE_K_MIN
+                + (xorshift(&mut rng) * (SKY_TWINKLE_K_MAX - SKY_TWINKLE_K_MIN) as f32) as u32,
+            twinkle_off: xorshift(&mut rng),
+            // Motion hierarchy: a minority breathe at full depth, the rest
+            // sit near-still — the sky shimmers star-by-star, never as a
+            // block.
+            twinkle_depth: if xorshift(&mut rng) < SKY_BREATHER_FRACTION {
+                SKY_TWINKLE_DEPTH
+            } else {
+                SKY_TWINKLE_DEPTH * SKY_STILL_DEPTH_FACTOR
+            },
+            kind,
+        }
+    };
+    let mut glyphs = Vec::with_capacity(SKY_STAR_COUNT + SKY_SPARKLE_COUNT + SKY_FAINT_COUNT);
+    for _ in 0..SKY_STAR_COUNT {
+        glyphs.push(make(SkyGlyphKind::Dot));
+    }
+    for _ in 0..SKY_SPARKLE_COUNT {
+        glyphs.push(make(SkyGlyphKind::Sparkle));
+    }
+    // Faint tier: smaller than the main field's size floor and at FULL
+    // twinkle depth, so each one fades entirely out of existence and back
+    // — the field's population itself breathes.
+    for _ in 0..SKY_FAINT_COUNT {
+        glyphs.push(SkyGlyph {
+            x: xorshift(&mut rng),
+            y: SKY_BAND_TOP + xorshift(&mut rng) * (SKY_BAND_BOTTOM - SKY_BAND_TOP),
+            size: SKY_FAINT_SIZE_MIN + xorshift(&mut rng) * SKY_FAINT_SIZE_SPAN,
+            twinkle_k: SKY_TWINKLE_K_MIN
+                + (xorshift(&mut rng) * (SKY_TWINKLE_K_MAX - SKY_TWINKLE_K_MIN) as f32) as u32,
+            twinkle_off: xorshift(&mut rng),
+            twinkle_depth: 1.0,
+            kind: SkyGlyphKind::Dot,
+        });
+    }
+    glyphs
+}
+
+/// Pixel scale for the scene's hand-drawn furniture (stars, notes, fish,
+/// moon), derived from the scene height. ONE helper shared by the canvas
+/// pass and the `trawl_scene` Svg moon layer, so the halo the canvas draws
+/// and the face the Svg places can never size apart.
+fn scene_glyph_scale(h: f32) -> f32 {
+    (h / 300.0).clamp(0.7, 1.6)
+}
+
+/// Even rays are the fan's MAJOR tier; odd rays are minor.
+fn sun_ray_is_major(i: usize) -> bool {
+    i.is_multiple_of(2)
+}
+
+/// A sun ray's world angle: the fan spins `TAU / 6` per cycle (the fan's
+/// FULL symmetry angle — see the day-scene const docs) plus the ray's
+/// fixed slot.
+fn sun_ray_theta(i: usize, phase: f32) -> f32 {
+    use std::f32::consts::TAU;
+    phase * (TAU / 6.0) + i as f32 * (TAU / SUN_RAY_COUNT as f32)
+}
+
+/// A sun ray's animated (angle, tip radius in face-radii, fill alpha).
+/// The travelling wave `sin(2θ + TAU·phase)` circulates AGAINST the spin
+/// (a swell washing around the ring); tip radius and brightness ride the
+/// SAME wave term. Pure — shared by the draw and the wrap-seam kin test.
+fn sun_ray_geometry(i: usize, phase: f32) -> (f32, f32, f32) {
+    use std::f32::consts::TAU;
+    let theta = sun_ray_theta(i, phase);
+    let wave = (2.0 * theta + TAU * phase).sin();
+    let (base, depth, alpha) = if sun_ray_is_major(i) {
+        (
+            SUN_WEDGE_OUTER_MAJOR,
+            SUN_WAVE_DEPTH_MAJOR,
+            SUN_WEDGE_ALPHA_MAJOR,
+        )
+    } else {
+        (
+            SUN_WEDGE_OUTER_MINOR,
+            SUN_WAVE_DEPTH_MINOR,
+            SUN_WEDGE_ALPHA_MINOR,
+        )
+    };
+    (theta, base + depth * wave, alpha * (0.90 + 0.10 * wave))
+}
+
+/// Fill a discretized radial glow: each `(radius, alpha)` entry of a
+/// largest-first table becomes one solid circle at `alpha · mult(index)`.
+/// Shared by the sun and moon so both bodies' glow obeys one banding
+/// contract; `mult` injects the per-mode motion (uniform breath for the
+/// sun, the outward-rolling cascade for the moon).
+fn draw_glow_stack(
+    frame: &mut canvas::Frame,
+    center: Point,
+    m: f32,
+    table: &[(f32, f32)],
+    color: Color,
+    mult: impl Fn(usize) -> f32,
+) {
+    for (i, (radius, alpha)) in table.iter().enumerate() {
+        frame.fill(
+            &canvas::Path::circle(center, radius * m),
+            Color {
+                a: alpha * mult(i),
+                ..color
+            },
+        );
+    }
+}
+
+/// One gull of the day scene's flock. `x0` is the travel-phase offset;
+/// the glide loops on `k` integer crossings per sea cycle (wrap-safe),
+/// leftward or rightward, with a gentle integer-rate bob.
+#[derive(Debug, Clone, Copy)]
+struct GullParam {
+    x0: f32,
+    y: f32,
+    k: u32,
+    leftward: bool,
+    size: f32,
+    bob_k: u32,
+    bob_off: f32,
+    flap_off: f32,
+}
+
+/// Deal the flock — deterministic, const-seeded, same contract as the sky.
+fn gull_params() -> Vec<GullParam> {
+    let mut rng = GULL_SEED;
+    (0..GULL_COUNT)
+        .map(|_| GullParam {
+            x0: xorshift(&mut rng),
+            y: 0.06 + xorshift(&mut rng) * 0.24,
+            k: 1 + (xorshift(&mut rng) * 2.0) as u32,
+            leftward: xorshift(&mut rng) < 0.5,
+            size: 0.7 + xorshift(&mut rng) * 0.6,
+            bob_k: 2 + (xorshift(&mut rng) * 3.0) as u32,
+            bob_off: xorshift(&mut rng),
+            flap_off: xorshift(&mut rng),
+        })
+        .collect()
+}
+
+/// Draw one gliding gull: the classic two-arc silhouette, wings meeting at
+/// `center`, arc height modulated by `flap` for a lazy wingbeat.
+fn draw_gull(frame: &mut canvas::Frame, center: Point, s: f32, flap: f32, color: Color) {
+    let wing = |dir: f32| {
+        canvas::Path::new(|b| {
+            b.move_to(Point::new(center.x + dir * s, center.y + 0.12 * s));
+            b.quadratic_curve_to(
+                Point::new(center.x + dir * 0.45 * s, center.y - flap * s),
+                center,
+            );
+        })
+    };
+    for dir in [-1.0, 1.0] {
+        frame.stroke(
+            &wing(dir),
+            canvas::Stroke::default()
+                .with_color(color)
+                .with_width(1.3)
+                .with_line_cap(canvas::LineCap::Round),
+        );
+    }
+}
+
+/// Hash a `(cycle, salt)` pair into `[0, 1)` — the deterministic dice the
+/// rare events (shooting star, fish) roll once per sea cycle. Three
+/// xorshift rounds decorrelate consecutive cycle values; the multiply-mix
+/// keeps a zero cycle from collapsing the stream.
+fn hash01(cycle: u32, salt: u32) -> f32 {
+    let mut s = cycle.wrapping_mul(0x9E37_79B9) ^ salt;
+    if s == 0 {
+        s = salt | 1;
+    }
+    for _ in 0..3 {
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+    }
+    (s as f32) / (u32::MAX as f32)
+}
+
+/// One rising note's fixed parameters (the per-frame position falls out of
+/// the phase). Deterministic, const-seeded — same contract as the sky.
+#[derive(Debug, Clone, Copy)]
+struct RiserParam {
+    /// Integer phase multiplier: how many rises per 20 s sea cycle.
+    k: u32,
+    /// Phase offset staggering the pool.
+    off: f32,
+    /// Horizontal offset from the mast, in glyph-scale pixels.
+    dx: f32,
+    /// Sway phase offset.
+    sway_off: f32,
+    /// `true` = beamed pair, `false` = single quaver.
+    beamed: bool,
+}
+
+/// Deal the riser pool. Alternating rise rates (1 or 2 per cycle) keep the
+/// stream from ever synchronizing into a volley.
+fn riser_params() -> Vec<RiserParam> {
+    let mut rng = RISER_SEED;
+    (0..RISER_COUNT)
+        .map(|i| RiserParam {
+            k: 1 + (i as u32 % 2),
+            off: xorshift(&mut rng),
+            dx: (xorshift(&mut rng) - 0.5) * 30.0,
+            sway_off: xorshift(&mut rng),
+            beamed: xorshift(&mut rng) < 0.5,
+        })
+        .collect()
+}
+
+/// Gradient stops for the crest shimmer sweep: a triangular brightness
+/// profile of half-width `half` centered at `c` (which sweeps from off-left
+/// to off-right), clipped to the drawable `[0, 1]` gradient domain with the
+/// boundary values interpolated — stops stay ascending and the last lands
+/// at exactly 1.0 (the packed-gradient contract).
+fn sweep_stops(c: f32, half: f32, peak: f32) -> Vec<(f32, f32)> {
+    let profile = |x: f32| (1.0 - ((x - c).abs() / half)).max(0.0) * peak;
+    let mut xs = vec![0.0_f32, 1.0];
+    // Candidates are kept an epsilon INSIDE (0, 1) so none can collide
+    // with a boundary stop — a naive dedup could otherwise keep a
+    // 0.9999… candidate and DROP the exact-1.0 boundary, breaking the
+    // packed-gradient "last stop at 1.0" contract. Candidates can't
+    // collide with each other (they are `half` apart, ≫ epsilon).
+    const EDGE_EPS: f32 = 1e-3;
+    for cand in [c - half, c, c + half] {
+        if cand > EDGE_EPS && cand < 1.0 - EDGE_EPS {
+            xs.push(cand);
+        }
+    }
+    xs.sort_by(f32::total_cmp);
+    xs.into_iter().map(|x| (x, profile(x))).collect()
+}
+
+/// Draw a beamed eighth-note pair (the `music-2` icon's shape) as canvas
+/// paths: two filled heads, a stem off each head's right edge, and a
+/// slanted beam joining the stem tops. Shared by the static sky glyphs and
+/// the rising notes so the two can never drift apart in style.
+fn draw_note_pair(frame: &mut canvas::Frame, center: Point, s: f32, color: Color) {
+    let head_r = 0.16 * s;
+    let dx = 0.55 * s; // second head sits right + slightly up
+    let dy = 0.12 * s;
+    let stem_h = 0.85 * s;
+    let head_a = center;
+    let head_b = Point::new(center.x + dx, center.y - dy);
+    frame.fill(&canvas::Path::circle(head_a, head_r), color);
+    frame.fill(&canvas::Path::circle(head_b, head_r), color);
+    let stems = canvas::Path::new(|b| {
+        b.move_to(Point::new(head_a.x + head_r, head_a.y));
+        b.line_to(Point::new(head_a.x + head_r, head_a.y - stem_h));
+        b.move_to(Point::new(head_b.x + head_r, head_b.y));
+        b.line_to(Point::new(head_b.x + head_r, head_b.y - stem_h));
+    });
+    frame.stroke(
+        &stems,
+        canvas::Stroke::default()
+            .with_color(color)
+            .with_width(1.0)
+            .with_line_cap(canvas::LineCap::Round),
+    );
+    let beam = canvas::Path::new(|b| {
+        b.move_to(Point::new(head_a.x + head_r, head_a.y - stem_h));
+        b.line_to(Point::new(head_b.x + head_r, head_b.y - stem_h));
+    });
+    frame.stroke(
+        &beam,
+        canvas::Stroke::default()
+            .with_color(color)
+            .with_width(0.16 * s)
+            .with_line_cap(canvas::LineCap::Round),
+    );
+}
+
+/// Draw a single flagged eighth note: filled head, stem, and a little
+/// quadratic flag curling off the stem top.
+fn draw_quaver(frame: &mut canvas::Frame, center: Point, s: f32, color: Color) {
+    let head_r = 0.18 * s;
+    let stem_h = 0.95 * s;
+    let stem_x = center.x + head_r * 0.9;
+    frame.fill(&canvas::Path::circle(center, head_r), color);
+    let stem_and_flag = canvas::Path::new(|b| {
+        b.move_to(Point::new(stem_x, center.y));
+        b.line_to(Point::new(stem_x, center.y - stem_h));
+        b.quadratic_curve_to(
+            Point::new(stem_x + 0.38 * s, center.y - 0.78 * s),
+            Point::new(stem_x + 0.30 * s, center.y - 0.45 * s),
+        );
+    });
+    frame.stroke(
+        &stem_and_flag,
+        canvas::Stroke::default()
+            .with_color(color)
+            .with_width(1.0)
+            .with_line_cap(canvas::LineCap::Round),
+    );
+}
 
 /// Build the front sea height field for `phase ∈ [0, 1)` — heights in
 /// `[0, 1]` of panel height, `SEA_POINTS` samples. This is the ONE array
@@ -124,7 +751,7 @@ fn back_swell_height(x: f64, phase: f32) -> f64 {
     .clamp(0.0, 1.0)
 }
 
-/// The Harbour Trawl panel: a quiet two-layer sea with the longship trawling
+/// The Harbour Trawl panel: the animated sea with the longship trawling
 /// across it, docked above the banded TRAWL pill.
 ///
 /// A COLUMN (not the overlay stack every art-backed panel uses): the pill
@@ -134,18 +761,33 @@ fn back_swell_height(x: f64, phase: f32) -> f64 {
 /// the boat and sea the real pixels of the region ABOVE the pill, keeping
 /// the sprite sized to the visible water (and dodging the Fill-in-Shrink
 /// flex-compression gotcha by carrying bounded sizes itself).
+///
+/// MODE PARITY with the sibling panels is load-bearing: in Auto / native
+/// artwork modes, `horizontal_layout` passes the panel through RAW and
+/// sizes the whole artwork column off the panel's natural size — the
+/// contract is "panels shrink to a `min(w, h)` square" (see
+/// `single_artwork_panel_inner`'s square arm). A Fill panel here balloons
+/// the column to the reserved maximum, wider than every sibling, and the
+/// elevated-mode nav overlay then juts INTO the scene. Only the stretched
+/// modes (where the layout wraps the panel in a user-tuned
+/// `Length::Fixed(extent)`) get the full-bleed Fill treatment.
+///
+/// `pill` is a FACTORY (not an element): the square arm builds the panel
+/// inside a `responsive` closure, which is a `Fn` the runtime may invoke
+/// repeatedly — a moved-in element could be consumed only once.
 pub(crate) fn trawl_scene<'a, M: 'a>(
     boat: &'a BoatState,
     sea_bars: &'a [f64],
     sea_phase: f32,
-    pill: Element<'a, M>,
+    sea_cycle: u32,
+    pill: impl Fn() -> Element<'a, M> + 'a,
 ) -> Element<'a, M> {
     use iced::widget::{column, container, stack};
 
-    let scene = iced::widget::responsive(move |size| {
-        let w = size.width.max(1.0);
-        let h = size.height.max(1.0);
-
+    // The scene's layer stack at known pixel dimensions. A `Copy` closure
+    // (all captures are shared refs / scalars) so both mode arms — and the
+    // square arm's NESTED responsive — can each take their own copy.
+    let scene_layers = move |w: f32, h: f32| -> Element<'a, M> {
         // Sky + sea backdrop on the shared artwork background so the panel
         // reads as a sibling of every other artwork column state.
         let backdrop = container(iced::widget::Space::new())
@@ -159,6 +801,8 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         let sea = canvas::Canvas::new(SeaCanvas {
             bars: sea_bars,
             phase: sea_phase,
+            cycle: sea_cycle,
+            boat_x: boat.x_ratio,
         })
         .width(Length::Fixed(w))
         .height(Length::Fixed(h));
@@ -168,17 +812,74 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         // has no lower reflection), anchor trailed on the seabed.
         let boat_el = boat_overlay::<M>(boat, w, h, w.min(h), 1.0, false, Some(TRAIL_OFFSET));
 
-        let layers: Element<'_, M> = stack![backdrop, sea, boat_el].into();
-        layers
-    });
+        let mut layers = stack![backdrop, sea];
+        // The moon: the owner's avatar, themed live via the shared LOGO
+        // tokens and cached on BoatState beside the boat/anchor handles
+        // (same theme-generation invalidation; warmed by the tick, with
+        // the boat overlay's rebuild-on-miss fallback). Placed over the
+        // canvas — its halo is drawn there at the same shared consts —
+        // and under the ship.
+        if MOON_ALPHA > 0.0 {
+            let moon_r = MOON_RADIUS_PX * scene_glyph_scale(h);
+            let handle = boat.cached_moon_handle().unwrap_or_else(|| {
+                iced::widget::svg::Handle::from_memory(
+                    crate::embedded_svg::themed_moon_face_svg().into_bytes(),
+                )
+            });
+            layers = layers.push(
+                container(
+                    iced::widget::Svg::new(handle)
+                        .width(Length::Fixed(2.0 * moon_r))
+                        .height(Length::Fixed(2.0 * moon_r))
+                        .opacity(MOON_ALPHA),
+                )
+                .padding(
+                    iced::Padding::new(0.0)
+                        .left((MOON_X * w - moon_r).max(0.0))
+                        .top((MOON_Y * h - moon_r).max(0.0)),
+                ),
+            );
+        }
+        layers.push(boat_el).into()
+    };
 
-    column![
-        container(scene).width(Length::Fill).height(Length::Fill),
-        crate::widgets::base_slot_list_layout::banded_pill(pill),
-    ]
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    if crate::theme::artwork_column_mode().is_stretched() {
+        // Stretched modes: the layout bounds the column at the user-tuned
+        // extent, so Fill is authoritative and the scene runs full-bleed.
+        let scene = iced::widget::responsive(move |size| {
+            scene_layers(size.width.max(1.0), size.height.max(1.0))
+        });
+        column![
+            container(scene).width(Length::Fill).height(Length::Fill),
+            crate::widgets::base_slot_list_layout::banded_pill(pill()),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    } else {
+        // Auto / native: the sibling square contract — resolve to a
+        // `min(w, h)` square via Shrink so the artwork column sizes off
+        // the same natural square as every other panel.
+        iced::widget::responsive(move |size| {
+            let s = size.width.min(size.height).max(1.0);
+            let scene = iced::widget::responsive(move |scene_size| {
+                scene_layers(scene_size.width.max(1.0), scene_size.height.max(1.0))
+            });
+            let panel: Element<'_, M> = container(
+                column![
+                    container(scene).width(Length::Fill).height(Length::Fill),
+                    crate::widgets::base_slot_list_layout::banded_pill(pill()),
+                ]
+                .width(Length::Fixed(s))
+                .height(Length::Fixed(s)),
+            )
+            .into();
+            panel
+        })
+        .width(Length::Shrink)
+        .height(Length::Shrink)
+        .into()
+    }
 }
 
 /// Canvas program drawing the two water layers. Inert and event-transparent
@@ -192,6 +893,12 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
 struct SeaCanvas<'a> {
     bars: &'a [f64],
     phase: f32,
+    /// Completed phase cycles — dice for the rare events.
+    cycle: u32,
+    /// The boat's live `x_ratio` — anchors the lantern glint and the
+    /// rising notes to the hull. May exceed `[0, 1]` in the wrap margin;
+    /// the boat-coupled passes gate on that.
+    boat_x: f32,
 }
 
 impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
@@ -223,6 +930,21 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             .and_then(|c| parse_hex_color(c))
             .unwrap_or(Color::from_rgb(0.35, 0.5, 0.6));
         let crest = parse_hex_color(&viz.border_color).unwrap_or(Color::from_rgb(0.5, 0.5, 0.5));
+        // Starlight: the PEAK gradient's first stop — the visualizer's
+        // bright sparkle-top, the one reliably light color in every theme's
+        // visualizer palette. The border color the rope/boat use is a DARK
+        // stroke in most themes (Svalbard: #111817), which vanishes on the
+        // dark sky; the water gradient is mid-tone. Peaks read as stars.
+        let starlight = viz
+            .peak_gradient_colors
+            .first()
+            .and_then(|c| parse_hex_color(c))
+            .or_else(|| {
+                viz.bar_gradient_colors
+                    .last()
+                    .and_then(|c| parse_hex_color(c))
+            })
+            .unwrap_or(Color::from_rgb(0.9, 0.92, 0.92));
 
         let steps = ((w / SEA_DRAW_STEP_PX).ceil() as usize).max(2);
 
@@ -241,29 +963,564 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             })
         };
 
-        // Back layer: dimmer, higher, half-speed — pure depth cue.
         let phase = self.phase;
+        let bars = self.bars;
         let back_y = move |x: f32| h - (back_swell_height((x / w) as f64, phase) as f32) * h;
+        let front_y = move |x: f32| h - sample_line_height(bars, x / w, false) * h;
+
+        // ── Gradient block A ─────────────────────────────────────────────
+        // The four gradient fills draw contiguously (mesh batching: a
+        // solid↔gradient alternation splits vertex buffers; grouping keeps
+        // the whole frame at three buffers).
+        //
+        // (1) Sky airglow: a barely-there cold luminance gathering toward
+        // the waterline and fading back out below it — the value story that
+        // motivates every highlight in the scene (light lands at the
+        // surface). Fading to alpha-0 at BOTH ends leaves no seam anywhere.
+        let glow_peak = 1.0 - SEA_DC as f32;
+        frame.fill_rectangle(
+            Point::ORIGIN,
+            size,
+            canvas::gradient::Linear::new(Point::ORIGIN, Point::new(0.0, h))
+                .add_stop(
+                    0.0,
+                    Color {
+                        a: 0.0,
+                        ..starlight
+                    },
+                )
+                .add_stop(
+                    glow_peak,
+                    Color {
+                        a: SKY_GLOW_ALPHA,
+                        ..starlight
+                    },
+                )
+                .add_stop(
+                    1.0,
+                    Color {
+                        a: 0.0,
+                        ..starlight
+                    },
+                ),
+        );
+
+        // (2) Back swell — atmospheric perspective: its crest dissolves
+        // into the sky like distance haze while its body keeps its weight,
+        // reaching full strength ABOVE the front waterline so the
+        // transition is visible. Geometry unchanged.
+        let water_far = viz
+            .bar_gradient_colors
+            .get(1)
+            .and_then(|c| parse_hex_color(c))
+            .unwrap_or(water);
+        let back_top = (1.0 - (SEA_DC + BACK_RAISE + BACK_AMP) as f32) * h;
         frame.fill(
             &fill_under(&back_y),
-            Color {
-                a: SEA_BACK_ALPHA,
-                ..water
-            },
+            canvas::gradient::Linear::new(Point::new(0.0, back_top), Point::new(0.0, h))
+                .add_stop(
+                    0.0,
+                    Color {
+                        a: SEA_BACK_TOP_ALPHA,
+                        ..water_far
+                    },
+                )
+                .add_stop(
+                    SEA_BACK_FADE_STOP,
+                    Color {
+                        a: SEA_BACK_BODY_ALPHA,
+                        ..water
+                    },
+                )
+                .add_stop(
+                    1.0,
+                    Color {
+                        a: SEA_BACK_BODY_ALPHA,
+                        ..water
+                    },
+                ),
         );
 
-        // Front waterline: the surface the boat rides. Fill below, then
-        // stroke the crest so the surface reads as a line, not just a wash.
-        let bars = self.bars;
-        let front_y = move |x: f32| h - sample_line_height(bars, x / w, false) * h;
+        // (3) Front water walks the theme ramp: brightest at the lit
+        // surface (a brighter gradient slot), sinking through the sea-teal
+        // toward the deep. Static endpoints (the max-crest line) — no
+        // per-frame gradient churn, and above-start pixels clamp to stop 0,
+        // which also absorbs any Catmull-Rom overshoot. Deliberately NO ink
+        // stop here: all darkness lives in the bed rect below, capping the
+        // total bottom darkening so the anchor keeps its contrast.
+        let water_lit = viz
+            .bar_gradient_colors
+            .get(2)
+            .and_then(|c| parse_hex_color(c))
+            .unwrap_or(water);
+        let surface_y = (1.0 - (SEA_DC + SWELL_AMP + RIPPLE_AMP) as f32) * h;
         frame.fill(
             &fill_under(&front_y),
-            Color {
-                a: SEA_FILL_ALPHA,
-                ..water
-            },
+            canvas::gradient::Linear::new(Point::new(0.0, surface_y), Point::new(0.0, h))
+                .add_stop(
+                    0.0,
+                    Color {
+                        a: SEA_LIT_ALPHA,
+                        ..water_lit
+                    },
+                )
+                .add_stop(
+                    0.5,
+                    Color {
+                        a: SEA_MID_ALPHA,
+                        ..water
+                    },
+                )
+                .add_stop(
+                    1.0,
+                    Color {
+                        a: SEA_DEEP_ALPHA,
+                        ..water
+                    },
+                ),
         );
 
+        // (4) Seabed ink vignette: the bottom of the water deepens toward
+        // ink, grounding the trawled anchor and easing the old razor cut
+        // into the pill band's bg0_hard. Starts below the deepest possible
+        // trough so the darkening never rides the surface; dialed by
+        // border_opacity, the theme's light-mode legibility knob.
+        let bed_top = SEA_BED_TOP * h;
+        frame.fill_rectangle(
+            Point::new(0.0, bed_top),
+            Size::new(w, h - bed_top),
+            canvas::gradient::Linear::new(Point::new(0.0, bed_top), Point::new(0.0, h))
+                .add_stop(0.0, Color { a: 0.0, ..crest })
+                .add_stop(
+                    1.0,
+                    Color {
+                        a: SEA_BED_ALPHA * viz.border_opacity,
+                        ..crest
+                    },
+                ),
+        );
+
+        // (5) Aurora — two seafoam curtains undulating across the upper
+        // sky (the default theme is named Svalbard; this is its light).
+        // Each ribbon is a closed band between two travelling sinusoids,
+        // filled with a vertical gradient fading to nothing at both edges.
+        // Phase multipliers are integers (wrap-safe); the bands drift at
+        // different rates and breathe gently out of step.
+        let aurora_a = viz
+            .bar_gradient_colors
+            .get(3)
+            .and_then(|c| parse_hex_color(c))
+            .unwrap_or(water);
+        let aurora_b = viz
+            .bar_gradient_colors
+            .get(4)
+            .and_then(|c| parse_hex_color(c))
+            .unwrap_or(water);
+        let breath = 1.0
+            - AURORA_BREATH_DEPTH
+                * (0.5 + 0.5 * (std::f64::consts::TAU * AURORA_BREATH_K * phase as f64).sin())
+                    as f32;
+        let mut aurora_ribbon = |base: f32,
+                                 amp: f32,
+                                 thick: f32,
+                                 cyc: f64,
+                                 k: f64,
+                                 shift: f64,
+                                 color: Color,
+                                 alpha: f32| {
+            let top_at = move |x: f32| {
+                base * h
+                    + amp
+                        * h
+                        * ((std::f64::consts::TAU * ((x / w) as f64 * cyc + k * phase as f64)
+                            + shift)
+                            .sin() as f32)
+            };
+            let ribbon = canvas::Path::new(|b| {
+                b.move_to(Point::new(0.0, top_at(0.0)));
+                for i in 1..=steps {
+                    let x = w * (i as f32 / steps as f32);
+                    b.line_to(Point::new(x, top_at(x)));
+                }
+                for i in (0..=steps).rev() {
+                    let x = w * (i as f32 / steps as f32);
+                    b.line_to(Point::new(x, top_at(x) + thick * h));
+                }
+                b.close();
+            });
+            let span_top = (base - amp) * h;
+            let span_bot = (base + amp + thick) * h;
+            frame.fill(
+                &ribbon,
+                canvas::gradient::Linear::new(Point::new(0.0, span_top), Point::new(0.0, span_bot))
+                    .add_stop(0.0, Color { a: 0.0, ..color })
+                    .add_stop(
+                        0.5,
+                        Color {
+                            a: alpha * breath,
+                            ..color
+                        },
+                    )
+                    .add_stop(1.0, Color { a: 0.0, ..color }),
+            );
+        };
+        // amp is kept WELL below thick: the fade gradient spans the static
+        // sinusoid envelope while the drawn edges undulate inside it, so an
+        // edge sits at gradient offset amp·(1+sin)/(2·amp+thick) off the
+        // zero stop — a large amp leaves the cut edge carrying visible
+        // alpha (a hard travelling contour line). At amp ≈ thick/10 the
+        // worst-case edge alpha is ~1-2/255: an actual soft curtain.
+        //
+        // Aurora is NIGHT furniture — the day scene (light mode) skips it.
+        let day = crate::theme::is_light_mode();
+        if !day {
+            aurora_ribbon(0.10, 0.012, 0.12, 1.4, 1.0, 0.0, aurora_a, AURORA_ALPHA_A);
+            aurora_ribbon(0.17, 0.010, 0.09, 2.1, 2.0, 2.4, aurora_b, AURORA_ALPHA_B);
+        }
+
+        // ── Solid block: the sky's inhabitants ──────────────────────────
+        // NIGHT: star dots, sparkle crosses (arms deferred to gradient
+        // block B where they taper via gradient strokes). DAY: the
+        // starlight field would be invisible on a light background, so
+        // seagulls glide in its place — each one loops on integer
+        // crossings per cycle over an off-panel margin (no edge pop),
+        // bobbing and beating its wings at integer rates.
+        let glyph_scale = scene_glyph_scale(h);
+        let mut deferred_arms: Vec<(Point, f32, f32)> = Vec::new();
+        if day {
+            let gull_ink = Color {
+                a: GULL_ALPHA * viz.border_opacity,
+                ..crest
+            };
+            for gull in gull_params() {
+                let dir = if gull.leftward { -1.0 } else { 1.0 };
+                let travel = (gull.x0 + dir * gull.k as f32 * phase).rem_euclid(1.0);
+                let gx = travel * (w + 2.0 * GULL_MARGIN_PX) - GULL_MARGIN_PX;
+                let gy = (gull.y
+                    + 0.012
+                        * (std::f32::consts::TAU * (gull.bob_k as f32 * phase + gull.bob_off))
+                            .sin())
+                    * h;
+                let flap = 0.42
+                    + 0.16 * (std::f32::consts::TAU * (GULL_FLAP_K * phase + gull.flap_off)).sin();
+                let s = 7.0 * gull.size * glyph_scale;
+                draw_gull(&mut frame, Point::new(gx, gy), s, flap, gull_ink);
+            }
+        }
+        let night_glyphs = if day { Vec::new() } else { sky_glyphs() };
+        for glyph in night_glyphs {
+            let twinkle = 1.0
+                - glyph.twinkle_depth
+                    * (0.5
+                        + 0.5
+                            * (std::f32::consts::TAU
+                                * (glyph.twinkle_k as f32 * phase + glyph.twinkle_off))
+                                .sin());
+            let center = Point::new(glyph.x * w, glyph.y * h);
+            match glyph.kind {
+                SkyGlyphKind::Dot => {
+                    // Crisp core + concentric halo rings — the visualizer
+                    // family's squared-falloff glow discretized to solid
+                    // circles (no blur primitive on a canvas). Brightness
+                    // correlates with size so the sky gains a magnitude
+                    // hierarchy instead of N identical LEDs; the brightest
+                    // tier earns a second, wider ring.
+                    let r = 1.5 * glyph.size * glyph_scale;
+                    let norm = ((glyph.size - 0.7) / 0.6).clamp(0.0, 1.0);
+                    let peak = SKY_STAR_ALPHA * (0.45 + 0.55 * norm);
+                    frame.fill(
+                        &canvas::Path::circle(center, 1.8 * r),
+                        Color {
+                            a: 0.30 * peak * twinkle,
+                            ..starlight
+                        },
+                    );
+                    if norm > 0.7 {
+                        frame.fill(
+                            &canvas::Path::circle(center, 2.8 * r),
+                            Color {
+                                a: 0.10 * peak * twinkle,
+                                ..starlight
+                            },
+                        );
+                    }
+                    frame.fill(
+                        &canvas::Path::circle(center, r),
+                        Color {
+                            a: peak * twinkle,
+                            ..starlight
+                        },
+                    );
+                }
+                SkyGlyphKind::Sparkle => {
+                    // A lens glint: soft under-glow + bright nucleus here
+                    // (solid), arms deferred to gradient block B so they
+                    // taper to nothing at the tips.
+                    let arm = 3.2 * glyph.size * glyph_scale;
+                    frame.fill(
+                        &canvas::Path::circle(center, 2.2 * glyph.size * glyph_scale),
+                        Color {
+                            a: 0.10 * twinkle,
+                            ..starlight
+                        },
+                    );
+                    frame.fill(
+                        &canvas::Path::circle(center, 1.1 * glyph.size * glyph_scale),
+                        Color {
+                            a: 0.35 * twinkle,
+                            ..starlight
+                        },
+                    );
+                    deferred_arms.push((center, arm, SKY_SPARKLE_ALPHA * twinkle));
+                }
+            }
+        }
+
+        // ── Wandering notes ──────────────────────────────────────────────
+        // The sky's music glyphs are transient: each cycle a few notes
+        // fade in at a CYCLE-HASHED spot, drift gently upward, and fade
+        // back out — never twice in the same place. Windows sit fully
+        // inside the cycle (max start 0.73 + 0.22 < 1.0), so a window can
+        // never straddle the cycle boundary where its hash would change.
+        for i in 0..SKY_WANDER_NOTES {
+            let salt = 0x407E + (i as u32) * 4;
+            let start = 0.05 + 0.68 * hash01(self.cycle, salt);
+            let t = phase - start;
+            if !(0.0..SKY_NOTE_DUR).contains(&t) {
+                continue;
+            }
+            let p = t / SKY_NOTE_DUR;
+            let fade = (std::f32::consts::PI * p).sin();
+            let x = (0.06 + 0.88 * hash01(self.cycle, salt + 1)) * w;
+            let y_base = (SKY_BAND_TOP
+                + SKY_NOTE_TOP_INSET
+                + (SKY_BAND_BOTTOM - SKY_BAND_TOP - SKY_NOTE_TOP_INSET)
+                    * hash01(self.cycle, salt + 2))
+                * h;
+            let y = y_base - 6.0 * glyph_scale * p;
+            let s = (7.5 + 2.0 * hash01(self.cycle, salt + 3)) * glyph_scale;
+            // Notes glow starlight by night, print in ink by day —
+            // starlight on a light background is invisible.
+            let color = if day {
+                Color {
+                    a: SKY_NOTE_ALPHA * fade * viz.border_opacity,
+                    ..crest
+                }
+            } else {
+                Color {
+                    a: SKY_NOTE_ALPHA * fade,
+                    ..starlight
+                }
+            };
+            if i % 2 == 0 {
+                draw_note_pair(&mut frame, Point::new(x, y), s, color);
+            } else {
+                draw_quaver(&mut frame, Point::new(x, y), s, color);
+            }
+        }
+
+        // ── The moon's glow / the sun's vexel fan ────────────────────────
+        // The face itself is the owner's avatar, rendered as a themed Svg
+        // layer in `trawl_scene` (a canvas can't draw SVGs) at the shared
+        // MOON_X/MOON_Y/MOON_RADIUS_PX consts. The canvas draws the light
+        // AROUND it — a discretized radial glow whose exposed steps sit
+        // under the visibility floor (see the glow-stack const docs).
+        // NIGHT: the starlight stack with a cascaded breath (one swell
+        // rolling from the face outward), plus a rare cycle-hashed exhale
+        // pulse. DAY: the gold stack breathing uniformly, under a vexel
+        // fan of 12 filled, bellied, tapered wedges — 6 major + 6 minor —
+        // whose tips and brightness ride a travelling wave circulating
+        // AGAINST the TAU/6 spin. Nothing structured sits under the face:
+        // the avatar is 0.60-opaque, so wedges start OUTSIDE it while the
+        // bright innermost glow steps hide beneath it.
+        if MOON_ALPHA > 0.0 {
+            let m = MOON_RADIUS_PX * glyph_scale;
+            let mc = Point::new(MOON_X * w, MOON_Y * h);
+            let moon_breath = 0.9 + 0.1 * (std::f32::consts::TAU * phase).sin();
+            if day {
+                let gold = crate::theme::logo_wood();
+                // Core glow: uniform k=1 breath across the stack. Gold is
+                // the scene's warm LIGHT — never dialed by border_opacity
+                // (that knob scales ink legibility, not light).
+                draw_glow_stack(&mut frame, mc, m, &SUN_GLOW_STACK, gold, |_| moon_breath);
+                // The vexel fan: filled tapered wedges whose sides AIM at
+                // the center (the reference's center-apex silhouette) but
+                // start at SUN_WEDGE_INNER, outside the translucent face.
+                // Both edges bow OUTWARD symmetrically (the static half of
+                // "wave like" — a plump curved ray, no pinwheel handedness).
+                for i in 0..SUN_RAY_COUNT {
+                    let (theta, r_out_m, alpha) = sun_ray_geometry(i, phase);
+                    let (sin_t, cos_t) = theta.sin_cos();
+                    let (tan_t, belly) = if sun_ray_is_major(i) {
+                        (SUN_WEDGE_TAN_MAJOR, SUN_WEDGE_BELLY_MAJOR)
+                    } else {
+                        (SUN_WEDGE_TAN_MINOR, SUN_WEDGE_BELLY_MINOR)
+                    };
+                    let r_in = SUN_WEDGE_INNER * m;
+                    let r_out = r_out_m * m;
+                    let rm = (r_in + r_out) * 0.5;
+                    let at = |r: f32, side: f32, extra: f32| {
+                        Point::new(
+                            mc.x + cos_t * r - sin_t * side * (r * tan_t + extra),
+                            mc.y + sin_t * r + cos_t * side * (r * tan_t + extra),
+                        )
+                    };
+                    let wedge = canvas::Path::new(|b| {
+                        b.move_to(at(r_in, -1.0, 0.0));
+                        b.quadratic_curve_to(at(rm, -1.0, belly * m), at(r_out, -1.0, 0.0));
+                        b.line_to(at(r_out, 1.0, 0.0));
+                        b.quadratic_curve_to(at(rm, 1.0, belly * m), at(r_in, 1.0, 0.0));
+                        b.close();
+                    });
+                    frame.fill(&wedge, Color { a: alpha, ..gold });
+                }
+            } else {
+                // Cascaded breath: rank counted from the INNERMOST entry,
+                // larger rank = larger lag = peaks later — the swell is
+                // born at the face and rolls outward (~11 s to cross).
+                // Each ring is a k=1 integer-rate sine with a constant
+                // offset, so phase 0 and phase 1 render identically.
+                let last = MOON_GLOW_STACK.len() - 1;
+                draw_glow_stack(&mut frame, mc, m, &MOON_GLOW_STACK, starlight, |i| {
+                    let rank = (last - i) as f32;
+                    (1.0 - MOON_WASH_DEPTH)
+                        + MOON_WASH_DEPTH
+                            * (0.5
+                                + 0.5
+                                    * (std::f32::consts::TAU * (phase - rank * MOON_WASH_LAG))
+                                        .sin())
+                });
+                // The exhale: some cycles a soft two-stroke ring detaches
+                // at the halo's shoulder, expands past the rim, and
+                // dissolves — wide faint stroke under a narrow brighter
+                // one reads as one soft band, not a crisp vector circle.
+                if hash01(self.cycle, MOON_PULSE_SALT) < MOON_PULSE_CHANCE {
+                    let start = 0.15 + 0.45 * hash01(self.cycle, MOON_PULSE_SALT ^ 0x9E37);
+                    let t = phase - start;
+                    if (0.0..MOON_PULSE_DUR).contains(&t) {
+                        let p = t / MOON_PULSE_DUR;
+                        let env = (std::f32::consts::PI * p).sin();
+                        let r = m * (1.20 + 1.00 * p);
+                        for (width, alpha) in [(0.42 * m, 0.016), (0.18 * m, 0.045)] {
+                            frame.stroke(
+                                &canvas::Path::circle(mc, r),
+                                canvas::Stroke::default()
+                                    .with_color(Color {
+                                        a: alpha * env,
+                                        ..starlight
+                                    })
+                                    .with_width(width),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Rising notes — the longship sings ───────────────────────────
+        // A small pool of note glyphs climbs from the mast, swaying as
+        // they rise, fading in at birth and out near the top. Each rider
+        // loops on an integer multiple of the phase; alpha hits zero at
+        // both ends of its run, so the cycle wrap (a position jump) never
+        // shows. Anchored to the live hull x, and DIMMED by edge proximity
+        // (boat_edge_fade) so the song fades out with the departing sprite
+        // instead of cutting in one frame at the panel edge while the hull
+        // is still half on-screen.
+        let boat_edge_fade = (self.boat_x.min(1.0 - self.boat_x) / BOAT_EDGE_FADE).clamp(0.0, 1.0);
+        if boat_edge_fade > 0.0 {
+            let boat_cx = self.boat_x * w;
+            let start_y = front_y(boat_cx) - 0.10 * h;
+            for rider in riser_params() {
+                let t = (rider.k as f32 * phase + rider.off).fract();
+                let fade_in = (t / RISER_FADE_IN).min(1.0);
+                let fade_out = ((1.0 - t) / RISER_FADE_OUT).min(1.0);
+                let alpha = RISER_ALPHA * fade_in * fade_out * boat_edge_fade;
+                if alpha <= 0.01 {
+                    continue;
+                }
+                let sway = RISER_SWAY_PX
+                    * glyph_scale
+                    * (std::f32::consts::TAU * (2.0 * t + rider.sway_off)).sin();
+                let x = boat_cx + rider.dx * glyph_scale + sway;
+                let y = start_y - t * RISER_RISE_FRAC * h;
+                let s = (7.0 + 4.0 * t) * glyph_scale;
+                // Starlight song by night, ink by day (see wandering notes).
+                let color = if day {
+                    Color {
+                        a: alpha * viz.border_opacity,
+                        ..crest
+                    }
+                } else {
+                    Color {
+                        a: alpha,
+                        ..starlight
+                    }
+                };
+                if rider.beamed {
+                    draw_note_pair(&mut frame, Point::new(x, y), s, color);
+                } else {
+                    draw_quaver(&mut frame, Point::new(x, y), s, color);
+                }
+            }
+        }
+
+        // ── Leaping fish — the trawl stirs one up ───────────────────────
+        // Some cycles, a small ink silhouette arcs out of the water at a
+        // cycle-hashed spot and dives back. Rotated along its flight
+        // tangent via the frame transform stack; alpha eases in and out
+        // over the hop so it surfaces and re-enters softly.
+        let fish_t = (phase + FISH_OFF).rem_euclid(1.0);
+        if hash01(self.cycle, 0xF1_5E) < FISH_CHANCE && fish_t < FISH_WINDOW {
+            let p = fish_t / FISH_WINDOW;
+            let fx = (0.15 + 0.70 * hash01(self.cycle, 0xF1_5F)) * w;
+            let arc_w = 0.06 * w;
+            let jump_h = FISH_JUMP_FRAC * h;
+            let x = fx + (p - 0.5) * arc_w;
+            let y = front_y(fx) + 2.0 - jump_h * 4.0 * p * (1.0 - p);
+            // Flight tangent: d/dp of (x, y) — horizontal speed is
+            // constant, vertical follows the parabola.
+            let angle = (-(jump_h * 4.0 * (1.0 - 2.0 * p))).atan2(arc_w);
+            let fade = (std::f32::consts::PI * p).sin();
+            let l = FISH_SIZE * glyph_scale;
+            let fish_color = Color {
+                a: FISH_ALPHA * viz.border_opacity * fade,
+                ..crest
+            };
+            frame.with_save(|frame| {
+                frame.translate(iced::Vector::new(x, y));
+                frame.rotate(angle);
+                // Body: a little teardrop; tail: a notched triangle.
+                let body = canvas::Path::new(|b| {
+                    b.move_to(Point::new(-0.50 * l, 0.0));
+                    b.quadratic_curve_to(
+                        Point::new(-0.10 * l, -0.35 * l),
+                        Point::new(0.45 * l, 0.0),
+                    );
+                    b.quadratic_curve_to(
+                        Point::new(-0.10 * l, 0.35 * l),
+                        Point::new(-0.50 * l, 0.0),
+                    );
+                    b.close();
+                });
+                let tail = canvas::Path::new(|b| {
+                    b.move_to(Point::new(-0.45 * l, 0.0));
+                    b.line_to(Point::new(-0.78 * l, -0.24 * l));
+                    b.line_to(Point::new(-0.70 * l, 0.0));
+                    b.line_to(Point::new(-0.78 * l, 0.24 * l));
+                    b.close();
+                });
+                frame.fill(&body, fish_color);
+                frame.fill(&tail, fish_color);
+            });
+        }
+
+        // ── The moonlit crest — the line the boat rides ─────────────────
+        // Three passes replace the old single 1.5px ink stroke (which
+        // measured ~2/255 of visible effect): a soft starlight halo, then
+        // committed sprite-weight ink (the boat's own outline language and
+        // the light-mode legibility mechanism), then a bright catch-light
+        // that fades into the panel edges. Crisp-core-plus-halo is the
+        // visualizer family's glow grammar at minimum viable form.
         let crest_path = canvas::Path::new(|b| {
             b.move_to(Point::new(0.0, front_y(0.0)));
             for i in 1..=steps {
@@ -271,16 +1528,337 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 b.line_to(Point::new(x, front_y(x)));
             }
         });
+        // Halo (solid, deliberately: gradient edge-stubs at 0.05 alpha are
+        // ~1/255 — invisible — and a second heavy gradient stroke of this
+        // long polyline isn't worth the buffer).
         frame.stroke(
             &crest_path,
             canvas::Stroke::default()
                 .with_color(Color {
-                    a: SEA_CREST_ALPHA * viz.border_opacity,
-                    ..crest
+                    a: CREST_HALO_ALPHA,
+                    ..starlight
                 })
-                .with_width(1.5)
+                .with_width(4.0)
                 .with_line_cap(canvas::LineCap::Round),
         );
+        // Ink.
+        frame.stroke(
+            &crest_path,
+            canvas::Stroke::default()
+                .with_color(Color {
+                    a: CREST_INK_ALPHA * viz.border_opacity,
+                    ..crest
+                })
+                .with_width(2.0)
+                .with_line_cap(canvas::LineCap::Round),
+        );
+
+        // ── Gradient block B: the catch-light ──────────────────────────
+        // A struct literal, NOT with_color (which clobbers the style back
+        // to Solid): a 1px lit line breathing into the edges instead of
+        // hitting them.
+        let catch =
+            canvas::gradient::Linear::new(Point::new(0.0, surface_y), Point::new(w, surface_y))
+                .add_stop(
+                    0.0,
+                    Color {
+                        a: 0.0,
+                        ..starlight
+                    },
+                )
+                .add_stop(
+                    CREST_LIGHT_EDGE,
+                    Color {
+                        a: CREST_LIGHT_ALPHA,
+                        ..starlight
+                    },
+                )
+                .add_stop(
+                    1.0 - CREST_LIGHT_EDGE,
+                    Color {
+                        a: CREST_LIGHT_ALPHA,
+                        ..starlight
+                    },
+                )
+                .add_stop(
+                    1.0,
+                    Color {
+                        a: 0.0,
+                        ..starlight
+                    },
+                );
+        frame.stroke(
+            &crest_path,
+            canvas::Stroke {
+                style: canvas::Style::Gradient(canvas::Gradient::Linear(catch)),
+                width: 1.0,
+                line_cap: canvas::LineCap::Round,
+                ..canvas::Stroke::default()
+            },
+        );
+
+        // Crest shimmer sweep: for 30% of each cycle a band of light
+        // glides along the crest (entering and exiting off-panel, so no
+        // edge pop), brightest where the wave actually peaks — the height
+        // gate derives from the same field the boat rides.
+        let sweep_t = (phase + CREST_SWEEP_OFF).rem_euclid(1.0);
+        if sweep_t < CREST_SWEEP_FRACTION {
+            let c = -CREST_SWEEP_HALF_WIDTH
+                + (sweep_t / CREST_SWEEP_FRACTION) * (1.0 + 2.0 * CREST_SWEEP_HALF_WIDTH);
+            let gate = ((sample_line_height(bars, c.clamp(0.0, 1.0), false) - SEA_DC as f32)
+                / (SWELL_AMP + RIPPLE_AMP) as f32)
+                .clamp(0.0, 1.0);
+            let peak = CREST_SHIMMER_ALPHA * gate;
+            if peak > 0.005 {
+                let mut sweep = canvas::gradient::Linear::new(
+                    Point::new(0.0, surface_y),
+                    Point::new(w, surface_y),
+                );
+                for (offset, alpha) in sweep_stops(c, CREST_SWEEP_HALF_WIDTH, peak) {
+                    sweep = sweep.add_stop(
+                        offset,
+                        Color {
+                            a: alpha,
+                            ..starlight
+                        },
+                    );
+                }
+                frame.stroke(
+                    &crest_path,
+                    canvas::Stroke {
+                        style: canvas::Style::Gradient(canvas::Gradient::Linear(sweep)),
+                        width: 3.0,
+                        line_cap: canvas::LineCap::Round,
+                        ..canvas::Stroke::default()
+                    },
+                );
+            }
+        }
+
+        // Lantern glint: the boat pools warm light on the water it rides —
+        // the scene's one warm note, answering the sprite's gold trim with
+        // the logo's own mode-stable accessor. Breathes on an integer-rate
+        // ~5 s cycle; dims by edge proximity so the pool departs with the
+        // sprite instead of cutting at the panel edge.
+        if boat_edge_fade > 0.0 {
+            let gold = crate::theme::logo_wood();
+            let cx = self.boat_x * w;
+            let cy = front_y(cx) + 1.5;
+            let r_w = 0.5 * crate::widgets::boat::boat_pixel_size(w.min(h)).0;
+            let glint_breath = (0.85
+                + 0.15 * (std::f32::consts::TAU * GLINT_BREATH_K * phase).sin())
+                * boat_edge_fade;
+            // Core pool.
+            frame.fill_rectangle(
+                Point::new(cx - r_w, cy - 1.5),
+                Size::new(2.0 * r_w, 3.0),
+                canvas::gradient::Linear::new(Point::new(cx - r_w, cy), Point::new(cx + r_w, cy))
+                    .add_stop(0.0, Color { a: 0.0, ..gold })
+                    .add_stop(
+                        0.5,
+                        Color {
+                            a: GLINT_ALPHA * glint_breath,
+                            ..gold
+                        },
+                    )
+                    .add_stop(1.0, Color { a: 0.0, ..gold }),
+            );
+            // Wider faint spread.
+            frame.fill_rectangle(
+                Point::new(cx - 1.8 * r_w, cy - 2.5),
+                Size::new(3.6 * r_w, 5.0),
+                canvas::gradient::Linear::new(
+                    Point::new(cx - 1.8 * r_w, cy),
+                    Point::new(cx + 1.8 * r_w, cy),
+                )
+                .add_stop(0.0, Color { a: 0.0, ..gold })
+                .add_stop(
+                    0.5,
+                    Color {
+                        a: 0.04 * glint_breath,
+                        ..gold
+                    },
+                )
+                .add_stop(1.0, Color { a: 0.0, ..gold }),
+            );
+            // A short fading smear sinking below the waterline.
+            let smear = canvas::Path::new(|b| {
+                b.move_to(Point::new(cx, cy));
+                b.line_to(Point::new(cx, cy + 0.08 * h));
+            });
+            frame.stroke(
+                &smear,
+                canvas::Stroke {
+                    style: canvas::Style::Gradient(canvas::Gradient::Linear(
+                        canvas::gradient::Linear::new(
+                            Point::new(cx, cy),
+                            Point::new(cx, cy + 0.08 * h),
+                        )
+                        .add_stop(
+                            0.0,
+                            Color {
+                                a: 0.07 * glint_breath,
+                                ..gold
+                            },
+                        )
+                        .add_stop(1.0, Color { a: 0.0, ..gold }),
+                    )),
+                    width: 2.0,
+                    line_cap: canvas::LineCap::Round,
+                    ..canvas::Stroke::default()
+                },
+            );
+        }
+
+        // Shooting star: some cycles carry one streak across the upper
+        // sky, its timing, origin, and heading all hashed from the cycle
+        // counter — no two cycles replay the same streak. Night only (a
+        // meteor at noon reads as a rendering bug, and the starlight
+        // streak would be invisible anyway).
+        if !day && hash01(self.cycle, 0x57A2) < SHOOT_CHANCE {
+            let start = 0.15 + 0.60 * hash01(self.cycle, 0x57A3);
+            if phase >= start && phase < start + SHOOT_WINDOW {
+                let p = (phase - start) / SHOOT_WINDOW;
+                let x0 = (0.25 + 0.60 * hash01(self.cycle, 0x57A4)) * w;
+                let y0 = (0.05 + 0.12 * hash01(self.cycle, 0x57A5)) * h;
+                let theta = (20.0 + 15.0 * hash01(self.cycle, 0x57A6)).to_radians();
+                let dir = iced::Vector::new(-theta.cos(), theta.sin());
+                // Height-scaled: max head depth = y0 + sin(35°)·0.35h ≈
+                // 0.37h, safely above the back swell's highest crest.
+                let travel = p * SHOOT_TRAVEL_FRAC * h;
+                let head = Point::new(x0 + dir.x * travel, y0 + dir.y * travel);
+                let len = SHOOT_LEN_FRAC * h;
+                let tail = Point::new(head.x - dir.x * len, head.y - dir.y * len);
+                let fade = (std::f32::consts::PI * p).sin();
+                let streak = canvas::Path::line(tail, head);
+                frame.stroke(
+                    &streak,
+                    canvas::Stroke {
+                        style: canvas::Style::Gradient(canvas::Gradient::Linear(
+                            canvas::gradient::Linear::new(tail, head)
+                                .add_stop(
+                                    0.0,
+                                    Color {
+                                        a: 0.0,
+                                        ..starlight
+                                    },
+                                )
+                                .add_stop(
+                                    1.0,
+                                    Color {
+                                        a: SHOOT_ALPHA * fade,
+                                        ..starlight
+                                    },
+                                ),
+                        )),
+                        width: 1.5,
+                        line_cap: canvas::LineCap::Round,
+                        ..canvas::Stroke::default()
+                    },
+                );
+                // Bright head with a small halo.
+                frame.fill(
+                    &canvas::Path::circle(head, 3.4),
+                    Color {
+                        a: 0.25 * fade,
+                        ..starlight
+                    },
+                );
+                frame.fill(
+                    &canvas::Path::circle(head, 1.6),
+                    Color {
+                        a: SHOOT_ALPHA * fade,
+                        ..starlight
+                    },
+                );
+            }
+        }
+
+        // Deferred sparkle arms: gradient strokes tapering to nothing at
+        // the tips (a lens glint, not an aliased butt-capped cross). The
+        // horizontal arm runs at 0.6× the vertical — classic glint
+        // proportions.
+        for (center, arm, alpha) in deferred_arms {
+            let vertical = canvas::Path::line(
+                Point::new(center.x, center.y - arm),
+                Point::new(center.x, center.y + arm),
+            );
+            frame.stroke(
+                &vertical,
+                canvas::Stroke {
+                    style: canvas::Style::Gradient(canvas::Gradient::Linear(
+                        canvas::gradient::Linear::new(
+                            Point::new(center.x, center.y - arm),
+                            Point::new(center.x, center.y + arm),
+                        )
+                        .add_stop(
+                            0.0,
+                            Color {
+                                a: 0.0,
+                                ..starlight
+                            },
+                        )
+                        .add_stop(
+                            0.5,
+                            Color {
+                                a: alpha,
+                                ..starlight
+                            },
+                        )
+                        .add_stop(
+                            1.0,
+                            Color {
+                                a: 0.0,
+                                ..starlight
+                            },
+                        ),
+                    )),
+                    width: 1.5,
+                    line_cap: canvas::LineCap::Round,
+                    ..canvas::Stroke::default()
+                },
+            );
+            let harm = 0.6 * arm;
+            let horizontal = canvas::Path::line(
+                Point::new(center.x - harm, center.y),
+                Point::new(center.x + harm, center.y),
+            );
+            frame.stroke(
+                &horizontal,
+                canvas::Stroke {
+                    style: canvas::Style::Gradient(canvas::Gradient::Linear(
+                        canvas::gradient::Linear::new(
+                            Point::new(center.x - harm, center.y),
+                            Point::new(center.x + harm, center.y),
+                        )
+                        .add_stop(
+                            0.0,
+                            Color {
+                                a: 0.0,
+                                ..starlight
+                            },
+                        )
+                        .add_stop(
+                            0.5,
+                            Color {
+                                a: alpha,
+                                ..starlight
+                            },
+                        )
+                        .add_stop(
+                            1.0,
+                            Color {
+                                a: 0.0,
+                                ..starlight
+                            },
+                        ),
+                    )),
+                    width: 1.5,
+                    line_cap: canvas::LineCap::Round,
+                    ..canvas::Stroke::default()
+                },
+            );
+        }
 
         vec![frame.into_geometry()]
     }
@@ -338,6 +1916,226 @@ mod tests {
             sea_bars(0.25),
             "advancing the phase must move the wave"
         );
+    }
+
+    #[test]
+    fn sky_glyphs_deterministic_and_in_band() {
+        let a = sky_glyphs();
+        let b = sky_glyphs();
+        assert_eq!(
+            a.len(),
+            SKY_STAR_COUNT + SKY_SPARKLE_COUNT + SKY_FAINT_COUNT,
+            "constellation size must match its consts"
+        );
+        for (ga, gb) in a.iter().zip(&b) {
+            assert_eq!(
+                (
+                    ga.x,
+                    ga.y,
+                    ga.size,
+                    ga.twinkle_k,
+                    ga.twinkle_off,
+                    ga.twinkle_depth
+                ),
+                (
+                    gb.x,
+                    gb.y,
+                    gb.size,
+                    gb.twinkle_k,
+                    gb.twinkle_off,
+                    gb.twinkle_depth
+                ),
+                "the constellation must be identical every build"
+            );
+        }
+        for g in &a {
+            assert!((0.0..=1.0).contains(&g.x), "x out of range: {}", g.x);
+            assert!(
+                (SKY_BAND_TOP..=SKY_BAND_BOTTOM).contains(&g.y),
+                "glyph must stay in the sky band, got y {}",
+                g.y
+            );
+            assert!(
+                g.twinkle_k >= SKY_TWINKLE_K_MIN,
+                "twinkle rate must stay an integer at or above the min"
+            );
+            assert!(g.twinkle_depth > 0.0, "every glyph carries a shimmer depth");
+        }
+        // The faint tier must exist: tiny stars at FULL twinkle depth, so
+        // they fade entirely out of the sky and back.
+        let faint: Vec<_> = a.iter().filter(|g| g.twinkle_depth >= 1.0).collect();
+        assert_eq!(
+            faint.len(),
+            SKY_FAINT_COUNT,
+            "exactly the faint tier runs at full fade depth"
+        );
+        for g in &faint {
+            assert!(
+                g.size < 0.7,
+                "faint stars must sit below the main field's size floor, got {}",
+                g.size
+            );
+        }
+    }
+
+    #[test]
+    fn glow_stacks_hold_the_banding_contract() {
+        // The glow reads as light (not stacked vector circles) only while
+        // every EXPOSED rim's alpha step stays under the visibility floor,
+        // the bright steps hide beneath the 0.60-opaque avatar, and no rim
+        // coincides with the face's own edge.
+        for (name, table, exposed_cap) in [
+            ("sun", &SUN_GLOW_STACK[..], 0.015_f32),
+            ("moon", &MOON_GLOW_STACK[..], 0.011),
+        ] {
+            for pair in table.windows(2) {
+                assert!(
+                    pair[0].0 > pair[1].0,
+                    "{name}: radii must strictly descend (largest-first stack)"
+                );
+            }
+            for (radius, alpha) in table {
+                assert!(
+                    !(0.95..=1.05).contains(radius),
+                    "{name}: no rim may coincide with the face edge, got {radius}"
+                );
+                if *radius > 1.05 {
+                    assert!(
+                        *alpha <= exposed_cap + 1e-6,
+                        "{name}: exposed rim at {radius} steps {alpha} > cap {exposed_cap}"
+                    );
+                }
+            }
+            let cumulative = 1.0 - table.iter().fold(1.0_f32, |acc, (_, a)| acc * (1.0 - a));
+            assert!(
+                (0.10..=0.20).contains(&cumulative),
+                "{name}: cumulative center presence out of budget: {cumulative}"
+            );
+        }
+    }
+
+    #[test]
+    fn sun_wedge_field_is_seamless_at_the_phase_wrap() {
+        // At the wrap, ray i's full animated state must equal ray i+2's
+        // start-of-cycle state (the TAU/6 spin advances exactly two ray
+        // slots, and i and i+2 share tier parity) — otherwise the fan
+        // snaps every 20 s.
+        for i in 0..SUN_RAY_COUNT {
+            let (t_end, r_end, a_end) = sun_ray_geometry(i, 1.0 - 1e-6);
+            let (t_start, r_start, a_start) = sun_ray_geometry((i + 2) % SUN_RAY_COUNT, 0.0);
+            // Angles may differ by whole turns — compare on the circle.
+            assert!(
+                (t_end.sin() - t_start.sin()).abs() < 1e-3
+                    && (t_end.cos() - t_start.cos()).abs() < 1e-3,
+                "ray {i}: wrap angle mismatch"
+            );
+            assert!((r_end - r_start).abs() < 1e-3, "ray {i}: wrap tip mismatch");
+            assert!(
+                (a_end - a_start).abs() < 1e-3,
+                "ray {i}: wrap alpha mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn gull_params_deterministic_and_sane() {
+        let a = gull_params();
+        assert_eq!(a.len(), GULL_COUNT);
+        for (ga, gb) in a.iter().zip(&gull_params()) {
+            assert_eq!(
+                (ga.x0, ga.y, ga.k, ga.leftward, ga.size, ga.bob_k),
+                (gb.x0, gb.y, gb.k, gb.leftward, gb.size, gb.bob_k),
+                "the flock must be identical every build"
+            );
+        }
+        for g in &a {
+            assert!(
+                g.k >= 1,
+                "glide rate must be a positive integer (wrap-safety)"
+            );
+            assert!(g.bob_k >= 1, "bob rate must be a positive integer");
+            assert!(
+                (0.06..=0.30).contains(&g.y),
+                "gulls must stay in the sky band, got y {}",
+                g.y
+            );
+        }
+    }
+
+    #[test]
+    fn wandering_note_windows_stay_inside_the_cycle() {
+        // A wandering note's window must never straddle the cycle boundary
+        // — its position hash would change mid-appearance. Max start
+        // (0.05 + 0.68) + SKY_NOTE_DUR must stay below 1.0.
+        const _: () = assert!(0.05 + 0.68 + SKY_NOTE_DUR < 1.0);
+        // And the note's hashed spot must vary across cycles.
+        let salt = 0x407E;
+        assert_ne!(
+            hash01(1, salt + 1),
+            hash01(2, salt + 1),
+            "consecutive cycles must deal different note positions"
+        );
+    }
+
+    #[test]
+    fn hash01_deterministic_and_unit_range() {
+        for cycle in [0_u32, 1, 2, 17, 9999, u32::MAX] {
+            for salt in [0x57A2_u32, 0xF1_5E, 1] {
+                let v = hash01(cycle, salt);
+                assert_eq!(v, hash01(cycle, salt), "hash must be deterministic");
+                assert!((0.0..=1.0).contains(&v), "hash out of range: {v}");
+            }
+        }
+        // Consecutive cycles must not collapse to the same draw.
+        assert_ne!(hash01(1, 0x57A2), hash01(2, 0x57A2));
+    }
+
+    #[test]
+    fn riser_params_deterministic_and_sane() {
+        let a = riser_params();
+        assert_eq!(a.len(), RISER_COUNT);
+        for (ra, rb) in a.iter().zip(&riser_params()) {
+            assert_eq!(
+                (ra.k, ra.off, ra.dx, ra.sway_off, ra.beamed),
+                (rb.k, rb.off, rb.dx, rb.sway_off, rb.beamed),
+                "riser pool must be identical every build"
+            );
+        }
+        for r in &a {
+            assert!(
+                r.k >= 1,
+                "riser rate must be a positive integer (wrap-safety)"
+            );
+            assert!((0.0..1.0).contains(&r.off));
+        }
+    }
+
+    #[test]
+    fn sweep_stops_stay_in_gradient_domain() {
+        // Sweep the band center across its full off-panel-to-off-panel
+        // run and hold the packed-gradient contract at every position:
+        // ascending offsets in [0, 1], first at 0.0, last at exactly 1.0.
+        // The extra probes sit an epsilon off the boundaries — the case
+        // where a naive dedup once dropped the exact-1.0 boundary stop.
+        let grid = (0..=48).map(|i| -0.10 + (i as f32 / 48.0) * 1.20);
+        for c in grid.chain([0.89995, 0.000_4, 0.999_6, -0.099_9, 1.099_9]) {
+            let stops = sweep_stops(c, CREST_SWEEP_HALF_WIDTH, CREST_SHIMMER_ALPHA);
+            assert!(stops.len() >= 2, "at least the two boundary stops");
+            assert_eq!(stops.first().map(|s| s.0), Some(0.0));
+            assert_eq!(stops.last().map(|s| s.0), Some(1.0));
+            for pair in stops.windows(2) {
+                assert!(
+                    pair[0].0 < pair[1].0,
+                    "stops must ascend strictly: {} then {}",
+                    pair[0].0,
+                    pair[1].0
+                );
+            }
+            for (offset, alpha) in &stops {
+                assert!((0.0..=1.0).contains(offset));
+                assert!((0.0..=CREST_SHIMMER_ALPHA + 1e-6).contains(alpha));
+            }
+        }
     }
 
     #[test]

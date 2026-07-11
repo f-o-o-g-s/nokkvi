@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Trawl filters are keyboard-editable: Shift+Tab / Shift+Backspace pick a tray control, Left/Right cycle its value.
-- The Trawl row's artwork panel now animates: the nokkvi longship sails a gently breathing sea, trawling its anchor along the seabed.
+- The Trawl row's artwork panel now animates: the longship trawls its anchor across a living sea — aurora and stars by night, sun and seagulls in light themes.
 
 ### Changed
 

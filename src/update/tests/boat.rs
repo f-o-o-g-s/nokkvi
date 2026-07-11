@@ -536,6 +536,54 @@ mod harbour_scene_tests {
     }
 
     #[test]
+    fn harbour_sea_cycle_increments_on_phase_wrap() {
+        // The cycle counter is the dice the rare scene events (shooting
+        // star, fish) roll — it must bump exactly when the phase wraps.
+        let mut app = app_on_harbour();
+        app.harbour_sea_phase = 0.999;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        assert_eq!(
+            app.harbour_sea_cycle, 0,
+            "no wrap yet — first tick has dt=0"
+        );
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        assert_eq!(
+            app.harbour_sea_cycle, 1,
+            "the 0.999 → wrap crossing must bump the cycle counter"
+        );
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+        assert_eq!(
+            app.harbour_sea_cycle, 1,
+            "an ordinary in-cycle tick must NOT bump the counter"
+        );
+    }
+
+    #[test]
+    fn harbour_sea_cycle_counts_whole_cycles_in_one_dt() {
+        // A single large dt (e.g. resuming after a compositor-occluded
+        // stall) can span multiple 20 s sea cycles — the counter must
+        // count them analytically, not via a wrap compare that misses
+        // every whole cycle whose fractional landing exceeds the start.
+        let mut app = app_on_harbour();
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        // 45 s at SEA_DRIFT_HZ 0.05 = 2.25 cycles.
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_secs(45)));
+        assert_eq!(
+            app.harbour_sea_cycle, 2,
+            "a 2.25-cycle dt must bump the counter exactly twice"
+        );
+        assert!(
+            (0.0..1.0).contains(&app.harbour_sea_phase),
+            "phase must land wrapped, got {}",
+            app.harbour_sea_phase
+        );
+    }
+
+    #[test]
     fn harbour_sea_phase_advances_and_stays_wrapped() {
         let mut app = app_on_harbour();
 

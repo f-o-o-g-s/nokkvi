@@ -243,10 +243,18 @@ fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     app.harbour_boat.last_tick = Some(now);
 
     // Advance the travelling sea and build the ONE bars array this frame's
-    // physics and render both consume.
-    app.harbour_sea_phase = (app.harbour_sea_phase
-        + dt.as_secs_f32() * crate::widgets::harbour_sea::SEA_DRIFT_HZ)
-        .rem_euclid(1.0);
+    // physics and render both consume. Full cycles crossed bump the counter
+    // that varies the scene's rare events (shooting star, leaping fish)
+    // from one ~20 s cycle to the next — counted analytically from the
+    // unwrapped advance (a `new < prev` compare would miss every whole
+    // cycle inside one large dt, e.g. after a compositor-occluded stall,
+    // and replay the previous cycle's events verbatim).
+    let advanced =
+        app.harbour_sea_phase + dt.as_secs_f32() * crate::widgets::harbour_sea::SEA_DRIFT_HZ;
+    app.harbour_sea_phase = advanced.rem_euclid(1.0);
+    // `advanced` is non-negative, so the cast floors: its whole part is the
+    // number of full cycles crossed this tick (0 on an ordinary frame).
+    app.harbour_sea_cycle = app.harbour_sea_cycle.wrapping_add(advanced as u32);
     let bars = crate::widgets::harbour_sea::sea_bars(app.harbour_sea_phase);
 
     // Suppress the drop-anchor state machine BEFORE the step (see docs),
@@ -281,6 +289,7 @@ fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     let facing = app.harbour_boat.facing;
     let _ = app.harbour_boat.cache_handle_for(tilt, facing, false);
     let _ = app.harbour_boat.cache_anchor_handle();
+    let _ = app.harbour_boat.cache_moon_handle();
 
     app.harbour_sea_bars = bars;
     app.harbour_boat.visible = true;

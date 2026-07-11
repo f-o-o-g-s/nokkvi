@@ -578,6 +578,10 @@ pub struct BoatState {
     /// path, not the SVG, so we don't need a per-quantized-angle map
     /// like the boat does.)
     pub anchor_handle: Option<svg::Handle>,
+    /// Single themed moon-face SVG (the harbour scene's avatar moon),
+    /// sharing the boat/anchor caches' theme-generation invalidation. Only
+    /// the harbour boat ever populates it; the Lines boat leaves it `None`.
+    pub moon_handle: Option<svg::Handle>,
     pub handle_generation: u64,
 }
 
@@ -607,6 +611,7 @@ impl BoatState {
         if self.handle_generation != current_gen {
             self.tilt_handles.clear();
             self.anchor_handle = None;
+            self.moon_handle = None;
             self.handle_generation = current_gen;
         }
     }
@@ -683,6 +688,30 @@ impl BoatState {
             return None;
         }
         self.anchor_handle.clone()
+    }
+
+    /// Build (and cache) the themed moon-face SVG handle — the avatar moon
+    /// of the harbour trawl scene. Mirrors `cache_anchor_handle` exactly:
+    /// single entry, invalidated by the shared theme generation.
+    pub(crate) fn cache_moon_handle(&mut self) -> svg::Handle {
+        self.clear_if_theme_changed();
+        if let Some(h) = &self.moon_handle {
+            return h.clone();
+        }
+        let bytes = crate::embedded_svg::themed_moon_face_svg().into_bytes();
+        let h = svg::Handle::from_memory(bytes);
+        self.moon_handle = Some(h.clone());
+        h
+    }
+
+    /// Read-only sibling of `cache_moon_handle` — the render path's lookup,
+    /// with the same rebuild-on-miss fallback contract as the boat/anchor.
+    pub(crate) fn cached_moon_handle(&self) -> Option<svg::Handle> {
+        let current_gen = crate::theme::theme_generation();
+        if self.handle_generation != current_gen {
+            return None;
+        }
+        self.moon_handle.clone()
     }
 }
 

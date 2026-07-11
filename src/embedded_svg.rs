@@ -270,6 +270,34 @@ const LOGO_TOKEN_OUTLINE: &str = "#111817"; // group stroke (near-black)
 /// `logo_viewbox_const_matches_master_svg` asserts it tracks the SVG.
 const LOGO_VIEWBOX: [f32; 4] = [70.96, 119.96, 881.07, 881.07];
 
+/// The owner's circular smiley avatar — the harbour trawl scene's moon.
+/// Normalized to the LOGO master's token scheme: its two semantic roles
+/// (pale face fill, dark line work) carry the SAME Svalbard-default
+/// sentinels as the ship — [`LOGO_TOKEN_BODY`] and [`LOGO_TOKEN_OUTLINE`]
+/// — so the untouched asset renders correctly as the default theme and no
+/// new color literal exists anywhere in the pipeline.
+const MOON_FACE_SVG: &str = include_str!("../assets/moon_face.svg");
+
+/// Return the moon-face avatar themed for the harbour scene. Follows the
+/// boat OVERLAY's convention (not the standalone logo's): the scene's
+/// doodads all key on the mode-stable dark visualizer palette — the face
+/// fill takes the PEAK color (the scene's starlight, so the moon shares the
+/// stars' light) and the line work takes the border ink, exactly the color
+/// `themed_boat_svg` strokes the hull with. Handle caching lives on
+/// `BoatState` beside the boat and anchor handles, sharing their
+/// theme-generation invalidation.
+pub(crate) fn themed_moon_face_svg() -> String {
+    let viz = crate::theme::get_visualizer_colors_dark();
+    let fill = viz
+        .peak_gradient_colors
+        .first()
+        .cloned()
+        .unwrap_or_else(|| LOGO_TOKEN_BODY.to_string());
+    MOON_FACE_SVG
+        .replace(LOGO_TOKEN_BODY, &fill)
+        .replace(LOGO_TOKEN_OUTLINE, &viz.border_color)
+}
+
 /// Convert an `iced::Color` to a `#rrggbb` hex string for SVG fill replacement.
 fn color_to_hex(c: Color) -> String {
     format!(
@@ -1077,6 +1105,29 @@ mod tests {
         assert!(
             out.contains(&format!("stroke-opacity=\"{}\"", viz.border_opacity)),
             "anchor must inherit the dark visualizer border opacity"
+        );
+    }
+
+    /// The moon-face asset must ship carrying the shared LOGO tokens (the
+    /// Svalbard-default sentinels), with no stray literal from the avatar
+    /// template's gruvbox era — and the themed output must land on the dark
+    /// visualizer palette like every other scene doodad.
+    #[test]
+    fn themed_moon_face_svg_uses_shared_logo_tokens() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        assert!(
+            MOON_FACE_SVG.contains(LOGO_TOKEN_BODY) && MOON_FACE_SVG.contains(LOGO_TOKEN_OUTLINE),
+            "the asset must carry the shared logo sentinels"
+        );
+        assert!(
+            !MOON_FACE_SVG.contains("#458588") && !MOON_FACE_SVG.contains("#1d2021"),
+            "no gruvbox-era literal may survive in the normalized asset"
+        );
+        let viz = crate::theme::get_visualizer_colors_dark();
+        let out = themed_moon_face_svg();
+        assert!(
+            out.contains(&viz.border_color),
+            "line work must use the dark visualizer border color"
         );
     }
 

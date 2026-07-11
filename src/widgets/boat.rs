@@ -487,12 +487,12 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         .position(Point::new(x - pad_x, target_y - pad_y))
     };
 
-    // Single sprite. The wrap zone in `step()` is sized so the boat fully
-    // exits the visible area before reappearing on the opposite side, so
-    // there is never a frame where two copies would be on screen at once
-    // — outer clip handles the off-screen portion of the sprite as it
-    // slides through the hidden stretch.
-    let mut overlay = Stack::new().push(pin_at(target_x));
+    // Z-order: rope at the bottom, anchor above it, ship on top — the rope
+    // emerges from BEHIND the hull (it attaches at the waterline underside)
+    // and a trawled anchor swinging under the boat at a tack passes behind
+    // the ship, not over its face. The boat sprite is pushed LAST, after
+    // the conditional anchor/rope block.
+    let mut overlay = Stack::new();
 
     // Anchor sprite + rope canvas: rendered while anchored (drop-anchor
     // event) OR always in trawl mode. The anchor sprite sits on the wave's
@@ -529,20 +529,6 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         let anchor_left_x = anchor_x_ratio * area_width - anchor_total_w * 0.5;
         let anchor_top_y = baseline_y - anchor_total_h;
 
-        overlay = overlay.push(
-            OverflowPin::new(
-                container(
-                    Svg::new(anchor_handle)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .opacity(opacity),
-                )
-                .width(Length::Fixed(anchor_total_w))
-                .height(Length::Fixed(anchor_total_h)),
-            )
-            .position(Point::new(anchor_left_x, anchor_top_y)),
-        );
-
         // Rope canvas: draws a single quadratic Bezier from the boat's
         // bottom-center to the top of the anchor's ring. The control
         // point sits at the rope's midpoint, offset perpendicular to
@@ -573,12 +559,30 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
             },
             stroke_width: rope_stroke_for(boat_h),
         };
+        // Rope first (deepest), then the anchor above it — the rope's tip
+        // tucks behind the anchor's ring.
         overlay = overlay.push(
             canvas::Canvas::new(rope)
                 .width(Length::Fixed(area_width))
                 .height(Length::Fixed(area_height)),
         );
+        overlay = overlay.push(
+            OverflowPin::new(
+                container(
+                    Svg::new(anchor_handle)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .opacity(opacity),
+                )
+                .width(Length::Fixed(anchor_total_w))
+                .height(Length::Fixed(anchor_total_h)),
+            )
+            .position(Point::new(anchor_left_x, anchor_top_y)),
+        );
     }
+
+    // The ship rides on top of its own tackle.
+    let overlay = overlay.push(pin_at(target_x));
 
     container(overlay)
         .width(Length::Fixed(area_width))

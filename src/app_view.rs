@@ -1791,6 +1791,7 @@ impl Nokkvi {
                     harbour_boat: &self.harbour_boat,
                     harbour_sea_bars: &self.harbour_sea_bars,
                     harbour_sea_phase: self.harbour_sea_phase,
+                    harbour_sea_cycle: self.harbour_sea_cycle,
                 })
                 .map(Message::Harbour),
             View::Radios => {
