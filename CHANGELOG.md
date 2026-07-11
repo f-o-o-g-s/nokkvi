@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Trawl filters are keyboard-editable: Shift+Tab / Shift+Backspace pick a tray control, Left/Right cycle its value.
+- The Trawl row's artwork panel now animates: the nokkvi longship sails a gently breathing sea, trawling its anchor along the seabed.
 
 ### Changed
 
@@ -14,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 - Pressing `/` inside the Trawl modal no longer reveals the auto-hide toolbar of the view behind it.
 - Shift+A inside the Trawl modal now adds the mix to the queue (the keyboard sibling of Ctrl+Enter's Play Mix); with an empty crate, both keys explain the no-op with a toast instead of doing nothing.
+- The Lines visualizer's sailing boat and its anchor now clip at the wave area's edges instead of drifting over the sidebar or neighbouring panels.
 
 ### Removed
 
