@@ -249,9 +249,13 @@ fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
         .rem_euclid(1.0);
     let bars = crate::widgets::harbour_sea::sea_bars(app.harbour_sea_phase);
 
-    // Suppress the drop-anchor state machine BEFORE the step (see docs).
+    // Suppress the drop-anchor state machine BEFORE the step (see docs),
+    // and keep the rope's wave-driven sway alive while sailing — the trawl
+    // rope renders continuously, so it bellies with the swell instead of
+    // decaying rigid the way the Lines boat's between-anchors rope does.
     app.harbour_boat.anchor_remaining_secs = 0.0;
     app.harbour_boat.secs_until_next_anchor = boat::ANCHOR_INTERVAL_MAX_SECS;
+    app.harbour_boat.trawl_sway = true;
     // The panel is ~square, so the same panel-size-independent wrap margin
     // the over-cover boat uses applies (the sprite sizes off min(w, h)).
     app.harbour_boat.x_wrap_margin = boat::OVER_COVER_WRAP_MARGIN;

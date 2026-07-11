@@ -488,6 +488,25 @@ mod harbour_scene_tests {
     }
 
     #[test]
+    fn harbour_trawl_rope_sways() {
+        // The trawl rope must keep the graceful wave-driven sway the anchored
+        // Lines rope has — without the trawl_sway drive, `anchor_sway` would
+        // spring to 0 while un-anchored and the rope would render rigid.
+        let mut app = app_on_harbour();
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+
+        assert!(
+            app.harbour_boat.anchor_sway != 0.0,
+            "the wave-driven sway must move the trawl rope \
+             (anchor_sway stayed 0)"
+        );
+    }
+
+    #[test]
     fn harbour_boat_hides_during_search() {
         // During a header search the Trawl row leaves the row list entirely,
         // so the scene stops ticking — hidden, dt baseline dropped, position

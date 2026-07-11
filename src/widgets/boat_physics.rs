@@ -563,6 +563,15 @@ pub struct BoatState {
     /// anchor is active lifts the anchor immediately (V1 punts on
     /// inverted + rope-physics geometry).
     pub inverted: bool,
+    /// Keep the wave-driven rope sway alive while UN-anchored. The Lines
+    /// boat's rope exists only during drop-anchor events, so its sway drive
+    /// gates on `anchored` and decays to zero between them. The harbour
+    /// trawl renders its rope continuously — this flag (set every tick by
+    /// `update::boat::step_harbour_scene`) extends the same spring-damper
+    /// drive to the sailing boat so the dragged rope bellies gracefully
+    /// with the swell instead of drawing rigid. Default `false` keeps the
+    /// Lines behavior bit-identical.
+    pub trawl_sway: bool,
     pub tilt_handles: HashMap<(i16, bool, bool), svg::Handle>,
     /// Single themed anchor-body SVG, rebuilt only on theme change.
     /// (The anchor doesn't rotate — the rope's sway lives in the canvas
@@ -1104,11 +1113,12 @@ pub(crate) fn step(
     // is `local_height_factor · MAX_ANCHOR_SWAY · sin(2π · sway_phase)`,
     // so on tall waves the rope swings up to ~MAX_ANCHOR_SWAY, on calm
     // water the target stays at 0 and the spring eases the rope back
-    // straight. The drive is only non-zero while anchored — between
-    // sessions the spring decays whatever sway was left over toward 0
-    // so a fresh anchor doesn't start mid-swing.
+    // straight. The drive is non-zero while anchored — between sessions
+    // the spring decays whatever sway was left over toward 0 so a fresh
+    // anchor doesn't start mid-swing — OR whenever `trawl_sway` keeps it
+    // alive for a continuously-rendered trawl rope (harbour scene).
     state.sway_phase = (state.sway_phase + dt_secs * ANCHOR_SWAY_DRIVE_HZ).rem_euclid(1.0);
-    let sway_amplitude = if anchored {
+    let sway_amplitude = if anchored || state.trawl_sway {
         ((local_height - ANCHOR_SWAY_AMPLITUDE_FLOOR) / (1.0 - ANCHOR_SWAY_AMPLITUDE_FLOOR))
             .clamp(0.0, 1.0)
     } else {
