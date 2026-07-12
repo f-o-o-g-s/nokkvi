@@ -37,11 +37,11 @@ fn empty_trawl_error(
     pre_filter_total: usize,
     min_length: crate::types::trawl::TrawlMinLength,
     max_length: crate::types::trawl::TrawlMaxLength,
-    min_rating: crate::types::trawl::TrawlMinRating,
+    rating: crate::types::trawl::TrawlRatingFilter,
 ) -> anyhow::Error {
     let active = usize::from(min_length.secs().is_some())
         + usize::from(max_length.secs().is_some())
-        + usize::from(min_rating.stars().is_some());
+        + usize::from(rating.is_active());
     if pre_filter_total == 0 || active == 0 {
         anyhow::anyhow!("No songs found for the mix")
     } else if active > 1 {
@@ -56,10 +56,12 @@ fn empty_trawl_error(
             "Mix is empty — every song was over {}. Raise the maximum length.",
             max_length.threshold_label()
         )
+    } else if rating == crate::types::trawl::TrawlRatingFilter::Unrated {
+        anyhow::anyhow!("Mix is empty — every song already has a rating. Change the rating filter.")
     } else {
         anyhow::anyhow!(
             "Mix is empty — no song met \"{}\". Lower the rating filter.",
-            min_rating.label()
+            rating.label()
         )
     }
 }
@@ -167,15 +169,15 @@ impl<'a> LibraryOrchestrator<'a> {
     ///
     /// Per seed: fetch songs through the per-entity `resolve_*` helpers
     /// (skip-on-fail with `warn!`, like [`Self::resolve_batch`]), apply the
-    /// min-length filter (hand-picked Song seeds exempt), sample artist and
-    /// genre seeds down to [`crate::types::trawl::TRAWL_SEED_SAMPLE_CAP`],
-    /// then merge everything with [`crate::types::trawl::blend_trawl`].
-    /// Empty output is a hard error, with dedicated copy when the min-length
-    /// filter alone emptied the mix.
+    /// length and rating filters (hand-picked Song seeds exempt), sample
+    /// artist and genre seeds down to
+    /// [`crate::types::trawl::TRAWL_SEED_SAMPLE_CAP`], then merge everything
+    /// with [`crate::types::trawl::blend_trawl`]. Empty output is a hard
+    /// error, with dedicated copy when a single filter emptied the mix.
     pub async fn resolve_trawl(&self, mix: &TrawlCrate) -> Result<Vec<Song>> {
         use crate::types::trawl::{
             TRAWL_SEED_SAMPLE_CAP, blend_trawl, filter_max_length, filter_min_length,
-            filter_min_rating, sample_cap,
+            filter_rating, sample_cap,
         };
 
         if mix.is_empty() {
@@ -201,7 +203,7 @@ impl<'a> LibraryOrchestrator<'a> {
                     if !matches!(seed.item, BatchItem::Song(_)) {
                         songs = filter_min_length(songs, mix.min_length);
                         songs = filter_max_length(songs, mix.max_length);
-                        songs = filter_min_rating(songs, mix.min_rating);
+                        songs = filter_rating(songs, mix.rating);
                     }
                     // Unbounded seeds get sampled so one genre can't swamp
                     // the mix; albums and playlists go in whole.
@@ -225,7 +227,7 @@ impl<'a> LibraryOrchestrator<'a> {
                 pre_filter_total,
                 mix.min_length,
                 mix.max_length,
-                mix.min_rating,
+                mix.rating,
             ))
         } else {
             Ok(blended)
@@ -514,13 +516,13 @@ mod tests {
 
     #[test]
     fn empty_trawl_error_names_the_active_filters() {
-        use crate::types::trawl::{TrawlMaxLength, TrawlMinRating};
+        use crate::types::trawl::{TrawlMaxLength, TrawlRatingFilter};
 
         let min_only = empty_trawl_error(
             12,
             TrawlMinLength::S60,
             TrawlMaxLength::Off,
-            TrawlMinRating::Off,
+            TrawlRatingFilter::Off,
         );
         assert!(
             min_only.to_string().contains("under 1:00"),
@@ -530,7 +532,7 @@ mod tests {
             12,
             TrawlMinLength::Off,
             TrawlMaxLength::S480,
-            TrawlMinRating::Off,
+            TrawlRatingFilter::Off,
         );
         assert!(
             max_only.to_string().contains("over 8:00"),
@@ -540,34 +542,54 @@ mod tests {
             12,
             TrawlMinLength::Off,
             TrawlMaxLength::Off,
-            TrawlMinRating::R4,
+            TrawlRatingFilter::R4,
         );
         assert!(
             rating_only.to_string().contains("4 stars and up"),
             "rating-only case names the filter, got: {rating_only}"
         );
+        let unrated_only = empty_trawl_error(
+            12,
+            TrawlMinLength::Off,
+            TrawlMaxLength::Off,
+            TrawlRatingFilter::Unrated,
+        );
+        assert!(
+            unrated_only.to_string().contains("already has a rating"),
+            "unrated-only case says why nothing survived, got: {unrated_only}"
+        );
         let combo = empty_trawl_error(
             12,
             TrawlMinLength::S60,
             TrawlMaxLength::S480,
-            TrawlMinRating::Off,
+            TrawlRatingFilter::Off,
         );
         assert!(
             combo.to_string().contains("the active filters"),
             "multi-filter case collapses honestly, got: {combo}"
         );
+        let unrated_combo = empty_trawl_error(
+            12,
+            TrawlMinLength::S60,
+            TrawlMaxLength::Off,
+            TrawlRatingFilter::Unrated,
+        );
+        assert!(
+            unrated_combo.to_string().contains("the active filters"),
+            "Unrated must count as active in the filter tally, got: {unrated_combo}"
+        );
         let generic = empty_trawl_error(
             0,
             TrawlMinLength::S60,
             TrawlMaxLength::S480,
-            TrawlMinRating::R4,
+            TrawlRatingFilter::R4,
         );
         assert!(generic.to_string().contains("No songs found for the mix"));
         let all_off = empty_trawl_error(
             12,
             TrawlMinLength::Off,
             TrawlMaxLength::Off,
-            TrawlMinRating::Off,
+            TrawlRatingFilter::Off,
         );
         assert!(
             all_off.to_string().contains("No songs found for the mix"),

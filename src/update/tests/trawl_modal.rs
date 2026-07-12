@@ -278,12 +278,12 @@ fn set_blend_and_min_length_write_to_the_crate() {
         nokkvi_data::types::trawl::TrawlMaxLength::S480
     );
 
-    let _ = app.handle_trawl_modal(TrawlModalMessage::SetMinRating(
-        nokkvi_data::types::trawl::TrawlMinRating::R4,
+    let _ = app.handle_trawl_modal(TrawlModalMessage::SetRating(
+        nokkvi_data::types::trawl::TrawlRatingFilter::R4,
     ));
     assert_eq!(
-        app.trawl_crate.min_rating,
-        nokkvi_data::types::trawl::TrawlMinRating::R4
+        app.trawl_crate.rating,
+        nokkvi_data::types::trawl::TrawlRatingFilter::R4
     );
 
     let _ = app.handle_trawl_modal(TrawlModalMessage::SetMaxTracks(
@@ -794,7 +794,7 @@ fn shift_tab_cycles_the_ring_and_wraps_through_none() {
         Some(TrawlTrayControl::Blend),
         Some(TrawlTrayControl::MinLength),
         Some(TrawlTrayControl::MaxLength),
-        Some(TrawlTrayControl::MinRating),
+        Some(TrawlTrayControl::Rating),
         Some(TrawlTrayControl::MaxTracks),
         None,
     ];
@@ -821,7 +821,7 @@ fn shift_backspace_reverse_cycles_the_ring() {
     shift_backspace(&mut app);
     assert_eq!(tray_cursor(&app), Some(TrawlTrayControl::MaxTracks));
     shift_backspace(&mut app);
-    assert_eq!(tray_cursor(&app), Some(TrawlTrayControl::MinRating));
+    assert_eq!(tray_cursor(&app), Some(TrawlTrayControl::Rating));
 }
 
 #[test]
@@ -941,7 +941,7 @@ fn left_right_cycle_the_focused_value_with_wrap() {
 #[test]
 fn all_five_controls_cycle_their_own_value() {
     use nokkvi_data::types::trawl::{
-        TrawlMaxLength, TrawlMaxTracks, TrawlMinLength, TrawlMinRating,
+        TrawlMaxLength, TrawlMaxTracks, TrawlMinLength, TrawlRatingFilter,
     };
 
     let mut app = test_app();
@@ -978,7 +978,7 @@ fn all_five_controls_cycle_their_own_value() {
                     (TrawlTrayControl::Blend, "blend")
                         | (TrawlTrayControl::MinLength, "min_length")
                         | (TrawlTrayControl::MaxLength, "max_length")
-                        | (TrawlTrayControl::MinRating, "min_rating")
+                        | (TrawlTrayControl::Rating, "rating")
                         | (TrawlTrayControl::MaxTracks, "max_tracks")
                 ),
                 "cursor {control:?}: only its own field may change, checked {name}"
@@ -987,7 +987,7 @@ fn all_five_controls_cycle_their_own_value() {
         stepped("blend", after.blend != before.blend);
         stepped("min_length", after.min_length != before.min_length);
         stepped("max_length", after.max_length != before.max_length);
-        stepped("min_rating", after.min_rating != before.min_rating);
+        stepped("rating", after.rating != before.rating);
         stepped("max_tracks", after.max_tracks != before.max_tracks);
 
         // ...and it landed exactly one wrapping step from where it was.
@@ -1007,10 +1007,10 @@ fn all_five_controls_cycle_their_own_value() {
                     next_of(&TrawlMaxLength::ALL, before.max_length)
                 );
             }
-            TrawlTrayControl::MinRating => {
+            TrawlTrayControl::Rating => {
                 assert_eq!(
-                    after.min_rating,
-                    next_of(&TrawlMinRating::ALL, before.min_rating)
+                    after.rating,
+                    next_of(&TrawlRatingFilter::ALL, before.rating)
                 );
             }
             TrawlTrayControl::MaxTracks => {
@@ -1028,7 +1028,7 @@ fn all_five_controls_cycle_their_own_value() {
         assert_eq!(reverted.blend, before.blend, "{control:?}: Left reverts");
         assert_eq!(reverted.min_length, before.min_length);
         assert_eq!(reverted.max_length, before.max_length);
-        assert_eq!(reverted.min_rating, before.min_rating);
+        assert_eq!(reverted.rating, before.rating);
         assert_eq!(reverted.max_tracks, before.max_tracks);
     }
 }
@@ -1049,7 +1049,7 @@ fn arrows_with_no_tray_cursor_are_inert() {
     assert_eq!(app.trawl_crate.blend, before.blend);
     assert_eq!(app.trawl_crate.min_length, before.min_length);
     assert_eq!(app.trawl_crate.max_length, before.max_length);
-    assert_eq!(app.trawl_crate.min_rating, before.min_rating);
+    assert_eq!(app.trawl_crate.rating, before.rating);
     assert_eq!(app.trawl_crate.max_tracks, before.max_tracks);
 }
 
@@ -1199,7 +1199,7 @@ fn slash_clears_the_tray_cursor_when_refocusing_search() {
     open_modal_over(&mut app, crate::View::Queue);
     if let Some(state) = app.trawl_modal.as_mut() {
         state.search_input_focused = false;
-        state.tray_cursor = Some(TrawlTrayControl::MinRating);
+        state.tray_cursor = Some(TrawlTrayControl::Rating);
     }
 
     let _ = send_raw_key(
@@ -1355,7 +1355,7 @@ fn list_nav_keeps_the_tray_cursor() {
         state.search_query = "ph".into();
         state.search_results = Some(*results_with_genre());
         state.search_input_focused = false;
-        state.tray_cursor = Some(TrawlTrayControl::MinRating);
+        state.tray_cursor = Some(TrawlTrayControl::Rating);
     }
 
     let _ = send_raw_key(
@@ -1371,7 +1371,7 @@ fn list_nav_keeps_the_tray_cursor() {
 
     assert_eq!(
         tray_cursor(&app),
-        Some(TrawlTrayControl::MinRating),
+        Some(TrawlTrayControl::Rating),
         "list nav and the tray ring are disjoint key axes — no re-entry tax"
     );
 }

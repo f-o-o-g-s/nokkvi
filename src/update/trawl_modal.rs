@@ -149,8 +149,8 @@ impl Nokkvi {
                 self.trawl_crate.max_length = max;
                 Task::none()
             }
-            TrawlModalMessage::SetMinRating(min) => {
-                self.trawl_crate.min_rating = min;
+            TrawlModalMessage::SetRating(filter) => {
+                self.trawl_crate.rating = filter;
                 Task::none()
             }
             TrawlModalMessage::SetMaxTracks(max) => {
@@ -324,7 +324,7 @@ impl Nokkvi {
     pub(crate) fn handle_trawl_tray_cycle_value(&mut self, forward: bool) -> Task<Message> {
         use nokkvi_data::{
             types::trawl::{
-                TrawlBlend, TrawlMaxLength, TrawlMaxTracks, TrawlMinLength, TrawlMinRating,
+                TrawlBlend, TrawlMaxLength, TrawlMaxTracks, TrawlMinLength, TrawlRatingFilter,
             },
             utils::cycle::cycle_wrapping,
         };
@@ -348,9 +348,9 @@ impl Nokkvi {
                 self.trawl_crate.max_length,
                 forward,
             )),
-            TrawlTrayControl::MinRating => TrawlModalMessage::SetMinRating(cycle_wrapping(
-                &TrawlMinRating::ALL,
-                self.trawl_crate.min_rating,
+            TrawlTrayControl::Rating => TrawlModalMessage::SetRating(cycle_wrapping(
+                &TrawlRatingFilter::ALL,
+                self.trawl_crate.rating,
                 forward,
             )),
             TrawlTrayControl::MaxTracks => TrawlModalMessage::SetMaxTracks(cycle_wrapping(

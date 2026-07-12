@@ -207,16 +207,21 @@ impl std::fmt::Display for TrawlMaxLength {
     }
 }
 
-/// Minimum user star rating for songs pulled in by expanded seeds. Unlike
-/// the length filter, an UNRATED song is dropped when this is active: a
-/// missing duration is unknown metadata, but an unrated song is one the
-/// user hasn't vouched for — "4 stars and up" must not flood with unrated
-/// tracks. Hand-picked song seeds are exempt, as ever.
+/// User star-rating filter for songs pulled in by expanded seeds. The
+/// threshold variants keep songs rated at or above N stars; `Unrated`
+/// inverts that and keeps only songs with no rating yet (a mix of tracks
+/// still awaiting a verdict). Unlike the length filter, an UNRATED song is
+/// dropped when a threshold is active: a missing duration is unknown
+/// metadata, but an unrated song is one the user hasn't vouched for —
+/// "4 stars and up" must not flood with unrated tracks. Hand-picked song
+/// seeds are exempt, as ever.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum TrawlMinRating {
+pub enum TrawlRatingFilter {
     /// No filtering.
     #[default]
     Off,
+    /// Only songs without a rating (never rated, or rating cleared to 0).
+    Unrated,
     /// Any rated song (drops only the unrated).
     R1,
     R2,
@@ -226,43 +231,53 @@ pub enum TrawlMinRating {
     R5,
 }
 
-impl TrawlMinRating {
-    /// Every variant, in display order (drift-anchored by tests).
-    pub const ALL: [TrawlMinRating; 6] = [
-        TrawlMinRating::Off,
-        TrawlMinRating::R1,
-        TrawlMinRating::R2,
-        TrawlMinRating::R3,
-        TrawlMinRating::R4,
-        TrawlMinRating::R5,
+impl TrawlRatingFilter {
+    /// Every variant, in display order (drift-anchored by tests). `Unrated`
+    /// sits between "Any rating" and "1 star and up" — ascending star order,
+    /// reading unrated as zero stars.
+    pub const ALL: [TrawlRatingFilter; 7] = [
+        TrawlRatingFilter::Off,
+        TrawlRatingFilter::Unrated,
+        TrawlRatingFilter::R1,
+        TrawlRatingFilter::R2,
+        TrawlRatingFilter::R3,
+        TrawlRatingFilter::R4,
+        TrawlRatingFilter::R5,
     ];
 
-    /// Threshold in stars; `None` = filter off.
-    pub fn stars(self) -> Option<u32> {
+    /// Whether the filter removes anything at all.
+    pub fn is_active(self) -> bool {
+        self != TrawlRatingFilter::Off
+    }
+
+    /// Whether a song with `rating` stars (0 = unrated) survives the filter.
+    pub fn keeps(self, rating: u32) -> bool {
         match self {
-            TrawlMinRating::Off => None,
-            TrawlMinRating::R1 => Some(1),
-            TrawlMinRating::R2 => Some(2),
-            TrawlMinRating::R3 => Some(3),
-            TrawlMinRating::R4 => Some(4),
-            TrawlMinRating::R5 => Some(5),
+            TrawlRatingFilter::Off => true,
+            TrawlRatingFilter::Unrated => rating == 0,
+            TrawlRatingFilter::R1 => rating >= 1,
+            TrawlRatingFilter::R2 => rating >= 2,
+            TrawlRatingFilter::R3 => rating >= 3,
+            TrawlRatingFilter::R4 => rating >= 4,
+            TrawlRatingFilter::R5 => rating >= 5,
         }
     }
 
     /// Picker label — names exactly which songs survive.
     pub fn label(self) -> &'static str {
         match self {
-            TrawlMinRating::Off => "Any rating",
-            TrawlMinRating::R1 => "1 star and up",
-            TrawlMinRating::R2 => "2 stars and up",
-            TrawlMinRating::R3 => "3 stars and up",
-            TrawlMinRating::R4 => "4 stars and up",
-            TrawlMinRating::R5 => "5 stars only",
+            TrawlRatingFilter::Off => "Any rating",
+            TrawlRatingFilter::Unrated => "Unrated only",
+            TrawlRatingFilter::R1 => "1 star and up",
+            TrawlRatingFilter::R2 => "2 stars and up",
+            TrawlRatingFilter::R3 => "3 stars and up",
+            TrawlRatingFilter::R4 => "4 stars and up",
+            TrawlRatingFilter::R5 => "5 stars only",
         }
     }
 }
 
-impl std::fmt::Display for TrawlMinRating {
+impl std::fmt::Display for TrawlRatingFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.label())
     }
@@ -373,14 +388,14 @@ impl TrawlSeed {
     }
 }
 
-/// The persistent mix crate: seeds + blend + minimum length.
+/// The persistent mix crate: seeds + blend + the tray filters.
 #[derive(Debug, Clone, Default)]
 pub struct TrawlCrate {
     pub seeds: Vec<TrawlSeed>,
     pub blend: TrawlBlend,
     pub min_length: TrawlMinLength,
     pub max_length: TrawlMaxLength,
-    pub min_rating: TrawlMinRating,
+    pub rating: TrawlRatingFilter,
     pub max_tracks: TrawlMaxTracks,
 }
 
@@ -460,17 +475,18 @@ pub fn filter_max_length(songs: Vec<Song>, max: TrawlMaxLength) -> Vec<Song> {
     }
 }
 
-/// Drop songs under the star threshold. Unrated songs are DROPPED when the
-/// filter is active — deliberate contrast with [`filter_min_length`]'s
-/// unknown-duration bypass (see [`TrawlMinRating`]).
-pub fn filter_min_rating(songs: Vec<Song>, min: TrawlMinRating) -> Vec<Song> {
-    match min.stars() {
-        None => songs,
-        Some(threshold) => songs
-            .into_iter()
-            .filter(|s| s.rating.unwrap_or(0) >= threshold)
-            .collect(),
+/// Apply the star-rating filter. Under a threshold variant, unrated songs
+/// are DROPPED — deliberate contrast with [`filter_min_length`]'s
+/// unknown-duration bypass; under `Unrated`, they are the only survivors
+/// (see [`TrawlRatingFilter`]).
+pub fn filter_rating(songs: Vec<Song>, filter: TrawlRatingFilter) -> Vec<Song> {
+    if !filter.is_active() {
+        return songs;
     }
+    songs
+        .into_iter()
+        .filter(|s| filter.keeps(s.rating.unwrap_or(0)))
+        .collect()
 }
 
 /// Uniform random sample down to `cap` when the list is longer (shuffle-then-
@@ -654,7 +670,7 @@ mod tests {
             blend: TrawlBlend::Weighted,
             min_length: TrawlMinLength::S120,
             max_length: TrawlMaxLength::default(),
-            min_rating: TrawlMinRating::default(),
+            rating: TrawlRatingFilter::default(),
             max_tracks: TrawlMaxTracks::default(),
         };
         c.clear_seeds();
@@ -711,17 +727,19 @@ mod tests {
         );
     }
 
-    // ---- min-rating filter ---------------------------------------------------
+    // ---- rating filter --------------------------------------------------------
 
     #[test]
-    fn min_rating_defaults_off_with_anchored_variants() {
-        assert_eq!(TrawlMinRating::default(), TrawlMinRating::Off);
-        assert_eq!(TrawlMinRating::ALL.len(), 6);
-        assert_eq!(TrawlMinRating::Off.stars(), None);
-        assert_eq!(TrawlMinRating::R1.stars(), Some(1));
-        assert_eq!(TrawlMinRating::R5.stars(), Some(5));
-        assert_eq!(TrawlMinRating::R4.label(), "4 stars and up");
-        assert_eq!(TrawlMinRating::R5.to_string(), "5 stars only");
+    fn rating_filter_defaults_off_with_anchored_variants() {
+        assert_eq!(TrawlRatingFilter::default(), TrawlRatingFilter::Off);
+        assert_eq!(TrawlRatingFilter::ALL.len(), 7);
+        assert_eq!(TrawlRatingFilter::ALL[1], TrawlRatingFilter::Unrated);
+        assert!(!TrawlRatingFilter::Off.is_active());
+        assert!(TrawlRatingFilter::Unrated.is_active());
+        assert!(TrawlRatingFilter::R5.is_active());
+        assert_eq!(TrawlRatingFilter::Unrated.label(), "Unrated only");
+        assert_eq!(TrawlRatingFilter::R4.label(), "4 stars and up");
+        assert_eq!(TrawlRatingFilter::R5.to_string(), "5 stars only");
     }
 
     fn rated(id: &str, rating: Option<u32>) -> Song {
@@ -733,7 +751,7 @@ mod tests {
     #[test]
     fn rating_filter_off_keeps_everything_including_unrated() {
         let list = vec![rated("unrated", None), rated("one", Some(1))];
-        let out = filter_min_rating(list, TrawlMinRating::Off);
+        let out = filter_rating(list, TrawlRatingFilter::Off);
         assert_eq!(ids(&out), vec!["unrated", "one"]);
     }
 
@@ -744,22 +762,38 @@ mod tests {
             rated("three", Some(3)),
             rated("five", Some(5)),
         ];
-        let out = filter_min_rating(list, TrawlMinRating::R3);
+        let out = filter_rating(list, TrawlRatingFilter::R3);
         assert_eq!(ids(&out), vec!["three", "five"], "at-threshold survives");
     }
 
     #[test]
-    fn rating_filter_drops_unrated_when_active() {
+    fn rating_filter_drops_unrated_when_threshold_active() {
         let list = vec![
             rated("unrated", None),
             rated("zero", Some(0)),
             rated("one", Some(1)),
         ];
-        let out = filter_min_rating(list, TrawlMinRating::R1);
+        let out = filter_rating(list, TrawlRatingFilter::R1);
         assert_eq!(
             ids(&out),
             vec!["one"],
             "unrated is not vouched for — dropped (deliberate contrast with duration-0)"
+        );
+    }
+
+    #[test]
+    fn rating_filter_unrated_keeps_only_unrated() {
+        let list = vec![
+            rated("unrated", None),
+            rated("zero", Some(0)),
+            rated("one", Some(1)),
+            rated("five", Some(5)),
+        ];
+        let out = filter_rating(list, TrawlRatingFilter::Unrated);
+        assert_eq!(
+            ids(&out),
+            vec!["unrated", "zero"],
+            "both never-rated (None) and cleared-to-zero count as unrated"
         );
     }
 

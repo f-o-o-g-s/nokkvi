@@ -231,9 +231,9 @@ pub struct Nokkvi {
     /// Trawl mix-builder modal overlay state. `Some` = modal is open. The
     /// crate being edited lives on `trawl_crate` and survives closing.
     pub trawl_modal: Option<crate::widgets::trawl_modal::TrawlModalState>,
-    /// The persistent Trawl crate: seeds + blend + min-length. Root-owned so
-    /// the Harbour row and context menus can accrue seeds while the modal is
-    /// closed; cleared on logout (seeds reference server ids).
+    /// The persistent Trawl crate: seeds + blend + the tray filters.
+    /// Root-owned so the Harbour row and context menus can accrue seeds while
+    /// the modal is closed; cleared on logout (seeds reference server ids).
     pub trawl_crate: nokkvi_data::types::trawl::TrawlCrate,
     /// Stale-drop generation for the modal's search fan-outs. Root-owned
     /// (NOT on `TrawlModalState`) so close/reopen can never re-mint a

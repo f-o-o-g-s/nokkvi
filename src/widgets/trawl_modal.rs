@@ -41,7 +41,7 @@ pub enum TrawlTrayControl {
     Blend,
     MinLength,
     MaxLength,
-    MinRating,
+    Rating,
     MaxTracks,
 }
 
@@ -51,7 +51,7 @@ impl TrawlTrayControl {
         TrawlTrayControl::Blend,
         TrawlTrayControl::MinLength,
         TrawlTrayControl::MaxLength,
-        TrawlTrayControl::MinRating,
+        TrawlTrayControl::Rating,
         TrawlTrayControl::MaxTracks,
     ];
 }
@@ -132,7 +132,7 @@ pub enum TrawlModalMessage {
     SetBlend(nokkvi_data::types::trawl::TrawlBlend),
     SetMinLength(nokkvi_data::types::trawl::TrawlMinLength),
     SetMaxLength(nokkvi_data::types::trawl::TrawlMaxLength),
-    SetMinRating(nokkvi_data::types::trawl::TrawlMinRating),
+    SetRating(nokkvi_data::types::trawl::TrawlRatingFilter),
     SetMaxTracks(nokkvi_data::types::trawl::TrawlMaxTracks),
     ClearCrate,
     /// Ctrl+Enter / the Play Mix CTA.
@@ -876,12 +876,12 @@ fn render_tray<'a>(
         tray_cursor == Some(TrawlTrayControl::MaxLength),
     );
 
-    let min_rating_picker = tray_picker(
-        mix.min_rating,
-        &nokkvi_data::types::trawl::TrawlMinRating::ALL,
+    let rating_picker = tray_picker(
+        mix.rating,
+        &nokkvi_data::types::trawl::TrawlRatingFilter::ALL,
         |m| m.label().to_string(),
-        TrawlModalMessage::SetMinRating,
-        tray_cursor == Some(TrawlTrayControl::MinRating),
+        TrawlModalMessage::SetRating,
+        tray_cursor == Some(TrawlTrayControl::Rating),
     );
 
     let max_tracks_picker = tray_picker(
@@ -978,7 +978,7 @@ fn render_tray<'a>(
         Space::new().width(Length::Fixed(8.0)),
         max_length_picker,
         Space::new().width(Length::Fixed(8.0)),
-        min_rating_picker,
+        rating_picker,
         Space::new().width(Length::Fixed(8.0)),
         max_tracks_picker,
         Space::new().width(Length::Fill),
@@ -1370,7 +1370,7 @@ mod tests {
                 Some(TrawlTrayControl::Blend),
                 Some(TrawlTrayControl::MinLength),
                 Some(TrawlTrayControl::MaxLength),
-                Some(TrawlTrayControl::MinRating),
+                Some(TrawlTrayControl::Rating),
                 Some(TrawlTrayControl::MaxTracks),
                 None,
             ],

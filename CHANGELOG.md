@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Trawl's rating filter gains "Unrated only", for mixes built purely from songs you haven't rated yet.
+
 ### Changed
 
 - The default start view is now Harbour: new installs open on the home shelves, and users still on the old default move there too.

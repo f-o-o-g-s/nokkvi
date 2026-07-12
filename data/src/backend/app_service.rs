@@ -1347,7 +1347,7 @@ impl AppService {
     // Trawl Mix Methods
     //
     // A trawl crate resolves through `LibraryOrchestrator::resolve_trawl`
-    // (per-seed fetch → min-length filter → sample cap → blend) and then
+    // (per-seed fetch → length/rating filters → sample cap → blend) and then
     // dispatches the pre-blended list as `SongSource::Preloaded` — the blend
     // IS the ordering, so no one-shot shuffle is layered on top.
     // =========================================================================
