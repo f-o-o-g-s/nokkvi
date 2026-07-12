@@ -445,7 +445,7 @@ impl Default for Nokkvi {
             settings: nokkvi_data::types::player_settings::LivePlayerSettings {
                 scrobbling_enabled: true,
                 scrobble_threshold: 0.50,
-                start_view: "Queue".to_string(),
+                start_view: "Harbour".to_string(),
                 stable_viewport: true,
                 auto_follow_playing: true,
                 ..nokkvi_data::types::player_settings::LivePlayerSettings::default()

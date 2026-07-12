@@ -62,7 +62,7 @@ define_settings! {
                 label: "Start View",
                 category: "Application",
                 subtitle: Some("View shown after login"),
-                default: "Queue",
+                default: "Harbour",
                 options: &[
                     "Queue",
                     "Albums",
@@ -731,7 +731,7 @@ mod tests {
         GeneralSettingsData {
             server_url: "http://localhost:4533".into(),
             username: "admin".into(),
-            start_view: "Queue".into(),
+            start_view: "Harbour".into(),
             stable_viewport: true,
             auto_follow_playing: true,
             enter_behavior: "Play All".into(),

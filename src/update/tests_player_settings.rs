@@ -48,8 +48,8 @@ fn nokkvi_default_preserves_pre_substruct_field_values() {
         "scrobble_threshold must default to 0.50"
     );
     assert_eq!(
-        app.settings.start_view, "Queue",
-        "start_view must default to \"Queue\""
+        app.settings.start_view, "Harbour",
+        "start_view must default to \"Harbour\""
     );
     assert!(
         app.settings.stable_viewport,

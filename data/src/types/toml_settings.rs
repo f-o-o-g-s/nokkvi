@@ -299,7 +299,7 @@ fn round_f32_array<S: Serializer, const N: usize>(arr: &[f32; N], s: S) -> Resul
 impl Default for TomlSettings {
     fn default() -> Self {
         Self {
-            start_view: "Queue".to_string(),
+            start_view: "Harbour".to_string(),
             enter_behavior: EnterBehavior::default(),
             enter_shuffle: false,
             local_music_path: String::new(),
@@ -486,7 +486,7 @@ mod tests {
         let toml_str = toml::to_string_pretty(&settings).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
         // Spot-check key fields
-        assert_eq!(parsed.start_view, "Queue");
+        assert_eq!(parsed.start_view, "Harbour");
         assert_eq!(parsed.crossfade_duration_secs, 7);
         assert!(parsed.scrobbling_enabled);
         assert_eq!(parsed.eq_gains, [0.0; EQ_BAND_COUNT]);

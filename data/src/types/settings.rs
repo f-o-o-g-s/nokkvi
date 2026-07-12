@@ -53,7 +53,7 @@ crate::player_settings_schema! {
     /// (default: true)
     #[serde(default = "default_radio_now_playing_enabled")]
     same radio_now_playing_enabled: bool = default_radio_now_playing_enabled(),
-    /// Start view name ("Queue", "Albums", etc. — default "Queue")
+    /// Start view name ("Queue", "Albums", etc. — default "Harbour")
     #[serde(default = "default_start_view")]
     same start_view: String = default_start_view(),
     /// Stable viewport mode (default: true)
@@ -444,7 +444,7 @@ fn default_radio_now_playing_enabled() -> bool {
     true
 }
 fn default_start_view() -> String {
-    "Queue".to_string()
+    "Harbour".to_string()
 }
 fn default_stable_viewport() -> bool {
     true
@@ -694,8 +694,8 @@ mod tests {
             "scrobble_threshold must default to 0.50"
         );
         assert_eq!(
-            p.start_view, "Queue",
-            "start_view must default to \"Queue\""
+            p.start_view, "Harbour",
+            "start_view must default to \"Harbour\""
         );
         assert!(p.stable_viewport, "stable_viewport must default to true");
         assert!(

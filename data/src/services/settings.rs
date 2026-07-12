@@ -1345,7 +1345,7 @@ mod sentinel_roundtrip_tests {
             radio_now_playing_enabled: false, // default true
 
             // General
-            start_view: "Albums".to_string(), // default "Queue"
+            start_view: "Albums".to_string(), // default "Harbour"
             stable_viewport: false,           // default true
             auto_follow_playing: false,       // default true
             enter_behavior: EnterBehavior::AppendAndPlay, // default PlayAll
@@ -2545,7 +2545,7 @@ name = "sentinel preset"
         let l = crate::types::player_settings::LivePlayerSettings::default();
 
         // same field on both.
-        assert_eq!(p.start_view, "Queue");
+        assert_eq!(p.start_view, "Harbour");
         assert_eq!(l.start_view, "");
 
         // splits: f64 on Persisted, f32 on Live.

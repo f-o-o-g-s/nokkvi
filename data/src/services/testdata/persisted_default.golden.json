@@ -9,7 +9,7 @@
   "radio_scrobbling_enabled": false,
   "radio_scrobble_threshold_secs": 60,
   "radio_now_playing_enabled": true,
-  "start_view": "Queue",
+  "start_view": "Harbour",
   "stable_viewport": true,
   "auto_follow_playing": true,
   "enter_behavior": "play_all",

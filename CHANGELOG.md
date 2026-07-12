@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The default start view is now Harbour: new installs open on the home shelves, and users still on the old default move there too.
+
 ### Fixed
 
 ### Removed
