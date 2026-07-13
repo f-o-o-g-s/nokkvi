@@ -14,7 +14,7 @@ views/settings/
 ├── items.rs            — Re-exports `SettingValue` / `SettingMeta` / `SettingItem` / `SettingsEntry` from the data crate, plus the `MacroRows::{new, take, finish}` helper used by the per-tab builders. Every builder ends with `macro_rows.finish()` (debug-panics naming any un-taken key; warns in release); conditional rows follow the take-unconditionally-push-conditionally convention so consumption is data-independent. Construct `SettingMeta` via `SettingMeta::new(key, label, category).with_subtitle(...)`
 ├── items_general.rs    — Library, Display, Behavior, Window & Tray, Advanced, Account
 ├── items_interface.rs  — Navigation, Slot List, Player Bar, Font & Icons (`icon_set` set picker), Metadata Strip, Artwork Overlays, Artwork Column
-├── items_playback.rs   — Transitions, Volume Normalization, Scrobbling, Rating Reminder, Playlists
+├── items_playback.rs   — Transitions, Fading, Volume Normalization, Scrobbling, Radio Scrobbling, Rating Reminder (rating + love-change notification), Playlists
 ├── items_hotkeys.rs    — Per-category hotkey entries
 ├── items_theme.rs      — Mode, Display, and the Select-Theme picker opener only. Theme COLORS are edited directly in each theme's TOML file (`~/.config/nokkvi/themes/`), not in the GUI — `build_theme_items` emits a single `__theme_picker` row (`ActivateKind::ThemePicker`) whose value is the current theme name
 ├── items_visualizer.rs — Frame, Signal, Bars, Lines, Scope rows all come from the Visualizer `define_settings!` table via `MacroRows`; headers, the Restore sentinel, and the Bar Colors Dark/Light `ColorArray` sections stay hand-written

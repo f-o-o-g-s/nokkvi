@@ -32,7 +32,8 @@ AppService (orchestrator)
 │   │   + custom error, then `queue_orchestrator().enqueue`)
 │   └── `LibraryOrchestrator` — entity resolution for albums / artists /
 │       genres / playlists / songs / batch via `SongSource::Batch`,
-│       unified behind `resolve(SongSource)`
+│       unified behind `resolve(SongSource)`; `resolve_trawl(&TrawlCrate)`
+│       resolves + blends a Trawl mix crate's seeds
 ├── Album/Artist/Songs services share the `LazyAuthedService<A>` newtype
 │   (`backend/lazy_authed_service.rs`) for their `tokio::OnceCell` +
 │   constructor closure pattern — added in Group D Lane 2 to keep their
@@ -144,7 +145,7 @@ The 50 per-view column flags live on one canonical `ViewColumns` struct (`data/s
 
 ### `define_settings!` registration
 
-Every setting backed by the Settings UI is registered via the `define_settings!` macro (`data/src/services/settings_tables/{general,interface,playback}.rs`; the macro itself lives in `data/src/types/setting_def.rs`). Each entry declares a key, label, scalar/array type, default, on_dispatch hook, ui_meta cluster, and a `write` closure that round-trips the live value back into TOML (the `write` arm was added 2026-05-17 — keep both directions on every key). The macro emits the dispatch arm + the per-tab `dump_<tab>_tab_player_settings` helper. Use `SettingsSideEffect` (`data/src/types/settings_side_effect.rs`) variants to thread side effects (toasts, atomic flag flips, library reloads) back to the UI from `on_dispatch`. Hotkey actions follow the same single-table pattern via `define_hotkey_actions!` in `data/src/types/hotkey_config/action.rs`. Per-tab `{General,Interface,Playback}SettingsData`, `SettingItem`, `SettingMeta`, `SettingValue`, and `SettingsEntry` live in `data/src/types/`.
+Every setting backed by the Settings UI is registered via the `define_settings!` macro (`data/src/services/settings_tables/{general,interface,playback,visualizer,columns}.rs`; the macro itself lives in `data/src/types/setting_def.rs`). Each entry declares a key, label, scalar/array type, default, on_dispatch hook, ui_meta cluster, and a `write` closure that round-trips the live value back into TOML (the `write` arm was added 2026-05-17 — keep both directions on every key). The macro emits the dispatch arm + the per-tab `dump_<tab>_tab_player_settings` helper. Use `SettingsSideEffect` (`data/src/types/settings_side_effect.rs`) variants to thread side effects (toasts, atomic flag flips, library reloads) back to the UI from `on_dispatch`. Hotkey actions follow the same single-table pattern via `define_hotkey_actions!` in `data/src/types/hotkey_config/action.rs`. Per-tab `{General,Interface,Playback,Visualizer}SettingsData`, `SettingItem`, `SettingMeta`, `SettingValue`, and `SettingsEntry` live in `data/src/types/` (the Columns tab reuses `InterfaceSettingsData`).
 
 Adjacent enum macros: `define_labeled_enum!` (`data/src/types/labeled_enum.rs`) for label/wire-string-backed enums (the `player_settings` knobs — `LibraryPageSize`, `NavLayout`, `TrackInfoDisplay`, `StripClickAction`, `IconSet`, `VerboseConfig`, etc.; `QueueSortMode` and `VisualizationMode` keep their own hand-rolled metadata tables); `atomic_u8_enum!` (`src/atomic_u8_enum.rs`) for the twelve enum-typed `UiModeFlags` atomics (eleven in `theme/ui_mode.rs` + `RoundedMode` in `theme/radius.rs`) — bytes derive from declaration discriminants (`Variant as u8`, list variants in data-crate declaration order) and are a transient in-process cache encoding only; persistence goes through the serde wire strings. Both keep unknown input from silently falling through (label fallback / defensive byte fallback).
 
@@ -164,6 +165,8 @@ Iced-free. Key types:
 - `Queue`, `QueueSortMode` (physical sort: Album/Artist/Title/Duration/Genre/Rating/MostPlayed/Random — Random re-rolls on re-select)
 - `NextTrackResetEffect` (`next_track_reset.rs`) returned from every queue mutator (mode toggles + reorders + replacements) to chain engine `reset_next_track()` calls. `apply_to(&Mutex)` locks the engine internally; `apply_locked(&mut Engine)` is for callers already holding the engine lock (completion callback consume path, `play_next` / `play_previous`).
 - `SongPool`, `BatchPayload` / `BatchItem`
+- `TrawlCrate` / `TrawlBlend` (Interleave/Weighted/ShuffleAll) / `TrawlRatingFilter` (star-threshold + `Unrated`) + the pure `blend_trawl()` engine (`trawl.rs`; `TRAWL_SEED_SAMPLE_CAP` = 50, `TRAWL_WEIGHT_MIN`/`MAX` = 1/5) — Trawl mix-builder domain, resolved via `LibraryOrchestrator::resolve_trawl`
+- `LibrarySearchResults` (`library_search.rs`) — five typed groups (artists/albums/songs/genres/playlists) returned by `AppService::search_library`, backing the Harbour whole-library search
 - `LibraryFilter` — ID-based cross-view navigation filter
 - `PlaylistEditState` — dirty detection
 - `InfoModalItem` — owned data for the Get Info modal
