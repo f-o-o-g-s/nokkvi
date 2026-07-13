@@ -645,7 +645,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Slot type stays `Element` in every branch so the surrounding row's
     // widget-tree shape never churns across renders (the iced re-render
     // trap that destroys `text_input` focus — see
-    // `.agent/rules/gotchas.md` "Widget Tree & Focus").
+    // `.claude/rules/gotchas.md` "Widget Tree & Focus").
     let library_trigger_slot: Element<'static, NavBarMessage> = {
         let library_count = data.library_count;
         let active_library_count = data.active_library_count;

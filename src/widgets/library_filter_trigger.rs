@@ -8,7 +8,7 @@
 //!   `Element`-typed child, so the widget-tree shape stays stable across
 //!   re-renders (the iced re-render trap that destroys `text_input`
 //!   focus when sibling slot types churn — see
-//!   `.agent/rules/gotchas.md` "Widget Tree & Focus" and Plan §14.8).
+//!   `.claude/rules/gotchas.md` "Widget Tree & Focus" and Plan §14.8).
 //! - `active_count == library_count || active_count == 0` → 28 × 28
 //!   icon-only button. "All libraries on" and "empty set → treated as
 //!   all" are visually identical because they share the same semantics

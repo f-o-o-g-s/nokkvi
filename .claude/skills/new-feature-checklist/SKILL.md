@@ -1,6 +1,5 @@
 ---
-trigger: model_decision
-description: End-to-end checklist when building new features. Covers cross-view sync, persistence, hotkeys, MPRIS, scrobbling, sort modes, search, artwork, settings.
+description: End-to-end wiring checklist for adding or extending any nokkvi feature — a new view, setting, hotkey, context-menu entry, playback/queue behavior, visualizer option, or API-backed capability. Invoke BEFORE writing code whenever a task adds or changes user-visible functionality, and re-check it before committing (its Verification section lists the CI gates).
 ---
 
 # New Feature Checklist
@@ -29,7 +28,7 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] **MPRIS**: update `services/mpris.rs` for playback-related changes
 - [ ] **Scrobbling**: check `update/scrobbling.rs` for track-lifecycle hooks
 - [ ] **Sort/Search**: extend `SortMode` (or `QueueSortMode`); search is immediate (no debounce)
-- [ ] **Settings**: every General / Interface / Playback / Visualizer knob is one `define_settings!` entry in `data/src/services/settings_tables/` — the schema row emits the dispatch arm, the persistence round-trips, and (via `ui_meta`) the UI row (details in `settings-view.md`). Theme / Hotkey items and the visualizer color sections still build by hand in `views/settings/items_*.rs` using `SettingMeta::new(key, label, category).with_subtitle(...)` (subtitle is optional). New settings rows get curated search synonyms in `data/src/utils/setting_keywords.rs::keywords_for` so the fuzzy settings search finds them by alias terms
+- [ ] **Settings**: every General / Interface / Playback / Visualizer knob is one `define_settings!` entry in `data/src/services/settings_tables/` — the schema row emits the dispatch arm, the persistence round-trips, and (via `ui_meta`) the UI row (details in `.claude/rules/settings-view.md`). Theme / Hotkey items and the visualizer color sections still build by hand in `views/settings/items_*.rs` using `SettingMeta::new(key, label, category).with_subtitle(...)` (subtitle is optional). New settings rows get curated search synonyms in `data/src/utils/setting_keywords.rs::keywords_for` so the fuzzy settings search finds them by alias terms
 - [ ] **Config write routing**: settings → `ConfigKey::AppScalar` / `Theme` / `ThemeArrayEntry` (typed dispatch in `config_writer.rs`). Sentinel pseudo-keys (logout, restore-defaults, the ListenBrainz/Last.fm credential actions) route through `SentinelKind` in `views/settings/sentinel.rs`
 - [ ] **Pre-play hook**: `guard_play_action()` on every play handler (transitions radio playback → queue mode; no longer blocks playlist edits)
 - [ ] **HasCommonAction**: implement on the action enum if the view has SearchChanged/SortModeChanged/SortOrderChanged

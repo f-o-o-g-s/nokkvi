@@ -313,8 +313,8 @@ fn dropdown_item<'a, Message: Clone + 'a>(
     .align_y(iced::Alignment::Center);
 
     // `HoverOverlay(container)` so the hover tint resolves cleanly
-    // across themes (see `.agent/rules/gotchas.md` "HoverOverlay wraps
-    // containers, not native buttons"). `ui_radius_xs()` matches the
+    // across themes (see `.claude/rules/gotchas.md` "HoverOverlay
+    // canonical pattern"). `ui_radius_xs()` matches the
     // panel's `ui_radius_md()` outline at concentric scale.
     mouse_area(
         super::hover_overlay::HoverOverlay::new(

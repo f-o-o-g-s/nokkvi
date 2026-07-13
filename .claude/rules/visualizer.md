@@ -1,6 +1,10 @@
 ---
-trigger: glob
-globs: src/widgets/visualizer/**,src/visualizer_config.rs,data/src/types/visualizer_config.rs,data/src/services/settings_tables/visualizer.rs
+paths:
+  - "src/widgets/visualizer/**"
+  - "src/visualizer_config.rs"
+  - "data/src/types/visualizer_config.rs"
+  - "data/src/services/settings_tables/visualizer.rs"
+  - "data/src/audio/spectrum.rs"
 ---
 
 # Visualizer

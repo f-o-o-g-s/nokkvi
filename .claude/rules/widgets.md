@@ -1,6 +1,8 @@
 ---
-trigger: glob
-globs: src/widgets/**
+paths:
+  - "src/widgets/**"
+  - "src/theme/**"
+  - "src/embedded_svg.rs"
 ---
 
 # Widgets
@@ -11,7 +13,6 @@ globs: src/widgets/**
 - **`rounded_mode` (AtomicU8)** → `RoundedMode` enum: `Off` / `On` / `PlayerOnly` (tri-state, not a bool). `rounded_mode()` reads it; `is_rounded_mode()` is true only for `On`; `set_rounded_mode(RoundedMode)` stores it. `ui_border_radius()` → 6.0 or 0.0 (gated on `is_rounded_mode()`), while `ui_border_radius_player()` also rounds for `PlayerOnly` so the player chrome stays soft when the rest of the UI is flat. ALWAYS use these helpers instead of hardcoded radii.
 - **`opacity_gradient` (AtomicBool)**: non-center slot opacity fade.
 - **`slot_row_height` (AtomicU8)** → `SlotRowHeight` enum: Compact 50, Default 70, Comfortable 90, Spacious 110.
-- **Transparent-border clipping**: Iced clips background to border radius even with a 0px transparent border. Leave radius unset on flush-to-edge bars.
 
 ## Single-Active Overlay Menu (`Nokkvi.open_menu`)
 
@@ -26,7 +27,7 @@ Every custom `overlay::Overlay` impl that draws a `MENU_SHADOW`-bearing quad mus
 - **Leaf overlays** (`hamburger_menu`, `player_modes_menu` — draw everything via `renderer.fill_quad`, host no child `Element`): produce the inflated node via `inflate_for_shadow(size, position)`; recover the visible rect via `visible_menu_bounds(layout.bounds())`.
 - **Child-forwarding overlays** (`checkbox_dropdown`, `context_menu` — host a real child `Element` that needs its own coordinate space): produce via `inflate_for_shadow_around_child(node, position)`; recover via `visible_menu_layout(layout)` (returns the inner child `Layout` to forward to the hosted widget).
 
-`MENU_SHADOW_PADDING` is module-private by design — new overlays use the helpers, not the raw constant. The four `const _: () = assert!(…)` invariants in `menu_constants.rs` pin the shadow geometry (padding covers worst-axis extent, offset stays vertical-only and non-negative); tuning `MENU_SHADOW` past those bounds yields a compile error pointing at the assertion to update.
+`MENU_SHADOW_PADDING` is module-private by design — new overlays use the helpers, not the raw constant. The `const _: () = assert!(…)` invariants in `menu_constants.rs` pin the shadow geometry (padding covers worst-axis extent, offset stays vertical-only and non-negative); tuning `MENU_SHADOW` past those bounds yields a compile error pointing at the assertion to update.
 
 ## Player Bar (`player_bar.rs`)
 
@@ -46,21 +47,21 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 |--------|------|---------|
 | Volume Slider | `volume_slider.rs` | Vertical/horizontal, `SliderVariant` |
 | View Header | `view_header.rs` | Sort selector, search bar, shuffle, center-on-playing, columns dropdown. `ViewHeaderConfig.sort_placeholder: Option<&str>` renders a grayed no-selection placeholder in the sort dropdown (queue shows "Unsorted" until a queue sort is applied). Opt-in auto-hide toolbar: `ViewHeaderConfig.collapsed` renders a collapsed strip per `CollapsedAppearance` instead of the full toolbar; `on_hover_enter`/`on_hover_exit` wrap the header in a hover-reveal `mouse_area`, `on_dropdown_open`/`on_dropdown_close` keep it revealed while the sort dropdown is open |
-| Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding (`base_slot_list_layout{,_with_handle}`, `BaseSlotListLayoutConfig`). Artwork panels take an `ArtworkPlaceholder` (`Blank` default / `RadioTower` for logo-less radio stations) for their art-less fill. `base_slot_list_empty_state()` lives in `widgets/mod.rs` and routes through it to preserve the root widget type (and `text_input` focus) across results/no-results |
+| Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding (`base_slot_list_layout{,_with_handle}`, `BaseSlotListLayoutConfig`). Artwork panels take an `ArtworkPlaceholder` (`Blank` default / `RadioTower` for logo-less radio stations) for their art-less fill. `base_slot_list_empty_state()` lives in `widgets/mod.rs` and routes through it |
 | Scroll Indicator | `scroll_indicator.rs` | `wrap_with_scroll_indicator()` + drag-to-seek, gated on the `ScrollbarVisibility` setting (`theme::scrollbar_visibility()`): `OnHover` = transient handle that fades in on hover/scroll; `Always` (default) = permanent track + handle, the wrapper reserves a right-edge gutter so the bar never floats over content; `Hidden` = nothing drawn, no gutter (wheel still scrolls) |
 | Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale + external `flash_at()`. Default radius = `ui_border_radius()`. `wash_enabled(false)` suppresses the hover/press color wash (press scale-down still fires) — used by foreign-palette rows like the theme-picker swatches; `on_accent_surface(true)` swaps the accent wash for a contrasting neutral pigment over already-`accent_bright()`-filled surfaces |
 | Track Info Strip | `track_info_strip.rs` | Now-playing metadata. `build_now_playing_segments` returns `Vec<String>` (title / artist / album fragments + separators) that the merged-mode marquee concats |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
 | Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` (`ShufflePlay` heads the list — one-shot shuffle, never touches shuffle mode) / `StripContextEntry` / `RadioContextEntry` (Edit, Copy Stream URL, Set Custom Artwork…, Reset Artwork [gated], Refresh Artwork, Delete); the queue's `QueueContextEntry` lives in `src/views/queue/mod.rs`. `PanelMenuEntry<Message>` (icon + label + message, constructors `refresh_artwork` / `set_custom_artwork` / `reset_artwork`) is the entries vocabulary of the large-artwork-panel menus — the `*_artwork_panel_with_*` helpers in `base_slot_list_layout.rs` take a `Vec<PanelMenuEntry>` and wrap in `context_menu` only when non-empty. Wrap helpers: `wrap_library_row` / `wrap_similar_row` (slot rows), `wrap_strip_context_menu` (the three now-playing strip placements — player-bar, top strip, merged nav-bar; takes `StripContextAction` / `SetOpenMenu` variant constructors as fn pointers, returns the bare strip when radio is active) |
-| Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown, generic over `Key` (controlled via `OpenMenu::CheckboxDropdown`) |
-| Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum |
+| Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown, generic over `Key` |
+| Info Modal | `info_modal.rs` | Two-column property table for Get Info (`InfoModalItem`) |
 | About Modal | `about_modal.rs` | Metadata + diagnostics, theme-adaptive logo, Ko-fi tip link |
 | Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box`; `TextInputDialogState.secure` masks the primary input for secret entry (scrobble tokens) |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
 | EQ Modal | `eq_modal.rs` | 10-band EQ overlay with preset picker (`update/eq_modal.rs`). State lives on `Nokkvi.eq_modal: EqModalState` (extracted as a sibling struct so the EQ overlay doesn't drift WindowState fields) |
 | Slot List Page | `slot_list_page.rs` | `SlotListPageState` + unified `SlotListPageMessage` dispatcher. Auto-hide toolbar: transient reveals (hover, open sort dropdown, hotkey reveal timer, focused-but-empty search) are gated on `window_focused` (window Focused/Unfocused events) so the toolbar collapses behind another app; a non-empty search filter stays revealed unconditionally. Activation is `ActivateCenter(bool)` — `true` forces a one-shot Shuffle Play (Ctrl+Enter). (`SlotListConfig` lives in `slot_list.rs`; its `hover_wash: bool` field — default `true`, cleared via `.without_hover_wash()` — forwards to each row's `HoverOverlay::wash_enabled`, used by the theme picker so swatch rows keep their own palette) |
 | Slot List View | `slot_list_view.rs` | Scroll-position state owned by the view (decoupled from `SlotListPageState`) |
-| Visualizer | `visualizer/` | Pipeline + shader + wgsl modules (see `.agent/rules/visualizer.md`) |
+| Visualizer | `visualizer/` | Pipeline + shader + wgsl modules (see `visualizer.md`) |
 | Drag Column | `drag_column.rs` | In-queue drag-and-drop reorder (multi-selection batch aware) |
 | Format Info | `format_info.rs` | Codec / bitrate split-string helper |
 | Hamburger Menu | `hamburger_menu.rs` | App menu (quit, light/dark toggle, about) |
@@ -123,8 +124,8 @@ Top-level module. `build.rs` walks **both** `assets/icons/` (the canonical Lucid
 
 The boat's drop-anchor doodad and the Queue/Playlists nav glyphs **follow the active set** (changing the set bumps `theme_generation()`, rebuilding the cached handles): `themed_anchor_svg()` strokes the Lucide open-path anchor or fills the Phosphor solid glyph with the visualizer border color, and `anchor_svg_ring_top_fraction()` returns the set-specific rope-hook fraction (Lucide `2/24`, Phosphor `40/256`).
 
-`themed_logo_svg()` rewrites the Nokkvi longship logo's hex fills to the active theme via three role accessors: body (sail + hull) → `logo_body()` (fg0), shields → `logo_shields()` (accent), wood (mast + yard) → `logo_wood()` (warning). All read the theme's dark palette regardless of light/dark mode, so the mark is mode-stable; the near-black group outline (`LOGO_TOKEN_OUTLINE`) stays fixed. `themed_boat_svg()` reshapes the same logo for the lines-mode boat overlay (uniform themed outline, baked tilt/mirror/flip transforms derived from `LOGO_VIEWBOX`).
+`themed_logo_svg()` rewrites the Nokkvi longship logo's hex fills to the active theme via role accessors: body (sail + hull) → `logo_body()` (fg0), shields → `logo_shields()` (accent), wood (mast + yard) → `logo_wood()` (warning). All read the theme's dark palette regardless of light/dark mode, so the mark is mode-stable; the near-black group outline (`LOGO_TOKEN_OUTLINE`) stays fixed. `themed_boat_svg()` reshapes the same logo for the lines-mode boat overlay (uniform themed outline, baked tilt/mirror/flip transforms derived from `LOGO_VIEWBOX`).
 
 ## HoverOverlay + native buttons
 
-`HoverOverlay::new(button)` works in some places — e.g. `player_bar.rs:845` (inside `player_control_button`) actively wraps a `button` and the hover/press visual fires correctly because commit `d2f22a0` added `shell.request_redraw()` to `HoverOverlay::update`. The canonical pattern is still `mouse_area(HoverOverlay::new(container(...))).on_press(msg)` for clickable cells (slot rows, header icons, modal-icon buttons), but the absolute "never wraps a button" framing in older notes is too strict.
+`HoverOverlay::new(button)` works in some places — e.g. `player_bar.rs:845` (inside `player_control_button`) actively wraps a `button` and the hover/press visual fires correctly because commit `d2f22a0` added `shell.request_redraw()` to `HoverOverlay::update`. The canonical pattern still applies for clickable cells (slot rows, header icons, modal-icon buttons), but the absolute "never wraps a button" framing in older notes is too strict.

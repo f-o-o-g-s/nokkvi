@@ -1,6 +1,7 @@
 ---
-trigger: glob
-globs: data/src/audio/**
+paths:
+  - "data/src/audio/**"
+  - "data/src/backend/playback_controller.rs"
 ---
 
 # Audio Engine

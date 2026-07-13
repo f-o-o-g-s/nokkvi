@@ -749,7 +749,7 @@ impl Nokkvi {
             // stateful widgets every time elevation flipped — Ctrl+E to
             // open the browsing panel, navigating to an ineligible view,
             // a window resize crossing the Auto-mode threshold. See
-            // CLAUDE.md "Render output" gotcha and gotchas.md:38.
+            // CLAUDE.md "Render output" gotcha and gotchas.md "Widget Tree & Focus".
             //
             // The outer `Space` reserves the nav-bar's vertical band:
             //   - non-elevated → `NAV_BAR_HEIGHT` so `main_content` is

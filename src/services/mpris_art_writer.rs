@@ -19,7 +19,7 @@
 //!
 //! `$XDG_CACHE_HOME/nokkvi/mpris-art-<pid>-<cover_id>.jpg` (falling back to
 //! `$HOME/.cache/nokkvi/...`). The `<pid>` suffix matches nokkvi's existing
-//! MPRIS bus-name pattern (see `.agent/rules/gotchas.md` — "MPRIS multi-instance
+//! MPRIS bus-name pattern (see `.claude/rules/gotchas.md` — "MPRIS multi-instance
 //! bus name") so two simultaneously-running instances don't fight over the same
 //! file. The `<cover_id>` suffix makes the URI unique per track — desktop
 //! shells (Plasma, GNOME, dunst, waybar) key their `mpris:artUrl` image cache

@@ -1,6 +1,9 @@
 ---
-trigger: glob
-globs: src/views/settings/**,src/update/settings.rs
+paths:
+  - "src/views/settings/**"
+  - "src/update/settings.rs"
+  - "data/src/services/settings_tables/**"
+  - "src/config_writer.rs"
 ---
 
 # Settings View

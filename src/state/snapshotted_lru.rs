@@ -9,7 +9,7 @@
 //! `refresh_*_snapshot()` method that callers had to invoke after every
 //! `put()` / `pop()`. Forgetting that call left the view borrowing a stale
 //! snapshot — a documented "silent" gotcha in `CLAUDE.md` and
-//! `.agent/rules/gotchas.md`.
+//! `.claude/rules/gotchas.md`.
 //!
 //! This newtype collapses the pair so the pairing is structural: `put()` and
 //! `pop()` refresh the snapshot inline, and the snapshot is exposed as a

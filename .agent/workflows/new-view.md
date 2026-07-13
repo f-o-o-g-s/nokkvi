@@ -47,13 +47,13 @@ Steps to add a new slot-list-based view, in order.
 
 11. Context menu: wrap rows in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry`. Resolve batch targets via `evaluate_context_menu()` and `get_batch_target_indices()` / `get_queue_target_indices()`. Build payloads via `expansion::build_batch_payload()`.
 
-12. Multi-selection: route clicks through `handle_slot_click()`; clear with `clear_multi_selection()` after every batch op. Add an opt-in checkbox column via `wrap_with_select_column()` + `compose_header_with_select()` (`widgets/slot_list.rs`) and a `{view}_show_select` flag in `ViewColumns` (`data/src/types/view_columns.rs` — shared by `LivePlayerSettings` / `PersistedPlayerSettings` / `TomlSettings` via their `view_columns` member) so the columns dropdown can toggle it. Every new `ViewColumns` field also gets declared in the `view_columns:` fields list of the consolidated `define_settings!` invocation in `data/src/services/settings_tables/columns.rs` — its exhaustive destructure turns an omission into a compile error (settings system: `.agent/rules/settings-view.md`; the per-view `define_view_columns!` dropdown side: `.agent/rules/ui-views.md`).
+12. Multi-selection: route clicks through `handle_slot_click()`; clear with `clear_multi_selection()` after every batch op. Add an opt-in checkbox column via `wrap_with_select_column()` + `compose_header_with_select()` (`widgets/slot_list.rs`) and a `{view}_show_select` flag in `ViewColumns` (`data/src/types/view_columns.rs` — shared by `LivePlayerSettings` / `PersistedPlayerSettings` / `TomlSettings` via their `view_columns` member) so the columns dropdown can toggle it. Every new `ViewColumns` field also gets declared in the `view_columns:` fields list of the consolidated `define_settings!` invocation in `data/src/services/settings_tables/columns.rs` — its exhaustive destructure turns an omission into a compile error (settings system: `.claude/rules/settings-view.md`; the per-view `define_view_columns!` dropdown side: `.claude/rules/ui-views.md`).
 
 13. Toasts: `toast_success()` / `toast_error()` / `toast_warn()` / `toast_info()`.
 
 14. Browsing panel: add a `BrowsingView` variant in `views/browsing_panel.rs` if the view should appear in split-view; wire lazy data load.
 
-15. Icons: adding one is a three-part change — the Lucide SVG in `assets/icons/` (the path code references; build.rs registers both icon dirs automatically), its Phosphor counterpart in `assets/icons-phosphor/`, and a `NAME_MAP` row in `src/embedded_svg.rs` mapping the Lucide stem to the Phosphor file. The `icon_name_map_*` tests enforce all three (Phosphor is the default set). Details: `.agent/rules/widgets.md`.
+15. Icons: adding one is a three-part change — the Lucide SVG in `assets/icons/` (the path code references; build.rs registers both icon dirs automatically), its Phosphor counterpart in `assets/icons-phosphor/`, and a `NAME_MAP` row in `src/embedded_svg.rs` mapping the Lucide stem to the Phosphor file. The `icon_name_map_*` tests enforce all three (Phosphor is the default set). Details: `.claude/rules/widgets.md`.
 
 16. Verify:
     - `cargo +nightly fmt --all -- --check`

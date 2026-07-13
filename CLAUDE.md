@@ -36,7 +36,7 @@ Three crates:
 | `nokkvi-data` | `data/` | **Iced-free** backend: domain types, audio engine, Subsonic/Navidrome API client, persistence, services. |
 | `nokkvi-ipc` | `nokkvi-ipc/` | **Iced-free** wire layer for the `nokkvi <verb>` CLI control path (unix socket, per-PID paths). Linked by the fork-before-iced client and the UI's iced subscription. |
 
-Entry points: `src/main.rs` (Iced app + `Nokkvi` root state), `src/app_message.rs` (root `Message` enum), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (`AppService` backend orchestrator).
+Entry points: `src/main.rs` (Iced app + `Nokkvi` root state), `src/app_message.rs` (root `Message` + `OpenMenu` enums), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (`AppService` backend orchestrator).
 
 `reference-*/` directories are external repos cloned for reference (iced, symphonia, feishin, rmpc, navidrome, lucide icons, pipewire, rodio, etc.). They are **not** project code — do not edit them, but read freely. `target/`, `.venv/`, `tmp/`, `local/` are also non-project.
 
@@ -61,7 +61,7 @@ Key shared infrastructure:
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
 - Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (pre-play hook: transition radio playback back to queue mode; retains a no-op `Option` return so a future block could short-circuit a play), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components/mod.rs`.
 
-Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage`, `NavigationMessage`, `FindMessage`, `SplitViewMessage`, `CrossPaneDragMessage`, `ToastMessage`). Flat variants remain only for cross-cutting concerns. See `src/app_message.rs`.
+Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `NavigationMessage`, `HotkeyMessage`, …) plus per-domain backend loader carriers (`{Name}LoaderMessage`); flat variants remain only for cross-cutting concerns. The authoritative list is `src/app_message.rs` — don't trust any doc's enumeration of it.
 
 ## Backend (`data/`) architecture
 
@@ -144,17 +144,9 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 - **Database lock on re-login**: `StateStorage` is cached on `Nokkvi.cached_storage` and reused via `AppService::new_with_storage()` — redb holds an exclusive lock so a fresh open after logout will fail. Stop the engine + `TaskManager` on logout.
 - **`CenterOnPlaying` (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path instead.
 
-For the full set of rules and patterns, see `.agent/rules/` (loaded contextually):
-- `project-context.md` — crate structure, naming, key types
-- `code-standards.md` — formatting, error handling, TDD protocol
-- `audio-engine.md` — engine internals, crossfade, EQ
-- `backend-services.md` — services, persistence, queue system
-- `ui-views.md` — slot list views, expansion, browsing panel, modals
-- `widgets.md` — widget catalog, layout constants, shared menu/modal chrome modules, SVG icons
-- `visualizer.md` — FFT pipeline, shaders, Bars/Lines/Scope + effects
-- `settings-view.md` — settings module structure, persistent sidebar layout, SettingValue types
-- `gotchas.md` — full list of the subtle pitfalls
-- `new-feature-checklist.md` — end-to-end checklist for new features
+The full rule set lives in `.claude/rules/` and **auto-injects**: `code-standards.md` loads in every session; the rest are path-scoped and inject on the first Read of a matching file (`audio-engine.md` — engine internals, crossfade, EQ; `backend-services.md` — services, persistence, queue system; `ui-views.md` — slot list views, expansion, browsing panel, modals; `widgets.md` — widget catalog, layout constants, menu/modal chrome, SVG icons; `visualizer.md` — FFT pipeline, shaders, effects; `settings-view.md` — settings module structure, SettingValue types; `gotchas.md` — the subtle pitfalls, fires on any code read). Subagents spawned without having read matching files can Read these directly.
+
+Building or extending a feature (new view, setting, hotkey, menu entry, playback behavior)? Read `.claude/skills/new-feature-checklist/SKILL.md` before writing code and re-check it before committing (also auto-invocable as the `new-feature-checklist` skill).
 
 Workflows in `.agent/workflows/` (`build-test.md`, `commit.md`, `new-view.md`, `package.md`, `sync-rules.md`) document concrete procedures.
 
