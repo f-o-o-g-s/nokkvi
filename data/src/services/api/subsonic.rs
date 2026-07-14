@@ -99,7 +99,7 @@ pub async fn subsonic_post_ok(
 /// - `Err(anyhow!(...))` when the body wraps a Subsonic-envelope error
 ///   (`subsonic-response.status == "failed"`) inside an HTTP 200.
 /// - `Ok(())` otherwise.
-fn check_subsonic_response_status(
+pub(crate) fn check_subsonic_response_status(
     status: reqwest::StatusCode,
     body: &str,
     operation_label: &str,

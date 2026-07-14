@@ -838,11 +838,16 @@ impl AppService {
             anyhow::bail!("Queue is empty — nothing to push");
         }
         // Position in ms from the ENGINE (u64 ms; a stopped engine reads 0).
-        // The tokio mutex hold is trivially short.
+        // A staged-but-never-played pull keeps its server position in the
+        // armed one-shot offset while `position()` reads 0 — prefer it so a
+        // pull→push round trip without pressing Play doesn't zero the
+        // server's saved position. The tokio mutex hold is trivially short.
         let position_ms = {
             let engine_arc = self.audio_engine();
             let engine = engine_arc.lock().await;
-            engine.position() as i64
+            engine
+                .pending_start_ms()
+                .unwrap_or_else(|| engine.position()) as i64
         };
         // A None cursor on a non-empty queue is coerced to 0 inside the API
         // layer (Navidrome range-checks currentIndex on non-empty saves).

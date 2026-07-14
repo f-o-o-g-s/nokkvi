@@ -126,17 +126,32 @@ impl PlayQueueApiService {
     /// Returns `None` when no queue was ever saved (the response field is
     /// absent); a present-but-empty queue returns `Some` with an empty
     /// `entry` list.
+    ///
+    /// Deliberately checks the HTTP + inner Subsonic status BEFORE parsing
+    /// (unlike the lenient `subsonic_get_envelope` list pipeline): a
+    /// `status:"failed"` envelope inside HTTP 200 also lacks
+    /// `playQueueByIndex`, and without the check it would masquerade as the
+    /// authoritative "no saved queue on server" instead of surfacing the
+    /// real error (and a 401 would never route to session teardown).
     pub async fn get_play_queue_by_index(&self) -> Result<Option<PlayQueueByIndex>> {
-        let inner: PlayQueueByIndexInner = crate::services::api::subsonic::subsonic_get_envelope(
+        let response = crate::services::api::subsonic::subsonic_post(
             &self.client.http_client(),
             &self.server_url,
             "getPlayQueueByIndex",
             &self.subsonic_credential,
             &[],
-            "get play queue",
         )
         .await?;
-        Ok(inner.play_queue_by_index)
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        crate::services::api::subsonic::check_subsonic_response_status(
+            status,
+            &body,
+            "get play queue",
+        )?;
+        let envelope: crate::services::api::subsonic::SubsonicEnvelope<PlayQueueByIndexInner> =
+            crate::services::api::parse::parse_json_with_preview(&body, "get play queue")?;
+        Ok(envelope.response.play_queue_by_index)
     }
 }
 

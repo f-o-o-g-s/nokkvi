@@ -1461,6 +1461,14 @@ impl CustomAudioEngine {
         self.pending_start_ms = Some(position_ms);
     }
 
+    /// The still-armed pulled-queue start offset, if any. A staged-but-
+    /// never-played pull keeps its server position here while `position()`
+    /// reads 0 — queue PUSH prefers this so a pull→push round trip without
+    /// pressing Play doesn't zero the server's saved position.
+    pub fn pending_start_ms(&self) -> Option<u64> {
+        self.pending_start_ms
+    }
+
     /// Get current parsed ICY-metadata from the stream buffer
     pub fn live_icy_metadata(&self) -> Option<String> {
         self.live_icy_metadata.get()
@@ -1595,12 +1603,16 @@ impl CustomAudioEngine {
         // One-shot pulled-queue start offset (see `pending_start_ms`): seek
         // the just-initialized decoder BEFORE the renderer starts, so a
         // paused-pull Play resumes mid-song with no position-0 audio at all.
-        // Clamped to the real duration, mirroring `seek()`.
+        // Clamped to the real duration, mirroring `seek()`. The applied
+        // target is carried into the renderer block below — the renderer's
+        // position accounting must mirror the decoder seek.
+        let mut pulled_start_offset: Option<u64> = None;
         if let Some(pending_ms) = self.pending_start_ms.take() {
             let target = pending_ms.min(self.duration);
             if target > 0 {
                 if decoder.seek(target) {
                     self.position = target;
+                    pulled_start_offset = Some(target);
                     debug!("🎵 AudioEngine: pulled-queue start offset applied: {target}ms");
                 } else {
                     warn!("Pulled-queue start offset seek to {target}ms failed; starting at 0");
@@ -1636,6 +1648,17 @@ impl CustomAudioEngine {
                 trace!(
                     " AudioEngine: renderer already initialized with correct format, skipping init"
                 );
+            }
+
+            // Pulled-queue start offset: `renderer.init` zeroes
+            // `position_offset`, so without this the playhead under-reports
+            // by the full offset for the whole track (progress bar/MPRIS
+            // wrong, a subsequent queue PUSH saves the corrupted position,
+            // and the position-based crossfade/gapless triggers fire late —
+            // hard EOF cut). Exact mirror of the crossfade-finalize offset
+            // reset; `seek()` gets the same effect via `renderer.seek`.
+            if let Some(offset_ms) = pulled_start_offset {
+                renderer.reset_position_with_offset(offset_ms);
             }
 
             // Apply current volume to renderer

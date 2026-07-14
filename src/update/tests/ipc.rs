@@ -804,3 +804,29 @@ fn queue_pull_with_capability_dispatches() {
     assert!(resp.error.is_none(), "pull with capability must not error");
     assert_eq!(resp.data, Some(json!({ "dispatched": "pull" })));
 }
+
+/// The push happy path: capability confirmed, non-empty queue → the verb
+/// dispatches and echoes the documented `{"dispatched":"push","tracks":N}`
+/// payload (pins the guard ordering: capability passes AND queue non-empty).
+#[test]
+fn queue_push_with_capability_and_songs_dispatches() {
+    let mut app = app_with_queue_sync_capability();
+    app.library.queue_songs = vec![
+        crate::test_helpers::make_queue_song("s1", "Song One", "Artist", "Album"),
+        crate::test_helpers::make_queue_song("s2", "Song Two", "Artist", "Album"),
+    ];
+    let (incoming, rx) = make_incoming("queue-push");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire");
+    assert!(
+        resp.error.is_none(),
+        "push with capability + songs must not error"
+    );
+    assert_eq!(
+        resp.data,
+        Some(json!({ "dispatched": "push", "tracks": 2 }))
+    );
+}

@@ -1213,10 +1213,12 @@ impl PlaybackController {
     /// - `was_playing == false`: stage without playing (no network I/O, no
     ///   decoder until `play()`); the armed offset makes the user's next Play
     ///   resume mid-song at the server-saved position.
-    /// - Same-source pull (pull-back of this device's own push): the load is
-    ///   `set_source`'s same-source no-op, so a live stream is jumped with a
-    ///   direct `seek` instead (a paused seek stays paused; a stopped,
-    ///   uninitialized decoder aborts the seek harmlessly → cues at 0).
+    ///
+    /// Every pull takes this ONE uniform reload+arm path — including a pull
+    /// of the song this engine is already playing (pull-back of this
+    /// device's own push): stream URLs carry a per-call cache-buster, so
+    /// `set_source` always treats the load as a fresh source. That also
+    /// makes repeated pulls idempotent (each restages and re-arms).
     ///
     /// The caller (`AppService::pull_queue`) has already anchored the queue
     /// cursor via `set_queue` and discharged the `NextTrackResetEffect`; this
@@ -1247,24 +1249,19 @@ impl PlaybackController {
 
         {
             let mut engine = self.audio_engine.lock().await;
-            let same_source = engine.is_playing_source(&stream_url);
             engine
                 .load_track_with_rg(&stream_url, replay_gain, expected_ms)
                 .await;
-            if !same_source && position_ms > 0 {
+            if position_ms > 0 {
                 // Consumed inside play()'s fresh-start branch — on the
-                // playing branch below, on the paused branch at the user's
-                // next Play. set_source (inside the load) cleared any stale
-                // offset first, so the arm is scoped to exactly this track.
+                // playing branch below immediately, on the paused/stopped
+                // branch at the user's next Play. set_source (inside the
+                // load) cleared any stale offset first, so the arm is
+                // always scoped to exactly this staged track.
                 engine.set_pending_start_ms(position_ms as u64);
             }
             if was_playing {
                 engine.play().await?;
-                if same_source && position_ms > 0 {
-                    // Load/play above were no-ops on the already-playing
-                    // stream; jump it directly.
-                    engine.seek(position_ms as u64).await;
-                }
             }
         }
 
