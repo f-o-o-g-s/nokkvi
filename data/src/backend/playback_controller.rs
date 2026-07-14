@@ -1194,6 +1194,90 @@ impl PlaybackController {
             }
         }
     }
+
+    /// Cue a freshly-pulled server queue onto the engine ("cue, don't play").
+    ///
+    /// Mirrors [`Self::apply_removal_aftermath`]'s `LoadNewCurrent` arm — the
+    /// shipped "current row changed under a live engine" primitive — because
+    /// `set_queue` mutates only the queue model + reactives: the engine still
+    /// holds the pre-pull song and `play()` would resume it (its non-empty
+    /// source early return), and any bare `seek()` would seek the OLD song.
+    /// Deliberately NOT routed through `play_song_from_queue` /
+    /// `load_play_and_set_current`: their `plan_click_play` fade routes would
+    /// blend into the pulled song at position 0 and the follow-up seek would
+    /// cancel the live blend, restoring the outgoing — the pre-pull song.
+    ///
+    /// - `was_playing == true`: hard-load + `play()` — the fresh-start branch
+    ///   consumes the pending offset so the decoder sits at `position_ms`
+    ///   BEFORE the renderer starts (no position-0 audio).
+    /// - `was_playing == false`: stage without playing (no network I/O, no
+    ///   decoder until `play()`); the armed offset makes the user's next Play
+    ///   resume mid-song at the server-saved position.
+    /// - Same-source pull (pull-back of this device's own push): the load is
+    ///   `set_source`'s same-source no-op, so a live stream is jumped with a
+    ///   direct `seek` instead (a paused seek stays paused; a stopped,
+    ///   uninitialized decoder aborts the seek harmlessly → cues at 0).
+    ///
+    /// The caller (`AppService::pull_queue`) has already anchored the queue
+    /// cursor via `set_queue` and discharged the `NextTrackResetEffect`; this
+    /// method finishes the job by syncing the remaining two sources of truth
+    /// (engine source, navigator `current_song_id`).
+    pub async fn cue_pulled_queue(
+        &self,
+        song_id: &str,
+        position_ms: i64,
+        was_playing: bool,
+    ) -> Result<()> {
+        let (replay_gain, expected_ms) = {
+            let qm_arc = self.queue_service.queue_manager();
+            let qm = qm_arc.lock().await;
+            qm.get_song(song_id).map_or((None, None), |s| {
+                (s.replay_gain.clone(), s.expected_duration_ms())
+            })
+        };
+
+        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
+        let stream_url =
+            crate::utils::artwork_url::build_stream_url(song_id, &server_url, &subsonic_credential);
+        if stream_url.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Failed to build stream URL for pulled queue"
+            ));
+        }
+
+        {
+            let mut engine = self.audio_engine.lock().await;
+            let same_source = engine.is_playing_source(&stream_url);
+            engine
+                .load_track_with_rg(&stream_url, replay_gain, expected_ms)
+                .await;
+            if !same_source && position_ms > 0 {
+                // Consumed inside play()'s fresh-start branch — on the
+                // playing branch below, on the paused branch at the user's
+                // next Play. set_source (inside the load) cleared any stale
+                // offset first, so the arm is scoped to exactly this track.
+                engine.set_pending_start_ms(position_ms as u64);
+            }
+            if was_playing {
+                engine.play().await?;
+                if same_source && position_ms > 0 {
+                    // Load/play above were no-ops on the already-playing
+                    // stream; jump it directly.
+                    engine.seek(position_ms as u64).await;
+                }
+            }
+        }
+
+        self.queue_navigator
+            .lock()
+            .await
+            .set_current_song_id(Some(song_id.to_string()))
+            .await;
+        debug!(
+            "🌊 Pulled queue cued: song={song_id} position={position_ms}ms was_playing={was_playing}"
+        );
+        Ok(())
+    }
 }
 
 /// How a user click that starts a track should reach the engine (M10 —

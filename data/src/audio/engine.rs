@@ -1278,6 +1278,14 @@ pub struct CustomAudioEngine {
     // Next track source
     next_source: String,
 
+    /// One-shot start offset (ms) consumed by `play()`'s fresh-start branch.
+    /// Armed when a pulled server queue is staged on a paused/stopped engine
+    /// (`PlaybackController::cue_pulled_queue`) so the next Play resumes
+    /// mid-song at the server-saved position — the decoder seeks BEFORE the
+    /// renderer starts, so no position-0 audio is ever rendered. Cleared by
+    /// `set_source` (any new load intent invalidates a stale offset).
+    pending_start_ms: Option<u64>,
+
     // Renderer
     renderer: Arc<PlMutex<AudioRenderer>>,
 
@@ -1355,6 +1363,7 @@ impl CustomAudioEngine {
             current_format: AudioFormat::invalid(),
             next_format: AudioFormat::invalid(),
             next_source: String::new(),
+            pending_start_ms: None,
             renderer: Arc::new(PlMutex::new(AudioRenderer::new())),
             state: PlaybackState::Stopped,
             decode_loop: DecodeLoopHandle::new(),
@@ -1385,6 +1394,10 @@ impl CustomAudioEngine {
             " AudioEngine: set_source called with: {}",
             redact_subsonic_url(&source)
         );
+        // Any (re)load intent invalidates a staged pulled-queue start offset —
+        // cleared BEFORE the same-source early return so a stale offset can
+        // never survive a reload of the track it was armed for.
+        self.pending_start_ms = None;
         if self.source == source {
             trace!(" AudioEngine: source unchanged, returning early");
             return;
@@ -1438,6 +1451,14 @@ impl CustomAudioEngine {
         self.source = source;
         self.channels.source_generation.bump_for_user_action();
         trace!(" AudioEngine: source set successfully");
+    }
+
+    /// Arm a one-shot start offset (ms) for the next fresh `play()` of the
+    /// just-staged source (see the `pending_start_ms` field doc). Callers
+    /// stage via `load_track_with_rg` FIRST — `set_source` clears any stale
+    /// offset, so the arm is always scoped to exactly one staged track.
+    pub fn set_pending_start_ms(&mut self, position_ms: u64) {
+        self.pending_start_ms = Some(position_ms);
     }
 
     /// Get current parsed ICY-metadata from the stream buffer
@@ -1569,6 +1590,22 @@ impl CustomAudioEngine {
             // CRITICAL: Restore duration from decoder (may have been cleared by stop())
             self.duration = decoder.duration();
             trace!(" AudioEngine: duration restored: {}", self.duration);
+        }
+
+        // One-shot pulled-queue start offset (see `pending_start_ms`): seek
+        // the just-initialized decoder BEFORE the renderer starts, so a
+        // paused-pull Play resumes mid-song with no position-0 audio at all.
+        // Clamped to the real duration, mirroring `seek()`.
+        if let Some(pending_ms) = self.pending_start_ms.take() {
+            let target = pending_ms.min(self.duration);
+            if target > 0 {
+                if decoder.seek(target) {
+                    self.position = target;
+                    debug!("🎵 AudioEngine: pulled-queue start offset applied: {target}ms");
+                } else {
+                    warn!("Pulled-queue start offset seek to {target}ms failed; starting at 0");
+                }
+            }
         }
 
         // Initialize renderer with format (only if needed)
@@ -4090,6 +4127,42 @@ impl CustomAudioEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pulled-queue start-offset lifecycle: `set_source` must clear a staged
+    /// offset BEFORE its same-source early return, so a stale offset can
+    /// never fire on a later fresh start of a reloaded (or unrelated) track.
+    ///
+    /// `#[tokio::test]`: `CustomAudioEngine::new()` builds the renderer,
+    /// which captures `tokio::runtime::Handle::current()` at construction.
+    #[tokio::test]
+    async fn pending_start_ms_cleared_by_set_source_including_same_source() {
+        let mut engine = CustomAudioEngine::new();
+
+        // A fresh-source load clears a previously-armed offset.
+        engine.set_pending_start_ms(5_000);
+        engine
+            .set_source("http://server/rest/stream?id=a".into(), None)
+            .await;
+        assert_eq!(
+            engine.pending_start_ms, None,
+            "fresh load clears the offset"
+        );
+
+        // Armed AFTER staging (the cue_pulled_queue order) — it survives
+        // until the next play()/set_source.
+        engine.set_pending_start_ms(42_000);
+        assert_eq!(engine.pending_start_ms, Some(42_000));
+
+        // A same-source reload takes the early return — the offset must
+        // STILL clear (the clear sits above the return).
+        engine
+            .set_source("http://server/rest/stream?id=a".into(), None)
+            .await;
+        assert_eq!(
+            engine.pending_start_ms, None,
+            "same-source early return clears too"
+        );
+    }
 
     /// Wiring interlock for `DecodeLoopChannels`: after `set_engine_reference`
     /// installs the renderer link, the engine and the renderer must share the

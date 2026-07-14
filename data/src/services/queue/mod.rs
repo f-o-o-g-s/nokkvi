@@ -1123,6 +1123,40 @@ pub(crate) mod tests {
         }
     }
 
+    /// Pulled-queue restore contract: `set_queue(entries, clamped)` must
+    /// anchor the derived playhead on the requested physical row and keep
+    /// duplicate song ids as distinct rows — the index-based server queue
+    /// round-trip depends on both (playhead is a POSITION, not a track id).
+    #[test]
+    fn set_queue_anchors_cursor_and_preserves_duplicates() {
+        let (mut qm, _tmp) = make_test_manager(vec![make_test_song("z")], Some(0));
+
+        // Duplicate "a" twice around "b" — the same song as distinct rows.
+        let pulled = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("a"),
+        ];
+        let _effect = qm.set_queue(pulled, Some(2)).expect("set_queue");
+
+        assert_eq!(
+            qm.song_ids_snapshot(),
+            vec!["a".to_string(), "b".to_string(), "a".to_string()],
+            "duplicates survive as distinct physical rows"
+        );
+        assert_eq!(
+            qm.current_index(),
+            Some(2),
+            "playhead anchors on the requested POSITION (the second 'a')"
+        );
+        let pairs = row_pairs(&qm);
+        assert_ne!(
+            pairs[0].1, pairs[2].1,
+            "duplicate rows carry distinct entry_ids"
+        );
+        assert_queue_invariants(&qm, "after pulled set_queue");
+    }
+
     /// M1 lock: the external-reader accessors must stay semantically glued
     /// to the queue's row storage — same ids, same length, same emptiness —
     /// so the M2 storage flip cannot silently change accessor behavior.
