@@ -862,7 +862,11 @@ impl AppService {
     pub async fn pull_queue(&self) -> Result<PullSummary> {
         use crate::services::api::play_queue::clamp_pulled_index;
 
-        let pq = self.play_queue_api().await?.get_play_queue_by_index().await?;
+        let pq = self
+            .play_queue_api()
+            .await?
+            .get_play_queue_by_index()
+            .await?;
         let Some(pq) = pq else {
             return Ok(PullSummary {
                 restored: 0,

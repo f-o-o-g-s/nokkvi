@@ -1024,14 +1024,12 @@ impl Nokkvi {
         self.shell_task(
             |shell| async move { shell.pull_queue().await },
             |result| match result {
-                Ok(s) if s.restored == 0 => {
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            "No saved queue on server".to_string(),
-                            nokkvi_data::types::toast::ToastLevel::Info,
-                        ),
-                    ))
-                }
+                Ok(s) if s.restored == 0 => Message::Toast(crate::app_message::ToastMessage::Push(
+                    nokkvi_data::types::toast::Toast::new(
+                        "No saved queue on server".to_string(),
+                        nokkvi_data::types::toast::ToastLevel::Info,
+                    ),
+                )),
                 Ok(s) => Message::Toast(crate::app_message::ToastMessage::PushThen(
                     nokkvi_data::types::toast::Toast::new(
                         format!("Pulled {} tracks from server", s.restored),

@@ -34,7 +34,10 @@ fn open_subsonic_extensions_fetched_updates_state_and_gates_queue_sync() {
     let _ = app.update(crate::app_message::Message::OpenSubsonicExtensionsFetched(
         None,
     ));
-    assert!(app.supports_index_based_queue(), "None leaves state untouched");
+    assert!(
+        app.supports_index_based_queue(),
+        "None leaves state untouched"
+    );
 }
 
 #[test]

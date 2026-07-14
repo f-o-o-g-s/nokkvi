@@ -739,8 +739,7 @@ fn queue_sync_verbs_without_capability_return_unsupported() {
 
 fn app_with_queue_sync_capability() -> crate::Nokkvi {
     let mut app = test_app();
-    app.open_subsonic_extensions =
-        Some(std::iter::once("indexBasedQueue".to_string()).collect());
+    app.open_subsonic_extensions = Some(std::iter::once("indexBasedQueue".to_string()).collect());
     app
 }
 
@@ -784,7 +783,9 @@ fn queue_sync_verbs_during_radio_return_unavailable() {
         drop(dispatched);
 
         let resp = rx.blocking_recv().expect("responder must fire");
-        let err = resp.error.unwrap_or_else(|| panic!("{verb} must error during radio"));
+        let err = resp
+            .error
+            .unwrap_or_else(|| panic!("{verb} must error during radio"));
         assert_eq!(err.code, "unavailable", "{verb}");
     }
 }
