@@ -932,6 +932,10 @@ pub enum Message {
     ResumeSession,
     /// Response from pinging the server to fetch its native application version
     ServerVersionFetched(Option<String>),
+    /// Response from probing the server's advertised OpenSubsonic extensions
+    /// (`getOpenSubsonicExtensions`); `None` when the probe failed —
+    /// extension-gated features stay hidden (fail-safe).
+    OpenSubsonicExtensionsFetched(Option<Vec<String>>),
     /// Session was terminated (e.g. 401 Unauthorized) — logout and notify
     SessionExpired,
 

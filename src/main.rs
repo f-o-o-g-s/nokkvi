@@ -370,6 +370,10 @@ pub struct Nokkvi {
     pub pending_expand: crate::state::PendingExpandState,
     /// Extracted backend server version (e.g. from Navidrome)
     pub server_version: Option<String>,
+    /// OpenSubsonic extension names advertised by the connected server
+    /// (`getOpenSubsonicExtensions`, fetched at login/resume). `None` until
+    /// the probe lands — extension-gated features fail safe (hidden).
+    pub open_subsonic_extensions: Option<std::collections::HashSet<String>>,
 
     // -------------------------------------------------------------------------
     // Roulette (slot-machine random pick across slot-list views)
@@ -456,6 +460,7 @@ impl Default for Nokkvi {
             pending_mode_commits: 0,
             pending_expand: crate::state::PendingExpandState::default(),
             server_version: None,
+            open_subsonic_extensions: None,
             // Consolidated state structs with defaults
             active_playback: crate::state::ActivePlayback::default(),
             playback: crate::state::PlaybackState::default(),
@@ -518,6 +523,15 @@ impl Default for Nokkvi {
 // ============================================================================
 
 impl Nokkvi {
+    /// Whether the connected server advertises the OpenSubsonic
+    /// `indexBasedQueue` extension (queue push/pull to the server).
+    /// `false` until the login-time probe lands — the feature fails safe.
+    pub(crate) fn supports_index_based_queue(&self) -> bool {
+        self.open_subsonic_extensions
+            .as_ref()
+            .is_some_and(|s| s.contains("indexBasedQueue"))
+    }
+
     /// Window title — dynamic based on playback state.
     ///
     /// Daemon-mode signature: the `_window` id is unused because nokkvi only

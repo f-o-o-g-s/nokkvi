@@ -1590,6 +1590,7 @@ impl Nokkvi {
         self.clear_stranded_within_list_drag();
         self.playlist_editor = None;
         self.server_version = None;
+        self.open_subsonic_extensions = None;
         self.last_queue_current_index = None;
         self.pending_expand = crate::state::PendingExpandState::default();
         self.roulette = None;

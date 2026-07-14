@@ -161,6 +161,15 @@ impl Nokkvi {
                 }
                 Task::none()
             }
+            Message::OpenSubsonicExtensionsFetched(exts) => {
+                // A failed probe (None) leaves the field untouched so
+                // extension-gated features stay fail-safe hidden rather
+                // than flapping on a transient error.
+                if let Some(names) = exts {
+                    self.open_subsonic_extensions = Some(names.into_iter().collect());
+                }
+                Task::none()
+            }
 
             // -----------------------------------------------------------------
             // Data Loading: Albums

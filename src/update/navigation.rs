@@ -709,6 +709,19 @@ impl Nokkvi {
                         },
                         Message::ServerVersionFetched,
                     ),
+                    Task::perform(
+                        {
+                            let shell_for_extensions = shell.clone();
+                            async move {
+                                shell_for_extensions
+                                    .auth()
+                                    .fetch_open_subsonic_extensions()
+                                    .await
+                                    .ok()
+                            }
+                        },
+                        Message::OpenSubsonicExtensionsFetched,
+                    ),
                     // Fetch the multi-library list at login so the nav-bar
                     // trigger knows the count (and hides itself when
                     // N<=1). Persisted active_library_ids was already

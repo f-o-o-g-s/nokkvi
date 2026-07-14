@@ -18,6 +18,35 @@ fn server_version_fetched_updates_state() {
     assert_eq!(app.server_version.as_deref(), Some("0.61.1"));
 }
 
+#[test]
+fn open_subsonic_extensions_fetched_updates_state_and_gates_queue_sync() {
+    let mut app = test_app();
+    assert_eq!(app.open_subsonic_extensions, None);
+    assert!(!app.supports_index_based_queue(), "fail-safe before probe");
+
+    let _ = app.update(crate::app_message::Message::OpenSubsonicExtensionsFetched(
+        Some(vec!["indexBasedQueue".to_string(), "formPost".to_string()]),
+    ));
+
+    assert!(app.supports_index_based_queue());
+
+    // A failed re-probe (None) must not clear an established capability set.
+    let _ = app.update(crate::app_message::Message::OpenSubsonicExtensionsFetched(
+        None,
+    ));
+    assert!(app.supports_index_based_queue(), "None leaves state untouched");
+}
+
+#[test]
+fn open_subsonic_extensions_without_index_queue_stays_gated() {
+    let mut app = test_app();
+    let _ = app.update(crate::app_message::Message::OpenSubsonicExtensionsFetched(
+        Some(vec!["formPost".to_string(), "songLyrics".to_string()]),
+    ));
+    assert!(app.open_subsonic_extensions.is_some());
+    assert!(!app.supports_index_based_queue());
+}
+
 // ============================================================================
 // Settings Escape Priority Chain (views/settings/mod.rs)
 // ============================================================================
@@ -722,6 +751,7 @@ fn seed_session_bound_state(app: &mut crate::Nokkvi) {
         String::new(),
     ));
     app.server_version = Some("0.61.1".into());
+    app.open_subsonic_extensions = Some(std::iter::once("indexBasedQueue".to_string()).collect());
     app.last_queue_current_index = Some(3);
     app.pending_expand.target = Some(pending_album("a1"));
     app.pending_expand.center_only = true;
@@ -789,6 +819,10 @@ fn reset_session_state_clears_all_session_bound_fields() {
     assert!(app.active_playlist_info.is_none());
     assert!(app.playlist_editor.is_none());
     assert!(app.server_version.is_none());
+    assert!(
+        app.open_subsonic_extensions.is_none(),
+        "capability set references the old server — cleared"
+    );
     assert!(app.last_queue_current_index.is_none());
     assert!(app.pending_expand.target.is_none());
     assert!(!app.pending_expand.center_only);
@@ -902,6 +936,7 @@ fn logout_and_session_expired_reach_identical_state() {
     assert_eq_fields!(
         similar_songs_generation,
         server_version,
+        open_subsonic_extensions,
         last_queue_current_index,
     );
     assert_eq!(

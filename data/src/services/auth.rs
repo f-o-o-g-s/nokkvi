@@ -250,6 +250,33 @@ impl AuthService {
         extract_server_version(&body)
             .context("Could not extract Navidrome server version from API response")
     }
+
+    /// Fetch the server's advertised OpenSubsonic extension names via
+    /// `getOpenSubsonicExtensions`.
+    ///
+    /// The endpoint is registered outside Navidrome's auth group
+    /// (unauthenticated per the OpenSubsonic spec); POSTing the credential in
+    /// the form body like every other Subsonic call is harmless. An absent
+    /// `openSubsonicExtensions` field (pre-OpenSubsonic server) deserializes
+    /// to an empty list, never an error.
+    pub async fn fetch_open_subsonic_extensions(&self) -> Result<Vec<String>> {
+        let client = self
+            .client
+            .as_ref()
+            .context("Not authenticated")?
+            .http_client();
+        let inner: OpenSubsonicExtensionsInner =
+            crate::services::api::subsonic::subsonic_get_envelope(
+                &client,
+                &self.server_url,
+                "getOpenSubsonicExtensions",
+                &self.subsonic_credential,
+                &[],
+                "open subsonic extensions",
+            )
+            .await?;
+        Ok(inner.extensions.into_iter().map(|e| e.name).collect())
+    }
 }
 
 /// Inner payload of the Subsonic ping envelope — only the `serverVersion`
@@ -259,6 +286,20 @@ impl AuthService {
 struct PingInner {
     #[serde(rename = "serverVersion")]
     server_version: Option<String>,
+}
+
+/// Inner payload of the `getOpenSubsonicExtensions` envelope. Only the
+/// extension names are consulted; `versions` and any additive fields are
+/// ignored by default serde behavior.
+#[derive(Debug, Deserialize)]
+struct OpenSubsonicExtensionsInner {
+    #[serde(rename = "openSubsonicExtensions", default)]
+    extensions: Vec<OpenSubsonicExtension>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenSubsonicExtension {
+    name: String,
 }
 
 /// Total-tolerant version probe: any parse failure or missing key returns
@@ -294,5 +335,30 @@ mod tests {
     fn test_extract_server_version_missing() {
         let json = r#"{"subsonic-response":{"status":"ok"}}"#;
         assert_eq!(extract_server_version(json), None);
+    }
+
+    #[test]
+    fn open_subsonic_extensions_parse_present() {
+        let json = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","openSubsonicExtensions":[{"name":"indexBasedQueue","versions":[1]},{"name":"formPost","versions":[1]}]}}"#;
+        let envelope: crate::services::api::subsonic::SubsonicEnvelope<
+            OpenSubsonicExtensionsInner,
+        > = serde_json::from_str(json).unwrap();
+        let names: Vec<String> = envelope
+            .response
+            .extensions
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, ["indexBasedQueue", "formPost"]);
+    }
+
+    #[test]
+    fn open_subsonic_extensions_parse_absent_field() {
+        // Pre-OpenSubsonic server: field absent → empty list, never an error.
+        let json = r#"{"subsonic-response":{"status":"ok","version":"1.16.1"}}"#;
+        let envelope: crate::services::api::subsonic::SubsonicEnvelope<
+            OpenSubsonicExtensionsInner,
+        > = serde_json::from_str(json).unwrap();
+        assert!(envelope.response.extensions.is_empty());
     }
 }

@@ -119,6 +119,14 @@ impl AuthGateway {
         let auth_service = self.auth_service.lock().await;
         auth_service.fetch_server_version().await
     }
+
+    /// Fetch the server's advertised OpenSubsonic extension names
+    /// (`getOpenSubsonicExtensions`). Used to gate extension-backed features
+    /// like the `indexBasedQueue` play-queue sync.
+    pub async fn fetch_open_subsonic_extensions(&self) -> Result<Vec<String>> {
+        let auth_service = self.auth_service.lock().await;
+        auth_service.fetch_open_subsonic_extensions().await
+    }
 }
 
 #[cfg(test)]
