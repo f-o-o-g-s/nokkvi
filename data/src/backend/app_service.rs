@@ -9,7 +9,7 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::Result;
 use parking_lot::RwLock;
 use tokio::sync::{Mutex, mpsc::UnboundedReceiver};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     audio::engine::CustomAudioEngine,
@@ -804,6 +804,110 @@ impl AppService {
             QueueVerb::InsertAt(position),
         )
         .await
+    }
+}
+
+/// Outcome summary of a pull-from-server queue restore.
+#[derive(Debug, Clone, Copy)]
+pub struct PullSummary {
+    /// Entries actually restored (0 = nothing saved on the server).
+    pub restored: usize,
+    /// Clamped physical playhead index the queue was anchored on.
+    pub current_index: Option<usize>,
+    /// Server-saved offset into the current track, in milliseconds.
+    pub position_ms: i64,
+}
+
+// === Server queue sync (OpenSubsonic indexBasedQueue) ===
+impl AppService {
+    /// PUSH — serialize the whole ordered song queue to the server via
+    /// `savePlayQueueByIndex` (full replace; one queue per user, each save
+    /// overwrites the previous). Returns the pushed row count.
+    ///
+    /// An empty local queue is refused rather than silently CLEARING the
+    /// server's saved queue (an empty save is a clear, server-side).
+    pub async fn push_queue(&self) -> Result<usize> {
+        // Read the id list + derived playhead in ONE queue-lock snapshot so a
+        // gapless auto-advance can't land between two separate reads.
+        let (ids, current_index): (Vec<String>, Option<usize>) = {
+            let qm_arc = self.queue_service.queue_manager();
+            let qm = qm_arc.lock().await;
+            (qm.song_ids_snapshot(), qm.current_index())
+        };
+        if ids.is_empty() {
+            anyhow::bail!("Queue is empty — nothing to push");
+        }
+        // Position in ms from the ENGINE (u64 ms; a stopped engine reads 0).
+        // The tokio mutex hold is trivially short.
+        let position_ms = {
+            let engine_arc = self.audio_engine();
+            let engine = engine_arc.lock().await;
+            engine.position() as i64
+        };
+        // A None cursor on a non-empty queue is coerced to 0 inside the API
+        // layer (Navidrome range-checks currentIndex on non-empty saves).
+        let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        self.play_queue_api()
+            .await?
+            .save_play_queue_by_index(&id_refs, current_index, position_ms)
+            .await?;
+        info!("🌊 Pushed {} queue rows to the server", ids.len());
+        Ok(ids.len())
+    }
+
+    /// PULL — fetch the server's saved queue, clamp the playhead against the
+    /// actually-returned entries (the server silently drops library-missing
+    /// ids), replace the local queue model, and cue the engine ("cue, don't
+    /// play" — play/pause state is preserved).
+    pub async fn pull_queue(&self) -> Result<PullSummary> {
+        use crate::services::api::play_queue::clamp_pulled_index;
+
+        let pq = self.play_queue_api().await?.get_play_queue_by_index().await?;
+        let Some(pq) = pq else {
+            return Ok(PullSummary {
+                restored: 0,
+                current_index: None,
+                position_ms: 0,
+            });
+        };
+        if pq.entry.is_empty() {
+            return Ok(PullSummary {
+                restored: 0,
+                current_index: None,
+                position_ms: 0,
+            });
+        }
+
+        let clamped = clamp_pulled_index(pq.current_index, pq.entry.len());
+        let restored = pq.entry.len();
+        let position_ms = pq.position.max(0);
+        let current_song_id = clamped.and_then(|i| pq.entry.get(i)).map(|s| s.id.clone());
+
+        // Capture play/pause BEFORE mutating anything.
+        let was_playing = self.playback.engine_is_playing().await;
+
+        // 1. Replace the queue MODEL + reactive playhead; discharge the
+        //    gapless-prep reset obligation against the engine.
+        let effect = self.queue_service.set_queue(pq.entry, clamped).await?;
+        let engine_arc = self.audio_engine();
+        effect.apply_to(&engine_arc).await;
+
+        // 2. Cue the engine: set_queue touched neither the engine source nor
+        //    the navigator — without this, play() would resume the PRE-pull
+        //    song (its non-empty-source early return).
+        if let Some(song_id) = current_song_id {
+            self.playback
+                .cue_pulled_queue(&song_id, position_ms, was_playing)
+                .await?;
+        }
+        info!(
+            "🌊 Pulled {restored} queue rows from the server (index {clamped:?}, {position_ms}ms)"
+        );
+        Ok(PullSummary {
+            restored,
+            current_index: clamped,
+            position_ms,
+        })
     }
 }
 
