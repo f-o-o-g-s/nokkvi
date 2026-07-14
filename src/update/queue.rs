@@ -716,6 +716,78 @@ impl Nokkvi {
                 return self
                     .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
             }
+            QueueAction::PushQueue => {
+                // UI-side empty guard (owner default: block + warn) — an
+                // empty save would CLEAR the server's stored queue. The
+                // backend refuses too (defense-in-depth for the CLI path).
+                if self.library.queue_songs.is_empty() {
+                    self.toast_warn("Queue is empty — nothing to push");
+                    return Task::none();
+                }
+                return self.shell_task(
+                    |shell| async move { shell.push_queue().await },
+                    |result| match result {
+                        Ok(n) => Message::Toast(crate::app_message::ToastMessage::Push(
+                            nokkvi_data::types::toast::Toast::new(
+                                format!("Pushed {n} tracks to server"),
+                                nokkvi_data::types::toast::ToastLevel::Success,
+                            ),
+                        )),
+                        Err(e) => {
+                            if let Some(msg) =
+                                crate::update::components::session_expired_message(&e)
+                            {
+                                return msg;
+                            }
+                            error!(" Queue push failed: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Push failed: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                );
+            }
+            QueueAction::PullQueue => {
+                return self.shell_task(
+                    |shell| async move { shell.pull_queue().await },
+                    |result| match result {
+                        Ok(s) if s.restored == 0 => {
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    "No saved queue on server".to_string(),
+                                    nokkvi_data::types::toast::ToastLevel::Info,
+                                ),
+                            ))
+                        }
+                        // Reload the visible queue buffer AFTER the toast so
+                        // the view picks up the fresh rows + entry_ids.
+                        Ok(s) => Message::Toast(crate::app_message::ToastMessage::PushThen(
+                            nokkvi_data::types::toast::Toast::new(
+                                format!("Pulled {} tracks from server", s.restored),
+                                nokkvi_data::types::toast::ToastLevel::Success,
+                            ),
+                            Box::new(Message::LoadQueue),
+                        )),
+                        Err(e) => {
+                            if let Some(msg) =
+                                crate::update::components::session_expired_message(&e)
+                            {
+                                return msg;
+                            }
+                            error!(" Queue pull failed: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Pull failed: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                );
+            }
             QueueAction::OpenDefaultPlaylistPicker => {
                 return Task::done(Message::DefaultPlaylistPicker(
                     crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,

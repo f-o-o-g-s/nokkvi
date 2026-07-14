@@ -1945,3 +1945,46 @@ fn drag_reorder_destination_uses_live_boundary_effective_center() {
         other => panic!("expected MoveItem, got {other:?}"),
     }
 }
+
+// ============================================================================
+// Server queue sync — push/pull (OpenSubsonic indexBasedQueue)
+// ============================================================================
+
+/// Page-level passthrough: the header buttons' messages map 1:1 onto their
+/// root actions with no page-state side effects.
+#[test]
+fn push_pull_messages_pass_through_to_actions() {
+    let mut page = crate::views::QueuePage::default();
+
+    let (_task, action) = page.update(crate::views::QueueMessage::PushQueue, &[]);
+    assert!(
+        matches!(action, crate::views::QueueAction::PushQueue),
+        "PushQueue passes through, got {action:?}"
+    );
+
+    let (_task, action) = page.update(crate::views::QueueMessage::PullQueue, &[]);
+    assert!(
+        matches!(action, crate::views::QueueAction::PullQueue),
+        "PullQueue passes through, got {action:?}"
+    );
+}
+
+/// Owner default for the empty-queue PUSH edge: block + warn — an empty save
+/// would CLEAR the server's stored queue. The guard fires before any
+/// backend dispatch, so it is observable without an `app_service`.
+#[test]
+fn push_queue_with_empty_queue_warns_and_blocks() {
+    let mut app = test_app();
+    assert!(app.library.queue_songs.is_empty());
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = app.handle_queue(crate::views::QueueMessage::PushQueue);
+
+    assert!(
+        app.toast.toasts.iter().any(|t| {
+            t.level == nokkvi_data::types::toast::ToastLevel::Warning
+                && t.message.contains("nothing to push")
+        }),
+        "empty-queue push warns instead of clearing the server queue"
+    );
+}

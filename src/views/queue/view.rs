@@ -192,6 +192,21 @@ impl QueuePage {
                 }
                 // Trawl door for mouse users — the anchor is the feature's mark.
                 btns.push(HeaderButton::Trawl(QueueMessage::OpenTrawl));
+                // Server queue sync (OpenSubsonic indexBasedQueue): hidden
+                // unless the server advertises the extension, and during
+                // radio (the queue position would be a stream offset).
+                if data.queue_sync_available && !data.is_radio {
+                    btns.push(HeaderButton::Icon(
+                        "assets/icons/arrow-up-to-line.svg",
+                        "Push queue to server",
+                        QueueMessage::PushQueue,
+                    ));
+                    btns.push(HeaderButton::Icon(
+                        "assets/icons/arrow-down-to-line.svg",
+                        "Pull queue from server",
+                        QueueMessage::PullQueue,
+                    ));
+                }
                 // Default-playlist chip is gated by a user setting; when on,
                 // it sits left of the columns dropdown in the trailing region.
                 if data.show_default_playlist_chip {

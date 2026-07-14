@@ -144,6 +144,13 @@ pub struct QueueViewData<'a> {
     pub show_default_playlist_chip: bool,
     /// Current default-playlist display name (empty when no default set).
     pub default_playlist_name: &'a str,
+    /// Whether the server advertises the OpenSubsonic `indexBasedQueue`
+    /// extension — gates the push/pull server-sync header buttons
+    /// (fail-safe hidden until the login-time probe confirms it).
+    pub queue_sync_available: bool,
+    /// Whether radio playback is active — the sync buttons hide during
+    /// radio (the queue snapshot/position would be meaningless).
+    pub is_radio: bool,
     /// Visual slot index where the cross-pane-drag drop indicator should
     /// draw — `Some` only when a drag is active and the cursor is over a
     /// queue slot. The queue view renders a 2 px accent line at the top
@@ -246,6 +253,10 @@ pub enum QueueMessage {
     OpenDefaultPlaylistPicker,
     /// Header anchor button — open the Trawl mix builder.
     OpenTrawl,
+    /// Header button — push the local queue to the server (indexBasedQueue).
+    PushQueue,
+    /// Header button — pull/restore the queue saved on the server.
+    PullQueue,
     /// Pointer entered the read-only playlist context strip — expand its detail
     /// block (hover mode). Handled locally; no root action.
     PlaylistStripHoverEnter,
@@ -307,6 +318,10 @@ pub enum QueueAction {
     OpenDefaultPlaylistPicker,
     /// Header anchor button — open the Trawl mix builder.
     OpenTrawl,
+    /// Push the local queue to the server (savePlayQueueByIndex).
+    PushQueue,
+    /// Pull/restore the queue saved on the server (getPlayQueueByIndex).
+    PullQueue,
     None,
 }
 

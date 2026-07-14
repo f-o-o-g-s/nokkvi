@@ -93,6 +93,8 @@ impl QueuePage {
                 (Task::none(), QueueAction::OpenDefaultPlaylistPicker)
             }
             QueueMessage::OpenTrawl => (Task::none(), QueueAction::OpenTrawl),
+            QueueMessage::PushQueue => (Task::none(), QueueAction::PushQueue),
+            QueueMessage::PullQueue => (Task::none(), QueueAction::PullQueue),
             QueueMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = queue_songs.get(item_index) {
                     use nokkvi_data::utils::formatters::compute_rating_toggle;

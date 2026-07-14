@@ -1388,6 +1388,8 @@ impl Nokkvi {
             },
             show_default_playlist_chip: self.settings.queue_show_default_playlist,
             default_playlist_name: &self.settings.default_playlist_name,
+            queue_sync_available: self.supports_index_based_queue(),
+            is_radio: self.active_playback.is_radio(),
             drop_indicator_slot: self.drop_indicator_slot(),
             // Over-cover visualizer + surfing boat (Scope always; Bars/Lines when
             // placed OverCover), shared with the Radios station-art panel via
