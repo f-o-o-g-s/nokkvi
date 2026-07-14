@@ -861,6 +861,10 @@ impl AppService {
             similar_api,
             crate::services::api::similar::SimilarApiService
         ),
+        (
+            play_queue_api,
+            crate::services::api::play_queue::PlayQueueApiService
+        ),
     );
 }
 

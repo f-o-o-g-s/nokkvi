@@ -10,6 +10,7 @@ pub mod genres;
 pub mod libraries;
 pub(crate) mod pagination;
 pub(crate) mod parse;
+pub mod play_queue;
 pub mod playlists;
 pub mod radios;
 pub mod rating;
