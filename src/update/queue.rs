@@ -719,74 +719,16 @@ impl Nokkvi {
             QueueAction::PushQueue => {
                 // UI-side empty guard (owner default: block + warn) — an
                 // empty save would CLEAR the server's stored queue. The
-                // backend refuses too (defense-in-depth for the CLI path).
+                // backend refuses too (defense-in-depth), and the CLI verb
+                // carries its own structured-error guard.
                 if self.library.queue_songs.is_empty() {
                     self.toast_warn("Queue is empty — nothing to push");
                     return Task::none();
                 }
-                return self.shell_task(
-                    |shell| async move { shell.push_queue().await },
-                    |result| match result {
-                        Ok(n) => Message::Toast(crate::app_message::ToastMessage::Push(
-                            nokkvi_data::types::toast::Toast::new(
-                                format!("Pushed {n} tracks to server"),
-                                nokkvi_data::types::toast::ToastLevel::Success,
-                            ),
-                        )),
-                        Err(e) => {
-                            if let Some(msg) =
-                                crate::update::components::session_expired_message(&e)
-                            {
-                                return msg;
-                            }
-                            error!(" Queue push failed: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Push failed: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
-                );
+                return self.push_queue_task();
             }
             QueueAction::PullQueue => {
-                return self.shell_task(
-                    |shell| async move { shell.pull_queue().await },
-                    |result| match result {
-                        Ok(s) if s.restored == 0 => {
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    "No saved queue on server".to_string(),
-                                    nokkvi_data::types::toast::ToastLevel::Info,
-                                ),
-                            ))
-                        }
-                        // Reload the visible queue buffer AFTER the toast so
-                        // the view picks up the fresh rows + entry_ids.
-                        Ok(s) => Message::Toast(crate::app_message::ToastMessage::PushThen(
-                            nokkvi_data::types::toast::Toast::new(
-                                format!("Pulled {} tracks from server", s.restored),
-                                nokkvi_data::types::toast::ToastLevel::Success,
-                            ),
-                            Box::new(Message::LoadQueue),
-                        )),
-                        Err(e) => {
-                            if let Some(msg) =
-                                crate::update::components::session_expired_message(&e)
-                            {
-                                return msg;
-                            }
-                            error!(" Queue pull failed: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Pull failed: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
-                );
+                return self.pull_queue_task();
             }
             QueueAction::OpenDefaultPlaylistPicker => {
                 return Task::done(Message::DefaultPlaylistPicker(
@@ -1039,5 +981,77 @@ impl Nokkvi {
         match msg {
             QueueLoaderMessage::Loaded(result) => self.handle_queue_loaded(result),
         }
+    }
+}
+
+// === Server queue sync task builders (shared by the header buttons + IPC) ===
+impl Nokkvi {
+    /// Dispatch the async server-queue PUSH with the standard toasts.
+    /// Callers apply their surface's own empty-queue guard first (the header
+    /// arm warns via toast; the CLI verb returns a structured error); the
+    /// backend refuses an empty push regardless, as defense-in-depth.
+    pub(crate) fn push_queue_task(&mut self) -> Task<Message> {
+        self.shell_task(
+            |shell| async move { shell.push_queue().await },
+            |result| match result {
+                Ok(n) => Message::Toast(crate::app_message::ToastMessage::Push(
+                    nokkvi_data::types::toast::Toast::new(
+                        format!("Pushed {n} tracks to server"),
+                        nokkvi_data::types::toast::ToastLevel::Success,
+                    ),
+                )),
+                Err(e) => {
+                    if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                        return msg;
+                    }
+                    error!(" Queue push failed: {e}");
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Push failed: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
+        )
+    }
+
+    /// Dispatch the async server-queue PULL with the standard toasts. A
+    /// successful restore chains `LoadQueue` so the view picks up the fresh
+    /// rows + entry_ids; an empty/absent server queue is an info toast with
+    /// no local change.
+    pub(crate) fn pull_queue_task(&mut self) -> Task<Message> {
+        self.shell_task(
+            |shell| async move { shell.pull_queue().await },
+            |result| match result {
+                Ok(s) if s.restored == 0 => {
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            "No saved queue on server".to_string(),
+                            nokkvi_data::types::toast::ToastLevel::Info,
+                        ),
+                    ))
+                }
+                Ok(s) => Message::Toast(crate::app_message::ToastMessage::PushThen(
+                    nokkvi_data::types::toast::Toast::new(
+                        format!("Pulled {} tracks from server", s.restored),
+                        nokkvi_data::types::toast::ToastLevel::Success,
+                    ),
+                    Box::new(Message::LoadQueue),
+                )),
+                Err(e) => {
+                    if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                        return msg;
+                    }
+                    error!(" Queue pull failed: {e}");
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Pull failed: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
+        )
     }
 }

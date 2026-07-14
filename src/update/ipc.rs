@@ -132,6 +132,13 @@
 //! | `rate`        | act_str   | `{"rating":0..5}`; arg `delta` `"+N"`/`"-N"`    |
 //! |               |           | (delta, clamped 0..=5) or `"0".."5"` absolute. |
 //! |               |           | Same playing-track rules as `love`.            |
+//! | `queue-push`  | act       | `{"dispatched":"push","tracks":N}`; save the    |
+//! |               |           | queue to the server (async — failures toast).  |
+//! |               |           | `unsupported` without indexBasedQueue;          |
+//! |               |           | `unavailable` during radio; `empty_queue`.      |
+//! | `queue-pull`  | act       | `{"dispatched":"pull"}`; restore the server's   |
+//! |               |           | saved queue (cue, don't play). Same guards     |
+//! |               |           | minus the empty-queue one.                     |
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
@@ -597,6 +604,46 @@ define_commands! {
         let task = app.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
         Ok((task, json!({ "rating": new_rating })))
     });
+    // Server queue sync (OpenSubsonic indexBasedQueue) — the queue header's
+    // push/pull pair, exposed headless. Guarded exactly like the buttons
+    // (capability + radio; the CLI has no hidden-button safety), and push
+    // refuses an empty queue (an empty save CLEARS the server's stored copy).
+    // The network round-trip is async, so success means "dispatched" — a
+    // later failure surfaces via the in-window toast, same as the buttons.
+    "queue-push"  => act      (|app: &mut Nokkvi| {
+        guard_queue_sync(app)?;
+        if app.library.queue_songs.is_empty() {
+            return Err(("empty_queue", "queue is empty — nothing to push".to_string()));
+        }
+        let tracks = app.library.queue_songs.len();
+        let task = app.push_queue_task();
+        Ok((task, json!({ "dispatched": "push", "tracks": tracks })))
+    });
+    "queue-pull"  => act      (|app: &mut Nokkvi| {
+        guard_queue_sync(app)?;
+        let task = app.pull_queue_task();
+        Ok((task, json!({ "dispatched": "pull" })))
+    });
+}
+
+/// Shared guard for the queue-sync verbs: the server must advertise the
+/// `indexBasedQueue` extension and radio must be inactive — mirrors the
+/// header buttons' visibility gate (during radio the engine position is a
+/// stream offset, and a pull would fight the radio engine mode).
+fn guard_queue_sync(app: &Nokkvi) -> Result<(), (&'static str, String)> {
+    if !app.supports_index_based_queue() {
+        return Err((
+            "unsupported",
+            "server does not advertise the indexBasedQueue extension".to_string(),
+        ));
+    }
+    if app.active_playback.is_radio() {
+        return Err((
+            "unavailable",
+            "queue sync is not available during radio playback".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Resolve the song id of whatever's currently playing, returning the

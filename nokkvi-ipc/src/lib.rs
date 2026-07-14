@@ -52,7 +52,8 @@
 //!   `view: string` — one of albums/queue/songs/artists/genres/playlists/
 //!   radios/settings), `love` (toggle star on playing track), `rate` (arg
 //!   `delta: string` — `"+N"`/`"-N"` delta or `"0".."5"` absolute on
-//!   playing track).
+//!   playing track), `queue-push` / `queue-pull` (server queue sync via the
+//!   OpenSubsonic indexBasedQueue extension; capability- and radio-gated).
 //!
 //! The full per-verb dispatch catalog lives in `src/update/ipc.rs`.
 

@@ -297,6 +297,9 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         "switch-view",
         "love",
         "rate",
+        // Server queue sync (OpenSubsonic indexBasedQueue)
+        "queue-push",
+        "queue-pull",
         // Navigation
         "nav-up",
         "nav-down",
@@ -715,4 +718,88 @@ fn rate_rejects_empty_delta() {
     let resp = drive_rate_with_song("");
     let err = resp.error.expect("empty delta must error");
     assert_eq!(err.code, "invalid_args");
+}
+
+// ============================================================================
+// Server queue sync — queue-push / queue-pull
+// ============================================================================
+
+/// Without the login-time capability probe confirming `indexBasedQueue`,
+/// both verbs refuse with a structured error (the CLI has no hidden-button
+/// safety, so the gate lives in the verb itself).
+#[test]
+fn queue_sync_verbs_without_capability_return_unsupported() {
+    for verb in ["queue-push", "queue-pull"] {
+        let resp = drive(verb);
+        assert!(resp.data.is_none(), "{verb}: no data on guard failure");
+        let err = resp.error.unwrap_or_else(|| panic!("{verb} must error"));
+        assert_eq!(err.code, "unsupported", "{verb}");
+    }
+}
+
+fn app_with_queue_sync_capability() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.open_subsonic_extensions =
+        Some(std::iter::once("indexBasedQueue".to_string()).collect());
+    app
+}
+
+/// An empty queue push is refused — an empty save would CLEAR the server's
+/// stored queue (owner default: block).
+#[test]
+fn queue_push_with_empty_queue_returns_empty_queue_error() {
+    let mut app = app_with_queue_sync_capability();
+    let (incoming, rx) = make_incoming("queue-push");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire");
+    let err = resp.error.expect("empty push must error");
+    assert_eq!(err.code, "empty_queue");
+}
+
+/// During radio playback both verbs refuse: the engine position is a stream
+/// offset, and a pull would fight the radio engine mode.
+#[test]
+fn queue_sync_verbs_during_radio_return_unavailable() {
+    for verb in ["queue-push", "queue-pull"] {
+        let mut app = app_with_queue_sync_capability();
+        app.active_playback =
+            crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+                station: nokkvi_data::types::radio_station::RadioStation {
+                    id: "r".into(),
+                    name: "n".into(),
+                    stream_url: "u".into(),
+                    home_page_url: None,
+                    cover_art: None,
+                },
+                icy_artist: None,
+                icy_title: None,
+                icy_url: None,
+            });
+        let (incoming, rx) = make_incoming(verb);
+
+        let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+        drop(dispatched);
+
+        let resp = rx.blocking_recv().expect("responder must fire");
+        let err = resp.error.unwrap_or_else(|| panic!("{verb} must error during radio"));
+        assert_eq!(err.code, "unavailable", "{verb}");
+    }
+}
+
+/// With the capability confirmed and no radio, pull dispatches (the network
+/// round-trip is async — the verb echoes "dispatched", not a result).
+#[test]
+fn queue_pull_with_capability_dispatches() {
+    let mut app = app_with_queue_sync_capability();
+    let (incoming, rx) = make_incoming("queue-pull");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire");
+    assert!(resp.error.is_none(), "pull with capability must not error");
+    assert_eq!(resp.data, Some(json!({ "dispatched": "pull" })));
 }
