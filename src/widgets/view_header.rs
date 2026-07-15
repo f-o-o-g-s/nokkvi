@@ -48,12 +48,10 @@ pub(crate) enum HeaderButton<'a, Message> {
     Add(&'static str, Message),
     /// Anchor-icon button opening the Trawl mix builder.
     Trawl(Message),
-    /// Generic `(icon_path, tooltip, on_press)` icon button for one-off
-    /// header actions (e.g. the queue's push/pull server-sync pair) — avoids
-    /// a new variant per icon when no extra semantics ride along.
-    Icon(&'static str, &'static str, Message),
-    /// Arbitrary element rendered between the built-in buttons and the
-    /// search field (e.g. the columns-cog dropdown).
+    /// Arbitrary element rendered between the built-in buttons and the search
+    /// field (e.g. the columns-cog dropdown, or the queue's server-sync
+    /// action-menu button). Pre-styled by its owner; the render loop only
+    /// height-locks and divider-wraps it.
     Trailing(Element<'a, Message>),
 }
 
@@ -269,7 +267,6 @@ pub(crate) fn view_header<
                         HeaderButton::CenterOnPlaying(_) => Some("assets/icons/locate.svg"),
                         HeaderButton::Add(_, _) => Some("assets/icons/plus.svg"),
                         HeaderButton::Trawl(_) => Some("assets/icons/anchor.svg"),
-                        HeaderButton::Icon(path, _, _) => Some(*path),
                         HeaderButton::SortToggle(_) | HeaderButton::Trailing(_) => None,
                     };
                     if let Some(p) = path {
@@ -469,9 +466,6 @@ pub(crate) fn view_header<
                     "Trawl — build a mix",
                     msg,
                 ));
-            }
-            HeaderButton::Icon(path, tooltip_text, msg) => {
-                button_cells.push(header_icon_cell(path, tooltip_text, msg));
             }
             HeaderButton::Trailing(element) => {
                 // External elements (columns dropdown, shuffle button) come

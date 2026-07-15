@@ -88,6 +88,19 @@ fn similar_column_dropdown_state(
     }
 }
 
+/// Sibling of [`column_dropdown_state`] for the Queue view's server-sync action
+/// menu, which uses its own `OpenMenu::QueueSync` variant (queue-only, so no
+/// matching `View` enum value).
+fn queue_sync_menu_state(
+    open_menu: &Option<crate::app_message::OpenMenu>,
+) -> (bool, Option<iced::Rectangle>) {
+    use crate::app_message::OpenMenu;
+    match open_menu {
+        Some(OpenMenu::QueueSync { trigger_bounds }) => (true, Some(*trigger_bounds)),
+        _ => (false, None),
+    }
+}
+
 /// Sibling of [`column_dropdown_state`] for the library selector popover.
 /// Called from `navigation_bar` to feed `(is_open, trigger_bounds)` into
 /// the nav-bar trigger; the paired popover overlay reads the same state.
@@ -1359,6 +1372,7 @@ impl Nokkvi {
     ) -> views::QueueViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Queue);
+        let (sync_menu_open, sync_menu_trigger_bounds) = queue_sync_menu_state(&self.open_menu);
         let (over_art_visualizer, over_art_boat) = self.over_cover_overlays();
         views::QueueViewData {
             queue_songs: self.filter_queue_songs(),
@@ -1390,6 +1404,8 @@ impl Nokkvi {
             default_playlist_name: &self.settings.default_playlist_name,
             queue_sync_available: self.supports_index_based_queue(),
             is_radio: self.active_playback.is_radio(),
+            sync_menu_open,
+            sync_menu_trigger_bounds,
             drop_indicator_slot: self.drop_indicator_slot(),
             // Over-cover visualizer + surfing boat (Scope always; Bars/Lines when
             // placed OverCover), shared with the Radios station-art panel via

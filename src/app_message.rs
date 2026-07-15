@@ -866,6 +866,13 @@ pub enum OpenMenu {
     /// matching `View` variant, so it gets its own discriminator instead of
     /// shoehorning a synthetic `View::Similar` through the rest of the app.
     CheckboxDropdownSimilar { trigger_bounds: iced::Rectangle },
+    /// Queue view's server-sync action menu (push / pull the server-saved
+    /// queue). A close-on-click action dropdown anchored below its header
+    /// trigger; `trigger_bounds` are captured at click time exactly like
+    /// `CheckboxDropdown`. Queue-only, so it gets its own discriminator rather
+    /// than a synthetic `View`. Only appears when the server advertises the
+    /// `indexBasedQueue` extension and radio is inactive.
+    QueueSync { trigger_bounds: iced::Rectangle },
     /// Right-click context menu, anchored to the screen-space cursor position
     /// captured at click time. `id` disambiguates between widget instances
     /// (slot rows, browsing-panel rows, the now-playing strip), which matters

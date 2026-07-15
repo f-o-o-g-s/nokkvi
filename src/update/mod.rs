@@ -357,11 +357,14 @@ impl Nokkvi {
                 // reveal-locks so the toolbar can't sit expanded behind another
                 // app's window. Drop search-input focus where the box unmounts
                 // (see clear_all_search_input_focus) so it can't re-reveal the
-                // header on refocus. Close ONLY the columns-cog dropdown — its
-                // overlay renders from stored trigger bounds independent of the
-                // (now-collapsed) header, so it would otherwise strand visible;
-                // context menus / popovers are left open. A non-empty search
-                // filter (query) is preserved.
+                // header on refocus. Close the header-anchored dropdowns
+                // (columns-cog + the queue server-sync menu) — their overlays
+                // render from stored trigger bounds independent of the
+                // (now-collapsed) header, so they would otherwise strand visible
+                // with autohide off, or (autohide on) re-fire open on refocus
+                // once the reveal-lock re-enables and remounts the trigger with
+                // no user action; context menus / popovers are left open. A
+                // non-empty search filter (query) is preserved.
                 self.set_all_window_focused(false);
                 self.clear_all_toolbar_reveal_locks();
                 // An unfocused Wayland surface stops delivering pointer events,
@@ -374,6 +377,7 @@ impl Nokkvi {
                     Some(
                         crate::app_message::OpenMenu::CheckboxDropdown { .. }
                             | crate::app_message::OpenMenu::CheckboxDropdownSimilar { .. }
+                            | crate::app_message::OpenMenu::QueueSync { .. }
                     )
                 ) {
                     self.open_menu = None;

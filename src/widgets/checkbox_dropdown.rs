@@ -1,15 +1,24 @@
-//! Checkbox Dropdown Widget
+//! Checkbox / Action Dropdown Widget
 //!
-//! Reusable trigger-button + overlay-panel combo for multi-toggle UIs (e.g.
-//! per-column visibility in a view header). Internally manages its open/closed
-//! state, mirroring [`crate::widgets::context_menu`] but with:
+//! The shared header-anchored dropdown chassis: a left-click trigger button that
+//! opens an overlay panel anchored below it (single-active `OpenMenu` mutual
+//! exclusion, Escape / outside-press dismissal, click-time trigger-bounds
+//! anchoring, shadow-halo). It hosts two row families off one widget so the
+//! subtle overlay/dismiss/anchor machinery lives at one site:
 //!
-//! - **Left-click trigger** (vs right-click).
-//! - **Anchored below the trigger** (vs at cursor position).
-//! - **Stays open after item click** (vs closes), so the user can flip several
-//!   toggles in one open.
-//! - Items render with a styled checkbox glyph (the shared
-//!   [`super::checkbox_glyph::element`]) + label.
+//! - **Checkbox rows** (multi-toggle UIs, e.g. per-column visibility): a styled
+//!   checkbox glyph (the shared [`super::checkbox_glyph::element`]) + label. The
+//!   menu **stays open** on click so the user can flip several toggles in one
+//!   open (`close_on_click = false`). See [`checkbox_dropdown`] /
+//!   [`library_selector_popover`].
+//! - **Action rows** (one-shot fire-and-close, e.g. the Queue server-sync
+//!   push/pull menu): a leading action icon + label + optional dim consequence
+//!   subtitle, **no** checkbox glyph. The menu **closes** on click
+//!   (`close_on_click = true`, publishing `on_open_change(None)` alongside the
+//!   row's action). See [`action_dropdown`].
+//!
+//! Mirrors [`crate::widgets::context_menu`] but with a **left-click trigger**
+//! (vs right-click) **anchored below the trigger** (vs at the cursor).
 //!
 //! Two entry points share the same widget chassis (overlay positioning,
 //! escape / click-outside, persisted hover state):
@@ -49,7 +58,8 @@ use crate::{
     theme,
     widgets::{
         menu_constants::{
-            MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child, visible_menu_layout,
+            MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
+            visible_menu_layout,
         },
         menu_dismiss,
     },
@@ -70,6 +80,12 @@ const MAX_NAME_WIDTH: f32 = 220.0;
 /// `MENU_MIN_WIDTH` — only the library selector overrides this.
 const LIBRARY_SELECTOR_WIDTH: f32 = 340.0;
 
+/// Width of the [`action_dropdown`] popover (px). Wider than the column
+/// dropdowns' `MENU_MIN_WIDTH` so a two-line action row's consequence subtitle
+/// ("Replaces the queue saved on the server") fits without ellipsizing; a wider
+/// active font wraps rather than truncates inside this fixed width.
+const ACTION_MENU_WIDTH: f32 = 300.0;
+
 /// One row in the dropdown menu. Single-column rows carry a static label
 /// (used by view-header column dropdowns); two-column rows carry an owned
 /// name + dim right-aligned metadata label (constructed by
@@ -85,6 +101,19 @@ enum DropdownItemData<Key> {
         name: String,
         right_label: String,
         checked: bool,
+    },
+    /// A one-shot ACTION row (not a toggle): a leading action icon + a label +
+    /// an optional dim consequence subtitle. Rendered by [`dropdown_item_action`]
+    /// and used only by [`action_dropdown`], whose widget is built with
+    /// `close_on_click = true` so selecting a row fires its action and closes
+    /// the menu (the checkbox rows stay open across toggles).
+    Action {
+        key: Key,
+        icon: &'static str,
+        label: &'static str,
+        /// Dim second line naming the action's effect; an empty string renders
+        /// no subtitle (keeps the row single-line).
+        subtitle: &'static str,
     },
 }
 
@@ -128,6 +157,61 @@ where
         header: None,
         menu_width: MENU_MIN_WIDTH,
         menu: None,
+        close_on_click: false,
+    }
+}
+
+/// Build an ACTION dropdown anchored to a header trigger icon: a close-on-click
+/// menu of one-shot actions (leading icon + label + optional consequence
+/// subtitle), as opposed to the stay-open checkbox rows of [`checkbox_dropdown`].
+///
+/// Reuses the shared header-anchored-menu chassis (trigger-bounds capture,
+/// single-active `OpenMenu` mutual exclusion, Escape / outside-press dismissal,
+/// shadow-halo anchoring) for a *fire-and-close* menu: each row publishes
+/// `on_select(key)` and the widget additionally publishes `on_open_change(None)`
+/// in the same frame so the menu closes. Used by the Queue view's server-sync
+/// (push / pull) menu.
+///
+/// Precedent: group **two or more related, occasional, consequential** actions
+/// behind one neutral trigger; keep frequent or standalone actions (Refresh,
+/// center-on-playing) as direct header buttons.
+///
+/// Items are `(key, icon_path, label, subtitle)`; pass `""` for `subtitle` to
+/// keep a row single-line.
+pub(crate) fn action_dropdown<'a, Key, Message>(
+    trigger_icon: &'static str,
+    tooltip: &'static str,
+    items: Vec<(Key, &'static str, &'static str, &'static str)>,
+    on_select: impl Fn(Key) -> Message + 'a,
+    on_open_change: impl Fn(Option<Rectangle>) -> Message + 'a,
+    is_open: bool,
+    trigger_bounds: Option<Rectangle>,
+) -> CheckboxDropdown<'a, Key, Message>
+where
+    Key: Copy + 'a,
+    Message: Clone + 'a,
+{
+    let items = items
+        .into_iter()
+        .map(|(key, icon, label, subtitle)| DropdownItemData::Action {
+            key,
+            icon,
+            label,
+            subtitle,
+        })
+        .collect();
+
+    CheckboxDropdown {
+        trigger: trigger_button(trigger_icon, tooltip),
+        items,
+        on_item_toggle: Box::new(on_select),
+        on_open_change: Box::new(on_open_change),
+        is_open,
+        trigger_bounds,
+        header: None,
+        menu_width: ACTION_MENU_WIDTH,
+        menu: None,
+        close_on_click: true,
     }
 }
 
@@ -191,6 +275,7 @@ where
         }),
         menu_width: LIBRARY_SELECTOR_WIDTH,
         menu: None,
+        close_on_click: false,
     }
 }
 
@@ -411,6 +496,73 @@ fn dropdown_item_two_column<'a, Message: Clone + 'a>(
     .into()
 }
 
+/// Render a one-shot ACTION row: leading action icon + label, with an optional
+/// dim consequence subtitle stacked under the label. No checkbox glyph (nothing
+/// is toggled). Same `HoverOverlay(container)` hover chassis as [`dropdown_item`]
+/// so the tint resolves cleanly across themes; the whole row publishes
+/// `on_press` and the widget closes the menu (`close_on_click = true`).
+fn dropdown_item_action<'a, Message: Clone + 'a>(
+    icon: &'static str,
+    label: &str,
+    subtitle: &str,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let icon_svg = crate::embedded_svg::svg_widget(icon)
+        .width(Length::Fixed(MENU_ICON_SIZE))
+        .height(Length::Fixed(MENU_ICON_SIZE))
+        .style(|_theme, _status| svg::Style {
+            color: Some(theme::fg0()),
+        });
+
+    let mut text_col = column![
+        text(label.to_string())
+            .size(MENU_TEXT_SIZE)
+            .font(theme::weighted_ui_font(iced::font::Weight::Medium))
+            .color(theme::fg0()),
+    ]
+    .spacing(2);
+    if !subtitle.is_empty() {
+        text_col = text_col.push(
+            text(subtitle.to_string())
+                .size(MENU_TEXT_SIZE - 2.0)
+                .font(theme::ui_font())
+                .color(theme::fg2()),
+        );
+    }
+
+    let row_content = row![
+        container(icon_svg).align_y(iced::Alignment::Center),
+        text_col,
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center);
+
+    mouse_area(
+        super::hover_overlay::HoverOverlay::new(
+            container(row_content)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: 10.0,
+                    right: 16.0,
+                    top: 6.0,
+                    bottom: 6.0,
+                })
+                .style(|_theme| container::Style {
+                    background: None,
+                    border: iced::Border {
+                        radius: theme::ui_radius_xs(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+        )
+        .border_radius(theme::ui_radius_xs()),
+    )
+    .on_press(on_press)
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into()
+}
+
 /// Build the menu element that floats below the trigger when open. Dispatches
 /// each item to the matching row renderer based on its variant. When `header`
 /// is set, prepends the header row + a 1 px separator above the items.
@@ -454,6 +606,12 @@ where
                 right_label,
                 checked,
             } => dropdown_item_two_column(name, right_label, *checked, on_item_toggle(*key)),
+            DropdownItemData::Action {
+                key,
+                icon,
+                label,
+                subtitle,
+            } => dropdown_item_action(icon, label, subtitle, on_item_toggle(*key)),
         };
         rows.push(row);
     }
@@ -539,6 +697,10 @@ pub struct CheckboxDropdown<'a, Key, Message> {
     menu_width: f32,
     /// Cached menu element, rebuilt each frame the dropdown is open.
     menu: Option<Element<'a, Message>>,
+    /// When `true` (action dropdowns), selecting a row publishes
+    /// `on_open_change(None)` in the same frame the row fires its action, so the
+    /// menu closes on click. Checkbox dropdowns pass `false` and stay open.
+    close_on_click: bool,
 }
 
 /// Tree-state. We still keep `menu_tree` because the overlay's button widgets
@@ -698,6 +860,7 @@ where
                 &*self.on_open_change,
                 self.trigger_bounds,
                 translation,
+                self.close_on_click,
             )
         } else {
             // Drop any cached menu element + reset the persisted tree so the
@@ -745,6 +908,7 @@ fn build_overlay<'a, 'b, Key, Message>(
     on_open_change: &'b dyn Fn(Option<Rectangle>) -> Message,
     trigger_bounds: Option<Rectangle>,
     translation: Vector,
+    close_on_click: bool,
 ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>>
 where
     Key: Copy,
@@ -771,6 +935,7 @@ where
             state,
             on_open_change,
             trigger_bounds: trigger_bounds + translation,
+            close_on_click,
         }))
     })
 }
@@ -784,6 +949,9 @@ struct MenuOverlay<'a, 'b, Message> {
     state: &'b mut State,
     on_open_change: &'b dyn Fn(Option<Rectangle>) -> Message,
     trigger_bounds: Rectangle,
+    /// Action dropdowns (`close_on_click = true`) dismiss on row selection;
+    /// checkbox dropdowns stay open. See [`action_dropdown`].
+    close_on_click: bool,
 }
 
 impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, '_, Message> {
@@ -854,9 +1022,9 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         let menu_layout = visible_menu_layout(layout);
         let menu_bounds = menu_layout.bounds();
 
-        // Forward to menu content so item mouse_areas fire on_press.
-        // Stays open on item click — the user can flip several toggles in
-        // one open.
+        // Forward to menu content so item mouse_areas fire on_press. Checkbox
+        // rows stay open on click (the user can flip several toggles in one
+        // open); action rows are closed just below via `close_on_click`.
         self.menu.as_widget_mut().update(
             &mut self.state.menu_tree,
             event,
@@ -866,6 +1034,31 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
             shell,
             &menu_bounds,
         );
+
+        // Action dropdowns dismiss on selection: the child `mouse_area` above
+        // already published the row's action into `shell` for this press (and
+        // captured the event); publish the close in the same frame so the menu
+        // goes away, then capture so a press that landed on the menu's own
+        // padding (not on a row, so the child never captured) can't also click
+        // through to the view behind. Outside presses were handled by
+        // `handle_dismiss` (deliberately uncaptured so the click can switch to
+        // another menu's trigger), and a press on the trigger never reaches this
+        // overlay — the trigger's own `Widget::update` toggles it. Mirrors the
+        // "publish action then SetOpenMenu(None)" contract of the context-menu /
+        // hamburger action menus. Left-mouse only, matching this dropdown
+        // family's mouse-only trigger-open (`Widget::update`) and outside-dismiss
+        // predicate — no touch backend is wired for any dropdown here, and
+        // Escape dismisses regardless.
+        if self.close_on_click
+            && matches!(
+                event,
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            )
+            && cursor.position_over(menu_bounds).is_some()
+        {
+            shell.publish((self.on_open_change)(None));
+            shell.capture_event();
+        }
     }
 
     fn draw(
@@ -957,6 +1150,47 @@ mod tests {
             |_| "noop".to_string(),
             false,
             None,
+        )
+        .into();
+    }
+
+    #[test]
+    fn action_dropdown_compiles_with_typical_inputs() {
+        // Two close-on-click action rows with leading icon + label + consequence
+        // subtitle — the shape the Queue server-sync (push / pull) menu produces.
+        // The icon-path string literals here are also swept by the
+        // `all_svg_paths_in_source_are_registered` guard, so they double as a
+        // registration check for the sync glyphs.
+        let items: Vec<(usize, &'static str, &'static str, &'static str)> = vec![
+            (
+                0,
+                "assets/icons/arrow-up-to-line.svg",
+                "Push to server",
+                "Replaces the queue saved on the server",
+            ),
+            (
+                1,
+                "assets/icons/arrow-down-to-line.svg",
+                "Pull from server",
+                "Replaces your local queue",
+            ),
+        ];
+        let _el: Element<'_, String> = action_dropdown(
+            "assets/icons/arrow-down-up.svg",
+            "Server queue (push / pull)",
+            items,
+            |key: usize| format!("action-{key}"),
+            |bounds| match bounds {
+                Some(_) => "open".to_string(),
+                None => "close".to_string(),
+            },
+            true,
+            Some(iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: 44.0,
+                height: 50.0,
+            }),
         )
         .into();
     }

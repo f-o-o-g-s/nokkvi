@@ -13,6 +13,7 @@ use iced::{
 
 use super::{QueueContextEntry, QueueMessage, QueuePage, QueueSortMode, QueueViewData};
 use crate::{
+    app_message::OpenMenu,
     views::song_list_pane::{SongListPaneParams, SongListRowEvent, song_list_pane},
     widgets::{
         self,
@@ -20,6 +21,16 @@ use crate::{
         view_header::{HeaderButton, ViewHeaderConfig},
     },
 };
+
+/// The two directions of the Queue view's server-sync action menu. `Copy` so it
+/// satisfies [`crate::widgets::checkbox_dropdown::action_dropdown`]'s
+/// `Key: Copy` bound; mapped to `QueueMessage::PushQueue` / `PullQueue` at the
+/// call site.
+#[derive(Debug, Clone, Copy)]
+enum QueueSyncAction {
+    Push,
+    Pull,
+}
 
 /// Compact height of the read-only playlist "Playing From" banner.
 pub(crate) const PLAYLIST_STRIP_COMPACT_H: f32 = 46.0;
@@ -172,9 +183,13 @@ impl QueuePage {
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).
         let autohide = crate::theme::is_autohide_toolbar();
-        let toolbar_collapsed = self
-            .common
-            .toolbar_collapsed(autohide, data.overlay.column_dropdown_open);
+        // Either header dropdown (columns cog or the server-sync action menu)
+        // holds the auto-hide toolbar revealed while open, so it can't collapse
+        // out from under the overlay.
+        let toolbar_collapsed = self.common.toolbar_collapsed(
+            autohide,
+            data.overlay.column_dropdown_open || data.sync_menu_open,
+        );
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.queue_sort_mode,
@@ -203,20 +218,48 @@ impl QueuePage {
                 }
                 // Trawl door for mouse users — the anchor is the feature's mark.
                 btns.push(HeaderButton::Trawl(QueueMessage::OpenTrawl));
-                // Server queue sync (OpenSubsonic indexBasedQueue): hidden
-                // unless the server advertises the extension, and during
-                // radio (the queue position would be a stream offset).
+                // Server queue sync (OpenSubsonic indexBasedQueue): one neutral
+                // "sync" trigger opening a close-on-click action menu with the
+                // push / pull directions. Hidden unless the server advertises
+                // the extension, and during radio (the queue position would be a
+                // stream offset). Push / Pull are consequential full-replaces, so
+                // the menu's labeled rows + consequence subtitles make the
+                // direction explicit at the moment of choice — vs two near-mirror
+                // arrow buttons one misclick apart. Reuses the columns-cog's
+                // header-anchored dropdown chassis (mutual exclusion, dismissal,
+                // trigger-bounds anchoring) via `action_dropdown`.
                 if data.queue_sync_available && !data.is_radio {
-                    btns.push(HeaderButton::Icon(
-                        "assets/icons/arrow-up-to-line.svg",
-                        "Push queue to server",
-                        QueueMessage::PushQueue,
-                    ));
-                    btns.push(HeaderButton::Icon(
-                        "assets/icons/arrow-down-to-line.svg",
-                        "Pull queue from server",
-                        QueueMessage::PullQueue,
-                    ));
+                    let sync_menu = widgets::checkbox_dropdown::action_dropdown(
+                        "assets/icons/arrow-down-up.svg",
+                        "Server queue (push / pull)",
+                        vec![
+                            (
+                                QueueSyncAction::Push,
+                                "assets/icons/arrow-up-to-line.svg",
+                                "Push to server",
+                                "Replaces the queue saved on the server",
+                            ),
+                            (
+                                QueueSyncAction::Pull,
+                                "assets/icons/arrow-down-to-line.svg",
+                                "Pull from server",
+                                "Replaces your local queue",
+                            ),
+                        ],
+                        |action| match action {
+                            QueueSyncAction::Push => QueueMessage::PushQueue,
+                            QueueSyncAction::Pull => QueueMessage::PullQueue,
+                        },
+                        |rect| match rect {
+                            Some(b) => QueueMessage::SetOpenMenu(Some(OpenMenu::QueueSync {
+                                trigger_bounds: b,
+                            })),
+                            None => QueueMessage::SetOpenMenu(None),
+                        },
+                        data.sync_menu_open,
+                        data.sync_menu_trigger_bounds,
+                    );
+                    btns.push(HeaderButton::Trailing(sync_menu.into()));
                 }
                 // Default-playlist chip is gated by a user setting; when on,
                 // it sits left of the columns dropdown in the trailing region.

@@ -36,6 +36,10 @@ const NAME_MAP: &[(&str, &str)] = &[
         "arrow-down-to-line",
         "assets/icons-phosphor/arrow-line-down-regular.svg",
     ),
+    (
+        "arrow-down-up",
+        "assets/icons-phosphor/arrows-down-up-regular.svg",
+    ),
     ("arrow-up", "assets/icons-phosphor/arrow-up-regular.svg"),
     (
         "arrow-up-to-line",

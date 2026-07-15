@@ -363,12 +363,14 @@ fn unfocused_window_collapses_toolbar_with_open_columns_dropdown() {
 }
 
 #[test]
-fn window_unfocus_closes_columns_dropdown_only() {
-    // The columns-cog dropdown renders from stored trigger bounds independent of
-    // the header, so it must close on unfocus or it strands visible over another
-    // app. Other menus (context menu, library selector, hamburger) are not
-    // toolbar-related and must stay open — closing them on a transient focus
-    // blip (amplified by focus-follows-mouse) would be a regression.
+fn window_unfocus_closes_header_dropdowns_only() {
+    // Header-anchored dropdowns (columns cog + the queue server-sync menu) render
+    // from stored trigger bounds independent of the header, so they must close on
+    // unfocus or they strand visible over another app (and with autohide on,
+    // re-fire open on refocus once the reveal-lock remounts the trigger). Other
+    // menus (context menu, library selector, hamburger) are not toolbar-related
+    // and must stay open — closing them on a transient focus blip (amplified by
+    // focus-follows-mouse) would be a regression.
     let mut app = songs_app();
 
     app.open_menu = Some(crate::app_message::OpenMenu::CheckboxDropdown {
@@ -379,6 +381,17 @@ fn window_unfocus_closes_columns_dropdown_only() {
     assert!(
         app.open_menu.is_none(),
         "columns-cog dropdown closes on unfocus"
+    );
+
+    // The queue server-sync action menu shares the same header-anchored,
+    // stored-bounds chassis and must close on unfocus too.
+    app.open_menu = Some(crate::app_message::OpenMenu::QueueSync {
+        trigger_bounds: iced::Rectangle::default(),
+    });
+    let _ = app.update(crate::app_message::Message::WindowUnfocused);
+    assert!(
+        app.open_menu.is_none(),
+        "queue server-sync menu closes on unfocus"
     );
 
     app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);

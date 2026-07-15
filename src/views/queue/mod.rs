@@ -148,9 +148,18 @@ pub struct QueueViewData<'a> {
     /// extension — gates the push/pull server-sync header buttons
     /// (fail-safe hidden until the login-time probe confirms it).
     pub queue_sync_available: bool,
-    /// Whether radio playback is active — the sync buttons hide during
+    /// Whether radio playback is active — the sync button hides during
     /// radio (the queue snapshot/position would be meaningless).
     pub is_radio: bool,
+    /// Whether the server-sync action menu (push / pull) is open. Driven by
+    /// `Nokkvi.open_menu == Some(OpenMenu::QueueSync { .. })` so the
+    /// single-active overlay-menu machinery enforces mutual exclusion; also fed
+    /// into `toolbar_collapsed` so an open menu holds the auto-hide toolbar
+    /// revealed (same reveal-lock as the columns cog).
+    pub sync_menu_open: bool,
+    /// Trigger bounds captured when the sync menu was opened; the overlay
+    /// anchors below this rectangle.
+    pub sync_menu_trigger_bounds: Option<iced::Rectangle>,
     /// Visual slot index where the cross-pane-drag drop indicator should
     /// draw — `Some` only when a drag is active and the cursor is over a
     /// queue slot. The queue view renders a 2 px accent line at the top
