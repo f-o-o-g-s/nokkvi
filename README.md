@@ -47,6 +47,7 @@ Things that shaped this project:
 - **Trawl** mix builder: gather artist, album, song, genre, and playlist seeds into a crate, then blend them into the queue by round-robin interleave, per-seed weight, or shuffle-all, with length, rating, and track-count filters
 - 23 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, Firmium, Enthroned, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
 - Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling to Last.fm / ListenBrainz — including direct scrobbling of internet-radio streams from their broadcast metadata
+- Sync your play queue to Navidrome and pull it back on another device or a fresh session, resuming at the exact track and position
 - Fully keyboard-driven with configurable shortcuts, MPRIS, optional system tray icon, and right-click menus everywhere
 - Designed on a tiling WM — player bar folds controls into a kebab menu as width shrinks; library views use a **slot-paginated list** (the viewport is a fixed odd number of whole-row slots — never partials) where the slot count adapts to window height (up to 29) and text, album artwork, and star icons scale with each slot
 
