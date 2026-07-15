@@ -94,7 +94,9 @@ fn playlist_strip_needs_top_separator(
 /// `content_width` is the comment's real rendered width (band width minus the
 /// strip padding). Sizing the block to it — and truncating the comment to fit
 /// — keeps a long description from pushing the meta row past the container's
-/// `clip(true)` and vanishing. Short comments still reserve no dead space.
+/// `clip(true)` and vanishing. Short comments still reserve no dead space, and
+/// a description-less playlist (empty or whitespace-only comment) collapses the
+/// block to the meta row alone — no reserved comment line at all.
 /// `ui_font()` is monospace, so the char-count/width estimate is reliable.
 fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
     const LINE_H: f32 = 16.0;
@@ -103,6 +105,15 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
     const ROW_GAP: f32 = 8.0;
     const BOTTOM_PAD: f32 = 9.0;
     const MAX_LINES: f32 = 5.0;
+    // No description (empty or whitespace-only): collapse the phantom comment
+    // line + its 8px gap so the meta row rides up flush under the identity row.
+    // Fulfils this fn's own "reserve no dead space" contract for the one case —
+    // an absent comment — that previously broke it by reserving a blank line.
+    // Only the emptiness *decision* is trimmed; a real comment still renders
+    // verbatim below.
+    if comment.trim().is_empty() {
+        return (String::new(), META_ROW_H + BOTTOM_PAD);
+    }
     let cols = (content_width / CHAR_W).floor().max(1.0);
     let char_count = comment.chars().count();
     let raw_lines = (char_count as f32 / cols).ceil().max(1.0);
@@ -397,7 +408,9 @@ impl QueuePage {
                 PLAYLIST_STRIP_COMPACT_H
             };
 
-            // Body: compact row alone, or compact + fixed-height detail block.
+            // Body: compact row alone, or compact + fixed-height detail block
+            // (comment + meta row, or the meta row alone when there is no
+            // description — see `playlist_strip_detail`).
             let body: Element<'a, QueueMessage> = if expanded {
                 let meta_item =
                     |icon_path: &'static str, label: String| -> Element<'a, QueueMessage> {
@@ -479,12 +492,24 @@ impl QueuePage {
                 });
                 meta_row = meta_row.push(chip);
 
-                let comment_text = iced::widget::text(playlist_comment_display)
-                    .font(crate::theme::ui_font())
-                    .size(12)
-                    .color(crate::theme::fg2());
+                // A description-less playlist collapses the block to the meta row
+                // alone (the helper returned the meta-only height + an empty
+                // display), so the stats ride up flush under the name with no
+                // reserved comment line. The display string is empty iff the
+                // height is meta-only, so keying the branch off `is_empty()` keeps
+                // the rendered structure and `playlist_detail_h` in lockstep.
+                let detail_body: Element<'a, QueueMessage> = if playlist_comment_display.is_empty()
+                {
+                    meta_row.into()
+                } else {
+                    let comment_text = iced::widget::text(playlist_comment_display)
+                        .font(crate::theme::ui_font())
+                        .size(12)
+                        .color(crate::theme::fg2());
+                    column![comment_text, meta_row].spacing(8).into()
+                };
 
-                let detail = container(column![comment_text, meta_row].spacing(8))
+                let detail = container(detail_body)
                     .width(Length::Fill)
                     .height(Length::Fixed(playlist_detail_h))
                     .padding(iced::Padding {
@@ -912,6 +937,9 @@ mod tests {
     const ONE_LINE_H: f32 = 53.0;
     // 5 lines (MAX_LINES): 5*16 + 8 + 20 + 9 = 117.
     const MAX_LINES_H: f32 = 117.0;
+    // No description: the phantom comment line + its 8px gap collapse away, so
+    // the block is just the meta row + bottom pad = 20 + 9 = 29.
+    const META_ONLY_H: f32 = 29.0;
 
     #[test]
     fn short_comment_renders_verbatim_at_one_line() {
@@ -924,10 +952,28 @@ mod tests {
     }
 
     #[test]
-    fn empty_comment_still_reserves_one_line() {
+    fn empty_comment_collapses_to_meta_only() {
+        // A description-less playlist drops the reserved comment line entirely:
+        // no display string, and the block shrinks to the meta row alone so the
+        // hover-expanded banner shows no dead space above the stats.
         let (display, height) = playlist_strip_detail("", 555.0);
         assert_eq!(display, "");
-        assert!((height - ONE_LINE_H).abs() < f32::EPSILON);
+        assert!(
+            (height - META_ONLY_H).abs() < f32::EPSILON,
+            "empty comment collapses to the meta row alone, got {height}"
+        );
+    }
+
+    #[test]
+    fn whitespace_only_comment_collapses_to_meta_only() {
+        // Whitespace-only comments are indistinguishable from empty to a reader,
+        // so they collapse identically — the emptiness decision trims first.
+        let (display, height) = playlist_strip_detail("   \n\t ", 555.0);
+        assert_eq!(display, "");
+        assert!(
+            (height - META_ONLY_H).abs() < f32::EPSILON,
+            "whitespace-only comment collapses to the meta row alone, got {height}"
+        );
     }
 
     #[test]
