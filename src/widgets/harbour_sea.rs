@@ -113,6 +113,18 @@ const CREST_INK_ALPHA: f32 = 0.55;
 const CREST_HALO_ALPHA: f32 = 0.05;
 const CREST_LIGHT_ALPHA: f32 = 0.18;
 const CREST_LIGHT_EDGE: f32 = 0.12;
+/// Day gain for the crest light passes once they render in sun gold —
+/// by day the sun is the scene's declared light source, so the
+/// catch-light and shimmer sweep GILD instead of going invisible
+/// (starlight-on-light measured ~0; day's waterline was a bare ink
+/// line). Gold here is the same `logo_wood()` the sun fan and lantern
+/// glint already draw with — day's one warm hue extended, not a second
+/// warm note; night's passes stay starlight untouched. Keep ≤ 1.0 (the
+/// sweep-stops test's alpha ceiling assumes it).
+// TUNE: drop to 0.7 if gold sweep + gold glint stack loud where the
+// boat crosses the sweep.
+const CREST_LIGHT_GAIN_DAY: f32 = 1.0;
+const _: () = assert!(CREST_LIGHT_GAIN_DAY <= 1.0);
 
 /// Horizontal pixel step between sampled points when drawing the water
 /// polylines. 3 px keeps the Catmull-Rom curve smooth without building
@@ -195,6 +207,32 @@ const AURORA_ALPHA_A: f32 = 0.07;
 const AURORA_ALPHA_B: f32 = 0.05;
 const AURORA_BREATH_DEPTH: f32 = 0.25;
 const AURORA_BREATH_K: f64 = 2.0;
+
+/// Moonbeam shafts — three slanted columns of starlight through the
+/// night water, fanning away from the moon: the lit volume that
+/// retroactively explains every starlight rim below the surface (the
+/// school's catch-rims, the rock and crate rims, the starfish
+/// overprint). Night-only (the aurora precedent) and near-threshold
+/// QUIET by contract: each shaft is two nested gradient quads whose
+/// exposed side-edge alpha steps sit under the ~2/255 banding floor —
+/// you notice the water is LIT, never that rays are drawn. This is the
+/// 0.72–0.86 separator band's FURNITURE budget: nothing else ever SITS
+/// there — rare transients (the serpent) may pass through; see the
+/// `SERPENT_*` docs for that half of the band contract.
+// TUNE: GAIN is the single dial and kill switch (0.0 = delete). Never
+// brighten to "make it visible" — loud god-rays are the kitsch kill
+// vector; the answer to any squint is DOWN.
+const MOONBEAM_GAIN: f32 = 1.0;
+const MOONBEAM_ALPHA_OUTER: f32 = 0.006;
+const MOONBEAM_ALPHA_INNER: f32 = 0.007;
+/// Entry offsets from `MOON_X` — the shafts stay slaved to the moon
+/// consts (moving the moon moves its light). Entries land at
+/// x ≈ 0.24 / 0.33 / 0.44.
+const MOONBEAM_ENTRY_DX: [f32; 3] = [0.09, 0.18, 0.29];
+const MOONBEAM_SEED: u32 = 0xB3A3_0001;
+// The banding floor: exposed steps stay under ~2/255 at full gain.
+const _: () = assert!(MOONBEAM_ALPHA_OUTER * MOONBEAM_GAIN <= 0.0078);
+const _: () = assert!(MOONBEAM_ALPHA_INNER * MOONBEAM_GAIN <= 0.0078);
 
 /// The moon — the owner's circular smiley avatar, themed live (face fill =
 /// starlight, line work = the boat outline's ink; see
@@ -351,6 +389,39 @@ const CREST_SWEEP_FRACTION: f32 = 0.30;
 const CREST_SWEEP_OFF: f32 = 0.55;
 const CREST_SWEEP_HALF_WIDTH: f32 = 0.10;
 
+/// The spiral galaxy — the night sky's rarest event: once in a long
+/// while a faint spiral swirl materializes in the open upper sky and
+/// draws the WHOLE constellation into itself — every star (and the
+/// sparkles, arms and all) streams inward along a tightening spiral
+/// path, holds a breath at the core, then glides back home as the
+/// swirl dissolves. The one sanctioned exception to the sky's
+/// static-positions contract, and only apparently: displaced positions
+/// are a PURE function of (cycle hash, phase) with displacement
+/// exactly zero at both window ends — at every event boundary, and on
+/// every non-event frame, the constellation renders byte-identical to
+/// the fixed field. The moon (the avatar) is never pulled, and the
+/// shooting star skips galaxy cycles so the sky carries one drama at
+/// a time. Night-only.
+// TUNE: CHANCE gates rarity (~once per 5 min at 0.07; 0.0 = none);
+// WINDOW the whole drama (0.70 ≈ 14 s); CONVERGE how tightly the sky
+// collapses; SWIRL the vortex read.
+const GALAXY_CHANCE: f32 = 0.07;
+const GALAXY_WINDOW: f32 = 0.70;
+const GALAXY_SALT: u32 = 0x6A1A_C57A;
+// Max hashed start (0.05 + 0.20) + the window stays inside the cycle.
+const _: () = assert!(0.05 + 0.20 + GALAXY_WINDOW < 1.0);
+/// Infalling stars converge to this fraction of their home radius.
+const GALAXY_CONVERGE: f32 = 0.08;
+/// Swirl gained over a full infall (radians) — the vortex read.
+const GALAXY_SWIRL: f32 = 2.2;
+/// The swirl's own footprint (arm reach, fraction of h) and light.
+const GALAXY_RADIUS_FRAC: f32 = 0.085;
+const GALAXY_CORE_ALPHA: f32 = 0.30;
+const GALAXY_ARM_ALPHA: f32 = 0.12;
+/// Arm rotation over the event (radians) — continuous within the
+/// window; wrap-safety is moot under the zero-end envelope.
+const GALAXY_ROT_RAD: f32 = 1.6;
+
 /// Shooting star — a rare streak across the upper sky. Timing, start
 /// point, and heading all hash the CYCLE COUNTER, so no two cycles replay
 /// the same streak (the fix for the identical-loop objection that got the
@@ -365,6 +436,34 @@ const SHOOT_TRAVEL_FRAC: f32 = 0.35;
 const SHOOT_LEN_FRAC: f32 = 0.20;
 const SHOOT_ALPHA: f32 = 0.7;
 
+/// Sun glitter — day's twinkle vocabulary, on the water where day
+/// light actually lives: a sparse fixed field of tiny gold dashes
+/// riding the front waterline under the sun's azimuth, each flashing
+/// briefly on its own integer rate. The ^4 brightness profile keeps
+/// flashes spiky-and-rare (glitter statistics, not blinking — the
+/// sky's twinkle-retune lesson). Day-only; gold is LIGHT, never dialed
+/// by border_opacity.
+// TUNE: COUNT/ALPHA set the lane's presence. If the gilt crest +
+// glitter combo reads busy, thin COUNT before dimming ALPHA. 0.0
+// alpha = none.
+const GLITTER_COUNT: usize = 8;
+const GLITTER_ALPHA: f32 = 0.30;
+const GLITTER_SEED: u32 = 0x501A_D115;
+
+/// Distant sail — day's rare event (night keeps the shooting star):
+/// some cycles a tiny hazed ink sail crosses the back parallax swell,
+/// always running toward panel center, riding the far swell's own
+/// heave. A fraction of the hero sprite by construction; the first cut
+/// on any "two ships" owner verdict.
+// TUNE: CHANCE·DUR ≈ the on-screen fraction of day cycles (~7% as
+// shipped — a luck moment, not a shipping lane). 0.0 chance = none.
+const SAIL_CHANCE: f32 = 0.25;
+const SAIL_DUR: f32 = 0.30;
+const SAIL_ALPHA: f32 = 0.35;
+const SAIL_SALT: u32 = 0x5A11_D157;
+// Max hashed start (0.08 + 0.30) + the window stays inside the cycle.
+const _: () = assert!(0.08 + 0.30 + SAIL_DUR < 1.0);
+
 /// Leaping fish — occasionally the trawl stirs one up: a small ink
 /// silhouette arcs out of the water and dives back. Cycle-hashed position
 /// and appearance chance; drawn under the boat layer, dialed by
@@ -376,6 +475,130 @@ const FISH_OFF: f32 = 0.30;
 const FISH_JUMP_FRAC: f32 = 0.10;
 const FISH_SIZE: f32 = 13.0;
 const FISH_ALPHA: f32 = 0.55;
+
+/// Bubbles — the drag aerates the bed: a sparse pool of riders climbs
+/// from the trawled anchor, swaying as they rise, fading in at birth
+/// and out before the top of the run (alpha zero at both ends — the
+/// riser contract, so the loop wrap never shows). The larger ones draw
+/// as stroked rings, the small ones as flecks. A second, slower seep
+/// rises from each kelp root. History: the seabed's first ship carried
+/// data-bound "treasure gems" the anchor kindled; on sight the owner
+/// read them as fallen stars and retired the metaphor — what the scene
+/// actually wanted was more LIFE at the bottom, and the one kicked-up
+/// mote (read as a bubble) was the keeper. This is that mote,
+/// densified into the bed's breath.
+// TUNE: COUNT/ALPHA set the stream's presence; RISE_FRAC the climb;
+// RING_FRACTION how many draw as rings.
+const BUBBLE_COUNT: usize = 7;
+const BUBBLE_ALPHA: f32 = 0.38;
+const BUBBLE_RISE_FRAC: f32 = 0.16;
+const BUBBLE_SWAY_PX: f32 = 3.0;
+const BUBBLE_RING_FRACTION: f32 = 0.35;
+const BUBBLE_FADE_IN: f32 = 0.15;
+const BUBBLE_FADE_OUT: f32 = 0.25;
+const BUBBLE_SEED: u32 = 0x00B0_BB1E;
+/// Kelp-root seep: rise fraction and the fleck's base radius factor.
+const SEEP_RISE_FRAC: f32 = 0.11;
+const SEEP_ALPHA: f32 = 0.30;
+
+/// The Deep Passage — some cycles Jörmungandr glides once through the
+/// deep lane beneath the trawl: a firmly-inked undulating body with a
+/// wedge head, exactly three tail-beats, then gone. All randomness
+/// (timing, depth, heading) hashes the cycle counter; the window sits
+/// fully inside the cycle and the envelope is zero at both ends. The
+/// mid-water school draws in FRONT of it (depth) and the anchor sprite
+/// rides the layer above the canvas — deference to the focal chain is
+/// structural. Ink is committed (the whale lesson: soft = invisible);
+/// night adds a starlight dorsal catch-rim (the school's rim lesson at
+/// scale). A rare TRANSIENT may cross the protected 0.72–0.86
+/// separator band — furniture may not sit there, events may pass
+/// through.
+// TUNE: CHANCE gates rarity (~1 passage per 2+ min expected at 0.15;
+// 0.0 = none); WINDOW the traverse duration (0.18 ≈ 3.6 s). If the
+// owner reads "worm", widen the head wedge half-base 2.6 → 3.2 first.
+const SERPENT_CHANCE: f32 = 0.15;
+const SERPENT_WINDOW: f32 = 0.18;
+const SERPENT_ALPHA: f32 = 0.52;
+const SERPENT_RIM_ALPHA: f32 = 0.30;
+/// The glide lane: hashed depth spans `LANE_TOP..LANE_TOP + LANE_SPAN`
+/// (fractions of h), with ~0.02h of undulation headroom below it.
+const SERPENT_LANE_TOP: f32 = 0.78;
+const SERPENT_LANE_SPAN: f32 = 0.06;
+// Max hashed start (0.06 + 0.72) + the window stays inside the cycle.
+const _: () = assert!(0.06 + 0.72 + SERPENT_WINDOW < 1.0);
+// The lane sits below the school band and above the bubble origin at
+// 0.955h (undulation headroom included).
+const _: () = assert!(SCHOOL_BAND_BOTTOM < SERPENT_LANE_TOP);
+const _: () = assert!(SERPENT_LANE_TOP + SERPENT_LANE_SPAN + 0.02 < 0.955);
+
+/// Drifting school — small ink fish gliding through the mid-water, the
+/// swimming counterpart of the rare leaping fish (which keeps its
+/// rarity; the school is ambient). The band sits BELOW the deepest wave
+/// trough (front crest y bottoms out at ~0.638h) so a drifter can never
+/// fly in air, and above the bed so the floor keeps its own layer.
+/// Night legibility: dark ink drowns in the dark deep, so each fish
+/// carries a faint starlight catch-rim along its back — moonlight
+/// through water — the crisp-core-plus-halo grammar at minimum form.
+// TUNE: count/alpha set presence; RIM_ALPHA the night moonlight.
+const SCHOOL_COUNT: usize = 3;
+const SCHOOL_ALPHA: f32 = 0.50;
+const SCHOOL_BAND_TOP: f32 = 0.65;
+const SCHOOL_BAND_BOTTOM: f32 = 0.72;
+const SCHOOL_MARGIN_PX: f32 = 26.0;
+const SCHOOL_RIM_ALPHA: f32 = 0.30;
+const SCHOOL_SEED: u32 = 0x0005_C001;
+
+/// Kelp — beds of fronds along the floor, swaying on slow integer-rate
+/// sines (wrap-safe): clusters on both flanks plus a couple of shorter
+/// loners toward the middle, each with its own height so the beds read
+/// as growth, not a fence. Ink by day, a dim seafoam by night (dark ink
+/// on the night bed would vanish — the same lesson as the school's
+/// rim). The anchor drags PAST the mid fronds — it draws on the layer
+/// above, which reads as the tackle brushing through the weed.
+// TUNE: SWAY_PX = tip travel; alphas per mode; roots/heights in
+// `kelp_params`.
+const KELP_ALPHA_DAY: f32 = 0.40;
+const KELP_ALPHA_NIGHT: f32 = 0.22;
+const KELP_SWAY_PX: f32 = 7.0;
+const KELP_SEED: u32 = 0xCE1F;
+
+/// Bed dressing — static ink furniture grounding the floor: low rock
+/// mounds and one resting starfish, each with a faint starlight rim at
+/// night (moonlit tops; plain ink silhouettes vanish on the night bed).
+/// Deliberately motionless — rocks don't move, and the still floor is
+/// what makes the fish, kelp, and bubbles read as ALIVE against it.
+// TUNE: counts/alphas; reseed BED_SEED to re-deal the arrangement.
+const ROCK_COUNT: usize = 3;
+const BED_INK_ALPHA: f32 = 0.50;
+const BED_RIM_ALPHA: f32 = 0.14;
+const STARFISH_ARM_PX: f32 = 5.0;
+const BED_SEED: u32 = 0x0BED;
+
+/// Sunken cargo crate — the bed's one mid-size landmark, answering the
+/// owner's ask ("crates at the bottom") in the readable-solid-object
+/// class. Settled at a tilt on the open right bed (the audit's
+/// emptiest zone, right-balancing the moon's upper-left weight),
+/// half-buried, STATIC on the rocks' stillness contract. Straight
+/// edges + the night starlight rim say "crate, not rock" through
+/// GEOMETRY; every value stays at or under the bed ink ceiling so the
+/// trawled anchor remains the loudest resident of the floor. Placement
+/// is a deliberate composition decision (fixed consts, the
+/// kelp-root-table pattern), not a scatter.
+// TUNE: SIZE_PX sets the landmark scale (rocks are ~9 px tall; keep
+// well under the anchor sprite); TILT the settled read; RIM_ALPHA has
+// headroom to 0.18 before it competes with the school's 0.30 catch-rim.
+const CRATE_X: f32 = 0.78;
+const CRATE_SIZE_PX: f32 = 19.0;
+const CRATE_TILT_DEG: f32 = -9.0;
+const CRATE_SLAT_ALPHA: f32 = 0.30;
+const CRATE_RIM_ALPHA: f32 = 0.15;
+const _: () = assert!(CRATE_RIM_ALPHA <= 0.18);
+const _: () = assert!(CRATE_SLAT_ALPHA <= BED_INK_ALPHA);
+// The open right-bed lane: inside the audit's empty zone, clear of the
+// 0.68 kelp loner's sway reach. (Starfish clearance is runtime — it is
+// dealt from BED_SEED — and lives in the tests.)
+const _: () = assert!(0.70 <= CRATE_X && CRATE_X <= 0.88);
+const _: () = assert!(CRATE_X - 0.68 >= 0.06);
 
 /// What a sky glyph draws as. Music glyphs are NOT constellation members —
 /// they wander (a transient per-cycle pass in the draw, never twice in the
@@ -587,6 +810,69 @@ fn draw_gull(frame: &mut canvas::Frame, center: Point, s: f32, flap: f32, color:
     }
 }
 
+/// One moonbeam shaft. `entry_dx` is the fixed offset from `MOON_X`
+/// where the shaft enters the water; breath and sway loop on integer
+/// rates (wrap-safe).
+#[derive(Debug, Clone, Copy)]
+struct MoonbeamParam {
+    entry_dx: f32,
+    k_breath: u32,
+    off_breath: f32,
+    k_sway: u32,
+    off_sway: f32,
+}
+
+/// Deal the shafts — the kelp fixed-table × stream-jitter pattern. The
+/// breath offsets are staggered by construction (i·0.33 + jitter) so
+/// the three shafts never pulse together; `.min(1.999)` guards
+/// xorshift's inclusive 1.0 so the integer rates stay in 1..=2.
+fn moonbeam_params() -> Vec<MoonbeamParam> {
+    let mut rng = MOONBEAM_SEED;
+    MOONBEAM_ENTRY_DX
+        .into_iter()
+        .enumerate()
+        .map(|(i, entry_dx)| MoonbeamParam {
+            entry_dx,
+            k_breath: 1 + ((xorshift(&mut rng) * 2.0).min(1.999)) as u32,
+            off_breath: i as f32 * 0.33 + 0.2 * xorshift(&mut rng),
+            k_sway: 1 + ((xorshift(&mut rng) * 2.0).min(1.999)) as u32,
+            off_sway: xorshift(&mut rng),
+        })
+        .collect()
+}
+
+/// One dash of the day's sun glitter. `x` is a width fraction packed
+/// toward the sun's azimuth; `depth_px` sits the dash just under the
+/// crest ink; the flash loops on an integer rate (wrap-safe).
+#[derive(Debug, Clone, Copy)]
+struct GlitterParam {
+    x: f32,
+    depth_px: f32,
+    len: f32,
+    k: u32,
+    off: f32,
+}
+
+/// Deal the glitter lane — deterministic, const-seeded. The `powf(1.6)`
+/// packs the dashes under the sun (at `MOON_X` 0.15) and thins them
+/// toward mid-panel; `.min(5)` clamps xorshift's inclusive 1.0 so `k`
+/// stays in 6..=11.
+fn glitter_params() -> Vec<GlitterParam> {
+    let mut rng = GLITTER_SEED;
+    (0..GLITTER_COUNT)
+        .map(|_| {
+            let r = xorshift(&mut rng);
+            GlitterParam {
+                x: 0.03 + 0.52 * r.powf(1.6),
+                depth_px: 1.5 + 2.5 * xorshift(&mut rng),
+                len: 2.5 + 2.0 * xorshift(&mut rng),
+                k: 6 + ((xorshift(&mut rng) * 6.0) as u32).min(5),
+                off: xorshift(&mut rng),
+            }
+        })
+        .collect()
+}
+
 /// Hash a `(cycle, salt)` pair into `[0, 1)` — the deterministic dice the
 /// rare events (shooting star, fish) roll once per sea cycle. Three
 /// xorshift rounds decorrelate consecutive cycle values; the multiply-mix
@@ -602,6 +888,58 @@ fn hash01(cycle: u32, salt: u32) -> f32 {
         s ^= s << 5;
     }
     (s as f32) / (u32::MAX as f32)
+}
+
+/// Hermite smoothstep on `[e0, e1]` — the galaxy event's easing brick.
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Pull strength over the galaxy event: ease in, hold near 1 through
+/// the middle, ease out — EXACTLY zero at both window ends, which is
+/// what lets the constellation's static-positions contract survive the
+/// event boundary (stars are bit-identically home when the window
+/// opens and closes).
+fn galaxy_pull(p: f32) -> f32 {
+    smoothstep(0.0, 0.35, p) * (1.0 - smoothstep(0.65, 1.0, p))
+}
+
+/// The swirl's own visual envelope — wider than the pull, so the
+/// galaxy fades in BEFORE the sky starts to move and lingers while the
+/// stars settle home. Zero at both ends.
+fn galaxy_env(p: f32) -> f32 {
+    smoothstep(0.0, 0.15, p) * (1.0 - smoothstep(0.85, 1.0, p))
+}
+
+/// This cycle's galaxy center as width/height fractions — hashed into
+/// the open upper-right sky, structurally clear of the moon at
+/// (`MOON_X`, `MOON_Y`) and inside the sky band.
+fn galaxy_center(cycle: u32) -> (f32, f32) {
+    (
+        0.52 + 0.30 * hash01(cycle, GALAXY_SALT ^ 0x0C31),
+        0.09 + 0.13 * hash01(cycle, GALAXY_SALT ^ 0x0C32),
+    )
+}
+
+/// Displace a sky glyph toward the galaxy along a tightening spiral:
+/// radius shrinks toward `GALAXY_CONVERGE` of home while the angle
+/// gains up to `GALAXY_SWIRL`. At `pull <= 0` this returns `home`
+/// EXACTLY (early return — no atan2 round-trip error), which is the
+/// bit-identical-boundary guarantee the const docs promise.
+fn galaxy_displace(home: Point, galaxy: Point, pull: f32) -> Point {
+    if pull <= 0.0 {
+        return home;
+    }
+    let dx = home.x - galaxy.x;
+    let dy = home.y - galaxy.y;
+    let r = (dx * dx + dy * dy).sqrt();
+    if r <= f32::EPSILON {
+        return home;
+    }
+    let theta = dy.atan2(dx) + pull * GALAXY_SWIRL;
+    let r2 = r * (1.0 - pull * (1.0 - GALAXY_CONVERGE));
+    Point::new(galaxy.x + theta.cos() * r2, galaxy.y + theta.sin() * r2)
 }
 
 /// One rising note's fixed parameters (the per-frame position falls out of
@@ -633,6 +971,203 @@ fn riser_params() -> Vec<RiserParam> {
             beamed: xorshift(&mut rng) < 0.5,
         })
         .collect()
+}
+
+/// One rising bubble of the anchor's stream. Fixed pool, dealt once
+/// from `BUBBLE_SEED`; per-frame position falls out of the phase (the
+/// riser contract).
+#[derive(Debug, Clone, Copy)]
+struct BubbleParam {
+    /// Integer rises per sea cycle (wrap-safety).
+    k: u32,
+    /// Phase offset staggering the stream.
+    off: f32,
+    /// Horizontal offset from the anchor, in glyph-scale pixels.
+    dx: f32,
+    /// Unit radius scale.
+    size: f32,
+    /// Sway phase offset.
+    sway_off: f32,
+    /// `true` = stroked ring (the big ones), `false` = filled fleck.
+    ring: bool,
+}
+
+/// Deal the bubble pool. Alternating rise rates (2 or 3 per cycle) keep
+/// the stream from synchronizing into a volley — the riser rule.
+fn bubble_params() -> Vec<BubbleParam> {
+    let mut rng = BUBBLE_SEED;
+    (0..BUBBLE_COUNT)
+        .map(|i| BubbleParam {
+            k: 2 + (i as u32 % 2),
+            off: xorshift(&mut rng),
+            dx: (xorshift(&mut rng) - 0.5) * 22.0,
+            size: 0.6 + xorshift(&mut rng) * 0.7,
+            sway_off: xorshift(&mut rng),
+            ring: xorshift(&mut rng) < BUBBLE_RING_FRACTION,
+        })
+        .collect()
+}
+
+/// One drifter of the mid-water school. Same glide contract as the day
+/// scene's gulls: integer crossings per cycle over an off-panel margin.
+#[derive(Debug, Clone, Copy)]
+struct SchoolFishParam {
+    x0: f32,
+    y: f32,
+    k: u32,
+    leftward: bool,
+    size: f32,
+    bob_k: u32,
+    bob_off: f32,
+}
+
+/// Deal the school — deterministic, const-seeded, gull rules underwater.
+fn school_params() -> Vec<SchoolFishParam> {
+    let mut rng = SCHOOL_SEED;
+    (0..SCHOOL_COUNT)
+        .map(|_| SchoolFishParam {
+            x0: xorshift(&mut rng),
+            y: SCHOOL_BAND_TOP + xorshift(&mut rng) * (SCHOOL_BAND_BOTTOM - SCHOOL_BAND_TOP),
+            k: 1 + (xorshift(&mut rng) * 2.0) as u32,
+            leftward: xorshift(&mut rng) < 0.5,
+            size: 0.8 + xorshift(&mut rng) * 0.4,
+            bob_k: 2 + (xorshift(&mut rng) * 3.0) as u32,
+            bob_off: xorshift(&mut rng),
+        })
+        .collect()
+}
+
+/// One kelp frond. `x` is the root as a width fraction; `height` a
+/// scene-height fraction; sway loops on an integer rate (wrap-safe);
+/// `lean` is a static tip bias in glyph-scale pixels so the fronds
+/// don't all stand at attention. `seep_k`/`seep_off` drive the slow
+/// bubble seeping from the root.
+#[derive(Debug, Clone, Copy)]
+struct KelpParam {
+    x: f32,
+    height: f32,
+    sway_k: u32,
+    sway_off: f32,
+    lean: f32,
+    seep_k: u32,
+    seep_off: f32,
+}
+
+/// Deal the kelp beds — a cluster on each flank plus two shorter loners
+/// toward the middle (fixed roots × height factors; jitter from the
+/// stream). The variety is what makes the beds read as growth.
+fn kelp_params() -> Vec<KelpParam> {
+    let mut rng = KELP_SEED;
+    [
+        (0.035_f32, 1.0_f32),
+        (0.075, 1.2),
+        (0.115, 0.8),
+        (0.30, 0.55),
+        (0.68, 0.6),
+        (0.91, 1.1),
+        (0.955, 0.75),
+    ]
+    .into_iter()
+    .map(|(base, tall)| KelpParam {
+        x: base + 0.015 * (xorshift(&mut rng) - 0.5),
+        height: (0.14 + 0.05 * xorshift(&mut rng)) * tall,
+        sway_k: 1 + (xorshift(&mut rng) * 2.0) as u32,
+        sway_off: xorshift(&mut rng),
+        lean: (xorshift(&mut rng) - 0.5) * 6.0,
+        seep_k: 1 + (xorshift(&mut rng) * 2.0) as u32,
+        seep_off: xorshift(&mut rng),
+    })
+    .collect()
+}
+
+/// One rock mound of the bed dressing. `x` a width fraction; `w`/`ht`
+/// unit scales for the dome's pixel base.
+#[derive(Debug, Clone, Copy)]
+struct RockParam {
+    x: f32,
+    w: f32,
+    ht: f32,
+}
+
+/// The bed's static furniture: rock mounds plus one resting starfish
+/// (position, rotation, arm scale). One seed stream deals everything,
+/// so the arrangement is identical every frame and launch.
+#[derive(Debug, Clone)]
+struct BedDressing {
+    rocks: Vec<RockParam>,
+    star_x: f32,
+    star_rot: f32,
+    star_size: f32,
+}
+
+/// Deal the bed dressing — deterministic, const-seeded. Rocks spread
+/// across the middle of the lane; the starfish rests near (but off)
+/// them.
+fn bed_dressing() -> BedDressing {
+    let mut rng = BED_SEED;
+    let rocks = (0..ROCK_COUNT)
+        .map(|_| RockParam {
+            x: 0.15 + 0.60 * xorshift(&mut rng),
+            w: 0.7 + 0.6 * xorshift(&mut rng),
+            ht: 0.55 + 0.45 * xorshift(&mut rng),
+        })
+        .collect();
+    BedDressing {
+        rocks,
+        star_x: 0.78 + 0.12 * xorshift(&mut rng),
+        star_rot: xorshift(&mut rng) * std::f32::consts::TAU,
+        star_size: 0.85 + 0.3 * xorshift(&mut rng),
+    }
+}
+
+/// Fill a resting starfish: a fat five-arm star polygon (alternating
+/// outer/inner vertices, inner at 0.55 of the arm) lying flat on the
+/// bed. Chunky arms keep it unmistakably a CREATURE — the sky's stars
+/// are dots, so the silhouettes never collide.
+fn fill_starfish(frame: &mut canvas::Frame, center: Point, arm: f32, rot: f32, color: Color) {
+    use std::f32::consts::TAU;
+    let star = canvas::Path::new(|b| {
+        for i in 0..10 {
+            let ang = rot + i as f32 * (TAU / 10.0) - TAU / 4.0;
+            let rad = if i % 2 == 0 { arm } else { 0.55 * arm };
+            let p = Point::new(center.x + ang.cos() * rad, center.y + ang.sin() * rad);
+            if i == 0 {
+                b.move_to(p);
+            } else {
+                b.line_to(p);
+            }
+        }
+        b.close();
+    });
+    frame.fill(&star, color);
+}
+
+/// Fill the fish silhouette — teardrop body + notched tail — at the
+/// current frame origin, `l` px long, nose toward +x when `dir` is
+/// `1.0` (pass `-1.0` to mirror). Shared by the rare leaping fish and
+/// the drifting school so the two can never drift apart in shape.
+fn fill_fish_silhouette(frame: &mut canvas::Frame, l: f32, dir: f32, color: Color) {
+    let body = canvas::Path::new(|b| {
+        b.move_to(Point::new(dir * -0.50 * l, 0.0));
+        b.quadratic_curve_to(
+            Point::new(dir * -0.10 * l, -0.35 * l),
+            Point::new(dir * 0.45 * l, 0.0),
+        );
+        b.quadratic_curve_to(
+            Point::new(dir * -0.10 * l, 0.35 * l),
+            Point::new(dir * -0.50 * l, 0.0),
+        );
+        b.close();
+    });
+    let tail = canvas::Path::new(|b| {
+        b.move_to(Point::new(dir * -0.45 * l, 0.0));
+        b.line_to(Point::new(dir * -0.78 * l, -0.24 * l));
+        b.line_to(Point::new(dir * -0.70 * l, 0.0));
+        b.line_to(Point::new(dir * -0.78 * l, 0.24 * l));
+        b.close();
+    });
+    frame.fill(&body, color);
+    frame.fill(&tail, color);
 }
 
 /// Gradient stops for the crest shimmer sweep: a triangular brightness
@@ -784,6 +1319,12 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
 ) -> Element<'a, M> {
     use iced::widget::{column, container, stack};
 
+    // The bubble stream's source, snapshotted as a scalar so the `Copy`
+    // scene closure can capture it. `trawled_anchor_x` is the SAME
+    // source `boat_overlay` places the anchor sprite at — one method,
+    // no drift.
+    let anchor_x = boat.trawled_anchor_x(TRAIL_OFFSET);
+
     // The scene's layer stack at known pixel dimensions. A `Copy` closure
     // (all captures are shared refs / scalars) so both mode arms — and the
     // square arm's NESTED responsive — can each take their own copy.
@@ -803,6 +1344,7 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
             phase: sea_phase,
             cycle: sea_cycle,
             boat_x: boat.x_ratio,
+            anchor_x,
         })
         .width(Length::Fixed(w))
         .height(Length::Fixed(h));
@@ -899,6 +1441,11 @@ struct SeaCanvas<'a> {
     /// rising notes to the hull. May exceed `[0, 1]` in the wrap margin;
     /// the boat-coupled passes gate on that.
     boat_x: f32,
+    /// The trawled anchor's x (from `BoatState::trawled_anchor_x` — the
+    /// same source the sprite is placed at). The bubble stream's source;
+    /// roams the wrap margin like `boat_x`, so the bubble pass
+    /// edge-fades on it.
+    anchor_x: f32,
 }
 
 impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
@@ -1176,6 +1723,78 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         if !day {
             aurora_ribbon(0.10, 0.012, 0.12, 1.4, 1.0, 0.0, aurora_a, AURORA_ALPHA_A);
             aurora_ribbon(0.17, 0.010, 0.09, 2.1, 2.0, 2.4, aurora_b, AURORA_ALPHA_B);
+
+            // (6) Moonbeam shafts — appended here so gradient block A
+            // stays contiguous (zero new buffer splits); everything
+            // solid (school, kelp, bubbles, crest, boat) draws over the
+            // shafts, so the scene swims THROUGH the light. Each shaft
+            // continues the moon→entry ray downward, breathing and
+            // swaying on integer rates; the top zero-stop anchors to
+            // the deepest possible trough so no lit air ever shows
+            // above a passing wave.
+            if MOONBEAM_GAIN > 0.0 {
+                let beam_top = (1.0 - (SEA_DC - SWELL_AMP - RIPPLE_AMP) as f32) * h;
+                let peak_y = SEA_BED_TOP * h;
+                let bot_y = 0.92 * h;
+                let peak_frac = (peak_y - beam_top) / (bot_y - beam_top);
+                for beam in moonbeam_params() {
+                    let breath = 0.72
+                        + 0.28
+                            * (std::f32::consts::TAU
+                                * (beam.k_breath as f32 * phase + beam.off_breath))
+                                .sin();
+                    let sway = 0.006
+                        * w
+                        * (std::f32::consts::TAU * (beam.k_sway as f32 * phase + beam.off_sway))
+                            .sin();
+                    let top_cx = (MOON_X + beam.entry_dx) * w + sway;
+                    let dx_per_dy = (beam.entry_dx * w) / (beam_top - MOON_Y * h);
+                    let dx = (dx_per_dy * (bot_y - beam_top)).clamp(-0.12 * w, 0.12 * w);
+                    let bot_cx = top_cx + dx;
+                    // Two nested quads split the side-edge step under
+                    // the banding floor (the discretized-glow grammar).
+                    for (half_top, half_bot, alpha) in [
+                        (0.026 * w, 0.045 * w, MOONBEAM_ALPHA_OUTER),
+                        (0.0143 * w, 0.02475 * w, MOONBEAM_ALPHA_INNER),
+                    ] {
+                        let quad = canvas::Path::new(|b| {
+                            b.move_to(Point::new(top_cx - half_top, beam_top));
+                            b.line_to(Point::new(top_cx + half_top, beam_top));
+                            b.line_to(Point::new(bot_cx + half_bot, bot_y));
+                            b.line_to(Point::new(bot_cx - half_bot, bot_y));
+                            b.close();
+                        });
+                        frame.fill(
+                            &quad,
+                            canvas::gradient::Linear::new(
+                                Point::new(0.0, beam_top),
+                                Point::new(0.0, bot_y),
+                            )
+                            .add_stop(
+                                0.0,
+                                Color {
+                                    a: 0.0,
+                                    ..starlight
+                                },
+                            )
+                            .add_stop(
+                                peak_frac,
+                                Color {
+                                    a: alpha * breath * MOONBEAM_GAIN,
+                                    ..starlight
+                                },
+                            )
+                            .add_stop(
+                                1.0,
+                                Color {
+                                    a: 0.0,
+                                    ..starlight
+                                },
+                            ),
+                        );
+                    }
+                }
+            }
         }
 
         // ── Solid block: the sky's inhabitants ──────────────────────────
@@ -1188,6 +1807,55 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         let glyph_scale = scene_glyph_scale(h);
         let mut deferred_arms: Vec<(Point, f32, f32)> = Vec::new();
         if day {
+            // Distant sail — day's shooting star: some cycles a tiny
+            // hazed ink sail crosses the back parallax swell, riding the
+            // far swell's own heave (phase-coherent for free), always
+            // running toward panel center so the full run stays
+            // in-panel for BOTH headings. Alpha-zero at both window
+            // ends; the later crest ink stroke stays in front, so the
+            // strongest depth cue survives.
+            if hash01(self.cycle, SAIL_SALT) < SAIL_CHANCE {
+                let start = 0.08 + 0.30 * hash01(self.cycle, SAIL_SALT ^ 0x9E37);
+                let t = phase - start;
+                if (0.0..SAIL_DUR).contains(&t) {
+                    let p = t / SAIL_DUR;
+                    let env = (std::f32::consts::PI * p).sin();
+                    let dir = if hash01(self.cycle, SAIL_SALT.wrapping_add(1)) < 0.5 {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    let span = hash01(self.cycle, SAIL_SALT.wrapping_add(3));
+                    let x0 = if dir > 0.0 {
+                        0.13 + 0.36 * span
+                    } else {
+                        0.87 - 0.36 * span
+                    };
+                    let xf = x0 + dir * 0.28 * p;
+                    let x = xf * w;
+                    let y = h - (back_swell_height(xf as f64, phase) as f32) * h + 1.0;
+                    let s = 7.0 * glyph_scale;
+                    let ink = Color {
+                        a: SAIL_ALPHA * viz.border_opacity * env,
+                        ..crest
+                    };
+                    frame.stroke(
+                        &canvas::Path::line(Point::new(x - 0.8 * s, y), Point::new(x + 0.8 * s, y)),
+                        canvas::Stroke::default()
+                            .with_color(ink)
+                            .with_width(1.6)
+                            .with_line_cap(canvas::LineCap::Round),
+                    );
+                    // Vertical luff on the mast, belly toward travel.
+                    let sail = canvas::Path::new(|b| {
+                        b.move_to(Point::new(x, y - 0.3 * s));
+                        b.line_to(Point::new(x, y - 1.5 * s));
+                        b.line_to(Point::new(x + dir * 0.9 * s, y - 0.35 * s));
+                        b.close();
+                    });
+                    frame.fill(&sail, ink);
+                }
+            }
             let gull_ink = Color {
                 a: GULL_ALPHA * viz.border_opacity,
                 ..crest
@@ -1207,6 +1875,93 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 draw_gull(&mut frame, Point::new(gx, gy), s, flap, gull_ink);
             }
         }
+        // ── The spiral galaxy — the sky's rarest event ──────────────────
+        // A cycle that rolls the galaxy computes (center, pull) once
+        // and draws the swirl; the star loop below routes every glyph
+        // through `galaxy_displace` (identity at pull 0 — the boundary
+        // guarantee), and the shooting star + wandering notes skip such
+        // cycles so the sky carries one drama at a time.
+        let galaxy_cycle = !day && hash01(self.cycle, GALAXY_SALT) < GALAXY_CHANCE;
+        let galaxy: Option<(Point, f32)> = if galaxy_cycle {
+            let start = 0.05 + 0.20 * hash01(self.cycle, GALAXY_SALT ^ 0x9E37);
+            let t = phase - start;
+            if (0.0..GALAXY_WINDOW).contains(&t) {
+                let p = t / GALAXY_WINDOW;
+                let (fx, fy) = galaxy_center(self.cycle);
+                let gc = Point::new(fx * w, fy * h);
+                // The swirl itself draws UNDER the stars (they fall in
+                // over it): a nucleus with a small glow, and two pairs
+                // of trailing spiral arms — starlight over a fainter
+                // seafoam under-arm — rotating slowly through the
+                // event. All solid fills/strokes, riding the solid
+                // block with the stars.
+                let env = galaxy_env(p);
+                if env > 0.0 {
+                    // Constrained-axis scaling: identical in the square
+                    // modes, and a user-dragged narrow stretched column
+                    // shrinks the swirl instead of clipping arm tips at
+                    // the panel edge.
+                    let reach = GALAXY_RADIUS_FRAC * h.min(w);
+                    // Alphas are FRACTIONS of the knob, so the nucleus
+                    // is GALAXY_CORE_ALPHA by construction — no hidden
+                    // second copy of the value to drift.
+                    for (r_frac, a_frac) in [(0.55_f32, 0.2_f32), (0.30, 0.4), (0.12, 1.0)] {
+                        frame.fill(
+                            &canvas::Path::circle(gc, r_frac * reach),
+                            Color {
+                                a: a_frac * GALAXY_CORE_ALPHA * env,
+                                ..starlight
+                            },
+                        );
+                    }
+                    let rot = GALAXY_ROT_RAD * p;
+                    for (arm_off, color, alpha, width) in [
+                        (0.0_f32, starlight, GALAXY_ARM_ALPHA, 1.2_f32),
+                        (std::f32::consts::PI, starlight, GALAXY_ARM_ALPHA, 1.2),
+                        (0.9, aurora_a, 0.6 * GALAXY_ARM_ALPHA, 1.6),
+                        (
+                            std::f32::consts::PI + 0.9,
+                            aurora_a,
+                            0.6 * GALAXY_ARM_ALPHA,
+                            1.6,
+                        ),
+                    ] {
+                        let arm = canvas::Path::new(|b| {
+                            const PTS: usize = 22;
+                            for i in 0..=PTS {
+                                let f = i as f32 / PTS as f32;
+                                let phi = f * 2.4 * std::f32::consts::PI;
+                                let r = reach * (0.12 + 0.88 * f.powf(1.4));
+                                let ang = rot + arm_off + phi;
+                                let pt =
+                                    Point::new(gc.x + ang.cos() * r, gc.y + ang.sin() * r * 0.62);
+                                if i == 0 {
+                                    b.move_to(pt);
+                                } else {
+                                    b.line_to(pt);
+                                }
+                            }
+                        });
+                        frame.stroke(
+                            &arm,
+                            canvas::Stroke::default()
+                                .with_color(Color {
+                                    a: alpha * env,
+                                    ..color
+                                })
+                                .with_width(width)
+                                .with_line_cap(canvas::LineCap::Round),
+                        );
+                    }
+                }
+                Some((gc, galaxy_pull(p)))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let night_glyphs = if day { Vec::new() } else { sky_glyphs() };
         for glyph in night_glyphs {
             let twinkle = 1.0
@@ -1216,7 +1971,14 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                             * (std::f32::consts::TAU
                                 * (glyph.twinkle_k as f32 * phase + glyph.twinkle_off))
                                 .sin());
-            let center = Point::new(glyph.x * w, glyph.y * h);
+            let home = Point::new(glyph.x * w, glyph.y * h);
+            // The galaxy's pull, when one is playing out: identity at
+            // pull 0, so non-event frames and window boundaries render
+            // the fixed field bit-identically.
+            let center = match galaxy {
+                Some((gc, pull)) => galaxy_displace(home, gc, pull),
+                None => home,
+            };
             match glyph.kind {
                 SkyGlyphKind::Dot => {
                     // Crisp core + concentric halo rings — the visualizer
@@ -1282,7 +2044,12 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // back out — never twice in the same place. Windows sit fully
         // inside the cycle (max start 0.73 + 0.22 < 1.0), so a window can
         // never straddle the cycle boundary where its hash would change.
-        for i in 0..SKY_WANDER_NOTES {
+        // Galaxy cycles skip the notes: every note window arithmetically
+        // overlaps the galaxy's, and a glyph hovering serene inside a sky
+        // the vortex is emptying reads as a bug — notes are not
+        // constellation members (they don't get pulled), so they sit the
+        // drama out entirely (the shooting star's one-drama rule).
+        for i in 0..if galaxy_cycle { 0 } else { SKY_WANDER_NOTES } {
             let salt = 0x407E + (i as u32) * 4;
             let start = 0.05 + 0.68 * hash01(self.cycle, salt);
             let t = phase - start;
@@ -1489,28 +2256,420 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             frame.with_save(|frame| {
                 frame.translate(iced::Vector::new(x, y));
                 frame.rotate(angle);
-                // Body: a little teardrop; tail: a notched triangle.
-                let body = canvas::Path::new(|b| {
-                    b.move_to(Point::new(-0.50 * l, 0.0));
+                // Body: a little teardrop; tail: a notched triangle —
+                // the shared silhouette, nose along the rotated +x.
+                fill_fish_silhouette(frame, l, 1.0, fish_color);
+            });
+        }
+
+        // ── The seabed — rocks, starfish, kelp beds, bubbles ────────────
+        // The trawl's floor, alive without a metaphor to decode: static
+        // furniture (rock mounds, one resting starfish) grounds the
+        // bottom, kelp beds sway over it, and the dragged anchor aerates
+        // the bed with a stream of rising bubbles. All cold (starlight /
+        // seafoam night, ink day); the lantern keeps the one warm note.
+        //
+        // Bed dressing first — it lies UNDER the kelp roots.
+        let dressing = bed_dressing();
+        for rock in &dressing.rocks {
+            let rw = 9.0 * rock.w * glyph_scale;
+            let rh = 4.5 * rock.ht * glyph_scale;
+            let base = Point::new(rock.x * w, 0.982 * h);
+            let dome = canvas::Path::new(|b| {
+                b.move_to(Point::new(base.x - rw, base.y));
+                b.quadratic_curve_to(
+                    Point::new(base.x, base.y - 2.0 * rh),
+                    Point::new(base.x + rw, base.y),
+                );
+                b.close();
+            });
+            frame.fill(
+                &dome,
+                Color {
+                    a: BED_INK_ALPHA * viz.border_opacity,
+                    ..crest
+                },
+            );
+            if !day {
+                // Moonlit top: ink mounds vanish on the night bed, so a
+                // faint starlight rim carries the silhouette (the
+                // school's catch-rim lesson).
+                let rim = canvas::Path::new(|b| {
+                    b.move_to(Point::new(base.x - 0.8 * rw, base.y - 0.35 * rh));
                     b.quadratic_curve_to(
-                        Point::new(-0.10 * l, -0.35 * l),
-                        Point::new(0.45 * l, 0.0),
+                        Point::new(base.x, base.y - 2.0 * rh),
+                        Point::new(base.x + 0.8 * rw, base.y - 0.35 * rh),
                     );
-                    b.quadratic_curve_to(
-                        Point::new(-0.10 * l, 0.35 * l),
-                        Point::new(-0.50 * l, 0.0),
-                    );
+                });
+                frame.stroke(
+                    &rim,
+                    canvas::Stroke::default()
+                        .with_color(Color {
+                            a: BED_RIM_ALPHA,
+                            ..starlight
+                        })
+                        .with_width(1.0)
+                        .with_line_cap(canvas::LineCap::Round),
+                );
+            }
+        }
+        let star_center = Point::new(dressing.star_x * w, 0.972 * h);
+        let star_arm = STARFISH_ARM_PX * dressing.star_size * glyph_scale;
+        fill_starfish(
+            &mut frame,
+            star_center,
+            star_arm,
+            dressing.star_rot,
+            Color {
+                a: BED_INK_ALPHA * viz.border_opacity,
+                ..crest
+            },
+        );
+        if !day {
+            // The same moonlit treatment: a dim seafoam overprint lifts
+            // the creature off the night bed without lighting it up.
+            fill_starfish(
+                &mut frame,
+                star_center,
+                star_arm,
+                dressing.star_rot,
+                Color {
+                    a: BED_RIM_ALPHA,
+                    ..water_far
+                },
+            );
+        }
+
+        // The sunken crate — grounds like a rock (kelp sways in front of
+        // it, the anchor sprite drags over it on the layer above), so it
+        // draws with the rest of the bed dressing.
+        {
+            let s = CRATE_SIZE_PX * glyph_scale;
+            let crate_ink = Color {
+                a: BED_INK_ALPHA * viz.border_opacity,
+                ..crest
+            };
+            frame.with_save(|frame| {
+                // Center sits low enough that the tilted bottom corners
+                // dip a few px below the base line — the half-buried
+                // read, same trick as the rock bases.
+                frame.translate(iced::Vector::new(CRATE_X * w, 0.988 * h - 0.42 * s));
+                frame.rotate(CRATE_TILT_DEG.to_radians());
+                let face = canvas::Path::new(|b| {
+                    b.move_to(Point::new(-0.5 * s, -0.5 * s));
+                    b.line_to(Point::new(0.5 * s, -0.5 * s));
+                    b.line_to(Point::new(0.5 * s, 0.5 * s));
+                    b.line_to(Point::new(-0.5 * s, 0.5 * s));
                     b.close();
                 });
-                let tail = canvas::Path::new(|b| {
-                    b.move_to(Point::new(-0.45 * l, 0.0));
-                    b.line_to(Point::new(-0.78 * l, -0.24 * l));
-                    b.line_to(Point::new(-0.70 * l, 0.0));
-                    b.line_to(Point::new(-0.78 * l, 0.24 * l));
+                frame.fill(&face, crate_ink);
+                // Frame stroke at the SAME alpha as the fill — the bed
+                // ink ceiling; the outline still reads via double
+                // coverage.
+                frame.stroke(
+                    &face,
+                    canvas::Stroke::default()
+                        .with_color(crate_ink)
+                        .with_width(1.2),
+                );
+                // Slats: two horizontal boards across the face.
+                let slats = canvas::Path::new(|b| {
+                    b.move_to(Point::new(-0.5 * s, -s / 6.0));
+                    b.line_to(Point::new(0.5 * s, -s / 6.0));
+                    b.move_to(Point::new(-0.5 * s, s / 6.0));
+                    b.line_to(Point::new(0.5 * s, s / 6.0));
+                });
+                frame.stroke(
+                    &slats,
+                    canvas::Stroke::default()
+                        .with_color(Color {
+                            a: CRATE_SLAT_ALPHA * viz.border_opacity,
+                            ..crest
+                        })
+                        .with_width(1.0),
+                );
+                if !day {
+                    // Moonlit rim on the up-facing edges: the STRAIGHT
+                    // lit lines are what say crate-not-rock on the dark
+                    // bed (the rocks' rim lesson, squared off).
+                    let rim = canvas::Path::new(|b| {
+                        b.move_to(Point::new(-0.5 * s, -0.5 * s));
+                        b.line_to(Point::new(0.5 * s, -0.5 * s));
+                        b.move_to(Point::new(-0.5 * s, -0.5 * s));
+                        b.line_to(Point::new(-0.5 * s, -0.15 * s));
+                    });
+                    frame.stroke(
+                        &rim,
+                        canvas::Stroke::default()
+                            .with_color(Color {
+                                a: CRATE_RIM_ALPHA,
+                                ..starlight
+                            })
+                            .with_width(1.0)
+                            .with_line_cap(canvas::LineCap::Round),
+                    );
+                }
+            });
+        }
+
+        let kelp_color = if day {
+            Color {
+                a: KELP_ALPHA_DAY * viz.border_opacity,
+                ..crest
+            }
+        } else {
+            Color {
+                a: KELP_ALPHA_NIGHT,
+                ..water_far
+            }
+        };
+        for kelp in kelp_params() {
+            let root = Point::new(kelp.x * w, 0.985 * h);
+            let height = kelp.height * h;
+            let sway = (std::f32::consts::TAU * (kelp.sway_k as f32 * phase + kelp.sway_off)).sin();
+            // Spine: root → tip, bending progressively (f^1.7) so the
+            // base stays planted while the tip travels.
+            let spine = |f: f32| {
+                let bend = f.powf(1.7);
+                Point::new(
+                    root.x + (kelp.lean + KELP_SWAY_PX * sway) * glyph_scale * bend,
+                    root.y - height * f,
+                )
+            };
+            // Three tapering width tiers over the frond's thirds.
+            for (tier, width) in [2.6_f32, 1.8, 1.0].into_iter().enumerate() {
+                let f0 = tier as f32 / 3.0;
+                let f1 = (tier as f32 + 1.0) / 3.0;
+                let seg = canvas::Path::new(|b| {
+                    b.move_to(spine(f0));
+                    b.line_to(spine((f0 + f1) * 0.5));
+                    b.line_to(spine(f1));
+                });
+                frame.stroke(
+                    &seg,
+                    canvas::Stroke::default()
+                        .with_color(kelp_color)
+                        .with_width(width * glyph_scale)
+                        .with_line_cap(canvas::LineCap::Round),
+                );
+            }
+        }
+
+        // Kelp-root seeps: one slow bubble per frond, rising on its own
+        // integer rate — the beds breathe even when the anchor is far.
+        // Alpha zero at both ends of each run (the riser contract).
+        for kelp in kelp_params() {
+            let t = (kelp.seep_k as f32 * phase + kelp.seep_off).fract();
+            let fade = ((t / 0.20).min(1.0)) * (((1.0 - t) / 0.30).min(1.0));
+            if fade <= 0.01 {
+                continue;
+            }
+            let x = kelp.x * w
+                + 1.5 * glyph_scale * (std::f32::consts::TAU * (2.0 * t + kelp.sway_off)).sin();
+            let y = 0.975 * h - t * SEEP_RISE_FRAC * h;
+            let color = if day {
+                Color {
+                    a: SEEP_ALPHA * fade * viz.border_opacity,
+                    ..crest
+                }
+            } else {
+                Color {
+                    a: SEEP_ALPHA * fade,
+                    ..starlight
+                }
+            };
+            frame.fill(&canvas::Path::circle(Point::new(x, y), glyph_scale), color);
+        }
+
+        // Bubbles — the drag aerates the bed: a sparse stream climbs
+        // from the trawled anchor, swaying as it rises. Each rider loops
+        // on an integer multiple of the phase with alpha zero at both
+        // ends, and the whole stream dims by the ANCHOR's edge proximity
+        // (the risers' rule) so it departs with the sprite instead of
+        // cutting at the panel edge — and the wrap seam, where the
+        // anchor teleports margins, can't pop a mid-flight bubble.
+        let anchor_fade = (self.anchor_x.min(1.0 - self.anchor_x) / BOAT_EDGE_FADE).clamp(0.0, 1.0);
+        if anchor_fade > 0.0 {
+            let base_x = self.anchor_x * w;
+            for bubble in bubble_params() {
+                let t = (bubble.k as f32 * phase + bubble.off).fract();
+                let fade_in = (t / BUBBLE_FADE_IN).min(1.0);
+                let fade_out = ((1.0 - t) / BUBBLE_FADE_OUT).min(1.0);
+                let alpha = BUBBLE_ALPHA * fade_in * fade_out * anchor_fade;
+                if alpha <= 0.01 {
+                    continue;
+                }
+                let sway = BUBBLE_SWAY_PX
+                    * glyph_scale
+                    * (std::f32::consts::TAU * (2.0 * t + bubble.sway_off)).sin();
+                let x = base_x + bubble.dx * glyph_scale + sway;
+                // Grow slightly as they rise (decompression) — a small
+                // touch that reads "bubble", not "spark".
+                let r = (1.0 + 0.6 * t) * bubble.size * glyph_scale * 1.4;
+                let y = 0.955 * h - t * BUBBLE_RISE_FRAC * h;
+                let color = if day {
+                    Color {
+                        a: alpha * viz.border_opacity,
+                        ..crest
+                    }
+                } else {
+                    Color {
+                        a: alpha,
+                        ..starlight
+                    }
+                };
+                if bubble.ring {
+                    frame.stroke(
+                        &canvas::Path::circle(Point::new(x, y), r),
+                        canvas::Stroke::default().with_color(color).with_width(0.8),
+                    );
+                } else {
+                    frame.fill(&canvas::Path::circle(Point::new(x, y), 0.7 * r), color);
+                }
+            }
+        }
+
+        // The Deep Passage — Jörmungandr's rare glide through the deep
+        // lane (y 0.78–0.855h: below the school band, above the bubble
+        // source and every bed silhouette; mid-kelp tips stop ~0.875h).
+        // Drawn BEFORE the school so the school glides in front — depth.
+        if hash01(self.cycle, 0xDEE9) < SERPENT_CHANCE {
+            let start = 0.06 + 0.72 * hash01(self.cycle, 0xDEEA);
+            let t = phase - start;
+            if (0.0..SERPENT_WINDOW).contains(&t) {
+                let p = t / SERPENT_WINDOW;
+                let env = (std::f32::consts::PI * p).sin();
+                let dir = if hash01(self.cycle, 0xDEEC) < 0.5 {
+                    -1.0_f32
+                } else {
+                    1.0
+                };
+                let y0 = (SERPENT_LANE_TOP + SERPENT_LANE_SPAN * hash01(self.cycle, 0xDEEB)) * h;
+                let gs = glyph_scale;
+                let l = 80.0 * gs;
+                // Head traverses 0.62w centered on the panel.
+                let hx = w * (0.5 + dir * (p - 0.5) * 0.62);
+                // Spine: amplitude tapers TOWARD the head (the head runs
+                // steady, the tail whips); 3·p = exactly three tail-beats
+                // per appearance (windowed-event precedent — wrap-safety
+                // is moot under the zero-end envelope).
+                let spine: Vec<Point> = (0..=12)
+                    .map(|i| {
+                        let u = i as f32 / 12.0;
+                        Point::new(
+                            hx - dir * u * l,
+                            y0 + 4.5
+                                * gs
+                                * (0.4 + 0.6 * u)
+                                * (std::f32::consts::TAU * (2.0 * u + 3.0 * p)).sin(),
+                        )
+                    })
+                    .collect();
+                let ink = Color {
+                    a: SERPENT_ALPHA * viz.border_opacity * env,
+                    ..crest
+                };
+                // Body — the kelp width-tier trick: three stroked
+                // polylines over the spine thirds with SHARED endpoints,
+                // widths tapering toward the tail (no fill mesh).
+                for (range, width) in [(0..=4_usize, 3.2_f32), (4..=8, 2.2), (8..=12, 1.2)] {
+                    let seg = canvas::Path::new(|b| {
+                        let mut first = true;
+                        for i in range.clone() {
+                            if first {
+                                b.move_to(spine[i]);
+                                first = false;
+                            } else {
+                                b.line_to(spine[i]);
+                            }
+                        }
+                    });
+                    frame.stroke(
+                        &seg,
+                        canvas::Stroke::default()
+                            .with_color(ink)
+                            .with_width(width * gs)
+                            .with_line_cap(canvas::LineCap::Round),
+                    );
+                }
+                // Head: filled wedge — nose forward of the first spine
+                // point. No dorsal spikes (clutter at this scale).
+                let head = canvas::Path::new(|b| {
+                    b.move_to(Point::new(hx + dir * 6.0 * gs, spine[0].y));
+                    b.line_to(Point::new(spine[0].x, spine[0].y - 2.6 * gs));
+                    b.line_to(Point::new(spine[0].x, spine[0].y + 2.6 * gs));
                     b.close();
                 });
-                frame.fill(&body, fish_color);
-                frame.fill(&tail, fish_color);
+                frame.fill(&head, ink);
+                if !day {
+                    // Dorsal catch-rim: moonlight along the back carries
+                    // the silhouette through the bed vignette's darkening
+                    // — the school's rim lesson at scale.
+                    let rim = canvas::Path::new(|b| {
+                        let mut first = true;
+                        for pt in spine.iter().take(10).skip(1) {
+                            let above = Point::new(pt.x, pt.y - 2.0 * gs);
+                            if first {
+                                b.move_to(above);
+                                first = false;
+                            } else {
+                                b.line_to(above);
+                            }
+                        }
+                    });
+                    frame.stroke(
+                        &rim,
+                        canvas::Stroke::default()
+                            .with_color(Color {
+                                a: SERPENT_RIM_ALPHA * env,
+                                ..starlight
+                            })
+                            .with_width(0.9)
+                            .with_line_cap(canvas::LineCap::Round),
+                    );
+                }
+            }
+        }
+
+        // Drifting school — mid-water gliders on the gull idiom, under
+        // the crest so the waterline still draws over them.
+        for fish in school_params() {
+            let dir = if fish.leftward { -1.0_f32 } else { 1.0 };
+            let travel = (fish.x0 + dir * fish.k as f32 * phase).rem_euclid(1.0);
+            let fx = travel * (w + 2.0 * SCHOOL_MARGIN_PX) - SCHOOL_MARGIN_PX;
+            let fy = (fish.y
+                + 0.008
+                    * (std::f32::consts::TAU * (fish.bob_k as f32 * phase + fish.bob_off)).sin())
+                * h;
+            let l = 11.0 * fish.size * glyph_scale;
+            let ink = Color {
+                a: SCHOOL_ALPHA * viz.border_opacity,
+                ..crest
+            };
+            frame.with_save(|frame| {
+                frame.translate(iced::Vector::new(fx, fy));
+                fill_fish_silhouette(frame, l, dir, ink);
+                if !day {
+                    // Starlight catch-rim along the back — moonlight
+                    // through water, or the school drowns in the deep.
+                    let rim = canvas::Path::new(|b| {
+                        b.move_to(Point::new(dir * -0.42 * l, -0.10 * l));
+                        b.quadratic_curve_to(
+                            Point::new(dir * -0.05 * l, -0.33 * l),
+                            Point::new(dir * 0.38 * l, -0.05 * l),
+                        );
+                    });
+                    frame.stroke(
+                        &rim,
+                        canvas::Stroke::default()
+                            .with_color(Color {
+                                a: SCHOOL_RIM_ALPHA,
+                                ..starlight
+                            })
+                            .with_width(0.9)
+                            .with_line_cap(canvas::LineCap::Round),
+                    );
+                }
             });
         }
 
@@ -1528,19 +2687,32 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 b.line_to(Point::new(x, front_y(x)));
             }
         });
+        // The crest light passes render in the MODE's light: starlight
+        // by night, sun gold by day (starlight-on-light measured ~0 —
+        // day's waterline was a bare ink line until the gilding).
+        let crest_light = if day {
+            crate::theme::logo_wood()
+        } else {
+            starlight
+        };
+        let crest_light_gain = if day { CREST_LIGHT_GAIN_DAY } else { 1.0 };
         // Halo (solid, deliberately: gradient edge-stubs at 0.05 alpha are
         // ~1/255 — invisible — and a second heavy gradient stroke of this
-        // long polyline isn't worth the buffer).
-        frame.stroke(
-            &crest_path,
-            canvas::Stroke::default()
-                .with_color(Color {
-                    a: CREST_HALO_ALPHA,
-                    ..starlight
-                })
-                .with_width(4.0)
-                .with_line_cap(canvas::LineCap::Round),
-        );
+        // long polyline isn't worth the buffer). Night-only: a wide gold
+        // halo reads muddy on a light sea, so day skips it rather than
+        // recoloring.
+        if !day {
+            frame.stroke(
+                &crest_path,
+                canvas::Stroke::default()
+                    .with_color(Color {
+                        a: CREST_HALO_ALPHA,
+                        ..starlight
+                    })
+                    .with_width(4.0)
+                    .with_line_cap(canvas::LineCap::Round),
+            );
+        }
         // Ink.
         frame.stroke(
             &crest_path,
@@ -1553,38 +2725,72 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 .with_line_cap(canvas::LineCap::Round),
         );
 
+        // Sun glitter (day only): sparse gold dashes riding the front
+        // waterline, each flashing on its own integer rate through a ^4
+        // profile — spiky glitter statistics, never a blink field. The
+        // height gate favors passing crests (the sweep's grammar); the
+        // hull occludes dashes it crosses for free (the ship Svg layers
+        // above the canvas).
+        if day && GLITTER_ALPHA > 0.0 {
+            let gold = crate::theme::logo_wood();
+            for gp in glitter_params() {
+                let tw = 0.5 + 0.5 * (std::f32::consts::TAU * (gp.k as f32 * phase + gp.off)).sin();
+                let bright = tw * tw * tw * tw;
+                let gate = 0.4
+                    + 0.6
+                        * ((sample_line_height(bars, gp.x, false) - SEA_DC as f32)
+                            / (SWELL_AMP + RIPPLE_AMP) as f32)
+                            .clamp(0.0, 1.0);
+                let a = GLITTER_ALPHA * bright * gate;
+                if a <= 0.01 {
+                    continue;
+                }
+                let x = gp.x * w;
+                let y = front_y(x) + gp.depth_px * glyph_scale;
+                let half = 0.5 * gp.len * glyph_scale;
+                frame.stroke(
+                    &canvas::Path::line(Point::new(x - half, y), Point::new(x + half, y)),
+                    canvas::Stroke::default()
+                        .with_color(Color { a, ..gold })
+                        .with_width(1.2)
+                        .with_line_cap(canvas::LineCap::Round),
+                );
+            }
+        }
+
         // ── Gradient block B: the catch-light ──────────────────────────
         // A struct literal, NOT with_color (which clobbers the style back
         // to Solid): a 1px lit line breathing into the edges instead of
         // hitting them.
+        let catch_alpha = CREST_LIGHT_ALPHA * crest_light_gain;
         let catch =
             canvas::gradient::Linear::new(Point::new(0.0, surface_y), Point::new(w, surface_y))
                 .add_stop(
                     0.0,
                     Color {
                         a: 0.0,
-                        ..starlight
+                        ..crest_light
                     },
                 )
                 .add_stop(
                     CREST_LIGHT_EDGE,
                     Color {
-                        a: CREST_LIGHT_ALPHA,
-                        ..starlight
+                        a: catch_alpha,
+                        ..crest_light
                     },
                 )
                 .add_stop(
                     1.0 - CREST_LIGHT_EDGE,
                     Color {
-                        a: CREST_LIGHT_ALPHA,
-                        ..starlight
+                        a: catch_alpha,
+                        ..crest_light
                     },
                 )
                 .add_stop(
                     1.0,
                     Color {
                         a: 0.0,
-                        ..starlight
+                        ..crest_light
                     },
                 );
         frame.stroke(
@@ -1608,7 +2814,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             let gate = ((sample_line_height(bars, c.clamp(0.0, 1.0), false) - SEA_DC as f32)
                 / (SWELL_AMP + RIPPLE_AMP) as f32)
                 .clamp(0.0, 1.0);
-            let peak = CREST_SHIMMER_ALPHA * gate;
+            let peak = CREST_SHIMMER_ALPHA * gate * crest_light_gain;
             if peak > 0.005 {
                 let mut sweep = canvas::gradient::Linear::new(
                     Point::new(0.0, surface_y),
@@ -1619,7 +2825,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                         offset,
                         Color {
                             a: alpha,
-                            ..starlight
+                            ..crest_light
                         },
                     );
                 }
@@ -1714,8 +2920,9 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // sky, its timing, origin, and heading all hashed from the cycle
         // counter — no two cycles replay the same streak. Night only (a
         // meteor at noon reads as a rendering bug, and the starlight
-        // streak would be invisible anyway).
-        if !day && hash01(self.cycle, 0x57A2) < SHOOT_CHANCE {
+        // streak would be invisible anyway). Galaxy cycles skip it —
+        // one sky drama at a time.
+        if !day && !galaxy_cycle && hash01(self.cycle, 0x57A2) < SHOOT_CHANCE {
             let start = 0.15 + 0.60 * hash01(self.cycle, 0x57A3);
             if phase >= start && phase < start + SHOOT_WINDOW {
                 let p = (phase - start) / SHOOT_WINDOW;
@@ -2146,5 +3353,329 @@ mod tests {
             assert!((0.0..=1.0).contains(&v));
         }
         assert!((back_swell_height(0.3, 0.0) - back_swell_height(0.3, 1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bubble_params_deterministic_and_wrap_safe() {
+        let a = bubble_params();
+        assert_eq!(a.len(), BUBBLE_COUNT);
+        for (ba, bb) in a.iter().zip(&bubble_params()) {
+            assert_eq!(
+                (ba.k, ba.off, ba.dx, ba.size, ba.sway_off, ba.ring),
+                (bb.k, bb.off, bb.dx, bb.size, bb.sway_off, bb.ring),
+                "the bubble pool must be identical every build"
+            );
+        }
+        for b in &a {
+            assert!(
+                b.k >= 1,
+                "rise rate must be a positive integer (wrap-safety)"
+            );
+            assert!((0.0..1.0).contains(&b.off));
+            assert!(b.size > 0.0);
+        }
+        // Both kinds must be dealt: the stream reads as bubbles because
+        // rings and flecks mix.
+        assert!(a.iter().any(|b| b.ring), "at least one ring bubble");
+        assert!(a.iter().any(|b| !b.ring), "at least one fleck bubble");
+    }
+
+    #[test]
+    fn galaxy_pull_and_env_are_zero_at_both_window_ends() {
+        // The static-positions contract survives the event boundary
+        // only if displacement is exactly zero as the window opens and
+        // closes; the visual envelope shares the rule.
+        assert_eq!(galaxy_pull(0.0), 0.0);
+        assert_eq!(galaxy_pull(1.0), 0.0);
+        assert!(galaxy_pull(0.5) > 0.99, "the hold must reach full pull");
+        assert_eq!(galaxy_env(0.0), 0.0);
+        assert_eq!(galaxy_env(1.0), 0.0);
+        assert!(galaxy_env(0.5) > 0.99);
+        // The envelope opens before and closes after the pull — the
+        // swirl is visible before the sky moves and while it settles.
+        assert!(galaxy_env(0.10) > galaxy_pull(0.10));
+        assert!(galaxy_env(0.90) > galaxy_pull(0.90));
+        for i in 0..=40 {
+            let p = i as f32 / 40.0;
+            assert!((0.0..=1.0).contains(&galaxy_pull(p)));
+            assert!((0.0..=1.0).contains(&galaxy_env(p)));
+        }
+    }
+
+    #[test]
+    fn galaxy_displace_is_identity_at_zero_pull_and_converges_at_full() {
+        let home = Point::new(200.0, 40.0);
+        let gc = Point::new(150.0, 60.0);
+        // Bit-exact identity at pull 0 (the early return) — no atan2
+        // round-trip error can leak into non-event frames.
+        let at_rest = galaxy_displace(home, gc, 0.0);
+        assert_eq!((at_rest.x, at_rest.y), (home.x, home.y));
+        // Full pull lands the star at CONVERGE of its home radius.
+        let pulled = galaxy_displace(home, gc, 1.0);
+        let r0 = ((home.x - gc.x).powi(2) + (home.y - gc.y).powi(2)).sqrt();
+        let r1 = ((pulled.x - gc.x).powi(2) + (pulled.y - gc.y).powi(2)).sqrt();
+        assert!(
+            (r1 - r0 * GALAXY_CONVERGE).abs() < 1e-3,
+            "full pull converges to the core (r0 {r0}, r1 {r1})"
+        );
+        // A star already at the center stays put (no NaN from atan2).
+        let centered = galaxy_displace(gc, gc, 0.7);
+        assert_eq!((centered.x, centered.y), (gc.x, gc.y));
+    }
+
+    #[test]
+    fn galaxy_deals_vary_and_center_stays_in_the_open_sky() {
+        assert_ne!(
+            galaxy_center(1),
+            galaxy_center(2),
+            "consecutive cycles must deal different centers"
+        );
+        for cycle in 0..200_u32 {
+            let (fx, fy) = galaxy_center(cycle);
+            assert!(
+                (0.52..=0.82).contains(&fx),
+                "center stays in the upper-right sky, clear of the moon: {fx}"
+            );
+            assert!(
+                (0.09..=0.22).contains(&fy),
+                "center stays inside the sky band: {fy}"
+            );
+        }
+    }
+
+    #[test]
+    fn moonbeam_params_deterministic_and_wrap_safe() {
+        let a = moonbeam_params();
+        assert_eq!(a.len(), MOONBEAM_ENTRY_DX.len());
+        for (ma, mb) in a.iter().zip(&moonbeam_params()) {
+            assert_eq!(
+                (
+                    ma.entry_dx,
+                    ma.k_breath,
+                    ma.off_breath,
+                    ma.k_sway,
+                    ma.off_sway
+                ),
+                (
+                    mb.entry_dx,
+                    mb.k_breath,
+                    mb.off_breath,
+                    mb.k_sway,
+                    mb.off_sway
+                ),
+                "the shafts must be identical every build"
+            );
+        }
+        for (m, dx) in a.iter().zip(MOONBEAM_ENTRY_DX) {
+            assert_eq!(m.entry_dx, dx, "shafts stay slaved to the entry table");
+            assert!(
+                (1..=2).contains(&m.k_breath),
+                "breath rate stays an integer in 1..=2 (wrap-safety)"
+            );
+            assert!((1..=2).contains(&m.k_sway));
+            assert!((0.0..1.0).contains(&m.off_breath));
+            assert!((0.0..1.0).contains(&m.off_sway));
+        }
+        // The vertical run: top zero-stop at the deepest trough, peak
+        // inside the run at the bed vignette's start, bottom dissolving
+        // above the bed floor (the glow-stack banding idiom).
+        let trough = 1.0 - (SEA_DC - SWELL_AMP - RIPPLE_AMP) as f32;
+        assert!(trough < SEA_BED_TOP && SEA_BED_TOP < 0.92);
+    }
+
+    #[test]
+    fn glitter_params_deterministic_and_wrap_safe() {
+        let a = glitter_params();
+        assert_eq!(a.len(), GLITTER_COUNT);
+        for (ga, gb) in a.iter().zip(&glitter_params()) {
+            assert_eq!(
+                (ga.x, ga.depth_px, ga.len, ga.k, ga.off),
+                (gb.x, gb.depth_px, gb.len, gb.k, gb.off),
+                "the glitter lane must be identical every build"
+            );
+        }
+        for g in &a {
+            assert!(
+                (6..=11).contains(&g.k),
+                "flash rate stays an integer in 6..=11 (wrap-safety + the sub-0.6 Hz twinkle law)"
+            );
+            assert!((0.0..1.0).contains(&g.off));
+            assert!(
+                (0.03..=0.56).contains(&g.x),
+                "dashes pack under the sun's azimuth, got x {}",
+                g.x
+            );
+        }
+    }
+
+    #[test]
+    fn sail_run_stays_inside_the_panel_for_both_headings() {
+        // Recompute dir/span/x0 exactly as the draw does for many cycles
+        // and pin the full run (sprite half-width ~0.03w) inside the
+        // panel for both headings.
+        for cycle in 0..500_u32 {
+            let dir = if hash01(cycle, SAIL_SALT.wrapping_add(1)) < 0.5 {
+                -1.0_f32
+            } else {
+                1.0
+            };
+            let span = hash01(cycle, SAIL_SALT.wrapping_add(3));
+            let x0 = if dir > 0.0 {
+                0.13 + 0.36 * span
+            } else {
+                0.87 - 0.36 * span
+            };
+            for p in [0.0_f32, 0.5, 1.0] {
+                let xf = x0 + dir * 0.28 * p;
+                assert!(
+                    (0.08..=0.92).contains(&xf),
+                    "cycle {cycle} heading {dir}: sail at {xf} leaves the panel"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn serpent_deals_vary_across_cycles() {
+        // Consecutive cycles must not replay the same passage — timing
+        // and depth both re-hash (the wandering-note contract). Band
+        // clearances are const-asserted beside the SERPENT_* consts.
+        assert_ne!(hash01(1, 0xDEEA), hash01(2, 0xDEEA));
+        assert_ne!(hash01(1, 0xDEEB), hash01(2, 0xDEEB));
+    }
+
+    #[test]
+    fn crate_landmark_clears_the_dealt_starfish() {
+        // Lane bounds + kelp-loner clearance are const-asserted beside
+        // the CRATE_* consts; the starfish is dealt live from BED_SEED,
+        // so its clearance is the runtime pin.
+        assert!(
+            (bed_dressing().star_x - CRATE_X).abs() >= 0.10,
+            "starfish clearance"
+        );
+    }
+
+    #[test]
+    fn bed_dressing_deterministic_and_grounded() {
+        let a = bed_dressing();
+        let b = bed_dressing();
+        assert_eq!(a.rocks.len(), ROCK_COUNT);
+        for (ra, rb) in a.rocks.iter().zip(&b.rocks) {
+            assert_eq!(
+                (ra.x, ra.w, ra.ht),
+                (rb.x, rb.w, rb.ht),
+                "the rocks must be identical every build"
+            );
+        }
+        assert_eq!(
+            (a.star_x, a.star_rot, a.star_size),
+            (b.star_x, b.star_rot, b.star_size),
+            "the starfish must be identical every build"
+        );
+        for r in &a.rocks {
+            assert!(
+                (0.10..=0.90).contains(&r.x),
+                "rocks stay inside the panel, got x {}",
+                r.x
+            );
+            assert!(r.w > 0.0 && r.ht > 0.0);
+        }
+        assert!(
+            (0.05..=0.95).contains(&a.star_x),
+            "starfish stays inside the panel, got x {}",
+            a.star_x
+        );
+    }
+
+    #[test]
+    fn school_params_deterministic_and_under_the_trough() {
+        let a = school_params();
+        assert_eq!(a.len(), SCHOOL_COUNT);
+        for (fa, fb) in a.iter().zip(&school_params()) {
+            assert_eq!(
+                (
+                    fa.x0,
+                    fa.y,
+                    fa.k,
+                    fa.leftward,
+                    fa.size,
+                    fa.bob_k,
+                    fa.bob_off
+                ),
+                (
+                    fb.x0,
+                    fb.y,
+                    fb.k,
+                    fb.leftward,
+                    fb.size,
+                    fb.bob_k,
+                    fb.bob_off
+                ),
+                "the school must be identical every build"
+            );
+        }
+        // The front crest bottoms out at y ≈ 1 − (DC − amps) ≈ 0.638h;
+        // the band (minus bob headroom) must sit below it so a drifter
+        // can never fly in air.
+        let trough = 1.0 - (SEA_DC - SWELL_AMP - RIPPLE_AMP) as f32;
+        assert!(
+            SCHOOL_BAND_TOP - 0.008 > trough,
+            "school band must clear the deepest trough ({trough})"
+        );
+        for f in &a {
+            assert!(f.k >= 1, "glide rate must be a positive integer");
+            assert!(f.bob_k >= 1, "bob rate must be a positive integer");
+            assert!(
+                (SCHOOL_BAND_TOP..=SCHOOL_BAND_BOTTOM).contains(&f.y),
+                "drifter must stay in the mid-water band, got y {}",
+                f.y
+            );
+        }
+    }
+
+    #[test]
+    fn kelp_params_deterministic_and_varied() {
+        let a = kelp_params();
+        assert_eq!(a.len(), 7, "flank clusters plus two mid loners");
+        for (ka, kb) in a.iter().zip(&kelp_params()) {
+            assert_eq!(
+                (
+                    ka.x,
+                    ka.height,
+                    ka.sway_k,
+                    ka.sway_off,
+                    ka.lean,
+                    ka.seep_k,
+                    ka.seep_off
+                ),
+                (
+                    kb.x,
+                    kb.height,
+                    kb.sway_k,
+                    kb.sway_off,
+                    kb.lean,
+                    kb.seep_k,
+                    kb.seep_off
+                ),
+                "the kelp must be identical every build"
+            );
+        }
+        for k in &a {
+            assert!(
+                (0.02..=0.97).contains(&k.x),
+                "kelp roots stay inside the panel, got x {}",
+                k.x
+            );
+            assert!(k.sway_k >= 1, "sway rate integer ≥ 1 (wrap-safety)");
+            assert!(k.seep_k >= 1, "seep rate integer ≥ 1 (wrap-safety)");
+            assert!((0.05..=0.25).contains(&k.height));
+        }
+        // The beds must read as growth, not a fence: real height spread.
+        let min = a.iter().map(|k| k.height).fold(f32::INFINITY, f32::min);
+        let max = a.iter().map(|k| k.height).fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            max > min * 1.4,
+            "frond heights must vary (min {min}, max {max})"
+        );
     }
 }

@@ -2679,3 +2679,44 @@ fn step_wrap_lifts_active_anchor_when_toggling_inverted() {
         state.secs_until_next_anchor,
     );
 }
+
+// --- trawled anchor --------------------------------------------------------
+
+#[test]
+fn trawled_anchor_x_trails_behind_travel_and_eases_through_a_stall() {
+    use super::boat_physics::TRAIL_V_REF;
+    let offset = 0.08_f32;
+    // At or above the reference speed the anchor sits at full offset
+    // BEHIND the travel direction.
+    let mut state = BoatState {
+        x_ratio: 0.5,
+        x_velocity: TRAIL_V_REF * 2.0,
+        ..BoatState::default()
+    };
+    assert!(
+        (state.trawled_anchor_x(offset) - (0.5 - offset)).abs() < 1e-6,
+        "rightward travel drags the anchor left of the hull"
+    );
+    state.x_velocity = -TRAIL_V_REF * 2.0;
+    assert!(
+        (state.trawled_anchor_x(offset) - (0.5 + offset)).abs() < 1e-6,
+        "leftward travel drags the anchor right of the hull"
+    );
+    // Below the reference the trail eases linearly toward zero — the
+    // anchor slides under the hull through a tack instead of popping
+    // across.
+    state.x_velocity = TRAIL_V_REF * 0.5;
+    assert!(
+        (state.trawled_anchor_x(offset) - (0.5 - offset * 0.5)).abs() < 1e-6,
+        "half speed = half trail"
+    );
+    state.x_velocity = 0.0;
+    assert!(
+        (state.trail_ease() - 0.0).abs() < 1e-6,
+        "a stalled boat carries no trail ease"
+    );
+    assert!(
+        (state.trawled_anchor_x(offset) - 0.5).abs() < 1e-6,
+        "a stalled anchor sits under the hull"
+    );
+}

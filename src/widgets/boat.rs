@@ -511,10 +511,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // ring; its bend is driven by `anchor_sway`, which the physics
     // oscillates from local wave amplitude while anchored (and decays to
     // ~0 otherwise — a taut trawl rope).
-    let trawl_anchor_x = trail.map(|offset| {
-        let ease = (state.x_velocity.abs() / boat_physics::TRAIL_V_REF).min(1.0);
-        state.x_ratio - state.x_velocity.signum() * offset * ease
-    });
+    let trawl_anchor_x = trail.map(|offset| state.trawled_anchor_x(offset));
     if state.anchor_remaining_secs > 0.0 || trawl_anchor_x.is_some() {
         let anchor_x_ratio = trawl_anchor_x.unwrap_or(state.anchor_drop_x);
         let anchor_handle = state.cached_anchor_handle().unwrap_or_else(|| {

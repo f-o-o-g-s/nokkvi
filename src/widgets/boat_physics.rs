@@ -713,6 +713,24 @@ impl BoatState {
         }
         self.moon_handle.clone()
     }
+
+    /// How far toward full extension the trawl trail currently is:
+    /// `|x_velocity| / TRAIL_V_REF` clamped to `[0, 1]`. The
+    /// trailed-anchor position eases by this so a tack reads as the
+    /// anchor sliding under the hull.
+    pub(crate) fn trail_ease(&self) -> f32 {
+        (self.x_velocity.abs() / TRAIL_V_REF).min(1.0)
+    }
+
+    /// X of the trawled anchor: dragged `offset` behind the hull's
+    /// travel, eased by [`Self::trail_ease`] so the anchor slides under
+    /// the hull as the boat stalls through a tack. THE single source of
+    /// the trawl-anchor position — `boat_overlay` places the sprite here
+    /// and `harbour_sea::SeaCanvas` rises its bubble stream from the
+    /// same x, so the bed's breath can never detach from the sprite.
+    pub(crate) fn trawled_anchor_x(&self, offset: f32) -> f32 {
+        self.x_ratio - self.x_velocity.signum() * offset * self.trail_ease()
+    }
 }
 
 /// Step the boat physics forward by `dt`, sampling slope and target height
