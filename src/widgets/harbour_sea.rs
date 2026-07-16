@@ -389,38 +389,70 @@ const CREST_SWEEP_FRACTION: f32 = 0.30;
 const CREST_SWEEP_OFF: f32 = 0.55;
 const CREST_SWEEP_HALF_WIDTH: f32 = 0.10;
 
-/// The spiral galaxy — the night sky's rarest event: once in a long
-/// while a faint spiral swirl materializes in the open upper sky and
-/// draws the WHOLE constellation into itself — every star (and the
-/// sparkles, arms and all) streams inward along a tightening spiral
-/// path, holds a breath at the core, then glides back home as the
-/// swirl dissolves. The one sanctioned exception to the sky's
-/// static-positions contract, and only apparently: displaced positions
-/// are a PURE function of (cycle hash, phase) with displacement
-/// exactly zero at both window ends — at every event boundary, and on
-/// every non-event frame, the constellation renders byte-identical to
-/// the fixed field. The moon (the avatar) is never pulled, and the
-/// shooting star skips galaxy cycles so the sky carries one drama at
-/// a time. Night-only.
+/// The black hole — the night sky's rarest event, and INVISIBLE, as a
+/// black hole should be: no ring, no halo, no ink — its only signature
+/// is what gravity does to the stars. The stars NEAR it are captured —
+/// gravity falls off, distant stars never stir — and plunge inward on
+/// ACCELERATING spirals (slow drift at first, then the dive; winding
+/// tighter as they fall). Nearing the event horizon their light stops
+/// escaping: each star SHRINKS AND DIMS TO NOTHING as it crosses in
+/// (the owner's brief: "the light shouldn't be able to escape").
+/// Trapped survivors orbit through the catch, and then the well spits
+/// everything back out — a fast ejection that re-lights each star as
+/// it re-crosses the horizon, sails past home, and settles gently
+/// back. For ~14 s the sky simply develops a slow whirlpool and a
+/// star-shaped absence, then heals.
+///
+/// The one sanctioned exception to the sky's static-positions
+/// contract, and only apparently: displaced positions and the horizon
+/// fade are a PURE function of (cycle hash, phase), with displacement
+/// exactly zero and visibility exactly 1 at both window ends — at
+/// every event boundary, and on every non-event frame, the
+/// constellation renders byte-identical to the fixed field. The moon
+/// (the avatar) is never pulled, and the shooting star + wandering
+/// notes skip hole cycles so the sky carries one drama at a time.
+/// Night-only. (History: v1 was a spiral galaxy swallowing the WHOLE
+/// sky on an eased glide — "goofy"; v2 added local gravity but marked
+/// the hole with a lit accretion ring and piled swallowed stars into
+/// a bright knot — both inverted the void. Invisibility + the horizon
+/// swallow are the owner's own fixes.)
 // TUNE: CHANCE gates rarity (~once per 5 min at 0.07; 0.0 = none);
-// WINDOW the whole drama (0.70 ≈ 14 s); CONVERGE how tightly the sky
-// collapses; SWIRL the vortex read.
-const GALAXY_CHANCE: f32 = 0.07;
-const GALAXY_WINDOW: f32 = 0.70;
-const GALAXY_SALT: u32 = 0x6A1A_C57A;
+// WINDOW the whole drama (0.70 ≈ 14 s); CAPTURE_FRAC the well's
+// reach; HORIZON_PX where light stops escaping; OVERSHOOT the
+// spit-out's sail-past-home punch; HOLD_WHIRL the trapped orbit rate.
+const BLACKHOLE_CHANCE: f32 = 0.07;
+const BLACKHOLE_WINDOW: f32 = 0.70;
+const BLACKHOLE_SALT: u32 = 0x6A1A_C57A;
 // Max hashed start (0.05 + 0.20) + the window stays inside the cycle.
-const _: () = assert!(0.05 + 0.20 + GALAXY_WINDOW < 1.0);
-/// Infalling stars converge to this fraction of their home radius.
-const GALAXY_CONVERGE: f32 = 0.08;
-/// Swirl gained over a full infall (radians) — the vortex read.
-const GALAXY_SWIRL: f32 = 2.2;
-/// The swirl's own footprint (arm reach, fraction of h) and light.
-const GALAXY_RADIUS_FRAC: f32 = 0.085;
-const GALAXY_CORE_ALPHA: f32 = 0.30;
-const GALAXY_ARM_ALPHA: f32 = 0.12;
-/// Arm rotation over the event (radians) — continuous within the
-/// window; wrap-safety is moot under the zero-end envelope.
-const GALAXY_ROT_RAD: f32 = 1.6;
+const _: () = assert!(0.05 + 0.20 + BLACKHOLE_WINDOW < 1.0);
+/// Gravity's reach as a fraction of min(w, h): full capture inside
+/// 35% of this radius, fading to zero influence at the full radius —
+/// only the NEIGHBORHOOD falls in.
+const BLACKHOLE_CAPTURE_FRAC: f32 = 0.30;
+/// Captured stars converge to this fraction of their home radius.
+const BLACKHOLE_CONVERGE: f32 = 0.06;
+/// Swirl gained over a full plunge (radians); inner stars wind up to
+/// ~1.7× more (differential rotation — the vortex read).
+const BLACKHOLE_SWIRL: f32 = 2.6;
+/// Event phasing: the plunge accelerates through PLUNGE_END, the catch
+/// holds through HOLD_END, the remainder is the spit-out.
+const BLACKHOLE_PLUNGE_END: f32 = 0.45;
+const BLACKHOLE_HOLD_END: f32 = 0.58;
+/// Plunge acceleration exponent (higher = lazier drift, harder dive).
+const BLACKHOLE_PLUNGE_POW: f32 = 2.6;
+/// Spit-out overshoot factor `b` in `(1-q)²·(1-b·q)`: stars sail past
+/// home (s goes negative → radius beyond home) and settle back. At 3.0
+/// the sail-past peaks ~12% beyond home.
+const BLACKHOLE_OVERSHOOT: f32 = 3.0;
+/// The event horizon in glyph-scale px: a star's light dies out
+/// between 1.6× and 0.6× this distance from the hole, and returns the
+/// same way on the way out.
+const BLACKHOLE_HORIZON_PX: f32 = 9.0;
+/// Extra orbital winding through the catch (radians per unit p) —
+/// trapped survivors keep circling instead of freezing (the strongest
+/// remaining choreography tell in v2). Scales by s, so the spit-out
+/// unwinds it into the outward whip.
+const BLACKHOLE_HOLD_WHIRL: f32 = 6.0;
 
 /// Shooting star — a rare streak across the upper sky. Timing, start
 /// point, and heading all hash the CYCLE COUNTER, so no two cycles replay
@@ -882,64 +914,114 @@ fn hash01(cycle: u32, salt: u32) -> f32 {
     if s == 0 {
         s = salt | 1;
     }
-    for _ in 0..3 {
-        s ^= s << 13;
-        s ^= s >> 17;
-        s ^= s << 5;
-    }
+    // Murmur3's multiplicative finalizer — NOT plain xorshift rounds.
+    // Xorshift is GF(2)-linear, which made sibling-salted hashes differ
+    // by a cycle-independent XOR constant: CONDITIONED on a rare-event
+    // gate passing (top bits of the gate hash pinned near zero), every
+    // derived deal (center, start, depth…) collapsed to a sliver of its
+    // range — the black hole opened at the same spot at the same moment
+    // every event, forever. The multiplies break the linearity, so
+    // deals stay independent even under the gate condition (pinned by
+    // `hashed_deals_spread_even_conditioned_on_the_gate`).
+    s ^= s >> 16;
+    s = s.wrapping_mul(0x85EB_CA6B);
+    s ^= s >> 13;
+    s = s.wrapping_mul(0xC2B2_AE35);
+    s ^= s >> 16;
     (s as f32) / (u32::MAX as f32)
 }
 
-/// Hermite smoothstep on `[e0, e1]` — the galaxy event's easing brick.
+/// Hermite smoothstep on `[e0, e1]` — the black-hole event's easing
+/// brick (envelope + grip falloff; the plunge itself is a power law).
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Pull strength over the galaxy event: ease in, hold near 1 through
-/// the middle, ease out — EXACTLY zero at both window ends, which is
-/// what lets the constellation's static-positions contract survive the
-/// event boundary (stars are bit-identically home when the window
-/// opens and closes).
-fn galaxy_pull(p: f32) -> f32 {
-    smoothstep(0.0, 0.35, p) * (1.0 - smoothstep(0.65, 1.0, p))
+/// The capture profile over the black hole event — GRAVITY's time
+/// signature, not an ease: the plunge ACCELERATES (a lazy drift that
+/// becomes a dive, `p^PLUNGE_POW`), the catch holds the stars trapped
+/// at the core, and the spit-out `(1-q)²·(1-b·q)` starts fast, sails
+/// PAST home (the negative dip — radius beyond the star's rest
+/// position), and settles gently back. EXACTLY zero at both window
+/// ends — f32-exact, which is what lets the constellation's
+/// static-positions contract survive the event boundary.
+fn blackhole_s(p: f32) -> f32 {
+    if p <= 0.0 {
+        0.0
+    } else if p < BLACKHOLE_PLUNGE_END {
+        (p / BLACKHOLE_PLUNGE_END).powf(BLACKHOLE_PLUNGE_POW)
+    } else if p < BLACKHOLE_HOLD_END {
+        1.0
+    } else if p < 1.0 {
+        let q = (p - BLACKHOLE_HOLD_END) / (1.0 - BLACKHOLE_HOLD_END);
+        (1.0 - q) * (1.0 - q) * (1.0 - BLACKHOLE_OVERSHOOT * q)
+    } else {
+        0.0
+    }
 }
 
-/// The swirl's own visual envelope — wider than the pull, so the
-/// galaxy fades in BEFORE the sky starts to move and lingers while the
-/// stars settle home. Zero at both ends.
-fn galaxy_env(p: f32) -> f32 {
-    smoothstep(0.0, 0.15, p) * (1.0 - smoothstep(0.85, 1.0, p))
-}
-
-/// This cycle's galaxy center as width/height fractions — hashed into
+/// This cycle's hole center as width/height fractions — hashed into
 /// the open upper-right sky, structurally clear of the moon at
 /// (`MOON_X`, `MOON_Y`) and inside the sky band.
-fn galaxy_center(cycle: u32) -> (f32, f32) {
+fn blackhole_center(cycle: u32) -> (f32, f32) {
     (
-        0.52 + 0.30 * hash01(cycle, GALAXY_SALT ^ 0x0C31),
-        0.09 + 0.13 * hash01(cycle, GALAXY_SALT ^ 0x0C32),
+        0.52 + 0.30 * hash01(cycle, BLACKHOLE_SALT ^ 0x0C31),
+        0.09 + 0.13 * hash01(cycle, BLACKHOLE_SALT ^ 0x0C32),
     )
 }
 
-/// Displace a sky glyph toward the galaxy along a tightening spiral:
-/// radius shrinks toward `GALAXY_CONVERGE` of home while the angle
-/// gains up to `GALAXY_SWIRL`. At `pull <= 0` this returns `home`
-/// EXACTLY (early return — no atan2 round-trip error), which is the
-/// bit-identical-boundary guarantee the const docs promise.
-fn galaxy_displace(home: Point, galaxy: Point, pull: f32) -> Point {
-    if pull <= 0.0 {
+/// How strongly the well at distance `dist` grips a star: full capture
+/// inside 35% of `capture_px`, fading smoothly to ZERO at the full
+/// radius — gravity is LOCAL; the rest of the sky never stirs.
+fn blackhole_grip(dist: f32, capture_px: f32) -> f32 {
+    smoothstep(capture_px, 0.35 * capture_px, dist)
+}
+
+/// Displace a sky glyph under the hole's gravity: effective pull =
+/// `s · grip(dist)`, radius collapsing toward `BLACKHOLE_CONVERGE` of
+/// home while the angle winds by up to `BLACKHOLE_SWIRL` — inner stars
+/// wind ~1.7× more (differential rotation). `spin` adds the catch's
+/// orbital winding (computed once per frame from `s` and `p`, zero at
+/// both window ends), scaled per star by its grip so untouched stars
+/// stay untouched. During the spit-out `s` goes NEGATIVE and the same
+/// formula throws the star past home (and unwinds past its rest angle
+/// — the outward whip). At `s == 0` this returns `home` EXACTLY (early
+/// return — no atan2 round-trip error): the bit-identical-boundary
+/// guarantee, and the untouched-sky guarantee for everything beyond
+/// the capture radius.
+fn blackhole_displace(home: Point, hole: Point, s: f32, spin: f32, capture_px: f32) -> Point {
+    if s == 0.0 {
         return home;
     }
-    let dx = home.x - galaxy.x;
-    let dy = home.y - galaxy.y;
+    let dx = home.x - hole.x;
+    let dy = home.y - hole.y;
     let r = (dx * dx + dy * dy).sqrt();
     if r <= f32::EPSILON {
         return home;
     }
-    let theta = dy.atan2(dx) + pull * GALAXY_SWIRL;
-    let r2 = r * (1.0 - pull * (1.0 - GALAXY_CONVERGE));
-    Point::new(galaxy.x + theta.cos() * r2, galaxy.y + theta.sin() * r2)
+    let grip = blackhole_grip(r, capture_px);
+    if grip <= 0.0 {
+        return home;
+    }
+    let eff = s * grip;
+    let wind = 1.0 + 0.7 * (1.0 - (r / capture_px).min(1.0));
+    let theta = dy.atan2(dx) + (eff * BLACKHOLE_SWIRL + spin * grip) * wind;
+    let r2 = r * (1.0 - eff * (1.0 - BLACKHOLE_CONVERGE));
+    Point::new(hole.x + theta.cos() * r2, hole.y + theta.sin() * r2)
+}
+
+/// How much of a glyph's light survives the horizon: `1.0` untouched,
+/// `0.0` fully swallowed. The fade keys on the CURRENT (displaced)
+/// distance — light dies between 1.6× and 0.6× the horizon radius —
+/// and its depth gates on `|s|·grip`, so a star whose HOME happens to
+/// sit beside a hashed center is untouched at the window boundaries
+/// and on non-event frames (visibility exactly 1 when displacement is
+/// exactly zero — the same bit-identity contract as position).
+fn blackhole_visibility(dist_now: f32, horizon_px: f32, s: f32, grip: f32) -> f32 {
+    let proximity = smoothstep(1.6 * horizon_px, 0.6 * horizon_px, dist_now);
+    let gate = (s.abs() * grip * 4.0).min(1.0);
+    1.0 - proximity * gate
 }
 
 /// One rising note's fixed parameters (the per-frame position falls out of
@@ -1875,86 +1957,35 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 draw_gull(&mut frame, Point::new(gx, gy), s, flap, gull_ink);
             }
         }
-        // ── The spiral galaxy — the sky's rarest event ──────────────────
-        // A cycle that rolls the galaxy computes (center, pull) once
-        // and draws the swirl; the star loop below routes every glyph
-        // through `galaxy_displace` (identity at pull 0 — the boundary
-        // guarantee), and the shooting star + wandering notes skip such
-        // cycles so the sky carries one drama at a time.
-        let galaxy_cycle = !day && hash01(self.cycle, GALAXY_SALT) < GALAXY_CHANCE;
-        let galaxy: Option<(Point, f32)> = if galaxy_cycle {
-            let start = 0.05 + 0.20 * hash01(self.cycle, GALAXY_SALT ^ 0x9E37);
+        // ── The black hole — the sky's rarest event ─────────────────────
+        // INVISIBLE by design (the owner's brief: a black hole isn't
+        // really visible) — nothing is drawn for the hole itself. A
+        // cycle that rolls one computes (center, s, spin, capture)
+        // once; the star loop below routes every glyph through
+        // `blackhole_displace` + `blackhole_visibility` (identity /
+        // full visibility at s 0 or beyond the capture radius — the
+        // boundary + locality guarantees), and the shooting star +
+        // wandering notes skip such cycles so the sky carries one
+        // drama at a time.
+        let blackhole_cycle = !day && hash01(self.cycle, BLACKHOLE_SALT) < BLACKHOLE_CHANCE;
+        let blackhole: Option<(Point, f32, f32, f32)> = if blackhole_cycle {
+            let start = 0.05 + 0.20 * hash01(self.cycle, BLACKHOLE_SALT ^ 0x9E37);
             let t = phase - start;
-            if (0.0..GALAXY_WINDOW).contains(&t) {
-                let p = t / GALAXY_WINDOW;
-                let (fx, fy) = galaxy_center(self.cycle);
-                let gc = Point::new(fx * w, fy * h);
-                // The swirl itself draws UNDER the stars (they fall in
-                // over it): a nucleus with a small glow, and two pairs
-                // of trailing spiral arms — starlight over a fainter
-                // seafoam under-arm — rotating slowly through the
-                // event. All solid fills/strokes, riding the solid
-                // block with the stars.
-                let env = galaxy_env(p);
-                if env > 0.0 {
-                    // Constrained-axis scaling: identical in the square
-                    // modes, and a user-dragged narrow stretched column
-                    // shrinks the swirl instead of clipping arm tips at
-                    // the panel edge.
-                    let reach = GALAXY_RADIUS_FRAC * h.min(w);
-                    // Alphas are FRACTIONS of the knob, so the nucleus
-                    // is GALAXY_CORE_ALPHA by construction — no hidden
-                    // second copy of the value to drift.
-                    for (r_frac, a_frac) in [(0.55_f32, 0.2_f32), (0.30, 0.4), (0.12, 1.0)] {
-                        frame.fill(
-                            &canvas::Path::circle(gc, r_frac * reach),
-                            Color {
-                                a: a_frac * GALAXY_CORE_ALPHA * env,
-                                ..starlight
-                            },
-                        );
-                    }
-                    let rot = GALAXY_ROT_RAD * p;
-                    for (arm_off, color, alpha, width) in [
-                        (0.0_f32, starlight, GALAXY_ARM_ALPHA, 1.2_f32),
-                        (std::f32::consts::PI, starlight, GALAXY_ARM_ALPHA, 1.2),
-                        (0.9, aurora_a, 0.6 * GALAXY_ARM_ALPHA, 1.6),
-                        (
-                            std::f32::consts::PI + 0.9,
-                            aurora_a,
-                            0.6 * GALAXY_ARM_ALPHA,
-                            1.6,
-                        ),
-                    ] {
-                        let arm = canvas::Path::new(|b| {
-                            const PTS: usize = 22;
-                            for i in 0..=PTS {
-                                let f = i as f32 / PTS as f32;
-                                let phi = f * 2.4 * std::f32::consts::PI;
-                                let r = reach * (0.12 + 0.88 * f.powf(1.4));
-                                let ang = rot + arm_off + phi;
-                                let pt =
-                                    Point::new(gc.x + ang.cos() * r, gc.y + ang.sin() * r * 0.62);
-                                if i == 0 {
-                                    b.move_to(pt);
-                                } else {
-                                    b.line_to(pt);
-                                }
-                            }
-                        });
-                        frame.stroke(
-                            &arm,
-                            canvas::Stroke::default()
-                                .with_color(Color {
-                                    a: alpha * env,
-                                    ..color
-                                })
-                                .with_width(width)
-                                .with_line_cap(canvas::LineCap::Round),
-                        );
-                    }
-                }
-                Some((gc, galaxy_pull(p)))
+            if (0.0..BLACKHOLE_WINDOW).contains(&t) {
+                let p = t / BLACKHOLE_WINDOW;
+                let (fx, fy) = blackhole_center(self.cycle);
+                let hole = Point::new(fx * w, fy * h);
+                // Constrained-axis capture radius: identical in the
+                // square modes; a dragged-narrow column shrinks the
+                // well instead of reaching off-panel.
+                let capture = BLACKHOLE_CAPTURE_FRAC * h.min(w);
+                let s = blackhole_s(p);
+                // The catch's orbital winding: grows from the plunge's
+                // end, scaled by s so the spit-out unwinds it into the
+                // outward whip and it is exactly zero at both window
+                // ends (s is).
+                let spin = s.max(0.0) * BLACKHOLE_HOLD_WHIRL * (p - BLACKHOLE_PLUNGE_END).max(0.0);
+                Some((hole, s, spin, capture))
             } else {
                 None
             }
@@ -1972,13 +2003,39 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                                 * (glyph.twinkle_k as f32 * phase + glyph.twinkle_off))
                                 .sin());
             let home = Point::new(glyph.x * w, glyph.y * h);
-            // The galaxy's pull, when one is playing out: identity at
-            // pull 0, so non-event frames and window boundaries render
-            // the fixed field bit-identically.
-            let center = match galaxy {
-                Some((gc, pull)) => galaxy_displace(home, gc, pull),
-                None => home,
+            // The hole's gravity, when one is open: identity and full
+            // visibility at s 0 and beyond the capture radius, so
+            // non-event frames, window boundaries, and the un-captured
+            // sky all render the fixed field bit-identically. Nearing
+            // the horizon a star's light stops escaping — it shrinks
+            // and dims to NOTHING, and re-lights crossing back out on
+            // the spit — so the hole is drawn by ABSENCE.
+            let (center, vis) = match blackhole {
+                Some((hole, s, spin, capture)) => {
+                    let pos = blackhole_displace(home, hole, s, spin, capture);
+                    let dx = home.x - hole.x;
+                    let dy = home.y - hole.y;
+                    let grip = blackhole_grip((dx * dx + dy * dy).sqrt(), capture);
+                    let dnx = pos.x - hole.x;
+                    let dny = pos.y - hole.y;
+                    let vis = blackhole_visibility(
+                        (dnx * dnx + dny * dny).sqrt(),
+                        BLACKHOLE_HORIZON_PX * glyph_scale,
+                        s,
+                        grip,
+                    );
+                    (pos, vis)
+                }
+                None => (home, 1.0),
             };
+            if vis <= 0.003 {
+                // Fully swallowed — beyond the horizon nothing shines.
+                continue;
+            }
+            let twinkle = twinkle * vis;
+            // Swallowed light also LOSES SIZE (the owner's scale-down):
+            // glyph geometry shrinks toward nothing alongside the fade.
+            let swallow_scale = 0.3 + 0.7 * vis;
             match glyph.kind {
                 SkyGlyphKind::Dot => {
                     // Crisp core + concentric halo rings — the visualizer
@@ -1987,7 +2044,7 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                     // correlates with size so the sky gains a magnitude
                     // hierarchy instead of N identical LEDs; the brightest
                     // tier earns a second, wider ring.
-                    let r = 1.5 * glyph.size * glyph_scale;
+                    let r = 1.5 * glyph.size * glyph_scale * swallow_scale;
                     let norm = ((glyph.size - 0.7) / 0.6).clamp(0.0, 1.0);
                     let peak = SKY_STAR_ALPHA * (0.45 + 0.55 * norm);
                     frame.fill(
@@ -2018,16 +2075,22 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                     // A lens glint: soft under-glow + bright nucleus here
                     // (solid), arms deferred to gradient block B so they
                     // taper to nothing at the tips.
-                    let arm = 3.2 * glyph.size * glyph_scale;
+                    let arm = 3.2 * glyph.size * glyph_scale * swallow_scale;
                     frame.fill(
-                        &canvas::Path::circle(center, 2.2 * glyph.size * glyph_scale),
+                        &canvas::Path::circle(
+                            center,
+                            2.2 * glyph.size * glyph_scale * swallow_scale,
+                        ),
                         Color {
                             a: 0.10 * twinkle,
                             ..starlight
                         },
                     );
                     frame.fill(
-                        &canvas::Path::circle(center, 1.1 * glyph.size * glyph_scale),
+                        &canvas::Path::circle(
+                            center,
+                            1.1 * glyph.size * glyph_scale * swallow_scale,
+                        ),
                         Color {
                             a: 0.35 * twinkle,
                             ..starlight
@@ -2044,12 +2107,12 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // back out — never twice in the same place. Windows sit fully
         // inside the cycle (max start 0.73 + 0.22 < 1.0), so a window can
         // never straddle the cycle boundary where its hash would change.
-        // Galaxy cycles skip the notes: every note window arithmetically
-        // overlaps the galaxy's, and a glyph hovering serene inside a sky
-        // the vortex is emptying reads as a bug — notes are not
+        // Black-hole cycles skip the notes: every note window
+        // arithmetically overlaps the hole's, and a glyph hovering serene
+        // beside a feeding gravity well reads as a bug — notes are not
         // constellation members (they don't get pulled), so they sit the
         // drama out entirely (the shooting star's one-drama rule).
-        for i in 0..if galaxy_cycle { 0 } else { SKY_WANDER_NOTES } {
+        for i in 0..if blackhole_cycle { 0 } else { SKY_WANDER_NOTES } {
             let salt = 0x407E + (i as u32) * 4;
             let start = 0.05 + 0.68 * hash01(self.cycle, salt);
             let t = phase - start;
@@ -2920,9 +2983,9 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // sky, its timing, origin, and heading all hashed from the cycle
         // counter — no two cycles replay the same streak. Night only (a
         // meteor at noon reads as a rendering bug, and the starlight
-        // streak would be invisible anyway). Galaxy cycles skip it —
+        // streak would be invisible anyway). Black-hole cycles skip it —
         // one sky drama at a time.
-        if !day && !galaxy_cycle && hash01(self.cycle, 0x57A2) < SHOOT_CHANCE {
+        if !day && !blackhole_cycle && hash01(self.cycle, 0x57A2) < SHOOT_CHANCE {
             let start = 0.15 + 0.60 * hash01(self.cycle, 0x57A3);
             if phase >= start && phase < start + SHOOT_WINDOW {
                 let p = (phase - start) / SHOOT_WINDOW;
@@ -3381,57 +3444,140 @@ mod tests {
     }
 
     #[test]
-    fn galaxy_pull_and_env_are_zero_at_both_window_ends() {
+    fn blackhole_s_is_zero_at_ends_accelerates_and_spits_past_home() {
         // The static-positions contract survives the event boundary
         // only if displacement is exactly zero as the window opens and
-        // closes; the visual envelope shares the rule.
-        assert_eq!(galaxy_pull(0.0), 0.0);
-        assert_eq!(galaxy_pull(1.0), 0.0);
-        assert!(galaxy_pull(0.5) > 0.99, "the hold must reach full pull");
-        assert_eq!(galaxy_env(0.0), 0.0);
-        assert_eq!(galaxy_env(1.0), 0.0);
-        assert!(galaxy_env(0.5) > 0.99);
-        // The envelope opens before and closes after the pull — the
-        // swirl is visible before the sky moves and while it settles.
-        assert!(galaxy_env(0.10) > galaxy_pull(0.10));
-        assert!(galaxy_env(0.90) > galaxy_pull(0.90));
+        // closes.
+        assert_eq!(blackhole_s(0.0), 0.0);
+        assert_eq!(blackhole_s(1.0), 0.0);
+        // The plunge ACCELERATES — gravity, not an ease: the second
+        // half of the fall covers far more than the first.
+        let early = blackhole_s(BLACKHOLE_PLUNGE_END * 0.5);
+        let late = blackhole_s(BLACKHOLE_PLUNGE_END * 0.999);
+        assert!(
+            late > 3.0 * early,
+            "the dive must accelerate (early {early}, late {late})"
+        );
+        // The catch holds full capture...
+        let mid = (BLACKHOLE_PLUNGE_END + BLACKHOLE_HOLD_END) * 0.5;
+        assert!((blackhole_s(mid) - 1.0).abs() < 1e-6);
+        // ...and the spit-out sails PAST home: s dips negative (radius
+        // beyond the star's rest position) before settling to zero.
+        let mut dip = 0.0_f32;
+        for i in 0..=100 {
+            let q = i as f32 / 100.0;
+            let p = BLACKHOLE_HOLD_END + q * (1.0 - BLACKHOLE_HOLD_END);
+            dip = dip.min(blackhole_s(p.min(1.0)));
+        }
+        assert!(
+            dip < -0.08,
+            "the ejection must overshoot past home, got min s {dip}"
+        );
         for i in 0..=40 {
             let p = i as f32 / 40.0;
-            assert!((0.0..=1.0).contains(&galaxy_pull(p)));
-            assert!((0.0..=1.0).contains(&galaxy_env(p)));
+            assert!(blackhole_s(p) <= 1.0 && blackhole_s(p) > -0.5);
         }
     }
 
     #[test]
-    fn galaxy_displace_is_identity_at_zero_pull_and_converges_at_full() {
-        let home = Point::new(200.0, 40.0);
-        let gc = Point::new(150.0, 60.0);
-        // Bit-exact identity at pull 0 (the early return) — no atan2
+    fn blackhole_gravity_is_local_and_boundary_exact() {
+        let hole = Point::new(150.0, 60.0);
+        let capture = 100.0;
+        let near = Point::new(170.0, 60.0); // dist 20 — full grip
+        let far = Point::new(150.0 + capture + 1.0, 60.0); // beyond reach
+        // Bit-exact identity at s 0 (the early return) — no atan2
         // round-trip error can leak into non-event frames.
-        let at_rest = galaxy_displace(home, gc, 0.0);
-        assert_eq!((at_rest.x, at_rest.y), (home.x, home.y));
-        // Full pull lands the star at CONVERGE of its home radius.
-        let pulled = galaxy_displace(home, gc, 1.0);
-        let r0 = ((home.x - gc.x).powi(2) + (home.y - gc.y).powi(2)).sqrt();
-        let r1 = ((pulled.x - gc.x).powi(2) + (pulled.y - gc.y).powi(2)).sqrt();
+        let rest = blackhole_displace(near, hole, 0.0, 0.0, capture);
+        assert_eq!((rest.x, rest.y), (near.x, near.y));
+        // Gravity is LOCAL: a star beyond the capture radius never
+        // stirs, even at full capture — bit-exact.
+        let unmoved = blackhole_displace(far, hole, 1.0, 0.4, capture);
+        assert_eq!((unmoved.x, unmoved.y), (far.x, far.y));
+        assert_eq!(blackhole_grip(0.0, capture), 1.0);
+        assert_eq!(blackhole_grip(capture, capture), 0.0);
+        // A fully-gripped star at full capture converges to the core,
+        // spin or no spin (the whirl moves the angle, not the radius).
+        let pulled = blackhole_displace(near, hole, 1.0, 0.7, capture);
+        let r1 = ((pulled.x - hole.x).powi(2) + (pulled.y - hole.y).powi(2)).sqrt();
         assert!(
-            (r1 - r0 * GALAXY_CONVERGE).abs() < 1e-3,
-            "full pull converges to the core (r0 {r0}, r1 {r1})"
+            (r1 - 20.0 * BLACKHOLE_CONVERGE).abs() < 1e-3,
+            "full grip converges to the core, got r {r1}"
+        );
+        // Negative s (the spit-out) throws it PAST home.
+        let spat = blackhole_displace(near, hole, -0.13, 0.0, capture);
+        let r2 = ((spat.x - hole.x).powi(2) + (spat.y - hole.y).powi(2)).sqrt();
+        assert!(
+            r2 > 20.0,
+            "ejection must overshoot the rest radius, got {r2}"
         );
         // A star already at the center stays put (no NaN from atan2).
-        let centered = galaxy_displace(gc, gc, 0.7);
-        assert_eq!((centered.x, centered.y), (gc.x, gc.y));
+        let centered = blackhole_displace(hole, hole, 0.7, 0.3, capture);
+        assert_eq!((centered.x, centered.y), (hole.x, hole.y));
     }
 
     #[test]
-    fn galaxy_deals_vary_and_center_stays_in_the_open_sky() {
+    fn blackhole_visibility_swallows_at_the_horizon_and_never_at_rest() {
+        let horizon = 12.0;
+        // At rest (s = 0) light is untouched at ANY distance — even a
+        // star whose HOME sits beside a hashed center renders the fixed
+        // field bit-identically outside events.
+        assert_eq!(blackhole_visibility(0.0, horizon, 0.0, 1.0), 1.0);
+        // Beyond the fade band, untouched even at full capture.
+        assert_eq!(blackhole_visibility(2.0 * horizon, horizon, 1.0, 1.0), 1.0);
+        // At the horizon with full grip and capture: fully swallowed —
+        // the light does not escape.
+        assert!(blackhole_visibility(0.5 * horizon, horizon, 1.0, 1.0) < 0.01);
+        // Monotone re-lighting on the way back out.
+        let deep = blackhole_visibility(0.7 * horizon, horizon, 1.0, 1.0);
+        let shallow = blackhole_visibility(1.3 * horizon, horizon, 1.0, 1.0);
+        assert!(deep < shallow, "light must return crossing back out");
+    }
+
+    #[test]
+    fn hashed_deals_spread_even_conditioned_on_the_gate() {
+        // The regression the GF(2)-linear hash hid: CONDITIONED on the
+        // rare-event gate passing, sibling-salted deals (center, start)
+        // must still span their ranges — under the old xorshift-only
+        // mixer every gate-passing cycle dealt the hole into a ~7 px
+        // box at the same start phase, forever.
+        let mut fxs: Vec<f32> = Vec::new();
+        let mut starts: Vec<f32> = Vec::new();
+        for cycle in 0..4000_u32 {
+            if hash01(cycle, BLACKHOLE_SALT) < BLACKHOLE_CHANCE {
+                fxs.push(blackhole_center(cycle).0);
+                starts.push(hash01(cycle, BLACKHOLE_SALT ^ 0x9E37));
+            }
+        }
+        assert!(
+            fxs.len() > 50,
+            "the gate must pass often enough to sample ({} hits)",
+            fxs.len()
+        );
+        let spread = |v: &[f32]| {
+            v.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b))
+                - v.iter().fold(f32::INFINITY, |a, &b| a.min(b))
+        };
+        assert!(
+            spread(&fxs) > 0.15,
+            "gate-conditioned centers must spread across the sky, got {}",
+            spread(&fxs)
+        );
+        assert!(
+            spread(&starts) > 0.5,
+            "gate-conditioned start phases must spread, got {}",
+            spread(&starts)
+        );
+    }
+
+    #[test]
+    fn blackhole_deals_vary_and_center_stays_in_the_open_sky() {
         assert_ne!(
-            galaxy_center(1),
-            galaxy_center(2),
+            blackhole_center(1),
+            blackhole_center(2),
             "consecutive cycles must deal different centers"
         );
         for cycle in 0..200_u32 {
-            let (fx, fy) = galaxy_center(cycle);
+            let (fx, fy) = blackhole_center(cycle);
             assert!(
                 (0.52..=0.82).contains(&fx),
                 "center stays in the upper-right sky, clear of the moon: {fx}"
