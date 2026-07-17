@@ -9,7 +9,7 @@ Propose entries for the `## [Unreleased]` block of `CHANGELOG.md` from commits m
 
 1. Find the boundary commit: `last_version_commit=$(git log --oneline --all --grep='bump version' -1 --format='%H')`. List commits since with `git log --no-merges --format='%h %s%n%b%n---' "${last_version_commit}..HEAD"`. Read bodies — subjects alone often miss the user-visible angle. If the range is empty, say so and stop.
 
-2. Read the current `## [Unreleased]` block in `CHANGELOG.md`. Existing bullets are authoritative — do not rewrite, reorder, or merge them. Your job is to *add* what's missing.
+2. Read the current `## [Unreleased]` block in `CHANGELOG.md`. Existing bullets are authoritative for **content** — never silently drop or merge away a recorded user-visible change, and keep their order. They are **not** authoritative for **form or truth**: before adding anything, re-measure every existing bullet against the § 1 rubric. Any bullet over the 25-word cap gets split into compliant bullets; any bullet braiding more than one claim gets split; any claim you cannot pin to a `file:line` gets verified, narrowed, or cut. Show these rewrites in the same proposed diff as your additions, each with its old and new word count. Nothing else in this loop ever re-reads a landed bullet, so verbosity and error are one-way unless you break them here.
 
 3. Categorize each commit by conventional-commit type:
    - `feat:` → **Added**

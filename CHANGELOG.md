@@ -6,11 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **The Trawl scene's seabed comes alive.** A small school of fish drifts through the mid-water (with a moonlit rim so it reads at night), kelp beds sway along the floor — clusters on the flanks plus a few shorter loners the anchor drags past — and the trawl aerates the bed: a stream of bubbles rises from the dragged anchor, the bigger ones as rings, with slow seeps rising from the kelp roots. Rock mounds, a resting starfish, and a sunken slatted cargo crate settled at a tilt on the right bed dress the bottom, moonlit at night. Cold starlight and seafoam by night, ink by day; the lantern stays the scene's only warm light.
-- **Moonbeams in the Trawl night, and rare visitors below.** Three whisper-quiet shafts of starlight fan from the moon down through the night water — you notice the water feels lit rather than seeing rays — and once in a while a long serpent glides through the deep beneath the longship: three tail-beats, then gone.
-- **The night sky's rarest event: a black hole.** Every once in a long while an invisible gravity well opens in the night sky — nothing is drawn for it, because a black hole isn't really visible. You know it's there because the stars near it start to fall: accelerating spirals winding tighter, each star shrinking and dimming to nothing as it crosses the event horizon (the light can't escape), the survivors orbiting the darkness — until the well lets go and spits everything back out, stars re-lighting as they sail past their homes and settle back into place. Distant stars never stir; the moon just watches; shooting stars sit those cycles out.
-- **The Trawl scene's day finally gets its light.** The waterline's catch-light and traveling shimmer now gild in sun gold by day (they previously drew in starlight, invisible on a light sea), sparse glitter flashes ride the water under the sun, and some cycles a tiny distant sail crosses the far swell — day's answer to the night's shooting star.
-- **The moon dreams.** The Trawl scene's moon (and its day sun) now rests as a plain disc. Once when the app opens, and rarely after that, it slips into a short ritual: four verses in carved staves drift through the sky, and with each verse a mark of a face appears on the disc — the grin first — until the face is whole; then it lets go again, the grin lingering last, and the plain moon sails on until the next dream. What the staves say is left to whoever cares to read them. The black hole, the shooting star, and the wandering notes sit those cycles out.
+- A small school of fish now drifts through the mid-water of the Trawl scene, above the seabed and below the waterline.
+- Kelp beds now sway along the Trawl seabed, taller clusters on each flank and shorter loners toward the middle.
+- A stream of bubbles now rises from the dragged anchor, aerating the bed as the trawl works across the floor.
+- Rock mounds and a resting starfish now settle on the Trawl scene's seabed floor.
+- A slatted cargo crate now lies tilted on the Trawl scene's right seabed.
+- The Trawl scene's night water now feels lit by the moon.
+- Once in a while a long inked serpent glides across the Trawl scene's deep water, then vanishes.
+- The Trawl scene's daytime waterline catch-light and shimmer now gild in sun gold, recolored from the starlight they drew at night.
+- Sparse glitter now flashes on the Trawl scene's daytime water beneath the sun.
+- Some cycles a tiny hazed sail now crosses the far swell behind the longship by day, bobbing with the distant water.
+- Rarely the Trawl night sky opens an invisible black hole, and nearby stars spiral in, shrink to nothing, then get spat back into place.
+- The Trawl scene's moon now rests as a bare disc, faceless between dreams.
+- Once at every launch, and rarely after, the Trawl scene's sky slips into a short ritual that calls a face onto its disc.
+- The face builds mark by mark as each carved verse arrives, the grin appearing first.
+- When the dream ends the marks leave in reverse, the strap first and the grin lingering last before the disc is bare again.
+- The moon dream's four carved verses ship untranslated, left to whoever cares to read them.
 
 ### Changed
 
