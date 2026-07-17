@@ -868,14 +868,19 @@ impl QueuePage {
         // keep up with offset changes (see Albums view for the same
         // pattern).
         let center_artwork_handle: Option<&iced::widget::image::Handle> = if data.is_playing {
-            current_playing_song_id
-                .as_ref()
-                .and_then(|song_id| queue_songs.iter().find(|s| &s.id == song_id))
-                .and_then(|song| {
-                    large_artwork
-                        .get(&song.album_id)
-                        .or_else(|| album_art.get(&song.album_id))
-                })
+            // Lyrics backdrop: the frosted variant of the playing cover wins
+            // when the blur setting is on and the blur is ready; sharp
+            // fallback otherwise (and always for the paused/centered panel).
+            data.lyrics_blurred_cover.or_else(|| {
+                current_playing_song_id
+                    .as_ref()
+                    .and_then(|song_id| queue_songs.iter().find(|s| &s.id == song_id))
+                    .and_then(|song| {
+                        large_artwork
+                            .get(&song.album_id)
+                            .or_else(|| album_art.get(&song.album_id))
+                    })
+            })
         } else {
             None
         }
@@ -939,6 +944,9 @@ impl QueuePage {
             center_artwork_handle,
             over_art_overlay,
             over_art_boat,
+            // Synced-lyrics layer: haloed text topmost, its scrim slotted
+            // BELOW the over-cover visualizer (both hero surfaces co-render).
+            data.lyrics,
             crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Blank,
             panel_menu_entries,
             artwork_menu_open,

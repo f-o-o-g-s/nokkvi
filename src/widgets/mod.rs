@@ -17,6 +17,7 @@ pub(crate) mod harbour_sea;
 pub(crate) mod hover_overlay;
 pub(crate) mod library_filter_trigger;
 pub(crate) mod link_text;
+pub(crate) mod lyrics_viewport;
 pub(crate) mod marquee_text;
 pub(crate) mod menu_chrome;
 pub(crate) mod menu_constants;

@@ -22,7 +22,7 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, LibraryPageSize,
-            LivePlayerSettings, NavDisplayMode, NavLayout, NormalizationLevel,
+            LivePlayerSettings, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
             TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
         },
@@ -200,6 +200,7 @@ impl SettingsService {
     delegate_setter!(set_local_music_path, String);
     delegate_setter!(set_library_page_size, LibraryPageSize);
     delegate_setter!(set_artwork_resolution, ArtworkResolution);
+    delegate_setter!(set_lyrics_backdrop_blur, LyricsBackdropBlur);
     delegate_setter!(set_eq_enabled, bool);
     delegate_setter!(set_eq_gains, [f32; 10]);
     delegate_setter!(delete_custom_eq_preset, usize);
@@ -207,6 +208,8 @@ impl SettingsService {
     delegate_setter!(set_opacity_gradient, bool);
     delegate_setter!(set_slot_text_links, bool);
     delegate_setter!(set_crossfade_enabled, bool);
+    delegate_setter!(set_lyrics_enabled, bool);
+    delegate_setter!(set_lyrics_fetch_online, bool);
     delegate_setter!(set_bit_perfect, BitPerfectMode);
     delegate_setter!(set_crossfade_duration, u32);
     delegate_setter!(set_crossfade_curve, CrossfadeCurve);

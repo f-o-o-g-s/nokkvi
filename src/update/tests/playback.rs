@@ -56,6 +56,7 @@ fn consume_toggled_sets_flag() {
 fn make_playback_update() -> PlaybackStateUpdate {
     PlaybackStateUpdate {
         position: 42,
+        position_ms: 42_000,
         duration: 200,
         playing: true,
         paused: false,

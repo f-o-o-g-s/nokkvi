@@ -53,6 +53,7 @@ const NAME_MAP: &[(&str, &str)] = &[
     ("binary", "assets/icons-phosphor/binary-regular.svg"),
     ("blend", "assets/icons-phosphor/intersect-regular.svg"),
     ("calendar", "assets/icons-phosphor/calendar-regular.svg"),
+    ("captions", "assets/icons-phosphor/subtitles-regular.svg"),
     ("check", "assets/icons-phosphor/check-regular.svg"),
     (
         "chevron-down",

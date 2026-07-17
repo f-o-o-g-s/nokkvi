@@ -218,6 +218,45 @@ pub(crate) fn get_state_dir() -> Result<PathBuf> {
     Ok(state_dir)
 }
 
+/// Get the data directory (`~/.local/share/nokkvi`).
+///
+/// Holds larger, non-portable client-side data (the lyrics store). Per the XDG
+/// Base Directory Specification this is `$XDG_DATA_HOME`, distinct from config
+/// (`~/.config`) and state (`~/.local/state`).
+pub(crate) fn get_data_dir() -> Result<PathBuf> {
+    let base_dirs = directories::BaseDirs::new()
+        .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+
+    let data_dir = base_dirs.data_dir().join(APP_NAME);
+
+    if !data_dir.exists() {
+        std::fs::create_dir_all(&data_dir).context(format!(
+            "Failed to create data directory: {}",
+            data_dir.display()
+        ))?;
+    }
+
+    Ok(data_dir)
+}
+
+/// Get the lyrics store directory (`~/.local/share/nokkvi/lyrics`).
+///
+/// A standalone `.lrc` corpus plus fetched-lyrics cache, matched to playing
+/// tracks by their internal tags. Kept out of the music library so album
+/// folders stay clean.
+pub fn get_lyrics_dir() -> Result<PathBuf> {
+    let lyrics_dir = get_data_dir()?.join("lyrics");
+
+    if !lyrics_dir.exists() {
+        std::fs::create_dir_all(&lyrics_dir).context(format!(
+            "Failed to create lyrics directory: {}",
+            lyrics_dir.display()
+        ))?;
+    }
+
+    Ok(lyrics_dir)
+}
+
 /// Get the credentials config file path (`~/.config/nokkvi/config.toml`,
 /// or `config.debug.toml` in debug builds — see `CONFIG_FILENAME`).
 pub fn get_config_path() -> Result<PathBuf> {

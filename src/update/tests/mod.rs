@@ -32,6 +32,7 @@ mod hotkeys;
 mod ipc;
 mod library;
 mod library_refresh;
+mod lyrics;
 mod menus;
 mod mpris;
 #[macro_use]

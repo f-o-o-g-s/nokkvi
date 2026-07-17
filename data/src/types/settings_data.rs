@@ -147,6 +147,10 @@ impl Default for InterfaceSettingsData {
 #[derive(Debug, Clone)]
 pub struct PlaybackSettingsData {
     pub crossfade_enabled: bool,
+    pub lyrics_enabled: bool,
+    pub lyrics_fetch_online: bool,
+    /// Cover-blur label ("Off" / "Light" / "Medium" / "Heavy").
+    pub lyrics_backdrop_blur: Cow<'static, str>,
     /// Bit-perfect mode label ("Off" / "Strict" / "Relaxed").
     pub bit_perfect: Cow<'static, str>,
     pub crossfade_duration_secs: i64,
@@ -229,6 +233,9 @@ impl Default for PlaybackSettingsData {
     fn default() -> Self {
         Self {
             crossfade_enabled: false,
+            lyrics_enabled: false,
+            lyrics_fetch_online: false,
+            lyrics_backdrop_blur: Cow::Borrowed("test-default"),
             bit_perfect: Cow::Borrowed("test-default"),
             crossfade_duration_secs: 0,
             crossfade_curve: Cow::Borrowed("test-default"),

@@ -389,7 +389,14 @@ impl Nokkvi {
                 tasks.push(self.warm_harbour_current_center());
                 Task::batch(tasks)
             }
-            View::Queue => Task::done(Message::LoadQueue), // Always reload queue to reflect changes
+            // Always reload queue to reflect changes; also kick a lyrics
+            // resolve for the current track if it played while the Queue view
+            // (the only lyrics surface) was hidden — the song-change hook
+            // deliberately skips network work off-surface.
+            View::Queue => Task::batch([
+                Task::done(Message::LoadQueue),
+                self.lyrics_kick_if_unresolved(),
+            ]),
             View::Settings => {
                 // Entries are rebuilt in update (not per frame), so entering
                 // the view must populate the cache: first entry, re-entry

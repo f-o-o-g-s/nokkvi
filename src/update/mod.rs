@@ -58,6 +58,7 @@ mod ipc;
 mod library_filter;
 mod library_refresh;
 mod loader_target;
+mod lyrics;
 mod menus;
 mod mpris;
 mod navigation;
@@ -170,6 +171,8 @@ impl Nokkvi {
                 }
                 Task::none()
             }
+            Message::LyricsIndexReady(index) => self.handle_lyrics_index_ready(index),
+            Message::LyricsLoader(msg) => self.handle_lyrics_loader(msg),
 
             // -----------------------------------------------------------------
             // Data Loading: Albums

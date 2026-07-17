@@ -40,15 +40,18 @@ Things that shaped this project:
 ## Highlights
 
 - Native PipeWire audio engine with gapless playback, configurable crossfade (selectable curves, gapless-album and minimum-length policies), optional fades on pause/stop/skip/radio, AGC + ReplayGain volume normalization, and a 10-band EQ
-- Opt-in **bit-perfect** playback that bypasses DSP (EQ, software volume, limiter) and follows each track's native sample rate, in a Strict mode or a Relaxed mode that still crossfades same-rate tracks, with a now-playing badge that reads the real hardware clock and honestly shows `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED` rather than trusting the requested rate
+- Opt-in **bit-perfect** playback that bypasses DSP (EQ, software volume, limiter) and follows each track's native sample rate, in a Strict mode or a Relaxed mode that still crossfades same-format tracks (same sample rate and channel count), with a now-playing badge that reads the real hardware clock and honestly shows `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED` rather than trusting the requested rate
 - GPU-accelerated visualizer with `bars`, `lines`, and `scope` (circular oscilloscope) modes, beat-reactive neon glow and bloom, plus optional motion trails, echo, and CRT/film post-processing; `bars`/`lines` can sit in a band above the player bar or draw over the now-playing cover art
-- Browse albums, artists, songs, genres, playlists, internet radios, and similar artists; inline expansion, split-view browsing, and multi-library filtering included
+- Browse albums, artists, songs, genres, playlists, internet radios, and similar songs; inline expansion, split-view browsing, and multi-library filtering included
+- Radio stations carry real artwork (an uploaded logo, or the stream's own now-playing image, remembered across restarts), and right-click "Set Custom Artwork" uploads a cover for any playlist or station to Navidrome
 - **Harbour** home view: collapsible discovery shelves — recently played, most played, recently added, plus random genre and playlist cover mosaics — fronted by nokkvi's first whole-library search that matches artists, albums, songs, genres, and playlists at once
-- **Trawl** mix builder: gather artist, album, song, genre, and playlist seeds into a crate, then blend them into the queue by round-robin interleave, per-seed weight, or shuffle-all, with length, rating, and track-count filters
-- 23 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, Firmium, Enthroned, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
-- Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling to Last.fm / ListenBrainz — including direct scrobbling of internet-radio streams from their broadcast metadata
-- Sync your play queue to Navidrome and pull it back on another device or a fresh session, resuming at the exact track and position
+- **Trawl** mix builder: gather artist, album, song, genre, and playlist seeds into a crate, then blend them into the queue by round-robin interleave, per-seed weight, or shuffle-all, with length, rating, and track-count filters. Its panel is a living day-and-night seascape around the trawling longship, with rare sights for patient eyes
+- 23 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, Firmium, Enthroned, ...) picked from a searchable modal that paints each row in that theme's own palette, with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own. Two complete icon sets ship (Phosphor default, Lucide alternate)
+- Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling (library plays go through your server's Last.fm / ListenBrainz agents, and internet-radio streams scrobble directly from their broadcast metadata)
+- Sync your play queue to Navidrome and pull it back on another device or a fresh session, resuming at the exact track and position (needs the OpenSubsonic indexBasedQueue extension, Navidrome 0.58.5+)
+- Synced lyrics over the Queue cover art (player-bar toggle, hotkey `L`), resolved from a local `.lrc` store, your server's OpenSubsonic lyrics, or LRCLIB (fetches cached into the local store for offline replay), with an eased line-follow, a soft glyph halo plus optional cover blur for readability over any art, and a crossfade-coupled dissolve between tracks; the visualizer keeps playing beneath the words
 - Fully keyboard-driven with configurable shortcuts, MPRIS, optional system tray icon, and right-click menus everywhere
+- Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull), handy for WM hotkeys and status bars
 - Designed on a tiling WM — player bar folds controls into a kebab menu as width shrinks; library views use a **slot-paginated list** (the viewport is a fixed odd number of whole-row slots — never partials) where the slot count adapts to window height (up to 29) and text, album artwork, and star icons scale with each slot
 
 Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).
@@ -63,7 +66,6 @@ Nokkvi is a fast, keyboard-driven music player, not a Navidrome admin panel. The
 - Bookmarks
 - Public sharing links
 - Offline download
-- Lyrics
 
 ## Download
 

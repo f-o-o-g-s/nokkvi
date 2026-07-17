@@ -234,6 +234,7 @@ const BREAKPOINT_HIDE_SFX_SLIDER: f32 = 840.0;
 /// for cull-priority and in-kebab queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModeId {
+    Lyrics,
     Visualizer,
     Crossfade,
     BitPerfect,
@@ -393,6 +394,20 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 message: PlayerBarMessage::ToggleBitPerfect,
             }
         }
+        ModeId::Lyrics => ModeDescriptor {
+            icon: Some("assets/icons/captions.svg"),
+            tooltip: if data.lyrics_enabled {
+                "Lyrics: On"
+            } else {
+                "Lyrics: Off"
+            },
+            kebab_label: if data.lyrics_enabled {
+                "Lyrics: On"
+            } else {
+                "Lyrics: Off"
+            },
+            message: PlayerBarMessage::ToggleLyrics,
+        },
         ModeId::Visualizer => ModeDescriptor {
             icon: Some(match data.visualization_mode {
                 VisualizationMode::Lines => "assets/icons/audio-waveform.svg",
@@ -421,7 +436,8 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
 /// Cull priority — index `i` is the i-th mode to fold into the kebab as the
 /// window narrows. Ordered to match the inline row's right-to-left disappear
 /// (rightmost-first) so gaps close cleanly from the right edge.
-pub(crate) const CULL_ORDER: [ModeId; 8] = [
+pub(crate) const CULL_ORDER: [ModeId; 9] = [
+    ModeId::Lyrics,
     ModeId::Visualizer,
     ModeId::Crossfade,
     ModeId::BitPerfect,
@@ -436,7 +452,8 @@ pub(crate) const CULL_ORDER: [ModeId; 8] = [
 /// Hysteresis on the way back out: a culled mode pops back inline only once
 /// width ≥ this threshold + `CULL_HYSTERESIS_PX`, preventing drag-resize
 /// flicker at the boundary.
-pub(crate) const CULL_ENTER_WIDTHS: [f32; 8] = [
+pub(crate) const CULL_ENTER_WIDTHS: [f32; 9] = [
+    1130.0, // Lyrics
     1070.0, // Visualizer
     1010.0, // Crossfade
     980.0,  // Bit-Perfect
@@ -612,6 +629,9 @@ pub(crate) struct PlayerBarViewData {
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
     pub crossfade_enabled: bool,
+    /// Synced-lyrics overlay toggle (the live mirror of
+    /// `general.lyrics_enabled`). Drives the Lyrics mode button's active state.
+    pub lyrics_enabled: bool,
     /// Bit-perfect output mode (the setting: Off / Strict / Relaxed). Drives the
     /// Bit-Perfect mode toggle's icon + active state. Distinct from
     /// `bit_perfect_status` (the honest device-rate badge).
@@ -676,6 +696,7 @@ pub enum PlayerBarMessage {
     CycleVisualization,
     ToggleCrossfade,
     ToggleBitPerfect,
+    ToggleLyrics,
     ScrollVolume(f32),
     /// Wheel-scroll delta over the SFX slider — handler reads the
     /// current SFX volume from app state and clamps, avoiding the
@@ -1279,6 +1300,7 @@ pub(crate) fn player_bar<'a>(
     let crossfade = mode_descriptor(ModeId::Crossfade, data);
     let bit_perfect = mode_descriptor(ModeId::BitPerfect, data);
     let visualizer = mode_descriptor(ModeId::Visualizer, data);
+    let lyrics = mode_descriptor(ModeId::Lyrics, data);
 
     // Per-mode kebab membership — derived once from the layout snapshot so
     // the inline row and kebab construction stay in sync.
@@ -1291,6 +1313,7 @@ pub(crate) fn player_bar<'a>(
     let crossfade_in_kebab = layout.is_in_kebab(ModeId::Crossfade);
     let bit_perfect_in_kebab = layout.is_in_kebab(ModeId::BitPerfect);
     let visualizer_in_kebab = layout.is_in_kebab(ModeId::Visualizer);
+    let lyrics_in_kebab = layout.is_in_kebab(ModeId::Lyrics);
 
     let mut mode_toggles_row = iced::widget::Row::new().spacing(4);
 
@@ -1378,6 +1401,18 @@ pub(crate) fn player_bar<'a>(
             true,
         ));
     }
+    // Rightmost inline mode (CULL_ORDER[0] — first to fold as the window
+    // narrows). Queue-only surface, so inert during radio like the queue-flow
+    // group.
+    if !lyrics_in_kebab {
+        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
+            lyrics.icon.unwrap_or("assets/icons/captions.svg"),
+            lyrics.message.clone(),
+            data.lyrics_enabled,
+            lyrics.tooltip,
+            mode_controls_enabled,
+        ));
+    }
 
     // Kebab menu — built only when at least one mode has folded in. Rows
     // render in the user-specified display order: queue-flow group first
@@ -1454,6 +1489,13 @@ pub(crate) fn player_bar<'a>(
                 sfx.kebab_label,
                 sound_effects_enabled,
                 sfx.message.clone(),
+            ));
+        }
+        if lyrics_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                lyrics.kebab_label,
+                data.lyrics_enabled,
+                lyrics.message.clone(),
             ));
         }
 
@@ -2242,7 +2284,7 @@ mod layout_tests {
     /// or reordering a mode.
     #[test]
     fn inline_row_order_reversed_matches_cull_order() {
-        const INLINE_ORDER: [ModeId; 8] = [
+        const INLINE_ORDER: [ModeId; 9] = [
             ModeId::Repeat,
             ModeId::Shuffle,
             ModeId::Consume,
@@ -2251,6 +2293,7 @@ mod layout_tests {
             ModeId::BitPerfect,
             ModeId::Crossfade,
             ModeId::Visualizer,
+            ModeId::Lyrics,
         ];
         let mut reversed = INLINE_ORDER;
         reversed.reverse();
@@ -2427,6 +2470,7 @@ mod layout_tests {
         // catches a mode being dropped/duplicated within CULL_ORDER (which keeps
         // the length but leaves some mode inline-only, never culling).
         let all = [
+            ModeId::Lyrics,
             ModeId::Visualizer,
             ModeId::Crossfade,
             ModeId::BitPerfect,
@@ -2534,6 +2578,7 @@ mod mode_descriptor_tests {
             sound_effects_enabled: false,
             sfx_volume: 1.0,
             crossfade_enabled: false,
+            lyrics_enabled: false,
             bit_perfect_mode: nokkvi_data::types::player_settings::BitPerfectMode::Off,
             visualization_mode: VisualizationMode::Off,
             window_width: 1200.0,
@@ -2766,6 +2811,7 @@ mod mode_descriptor_tests {
                 ModeId::Crossfade => matches!(d.message, PlayerBarMessage::ToggleCrossfade),
                 ModeId::BitPerfect => matches!(d.message, PlayerBarMessage::ToggleBitPerfect),
                 ModeId::Visualizer => matches!(d.message, PlayerBarMessage::CycleVisualization),
+                ModeId::Lyrics => matches!(d.message, PlayerBarMessage::ToggleLyrics),
             };
             assert!(ok, "wrong message ctor for {mode:?}: {:?}", d.message);
         }

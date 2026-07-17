@@ -139,6 +139,9 @@ fn action_to_message(action: HotkeyAction) -> Message {
             Message::TrawlModal(crate::widgets::trawl_modal::TrawlModalMessage::Open)
         }
         HotkeyAction::ToggleCrossfade => Message::Playback(PlaybackMessage::ToggleCrossfade),
+        HotkeyAction::ToggleLyrics => {
+            Message::PlayerBar(crate::widgets::PlayerBarMessage::ToggleLyrics)
+        }
         HotkeyAction::ToggleBitPerfect => Message::Playback(PlaybackMessage::ToggleBitPerfect),
         // Slot List
         HotkeyAction::SlotListUp => Message::SlotList(SlotListMessage::NavigateUp),

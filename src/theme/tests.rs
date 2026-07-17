@@ -209,6 +209,31 @@ fn selection_ring_clears_contrast_floor_on_every_theme() {
     }
 }
 
+/// The lyric glyph halo (`widgets/lyrics_viewport.rs`) draws every lyric fill
+/// over a near-opaque `bg0_hard` rim, so the active line's legibility formally
+/// leans on the `(accent_bright, bg0_hard)` pair — and every line on
+/// `(fg0, bg0_hard)`. Gauntlet-pin both across all shipped themes/modes so a
+/// future palette can't silently break lyrics over art (cf. the selection-ring
+/// guard above for the same failure class).
+#[test]
+fn lyric_halo_ink_contrasts_bg0_hard_on_every_theme() {
+    for (name, mode, t) in all_builtin_palettes() {
+        let ink = resolve_lyrics_accent(t.accent_bright, t.bg0_hard);
+        let accent_cr = contrast_ratio(ink, t.bg0_hard);
+        assert!(
+            accent_cr >= SELECTION_RING_MIN_CONTRAST - 1e-3,
+            "{name}/{mode} lyric accent ink on bg0_hard only reached {accent_cr:.2}:1 \
+             (floor {SELECTION_RING_MIN_CONTRAST}) — the active lyric line rides this pair"
+        );
+        let fg_cr = contrast_ratio(t.fg0, t.bg0_hard);
+        assert!(
+            fg_cr >= 4.5 - 1e-3,
+            "{name}/{mode} fg0 on bg0_hard only reached {fg_cr:.2}:1 \
+             (AA text floor 4.5) — every lyric line rides this pair"
+        );
+    }
+}
+
 /// `legible_against` is bidirectional: too-dark text on a dark surface is
 /// LIFTED (the old `darken_until_legible` could not), and too-light text on
 /// a light surface is darkened — both reaching WCAG AA.

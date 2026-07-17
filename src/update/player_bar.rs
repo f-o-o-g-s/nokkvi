@@ -56,6 +56,36 @@ impl Nokkvi {
             PlayerBarMessage::ToggleBitPerfect => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleBitPerfect))
             }
+            PlayerBarMessage::ToggleLyrics => {
+                // Flip the LIVE mirror synchronously (the single value the
+                // render reads — observable in tests, where the async persist
+                // below never runs), then persist + drive the surface.
+                // Deliberately NOT the Crossfade re-dispatch hop: that extra
+                // Task indirection is inert in test_app and adds nothing here.
+                self.lyrics.enabled = !self.lyrics.enabled;
+                let enabled = self.lyrics.enabled;
+                self.settings.lyrics_enabled = enabled;
+                let persist = self.shell_task(
+                    move |shell| async move {
+                        let mgr = shell.settings().settings_manager();
+                        let mut mgr = mgr.lock().await;
+                        if let Err(e) = mgr.set_lyrics_enabled(enabled) {
+                            tracing::warn!(error = %e, "failed to persist lyrics_enabled");
+                        }
+                    },
+                    |()| Message::NoOp,
+                );
+                let drive = if enabled {
+                    // Resolve the current track immediately (user-initiated).
+                    self.lyrics_kick_if_unresolved()
+                } else {
+                    self.lyrics.clear();
+                    Task::none()
+                };
+                self.settings_page.config_dirty = true;
+                self.refresh_settings_entries_if_dirty();
+                Task::batch([persist, drive])
+            }
             PlayerBarMessage::ScrollVolume(delta) => Task::done(
                 scroll_volume_to_committed_message(self.playback.volume, delta),
             ),

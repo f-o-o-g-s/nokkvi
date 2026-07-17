@@ -3105,6 +3105,7 @@ dependencies = [
  "font-kit",
  "futures",
  "icy-metadata",
+ "lru 0.18.0",
  "md-5",
  "num-complex",
  "parking_lot",

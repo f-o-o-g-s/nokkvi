@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Synced lyrics now display over the Queue cover art, following the playing track line by line.
+- A Lyrics toggle joins the player-bar modes (hotkey `L`), with a matching Settings row.
+- Lyrics resolve from a local store, then your server's OpenSubsonic lyrics, then LRCLIB.
+- Fetched lyrics cache into `~/.local/share/nokkvi/lyrics/` and resolve offline afterwards.
+- An online-fetch setting gates the LRCLIB channel for privacy.
+- The lyric column glides between lines with eased motion, snapping on seeks.
+- With crossfade on, the old track's lyrics dissolve out as the next track's fade in.
+- The over-cover visualizer keeps playing underneath the lyrics instead of yielding to them.
+- A Lyrics: Cover Blur setting frosts the cover behind the lyrics, Off through Heavy.
+
 - A small school of fish now drifts through the mid-water of the Trawl scene, above the seabed and below the waterline.
 - Kelp beds now sway along the Trawl seabed, taller clusters on each flank and shorter loners toward the middle.
 - A stream of bubbles now rises from the dragged anchor, aerating the bed as the trawl works across the floor.

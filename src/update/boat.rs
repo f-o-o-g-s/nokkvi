@@ -43,6 +43,23 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // player is paused or stopped.
     step_harbour_scene(app, now);
 
+    // Synced-lyrics glide: ease the column center toward the active line at
+    // display refresh, smoothing the 100 ms position ticks into crossfade-tier
+    // motion. Runs BEFORE the boat's early-outs (lyrics must animate whatever
+    // the visualizer mode) and with NO pause gate — an in-flight glide settles
+    // to its target even while paused (the retarget only fires on real line
+    // changes, which don't happen while paused).
+    if app.lyrics.enabled && app.lyrics.matched_song_id.is_some() {
+        let pos = crate::widgets::lyrics_viewport::eased_center(
+            app.lyrics.scroll_from,
+            app.lyrics.scroll_to,
+            app.lyrics.anim_start,
+            app.lyrics.anim_duration_ms,
+            now,
+        );
+        crate::widgets::lyrics_viewport::set_lyrics_center(pos);
+    }
+
     // Read mode + config snapshot once per tick. The "visualizer enabled"
     // check is `engine.visualization_mode != VisualizationMode::Off` — that's
     // what gates the shader element in the app_view visualizer-element build

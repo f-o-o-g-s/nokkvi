@@ -374,10 +374,10 @@ impl ArtworkPlaceholder {
 ///   no horizontal letterbox gap).
 /// - `AlwaysStretched` / `AlwaysVerticalStretched` → responsive `Length::Fill`
 ///   with image filling the parent rect via the configured `ContentFit`.
-pub(crate) fn single_artwork_panel<'a, Message: 'a>(
+pub(crate) fn single_artwork_panel<'a, Message: 'a + 'static>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
 ) -> Element<'a, Message> {
-    single_artwork_panel_inner(artwork_handle, None, None, ArtworkPlaceholder::Blank)
+    single_artwork_panel_inner(artwork_handle, None, None, None, ArtworkPlaceholder::Blank)
 }
 
 /// Surfing-boat overlay for the over-cover Lines visualizer. Carries a borrow of
@@ -421,7 +421,7 @@ pub(crate) struct OverCoverBoat<'a> {
 /// centered and sized by `scope.radius`, filling the panel.
 ///
 /// [`Visualizer`]: crate::widgets::visualizer::Visualizer
-fn single_artwork_panel_inner<'a, Message: 'a>(
+fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     over_art: Option<(
         crate::widgets::visualizer::Visualizer,
@@ -429,6 +429,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
         f32,
     )>,
     boat: Option<OverCoverBoat<'a>>,
+    lyrics: Option<crate::widgets::lyrics_viewport::LyricsPanelData<'a>>,
     placeholder: ArtworkPlaceholder,
 ) -> Element<'a, Message> {
     if theme::artwork_column_mode().is_stretched() {
@@ -467,6 +468,17 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
             // they occupy `height_percent` of the cover height, bottom-anchored
             // (cover art shows above) — the same knob the bottom band uses. Bars
             // also recompute their bar layout from the panel width.
+            // Lyrics scrim BELOW the visualizer: the art dims for legibility
+            // while the visualizer keeps full strength above it; the haloed
+            // lyric text stacks topmost. All lyric pieces are event-
+            // transparent, so the panel context menu still works.
+            let mut layers = stack![cover];
+            if lyrics.is_some() {
+                layers = layers.push(crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(
+                    size.width,
+                    size.height,
+                ));
+            }
             let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
                 let is_scope = *mode == crate::widgets::visualizer::VisualizationMode::Scope;
                 let band_h = if is_scope {
@@ -501,7 +513,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
                     .height(Length::Fill)
                     .into()
                 };
-                let mut layers = stack![cover, ring_layer];
+                layers = layers.push(ring_layer);
                 // Surfing boat over the Lines wave, confined to the same bottom
                 // band so it rides the rendered waveform. Inert + event-
                 // transparent, so it never steals the artwork right-click.
@@ -533,9 +545,18 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
                 }
                 layers.into()
             } else {
-                cover.into()
+                layers.into()
             };
-            panel
+            // Haloed lyric text, topmost — above the visualizer and boat.
+            if let Some(ly) = lyrics {
+                stack![
+                    panel,
+                    crate::widgets::lyrics_viewport::lyrics_text_layer(ly, size.width, size.height)
+                ]
+                .into()
+            } else {
+                panel
+            }
         })
         .width(Length::Fill)
         .height(Length::Fill)
@@ -570,6 +591,14 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
         // square (centered ring). Bars/Lines honor the Visualizer Height setting:
         // they occupy `height_percent` of the square, bottom-anchored (cover art
         // shows above) — the same knob the bottom band uses.
+        // Lyrics scrim BELOW the visualizer (see the stretched closure above).
+        let mut layers = stack![cover];
+        if lyrics.is_some() {
+            layers = layers.push(crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(
+                square_size,
+                square_size,
+            ));
+        }
         let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
             let is_scope = *mode == crate::widgets::visualizer::VisualizationMode::Scope;
             let band_h = if is_scope {
@@ -600,7 +629,7 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
                 .height(Length::Fixed(square_size))
                 .into()
             };
-            let mut layers = stack![cover, ring_layer];
+            layers = layers.push(ring_layer);
             // Surfing boat over the Lines wave, confined to the same bottom band
             // so it rides the rendered waveform. Inert + transparent.
             if let Some(b) = &boat
@@ -630,9 +659,19 @@ fn single_artwork_panel_inner<'a, Message: 'a>(
             }
             layers.into()
         } else {
-            cover.into()
+            layers.into()
         };
-        panel
+        // Haloed lyric text over the centered square (matches the cover
+        // rect, not the raw column). Topmost — above visualizer and boat.
+        if let Some(ly) = lyrics {
+            stack![
+                panel,
+                crate::widgets::lyrics_viewport::lyrics_text_layer(ly, square_size, square_size)
+            ]
+            .into()
+        } else {
+            panel
+        }
     })
     .width(Length::Shrink)
     .height(Length::Shrink)
@@ -681,7 +720,7 @@ fn wrap_with_panel_menu<'a, Message: Clone + 'a>(
 /// `placeholder` controls the art-less fill (e.g. Radios passes `RadioTower` so
 /// the tower glyph shows under the visualizer instead of a blank square).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone + 'a>(
+pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone + 'a + 'static>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     over_art: Option<(
         crate::widgets::visualizer::Visualizer,
@@ -689,13 +728,14 @@ pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone +
         f32,
     )>,
     boat: Option<OverCoverBoat<'a>>,
+    lyrics: Option<crate::widgets::lyrics_viewport::LyricsPanelData<'a>>,
     placeholder: ArtworkPlaceholder,
     menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
     is_open: bool,
     open_position: Option<iced::Point>,
     on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let panel = single_artwork_panel_inner(artwork_handle, over_art, boat, placeholder);
+    let panel = single_artwork_panel_inner(artwork_handle, over_art, boat, lyrics, placeholder);
     wrap_with_panel_menu(panel, menu_entries, is_open, open_position, on_open_change)
 }
 
@@ -703,7 +743,7 @@ pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone +
 ///
 /// A non-empty `menu_entries` wraps the panel in a context menu; an empty
 /// list is identical to [`single_artwork_panel`].
-pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
+pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a + 'static>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
     is_open: bool,
@@ -768,7 +808,7 @@ pub(crate) fn banded_pill<'a, Message: 'a>(content: Element<'a, Message>) -> Ele
 }
 
 /// Create a single-image artwork panel with a bottom-anchored, full-width bar overlay
-pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
+pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a + 'static>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     pill_content: Option<Element<'a, Message>>,
     menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,

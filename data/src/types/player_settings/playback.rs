@@ -305,6 +305,41 @@ where
     }
 }
 
+define_labeled_enum! {
+    /// Cover-art blur behind the synced-lyrics overlay — how strongly the
+    /// Queue cover frosts while lyrics display. Applied by CPU-blurring the
+    /// cover bitmap once per track (cached), never per frame; `Off` leaves
+    /// the art sharp and skips the work entirely.
+    ///
+    /// Serializes to lowercase strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum LyricsBackdropBlur {
+        /// No blur — the cover stays sharp under the lyrics scrim.
+        #[default]
+        Off { label: "Off", wire: "off" },
+        /// A gentle soften — detail readable through the frost.
+        Light { label: "Light", wire: "light" },
+        /// A true frosted-glass read — shapes survive, detail goes.
+        Medium { label: "Medium", wire: "medium" },
+        /// Melts the cover to pure color wash.
+        Heavy { label: "Heavy", wire: "heavy" },
+    }
+}
+
+impl LyricsBackdropBlur {
+    /// Gaussian sigma for the blur pass, tuned for the ≤800 px working image
+    /// the blur pipeline downscales to. `None` = no blur (skip the pipeline).
+    pub fn sigma(self) -> Option<f32> {
+        match self {
+            Self::Off => None,
+            Self::Light => Some(6.0),
+            Self::Medium => Some(14.0),
+            Self::Heavy => Some(28.0),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

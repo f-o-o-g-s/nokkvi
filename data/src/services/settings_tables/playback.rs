@@ -25,7 +25,7 @@ use crate::{
             BitPerfectMode, CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
             CROSSFADE_MIN_TRACK_MAX_SECS, CROSSFADE_MIN_TRACK_MIN_SECS, CROSSFADE_OFFSET_MAX_SECS,
             CROSSFADE_OFFSET_MIN_SECS, CrossfadeCurve, FADE_SKIP_SECS_MAX, FADE_SKIP_SECS_MIN,
-            FadeOnSkip, NormalizationLevel, RatingReminderTrigger, RoundedMode,
+            FadeOnSkip, LyricsBackdropBlur, NormalizationLevel, RatingReminderTrigger, RoundedMode,
             TRANSPORT_FADE_MS_MAX, TRANSPORT_FADE_MS_MIN, VolumeNormalizationMode,
         },
         settings_data::PlaybackSettingsData,
@@ -62,6 +62,66 @@ define_settings! {
                 ),
                 default: true,
                 read_field: |d| d.crossfade_enabled,
+            },
+        },
+        LyricsEnabled {
+            key: "general.lyrics_enabled",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_lyrics_enabled(v),
+            toml_apply: |ts, p| p.lyrics_enabled = ts.lyrics_enabled,
+            read: |src, out| out.lyrics_enabled = src.lyrics_enabled,
+            write: |ps, ts| ts.lyrics_enabled = ps.lyrics_enabled,
+            ui_meta: {
+                label: "Lyrics",
+                category: "Playback",
+                subtitle: Some(
+                    "Show synced lyrics over the Queue cover art, following the playing track \
+                     line by line. Off leaves the cover (and any over-cover visualizer) \
+                     untouched.",
+                ),
+                default: false,
+                read_field: |d| d.lyrics_enabled,
+            },
+        },
+        LyricsFetchOnline {
+            key: "general.lyrics_fetch_online",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_lyrics_fetch_online(v),
+            toml_apply: |ts, p| p.lyrics_fetch_online = ts.lyrics_fetch_online,
+            read: |src, out| out.lyrics_fetch_online = src.lyrics_fetch_online,
+            write: |ps, ts| ts.lyrics_fetch_online = ps.lyrics_fetch_online,
+            ui_meta: {
+                label: "Lyrics: Online Fetch",
+                category: "Playback",
+                subtitle: Some(
+                    "Fetch missing lyrics from lrclib.net over the internet and cache them \
+                     locally for next time. Off resolves lyrics only from the local store and \
+                     your Navidrome server.",
+                ),
+                default: true,
+                read_field: |d| d.lyrics_fetch_online,
+            },
+        },
+        LyricsBackdropBlurKey {
+            key: "general.lyrics_backdrop_blur",
+            value_type: Enum,
+            setter: |mgr, v: String| {
+                mgr.set_lyrics_backdrop_blur(LyricsBackdropBlur::from_label(&v))
+            },
+            toml_apply: |ts, p| p.lyrics_backdrop_blur = ts.lyrics_backdrop_blur,
+            read: |src, out| out.lyrics_backdrop_blur = src.lyrics_backdrop_blur,
+            write: |ps, ts| ts.lyrics_backdrop_blur = ps.lyrics_backdrop_blur,
+            ui_meta: {
+                label: "Lyrics: Cover Blur",
+                category: "Playback",
+                subtitle: Some(
+                    "Frost the cover art while lyrics display. Off keeps the art sharp under \
+                     the lyrics; Heavy melts it to a color wash. Blurred once per track, \
+                     cached.",
+                ),
+                default: "Off",
+                options: &["Off", "Light", "Medium", "Heavy"],
+                read_field: |d| d.lyrics_backdrop_blur.as_ref(),
             },
         },
         BitPerfect {
@@ -856,6 +916,9 @@ mod tests {
     fn default_playback_data() -> PlaybackSettingsData {
         PlaybackSettingsData {
             crossfade_enabled: false,
+            lyrics_enabled: false,
+            lyrics_fetch_online: true,
+            lyrics_backdrop_blur: "Off".into(),
             bit_perfect: "Off".into(),
             crossfade_duration_secs: 5,
             crossfade_curve: "Equal Power".into(),
@@ -916,10 +979,10 @@ mod tests {
     /// unconditionally but the UI builder (`items_playback.rs`) only splices
     /// them in when the feature is enabled.
     #[test]
-    fn build_playback_tab_settings_items_emits_thirty_one_rows() {
+    fn build_playback_tab_settings_items_emits_the_pinned_row_count() {
         let data = default_playback_data();
         let entries = build_playback_tab_settings_items(&data);
-        assert_eq!(entries.len(), 31);
+        assert_eq!(entries.len(), 34);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -1764,6 +1827,9 @@ mod tests {
 
         let data = PlaybackSettingsData {
             crossfade_enabled: live.crossfade_enabled,
+            lyrics_enabled: live.lyrics_enabled,
+            lyrics_fetch_online: live.lyrics_fetch_online,
+            lyrics_backdrop_blur: live.lyrics_backdrop_blur.as_label().into(),
             bit_perfect: live.bit_perfect.as_label().into(),
             crossfade_duration_secs: i64::from(live.crossfade_duration_secs),
             crossfade_curve: live.crossfade_curve.as_label().into(),

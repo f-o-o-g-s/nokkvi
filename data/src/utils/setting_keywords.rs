@@ -85,6 +85,9 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
 
         // ── Playback · Transitions ───────────────────────────────────────────
         "general.crossfade_enabled" => &["fade", "blend", "gapless"],
+        "general.lyrics_enabled" => &["lyrics", "karaoke", "synced", "subtitles", "words"],
+        "general.lyrics_fetch_online" => &["lrclib", "lyrics download", "internet", "fetch"],
+        "general.lyrics_backdrop_blur" => &["blur", "frost", "frosted", "backdrop", "cover blur"],
         "general.crossfade_duration" => &["fade time", "fade length"],
         "general.crossfade_curve" => &["equal power", "constant gain", "fade shape", "fade curve"],
         "general.crossfade_min_track" => &["short tracks", "interlude", "skit", "minimum length"],

@@ -105,6 +105,10 @@ pub struct QueueViewData<'a> {
     pub queue_songs: std::borrow::Cow<'a, [QueueSongUIViewData]>,
     pub album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     pub large_artwork: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// Frosted variant of the playing track's cover for the lyrics backdrop
+    /// (`None` = blur off / not ready / not this track — the view falls back
+    /// to the sharp handle).
+    pub lyrics_blurred_cover: Option<&'a iced::widget::image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -190,6 +194,12 @@ pub struct QueueViewData<'a> {
     /// already driven by the per-frame boat tick. `pub(crate)` because
     /// `OverCoverBoat` wraps the crate-private `BoatState`.
     pub(crate) over_art_boat: Option<crate::widgets::base_slot_list_layout::OverCoverBoat<'a>>,
+    /// Synced-lyrics layer for the now-playing cover. `Some` only when lyrics
+    /// are enabled and queue playback is active. The over-cover visualizer
+    /// co-renders beneath the lyric text (above the lyrics scrim). Carries
+    /// borrowed lines + the active index; an empty doc arrives with
+    /// `empty_message` set (the faded no-match state).
+    pub(crate) lyrics: Option<crate::widgets::lyrics_viewport::LyricsPanelData<'a>>,
 }
 
 /// Context menu entries for queue items

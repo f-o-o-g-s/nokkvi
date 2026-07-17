@@ -603,6 +603,8 @@ impl RadiosPage {
                 panel_handle,
                 over_art_visualizer,
                 over_art_boat,
+                // Lyrics are Queue-only (ICY stream titles starve the matcher).
+                None,
                 crate::widgets::base_slot_list_layout::ArtworkPlaceholder::RadioTower,
                 panel_menu_entries,
                 menu_open,

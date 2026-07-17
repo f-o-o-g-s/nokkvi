@@ -373,6 +373,7 @@ impl Nokkvi {
 
                 crate::app_message::PlaybackStateUpdate {
                     position: (pos / 1000) as u32,
+                    position_ms: pos as u32,
                     duration: dur_seconds,
                     playing,
                     paused,
@@ -406,6 +407,7 @@ impl Nokkvi {
         // Destructure the update struct for cleaner access
         let crate::app_message::PlaybackStateUpdate {
             position: pos,
+            position_ms,
             duration: dur,
             playing,
             paused,
@@ -708,6 +710,90 @@ impl Nokkvi {
                             ))
                         },
                     ));
+                }
+
+                // Synced lyrics: promote the prefetched next-track doc into
+                // place synchronously (no blank gap on sequential/gapless
+                // transitions), else clear and — only while the Queue view is
+                // showing (no off-surface network) — schedule the debounced
+                // resolve. A skip storm re-clears per skip, so only the track
+                // still current when a window elapses actually dispatches.
+                if self.lyrics.enabled {
+                    // Crossfade-coupled dissolve: while the audio blends the
+                    // outgoing track into the next, the old sheet fades out in
+                    // place over the same duration as the new one resolves in.
+                    // UI-timed off the crossfade duration (the engine's blend
+                    // phase isn't surfaced to the UI); a hard swap when
+                    // crossfade is off.
+                    if self.engine.crossfade_enabled {
+                        let center = crate::widgets::lyrics_viewport::lyrics_center_pos();
+                        let duration_ms = self.engine.crossfade_duration_secs.saturating_mul(1000);
+                        self.lyrics.park_outgoing(center, duration_ms);
+                    }
+                    match song_id.as_deref() {
+                        Some(new_id) => {
+                            if !self.lyrics.promote_next(new_id) {
+                                self.lyrics.clear();
+                                if self.current_view == View::Queue {
+                                    tasks.push(Self::lyrics_debounce_task(
+                                        new_id.to_string(),
+                                        self.lyrics.load_epoch,
+                                    ));
+                                }
+                            }
+                        }
+                        None => self.lyrics.clear(),
+                    }
+                }
+            }
+
+            // Synced lyrics: advance the active-line cursor from the
+            // authoritative ms position (the whole-second `position` is too
+            // coarse for line sync). Runs AFTER the song-change block so a
+            // just-cleared doc can't be scanned against the new track's clock;
+            // the matched-id guard skips foreign docs entirely. Pre-roll
+            // (before the first timestamp) is honestly `None` — no highlight.
+            // Drop a finished lyric dissolve (10 Hz cleanup; the render reads
+            // its progress continuously between these ticks).
+            if self.lyrics.outgoing.is_some() {
+                self.lyrics.expire_outgoing(std::time::Instant::now());
+            }
+
+            // Frost the cover behind the lyrics when the blur setting asks for
+            // it (idempotent — gates out in one compare when fresh/pending).
+            if let Some(task) = self.lyrics_blur_task() {
+                tasks.push(task);
+            }
+
+            if self.lyrics.enabled
+                && self.lyrics.matched_song_id == song_id
+                && self.lyrics.doc.synced
+            {
+                self.lyrics.position_ms = position_ms;
+                let new_active = crate::state::active_line_at(&self.lyrics.doc.lines, position_ms);
+                if new_active != self.lyrics.active_index {
+                    // Retarget the glide: snap on seek-sized jumps (or when
+                    // entering/leaving pre-roll), else ease over an adaptive
+                    // duration capped below the gap to the next line.
+                    let snap = match (self.lyrics.active_index, new_active) {
+                        (Some(prev), Some(next)) => {
+                            prev.abs_diff(next) > crate::update::lyrics::LYRICS_SNAP_INDEX_DELTA
+                        }
+                        _ => true,
+                    };
+                    self.lyrics.active_index = new_active;
+                    if let Some(next) = new_active {
+                        let duration = if snap {
+                            0
+                        } else {
+                            crate::update::lyrics::lyrics_glide_duration(
+                                &self.lyrics.doc.lines,
+                                next,
+                            )
+                        };
+                        let current = crate::widgets::lyrics_viewport::lyrics_center_pos();
+                        self.lyrics.retarget_scroll(next, current, duration);
+                    }
                 }
             }
 
@@ -1793,12 +1879,20 @@ impl Nokkvi {
         }
         self.engine.gapless_preparing = true;
 
-        self.shell_task(
-            |shell| async move {
-                let _ = shell.prepare_next_for_gapless().await;
-            },
-            |_| Message::NoOp,
-        )
+        // Piggyback the lyrics next-track prefetch on the same once-per-
+        // transition edge, so the upcoming song's doc is parked in
+        // `pending_next` before the transition promotes it (no blank gap).
+        let lyrics_prefetch = self.lyrics_prefetch_next_task();
+
+        Task::batch([
+            self.shell_task(
+                |shell| async move {
+                    let _ = shell.prepare_next_for_gapless().await;
+                },
+                |_| Message::NoOp,
+            ),
+            lyrics_prefetch,
+        ])
     }
 
     /// Push a visualizer behavior config onto the shared render-path state,
@@ -1860,6 +1954,11 @@ impl Nokkvi {
         self.engine.crossfade_enabled = settings.crossfade_enabled;
         self.engine.bit_perfect_mode = settings.bit_perfect;
         self.engine.crossfade_duration_secs = settings.crossfade_duration_secs;
+        // Seed the live lyrics mirror — the ONE place persisted values reach
+        // live mirrors (the ctor cannot: settings arrive async). The player-bar
+        // toggle flips this mirror synchronously and persists behind it, so a
+        // subsequent settings load round-trips the same value.
+        self.lyrics.enabled = settings.lyrics_enabled;
 
         // Volume normalization settings
         self.engine.volume_normalization = settings.volume_normalization;

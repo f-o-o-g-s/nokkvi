@@ -288,7 +288,10 @@ fn ipv4_is_blocked(ip: std::net::Ipv4Addr) -> bool {
 /// encoding the kernel routes back to IPv4. The fetch client re-runs this guard
 /// on every redirect hop (see [`AlbumsService::new`]), so a public host can't
 /// `302` past it.
-fn external_host_is_blocked(url_str: &str) -> bool {
+///
+/// `pub(crate)` so the lyrics LRCLIB fetch (`services::lyrics_source`) reuses
+/// the same guard + redirect policy rather than duplicating it.
+pub(crate) fn external_host_is_blocked(url_str: &str) -> bool {
     let Ok(parsed) = url::Url::parse(url_str) else {
         return true;
     };
@@ -338,7 +341,10 @@ fn external_host_is_blocked(url_str: &str) -> bool {
 /// external-image client start from this so their stall behavior can't drift
 /// apart; the external client then layers its per-hop SSRF redirect policy on
 /// top.
-fn artwork_client_base() -> reqwest::ClientBuilder {
+///
+/// `pub(crate)` so the lyrics LRCLIB fetch reuses the same user-agent + stall
+/// timeouts as a base for its own redirect-guarded client.
+pub(crate) fn artwork_client_base() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .user_agent(crate::USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(8))

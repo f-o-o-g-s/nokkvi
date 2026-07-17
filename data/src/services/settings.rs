@@ -11,8 +11,9 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode, EnterBehavior,
-            NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger, RoundedMode,
-            SlotRowHeight, StripClickAction, TrackInfoDisplay, VolumeNormalizationMode,
+            LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
+            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TrackInfoDisplay,
+            VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -406,6 +407,16 @@ impl SettingsManager {
 
     pub fn set_crossfade_enabled(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.crossfade_enabled = enabled;
+        self.save()
+    }
+
+    pub fn set_lyrics_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.lyrics_enabled = enabled;
+        self.save()
+    }
+
+    pub fn set_lyrics_fetch_online(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.lyrics_fetch_online = enabled;
         self.save()
     }
 
@@ -1061,6 +1072,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_lyrics_backdrop_blur(&mut self, blur: LyricsBackdropBlur) -> Result<()> {
+        self.settings.player.lyrics_backdrop_blur = blur;
+        self.save()
+    }
+
     /// Whether the TOML section writers should emit every key (including
     /// unchanged defaults) rather than pruning to the non-default set. True
     /// only for `VerboseConfig::On`; both `Off` and `Clean` write sparse.
@@ -1362,24 +1378,27 @@ mod sentinel_roundtrip_tests {
             icon_set: crate::types::player_settings::IconSet::Lucide, // default Phosphor
 
             // Playback / crossfade
-            crossfade_enabled: true,                 // default false
-            bit_perfect: BitPerfectMode::Strict,     // default Off
-            crossfade_duration_secs: 9,              // default 5
-            crossfade_curve: CrossfadeCurve::Linear, // default EqualPower
-            crossfade_min_track_secs: 25,            // default 10
-            crossfade_album_gapless: true,           // default false
-            smooth_track_starts: false,              // default true
-            fade_on_pause: true,                     // default false
-            fade_pause_ms: 250,                      // default 100
-            fade_on_stop: true,                      // default false
-            fade_stop_ms: 350,                       // default 100
-            fade_radio_transitions: true,            // default false
+            crossfade_enabled: true,                         // default false
+            lyrics_enabled: true,                            // default false
+            lyrics_fetch_online: false,                      // default true
+            lyrics_backdrop_blur: LyricsBackdropBlur::Light, // default Off
+            bit_perfect: BitPerfectMode::Strict,             // default Off
+            crossfade_duration_secs: 9,                      // default 5
+            crossfade_curve: CrossfadeCurve::Linear,         // default EqualPower
+            crossfade_min_track_secs: 25,                    // default 10
+            crossfade_album_gapless: true,                   // default false
+            smooth_track_starts: false,                      // default true
+            fade_on_pause: true,                             // default false
+            fade_pause_ms: 250,                              // default 100
+            fade_on_stop: true,                              // default false
+            fade_stop_ms: 350,                               // default 100
+            fade_radio_transitions: true,                    // default false
             fade_on_skip: crate::types::player_settings::FadeOnSkip::Crossfade, // default Off
-            fade_skip_secs: 3,                       // default 2
-            skip_silence: true,                      // default false
-            crossfade_offset_secs: -2,               // default 0
-            crossfade_bar_snap: true,                // default false
-            rewind_on_previous: true,                // default false
+            fade_skip_secs: 3,                               // default 2
+            skip_silence: true,                              // default false
+            crossfade_offset_secs: -2,                       // default 0
+            crossfade_bar_snap: true,                        // default false
+            rewind_on_previous: true,                        // default false
 
             // Playlists
             quick_add_to_playlist: true,       // default false

@@ -10,6 +10,7 @@ use std::{
 };
 
 use iced::widget::image;
+use nokkvi_data::types::player_settings::LyricsBackdropBlur;
 
 use super::snapshotted_lru::SnapshottedLru;
 
@@ -201,6 +202,29 @@ pub struct ArtworkState {
     pub playlist_custom_art_failed: HashMap<String, Option<String>>,
     /// Currently loading large artwork album ID.
     pub loading_large_artwork: Option<String>,
+    /// The one blurred variant of the now-playing cover for the lyrics
+    /// backdrop (single slot, not an LRU: only the CURRENT track's cover is
+    /// ever frosted, and the sharp source stays in [`Self::large_artwork`]).
+    /// `handle: None` records a decode failure for this exact source so the
+    /// tick doesn't re-dispatch a doomed blur every 100 ms. Keyed by the
+    /// SOURCE handle's unique id — a server-side cover refresh mints a new
+    /// handle id and invalidates this slot automatically.
+    pub lyrics_blurred: Option<LyricsBlurredCover>,
+    /// In-flight blur guard `(album_id, level)` — the blur runs on a blocking
+    /// thread; without this the 100 ms tick would pile up duplicate jobs.
+    pub lyrics_blur_pending: Option<(String, LyricsBackdropBlur)>,
+}
+
+/// The cached blurred cover behind the lyrics overlay. See
+/// [`ArtworkState::lyrics_blurred`].
+#[derive(Debug, Clone)]
+pub struct LyricsBlurredCover {
+    pub album_id: String,
+    /// Identity of the sharp source handle this blur was computed from.
+    pub source_id: iced::advanced::image::Id,
+    pub level: LyricsBackdropBlur,
+    /// `None` = the source failed to decode; negative-cached.
+    pub handle: Option<image::Handle>,
 }
 
 impl Default for ArtworkState {
@@ -225,6 +249,8 @@ impl Default for ArtworkState {
             playlist_custom_art_versions: HashMap::new(),
             playlist_custom_art_failed: HashMap::new(),
             loading_large_artwork: None,
+            lyrics_blurred: None,
+            lyrics_blur_pending: None,
         }
     }
 }

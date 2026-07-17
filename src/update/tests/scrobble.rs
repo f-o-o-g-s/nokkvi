@@ -5,6 +5,7 @@ use crate::{app_message::PlaybackStateUpdate, test_helpers::*};
 fn threshold_crossing_update(song_id: &str, pos: u32, dur: u32) -> PlaybackStateUpdate {
     PlaybackStateUpdate {
         position: pos,
+        position_ms: pos.saturating_mul(1000),
         duration: dur,
         playing: true,
         paused: false,

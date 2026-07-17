@@ -271,6 +271,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.toggle_crossfade",
             default: KeyCombo::key(KeyCode::Char('f')),
         },
+        ToggleLyrics {
+            display: "Toggle Lyrics",
+            description: "Show or hide synced lyrics over the Queue cover art",
+            category: "Playback",
+            toml_key: "toggle_lyrics",
+            settings_key: "hotkey.toggle_lyrics",
+            default: KeyCombo::key(KeyCode::Char('l')),
+        },
         ToggleBitPerfect {
             display: "Toggle Bit-Perfect",
             description: "Enable or disable bit-perfect output (disables crossfade)",

@@ -69,6 +69,9 @@ pub struct LoginSuccess {
 #[derive(Debug, Clone)]
 pub struct PlaybackStateUpdate {
     pub position: u32,
+    /// Authoritative engine position in milliseconds (`position` is whole
+    /// seconds for the scrobble math; lyrics line-sync needs sub-second).
+    pub position_ms: u32,
     pub duration: u32,
     pub playing: bool,
     pub paused: bool,
@@ -102,6 +105,28 @@ pub struct PlaybackStateUpdate {
     /// Optional because not all music has BPM metadata; the boat
     /// physics falls back to the spectral-flux envelope when absent.
     pub bpm: Option<u32>,
+}
+
+/// Async lyrics-resolve pipeline messages, carried by `Message::LyricsLoader`.
+#[derive(Debug, Clone)]
+pub enum LyricsLoaderMessage {
+    /// The post-song-change debounce window elapsed; fire the resolve if this
+    /// song is still current (a skip storm supersedes it via the epoch/id guard
+    /// before any network request is sent).
+    DebounceElapsed { song_id: String, epoch: u64 },
+    /// A resolve finished. `doc` is empty/unsynced on a no-match (rendered as
+    /// the empty state). Applied only under the stale-load guard.
+    Loaded {
+        song_id: String,
+        doc: Box<nokkvi_data::types::lyrics::LrcDocument>,
+        epoch: u64,
+    },
+    /// A next-track prefetch finished; parked in `pending_next` for
+    /// `promote_next` to swap in synchronously at the transition.
+    PrefetchLoaded {
+        song_id: String,
+        doc: Box<nokkvi_data::types::lyrics::LrcDocument>,
+    },
 }
 
 /// Playback-related messages, namespaced under `Message::Playback(..)`
@@ -357,6 +382,16 @@ pub enum ArtworkMessage {
     /// Result of a refresh: (album_id, thumb_handle, large_handle, silent).
     /// `silent = true` suppresses the success toast in the completion handler.
     RefreshComplete(String, Option<image::Handle>, Option<image::Handle>, bool),
+
+    /// Result of the lyrics cover-blur job: `(album_id, level, source_id,
+    /// blurred)`. `blurred = None` records a decode failure so the tick's
+    /// dispatch gate negative-caches this exact source instead of re-firing.
+    LyricsBlurReady(
+        String,
+        nokkvi_data::types::player_settings::LyricsBackdropBlur,
+        iced::advanced::image::Id,
+        Option<image::Handle>,
+    ),
 
     // --- Collage Artwork (Genre / Playlist) ---
     LoadCollage(CollageTarget, String, String, String, Vec<String>),
@@ -943,6 +978,10 @@ pub enum Message {
     /// (`getOpenSubsonicExtensions`); `None` when the probe failed —
     /// extension-gated features stay hidden (fail-safe).
     OpenSubsonicExtensionsFetched(Option<Vec<String>>),
+    /// The lyrics-store index finished building (boot-time background task).
+    LyricsIndexReady(std::sync::Arc<nokkvi_data::types::lyrics::LyricsIndex>),
+    /// Carrier for the async lyrics resolve pipeline (debounce + results).
+    LyricsLoader(LyricsLoaderMessage),
     /// Session was terminated (e.g. 401 Unauthorized) — logout and notify
     SessionExpired,
 

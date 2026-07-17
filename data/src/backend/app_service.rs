@@ -84,6 +84,12 @@ pub struct AppService {
     /// and Last.fm). Separate from the Navidrome `ApiClient` and the artwork
     /// client — radio scrobbling does not go through Navidrome.
     radio_scrobble_http: Arc<reqwest::Client>,
+    /// Session cache for `resolve_lyrics`, keyed by song id. Caches negatives
+    /// (a `None` value) too, so a repeated skip past an unmatched track doesn't
+    /// re-hit the network. `Arc<Mutex<...>>` so it survives the per-`shell_task`
+    /// `AppService` clone (a plain field would be cloned independently).
+    lyrics_cache:
+        Arc<parking_lot::Mutex<lru::LruCache<String, Option<crate::types::lyrics::LrcDocument>>>>,
 }
 
 impl std::fmt::Debug for AppService {
@@ -181,6 +187,9 @@ impl AppService {
             active_library_ids: Arc::new(RwLock::new(active_library_ids)),
             all_libraries: Arc::new(RwLock::new(Vec::new())),
             radio_scrobble_http,
+            lyrics_cache: Arc::new(parking_lot::Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN),
+            ))),
         })
     }
 
@@ -974,11 +983,79 @@ impl AppService {
             similar_api,
             crate::services::api::similar::SimilarApiService
         ),
+        (lyrics_api, crate::services::api::lyrics::LyricsApiService),
         (
             play_queue_api,
             crate::services::api::play_queue::PlayQueueApiService
         ),
     );
+}
+
+// === Lyrics resolution ===
+impl AppService {
+    /// Resolve synced lyrics for a song through the store -> `getLyricsBySongId`
+    /// -> LRCLIB chain (the "Feishin or better" precedence), caching the result
+    /// including a negative. Iced-free; the UI's `shell_task` drives it with the
+    /// current index and the gating opts. Probes are lazy — a store hit never
+    /// touches the network.
+    pub async fn resolve_lyrics(
+        &self,
+        song: &crate::types::song::Song,
+        index: Option<std::sync::Arc<crate::types::lyrics::LyricsIndex>>,
+        opts: crate::services::lyrics_source::ResolveOpts,
+    ) -> Option<crate::types::lyrics::LrcDocument> {
+        use crate::types::lyrics::{LrcDocument, parse};
+
+        if let Some(cached) = self.lyrics_cache.lock().get(&song.id).cloned() {
+            return cached;
+        }
+
+        let store = || async {
+            let index = index.as_ref()?;
+            let album = (!song.album.is_empty()).then_some(song.album.as_str());
+            let path = index
+                .find(
+                    &song.artist,
+                    &song.title,
+                    album,
+                    Some(song.duration.saturating_mul(1000)),
+                )?
+                .path
+                .clone();
+            let text = tokio::fs::read_to_string(&path).await.ok()?;
+            let doc = parse(&text);
+            doc.synced.then_some(doc)
+        };
+        let api = || async {
+            let service = self.lyrics_api().await.ok()?;
+            let list = service.get_lyrics_by_song_id(&song.id, true).await.ok()?;
+            // Kind-selection lives here (the converter takes one entry): prefer
+            // the main synced layer, else the first synced.
+            let chosen = list
+                .iter()
+                .find(|s| s.kind.as_deref() == Some("main") && s.synced)
+                .or_else(|| list.iter().find(|s| s.synced))?;
+            let doc = LrcDocument::from_structured(chosen);
+            doc.synced.then_some(doc)
+        };
+        let lrclib = || async {
+            let (doc, raw) = crate::services::lyrics_source::fetch_lrclib(
+                &song.artist,
+                &song.title,
+                &song.album,
+                song.duration,
+            )
+            .await?;
+            crate::services::lyrics_source::cache_to_store(&raw, song).await;
+            Some(doc)
+        };
+
+        let result = crate::services::lyrics_source::resolve_from(store, api, lrclib, opts).await;
+        self.lyrics_cache
+            .lock()
+            .put(song.id.clone(), result.clone());
+        result
+    }
 }
 
 // === Queue orchestrator accessor ===

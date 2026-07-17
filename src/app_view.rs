@@ -274,7 +274,7 @@ impl Nokkvi {
     /// ([`mini_player_artwork`](Self::mini_player_artwork) and
     /// [`now_playing_artwork_to_warm`](Self::now_playing_artwork_to_warm)) so
     /// the two cannot drift on how "the playing album" is derived.
-    fn current_queue_song_album_id(&self) -> Option<&str> {
+    pub(crate) fn current_queue_song_album_id(&self) -> Option<&str> {
         if self.active_playback.is_radio() {
             return None;
         }
@@ -538,6 +538,7 @@ impl Nokkvi {
             sound_effects_enabled: self.sfx.enabled,
             sfx_volume: self.sfx.volume,
             crossfade_enabled: self.engine.crossfade_enabled,
+            lyrics_enabled: self.lyrics.enabled,
             bit_perfect_mode: self.engine.bit_perfect_mode,
             visualization_mode: self.engine.visualization_mode,
             window_width: self.window.width,
@@ -1314,6 +1315,27 @@ impl Nokkvi {
         }
     }
 
+    /// The frosted cover for the lyrics backdrop, when it should replace the
+    /// sharp playing-track art: lyrics showing, a non-`Off` blur level, and a
+    /// cached blur matching the live `(album, source handle, level)` — the
+    /// source-id check keeps a stale blur of a refreshed cover from
+    /// displaying (sharp fallback until the fresh blur lands). The view
+    /// applies it only on the is-playing branch (the blur is keyed to the
+    /// PLAYING track's cover; the paused/centered panel stays sharp).
+    pub(crate) fn lyrics_blurred_cover_for_view(&self) -> Option<&iced::widget::image::Handle> {
+        if !self.lyrics.enabled || !self.active_playback.is_queue() {
+            return None;
+        }
+        let level = self.settings.lyrics_backdrop_blur;
+        level.sigma()?;
+        let album_id = self.current_queue_song_album_id()?;
+        let source = self.artwork.large_artwork.snapshot.get(album_id)?;
+        let cached = self.artwork.lyrics_blurred.as_ref()?;
+        (cached.album_id == album_id && cached.source_id == source.id() && cached.level == level)
+            .then_some(cached.handle.as_ref())
+            .flatten()
+    }
+
     /// The over-cover visualizer + surfing-boat overlays for an artwork panel —
     /// the single source of truth for the Queue now-playing cover and the Radios
     /// station-art panel (the two call sites were previously byte-identical).
@@ -1332,6 +1354,10 @@ impl Nokkvi {
         )>,
         Option<crate::widgets::base_slot_list_layout::OverCoverBoat<'_>>,
     ) {
+        // The visualizer (and boat) render WITH the lyrics layer: the panel
+        // stacks cover → lyrics scrim → visualizer → boat → haloed lyric
+        // text, so both hero surfaces stay visible at once (owner-directed;
+        // the per-glyph halo is what keeps text readable over the motion).
         let (over_art_mode, height_percent, opacity, mirror) = {
             let cfg = self.visualizer_config.read();
             let mode = widgets::visualizer::resolve_placement(
@@ -1373,6 +1399,8 @@ impl Nokkvi {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Queue);
         let (sync_menu_open, sync_menu_trigger_bounds) = queue_sync_menu_state(&self.open_menu);
+        let lyrics = self.queue_lyrics_panel_data();
+        let lyrics_blurred_cover = self.lyrics_blurred_cover_for_view();
         let (over_art_visualizer, over_art_boat) = self.over_cover_overlays();
         views::QueueViewData {
             queue_songs: self.filter_queue_songs(),
@@ -1413,7 +1441,41 @@ impl Nokkvi {
             // freezes in place when paused.
             over_art_visualizer,
             over_art_boat,
+            lyrics,
+            lyrics_blurred_cover,
         }
+    }
+
+    /// Lyrics layer data for the Queue now-playing cover: `Some` whenever the
+    /// lyrics toggle is on and queue playback is active (including the empty
+    /// no-match state — the scrim + message still render, with the visualizer
+    /// co-rendering beneath the text), `None` otherwise. Borrows the resolved
+    /// doc; an unmatched track shows the faded no-match message.
+    pub(crate) fn queue_lyrics_panel_data(
+        &self,
+    ) -> Option<crate::widgets::lyrics_viewport::LyricsPanelData<'_>> {
+        (self.lyrics.enabled && self.active_playback.is_queue()).then(|| {
+            // The outgoing sheet's dissolve progress is read continuously here
+            // (the per-frame boat tick redraws); the 100 ms playback tick
+            // drops the record once it completes.
+            let dissolve = self.lyrics.outgoing.as_ref().and_then(|outgoing| {
+                let progress = outgoing.progress(std::time::Instant::now());
+                (progress < 1.0).then(|| crate::widgets::lyrics_viewport::DissolveView {
+                    lines: &outgoing.doc.lines,
+                    center: outgoing.center,
+                    progress,
+                })
+            });
+            crate::widgets::lyrics_viewport::LyricsPanelData {
+                lines: &self.lyrics.doc.lines,
+                active_index: self.lyrics.active_index,
+                // Suppress the no-match message while the previous sheet is
+                // still dissolving (the cold path resolves under it).
+                empty_message: (self.lyrics.doc.lines.is_empty() && dissolve.is_none())
+                    .then_some("No synced lyrics for this track"),
+                dissolve,
+            }
+        })
     }
 
     // -------------------------------------------------------------------------

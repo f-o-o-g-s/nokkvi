@@ -386,6 +386,35 @@ pub(crate) fn selection_ring_on(bg: Color) -> Color {
     selection_ring(accent_bright(), bg)
 }
 
+/// Resolve the lyric active-line ink for the glyph-halo surface. The lyric
+/// viewport backs every glyph with a near-opaque `bg0_hard` halo, so the
+/// arrived active line formally rides the `(accent_bright, bg0_hard)` pair —
+/// which is NOT guaranteed legible on every theme (Svalbard light's raw
+/// accent reaches only 2.61:1 there). Starts from `accent_bright` so the line
+/// still reads as "the theme accent" and only nudges toward the contrasting
+/// extreme when the raw accent sits under the UI-component floor.
+///
+/// The floor is deliberately 3.0, not the 4.5 body-text floor, although the
+/// line is 16 px text: measured across all 46 shipped variants, a 4.5 floor
+/// would recolor the accent on 20 of them — including four DARK modes (iced
+/// 4.26, solarized 3.75, enthroned 4.43, frappé 4.39) whose active-line hue
+/// is signed-off aesthetic. 3.0 engages on only the 9 genuinely broken pairs
+/// (all light modes, 1.60–2.71). The line also arrives by fading FROM `fg0`
+/// (which is gauntlet-pinned ≥ 4.5 on `bg0_hard`), so sub-4.5 exposure is
+/// only at full arrival. Raising the floor to 4.5 is a one-constant owner
+/// call, not a redesign. Pure in its inputs so the all-themes gauntlet can
+/// sweep it; [`lyrics_accent`] is the live-theme wrapper.
+pub(super) fn resolve_lyrics_accent(accent_bright: Color, bg0_hard: Color) -> Color {
+    legible_against(accent_bright, bg0_hard, SELECTION_RING_MIN_CONTRAST)
+}
+
+/// Live-theme [`resolve_lyrics_accent`]: the contrast-assured active-line ink
+/// for the lyric viewport.
+#[inline]
+pub(crate) fn lyrics_accent() -> Color {
+    resolve_lyrics_accent(accent_bright(), bg0_hard())
+}
+
 /// Resolve the `(now_playing, selected)` fill pair from the accent tokens,
 /// applying the distinctness separator once so the pair is always mutually
 /// consistent. `selected` anchors on the louder `accent_bright`; `playing` is

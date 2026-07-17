@@ -200,6 +200,8 @@ pub struct Nokkvi {
     // -------------------------------------------------------------------------
     pub active_playback: crate::state::ActivePlayback,
     pub playback: crate::state::PlaybackState,
+    /// Synced-lyrics state: resolved document, active-line cursor, store index.
+    pub lyrics: crate::state::LyricsState,
     /// Monotonic epoch for the now-playing breathing glow. The per-frame boat
     /// tick (`update::boat::handle_boat_tick`) derives
     /// `phase = (now - glow_epoch) / GLOW_PERIOD_SECS` from it while playing.
@@ -464,6 +466,7 @@ impl Default for Nokkvi {
             // Consolidated state structs with defaults
             active_playback: crate::state::ActivePlayback::default(),
             playback: crate::state::PlaybackState::default(),
+            lyrics: crate::state::LyricsState::default(),
             glow_epoch: std::time::Instant::now(),
             scrobble: crate::state::ScrobbleState::default(),
             radio_scrobble: crate::state::RadioScrobbleState::default(),
@@ -530,6 +533,15 @@ impl Nokkvi {
         self.open_subsonic_extensions
             .as_ref()
             .is_some_and(|s| s.contains("indexBasedQueue"))
+    }
+
+    /// `songLyrics` extension (structured lyrics via `getLyricsBySongId`).
+    /// `false` until the login-time probe lands — the server lyrics channel
+    /// fails safe to skipped; the store + LRCLIB channels are unaffected.
+    pub(crate) fn supports_song_lyrics(&self) -> bool {
+        self.open_subsonic_extensions
+            .as_ref()
+            .is_some_and(|s| s.contains("songLyrics"))
     }
 
     /// Window title — dynamic based on playback state.
@@ -1549,14 +1561,27 @@ fn boot() -> (Nokkvi, Task<Message>) {
     // the per-cover-id naming doesn't supersede on its own.
     let sweep_task =
         Task::future(crate::services::mpris_art_writer::sweep_dead_pid_files()).discard();
+    // Build the lyrics-store index once at boot (server-independent, so no
+    // re-build on login). On Err only the store channel is lost — the server +
+    // LRCLIB channels still resolve; the enabled mirror is left untouched.
+    let lyrics_index_task = match nokkvi_data::utils::paths::get_lyrics_dir() {
+        Ok(dir) => Task::perform(nokkvi_data::types::lyrics::build_index(dir), |idx| {
+            Message::LyricsIndexReady(std::sync::Arc::new(idx))
+        }),
+        Err(e) => {
+            tracing::warn!(error = %e, "lyrics dir unavailable; store channel disabled");
+            Task::none()
+        }
+    };
     let task = if auto_login {
         Task::batch([
             open_task.discard(),
             sweep_task,
+            lyrics_index_task,
             Task::done(Message::ResumeSession),
         ])
     } else {
-        Task::batch([open_task.discard(), sweep_task])
+        Task::batch([open_task.discard(), sweep_task, lyrics_index_task])
     };
     (state, task)
 }

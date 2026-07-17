@@ -60,6 +60,9 @@ impl Nokkvi {
                 self.handle_artwork_loaded(id, updated_at, art)
             }
             ArtworkMessage::LoadLarge(album_id) => self.handle_load_large_artwork(album_id),
+            ArtworkMessage::LyricsBlurReady(album_id, level, source_id, handle) => {
+                self.handle_lyrics_blur_ready(album_id, level, source_id, handle)
+            }
             ArtworkMessage::LargeLoaded(id, handle) => self.handle_large_artwork_loaded(id, handle),
             ArtworkMessage::LargeArtistLoaded(id, handle) => {
                 // Mirror `handle_large_artwork_loaded`'s id-gated clear:

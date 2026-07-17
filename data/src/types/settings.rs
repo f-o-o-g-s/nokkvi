@@ -7,11 +7,11 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
-            LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger,
-            RoundedMode, ScrollbarVisibility, SlotRowHeight, StripClickAction, StripSeparator,
-            TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
-            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
-            deserialize_verbose_config_with_bool_compat,
+            LibraryPageSize, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
+            RatingReminderTrigger, RoundedMode, ScrollbarVisibility, SlotRowHeight,
+            StripClickAction, StripSeparator, TrackInfoDisplay, VerboseConfig, VisualizationMode,
+            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
+            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -116,6 +116,17 @@ crate::player_settings_schema! {
     /// Whether crossfade between tracks is enabled (default: true)
     #[serde(default = "default_true")]
     same crossfade_enabled: bool = true,
+    /// Synced-lyrics overlay on the Queue now-playing cover (default: off).
+    #[serde(default)]
+    same lyrics_enabled: bool = false,
+    /// Whether the lyrics resolve chain may fetch missing lyrics from LRCLIB
+    /// over the internet (default: on — the local store + the server channel
+    /// alone cover only what they already hold).
+    #[serde(default = "default_true")]
+    same lyrics_fetch_online: bool = true,
+    /// Cover-art blur strength behind the lyrics overlay (default: off).
+    #[serde(default)]
+    same lyrics_backdrop_blur: LyricsBackdropBlur = LyricsBackdropBlur::default(),
     /// Bit-perfect output mode (Off / Strict / Relaxed): Strict and Relaxed
     /// play at each track's native sample rate with the DSP chain (EQ / software
     /// volume / limiter) bypassed, letting PipeWire switch the device clock.

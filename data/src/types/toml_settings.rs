@@ -12,11 +12,11 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
-            LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, RatingReminderTrigger,
-            RoundedMode, ScrollbarVisibility, SlotRowHeight, StripClickAction, TrackInfoDisplay,
-            VerboseConfig, VisualizationMode, VolumeNormalizationMode,
-            deserialize_bit_perfect_with_bool_compat, deserialize_rounded_mode_with_bool_compat,
-            deserialize_verbose_config_with_bool_compat,
+            LibraryPageSize, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
+            RatingReminderTrigger, RoundedMode, ScrollbarVisibility, SlotRowHeight,
+            StripClickAction, TrackInfoDisplay, VerboseConfig, VisualizationMode,
+            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
+            deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
         view_columns::ViewColumns,
     },
@@ -135,6 +135,9 @@ pub struct TomlSettings {
 
     // -- Playback --
     pub crossfade_enabled: bool,
+    pub lyrics_enabled: bool,
+    pub lyrics_fetch_online: bool,
+    pub lyrics_backdrop_blur: LyricsBackdropBlur,
     #[serde(deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
     pub bit_perfect: BitPerfectMode,
     pub crossfade_duration_secs: u32,
@@ -347,6 +350,9 @@ impl Default for TomlSettings {
             strip_show_labels: true,
             strip_separator: crate::types::player_settings::StripSeparator::Slash,
             crossfade_enabled: true,
+            lyrics_enabled: false,
+            lyrics_fetch_online: true,
+            lyrics_backdrop_blur: LyricsBackdropBlur::default(),
             bit_perfect: BitPerfectMode::default(),
             crossfade_duration_secs: 7,
             crossfade_curve: CrossfadeCurve::default(),

@@ -7,6 +7,7 @@
 pub mod api;
 pub mod auth;
 pub mod font_discovery;
+pub mod lyrics_source;
 pub mod navidrome_events;
 pub mod playback;
 pub mod queue;
