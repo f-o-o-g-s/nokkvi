@@ -107,12 +107,28 @@ fn is_timestamp(content: &str) -> bool {
 /// Fractions of a second are truncated to 3 digits and scaled to ms.
 fn parse_timestamp(ts: &str, offset_ms: i64) -> Option<u32> {
     let (minutes, rest) = ts.split_once(':')?;
-    let (seconds, fractions) = rest.split_once('.').or_else(|| rest.split_once(':'))?;
+    // The fraction is optional: `mm:ss`, `mm:ss.xx`, and `mm:ss:xx` are all
+    // valid real-world stamps (a fractionless `[03:21]` file must still parse
+    // into timed lines, not a synced-but-empty doc).
+    let (seconds, fractions) = rest
+        .split_once('.')
+        .or_else(|| rest.split_once(':'))
+        .unwrap_or((rest, ""));
 
+    // The fraction must be ASCII digits. Rejecting non-ASCII here (full-width
+    // digits, accented chars) is what keeps the byte-slice below from panicking
+    // mid-character on CJK corpora — a bad stamp skips its line, never crashes.
+    if !fractions.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
     let fractions = &fractions[..3.min(fractions.len())];
     let minutes: u64 = minutes.parse().ok()?;
     let seconds: u64 = seconds.parse().ok()?;
-    let frac_value: u64 = fractions.parse().ok()?;
+    let frac_value: u64 = if fractions.is_empty() {
+        0
+    } else {
+        fractions.parse().ok()?
+    };
 
     let scale = 10u64.pow(3 - u32::try_from(fractions.len()).unwrap_or(3));
     let ms = minutes * 60_000 + seconds * 1000 + frac_value * scale;
@@ -187,12 +203,15 @@ pub fn read_metadata(content: &str) -> LrcMetadata {
     meta
 }
 
-/// Parse a `[length: mm:ss]` value into milliseconds.
+/// Parse a `[length: mm:ss]` value into milliseconds. The arithmetic is done
+/// in `u64` (this module's timing rule) so a corrupt/hostile 5-digit minutes
+/// value can't overflow `u32` mid-multiply — an out-of-range total simply
+/// fails the final `try_from` and yields `None`.
 fn parse_length_ms(value: &str) -> Option<u32> {
     let (minutes, seconds) = value.trim().split_once(':')?;
-    let minutes: u32 = minutes.trim().parse().ok()?;
-    let seconds: u32 = seconds.trim().parse().ok()?;
-    Some((minutes * 60 + seconds) * 1000)
+    let minutes: u64 = minutes.trim().parse().ok()?;
+    let seconds: u64 = seconds.trim().parse().ok()?;
+    u32::try_from((minutes * 60 + seconds) * 1000).ok()
 }
 
 /// Parse a complete LRC document. `\r` is handled by `str::lines()`. Blank
@@ -357,7 +376,7 @@ impl LrcDocument {
     /// End are inclusive, line-relative, and off-by-one against a Rust range).
     pub fn from_structured(s: &StructuredLyrics) -> LrcDocument {
         let offset = s.offset_ms;
-        let lines = s
+        let mut lines: Vec<LrcLine> = s
             .lines
             .iter()
             .enumerate()
@@ -385,6 +404,11 @@ impl LrcDocument {
             })
             .collect();
 
+        // The server's line order isn't guaranteed monotonic, and a line with
+        // no `start` (optional in the OpenSubsonic schema) defaults to time 0
+        // mid-document — either breaks the sorted invariant `active_line_at`'s
+        // binary search relies on. Stable-sort by time, exactly as `parse()`.
+        lines.sort_by_key(|l| l.time_ms);
         LrcDocument {
             lines,
             synced: s.synced,
@@ -452,27 +476,33 @@ mod normalize {
         result
     }
 
-    /// Strip a trailing ` - feat. ...` suffix (ported from firmium).
+    /// Strip a trailing ` - feat. ...` suffix (ported from firmium). The marker
+    /// index comes from `to_lowercase()`, whose byte length can differ from the
+    /// original (`İ`→`i̇` grows, `ẞ`→`ß` shrinks), so the slice is taken from the
+    /// SAME lowercased string — mixing them mis-cuts or panics mid-character.
+    /// The Tier-2 key reduces this through `casefold` anyway, so losing the
+    /// original case here is harmless.
     fn strip_feat_suffix(title: &str) -> String {
         let lower = title.to_lowercase();
         for marker in [" - feat.", " - feat ", " - featuring"] {
             if let Some(idx) = lower.find(marker) {
-                return title[..idx].trim_end().to_string();
+                return lower[..idx].trim_end().to_string();
             }
         }
-        title.to_string()
+        lower
     }
 
-    /// Keep the primary artist, dropping ` feat`/` ft`/`/` runs (ported).
+    /// Keep the primary artist, dropping ` feat`/` ft`/`/` runs (ported). Slices
+    /// the lowercased string the index was found in — see `strip_feat_suffix`.
     fn primary_artist(artist: &str) -> String {
         let lower = artist.to_lowercase();
-        let mut cut = artist.len();
+        let mut cut = lower.len();
         for marker in [" feat.", " feat ", " featuring ", " ft.", " ft ", "/"] {
             if let Some(idx) = lower.find(marker) {
                 cut = cut.min(idx);
             }
         }
-        artist[..cut].trim().to_string()
+        lower[..cut].trim().to_string()
     }
 
     /// Casefold + `&`->`and` + drop punctuation + collapse whitespace. This is
@@ -764,6 +794,36 @@ mod tests {
     }
 
     #[test]
+    fn fractionless_timestamp_parses() {
+        // A real-world `[mm:ss]` file (no centisecond fraction) must yield
+        // timed lines, not a synced-but-empty doc that ends the resolve chain.
+        let doc = parse("[ar:A]\n[ti:T]\n[03:21]line one\n[03:25]line two");
+        assert!(doc.synced);
+        assert_eq!(doc.lines.len(), 2);
+        assert_eq!(doc.lines[0].time_ms, 201_000);
+        assert_eq!(doc.lines[1].time_ms, 205_000);
+    }
+
+    #[test]
+    fn multibyte_fraction_skips_line_without_panic() {
+        // Full-width digits in the fraction (common in CJK corpora) must not
+        // byte-slice mid-character; the bad line is skipped, valid ones remain.
+        let doc = parse("[00:10.１２]bad\n[00:20.50]good");
+        assert_eq!(doc.lines.len(), 1);
+        assert_eq!(doc.lines[0].time_ms, 20_500);
+    }
+
+    #[test]
+    fn length_header_overflow_is_none_not_panic() {
+        // A hostile 5-digit minutes value overflows u32 mid-multiply if the
+        // math isn't done in u64; read_metadata must not panic at index time.
+        let meta = read_metadata("[length:9999999:00]\n[00:01.00]a");
+        assert_eq!(meta.length_ms, None);
+        let ok = read_metadata("[length:03:21]\n[00:01.00]a");
+        assert_eq!(ok.length_ms, Some(201_000));
+    }
+
+    #[test]
     fn brackets_in_lyrics_and_metadata() {
         let doc = parse("[ti:Song [Explicit]]\n[00:10.00][Intro] Welcome to the [Show]");
         assert_eq!(doc.lines.len(), 1);
@@ -1032,6 +1092,45 @@ mod tests {
         assert_eq!(doc.lines[0].words.len(), 2);
         assert_eq!(doc.lines[0].words[1].text, "world");
         assert!(doc.lines[1].words.is_empty()); // no cueLine for index 1
+    }
+
+    #[test]
+    fn from_structured_sorts_unsorted_lines() {
+        // An out-of-order structured payload (or a line missing `start` → 0)
+        // must be sorted so `active_line_at`'s binary search stays valid.
+        let s = StructuredLyrics {
+            synced: true,
+            offset_ms: 0,
+            kind: Some("main".into()),
+            lines: vec![
+                StructuredLine {
+                    start_ms: Some(3_000),
+                    value: "third".into(),
+                },
+                StructuredLine {
+                    start_ms: Some(1_000),
+                    value: "first".into(),
+                },
+                StructuredLine {
+                    start_ms: Some(2_000),
+                    value: "second".into(),
+                },
+            ],
+            cue_lines: vec![],
+        };
+        let doc = LrcDocument::from_structured(&s);
+        let times: Vec<u32> = doc.lines.iter().map(|l| l.time_ms).collect();
+        assert_eq!(times, [1_000, 2_000, 3_000]);
+        assert!(times.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    #[test]
+    fn tier2_multibyte_feat_does_not_panic() {
+        // Case-folding changes byte length; the feat-strip must not mis-slice.
+        let (artist, _) = normalize::tier2_key("İrem feat. Guest", "Song");
+        assert!(!artist.is_empty());
+        let (_, title) = normalize::tier2_key("A", "Track - feat. İX");
+        assert!(!title.is_empty());
     }
 
     #[test]
