@@ -2720,3 +2720,82 @@ fn trawled_anchor_x_trails_behind_travel_and_eases_through_a_stall() {
         "a stalled anchor sits under the hull"
     );
 }
+
+// --- moon veil cache --------------------------------------------------------
+
+/// The resting veil key routes to the plain moon handle — outside a moon
+/// dream the veil cache stays empty and the moon renders exactly the
+/// untouched master document.
+#[test]
+fn moon_veil_resting_key_delegates_to_the_plain_moon_handle() {
+    let _guard = THEME_MUTATION_LOCK.lock();
+    let mut state = BoatState::default();
+    let plain = state.cache_moon_handle().id();
+    let via_veil = state
+        .cache_moon_veil_handle(crate::embedded_svg::MOON_VEIL_OPAQUE)
+        .id();
+    assert_eq!(
+        plain, via_veil,
+        "the resting key must reuse the plain handle"
+    );
+    assert!(
+        state.moon_veil_handles.is_empty(),
+        "the veil cache must stay empty outside a dream"
+    );
+    assert_eq!(
+        state
+            .cached_moon_veil_handle(crate::embedded_svg::MOON_VEIL_OPAQUE)
+            .map(|h| h.id()),
+        Some(plain),
+        "the read-only lookup routes the resting key the same way"
+    );
+}
+
+/// Same veil key → the same cached handle; different keys → distinct
+/// documents. The identity is what lets iced's raster cache reuse the
+/// rasterization for repeated frames at one choreography step.
+#[test]
+fn moon_veil_cache_is_keyed_by_the_quantized_alphas() {
+    let _guard = THEME_MUTATION_LOCK.lock();
+    let mut state = BoatState::default();
+    let half = state.cache_moon_veil_handle([16, 32, 32, 32]).id();
+    let half_again = state.cache_moon_veil_handle([16, 32, 32, 32]).id();
+    let bare = state.cache_moon_veil_handle([0, 0, 0, 0]).id();
+    assert_eq!(half, half_again, "same key must return the cached handle");
+    assert_ne!(half, bare, "different keys must carry different documents");
+    assert_eq!(state.moon_veil_handles.len(), 2);
+    assert_eq!(
+        state
+            .cached_moon_veil_handle([16, 32, 32, 32])
+            .map(|h| h.id()),
+        Some(half),
+        "the read-only lookup sees what the warm path cached"
+    );
+}
+
+/// A theme-generation advance drops the veil cache with every other
+/// handle — a stale veiled document would keep the old palette's moon
+/// mid-dream until restart.
+#[test]
+fn moon_veil_cache_invalidates_when_theme_generation_advances() {
+    let _guard = THEME_MUTATION_LOCK.lock();
+    let mut state = BoatState::default();
+    let initial_mode = crate::theme::is_light_mode();
+
+    let _ = state.cache_moon_veil_handle([8, 32, 32, 32]);
+    let cached_before = state.cached_moon_veil_handle([8, 32, 32, 32]).is_some();
+
+    crate::theme::set_light_mode(!initial_mode);
+    let invalidated = state.cached_moon_veil_handle([8, 32, 32, 32]).is_none();
+    let _ = state.cache_moon_veil_handle([8, 32, 32, 32]);
+    let repopulated = state.cached_moon_veil_handle([8, 32, 32, 32]).is_some();
+
+    crate::theme::set_light_mode(initial_mode);
+
+    assert!(cached_before, "freshly built veil handle must be cached");
+    assert!(
+        invalidated,
+        "a generation advance must invalidate the veil cache"
+    );
+    assert!(repopulated, "rebuilding after the change must repopulate");
+}

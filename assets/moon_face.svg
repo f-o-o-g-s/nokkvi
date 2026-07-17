@@ -52,7 +52,7 @@
            id="path8"
            cx="149.58746"
            cy="149.34581"
-           r="132.46153" /><path
+           r="132.46153" /><g id="veil-smile" opacity="1"><path
            style="opacity:1;fill:#111817;fill-opacity:0;stroke:#111817;stroke-width:6.61458;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
            id="circle9"
            d="m 241.69646,149.34581 a 92.109001,92.108704 0 0 1 -46.0545,79.76848 92.109001,92.108704 0 0 1 -92.109,0 92.109001,92.108704 0 0 1 -46.054498,-79.76848"
@@ -65,19 +65,19 @@
            sodipodi:cy="149.34581"
            sodipodi:cx="149.58746"
            sodipodi:open="true"
-           inkscape:label="smile" /><ellipse
+           inkscape:label="smile" /></g><g id="veil-eye" opacity="1"><ellipse
            style="opacity:1;fill:#111817;fill-opacity:1;stroke:#111817;stroke-width:0;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
            id="path9"
            cx="108.50836"
            cy="105.77433"
            rx="25.738251"
            ry="32.187252"
-           inkscape:label="left-eye" /><path
+           inkscape:label="left-eye" /></g><g id="veil-patch" opacity="1"><path
            id="path10"
            style="opacity:1;fill:#111817;fill-opacity:1;stroke:#111817;stroke-width:0;stroke-linecap:round;stroke-linejoin:round"
            d="m 249.66736,93.364887 c -7.31917,21.072403 -21.76531,37.875573 -37.89671,44.079893 -16.13139,6.20432 -31.49731,0.86721 -40.30954,-14.00088 -8.81223,-14.86809 -9.732,-37.008341 -2.41283,-58.080752 0,0 29.03467,3.089051 42.70185,7.849213 13.51693,4.707836 37.91723,20.152526 37.91723,20.152526 z"
-           sodipodi:nodetypes="csscac" /><path
+           sodipodi:nodetypes="csscac" /></g><g id="veil-strap" opacity="1"><path
            style="opacity:1;fill:#111817;fill-opacity:0.70588237;stroke:#111817;stroke-width:6.61458;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1"
            d="M 80.996808,37.080817 273.23607,105.0908 Z"
            id="path11"
-           sodipodi:nodetypes="ccc" /></g></g></g></svg>
+           sodipodi:nodetypes="ccc" /></g></g></g></g></svg>

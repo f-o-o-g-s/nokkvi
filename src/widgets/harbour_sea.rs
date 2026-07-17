@@ -24,7 +24,10 @@
 
 use iced::{Color, Element, Length, Point, Rectangle, Size, widget::canvas};
 
-use crate::widgets::boat::{BoatState, boat_overlay, parse_hex_color, sample_line_height};
+use crate::widgets::{
+    boat::{BoatState, boat_overlay, parse_hex_color, sample_line_height},
+    harbour_runes,
+};
 
 /// Samples in the sea height field — enough that the Catmull-Rom resample
 /// reads as a smooth swell at panel widths, few enough that building the
@@ -453,6 +456,71 @@ const BLACKHOLE_HORIZON_PX: f32 = 9.0;
 /// remaining choreography tell in v2). Scales by s, so the spit-out
 /// unwinds it into the outward whip.
 const BLACKHOLE_HOLD_WHIRL: f32 = 6.0;
+
+/// The moon's dream — the sky's other long ritual, and the only one the
+/// moon itself takes part in: the face lets its marks go one by one (the
+/// grin last), the bare disc hangs in the sky, and four short verses in
+/// the old tongue drift through the upper air, each verse calling one
+/// mark back — the grin first. The verses are carved long-branch staves
+/// (`harbour_runes`); the scene keeps their meaning to itself. Cycle 0
+/// always dreams (the app lands on Harbour, so every launch is greeted
+/// by the ritual once), then the gate rolls the usual hashed dice. Day
+/// dreams too — the sun wears the same face.
+///
+/// PURITY: mark alphas are a pure function of (cycle hash, phase),
+/// EXACTLY 1.0 at both window ends — every non-dream frame renders the
+/// moon from the untouched resting handle, byte-identical to a build
+/// without this event. The eyepatch and its strap never hold
+/// intermediate alpha at the same instant (their ink overlaps where the
+/// strap crosses the patch; a simultaneous half-fade would double-expose
+/// the seam) — the out/in windows are staggered to keep them disjoint,
+/// pinned by `moon_dream_patch_and_strap_never_fade_together`. The black
+/// hole, the shooting star, and the wandering notes all sit dream cycles
+/// out (the one-drama rule).
+// TUNE: CHANCE gates rarity (~once per 5 min at 0.07; 0.0 = never);
+// GREETS_LAUNCH the cycle-0 ritual; WINDOW the whole dream (0.70 = 14 s
+// of the 20 s cycle); MARK_LAG how long a verse sounds before its mark
+// answers; VERSE_CX/Y/STAVE_PX/ALPHA place, size, and weight the runes.
+const MOON_DREAM_CHANCE: f32 = 0.07;
+const MOON_DREAM_GREETS_LAUNCH: bool = true;
+const MOON_DREAM_WINDOW: f32 = 0.70;
+const MOON_DREAM_SALT: u32 = 0xD5EA_0117;
+// Max hashed start (0.10 + 0.15) + the window stays inside the cycle.
+const _: () = assert!(0.10 + 0.15 + MOON_DREAM_WINDOW < 1.0);
+/// The dream in seconds — its window over the sea drift rate.
+const MOON_DREAM_SECS: f32 = MOON_DREAM_WINDOW / SEA_DRIFT_HZ;
+/// Fade-out starts (seconds into the window), one per mark in
+/// [smile, eye, patch, strap] order — marks leave in REVERSE order, the
+/// strap first and the grin last, so the farewell mirrors the return.
+const MOON_DREAM_OUT_START: [f32; 4] = [1.55, 1.15, 0.74, 0.06];
+const MOON_DREAM_OUT_SECS: f32 = 0.66;
+// The strap is fully gone before the patch starts to fade (disjoint
+// windows — see the seam note in the doc above).
+const _: () = assert!(MOON_DREAM_OUT_START[3] + MOON_DREAM_OUT_SECS < MOON_DREAM_OUT_START[2]);
+/// Verse timing: verse `i` owns `[START + i·SPAN, START + (i+1)·SPAN]`,
+/// fading in and out by FADE inside its own span.
+const MOON_DREAM_VERSE_START: f32 = 2.33;
+const MOON_DREAM_VERSE_TAIL: f32 = 0.40;
+const MOON_DREAM_VERSE_SPAN: f32 =
+    (MOON_DREAM_SECS - MOON_DREAM_VERSE_START - MOON_DREAM_VERSE_TAIL) / 4.0;
+const MOON_DREAM_VERSE_FADE: f32 = 0.50;
+/// Each mark answers its verse MARK_LAG seconds in, easing over IN_SECS.
+const MOON_DREAM_MARK_LAG: f32 = 1.0;
+const MOON_DREAM_IN_SECS: f32 = 1.10;
+// The last mark settles before the window closes (identity at both ends).
+const _: () = assert!(
+    MOON_DREAM_VERSE_START + 3.0 * MOON_DREAM_VERSE_SPAN + MOON_DREAM_MARK_LAG + MOON_DREAM_IN_SECS
+        < MOON_DREAM_SECS
+);
+// TUNE: the verses' place and presence. STAVE_PX is the rune height at
+// the 300 px reference panel (rides the shared glyph scale, then capped
+// by the draw pass so the longest line fits between the moon's pixel
+// extent and the right edge on every panel shape); CX centers each
+// line in the open right sky.
+const MOON_DREAM_VERSE_CX: f32 = 0.58;
+const MOON_DREAM_VERSE_Y: f32 = 0.14;
+const MOON_DREAM_STAVE_PX: f32 = 10.0;
+const MOON_DREAM_VERSE_ALPHA: f32 = 0.62;
 
 /// Shooting star — a rare streak across the upper sky. Timing, start
 /// point, and heading all hash the CYCLE COUNTER, so no two cycles replay
@@ -1024,6 +1092,71 @@ fn blackhole_visibility(dist_now: f32, horizon_px: f32, s: f32, grip: f32) -> f3
     1.0 - proximity * gate
 }
 
+/// Does this cycle dream? Cycle 0 always does while the launch greeting
+/// is on — the app opens on Harbour centred on the Trawl row, so the
+/// first full cycle after launch carries the ritual — then the usual
+/// hashed dice, at the black hole's rarity.
+fn moon_dream_cycle(cycle: u32) -> bool {
+    (MOON_DREAM_GREETS_LAUNCH && cycle == 0) || hash01(cycle, MOON_DREAM_SALT) < MOON_DREAM_CHANCE
+}
+
+/// Progress through this cycle's dream window: `Some(p ∈ [0, 1])` while
+/// the ritual plays, `None` on every other frame (including all of a
+/// non-dream cycle). The hashed start (2.0–5.0 s in) also buys a cold
+/// launch time to land its shelves before the first verse sounds.
+fn moon_dream_progress(phase: f32, cycle: u32) -> Option<f32> {
+    if !moon_dream_cycle(cycle) {
+        return None;
+    }
+    let start = 0.10 + 0.15 * hash01(cycle, MOON_DREAM_SALT ^ 0x9E37);
+    let p = (phase - start) / MOON_DREAM_WINDOW;
+    (0.0..=1.0).contains(&p).then_some(p)
+}
+
+/// The four mark alphas [smile, eye, patch, strap] at dream progress
+/// `p` — each `max(fading out, easing back)`, EXACTLY 1.0 at both
+/// window ends (the boundary identity the purity contract rides on).
+fn moon_dream_alphas(p: f32) -> [f32; 4] {
+    let t = p.clamp(0.0, 1.0) * MOON_DREAM_SECS;
+    let mut alphas = [1.0f32; 4];
+    for (i, alpha) in alphas.iter_mut().enumerate() {
+        let out_start = MOON_DREAM_OUT_START[i];
+        let gone = 1.0 - smoothstep(out_start, out_start + MOON_DREAM_OUT_SECS, t);
+        let back_start =
+            MOON_DREAM_VERSE_START + i as f32 * MOON_DREAM_VERSE_SPAN + MOON_DREAM_MARK_LAG;
+        let back = smoothstep(back_start, back_start + MOON_DREAM_IN_SECS, t);
+        *alpha = gone.max(back);
+    }
+    alphas
+}
+
+/// Verse `line`'s alpha at dream progress `p`. The four verse windows
+/// tile the recital exactly (each fades to zero at its own ends), so at
+/// most one verse is ever audible — pinned by
+/// `moon_dream_verses_speak_one_at_a_time`.
+fn moon_dream_verse_alpha(p: f32, line: usize) -> f32 {
+    let t = p.clamp(0.0, 1.0) * MOON_DREAM_SECS;
+    let s = MOON_DREAM_VERSE_START + line as f32 * MOON_DREAM_VERSE_SPAN;
+    let e = s + MOON_DREAM_VERSE_SPAN;
+    smoothstep(s, s + MOON_DREAM_VERSE_FADE, t).min(smoothstep(e, e - MOON_DREAM_VERSE_FADE, t))
+}
+
+/// The veil cache key for this frame: the dream's mark alphas quantized
+/// to [`crate::embedded_svg::MOON_VEIL_STEPS`] steps — or the resting
+/// key on every frame outside a dream. Quantizing keeps the per-key
+/// handle cache on `BoatState` bounded (~156 distinct documents across
+/// the whole choreography instead of one per frame); one step is
+/// sub-JND after the scene's own `MOON_ALPHA` scaling. Shared by the
+/// tick (which warms the handle) and `trawl_scene` (which renders it)
+/// — one source, no drift.
+pub(crate) fn moon_dream_veil_key(phase: f32, cycle: u32) -> [u8; 4] {
+    let Some(p) = moon_dream_progress(phase, cycle) else {
+        return crate::embedded_svg::MOON_VEIL_OPAQUE;
+    };
+    let steps = f32::from(crate::embedded_svg::MOON_VEIL_STEPS);
+    moon_dream_alphas(p).map(|a| (a * steps).round() as u8)
+}
+
 /// One rising note's fixed parameters (the per-frame position falls out of
 /// the phase). Deterministic, const-seeded — same contract as the sky.
 #[derive(Debug, Clone, Copy)]
@@ -1442,12 +1575,17 @@ pub(crate) fn trawl_scene<'a, M: 'a>(
         // (same theme-generation invalidation; warmed by the tick, with
         // the boat overlay's rebuild-on-miss fallback). Placed over the
         // canvas — its halo is drawn there at the same shared consts —
-        // and under the ship.
+        // and under the ship. During a moon dream the handle is the
+        // veiled document for this frame's quantized key (the SAME
+        // `moon_dream_veil_key(phase, cycle)` the canvas verses and the
+        // tick's cache-warm read — one clock, no drift); every other
+        // frame it is the untouched resting master.
         if MOON_ALPHA > 0.0 {
             let moon_r = MOON_RADIUS_PX * scene_glyph_scale(h);
-            let handle = boat.cached_moon_handle().unwrap_or_else(|| {
+            let veil = moon_dream_veil_key(sea_phase, sea_cycle);
+            let handle = boat.cached_moon_veil_handle(veil).unwrap_or_else(|| {
                 iced::widget::svg::Handle::from_memory(
-                    crate::embedded_svg::themed_moon_face_svg().into_bytes(),
+                    crate::embedded_svg::themed_moon_face_veiled(veil).into_bytes(),
                 )
             });
             layers = layers.push(
@@ -1966,8 +2104,11 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // full visibility at s 0 or beyond the capture radius — the
         // boundary + locality guarantees), and the shooting star +
         // wandering notes skip such cycles so the sky carries one
-        // drama at a time.
-        let blackhole_cycle = !day && hash01(self.cycle, BLACKHOLE_SALT) < BLACKHOLE_CHANCE;
+        // drama at a time. Dream cycles pre-empt the hole under the
+        // same rule — the moon's ritual owns its sky.
+        let dream_cycle = moon_dream_cycle(self.cycle);
+        let blackhole_cycle =
+            !day && !dream_cycle && hash01(self.cycle, BLACKHOLE_SALT) < BLACKHOLE_CHANCE;
         let blackhole: Option<(Point, f32, f32, f32)> = if blackhole_cycle {
             let start = 0.05 + 0.20 * hash01(self.cycle, BLACKHOLE_SALT ^ 0x9E37);
             let t = phase - start;
@@ -2111,8 +2252,14 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // arithmetically overlaps the hole's, and a glyph hovering serene
         // beside a feeding gravity well reads as a bug — notes are not
         // constellation members (they don't get pulled), so they sit the
-        // drama out entirely (the shooting star's one-drama rule).
-        for i in 0..if blackhole_cycle { 0 } else { SKY_WANDER_NOTES } {
+        // drama out entirely (the shooting star's one-drama rule). Dream
+        // cycles skip them too: the verses take the same upper air the
+        // notes wander through.
+        for i in 0..if blackhole_cycle || dream_cycle {
+            0
+        } else {
+            SKY_WANDER_NOTES
+        } {
             let salt = 0x407E + (i as u32) * 4;
             let start = 0.05 + 0.68 * hash01(self.cycle, salt);
             let t = phase - start;
@@ -2146,6 +2293,77 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
                 draw_note_pair(&mut frame, Point::new(x, y), s, color);
             } else {
                 draw_quaver(&mut frame, Point::new(x, y), s, color);
+            }
+        }
+
+        // ── The moon's dream — verses in the old tongue ──────────────────
+        // While the face's marks slip away and return on the Svg layer
+        // above (`trawl_scene` keys the moon handle off the same
+        // progress), four carved verses take the open right sky one at a
+        // time. Starlight by night, ink by day — the wandering notes'
+        // swap. The stave height rides the shared glyph scale, capped so
+        // the longest line clears both the moon and the right edge on
+        // any panel shape; each line center-clamps into the same band.
+        if let Some(p) = moon_dream_progress(phase, self.cycle) {
+            let longest = harbour_runes::DREAM_VERSES
+                .iter()
+                .map(|v| harbour_runes::verse_advance(v))
+                .fold(0.0f32, f32::max);
+            // The verse band vertically overlaps the moon (both live in
+            // the upper sky), so the LEFT floor must clear the moon's
+            // PIXEL extent — a width-fraction floor alone fails on a
+            // dragged-narrow stretched panel where the moon's radius
+            // outgrows its width share. The stave cap absorbs the floor
+            // so the longest capped line still fits the [floor, 0.95 w]
+            // band on every shape.
+            let left_floor = (MOON_X * w + MOON_RADIUS_PX * glyph_scale + 6.0).max(0.24 * w);
+            let stave = (MOON_DREAM_STAVE_PX * glyph_scale)
+                .min((0.95 * w - left_floor).max(0.0) / longest.max(f32::EPSILON));
+            for (line, verse) in harbour_runes::DREAM_VERSES.iter().enumerate() {
+                let fade = moon_dream_verse_alpha(p, line);
+                if fade <= 0.0 {
+                    continue;
+                }
+                let width = harbour_runes::verse_advance(verse) * stave;
+                let x0 = (MOON_DREAM_VERSE_CX * w - 0.5 * width)
+                    .clamp(left_floor, (0.95 * w - width).max(left_floor));
+                let y0 = MOON_DREAM_VERSE_Y * h;
+                let color = if day {
+                    Color {
+                        a: MOON_DREAM_VERSE_ALPHA * fade * viz.border_opacity,
+                        ..crest
+                    }
+                } else {
+                    Color {
+                        a: MOON_DREAM_VERSE_ALPHA * fade,
+                        ..starlight
+                    }
+                };
+                let staves = canvas::Path::new(|b| {
+                    let mut pen = x0;
+                    for c in verse.chars() {
+                        if c == ' ' {
+                            pen += harbour_runes::RUNE_WORD_SPACE * stave;
+                            continue;
+                        }
+                        let Some(glyph) = harbour_runes::rune_glyph(c) else {
+                            continue;
+                        };
+                        let lb = harbour_runes::left_bearing(glyph) * stave;
+                        for seg in glyph.segments {
+                            b.move_to(Point::new(pen + lb + seg[0] * stave, y0 + seg[1] * stave));
+                            b.line_to(Point::new(pen + lb + seg[2] * stave, y0 + seg[3] * stave));
+                        }
+                        pen += glyph.width * stave;
+                    }
+                });
+                frame.stroke(
+                    &staves,
+                    canvas::Stroke::default()
+                        .with_color(color)
+                        .with_width((0.10 * stave).max(0.7))
+                        .with_line_cap(canvas::LineCap::Round),
+                );
             }
         }
 
@@ -2983,9 +3201,9 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
         // sky, its timing, origin, and heading all hashed from the cycle
         // counter — no two cycles replay the same streak. Night only (a
         // meteor at noon reads as a rendering bug, and the starlight
-        // streak would be invisible anyway). Black-hole cycles skip it —
-        // one sky drama at a time.
-        if !day && !blackhole_cycle && hash01(self.cycle, 0x57A2) < SHOOT_CHANCE {
+        // streak would be invisible anyway). Black-hole and dream cycles
+        // skip it — one sky drama at a time.
+        if !day && !blackhole_cycle && !dream_cycle && hash01(self.cycle, 0x57A2) < SHOOT_CHANCE {
             let start = 0.15 + 0.60 * hash01(self.cycle, 0x57A3);
             if phase >= start && phase < start + SHOOT_WINDOW {
                 let p = (phase - start) / SHOOT_WINDOW;
@@ -3823,5 +4041,137 @@ mod tests {
             max > min * 1.4,
             "frond heights must vary (min {min}, max {max})"
         );
+    }
+
+    /// The dream's boundary identity: at both window ends every mark is
+    /// EXACTLY 1.0 — the moon renders from the untouched resting handle
+    /// on the frames either side of a ritual, byte-identical to a build
+    /// without it. A botched envelope here would permanently alter an
+    /// avatar the owner has already approved.
+    #[test]
+    fn moon_dream_alphas_are_identity_at_both_window_ends() {
+        assert_eq!(moon_dream_alphas(0.0), [1.0; 4]);
+        assert_eq!(moon_dream_alphas(1.0), [1.0; 4]);
+    }
+
+    /// Mid-ritual the disc is genuinely bare: after the last mark leaves
+    /// and before the first verse answers, all four alphas are zero.
+    #[test]
+    fn moon_dream_bares_the_disc_between_farewell_and_first_verse() {
+        let t = MOON_DREAM_OUT_START[0] + MOON_DREAM_OUT_SECS + 0.05;
+        assert!(t < MOON_DREAM_VERSE_START + MOON_DREAM_MARK_LAG);
+        assert_eq!(moon_dream_alphas(t / MOON_DREAM_SECS), [0.0; 4]);
+    }
+
+    /// The eyepatch and its strap never hold intermediate alpha at the
+    /// same instant — their ink overlaps where the strap crosses the
+    /// patch, and a simultaneous half-fade would double-expose the seam.
+    /// Nobody would think to look for this by eye; it is the one guard
+    /// against an invisible compositing artifact.
+    #[test]
+    fn moon_dream_patch_and_strap_never_fade_together() {
+        let mid = |x: f32| x > 1e-4 && x < 1.0 - 1e-4;
+        for i in 0..=4000 {
+            let p = i as f32 / 4000.0;
+            let a = moon_dream_alphas(p);
+            assert!(
+                !(mid(a[2]) && mid(a[3])),
+                "patch {} and strap {} both mid-fade at p {p}",
+                a[2],
+                a[3]
+            );
+        }
+    }
+
+    /// Marks return in verse order — the grin first, the strap last —
+    /// and every one has settled back to exactly 1.0 before the window
+    /// closes.
+    #[test]
+    fn moon_dream_marks_return_in_verse_order() {
+        let first_settled = |mark: usize| {
+            (0..=4000)
+                .map(|i| i as f32 / 4000.0)
+                .find(|&p| p > 0.25 && moon_dream_alphas(p)[mark] >= 1.0 - 1e-6)
+        };
+        let times: Vec<f32> = (0..4)
+            .map(|m| first_settled(m).unwrap_or_else(|| panic!("mark {m} never settles back")))
+            .collect();
+        for pair in times.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "marks must settle in order, got {times:?}"
+            );
+        }
+        assert!(times[3] < 1.0, "the strap settles before the window closes");
+    }
+
+    /// The verse windows tile the recital: at most one verse is audible
+    /// at any instant, and the last has faded fully out before the
+    /// window ends.
+    #[test]
+    fn moon_dream_verses_speak_one_at_a_time() {
+        for i in 0..=4000 {
+            let p = i as f32 / 4000.0;
+            let audible = (0..4)
+                .filter(|&line| moon_dream_verse_alpha(p, line) > 1e-4)
+                .count();
+            assert!(audible <= 1, "{audible} verses audible at p {p}");
+        }
+        assert!(moon_dream_verse_alpha(1.0, 3) <= f32::EPSILON);
+    }
+
+    /// The launch greeting: cycle 0 always dreams, and its hashed window
+    /// sits fully inside the cycle (no dream can straddle a wrap, where
+    /// its hash — and choreography — would change mid-ritual).
+    #[test]
+    fn moon_dream_greets_the_launch_inside_its_cycle() {
+        assert!(moon_dream_cycle(0), "cycle 0 must carry the greeting");
+        for cycle in 0..10_000u32 {
+            if !moon_dream_cycle(cycle) {
+                continue;
+            }
+            let start = 0.10 + 0.15 * hash01(cycle, MOON_DREAM_SALT ^ 0x9E37);
+            assert!(
+                start + MOON_DREAM_WINDOW < 1.0,
+                "cycle {cycle} straddles the wrap"
+            );
+            assert!(moon_dream_progress(0.0, cycle).is_none());
+        }
+    }
+
+    /// Outside the window — and on every non-dream cycle — the veil key
+    /// is the resting key: the render path takes the ordinary cached
+    /// moon handle and the dream machinery is invisible.
+    #[test]
+    fn moon_dream_veil_key_rests_opaque_outside_the_window() {
+        use crate::embedded_svg::MOON_VEIL_OPAQUE;
+        let start = 0.10 + 0.15 * hash01(0, MOON_DREAM_SALT ^ 0x9E37);
+        assert_eq!(moon_dream_veil_key(start - 0.01, 0), MOON_VEIL_OPAQUE);
+        assert_eq!(
+            moon_dream_veil_key(start + MOON_DREAM_WINDOW + 0.01, 0),
+            MOON_VEIL_OPAQUE
+        );
+        let quiet = (1u32..)
+            .find(|&c| !moon_dream_cycle(c))
+            .expect("some cycle must not dream");
+        for i in 0..=20 {
+            assert_eq!(
+                moon_dream_veil_key(i as f32 / 20.0, quiet),
+                MOON_VEIL_OPAQUE
+            );
+        }
+    }
+
+    /// Deep in the farewell the veil key must NOT be the resting key —
+    /// the guard that the quantizer actually engages (a broken progress
+    /// gate would leave the moon permanently complete and the dream
+    /// silently invisible, the one failure mode nobody would notice).
+    #[test]
+    fn moon_dream_veil_key_engages_inside_the_window() {
+        let start = 0.10 + 0.15 * hash01(0, MOON_DREAM_SALT ^ 0x9E37);
+        let bare = start
+            + (MOON_DREAM_OUT_START[0] + MOON_DREAM_OUT_SECS + 0.05) * MOON_DREAM_WINDOW
+                / MOON_DREAM_SECS;
+        assert_eq!(moon_dream_veil_key(bare, 0), [0u8; 4]);
     }
 }

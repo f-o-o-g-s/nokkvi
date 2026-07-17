@@ -302,6 +302,51 @@ pub(crate) fn themed_moon_face_svg() -> String {
         .replace(LOGO_TOKEN_OUTLINE, &viz.border_color)
 }
 
+/// The moon face's four fadeable marks, in choreography order. Each id
+/// names a `<g>` wrapper in the master asset whose `opacity="1"` the
+/// veil rewrite retargets — the master must carry each anchor EXACTLY
+/// once (test-pinned), and the rewrite replaces the full `id + opacity`
+/// attribute pair so it can never touch any other opacity in the
+/// document. The face disc itself is never veiled.
+pub(crate) const MOON_VEIL_IDS: [&str; 4] = ["veil-smile", "veil-eye", "veil-patch", "veil-strap"];
+
+/// Veil alpha quantization: each mark's opacity is keyed in 1/32 steps
+/// (further scaled by the scene's 0.60 moon alpha at composite time, so
+/// one step lands well under a JND). Quantizing is what keeps the
+/// per-key handle cache on `BoatState` bounded — an unquantized alpha
+/// would mint a new SVG document (and a full usvg parse + raster)
+/// every frame.
+pub(crate) const MOON_VEIL_STEPS: u8 = 32;
+
+/// The resting veil — every mark fully present. `themed_moon_face_veiled`
+/// returns the untouched themed master for this key (byte-identical to
+/// `themed_moon_face_svg`, test-pinned), which is what every ordinary
+/// frame renders.
+pub(crate) const MOON_VEIL_OPAQUE: [u8; 4] = [MOON_VEIL_STEPS; 4];
+
+/// Return the themed moon face with per-mark opacity applied — the
+/// harbour scene's moon-dream rewrite. `veil` carries one quantized
+/// alpha per [`MOON_VEIL_IDS`] entry; marks at full opacity keep their
+/// authored `opacity="1"` anchor untouched. Group opacity is isolated
+/// in SVG (the group composites offscreen, once), so a half-faded mark
+/// emerges from the face disc rather than double-exposing against it —
+/// the reason this rewrite exists instead of stacked per-mark Svg
+/// layers, whose compositing provably lightens the settled ink.
+pub(crate) fn themed_moon_face_veiled(veil: [u8; 4]) -> String {
+    let mut out = themed_moon_face_svg();
+    for (id, q) in MOON_VEIL_IDS.iter().zip(veil) {
+        if q >= MOON_VEIL_STEPS {
+            continue;
+        }
+        let alpha = f32::from(q) / f32::from(MOON_VEIL_STEPS);
+        out = out.replace(
+            &format!("id=\"{id}\" opacity=\"1\""),
+            &format!("id=\"{id}\" opacity=\"{alpha:.4}\""),
+        );
+    }
+    out
+}
+
 /// Convert an `iced::Color` to a `#rrggbb` hex string for SVG fill replacement.
 fn color_to_hex(c: Color) -> String {
     format!(
@@ -1133,6 +1178,47 @@ mod tests {
             out.contains(&viz.border_color),
             "line work must use the dark visualizer border color"
         );
+    }
+
+    /// Every veil anchor must appear in the master exactly once — a
+    /// re-save that normalizes `opacity="1"` into a style string (Inkscape
+    /// does this) would turn the veil rewrite into a silent no-op, leaving
+    /// the moon permanently complete and the dream invisible.
+    #[test]
+    fn moon_face_master_carries_every_veil_anchor() {
+        for id in MOON_VEIL_IDS {
+            let anchor = format!("id=\"{id}\" opacity=\"1\"");
+            assert_eq!(
+                MOON_FACE_SVG.matches(&anchor).count(),
+                1,
+                "the master must carry `{anchor}` exactly once — hand-edit \
+                 the XML, don't re-save through Inkscape"
+            );
+        }
+    }
+
+    /// The resting veil is the untouched themed master, byte for byte —
+    /// the guarantee that every ordinary frame renders exactly the moon
+    /// that ships today.
+    #[test]
+    fn veiled_moon_at_full_opacity_is_the_resting_moon() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        assert_eq!(
+            themed_moon_face_veiled(MOON_VEIL_OPAQUE),
+            themed_moon_face_svg()
+        );
+    }
+
+    /// Each mark's opacity rewrites independently; a full-opacity mark
+    /// keeps its authored anchor untouched.
+    #[test]
+    fn veiled_moon_rewrites_each_mark_alone() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let out = themed_moon_face_veiled([0, 16, MOON_VEIL_STEPS, 8]);
+        assert!(out.contains(r#"id="veil-smile" opacity="0.0000""#));
+        assert!(out.contains(r#"id="veil-eye" opacity="0.5000""#));
+        assert!(out.contains(r#"id="veil-patch" opacity="1""#));
+        assert!(out.contains(r#"id="veil-strap" opacity="0.2500""#));
     }
 
     /// The Lucide anchor SVG must include the four lucide-anchor sub-paths

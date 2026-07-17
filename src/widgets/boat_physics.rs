@@ -582,6 +582,14 @@ pub struct BoatState {
     /// sharing the boat/anchor caches' theme-generation invalidation. Only
     /// the harbour boat ever populates it; the Lines boat leaves it `None`.
     pub moon_handle: Option<svg::Handle>,
+    /// Per-veil-key moon-face documents for the harbour scene's moon
+    /// dream (`harbour_sea::moon_dream_veil_key`), keyed on the quantized
+    /// mark alphas. Never populated outside a dream (the resting key
+    /// delegates to the plain moon handle); the full choreography spans
+    /// ~156 distinct keys, retained after a recital — warm for the next
+    /// one — until the shared theme-generation invalidation (or the
+    /// 512-entry defensive clear) drops them.
+    pub moon_veil_handles: HashMap<[u8; 4], svg::Handle>,
     pub handle_generation: u64,
 }
 
@@ -612,6 +620,7 @@ impl BoatState {
             self.tilt_handles.clear();
             self.anchor_handle = None;
             self.moon_handle = None;
+            self.moon_veil_handles.clear();
             self.handle_generation = current_gen;
         }
     }
@@ -712,6 +721,45 @@ impl BoatState {
             return None;
         }
         self.moon_handle.clone()
+    }
+
+    /// Build (and cache) the moon handle for a veil key — the moon
+    /// dream's per-step document (`embedded_svg::themed_moon_face_veiled`
+    /// keyed by `harbour_sea::moon_dream_veil_key`). The resting key
+    /// delegates to [`Self::cache_moon_handle`], so every ordinary frame
+    /// keeps the untouched master and no entry is ever inserted outside
+    /// a dream. Keyed like the boat's tilt cache; the choreography
+    /// retraces the same ~156-key path every recital (entries persist
+    /// between recitals), with a defensive clear at 512 in case a beat
+    /// re-TUNE ever widens it.
+    pub(crate) fn cache_moon_veil_handle(&mut self, veil: [u8; 4]) -> svg::Handle {
+        if veil == crate::embedded_svg::MOON_VEIL_OPAQUE {
+            return self.cache_moon_handle();
+        }
+        self.clear_if_theme_changed();
+        if let Some(h) = self.moon_veil_handles.get(&veil) {
+            return h.clone();
+        }
+        if self.moon_veil_handles.len() >= 512 {
+            self.moon_veil_handles.clear();
+        }
+        let bytes = crate::embedded_svg::themed_moon_face_veiled(veil).into_bytes();
+        let h = svg::Handle::from_memory(bytes);
+        self.moon_veil_handles.insert(veil, h.clone());
+        h
+    }
+
+    /// Read-only sibling of `cache_moon_veil_handle` — the render path's
+    /// lookup, same rebuild-on-miss fallback contract as every other
+    /// `cached_*`. The resting key routes to the plain moon handle.
+    pub(crate) fn cached_moon_veil_handle(&self, veil: [u8; 4]) -> Option<svg::Handle> {
+        if veil == crate::embedded_svg::MOON_VEIL_OPAQUE {
+            return self.cached_moon_handle();
+        }
+        if self.handle_generation != crate::theme::theme_generation() {
+            return None;
+        }
+        self.moon_veil_handles.get(&veil).cloned()
     }
 
     /// How far toward full extension the trawl trail currently is:
