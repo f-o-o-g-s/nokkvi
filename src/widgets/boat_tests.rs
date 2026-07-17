@@ -2723,46 +2723,50 @@ fn trawled_anchor_x_trails_behind_travel_and_eases_through_a_stall() {
 
 // --- moon veil cache --------------------------------------------------------
 
-/// The resting veil key routes to the plain moon handle — outside a moon
-/// dream the veil cache stays empty and the moon renders exactly the
-/// untouched master document.
+/// The resting BARE key routes to the plain bare-disc handle — outside a
+/// moon dream the veil cache gains no entry and the moon renders exactly
+/// the one cached resting document.
 #[test]
-fn moon_veil_resting_key_delegates_to_the_plain_moon_handle() {
+fn moon_veil_resting_key_delegates_to_the_bare_disc_handle() {
     let _guard = THEME_MUTATION_LOCK.lock();
     let mut state = BoatState::default();
-    let plain = state.cache_moon_handle().id();
+    let bare = state.cache_moon_handle().id();
     let via_veil = state
-        .cache_moon_veil_handle(crate::embedded_svg::MOON_VEIL_OPAQUE)
+        .cache_moon_veil_handle(crate::embedded_svg::MOON_VEIL_BARE)
         .id();
     assert_eq!(
-        plain, via_veil,
-        "the resting key must reuse the plain handle"
+        bare, via_veil,
+        "the resting key must reuse the bare-disc handle"
     );
     assert!(
         state.moon_veil_handles.is_empty(),
-        "the veil cache must stay empty outside a dream"
+        "the resting key must not mint a veil-cache entry"
     );
     assert_eq!(
         state
-            .cached_moon_veil_handle(crate::embedded_svg::MOON_VEIL_OPAQUE)
+            .cached_moon_veil_handle(crate::embedded_svg::MOON_VEIL_BARE)
             .map(|h| h.id()),
-        Some(plain),
+        Some(bare),
         "the read-only lookup routes the resting key the same way"
     );
 }
 
 /// Same veil key → the same cached handle; different keys → distinct
 /// documents. The identity is what lets iced's raster cache reuse the
-/// rasterization for repeated frames at one choreography step.
+/// rasterization for repeated frames at one choreography step. The
+/// fully-opaque (whole-face) key is an ordinary cache entry now — only
+/// BARE delegates.
 #[test]
 fn moon_veil_cache_is_keyed_by_the_quantized_alphas() {
     let _guard = THEME_MUTATION_LOCK.lock();
     let mut state = BoatState::default();
     let half = state.cache_moon_veil_handle([16, 32, 32, 32]).id();
     let half_again = state.cache_moon_veil_handle([16, 32, 32, 32]).id();
-    let bare = state.cache_moon_veil_handle([0, 0, 0, 0]).id();
+    let whole = state
+        .cache_moon_veil_handle(crate::embedded_svg::MOON_VEIL_OPAQUE)
+        .id();
     assert_eq!(half, half_again, "same key must return the cached handle");
-    assert_ne!(half, bare, "different keys must carry different documents");
+    assert_ne!(half, whole, "different keys must carry different documents");
     assert_eq!(state.moon_veil_handles.len(), 2);
     assert_eq!(
         state

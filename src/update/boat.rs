@@ -289,10 +289,10 @@ fn step_harbour_scene(app: &mut Nokkvi, now: Instant) {
     let facing = app.harbour_boat.facing;
     let _ = app.harbour_boat.cache_handle_for(tilt, facing, false);
     let _ = app.harbour_boat.cache_anchor_handle();
-    // The moon warms through the veil key: the resting key (every
-    // ordinary frame) delegates to the plain moon handle; during a moon
-    // dream this bakes the frame's veiled document so the pure view path
-    // stays a cheap handle clone.
+    // The moon warms through the veil key: the resting BARE key (every
+    // ordinary frame) delegates to the plain bare-disc handle; during a
+    // moon dream this bakes the frame's veiled document so the pure view
+    // path stays a cheap handle clone.
     let veil = crate::widgets::harbour_sea::moon_dream_veil_key(
         app.harbour_sea_phase,
         app.harbour_sea_cycle,

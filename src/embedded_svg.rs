@@ -318,11 +318,21 @@ pub(crate) const MOON_VEIL_IDS: [&str; 4] = ["veil-smile", "veil-eye", "veil-pat
 /// every frame.
 pub(crate) const MOON_VEIL_STEPS: u8 = 32;
 
-/// The resting veil — every mark fully present. `themed_moon_face_veiled`
-/// returns the untouched themed master for this key (byte-identical to
-/// `themed_moon_face_svg`, test-pinned), which is what every ordinary
-/// frame renders.
+/// Every mark fully present — the dream's mid-ritual peak, when the
+/// face is whole. `themed_moon_face_veiled` returns the untouched
+/// themed master for this key (byte-identical to
+/// `themed_moon_face_svg`, test-pinned). Production code never names
+/// this key — the quantizer produces it as a value during the hold —
+/// so it exists as shared test vocabulary.
+#[cfg(test)]
 pub(crate) const MOON_VEIL_OPAQUE: [u8; 4] = [MOON_VEIL_STEPS; 4];
+
+/// The RESTING veil — the bare disc. The moon (and the day sun; same
+/// asset) sails faceless between dreams: every mark's group carries
+/// zero opacity, leaving only the disc and its rim. This is the key
+/// every ordinary frame renders, and the one `BoatState`'s plain moon
+/// handle bakes.
+pub(crate) const MOON_VEIL_BARE: [u8; 4] = [0; 4];
 
 /// Return the themed moon face with per-mark opacity applied — the
 /// harbour scene's moon-dream rewrite. `veil` carries one quantized
@@ -1197,16 +1207,30 @@ mod tests {
         }
     }
 
-    /// The resting veil is the untouched themed master, byte for byte —
-    /// the guarantee that every ordinary frame renders exactly the moon
-    /// that ships today.
+    /// The fully-opaque veil is the untouched themed master, byte for
+    /// byte — the guarantee that the dream's mid-ritual peak shows
+    /// exactly the authored face, nothing resampled.
     #[test]
-    fn veiled_moon_at_full_opacity_is_the_resting_moon() {
+    fn veiled_moon_at_full_opacity_is_the_untouched_master() {
         let _guard = crate::theme::THEME_MODE_LOCK.lock();
         assert_eq!(
             themed_moon_face_veiled(MOON_VEIL_OPAQUE),
             themed_moon_face_svg()
         );
+    }
+
+    /// The resting (bare) veil hides every mark — the disc the moon
+    /// wears between dreams carries no trace of the face.
+    #[test]
+    fn veiled_moon_bare_hides_every_mark() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let out = themed_moon_face_veiled(MOON_VEIL_BARE);
+        for id in MOON_VEIL_IDS {
+            assert!(
+                out.contains(&format!("id=\"{id}\" opacity=\"0.0000\"")),
+                "{id} must be fully hidden in the resting document"
+            );
+        }
     }
 
     /// Each mark's opacity rewrites independently; a full-opacity mark

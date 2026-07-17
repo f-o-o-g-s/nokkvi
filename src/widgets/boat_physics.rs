@@ -578,15 +578,16 @@ pub struct BoatState {
     /// path, not the SVG, so we don't need a per-quantized-angle map
     /// like the boat does.)
     pub anchor_handle: Option<svg::Handle>,
-    /// Single themed moon-face SVG (the harbour scene's avatar moon),
-    /// sharing the boat/anchor caches' theme-generation invalidation. Only
-    /// the harbour boat ever populates it; the Lines boat leaves it `None`.
+    /// The RESTING moon document (the bare disc — the face's marks show
+    /// only during a moon dream), sharing the boat/anchor caches'
+    /// theme-generation invalidation. Only the harbour boat ever
+    /// populates it; the Lines boat leaves it `None`.
     pub moon_handle: Option<svg::Handle>,
     /// Per-veil-key moon-face documents for the harbour scene's moon
     /// dream (`harbour_sea::moon_dream_veil_key`), keyed on the quantized
     /// mark alphas. Never populated outside a dream (the resting key
     /// delegates to the plain moon handle); the full choreography spans
-    /// ~156 distinct keys, retained after a recital — warm for the next
+    /// ~131 distinct keys, retained after a recital — warm for the next
     /// one — until the shared theme-generation invalidation (or the
     /// 512-entry defensive clear) drops them.
     pub moon_veil_handles: HashMap<[u8; 4], svg::Handle>,
@@ -699,15 +700,19 @@ impl BoatState {
         self.anchor_handle.clone()
     }
 
-    /// Build (and cache) the themed moon-face SVG handle — the avatar moon
-    /// of the harbour trawl scene. Mirrors `cache_anchor_handle` exactly:
-    /// single entry, invalidated by the shared theme generation.
+    /// Build (and cache) the RESTING moon handle — the bare disc the
+    /// harbour trawl scene's moon (and day sun) wears between moon
+    /// dreams; the face's marks exist only mid-ritual, through the veil
+    /// cache below. Mirrors `cache_anchor_handle` exactly: single entry,
+    /// invalidated by the shared theme generation.
     pub(crate) fn cache_moon_handle(&mut self) -> svg::Handle {
         self.clear_if_theme_changed();
         if let Some(h) = &self.moon_handle {
             return h.clone();
         }
-        let bytes = crate::embedded_svg::themed_moon_face_svg().into_bytes();
+        let bytes =
+            crate::embedded_svg::themed_moon_face_veiled(crate::embedded_svg::MOON_VEIL_BARE)
+                .into_bytes();
         let h = svg::Handle::from_memory(bytes);
         self.moon_handle = Some(h.clone());
         h
@@ -729,11 +734,11 @@ impl BoatState {
     /// delegates to [`Self::cache_moon_handle`], so every ordinary frame
     /// keeps the untouched master and no entry is ever inserted outside
     /// a dream. Keyed like the boat's tilt cache; the choreography
-    /// retraces the same ~156-key path every recital (entries persist
+    /// retraces the same ~131-key path every recital (entries persist
     /// between recitals), with a defensive clear at 512 in case a beat
     /// re-TUNE ever widens it.
     pub(crate) fn cache_moon_veil_handle(&mut self, veil: [u8; 4]) -> svg::Handle {
-        if veil == crate::embedded_svg::MOON_VEIL_OPAQUE {
+        if veil == crate::embedded_svg::MOON_VEIL_BARE {
             return self.cache_moon_handle();
         }
         self.clear_if_theme_changed();
@@ -753,7 +758,7 @@ impl BoatState {
     /// lookup, same rebuild-on-miss fallback contract as every other
     /// `cached_*`. The resting key routes to the plain moon handle.
     pub(crate) fn cached_moon_veil_handle(&self, veil: [u8; 4]) -> Option<svg::Handle> {
-        if veil == crate::embedded_svg::MOON_VEIL_OPAQUE {
+        if veil == crate::embedded_svg::MOON_VEIL_BARE {
             return self.cached_moon_handle();
         }
         if self.handle_generation != crate::theme::theme_generation() {
