@@ -130,10 +130,10 @@ pub async fn cache_to_store(raw_synced: &str, song: &Song) {
     }
 
     let mut content = String::with_capacity(raw_synced.len() + 128);
-    content.push_str(&format!("[ar:{}]\n", song.artist));
-    content.push_str(&format!("[ti:{}]\n", song.title));
+    content.push_str(&format!("[ar:{}]\n", header_safe(&song.artist)));
+    content.push_str(&format!("[ti:{}]\n", header_safe(&song.title)));
     if !song.album.is_empty() {
-        content.push_str(&format!("[al:{}]\n", song.album));
+        content.push_str(&format!("[al:{}]\n", header_safe(&song.album)));
     }
     content.push_str(&format!(
         "[length:{:02}:{:02}]\n",
@@ -149,13 +149,42 @@ pub async fn cache_to_store(raw_synced: &str, song: &Song) {
     }
 }
 
-/// Reduce a string to a filesystem-safe stem (alphanumerics kept, everything
-/// else collapsed to `_`, length-capped).
+/// Make a tag value safe to interpolate into a `[key:value]` header: bracket
+/// and newline characters would make the line unparseable by `next_tag`
+/// (dropping the header so the cached file never re-matches). They collapse to
+/// a space; `reduce()` in the index drops them anyway, so the loose match is
+/// unaffected.
+fn header_safe(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| match c {
+            '[' | ']' | '\r' | '\n' => ' ',
+            other => other,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// Reduce a string to a filesystem-safe stem, then append a stable hash of the
+/// FULL key. Two songs whose readable stems collide (punctuation-only
+/// differences that both map to `_`, or content beyond the cap) still get
+/// distinct filenames — without the hash they silently overwrote each other's
+/// cached lyrics. The hash is deterministic, so re-caching the same song reuses
+/// its file rather than accumulating duplicates.
 fn sanitize_filename(s: &str) -> String {
-    s.chars()
+    let stem: String = s
+        .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .take(120)
-        .collect()
+        .take(80)
+        .collect();
+    // FNV-1a over the full key — a stable, collision-resistant suffix.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{stem}_{hash:016x}")
 }
 
 /// Pure precedence helper — the "Feishin or better" ordering, testable without a
@@ -208,6 +237,34 @@ mod tests {
         songlyrics_ext: true,
         fetch_online: true,
     };
+
+    #[test]
+    fn header_safe_neutralizes_brackets_and_newlines() {
+        // An unbalanced bracket or newline in a tag must not survive into the
+        // synthesized header (it would make the line unparseable and the
+        // cached file permanently unmatchable).
+        assert_eq!(header_safe("Song [Live"), "Song  Live");
+        assert_eq!(header_safe("A\r\nB"), "A  B");
+        // A synthesized header round-trips back through the parser.
+        let content = format!("[ti:{}]\n[00:01.00]x", header_safe("Song [Live"));
+        assert_eq!(
+            crate::types::lyrics::read_metadata(&content)
+                .title
+                .as_deref(),
+            Some("Song  Live")
+        );
+    }
+
+    #[test]
+    fn sanitize_filename_distinguishes_colliding_stems() {
+        // Two songs whose readable stems collapse identically must not share a
+        // cache filename (which silently overwrote the first file's lyrics).
+        let a = sanitize_filename("AC/DC-T.N.T.-High Voltage");
+        let b = sanitize_filename("AC DC-T N T-High Voltage");
+        assert_ne!(a, b);
+        // Deterministic: the same key always maps to the same file.
+        assert_eq!(a, sanitize_filename("AC/DC-T.N.T.-High Voltage"));
+    }
 
     #[tokio::test]
     #[ignore]
