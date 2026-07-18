@@ -17,6 +17,12 @@ const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct ResolveOpts {
     /// The server advertises the `songLyrics` extension (gates getLyricsBySongId).
     pub songlyrics_ext: bool,
+    /// Whether the async OpenSubsonic extensions probe has RESPONDED at all.
+    /// `songlyrics_ext == false` is only authoritative once this is true —
+    /// before the probe lands the server channel is skipped-but-unknown, so a
+    /// miss resolved then must not be negative-cached (the miss-cache
+    /// completeness gate consumes this; `resolve_from` itself does not).
+    pub ext_probe_landed: bool,
     /// The user allows the direct third-party LRCLIB fetch.
     pub fetch_online: bool,
 }
@@ -149,16 +155,43 @@ pub async fn cache_to_store(raw_synced: &str, song: &Song) {
     }
 }
 
-/// Make a tag value safe to interpolate into a `[key:value]` header: bracket
-/// and newline characters would make the line unparseable by `next_tag`
-/// (dropping the header so the cached file never re-matches). They collapse to
-/// a space; `reduce()` in the index drops them anyway, so the loose match is
-/// unaffected.
+/// Make a tag value safe to interpolate into a `[key:value]` header. Newlines
+/// always collapse to a space. Brackets are kept VERBATIM when balanced —
+/// `next_tag`'s depth counter round-trips nested brackets, so a title like
+/// `Song [Live]` re-parses exactly and keeps its Tier-1 identity (mangling it
+/// desynced the cached header from the song on BOTH match tiers: the query
+/// side strips the `[Live]` qualifier, a de-bracketed header cannot). Only an
+/// UNBALANCED sequence — the case that actually breaks parsing — degrades,
+/// to parentheses, which the qualifier-stripper treats identically.
 fn header_safe(value: &str) -> String {
-    value
+    let no_newlines: String = value
+        .chars()
+        .map(|c| if c == '\r' || c == '\n' { ' ' } else { c })
+        .collect();
+
+    let mut depth: i32 = 0;
+    let mut balanced = true;
+    for c in no_newlines.chars() {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth < 0 {
+                    balanced = false;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if balanced && depth == 0 {
+        return no_newlines.trim().to_string();
+    }
+    no_newlines
         .chars()
         .map(|c| match c {
-            '[' | ']' | '\r' | '\n' => ' ',
+            '[' => '(',
+            ']' => ')',
             other => other,
         })
         .collect::<String>()
@@ -173,11 +206,17 @@ fn header_safe(value: &str) -> String {
 /// cached lyrics. The hash is deterministic, so re-caching the same song reuses
 /// its file rather than accumulating duplicates.
 fn sanitize_filename(s: &str) -> String {
-    let stem: String = s
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .take(80)
-        .collect();
+    // Cap the stem by BYTES, not chars: 80 CJK chars are ~240 bytes, and with
+    // the hash suffix + ".lrc" that overflows Linux's 255-byte NAME_MAX —
+    // tokio::fs::write then fails silently (debug-logged) and the cache never
+    // persists. 80 bytes + 21-byte suffix stays comfortably inside.
+    let mut stem = String::new();
+    for c in s.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }) {
+        if stem.len() + c.len_utf8() > 80 {
+            break;
+        }
+        stem.push(c);
+    }
     // FNV-1a over the full key — a stable, collision-resistant suffix.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
@@ -235,24 +274,40 @@ mod tests {
 
     const BOTH_ON: ResolveOpts = ResolveOpts {
         songlyrics_ext: true,
+        ext_probe_landed: true,
         fetch_online: true,
     };
 
     #[test]
-    fn header_safe_neutralizes_brackets_and_newlines() {
-        // An unbalanced bracket or newline in a tag must not survive into the
-        // synthesized header (it would make the line unparseable and the
-        // cached file permanently unmatchable).
-        assert_eq!(header_safe("Song [Live"), "Song  Live");
-        assert_eq!(header_safe("A\r\nB"), "A  B");
-        // A synthesized header round-trips back through the parser.
+    fn header_safe_roundtrips_balanced_and_degrades_unbalanced() {
+        // BALANCED brackets round-trip verbatim — next_tag's depth counter
+        // handles nesting, and preserving them keeps the cached header on the
+        // song's exact Tier-1 identity (a qualifier like "[Live]" must remain
+        // strippable on both sides of the match).
+        assert_eq!(header_safe("Song [Live]"), "Song [Live]");
+        let content = format!("[ti:{}]\n[00:01.00]x", header_safe("Song [Live]"));
+        assert_eq!(
+            crate::types::lyrics::read_metadata(&content)
+                .title
+                .as_deref(),
+            Some("Song [Live]")
+        );
+
+        // UNBALANCED brackets (the case that actually breaks parsing) degrade
+        // to parentheses; the header still parses, and Tier-2's qualifier
+        // strip + reduce treat parens exactly like brackets.
+        assert_eq!(header_safe("Song [Live"), "Song (Live");
         let content = format!("[ti:{}]\n[00:01.00]x", header_safe("Song [Live"));
         assert_eq!(
             crate::types::lyrics::read_metadata(&content)
                 .title
                 .as_deref(),
-            Some("Song  Live")
+            Some("Song (Live")
         );
+        assert_eq!(header_safe("Song] X"), "Song) X");
+
+        // Newlines always collapse to spaces.
+        assert_eq!(header_safe("A\r\nB"), "A  B");
     }
 
     #[test]
@@ -264,6 +319,17 @@ mod tests {
         assert_ne!(a, b);
         // Deterministic: the same key always maps to the same file.
         assert_eq!(a, sanitize_filename("AC/DC-T.N.T.-High Voltage"));
+    }
+
+    #[test]
+    fn sanitize_filename_stays_under_name_max_for_multibyte() {
+        // 80 CJK chars are ~240 bytes — the stem must cap by BYTES so the
+        // final name (stem + "_<16 hex>.lrc") stays inside Linux's 255-byte
+        // NAME_MAX; otherwise the cache write fails silently for CJK tags.
+        let key = "東".repeat(120);
+        let name = format!("{}.lrc", sanitize_filename(&key));
+        assert!(name.len() <= 255, "filename {} bytes", name.len());
+        assert!(name.len() >= 80, "stem should still carry real content");
     }
 
     #[tokio::test]
@@ -325,6 +391,7 @@ mod tests {
     async fn api_skipped_without_ext() {
         let opts = ResolveOpts {
             songlyrics_ext: false,
+            ext_probe_landed: true,
             fetch_online: true,
         };
         let result = resolve_from(
@@ -341,6 +408,7 @@ mod tests {
     async fn lrclib_skipped_without_fetch_online() {
         let opts = ResolveOpts {
             songlyrics_ext: true,
+            ext_probe_landed: true,
             fetch_online: false,
         };
         let result = resolve_from(

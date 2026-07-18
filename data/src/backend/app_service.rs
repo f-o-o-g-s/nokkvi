@@ -1052,13 +1052,16 @@ impl AppService {
 
         let result = crate::services::lyrics_source::resolve_from(store, api, lrclib, opts).await;
         // Cache a hit always; cache a MISS only when the resolution was
-        // complete — the store index was present AND online fetch was allowed.
-        // A miss recorded while the index was still building (boot) or while
-        // online fetch was off isn't authoritative: caching it would make the
-        // track show "no lyrics" for the rest of the session even after the
-        // index lands or the user enables fetch. Those incomplete misses are
-        // left uncached so a later replay (or the index-ready re-drive) retries.
-        let complete = index.is_some() && opts.fetch_online;
+        // complete — the store index was present, online fetch was allowed,
+        // AND the server-extension probe had responded (before it lands the
+        // api channel is skipped-but-unknown, so a capable server's lyrics
+        // were never consulted). A miss recorded with any channel still
+        // pending isn't authoritative: caching it would make the track show
+        // "no lyrics" for the rest of the session even after the index lands,
+        // the probe responds, or the user enables fetch. Incomplete misses
+        // stay uncached so a later replay / re-drive retries the full chain.
+        let complete =
+            index.is_some() && opts.fetch_online && (opts.songlyrics_ext || opts.ext_probe_landed);
         if result.is_some() || complete {
             self.lyrics_cache
                 .lock()

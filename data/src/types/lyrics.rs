@@ -141,8 +141,14 @@ fn parse_timestamp(ts: &str, offset_ms: i64) -> Option<u32> {
         fractions.parse().ok()?
     };
 
+    // Checked arithmetic: an 18-digit minutes value parses fine as u64 but
+    // overflows the multiply — a debug-build panic reachable from any store
+    // file or LRCLIB response. Overflow = malformed stamp = None.
     let scale = 10u64.pow(3 - u32::try_from(fractions.len()).unwrap_or(3));
-    let ms = minutes * 60_000 + seconds * 1000 + frac_value * scale;
+    let ms = minutes
+        .checked_mul(60_000)?
+        .checked_add(seconds.checked_mul(1000)?)?
+        .checked_add(frac_value * scale)?;
 
     u32::try_from(apply_offset_u64(ms, offset_ms)).ok()
 }
@@ -214,15 +220,19 @@ pub fn read_metadata(content: &str) -> LrcMetadata {
     meta
 }
 
-/// Parse a `[length: mm:ss]` value into milliseconds. The arithmetic is done
-/// in `u64` (this module's timing rule) so a corrupt/hostile 5-digit minutes
-/// value can't overflow `u32` mid-multiply — an out-of-range total simply
-/// fails the final `try_from` and yields `None`.
+/// Parse a `[length: mm:ss]` value into milliseconds. Checked `u64` math the
+/// whole way: a hostile 18-digit minutes value parses as `u64` but would
+/// overflow an unchecked multiply (a debug-build panic during the boot index
+/// walk). Overflow or an out-of-`u32` total yields `None`.
 fn parse_length_ms(value: &str) -> Option<u32> {
     let (minutes, seconds) = value.trim().split_once(':')?;
     let minutes: u64 = minutes.trim().parse().ok()?;
     let seconds: u64 = seconds.trim().parse().ok()?;
-    u32::try_from((minutes * 60 + seconds) * 1000).ok()
+    let ms = minutes
+        .checked_mul(60)?
+        .checked_add(seconds)?
+        .checked_mul(1000)?;
+    u32::try_from(ms).ok()
 }
 
 /// Parse a complete LRC document. `\r` is handled by `str::lines()`. Blank
