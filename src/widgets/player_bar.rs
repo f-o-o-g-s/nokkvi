@@ -2192,18 +2192,18 @@ mod section_width_tests {
         let chrome_w = crate::widgets::sizes::TOOLBAR_BUTTON_SIZE;
         let total_modes = CULL_ORDER.len() as f32;
 
-        // All inline (kebab_count=0): 8 buttons + 7 gaps, no kebab.
+        // All inline (kebab_count=0): 9 buttons + 8 gaps, no kebab.
         let all_inline = mode_section_width(layout(0), false);
         assert_eq!(
             all_inline,
             total_modes * mode_btn_w + (total_modes - 1.0) * SECTION_BUTTON_GAP
         );
 
-        // Some culled (kebab_count=5): with 8 modes, 3 inline + kebab + 3 gaps.
+        // Some culled (kebab_count=5): with 9 modes, 4 inline + kebab + 4 gaps.
         let some_culled = mode_section_width(layout(5), false);
         assert_eq!(
             some_culled,
-            3.0 * mode_btn_w + chrome_w + 3.0 * SECTION_BUTTON_GAP
+            4.0 * mode_btn_w + chrome_w + 4.0 * SECTION_BUTTON_GAP
         );
 
         // Hamburger adds one more button + gap.
@@ -2523,17 +2523,19 @@ mod layout_tests {
     }
 
     #[test]
-    fn is_in_kebab_first_culled_is_visualizer() {
+    fn is_in_kebab_first_culled_is_lyrics() {
+        // Lyrics heads CULL_ORDER (it folds away first as the bar narrows).
         let l = layout(1);
-        assert!(l.is_in_kebab(ModeId::Visualizer));
-        assert!(!l.is_in_kebab(ModeId::Crossfade));
+        assert!(l.is_in_kebab(ModeId::Lyrics));
+        assert!(!l.is_in_kebab(ModeId::Visualizer));
         assert!(!l.is_in_kebab(ModeId::Repeat));
     }
 
     #[test]
     fn is_in_kebab_all_modes_at_full_count() {
-        let l = layout(8);
+        let l = layout(9);
         for mode in [
+            ModeId::Lyrics,
             ModeId::Visualizer,
             ModeId::Crossfade,
             ModeId::BitPerfect,
