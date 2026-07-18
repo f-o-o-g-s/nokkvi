@@ -1024,7 +1024,7 @@ impl AppService {
                 .clone();
             let text = tokio::fs::read_to_string(&path).await.ok()?;
             let doc = parse(&text);
-            doc.synced.then_some(doc)
+            doc.is_renderable().then_some(doc)
         };
         let api = || async {
             let service = self.lyrics_api().await.ok()?;
@@ -1036,7 +1036,7 @@ impl AppService {
                 .find(|s| s.kind.as_deref() == Some("main") && s.synced)
                 .or_else(|| list.iter().find(|s| s.synced))?;
             let doc = LrcDocument::from_structured(chosen);
-            doc.synced.then_some(doc)
+            doc.is_renderable().then_some(doc)
         };
         let lrclib = || async {
             let (doc, raw) = crate::services::lyrics_source::fetch_lrclib(
@@ -1051,9 +1051,19 @@ impl AppService {
         };
 
         let result = crate::services::lyrics_source::resolve_from(store, api, lrclib, opts).await;
-        self.lyrics_cache
-            .lock()
-            .put(song.id.clone(), result.clone());
+        // Cache a hit always; cache a MISS only when the resolution was
+        // complete — the store index was present AND online fetch was allowed.
+        // A miss recorded while the index was still building (boot) or while
+        // online fetch was off isn't authoritative: caching it would make the
+        // track show "no lyrics" for the rest of the session even after the
+        // index lands or the user enables fetch. Those incomplete misses are
+        // left uncached so a later replay (or the index-ready re-drive) retries.
+        let complete = index.is_some() && opts.fetch_online;
+        if result.is_some() || complete {
+            self.lyrics_cache
+                .lock()
+                .put(song.id.clone(), result.clone());
+        }
         result
     }
 }

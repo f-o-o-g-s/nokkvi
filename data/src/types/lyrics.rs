@@ -38,6 +38,17 @@ pub struct LrcDocument {
     pub synced: bool,
 }
 
+impl LrcDocument {
+    /// Whether this document is worth rendering as synced lyrics: timestamped
+    /// AND non-empty. The single definition of "success" shared by the resolve
+    /// chain's channel predicates and the UI's apply path — a synced-but-empty
+    /// doc (e.g. a header-only file) is a no-match, not a hit, so it neither
+    /// ends the chain early nor renders as a blank sheet.
+    pub fn is_renderable(&self) -> bool {
+        self.synced && !self.lines.is_empty()
+    }
+}
+
 /// Header metadata read from an LRC file (or synthesized when caching a fetch).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LrcMetadata {
@@ -791,6 +802,39 @@ mod tests {
     fn colon_fraction_separator() {
         let doc = parse("[00:04:73]colon frac");
         assert_eq!(doc.lines[0].time_ms, 4_730);
+    }
+
+    #[test]
+    fn is_renderable_rejects_empty_and_unsynced() {
+        let line = || LrcLine {
+            time_ms: 0,
+            text: "x".into(),
+            words: vec![],
+        };
+        // Synced-but-empty (a timestamp-shaped but unparseable stamp yields
+        // this): NOT a hit — it must not end the resolve chain.
+        assert!(
+            !LrcDocument {
+                lines: vec![],
+                synced: true,
+            }
+            .is_renderable()
+        );
+        // Unsynced with text (plain lyrics) is a no-match, not a hit.
+        assert!(
+            !LrcDocument {
+                lines: vec![line()],
+                synced: false,
+            }
+            .is_renderable()
+        );
+        assert!(
+            LrcDocument {
+                lines: vec![line()],
+                synced: true,
+            }
+            .is_renderable()
+        );
     }
 
     #[test]
