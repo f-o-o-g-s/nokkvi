@@ -247,17 +247,124 @@ fn over_cover_viz_coexists_with_lyrics() {
 }
 
 #[test]
-fn queue_lyrics_panel_data_gated_on_enabled() {
+fn dispatch_bumps_epoch_so_concurrent_resolves_cant_co_win() {
+    let mut app = test_app();
+    app.lyrics.enabled = true;
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    let before = app.lyrics.load_epoch;
+
+    // Each dispatch supersedes the last: the older epoch loses the stale guard.
+    let _ = app.dispatch_lyrics_resolve("song_1".to_string());
+    let e1 = app.lyrics.load_epoch;
+    assert_eq!(e1, before.wrapping_add(1));
+
+    let _ = app.dispatch_lyrics_resolve("song_1".to_string());
+    assert_eq!(app.lyrics.load_epoch, e1.wrapping_add(1));
+
+    // A Loaded carrying the SUPERSEDED epoch is rejected (can't overwrite).
+    app.lyrics.doc = timed_doc(&[1_000]);
+    app.lyrics.matched_song_id = Some("song_1".to_string());
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: "song_1".to_string(),
+        doc: Box::new(LrcDocument::default()),
+        epoch: e1, // stale
+    });
+    assert_eq!(
+        app.lyrics.doc.lines.len(),
+        1,
+        "a stale-epoch no-match must not erase the rendered doc"
+    );
+}
+
+#[test]
+fn index_ready_redrives_a_pre_index_no_match() {
+    let mut app = test_app();
+    app.lyrics.enabled = true;
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    // A no-match landed before the index existed: matched == current, doc empty.
+    app.lyrics.matched_song_id = Some("song_1".to_string());
+    app.lyrics.doc = LrcDocument::default();
+    let before = app.lyrics.load_epoch;
+
+    // The index lands → re-drive fires despite matched_song_id == current
+    // (the guard that used to defeat it), observable via the epoch bump.
+    let _ = app.handle_lyrics_index_ready(Arc::new(LyricsIndex::default()));
+    assert_eq!(
+        app.lyrics.load_epoch,
+        before.wrapping_add(1),
+        "empty doc + index landing must re-dispatch"
+    );
+
+    // With a rendered doc already present, the index landing does NOT re-drive.
+    let mut app2 = test_app();
+    app2.lyrics.enabled = true;
+    app2.scrobble.current_song_id = Some("song_1".to_string());
+    app2.lyrics.matched_song_id = Some("song_1".to_string());
+    app2.lyrics.doc = timed_doc(&[1_000]);
+    let before2 = app2.lyrics.load_epoch;
+    let _ = app2.handle_lyrics_index_ready(Arc::new(LyricsIndex::default()));
+    assert_eq!(
+        app2.lyrics.load_epoch, before2,
+        "a resolved doc must not be re-driven"
+    );
+}
+
+#[test]
+fn clear_resets_position_so_cold_docs_scan_from_zero() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[5_000, 200_000]));
+    app.lyrics.position_ms = 200_000;
+
+    // Skip: the cold path clears. Position must reset so the next doc isn't
+    // scanned against the old track's deep position.
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    assert_eq!(app.lyrics.position_ms, 0);
+
+    // A doc landing for the new track scans from 0 → pre-roll (None), not a
+    // wrong-line snap deep in the sheet.
+    app.scrobble.current_song_id = Some("song_2".to_string());
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: "song_2".to_string(),
+        doc: Box::new(timed_doc(&[5_000, 200_000])),
+        epoch: app.lyrics.load_epoch,
+    });
+    assert_eq!(app.lyrics.active_index, None, "cold doc starts at pre-roll");
+}
+
+#[test]
+fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     let mut app = test_app();
     assert!(app.queue_lyrics_panel_data().is_none());
 
+    // Enabled but NOTHING playing (stopped): no panel — the scrim must not
+    // paint over browsing artwork with no track.
     app.lyrics.enabled = true;
-    let data = app
-        .queue_lyrics_panel_data()
-        .expect("enabled + queue playback");
-    // Empty doc → the faded no-match message is set.
-    assert!(data.empty_message.is_some());
+    assert!(
+        app.queue_lyrics_panel_data().is_none(),
+        "no loaded track → no lyrics layer"
+    );
+
+    // A track loads but its resolve hasn't landed (matched_song_id None): the
+    // panel shows, but the no-match message is suppressed (a resolve may be in
+    // flight — a false negative here flashes on every skip).
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    let data = app.queue_lyrics_panel_data().expect("loaded track");
     assert!(data.lines.is_empty());
+    assert!(
+        data.empty_message.is_none(),
+        "no false negative before the resolve lands"
+    );
+
+    // A landed no-match for the current track (matched == current, empty doc):
+    // now the message is the resolved verdict.
+    app.lyrics.matched_song_id = Some("song_1".to_string());
+    assert!(
+        app.queue_lyrics_panel_data()
+            .expect("loaded")
+            .empty_message
+            .is_some(),
+        "resolved no-match shows the message"
+    );
 
     app.lyrics.doc = timed_doc(&[1_000]);
     app.lyrics.active_index = Some(0);

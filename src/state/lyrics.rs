@@ -51,10 +51,14 @@ pub struct LyricsState {
     pub matched_song_id: Option<String>,
     /// Index of the active line, or `None` before the first timestamp (pre-roll).
     pub active_index: Option<usize>,
-    /// Bumped on every clear / promote / (future) seek. An async resolve result
-    /// is applied only if the epoch still matches — the other half of the guard.
+    /// Bumped on every clear / promote / resolve-dispatch. An async resolve
+    /// result is applied only if the epoch still matches — so a newer resolve
+    /// (or a song change) supersedes an older in-flight one. The other half of
+    /// the guard alongside `matched_song_id`.
     pub load_epoch: u64,
-    /// Last authoritative playback position (ms) the active line was computed at.
+    /// Last authoritative playback position (ms) the active line was computed
+    /// at. Reset by `clear()` so a doc resolved after a song change is scanned
+    /// from the new track's clock, not the previous track's last position.
     pub position_ms: u32,
     /// Glide origin in slot-index space (the eased center at retarget time).
     pub scroll_from: f32,
@@ -78,6 +82,10 @@ impl LyricsState {
         self.pending_next = None;
         self.matched_song_id = None;
         self.active_index = None;
+        // Drop the old track's playhead so a doc that resolves after this clear
+        // scans against the new track (the tick only refreshes position_ms once
+        // a match lands, so a stale value would snap-highlight the wrong line).
+        self.position_ms = 0;
         self.load_epoch = self.load_epoch.wrapping_add(1);
     }
 

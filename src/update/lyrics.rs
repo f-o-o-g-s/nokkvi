@@ -54,9 +54,22 @@ impl Nokkvi {
     /// The lyrics-store index finished building at boot.
     pub(crate) fn handle_lyrics_index_ready(&mut self, index: Arc<LyricsIndex>) -> Task<Message> {
         self.lyrics.index = Some(index);
-        // Re-drive the current song if it played before the index landed
-        // (e.g. session-resume playback beat the boot-time build).
-        self.lyrics_kick_if_unresolved()
+        // Re-drive the current song if it has no rendered lyrics yet — INCLUDING
+        // a no-match resolved before the index landed. That path set
+        // `matched_song_id = Some(current)`, which `lyrics_kick_if_unresolved`
+        // would treat as "already resolved" and skip; keying on an empty doc
+        // instead lets the freshly-built store get a second look. The build
+        // fires once, so this can't loop. `dispatch_lyrics_resolve` bumps the
+        // epoch, so it supersedes any resolve still in flight.
+        if self.lyrics.enabled
+            && self.current_view == View::Queue
+            && self.active_playback.is_queue()
+            && self.lyrics.doc.lines.is_empty()
+            && let Some(current) = self.scrobble.current_song_id.clone()
+        {
+            return self.dispatch_lyrics_resolve(current);
+        }
+        Task::none()
     }
 
     /// Dispatch a resolve for the current song when lyrics are enabled, the
@@ -104,6 +117,13 @@ impl Nokkvi {
     /// as `Loaded` under the stale guard; a `None` resolve arrives as an empty
     /// doc, which the apply path records as "resolved, no match".
     pub(crate) fn dispatch_lyrics_resolve(&mut self, song_id: String) -> Task<Message> {
+        // Bump the epoch so THIS resolve supersedes any earlier one still in
+        // flight for the same song (the debounce cold-path and the index-ready
+        // kick can both be live at once): the older result then fails the
+        // stale-load guard instead of racing to overwrite. Without the bump
+        // they share one epoch and whichever lands last wins — a slow no-match
+        // could erase already-rendered lyrics mid-track.
+        self.lyrics.load_epoch = self.lyrics.load_epoch.wrapping_add(1);
         let epoch = self.lyrics.load_epoch;
         let index = self.lyrics.index.clone();
         let opts = self.lyrics_resolve_opts();

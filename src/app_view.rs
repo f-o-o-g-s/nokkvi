@@ -1454,7 +1454,14 @@ impl Nokkvi {
     pub(crate) fn queue_lyrics_panel_data(
         &self,
     ) -> Option<crate::widgets::lyrics_viewport::LyricsPanelData<'_>> {
-        (self.lyrics.enabled && self.active_playback.is_queue()).then(|| {
+        // `is_queue()` is the DEFAULT ActivePlayback (true when stopped/never
+        // played), so a loaded queue track is the real gate — otherwise the
+        // scrim + no-match message paint over browsing artwork with nothing
+        // playing. `current_song_id` is None until a track loads.
+        (self.lyrics.enabled
+            && self.active_playback.is_queue()
+            && self.scrobble.current_song_id.is_some())
+        .then(|| {
             // The outgoing sheet's dissolve progress is read continuously here
             // (the per-frame boat tick redraws); the 100 ms playback tick
             // drops the record once it completes.
@@ -1466,13 +1473,20 @@ impl Nokkvi {
                     progress,
                 })
             });
+            // The "no synced lyrics" message is a RESOLVED verdict, shown only
+            // once this track's resolve has landed (matched_song_id == current).
+            // While a resolve is still in flight matched_song_id is None, so the
+            // panel stays blank rather than flashing a false negative on every
+            // skip. Also suppressed while the previous sheet is still dissolving.
+            let resolved_no_match = self.lyrics.doc.lines.is_empty()
+                && dissolve.is_none()
+                && self.lyrics.matched_song_id.is_some()
+                && self.lyrics.matched_song_id.as_deref()
+                    == self.scrobble.current_song_id.as_deref();
             crate::widgets::lyrics_viewport::LyricsPanelData {
                 lines: &self.lyrics.doc.lines,
                 active_index: self.lyrics.active_index,
-                // Suppress the no-match message while the previous sheet is
-                // still dissolving (the cold path resolves under it).
-                empty_message: (self.lyrics.doc.lines.is_empty() && dissolve.is_none())
-                    .then_some("No synced lyrics for this track"),
+                empty_message: resolved_no_match.then_some("No synced lyrics for this track"),
                 dissolve,
             }
         })
