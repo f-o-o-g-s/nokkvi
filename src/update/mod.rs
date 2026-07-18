@@ -168,6 +168,11 @@ impl Nokkvi {
                 // than flapping on a transient error.
                 if let Some(names) = exts {
                     self.open_subsonic_extensions = Some(names.into_iter().collect());
+                    // A lyrics resolve dispatched before the probe responded
+                    // skipped the server channel (and its miss was deliberately
+                    // not cached) — give the current track its second look now
+                    // that the songLyrics capability is known.
+                    return self.lyrics_kick_if_unresolved();
                 }
                 Task::none()
             }

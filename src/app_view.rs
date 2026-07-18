@@ -1455,11 +1455,14 @@ impl Nokkvi {
         &self,
     ) -> Option<crate::widgets::lyrics_viewport::LyricsPanelData<'_>> {
         // `is_queue()` is the DEFAULT ActivePlayback (true when stopped/never
-        // played), so a loaded queue track is the real gate — otherwise the
-        // scrim + no-match message paint over browsing artwork with nothing
-        // playing. `current_song_id` is None until a track loads.
+        // played), and `current_song_id` is BOTH seeded from the restored
+        // queue at login and retained after a CLI/MPRIS stop (the queue cursor
+        // survives `stop()`) — so neither means audio is live. The real gate
+        // is the transport: playing or paused. Stopped / never-played leaves
+        // the cover art bare.
         (self.lyrics.enabled
             && self.active_playback.is_queue()
+            && (self.playback.playing || self.playback.paused)
             && self.scrobble.current_song_id.is_some())
         .then(|| {
             // The outgoing sheet's dissolve progress is read continuously here

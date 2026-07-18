@@ -54,33 +54,28 @@ impl Nokkvi {
     /// The lyrics-store index finished building at boot.
     pub(crate) fn handle_lyrics_index_ready(&mut self, index: Arc<LyricsIndex>) -> Task<Message> {
         self.lyrics.index = Some(index);
-        // Re-drive the current song if it has no rendered lyrics yet — INCLUDING
-        // a no-match resolved before the index landed. That path set
-        // `matched_song_id = Some(current)`, which `lyrics_kick_if_unresolved`
-        // would treat as "already resolved" and skip; keying on an empty doc
-        // instead lets the freshly-built store get a second look. The build
-        // fires once, so this can't loop. `dispatch_lyrics_resolve` bumps the
-        // epoch, so it supersedes any resolve still in flight.
-        if self.lyrics.enabled
-            && self.current_view == View::Queue
-            && self.active_playback.is_queue()
-            && self.lyrics.doc.lines.is_empty()
-            && let Some(current) = self.scrobble.current_song_id.clone()
-        {
-            return self.dispatch_lyrics_resolve(current);
-        }
-        Task::none()
+        // Re-drive via the shared kick: it fires whenever the current track
+        // has no rendered lyrics — including a no-match resolved before the
+        // index landed. If the user is off the Queue view right now, the same
+        // kick re-fires on Queue entry, so the second look is never lost.
+        self.lyrics_kick_if_unresolved()
     }
 
     /// Dispatch a resolve for the current song when lyrics are enabled, the
-    /// Queue view is showing, and the current track isn't already resolved.
-    /// Used by the index-ready re-drive and the enter-Queue hook.
+    /// Queue view is showing, and the track has NO rendered lyrics — either
+    /// never resolved (`matched_song_id` differs) or resolved to a no-match
+    /// (empty doc). Re-driving landed no-matches is deliberate: a channel may
+    /// have been unavailable at resolve time (store index building, extensions
+    /// probe pending), and complete misses are LRU-cached backend-side, so a
+    /// re-kick for a genuinely lyric-less track costs one cache hit. Callers:
+    /// enter-Queue, index-ready, extensions-probe-landed.
     pub(crate) fn lyrics_kick_if_unresolved(&mut self) -> Task<Message> {
         if self.lyrics.enabled
             && self.current_view == View::Queue
             && self.active_playback.is_queue()
             && let Some(current) = self.scrobble.current_song_id.clone()
-            && self.lyrics.matched_song_id.as_deref() != Some(current.as_str())
+            && (self.lyrics.matched_song_id.as_deref() != Some(current.as_str())
+                || self.lyrics.doc.lines.is_empty())
         {
             return self.dispatch_lyrics_resolve(current);
         }
@@ -106,6 +101,11 @@ impl Nokkvi {
     fn lyrics_resolve_opts(&self) -> ResolveOpts {
         ResolveOpts {
             songlyrics_ext: self.supports_song_lyrics(),
+            // Whether the extensions probe has responded at all — before it
+            // lands, `songlyrics_ext == false` means "unknown", and the
+            // backend's miss-cache completeness gate must not treat a resolve
+            // that skipped the server channel as authoritative.
+            ext_probe_landed: self.open_subsonic_extensions.is_some(),
             // The user's privacy gate for the direct third-party LRCLIB
             // channel (the server channel is their own Navidrome and always
             // participates while lyrics are enabled).

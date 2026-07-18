@@ -310,6 +310,38 @@ fn index_ready_redrives_a_pre_index_no_match() {
 }
 
 #[test]
+fn extensions_probe_landing_redrives_an_unresolved_track() {
+    use crate::app_message::Message;
+    let mut app = test_app();
+    app.lyrics.enabled = true;
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    // A no-match landed while the probe was pending (server channel skipped;
+    // the incomplete miss was deliberately not cached backend-side).
+    app.lyrics.matched_song_id = Some("song_1".to_string());
+    let before = app.lyrics.load_epoch;
+
+    // The probe responds advertising songLyrics → the current track gets its
+    // second look (observable via the dispatch epoch bump).
+    let _ = app.update(Message::OpenSubsonicExtensionsFetched(Some(vec![
+        "songLyrics".to_string(),
+    ])));
+    assert!(app.supports_song_lyrics(), "probe stored");
+    assert_eq!(
+        app.lyrics.load_epoch,
+        before.wrapping_add(1),
+        "probe landing must re-dispatch the unresolved track"
+    );
+
+    // A FAILED probe (None) stores nothing and re-drives nothing.
+    let mut app2 = test_app();
+    app2.lyrics.enabled = true;
+    app2.scrobble.current_song_id = Some("song_1".to_string());
+    let before2 = app2.lyrics.load_epoch;
+    let _ = app2.update(Message::OpenSubsonicExtensionsFetched(None));
+    assert_eq!(app2.lyrics.load_epoch, before2);
+}
+
+#[test]
 fn clear_resets_position_so_cold_docs_scan_from_zero() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", timed_doc(&[5_000, 200_000]));
@@ -336,18 +368,26 @@ fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     let mut app = test_app();
     assert!(app.queue_lyrics_panel_data().is_none());
 
-    // Enabled but NOTHING playing (stopped): no panel — the scrim must not
-    // paint over browsing artwork with no track.
+    // Enabled but transport idle (stopped / never played): no panel — the
+    // scrim must not paint over browsing artwork. This holds even with a
+    // current_song_id, which login seeds from the restored queue and a
+    // CLI/MPRIS stop retains (the queue cursor survives stop()).
     app.lyrics.enabled = true;
     assert!(
         app.queue_lyrics_panel_data().is_none(),
         "no loaded track → no lyrics layer"
     );
-
-    // A track loads but its resolve hasn't landed (matched_song_id None): the
-    // panel shows, but the no-match message is suppressed (a resolve may be in
-    // flight — a false negative here flashes on every skip).
     app.scrobble.current_song_id = Some("song_1".to_string());
+    assert!(
+        app.queue_lyrics_panel_data().is_none(),
+        "a seeded/stopped current_song_id alone must not raise the layer"
+    );
+
+    // A track is audibly live (paused counts) but its resolve hasn't landed
+    // (matched_song_id None): the panel shows, but the no-match message is
+    // suppressed (a resolve may be in flight — a false negative here flashes
+    // on every skip).
+    app.playback.playing = true;
     let data = app.queue_lyrics_panel_data().expect("loaded track");
     assert!(data.lines.is_empty());
     assert!(
@@ -372,6 +412,20 @@ fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     assert_eq!(data.lines.len(), 1);
     assert!(data.empty_message.is_none());
     assert_eq!(data.active_index, Some(0));
+
+    // Paused keeps the layer; a stop (both transport flags false) drops it
+    // even though current_song_id survives.
+    app.playback.playing = false;
+    app.playback.paused = true;
+    assert!(
+        app.queue_lyrics_panel_data().is_some(),
+        "paused keeps lyrics"
+    );
+    app.playback.paused = false;
+    assert!(
+        app.queue_lyrics_panel_data().is_none(),
+        "stop-after-play must drop the layer despite the surviving song id"
+    );
 }
 
 #[test]

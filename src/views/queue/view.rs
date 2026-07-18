@@ -141,26 +141,26 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
 }
 
 /// Whether the artwork panel is displaying the now-playing track's cover — the
-/// gate for overlaying its lyrics. When actively playing, the cover locks to the
-/// playing track (shown only when it's in the filtered list). When paused or
-/// stopped, the cover follows the centered row, so it's the now-playing cover
-/// only when the centered row IS the playing track. Pure so the branch logic
-/// is regression-pinned; the caller gathers the two booleans alloc-free.
+/// gate for overlaying its lyrics, keyed to what actually RENDERS, not intent.
+///
+/// Playing: the locked branch shows the playing cover only when it's in the
+/// filtered list AND its handle resolved (`playing_art_shown`); during the
+/// cold-art window the panel falls back to the centered row, which only reads
+/// as the now-playing cover when that row shares the playing ALBUM (identical
+/// picture; `None` = no centered row → blank panel, lyrics harmless).
+/// Paused/stopped: the cover follows the centered row, so lyrics show only
+/// when the centered row IS the playing track. Pure and regression-pinned.
 fn cover_shows_now_playing(
     is_playing: bool,
-    playing_id: Option<&str>,
     playing_in_list: bool,
-    centered_id: Option<&str>,
+    playing_art_shown: bool,
+    fallback_same_album: Option<bool>,
+    centered_is_playing: bool,
 ) -> bool {
-    match playing_id {
-        None => false,
-        Some(pid) => {
-            if is_playing {
-                playing_in_list
-            } else {
-                centered_id == Some(pid)
-            }
-        }
+    if is_playing {
+        playing_in_list && (playing_art_shown || fallback_same_album.unwrap_or(true))
+    } else {
+        centered_is_playing
     }
 }
 
@@ -891,36 +891,37 @@ impl QueuePage {
         // slot during a roulette spin's fast cruise where LoadLarge can't
         // keep up with offset changes (see Albums view for the same
         // pattern).
-        let center_artwork_handle: Option<&iced::widget::image::Handle> = if data.is_playing {
+        // The playing track's own cover, resolvable only while actively playing
+        // AND present in the FILTERED list (a search that hides it must not
+        // leak its cover while the panel menu targets the centered album). The
+        // frosted lyrics-backdrop variant wins when ready; sharp fallback.
+        let playing_song = if data.is_playing {
             current_playing_song_id
                 .as_ref()
                 .and_then(|song_id| queue_songs.iter().find(|s| &s.id == song_id))
-                .and_then(|song| {
-                    // Lyrics backdrop: the frosted variant of the playing cover
-                    // wins when the blur is ready; sharp fallback otherwise.
-                    // Gated INSIDE the filtered-queue find so a search that
-                    // hides the playing track doesn't leak its (blurred) cover
-                    // while the panel menu targets the centered visible album.
-                    data.lyrics_blurred_cover.or_else(|| {
-                        large_artwork
-                            .get(&song.album_id)
-                            .or_else(|| album_art.get(&song.album_id))
-                    })
-                })
         } else {
             None
-        }
-        .or_else(|| {
-            self.common
-                .slot_list
-                .get_center_item_index(queue_songs.len())
-                .and_then(|center_idx| queue_songs.get(center_idx))
-                .and_then(|song| {
+        };
+        let playing_handle = playing_song.and_then(|song| {
+            data.lyrics_blurred_cover.or_else(|| {
+                large_artwork
+                    .get(&song.album_id)
+                    .or_else(|| album_art.get(&song.album_id))
+            })
+        });
+        let centered_song = self
+            .common
+            .slot_list
+            .get_center_item_index(queue_songs.len())
+            .and_then(|center_idx| queue_songs.get(center_idx));
+        let center_artwork_handle: Option<&iced::widget::image::Handle> =
+            playing_handle.or_else(|| {
+                centered_song.and_then(|song| {
                     large_artwork
                         .get(&song.album_id)
                         .or_else(|| album_art.get(&song.album_id))
                 })
-        });
+            });
 
         use crate::widgets::base_slot_list_layout::single_artwork_panel_with_visualizer_and_menu;
 
@@ -966,19 +967,25 @@ impl QueuePage {
         // Surfing boat over the cover — ungated to match the ring above; the boat
         // tick holds `visible` and the frozen position/handle while paused.
         let over_art_boat = data.over_art_boat;
-        // Only overlay lyrics when the panel is actually showing the NOW-PLAYING
-        // cover — otherwise a paused user scrolling the queue would see the
-        // playing track's lyrics over a different centered album.
+        // Only overlay lyrics when the panel is actually DISPLAYING the
+        // now-playing cover — not merely intending to. While playing, the
+        // locked branch displays it only when its handle resolved; a cold-art
+        // fallback to the centered row is fine only when that row shares the
+        // playing album (same picture) or shows nothing. Paused/stopped, the
+        // cover follows the centered row, so lyrics show only centered on the
+        // playing track itself.
         let playing_id = current_playing_song_id.as_deref();
-        let playing_in_list = playing_id.is_some_and(|pid| queue_songs.iter().any(|s| s.id == pid));
-        let centered_id = self
-            .common
-            .slot_list
-            .get_center_item_index(queue_songs.len())
-            .and_then(|i| queue_songs.get(i))
-            .map(|s| s.id.as_str());
-        let cover_is_now_playing =
-            cover_shows_now_playing(data.is_playing, playing_id, playing_in_list, centered_id);
+        let fallback_same_album =
+            centered_song.and_then(|cs| playing_song.map(|ps| cs.album_id == ps.album_id));
+        let centered_is_playing = playing_id.is_some()
+            && centered_song.is_some_and(|cs| Some(cs.id.as_str()) == playing_id);
+        let cover_is_now_playing = cover_shows_now_playing(
+            data.is_playing,
+            playing_song.is_some(),
+            playing_handle.is_some(),
+            fallback_same_album,
+            centered_is_playing,
+        );
         let lyrics_layer = data.lyrics.filter(|_| cover_is_now_playing);
 
         let artwork_content = Some(single_artwork_panel_with_visualizer_and_menu(
@@ -1015,27 +1022,60 @@ mod tests {
 
     #[test]
     fn cover_now_playing_gate_covers_every_case() {
-        // Playing + track in the (filtered) list → cover locks to it.
-        assert!(cover_shows_now_playing(true, Some("p"), true, None));
-        // Playing but search filtered it out → cover falls to centered, not it.
+        // Playing, in the filtered list, art resolved → cover locks to it.
+        assert!(cover_shows_now_playing(
+            true,
+            true,
+            true,
+            Some(false),
+            false
+        ));
+        // Playing but its art is cold and the centered fallback shows a
+        // DIFFERENT album → the panel displays the wrong cover; no lyrics.
         assert!(!cover_shows_now_playing(
             true,
-            Some("p"),
+            true,
             false,
-            Some("other")
+            Some(false),
+            false
+        ));
+        // Cold art but the centered fallback is the SAME album (identical
+        // picture) → lyrics stay up through the cold-art window.
+        assert!(cover_shows_now_playing(
+            true,
+            true,
+            false,
+            Some(true),
+            false
+        ));
+        // Cold art, no centered row at all (blank panel) → lyrics harmless.
+        assert!(cover_shows_now_playing(true, true, false, None, false));
+        // Playing but search filtered it out → centered cover shown; no lyrics.
+        assert!(!cover_shows_now_playing(
+            true,
+            false,
+            false,
+            Some(false),
+            false
         ));
         // Paused, centered ON the playing track → cover is now-playing.
-        assert!(cover_shows_now_playing(false, Some("p"), false, Some("p")));
-        // Paused, scrolled away → cover is a different album, no lyrics.
+        assert!(cover_shows_now_playing(
+            false,
+            false,
+            false,
+            Some(true),
+            true
+        ));
+        // Paused, scrolled away → different cover; no lyrics.
         assert!(!cover_shows_now_playing(
             false,
-            Some("p"),
             false,
-            Some("other")
+            false,
+            Some(false),
+            false
         ));
-        // Stopped / nothing loaded → never.
-        assert!(!cover_shows_now_playing(true, None, true, Some("p")));
-        assert!(!cover_shows_now_playing(false, None, false, None));
+        // Nothing loaded → never (both branch inputs are false/None-derived).
+        assert!(!cover_shows_now_playing(false, false, false, None, false));
     }
 
     /// Both top-separator / band-width tests mutate the artwork-column-mode
