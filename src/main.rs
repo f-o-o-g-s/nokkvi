@@ -153,6 +153,11 @@ pub struct Nokkvi {
     pub settings_page: views::SettingsPage,
     pub similar_page: views::SimilarPage,
     pub harbour_page: views::HarbourPage,
+    /// Columns shown in the smart-playlist rules preview/results pane. The
+    /// rules session is ephemeral (rebuilt each open), so unlike the 7 view
+    /// pages this persistent copy is the source of truth — restored on
+    /// `PlayerSettingsLoaded`, toggled optimistically, and read by the view.
+    pub preview_column_visibility: crate::state::PreviewColumnVisibility,
 
     // -------------------------------------------------------------------------
     // Core Services
@@ -438,6 +443,7 @@ impl Default for Nokkvi {
             settings_page: views::SettingsPage::new(),
             similar_page: views::SimilarPage::new(),
             harbour_page: views::HarbourPage::new(),
+            preview_column_visibility: crate::state::PreviewColumnVisibility::default(),
             app_service: None,
             cached_storage: None,
             sfx_engine: nokkvi_data::audio::SfxEngine::default(),

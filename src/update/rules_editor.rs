@@ -1014,6 +1014,13 @@ impl Nokkvi {
                 });
                 Task::none()
             }
+            RulesEditorMessage::ToggleColumnVisible(col) => {
+                // Optimistic flip on the persistent copy (survives editor
+                // close/reopen within a session); persist through the same
+                // generic path every library view's columns cog uses.
+                let new_value = self.preview_column_visibility.toggle(col);
+                self.persist_column_visibility(col, new_value)
+            }
         }
     }
 

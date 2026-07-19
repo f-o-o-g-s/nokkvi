@@ -119,6 +119,41 @@ fn enter_edit_seeds_cursor_on_match_row() {
     );
 }
 
+/// The preview columns cog flips a column's visibility on the PERSISTENT
+/// `Nokkvi.preview_column_visibility` (survives editor close/reopen, unlike
+/// the ephemeral session), per-column independent. All five default ON, so the
+/// first toggle turns one OFF; a second restores it.
+#[test]
+fn toggle_preview_column_flips_persistent_visibility() {
+    use crate::state::PreviewColumn;
+    let mut app = capable_app();
+    open_create(&mut app);
+    assert!(app.preview_column_visibility.stars, "stars default on");
+
+    let _ = app.update(Message::RulesEditor(R::ToggleColumnVisible(
+        PreviewColumn::Stars,
+    )));
+    assert!(
+        !app.preview_column_visibility.stars,
+        "first toggle turns off"
+    );
+
+    let _ = app.update(Message::RulesEditor(R::ToggleColumnVisible(
+        PreviewColumn::Stars,
+    )));
+    assert!(
+        app.preview_column_visibility.stars,
+        "second toggle restores"
+    );
+
+    // A different column toggles independently.
+    let _ = app.update(Message::RulesEditor(R::ToggleColumnVisible(
+        PreviewColumn::Genre,
+    )));
+    assert!(!app.preview_column_visibility.genre, "genre toggled off");
+    assert!(app.preview_column_visibility.stars, "stars unaffected");
+}
+
 /// The caps gate: with the capability unknown, no session mounts and the
 /// refusal toast fires (conservative = feature-hidden).
 #[test]

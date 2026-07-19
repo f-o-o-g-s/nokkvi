@@ -29,7 +29,8 @@ use nokkvi_data::types::{
 use crate::{
     app_message::{EditorMessage, Message, RulesEditorMessage},
     state::{
-        FormCell, FormMode, FormRow, PlaylistEditorState, PreviewPhase, RulesPane, RulesSessionUi,
+        FormCell, FormMode, FormRow, PlaylistEditorState, PreviewColumnVisibility, PreviewPhase,
+        RulesPane, RulesSessionUi,
     },
     theme,
     widgets::hover_overlay::HoverOverlay,
@@ -55,6 +56,13 @@ pub(crate) struct RulesViewData<'a> {
     /// The cover accepts Set/Reset (an edit session against a saved
     /// playlist); a create session shows the quad but can't upload yet.
     pub cover_editable: bool,
+    /// Which optional columns the preview renders (persistent copy on
+    /// `Nokkvi`, restored on `PlayerSettingsLoaded`, toggled via the cog).
+    pub column_visibility: PreviewColumnVisibility,
+    /// Whether the preview/results-pane columns cog dropdown is open.
+    pub column_dropdown_open: bool,
+    /// Anchor bounds captured when the columns cog was clicked (open only).
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
 }
 
 impl PlaylistEditorState {
@@ -73,7 +81,14 @@ impl PlaylistEditorState {
         let edit_bar = self.rules_edit_bar(session, &cover);
         let sep = theme::horizontal_separator(1.0);
 
-        let results = results_pane(session, data.album_art, data.window_height);
+        let results = results_pane(
+            session,
+            data.album_art,
+            data.window_height,
+            data.column_visibility,
+            data.column_dropdown_open,
+            data.column_dropdown_trigger_bounds,
+        );
         let form = form_pane(session, data.window_height);
 
         // Left preview pane recedes to bg0_hard (a "results/output" surface,
@@ -106,14 +121,28 @@ impl PlaylistEditorState {
                 self.rules_edit_bar(session, &cover),
                 theme::horizontal_separator(1.0),
                 conflict_banner(),
-                panes_placeholder(session, data.album_art, data.window_height),
+                panes_placeholder(
+                    session,
+                    data.album_art,
+                    data.window_height,
+                    data.column_visibility,
+                    data.column_dropdown_open,
+                    data.column_dropdown_trigger_bounds,
+                ),
             ];
         } else if session.save_target_gone {
             root = column![
                 self.rules_edit_bar(session, &cover),
                 theme::horizontal_separator(1.0),
                 target_gone_banner(),
-                panes_placeholder(session, data.album_art, data.window_height),
+                panes_placeholder(
+                    session,
+                    data.album_art,
+                    data.window_height,
+                    data.column_visibility,
+                    data.column_dropdown_open,
+                    data.column_dropdown_trigger_bounds,
+                ),
             ];
         }
 
@@ -280,6 +309,9 @@ fn results_pane<'a>(
     session: &'a RulesSessionUi,
     album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     _window_height: f32,
+    cols: PreviewColumnVisibility,
+    column_dropdown_open: bool,
+    column_dropdown_trigger_bounds: Option<iced::Rectangle>,
 ) -> Element<'a, Message> {
     let is_create = matches!(session.target, RulesTarget::Create);
 
@@ -305,9 +337,22 @@ fn results_pane<'a>(
         _ if is_create => String::new(),
         _ => "Showing the saved rules' matches".to_owned(),
     };
+    // The columns cog — same checkbox dropdown every library view uses, but on
+    // the preview's own `OpenMenu::CheckboxDropdownPreview` discriminator (this
+    // surface has no `View` variant, like Similar).
+    let cog: Element<'a, Message> = crate::widgets::checkbox_dropdown::preview_columns_dropdown(
+        cols.dropdown_entries(),
+        |c| Message::RulesEditor(RulesEditorMessage::ToggleColumnVisible(c)),
+        Message::SetOpenMenu,
+        column_dropdown_open,
+        column_dropdown_trigger_bounds,
+    )
+    .into();
+
     // A persistent "PREVIEW" eyebrow (mirrors the rules pane's eyebrow) so a
     // populated pane can't be mistaken for the saved playlist's tracks — these
-    // are the rules' current matches, not what's committed.
+    // are the rules' current matches, not what's committed. The columns cog sits
+    // at the far end of the strip.
     let header = container(
         row![
             text("PREVIEW")
@@ -319,6 +364,8 @@ fn results_pane<'a>(
                 .size(11)
                 .font(theme::ui_font())
                 .color(theme::fg3()),
+            Space::new().width(Length::Fill),
+            cog,
         ]
         .spacing(8)
         .align_y(Alignment::Center),
@@ -362,6 +409,7 @@ fn results_pane<'a>(
                     i,
                     focused && session.preview.cursor == i,
                     album_art,
+                    cols,
                 ));
             }
             // Failure retains last-good rows + stamp with a retry line —
@@ -394,6 +442,7 @@ fn preview_row<'a>(
     _index: usize,
     centered: bool,
     album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
+    cols: PreviewColumnVisibility,
 ) -> Element<'a, Message> {
     let art: Element<'a, Message> = match album_art.get(&song.album_id) {
         Some(handle) => iced::widget::image(handle.clone())
@@ -409,20 +458,48 @@ fn preview_row<'a>(
             })
             .into(),
     };
+    // Wrapping::None + Ellipsis::End lets iced's text layout truncate a long
+    // title/artist with "…" at the (clipped, bounded) column edge instead of
+    // overflowing into the trailing columns — the slot_list_text recipe.
     let title = text(&song.title)
         .size(12.5)
         .font(theme::ui_font())
         .color(theme::fg0())
-        .wrapping(iced::widget::text::Wrapping::None);
+        .wrapping(iced::widget::text::Wrapping::None)
+        .ellipsis(iced::widget::text::Ellipsis::End);
     let meta = text(format!("{} · {}", song.artist, song.album))
         .size(10.5)
         .font(theme::ui_font())
         .color(theme::fg3())
-        .wrapping(iced::widget::text::Wrapping::None);
-    let duration = text(&song.duration)
-        .size(11)
-        .font(theme::ui_font())
-        .color(theme::fg3());
+        .wrapping(iced::widget::text::Wrapping::None)
+        .ellipsis(iced::widget::text::Ellipsis::End);
+    // The text column takes the flex space; a clipped, Fill-width container
+    // bounds it so the ellipsis has an edge to truncate at.
+    let text_col = container(column![title, meta].spacing(1))
+        .width(Length::Fill)
+        .clip(true);
+
+    // Each visible column is a fixed-width trailing cell so they line up across
+    // rows. All display-only — the preview shows the values, never mutates.
+    let mut cells = row![art, text_col]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .padding([4, 10]);
+    if cols.stars {
+        cells = cells.push(preview_stars_cell(song.rating));
+    }
+    if cols.love {
+        cells = cells.push(preview_love_cell(song.starred));
+    }
+    if cols.plays {
+        cells = cells.push(preview_plays_cell(song.play_count));
+    }
+    if cols.genre {
+        cells = cells.push(preview_genre_cell(&song.genre));
+    }
+    if cols.duration {
+        cells = cells.push(preview_duration_cell(&song.duration));
+    }
 
     // The preview pane is now bg0_hard — the surface-aware ring must match.
     let ring = if centered {
@@ -430,26 +507,17 @@ fn preview_row<'a>(
     } else {
         iced::Color::TRANSPARENT
     };
-    let row_container = container(
-        row![
-            art,
-            column![title, meta].spacing(1).width(Length::Fill),
-            duration,
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .padding([4, 10]),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(PREVIEW_ROW_H))
-    .style(move |_t| iced::widget::container::Style {
-        border: iced::Border {
-            color: ring,
-            width: 2.0,
-            radius: theme::ui_radius_sm(),
-        },
-        ..Default::default()
-    });
+    let row_container = container(cells)
+        .width(Length::Fill)
+        .height(Length::Fixed(PREVIEW_ROW_H))
+        .style(move |_t| iced::widget::container::Style {
+            border: iced::Border {
+                color: ring,
+                width: 2.0,
+                radius: theme::ui_radius_sm(),
+            },
+            ..Default::default()
+        });
     // Tag the centered row so `center_in_scrollable` can measure it and keep
     // the keyboard cursor in view as it walks a long preview.
     if centered {
@@ -459,6 +527,107 @@ fn preview_row<'a>(
     } else {
         row_container.into()
     }
+}
+
+// -- Preview column cells (display-only) ----------------------------------
+// Fixed widths so the columns line up across rows in the narrow pane. Every
+// trailing cell is Fixed-width (including duration) so the Fill text column
+// absorbs a constant amount of slack and the column group's start-x is
+// identical row-to-row.
+const PREVIEW_STARS_W: f32 = 62.0;
+const PREVIEW_LOVE_W: f32 = 18.0;
+const PREVIEW_PLAYS_W: f32 = 34.0;
+const PREVIEW_GENRE_W: f32 = 88.0;
+const PREVIEW_DURATION_W: f32 = 48.0;
+
+/// A plain, unselected, full-opacity slot style so the preview can reuse the
+/// canonical `slot_list_star_rating` / `slot_list_favorite_icon` renderers
+/// instead of hand-copying their icon-path + color recipe (which would silently
+/// drift from the six library views on a future glyph change).
+/// `for_slot(is_center, is_highlighted, is_playing, is_selected,
+/// has_multi_selection, opacity, depth)` — all off, full opacity, top level.
+fn preview_glyph_style() -> crate::widgets::slot_list::SlotListSlotStyle {
+    crate::widgets::slot_list::SlotListSlotStyle::for_slot(
+        false, false, false, false, false, 1.0, 0,
+    )
+}
+
+/// Five stars filled to `rating` (dim outlines for the remainder), so a rules
+/// author can read a 2-vs-3-star match at a glance. Unrated → 5 dim outlines.
+/// Display-only (`on_click: None`) — the preview shows, it doesn't rate.
+fn preview_stars_cell<'a>(rating: Option<u32>) -> Element<'a, Message> {
+    container(crate::widgets::slot_list::slot_list_star_rating(
+        rating.unwrap_or(0) as usize,
+        10.0,
+        preview_glyph_style(),
+        None,
+        None::<fn(usize) -> Message>,
+    ))
+    .width(Length::Fixed(PREVIEW_STARS_W))
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// A filled heart when loved, else a dim outline heart. Display-only.
+fn preview_love_cell<'a>(starred: bool) -> Element<'a, Message> {
+    container(crate::widgets::slot_list::slot_list_favorite_icon(
+        starred,
+        preview_glyph_style(),
+        12.0,
+        crate::widgets::slot_list::FavoriteIconKind::Heart,
+        None,
+    ))
+    .width(Length::Fixed(PREVIEW_LOVE_W))
+    .align_x(iced::alignment::Horizontal::Center)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// Right-aligned play count (`0` when unknown).
+fn preview_plays_cell<'a>(play_count: Option<u32>) -> Element<'a, Message> {
+    container(
+        text(play_count.unwrap_or(0).to_string())
+            .size(11)
+            .font(theme::ui_font())
+            .color(theme::fg3())
+            .wrapping(iced::widget::text::Wrapping::None),
+    )
+    .width(Length::Fixed(PREVIEW_PLAYS_W))
+    .align_x(iced::alignment::Horizontal::Right)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// Genre text, ellipsized to a fixed width (no wrap, no row-height jitter).
+fn preview_genre_cell<'a>(genre: &'a str) -> Element<'a, Message> {
+    container(
+        text(genre)
+            .size(10.5)
+            .font(theme::ui_font())
+            .color(theme::fg3())
+            .wrapping(iced::widget::text::Wrapping::None)
+            .ellipsis(iced::widget::text::Ellipsis::End),
+    )
+    .width(Length::Fixed(PREVIEW_GENRE_W))
+    .align_y(Alignment::Center)
+    .clip(true)
+    .into()
+}
+
+/// Right-aligned duration in a fixed-width cell (fits H:MM:SS) so it doesn't
+/// shift the other columns' start-x row-to-row.
+fn preview_duration_cell<'a>(duration: &'a str) -> Element<'a, Message> {
+    container(
+        text(duration)
+            .size(11)
+            .font(theme::ui_font())
+            .color(theme::fg3())
+            .wrapping(iced::widget::text::Wrapping::None),
+    )
+    .width(Length::Fixed(PREVIEW_DURATION_W))
+    .align_x(iced::alignment::Horizontal::Right)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 // =========================================================================
@@ -1358,17 +1527,27 @@ fn panes_placeholder<'a>(
     session: &'a RulesSessionUi,
     album_art: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     window_height: f32,
+    cols: PreviewColumnVisibility,
+    column_dropdown_open: bool,
+    column_dropdown_trigger_bounds: Option<iced::Rectangle>,
 ) -> Element<'a, Message> {
     // Same tonal step + full-height divider as the live `panes` row, so the
     // save-conflict / target-gone banner state doesn't lose the separation.
     row![
-        container(results_pane(session, album_art, window_height))
-            .width(Length::FillPortion(11))
-            .height(Length::Fill)
-            .style(|_t| iced::widget::container::Style {
-                background: Some(theme::bg0_hard().into()),
-                ..Default::default()
-            }),
+        container(results_pane(
+            session,
+            album_art,
+            window_height,
+            cols,
+            column_dropdown_open,
+            column_dropdown_trigger_bounds,
+        ))
+        .width(Length::FillPortion(11))
+        .height(Length::Fill)
+        .style(|_t| iced::widget::container::Style {
+            background: Some(theme::bg0_hard().into()),
+            ..Default::default()
+        }),
         pane_divider(),
         container(form_pane(session, window_height))
             .width(Length::FillPortion(9))

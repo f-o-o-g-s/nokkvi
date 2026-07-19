@@ -593,12 +593,12 @@ mod tests {
         assert!(parsed.replay_gain_prevent_clipping);
     }
 
-    /// True for the 50 per-view column-visibility keys (`<view>_show_<col>`).
+    /// True for the 55 per-view column-visibility keys (`<view>_show_<col>`).
     /// `queue_show_default_playlist` (the header chip) is NOT a column; the
     /// `strip_show_*` / `mini_player_show_*` / `*_artwork_overlay` toggles
     /// don't carry a view prefix and never match.
     fn is_view_column_key(key: &str) -> bool {
-        const VIEW_PREFIXES: [&str; 7] = [
+        const VIEW_PREFIXES: [&str; 8] = [
             "albums_show_",
             "artists_show_",
             "genres_show_",
@@ -606,6 +606,7 @@ mod tests {
             "similar_show_",
             "songs_show_",
             "queue_show_",
+            "preview_show_",
         ];
         key != "queue_show_default_playlist" && VIEW_PREFIXES.iter().any(|p| key.starts_with(p))
     }
@@ -633,8 +634,8 @@ mod tests {
             .collect();
         assert_eq!(
             column_keys.len(),
-            50,
-            "expected the 50 per-view column keys at the top level, got {column_keys:?}"
+            55,
+            "expected the 55 per-view column keys at the top level, got {column_keys:?}"
         );
     }
 
@@ -678,7 +679,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 50, "expected to check all 50 column keys");
+        assert_eq!(checked, 55, "expected to check all 55 column keys");
     }
 
     #[test]

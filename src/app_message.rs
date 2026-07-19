@@ -841,6 +841,10 @@ pub enum RulesEditorMessage {
     SaveConflict,
     /// The save target vanished (404) — single recovery: Save as new.
     SaveTargetGone,
+    /// Toggle a preview/results-pane column's visibility from the header cog
+    /// dropdown. The handler flips the session's `column_visibility` and
+    /// persists via `persist_column_visibility`.
+    ToggleColumnVisible(crate::state::PreviewColumn),
 }
 
 /// Playlist-editor messages, namespaced under `Message::Editor(..)`.
@@ -1140,6 +1144,10 @@ pub enum OpenMenu {
     /// matching `View` variant, so it gets its own discriminator instead of
     /// shoehorning a synthetic `View::Similar` through the rest of the app.
     CheckboxDropdownSimilar { trigger_bounds: iced::Rectangle },
+    /// The smart-playlist rules editor's preview/results-pane columns dropdown.
+    /// Like Similar, the preview surface has no matching `View` variant, so it
+    /// gets its own discriminator.
+    CheckboxDropdownPreview { trigger_bounds: iced::Rectangle },
     /// The Playlists header's create dropdown (New Playlist / New Smart
     /// Playlist / Import .nsp…) — the QueueSync `action_dropdown` chassis.
     PlaylistsCreate { trigger_bounds: iced::Rectangle },

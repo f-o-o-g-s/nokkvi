@@ -264,6 +264,23 @@ impl PreviewState {
     }
 }
 
+// Configurable columns for the preview/results pane. Like Similar, the preview
+// surface has no `View` enum variant, so it owns its own column set + a
+// dedicated `OpenMenu::CheckboxDropdownPreview` discriminator. Every field the
+// cells read (`starred` / `rating` / `play_count` / `genre` / `duration`)
+// already rides `QueueSongUIViewData` — the toggles just gate rendering. All
+// five default ON (duration was always rendered before columns existed; the
+// rest surface the metadata a rules author most wants to see).
+crate::views::define_view_columns! {
+    PreviewColumn => PreviewColumnVisibility {
+        Stars("Stars"): stars = true => set_preview_show_stars @ preview_show_stars,
+        Love("Love"): love = true => set_preview_show_love @ preview_show_love,
+        Plays("Plays"): plays = true => set_preview_show_plays @ preview_show_plays,
+        Genre("Genre"): genre = true => set_preview_show_genre @ preview_show_genre,
+        Duration("Duration"): duration = true => set_preview_show_duration @ preview_show_duration,
+    }
+}
+
 /// The whole rules-editor session (UI half — the domain half lives in
 /// `nokkvi_data::types::{smart_criteria, rules_session}`).
 #[derive(Debug)]

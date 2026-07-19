@@ -2084,6 +2084,9 @@ impl Nokkvi {
             views::songs::SongsColumnVisibility::restore_from(&settings);
         self.similar_page.column_visibility =
             views::similar::SimilarColumnVisibility::restore_from(&settings);
+        // The rules preview has no persistent page; its column state lives here.
+        self.preview_column_visibility =
+            crate::state::PreviewColumnVisibility::restore_from(&settings);
 
         // Restore active playlist context from persisted settings. The full
         // metadata (count/duration/public/updated) is persisted, so the

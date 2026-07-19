@@ -1,8 +1,10 @@
-//! Consolidated view-column copy-steps for all 7 slot-list views.
+//! Consolidated view-column copy-steps for all 7 slot-list views + the rules
+//! preview.
 //!
 //! ONE `define_settings!` invocation owns every `<view>_show_<col>` boolean
-//! (Queue 9, Albums 7, Songs 9, Artists 8, Genres 5, Playlists 6, Similar 6 —
-//! 50 total) via the `view_columns:` clause, emitting the three orchestrator
+//! (Queue 9, Albums 7, Songs 9, Artists 8, Genres 5, Playlists 6, Similar 6,
+//! Preview 5 — 55 total) via the `view_columns:` clause, emitting the three
+//! orchestrator
 //! copy functions:
 //!
 //! - `apply_toml_columns_tab(ts, p)` — TOML → redb-backed
@@ -111,6 +113,12 @@ crate::define_settings! {
             similar_show_duration,
             similar_show_love,
             similar_show_select,
+            // -- Preview (5) --
+            preview_show_stars,
+            preview_show_love,
+            preview_show_plays,
+            preview_show_genre,
+            preview_show_duration,
         ],
         assert_exhaustive: assert_all_view_columns_covered,
     }

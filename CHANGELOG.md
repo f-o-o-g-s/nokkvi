@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Rules editing includes seeded presets, a raw-JSON mode, and an honest evaluated-at freshness stamp.
 - Rule previews are server-evaluated through a private draft, fresh on every press, before anything saves.
 - Enter on a preview row plays it — tweak rules and hear matches in one loop.
+- The rules preview gained a columns cog: show rating, love, plays, genre, and duration alongside each match.
 - Stray preview drafts clean themselves up at login; other clients see them clearly labeled meanwhile.
 - .nsp smart-playlist files import from the Playlists create menu, with update-or-create-new choice on name collision.
 - The rules editor's empty state can load a .nsp file straight into the open session.

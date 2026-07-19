@@ -602,13 +602,15 @@ fn player_settings_loaded_restores_all_column_visibility() {
     let _guard = crate::theme::THEME_MODE_LOCK.lock();
     let mut app = test_app();
 
-    // Every one of the 50 column `*_show_*` fields, set to an alternating
+    // Every one of the 55 column `*_show_*` fields, set to an alternating
     // true/false pattern by declaration order so each adjacent pair differs.
     // Any assertion below fails if `restore_from` read the wrong field (the
     // realistic drift is a copy-pasted `@ token` matching a neighbor) or if the
     // handler skipped a page. The non-column `*_show_*` fields
     // (queue_show_default_playlist + 5 strip_show_*) are left at their defaults
-    // via `..Default::default()`.
+    // via `..Default::default()`. The 5 preview_* fields are set for
+    // exhaustiveness but not asserted here — the preview has no persistent page;
+    // it restores at session mount (mount_rules_session), not on this event.
     let settings = LivePlayerSettings {
         view_columns: ViewColumns {
             // Queue
@@ -668,6 +670,13 @@ fn player_settings_loaded_restores_all_column_visibility() {
             similar_show_album: false,
             similar_show_duration: true,
             similar_show_love: false,
+            // Preview — restored into Nokkvi.preview_column_visibility by this
+            // same event (no persistent page; asserted below like the 7 views)
+            preview_show_stars: true,
+            preview_show_love: false,
+            preview_show_plays: true,
+            preview_show_genre: false,
+            preview_show_duration: true,
         },
         ..Default::default()
     };
@@ -744,6 +753,16 @@ fn player_settings_loaded_restores_all_column_visibility() {
     assert_eq!(si.album, settings.view_columns.similar_show_album);
     assert_eq!(si.duration, settings.view_columns.similar_show_duration);
     assert_eq!(si.love, settings.view_columns.similar_show_love);
+
+    // Preview — the persistent field on Nokkvi (no page), restored by the same
+    // handler. Alternating T/F above so an `@ token` field-swap in the preview
+    // `define_view_columns!` macro is caught here like the seven views.
+    let pv = app.preview_column_visibility;
+    assert_eq!(pv.stars, settings.view_columns.preview_show_stars);
+    assert_eq!(pv.love, settings.view_columns.preview_show_love);
+    assert_eq!(pv.plays, settings.view_columns.preview_show_plays);
+    assert_eq!(pv.genre, settings.view_columns.preview_show_genre);
+    assert_eq!(pv.duration, settings.view_columns.preview_show_duration);
 }
 
 #[test]
@@ -752,8 +771,9 @@ fn column_macro_covers_expected_field_count() {
 
     // Completeness guard. Each `*ColumnVisibility` is a struct of `bool` fields,
     // one per column the macro owns; `size_of` == field count (bool is 1 byte,
-    // no padding for an all-bool struct). The sum across the 7 production
-    // visibility structs MUST equal the number of column `*_show_*` fields the
+    // no padding for an all-bool struct). The sum across the 8 production
+    // visibility structs (7 view pages + the preview) MUST equal the number of
+    // column `*_show_*` fields the
     // macro restores. This guard trips when a column is ADDED or REMOVED in a
     // `define_view_columns!` invocation without updating the count below — the
     // realistic drift. It does NOT auto-detect a brand-new `ViewColumns`
@@ -761,13 +781,13 @@ fn column_macro_covers_expected_field_count() {
     // struct sizes unchanged); catching that direction relies on also adding the
     // column + its per-page round-trip assertion.
     //
-    // 50 column fields total today (verified against
+    // 55 column fields total today (verified against
     // data/src/types/view_columns.rs). The 6 INTENTIONALLY-EXCLUDED
     // `*_show_*` fields are NOT columns and must NOT be counted here:
     //   - queue_show_default_playlist  (header chip, read directly in app_view)
     //   - strip_show_title / strip_show_artist / strip_show_album /
     //     strip_show_format_info / strip_show_labels  (metadata-strip toggles)
-    const EXPECTED_COLUMN_FIELDS: usize = 50;
+    const EXPECTED_COLUMN_FIELDS: usize = 55;
 
     let total = size_of::<crate::views::queue::QueueColumnVisibility>()
         + size_of::<crate::views::artists::ArtistsColumnVisibility>()
@@ -775,7 +795,8 @@ fn column_macro_covers_expected_field_count() {
         + size_of::<crate::views::playlists::PlaylistsColumnVisibility>()
         + size_of::<crate::views::albums::AlbumsColumnVisibility>()
         + size_of::<crate::views::songs::SongsColumnVisibility>()
-        + size_of::<crate::views::similar::SimilarColumnVisibility>();
+        + size_of::<crate::views::similar::SimilarColumnVisibility>()
+        + size_of::<crate::state::PreviewColumnVisibility>();
 
     assert_eq!(
         total, EXPECTED_COLUMN_FIELDS,
@@ -832,6 +853,31 @@ fn column_visibility_defaults_agree_with_live_player_settings_defaults() {
         crate::views::similar::SimilarColumnVisibility::restore_from(&live),
         "Similar column defaults drifted from ViewColumns::default()"
     );
+    assert_eq!(
+        crate::state::PreviewColumnVisibility::default(),
+        crate::state::PreviewColumnVisibility::restore_from(&live),
+        "Preview column defaults drifted from ViewColumns::default()"
+    );
+}
+
+#[test]
+fn preview_column_visibility_restore_from_reads_settings() {
+    // Pin the pure `restore_from` read path directly. Maximally-alternating
+    // T/F/T/F/T (every adjacent pair differs, none equals the all-true default)
+    // so a `@ token` field-swap in the macro OR a "read the default" bug fails.
+    let mut live = LivePlayerSettings::default();
+    live.view_columns.preview_show_stars = true;
+    live.view_columns.preview_show_love = false;
+    live.view_columns.preview_show_plays = true;
+    live.view_columns.preview_show_genre = false;
+    live.view_columns.preview_show_duration = true;
+
+    let v = crate::state::PreviewColumnVisibility::restore_from(&live);
+    assert!(v.stars);
+    assert!(!v.love);
+    assert!(v.plays);
+    assert!(!v.genre);
+    assert!(v.duration);
 }
 
 #[test]

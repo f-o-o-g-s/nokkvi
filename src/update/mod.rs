@@ -431,6 +431,7 @@ impl Nokkvi {
                     Some(
                         crate::app_message::OpenMenu::CheckboxDropdown { .. }
                             | crate::app_message::OpenMenu::CheckboxDropdownSimilar { .. }
+                            | crate::app_message::OpenMenu::CheckboxDropdownPreview { .. }
                             | crate::app_message::OpenMenu::QueueSync { .. }
                     )
                 ) {

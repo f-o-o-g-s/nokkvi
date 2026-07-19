@@ -88,6 +88,19 @@ fn similar_column_dropdown_state(
     }
 }
 
+/// Sibling of [`similar_column_dropdown_state`] for the smart-playlist rules
+/// editor's preview/results pane, which uses its own `OpenMenu` variant
+/// because that surface has no matching `View` enum value.
+fn preview_column_dropdown_state(
+    open_menu: &Option<crate::app_message::OpenMenu>,
+) -> (bool, Option<iced::Rectangle>) {
+    use crate::app_message::OpenMenu;
+    match open_menu {
+        Some(OpenMenu::CheckboxDropdownPreview { trigger_bounds }) => (true, Some(*trigger_bounds)),
+        _ => (false, None),
+    }
+}
+
 /// Sibling of [`column_dropdown_state`] for the Queue view's server-sync action
 /// menu, which uses its own `OpenMenu::QueueSync` variant (queue-only, so no
 /// matching `View` enum value).
@@ -1633,6 +1646,8 @@ impl Nokkvi {
                     (None, ids, false)
                 }
             };
+            let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                preview_column_dropdown_state(&self.open_menu);
             let rules_data = crate::views::playlist_editor::rules_view::RulesViewData {
                 session,
                 album_art: &self.artwork.album_art.snapshot,
@@ -1640,6 +1655,9 @@ impl Nokkvi {
                 custom_cover,
                 cover_album_ids,
                 cover_editable,
+                column_visibility: self.preview_column_visibility,
+                column_dropdown_open,
+                column_dropdown_trigger_bounds,
             };
             return editor.rules_view(rules_data);
         }

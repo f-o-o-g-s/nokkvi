@@ -1,8 +1,8 @@
 //! Canonical per-view column-visibility toggles.
 //!
-//! One struct owns all 50 `<view>_show_<col>` booleans (Queue 9, Albums 7,
-//! Songs 9, Artists 8, Genres 5, Playlists 6, Similar 6) and the ONE
-//! `Default` impl that every consumer shares:
+//! One struct owns all 55 `<view>_show_<col>` booleans (Queue 9, Albums 7,
+//! Songs 9, Artists 8, Genres 5, Playlists 6, Similar 6, Preview 5) and the
+//! ONE `Default` impl that every consumer shares:
 //!
 //! - [`PersistedPlayerSettings`][crate::types::settings::PersistedPlayerSettings]
 //!   and [`TomlSettings`][crate::types::toml_settings::TomlSettings] embed it
@@ -152,6 +152,19 @@ pub struct ViewColumns {
     pub similar_show_love: bool,
     /// Leading multi-select checkbox column (default: false).
     pub similar_show_select: bool,
+
+    // -- Smart-playlist preview column toggles (rules editor's results pane) --
+    /// Star-rating column (default: true).
+    pub preview_show_stars: bool,
+    /// Love (heart) column (default: true).
+    pub preview_show_love: bool,
+    /// Play-count column (default: true).
+    pub preview_show_plays: bool,
+    /// Genre column (default: true).
+    pub preview_show_genre: bool,
+    /// Duration column (default: true). Was always rendered before the
+    /// preview gained configurable columns, so it defaults on.
+    pub preview_show_duration: bool,
 }
 
 impl Default for ViewColumns {
@@ -207,6 +220,11 @@ impl Default for ViewColumns {
             similar_show_duration: true,
             similar_show_love: true,
             similar_show_select: false,
+            preview_show_stars: true,
+            preview_show_love: true,
+            preview_show_plays: true,
+            preview_show_genre: true,
+            preview_show_duration: true,
         }
     }
 }
