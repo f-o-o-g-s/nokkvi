@@ -42,11 +42,11 @@ Things that shaped this project:
 - Native **PipeWire** audio engine: gapless playback, a 10-band EQ, ReplayGain and AGC normalization, and configurable crossfade with transition fades.
 - Opt-in **bit-perfect** playback (Strict or Relaxed, follows the native sample rate) with a badge that reads the real hardware clock as `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED`.
 - GPU visualizer with `bars`, `lines`, and `scope` modes plus beat glow, bloom, trails, echo, and CRT, shown in a band above the player bar or over the cover art.
-- **Smart playlists** authored in-app: a keyboard-first rules editor with live validation, presets, a raw-JSON mode, and server-evaluated previews. Also imports `.nsp` (needs Navidrome 0.61+).
+- **Smart playlists** authored in-app: a rules editor with live validation, presets, a raw-JSON mode, and server-evaluated previews. Also imports `.nsp` (needs Navidrome 0.61+).
 - **Trawl** mix builder: blend artist, album, song, genre, and playlist seeds into a crate (round-robin, weighted, or shuffle-all) and save the result as a playlist.
 - Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull).
 - **23 built-in themes** (default **Svalbard**), drop-in `.toml` with instant hot-reload, a searchable picker that paints each row in its own palette, and two icon sets (Phosphor, Lucide).
-- Built for tiling WMs: a width-adaptive player bar and a **slot-paginated list** (up to 29 whole rows, no scrollbar, contents scale per slot).
+- Built for tiling WMs: a width-adaptive player bar and a **slot-paginated list** that fits a whole number of rows to the window (up to 29) and scales their contents to match.
 - Plus the essentials: browse albums, artists, songs, genres, playlists, radio, and similar songs; a **Harbour** home with whole-library search; persistent queue, multi-select, drag-and-drop, star ratings; synced lyrics; custom cover art; server queue sync (Navidrome 0.58.5+); scrobbling (library and radio); MPRIS; an optional tray icon; and full keyboard control.
 
 Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).

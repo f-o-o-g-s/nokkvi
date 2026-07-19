@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 - Shift+Up/Down reorders tracks inside the playlist editor; changes stay staged until Save.
 - Create-playlist dialogs warn when the name already exists, without blocking.
 - Get Info now works inside the playlist editor.
-- Smart playlists can now be created and edited in-app: a keyboard-first rules editor with live validation.
+- Smart playlists can now be created and edited in-app: a rules editor with live validation.
 - The Playlists header's + becomes a create menu (regular or smart) on capable servers.
 - Edit Rules… on owned smart rows; the queue banner pencil routes smart playlists there too.
 - New hotkeys: Shift+N opens a new smart playlist; `e` edits the centered playlist.
