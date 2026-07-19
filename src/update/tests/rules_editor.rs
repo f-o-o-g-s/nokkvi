@@ -744,6 +744,97 @@ fn shift_tab_hops_panes() {
     assert_eq!(session(&app).pane, RulesPane::Form, "…both directions");
 }
 
+// --- Bare-modifier guard (typing a capital while editing) -------------------
+
+// A bare modifier keypress — the Shift or CapsLock the user presses to type a
+// capital, or a bare Ctrl/Alt/Super — is never captured by a focused
+// `text_input`, so it reaches `handle_raw_key_event` as `Status::Ignored`.
+// Before the guard, that uncaptured key hit the Editing-mode "focus lost"
+// fall-through (hotkeys/mod.rs:586), which committed the cell and blurred the
+// input; the user's following capital then landed on a blurred field and leaked
+// to a global hotkey (Shift+S -> FindSimilar, Shift+D -> ClearQueue). These pin
+// that a bare modifier is a no-op while Editing, so focus (and the capital) survive.
+
+/// The reported bug: pressing Shift to type a capital in the name field must NOT
+/// commit the cell — committing blurs it and leaks the next capital to a hotkey.
+#[test]
+fn bare_shift_while_editing_name_keeps_editing() {
+    let mut app = capable_app();
+    open_create(&mut app);
+    assert_eq!(
+        session(&app).mode,
+        FormMode::Editing,
+        "create opens Editing"
+    );
+    assert_eq!(session(&app).cell, FormCell::Name);
+
+    let _ = app.handle_raw_key_event(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
+        iced::keyboard::Modifiers::SHIFT,
+        iced::event::Status::Ignored,
+    );
+
+    let s = session(&app);
+    assert_eq!(
+        s.mode,
+        FormMode::Editing,
+        "bare Shift must not commit/blur the focused name input"
+    );
+    assert_eq!(s.cell, FormCell::Name, "still editing the same cell");
+}
+
+/// CapsLock is the other capital-typing key and shares the exact leak path.
+#[test]
+fn bare_capslock_while_editing_keeps_editing() {
+    let mut app = capable_app();
+    open_create(&mut app);
+
+    let _ = app.handle_raw_key_event(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::CapsLock),
+        iced::keyboard::Modifiers::default(),
+        iced::event::Status::Ignored,
+    );
+
+    assert_eq!(session(&app).mode, FormMode::Editing);
+}
+
+/// Bare Control (standing in for the whole modifier/lock class) is likewise a
+/// no-op while Editing rather than a commit.
+#[test]
+fn bare_control_while_editing_keeps_editing() {
+    let mut app = capable_app();
+    open_create(&mut app);
+
+    let _ = app.handle_raw_key_event(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Control),
+        iced::keyboard::Modifiers::CTRL,
+        iced::event::Status::Ignored,
+    );
+
+    assert_eq!(session(&app).mode, FormMode::Editing);
+}
+
+/// Regression: Tab is a real key (not a bare modifier) and must STILL commit the
+/// cell — the guard must not over-reach and swallow it.
+#[test]
+fn tab_while_editing_still_commits() {
+    let mut app = capable_app();
+    open_create(&mut app);
+    assert_eq!(session(&app).mode, FormMode::Editing);
+
+    let _ = app.handle_raw_key_event(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+        iced::keyboard::Modifiers::default(),
+        iced::event::Status::Ignored,
+    );
+
+    assert_eq!(
+        session(&app).mode,
+        FormMode::Cursor,
+        "Tab still commits Editing -> Cursor"
+    );
+}
+
 // --- EditCenteredPlaylist hotkey -------------------------------------------
 
 /// The keyboard front door: on the centered Playlists row, kind-dispatched

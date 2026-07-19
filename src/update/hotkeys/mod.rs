@@ -782,6 +782,42 @@ impl Nokkvi {
             ));
         }
 
+        // A bare modifier / lock keypress — the Shift or CapsLock the user
+        // presses to type a capital, or a bare Ctrl/Alt/Super/etc. — is
+        // delivered by winit as its own `KeyPressed`. It is NEVER a hotkey
+        // (`iced_key_to_keycode` maps every one of them to `None`) and is NEVER
+        // captured by a focused `text_input` (which only captures the character
+        // it produces), so it always arrives `Status::Ignored`. Its one live
+        // effect today is tripping the rules editor's Editing-mode "focus lost"
+        // fall-through, which commits the cell and blurs the input — so the
+        // capital that follows lands on a blurred field and leaks to a global
+        // hotkey (Shift+S → FindSimilar, Shift+D → ClearQueue). Dropping it here,
+        // before any dispatch, keeps the field focused so the capital types
+        // normally; it is behavior-neutral everywhere else (it resolves to no
+        // hotkey regardless of where it lands). Placed AFTER the hotkey-capture
+        // forward so rebinding a chord still receives the modifier keydowns.
+        if matches!(
+            key,
+            iced::keyboard::Key::Named(
+                iced::keyboard::key::Named::Shift
+                    | iced::keyboard::key::Named::Control
+                    | iced::keyboard::key::Named::Alt
+                    | iced::keyboard::key::Named::AltGraph
+                    | iced::keyboard::key::Named::Super
+                    | iced::keyboard::key::Named::Meta
+                    | iced::keyboard::key::Named::Hyper
+                    | iced::keyboard::key::Named::CapsLock
+                    | iced::keyboard::key::Named::NumLock
+                    | iced::keyboard::key::Named::ScrollLock
+                    | iced::keyboard::key::Named::Fn
+                    | iced::keyboard::key::Named::FnLock
+                    | iced::keyboard::key::Named::Symbol
+                    | iced::keyboard::key::Named::SymbolLock
+            )
+        ) {
+            return Task::none();
+        }
+
         // Escape always reaches the dispatcher: it closes overlays / clears
         // search. Hoisted (with Tab) so the guard blocks below can read them.
         let is_escape = matches!(
