@@ -8,13 +8,19 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## v0.18.1 — 2026-07-19
+
+### Changed
+
 - The queue's playlist banner shows a smart-playlist indicator in place of the save button for smart playlists.
 
 ### Fixed
 
 - Typing a capital letter in the smart-playlist editor no longer fires a global hotkey instead of inserting it.
-
-### Removed
 
 ## v0.18.0 — 2026-07-19
 
