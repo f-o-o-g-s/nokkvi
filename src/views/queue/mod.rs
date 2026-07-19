@@ -128,6 +128,14 @@ pub struct QueueViewData<'a> {
     /// When a playlist is loaded for playback (editing happens in the
     /// decoupled `PlaylistEditor` view, never in the queue).
     pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,
+    /// Whether the playlist loaded for playback is a smart playlist (its
+    /// tracks are rules-derived). Drives the strip's action cluster: a smart
+    /// playlist has no meaningful quick-save (saving the queue over it is a
+    /// no-op — the server re-evaluates the rules), so the save button's slot
+    /// shows a non-interactive smart-playlist indicator instead, beside the
+    /// rules-aware edit button. Resolved by `Nokkvi::active_playlist_is_smart`
+    /// (freshest library signal, falling back to the play-time context flag).
+    pub playlist_context_is_smart: bool,
     /// Whether the read-only playlist context strip should render its expanded
     /// detail block this frame (mirrors `QueuePage.playlist_strip_expanded`).
     pub playlist_strip_expanded: bool,

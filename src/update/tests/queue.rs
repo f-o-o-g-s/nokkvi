@@ -115,6 +115,102 @@ fn strip_quad_identity_frozen_across_queue_mutations() {
     assert_eq!(tiles.len(), 4);
 }
 
+// ============================================================================
+// "Playing From" strip — quick-save gate for smart playlists (app_view.rs)
+//
+// `active_playlist_is_smart` drives whether the strip renders its quick-save
+// button: a smart playlist's tracks are rules-derived, so saving the queue
+// over it is meaningless. It resolves the freshest signal — the live library
+// row first, then the play-time context flag — mirroring the Edit-from-queue
+// precedence so the save and edit buttons agree.
+// ============================================================================
+
+/// Minimal library playlist row — only `id` and `is_smart` matter to
+/// `active_playlist_is_smart`; every other field is a neutral placeholder.
+fn playlist_lib_row(
+    id: &str,
+    is_smart: bool,
+) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
+    nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: id.to_string(),
+        name: "Row".to_string(),
+        comment: String::new(),
+        duration: 0.0,
+        song_count: 0,
+        owner_name: String::new(),
+        public: false,
+        updated_at: String::new(),
+        artwork_album_ids: vec![],
+        uploaded_image: None,
+        is_smart,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
+        searchable_lower: String::new(),
+    }
+}
+
+/// A minimal active-playlist context (id `pl-1`) with the smartness flag set.
+fn active_ctx(smart: Option<bool>) -> crate::state::ActivePlaylistContext {
+    let mut ctx =
+        crate::state::ActivePlaylistContext::minimal("pl-1".into(), "Mix".into(), String::new());
+    ctx.smart = smart;
+    ctx
+}
+
+#[test]
+fn active_playlist_is_smart_false_without_active_playlist() {
+    let mut app = test_app();
+    app.active_playlist_info = None;
+    assert!(!app.active_playlist_is_smart());
+}
+
+#[test]
+fn active_playlist_is_smart_reads_context_flag_when_no_library_row() {
+    // Played straight from the Playlists view: the context carries the flag,
+    // no library-row lookup needed.
+    let mut app = test_app();
+    app.active_playlist_info = Some(active_ctx(Some(true)));
+    assert!(app.active_playlist_is_smart());
+
+    app.active_playlist_info = Some(active_ctx(Some(false)));
+    assert!(!app.active_playlist_is_smart());
+}
+
+#[test]
+fn active_playlist_is_smart_false_when_smartness_unknown() {
+    // Restored / minimal context (smart: None) whose playlists list has not
+    // reloaded yet: keep the save affordance until a definite signal arrives.
+    let mut app = test_app();
+    app.active_playlist_info = Some(active_ctx(None));
+    assert!(!app.active_playlist_is_smart());
+}
+
+#[test]
+fn active_playlist_is_smart_upgrades_unknown_from_library_row() {
+    // The freshest signal — the live library row — resolves the None window.
+    let mut app = test_app();
+    app.active_playlist_info = Some(active_ctx(None));
+    app.library
+        .playlists
+        .set_from_vec(vec![playlist_lib_row("pl-1", true)]);
+    assert!(app.active_playlist_is_smart());
+}
+
+#[test]
+fn active_playlist_is_smart_library_row_overrides_stale_context() {
+    // A library row that says "not smart" wins over a stale context flag — the
+    // save button must not stay hidden when the fresh signal disagrees.
+    let mut app = test_app();
+    app.active_playlist_info = Some(active_ctx(Some(true)));
+    app.library
+        .playlists
+        .set_from_vec(vec![playlist_lib_row("pl-1", false)]);
+    assert!(!app.active_playlist_is_smart());
+}
+
 /// `handle_queue_loaded` freezes the snapshot only while it is empty — the
 /// first queue for a context wins; later reloads leave it alone.
 #[test]

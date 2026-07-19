@@ -417,7 +417,6 @@ impl QueuePage {
                 .width(Length::Fill)
                 .clip(true);
 
-            let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::QuickSavePlaylist);
             let edit_btn = icon_btn("assets/icons/pencil-line.svg", QueueMessage::EditPlaylist);
 
             // Compact row. The cover is pushed only when its handle is cached so
@@ -461,9 +460,54 @@ impl QueuePage {
             // right. All metadata (count / duration / updated / visibility) lives
             // in the hover-expanded detail block — keeping the compact band from
             // duplicating the song count the view-header already shows beneath it.
-            let actions = row![save_btn, edit_btn]
-                .spacing(2)
-                .align_y(Alignment::Center);
+            // Smart playlists derive their tracks from rules, so quick-saving the
+            // queue over one is meaningless (the server re-evaluates the rules).
+            // Rather than leave a gap, the save slot shows the same sparkles
+            // smart-playlist indicator the Playlists view uses — a reliable
+            // smartness cue in the compact strip (which otherwise only hints at
+            // it via the expanded comment). It is non-interactive and accent-
+            // tinted so it reads as a badge, not a dead button, and its
+            // container matches the icon buttons' footprint so the cluster stays
+            // aligned. Regular playlists keep the interactive quick-save button.
+            let mut actions = Row::new().spacing(2).align_y(Alignment::Center);
+            if data.playlist_context_is_smart {
+                let smart_icon = crate::embedded_svg::svg_widget("assets/icons/sparkles.svg")
+                    .width(Length::Fixed(14.0))
+                    .height(Length::Fixed(14.0))
+                    .style(move |_theme, _status| svg::Style {
+                        color: Some(accent),
+                    });
+                let smart_badge = iced::widget::tooltip(
+                    container(smart_icon)
+                        .padding([4, 6])
+                        .style(|_theme| container::Style {
+                            background: None,
+                            border: iced::Border {
+                                color: iced::Color::TRANSPARENT,
+                                width: 2.0,
+                                radius: crate::theme::ui_border_radius(),
+                            },
+                            ..Default::default()
+                        })
+                        .center_y(Length::Shrink),
+                    container(
+                        iced::widget::text("Smart playlist — updates itself from rules")
+                            .size(11.0)
+                            .font(crate::theme::ui_font()),
+                    )
+                    .padding(4),
+                    iced::widget::tooltip::Position::Top,
+                )
+                .gap(4)
+                .style(crate::theme::container_tooltip);
+                actions = actions.push(smart_badge);
+            } else {
+                actions = actions.push(icon_btn(
+                    "assets/icons/save.svg",
+                    QueueMessage::QuickSavePlaylist,
+                ));
+            }
+            let actions = actions.push(edit_btn);
             let compact = compact.push(name_stack).push(actions);
             let compact = container(compact)
                 .center_y(Length::Fixed(PLAYLIST_STRIP_COMPACT_H))

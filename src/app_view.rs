@@ -1179,6 +1179,25 @@ impl Nokkvi {
         resolve_quad_handles(&self.strip_quad_album_ids, &self.artwork.album_art.snapshot)
     }
 
+    /// Whether the playlist currently loaded for playback is a smart playlist.
+    /// Resolves via the freshest available signal — the live library row's
+    /// `is_smart` first, falling back to the play-time
+    /// `ActivePlaylistContext.smart` — the same precedence the Edit-from-queue
+    /// path uses in `update/queue.rs`, so the strip's save and edit buttons
+    /// agree on smartness. Drives the queue strip's action cluster: a smart
+    /// playlist's tracks are derived from its rules, so saving the queue over
+    /// it is meaningless — the strip replaces the quick-save button with a
+    /// non-interactive smart-playlist indicator. Unknown smartness (restored /
+    /// minimal context whose playlists list has not reloaded yet) resolves to
+    /// `false`, keeping the save button until a definite signal arrives.
+    pub(crate) fn active_playlist_is_smart(&self) -> bool {
+        let Some(ctx) = self.active_playlist_info.as_ref() else {
+            return false;
+        };
+        let lib_row = self.library.playlists.iter().find(|p| p.id == ctx.id);
+        matches!(lib_row.map(|p| p.is_smart).or(ctx.smart), Some(true))
+    }
+
     // -------------------------------------------------------------------------
     // Per-view ViewData builders
     //
@@ -1435,6 +1454,7 @@ impl Nokkvi {
             stable_viewport: self.settings.stable_viewport,
             elevated,
             playlist_context_info: self.active_playlist_info.clone(),
+            playlist_context_is_smart: self.active_playlist_is_smart(),
             playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
             playlist_cover: self.active_playlist_strip_cover(),
             playlist_quad: self.active_playlist_strip_quad(),
