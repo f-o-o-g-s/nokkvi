@@ -2672,7 +2672,12 @@ mod tests {
     // --- Property: serialize→parse fixpoint -------------------------------
 
     mod prop {
-        use proptest::prelude::*;
+        // Disambiguate `prop`: the glob above AND `super::*` (whose parent also
+        // globs proptest's prelude) both re-export proptest's `prop` module, so
+        // `#[deny(ambiguous_glob_imports)]` — a future-incompat lint that is a
+        // hard error on newer rustc (CI), only a warning on 1.95.0 — rejects it.
+        // An explicit import wins over the globs and resolves the ambiguity.
+        use proptest::prelude::{prop, *};
 
         use super::*;
 
