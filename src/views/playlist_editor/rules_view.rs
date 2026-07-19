@@ -536,7 +536,7 @@ fn preview_row<'a>(
 // identical row-to-row.
 const PREVIEW_STARS_W: f32 = 62.0;
 const PREVIEW_LOVE_W: f32 = 18.0;
-const PREVIEW_PLAYS_W: f32 = 34.0;
+const PREVIEW_PLAYS_W: f32 = 60.0;
 const PREVIEW_GENRE_W: f32 = 88.0;
 const PREVIEW_DURATION_W: f32 = 48.0;
 
@@ -583,10 +583,12 @@ fn preview_love_cell<'a>(starred: bool) -> Element<'a, Message> {
     .into()
 }
 
-/// Right-aligned play count (`0` when unknown).
+/// Right-aligned play count labeled "N plays" (`0 plays` when unknown) — the
+/// same string the Songs/Queue slot list uses (`song_list_pane.rs`), so the
+/// bare number can't be misread as part of the adjacent genre.
 fn preview_plays_cell<'a>(play_count: Option<u32>) -> Element<'a, Message> {
     container(
-        text(play_count.unwrap_or(0).to_string())
+        text(format!("{} plays", play_count.unwrap_or(0)))
             .size(11)
             .font(theme::ui_font())
             .color(theme::fg3())
