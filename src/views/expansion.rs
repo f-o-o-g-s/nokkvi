@@ -200,6 +200,37 @@ impl<C: Clone> ExpansionState<C> {
         None
     }
 
+    /// The 0-based ordinal of the CHILD at flattened `idx` within the
+    /// expanded parent's children, or `None` when `idx` is a parent row or
+    /// out of range. The playlist remove-by-position path depends on the
+    /// ORDINAL, never the song id — a playlist can contain the same song
+    /// twice, so an id lookup would be ambiguous.
+    pub fn child_ordinal_at<P>(
+        &self,
+        idx: usize,
+        parents: &[P],
+        id_fn: impl Fn(&P) -> &str,
+    ) -> Option<usize> {
+        if !self.is_expanded() {
+            return None;
+        }
+        let mut flat_idx = 0;
+        for parent in parents {
+            if flat_idx == idx {
+                return None; // a parent row
+            }
+            flat_idx += 1;
+            if Some(id_fn(parent)) == self.expanded_id.as_deref() {
+                let child_offset = idx.checked_sub(flat_idx)?;
+                if child_offset < self.children.len() {
+                    return Some(child_offset);
+                }
+                flat_idx += self.children.len();
+            }
+        }
+        None
+    }
+
     /// Collapse expansion and restore slot list offset to parent position
     pub fn collapse<P>(
         &mut self,
@@ -779,6 +810,35 @@ mod tests {
             matches!(state.get_entry_at(1, &p, id_fn), Some(SlotListEntry::Parent(p)) if p.id == "b")
         );
         assert!(state.get_entry_at(5, &p, id_fn).is_none());
+    }
+
+    /// `child_ordinal_at` yields the 0-based ordinal for CHILD rows only —
+    /// parent rows and out-of-range indices resolve to `None`. The playlist
+    /// remove-by-position path depends on this (ordinal, never song id).
+    #[test]
+    fn child_ordinal_at_resolves_children_only() {
+        let mut state: ExpansionState<TestChild> = ExpansionState::default();
+        let p = parents();
+        let mut common = SlotListPageState::default();
+        state.set_children("b".into(), children(), &p, &mut common);
+        // Flattened: [a, b, c1, c2, c]
+        assert_eq!(state.child_ordinal_at(0, &p, id_fn), None, "parent a");
+        assert_eq!(state.child_ordinal_at(1, &p, id_fn), None, "parent b");
+        assert_eq!(state.child_ordinal_at(2, &p, id_fn), Some(0), "first child");
+        assert_eq!(
+            state.child_ordinal_at(3, &p, id_fn),
+            Some(1),
+            "second child"
+        );
+        assert_eq!(state.child_ordinal_at(4, &p, id_fn), None, "parent c");
+        assert_eq!(state.child_ordinal_at(9, &p, id_fn), None, "out of range");
+
+        let collapsed: ExpansionState<TestChild> = ExpansionState::default();
+        assert_eq!(
+            collapsed.child_ordinal_at(1, &p, id_fn),
+            None,
+            "no expansion → no child ordinals"
+        );
     }
 
     #[test]

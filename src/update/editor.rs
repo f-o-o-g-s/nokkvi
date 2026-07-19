@@ -21,6 +21,17 @@ use crate::{
 };
 
 impl Nokkvi {
+    /// The `(id, name)` of the editor's playlist when it has a real server row
+    /// (a saved edit session, or a create session after its first Save).
+    /// `None` for an unsaved deferred-create session (empty id) — there is no
+    /// upload target yet, so cover Set/Reset gate on this.
+    fn editor_saved_playlist_target(&self) -> Option<(String, String)> {
+        self.playlist_editor.as_ref().and_then(|e| {
+            let id = &e.edit.playlist_id;
+            (!id.is_empty()).then(|| (id.clone(), e.edit.playlist_name.clone()))
+        })
+    }
+
     /// Dispatch a [`EditorMessage`].
     pub(crate) fn handle_editor_message(&mut self, msg: EditorMessage) -> Task<Message> {
         match msg {
@@ -47,8 +58,20 @@ impl Nokkvi {
                 Task::none()
             }
             EditorMessage::CommentChanged(comment) => {
+                // Reserved-prefix strip (defense-in-depth for the draft-marker
+                // grammar): the comment field is a live write path, so a
+                // hand-typed comment must never BEGIN with the marker prefix —
+                // strict parsing already protects prose mentions elsewhere in
+                // the comment.
+                let stripped = comment
+                    .strip_prefix(nokkvi_data::types::playlist::DRAFT_MARKER_PREFIX)
+                    .map(str::to_string);
+                let sanitized = stripped.clone().unwrap_or(comment);
                 if let Some(editor) = self.playlist_editor.as_mut() {
-                    editor.edit.set_comment(comment);
+                    editor.edit.set_comment(sanitized);
+                }
+                if stripped.is_some() {
+                    self.toast_info("'nokkvi-draft/' is a reserved comment prefix");
                 }
                 Task::none()
             }
@@ -58,6 +81,20 @@ impl Nokkvi {
                 }
                 Task::none()
             }
+            // Cover Set/Reset reuse the shared playlist-artwork handlers (the
+            // same ones the list context menu and the smart editor call). Gated
+            // on a real id: an unsaved create session has no upload target yet.
+            EditorMessage::SetCover => match self.editor_saved_playlist_target() {
+                Some((id, name)) => self.handle_set_playlist_artwork(id, name),
+                None => {
+                    self.toast_info("Save the playlist first to set a custom cover");
+                    Task::none()
+                }
+            },
+            EditorMessage::ResetCover => match self.editor_saved_playlist_target() {
+                Some((id, name)) => self.handle_reset_playlist_artwork(id, name),
+                None => Task::none(),
+            },
             // Discard/exit reuses the shared split-view exit handler — the
             // editor view emits this so the discard button can route through
             // the editor's own message space (Phase 6 owns the exit handler).
@@ -189,11 +226,14 @@ impl Nokkvi {
                 editor.clear_drag();
 
                 // DESTINATION: follows the live cursor against the CURRENT
-                // viewport.
+                // viewport. A drop released in the empty area past the last row
+                // maps to None → append at the end (`total`), mirroring the
+                // queue — otherwise that gesture is a silent snap-back.
                 let to = editor
                     .common
                     .slot_list
-                    .slot_to_item_index_for_drop(target_index, total);
+                    .slot_to_item_index_for_drop(target_index, total)
+                    .unwrap_or(total);
 
                 match source {
                     // Multi-selection batch drag: resolve the batch rows by
@@ -202,25 +242,21 @@ impl Nokkvi {
                     // would clear `selected_indices`. `reorder_buffer_batch`
                     // stays index-based — it takes the resolved live positions.
                     Some(ids) if ids.len() > 1 => {
-                        if let Some(t) = to {
-                            let mut indices: Vec<usize> = ids
-                                .iter()
-                                .filter_map(|eid| {
-                                    editor.songs.iter().position(|s| s.entry_id == *eid)
-                                })
-                                .collect();
-                            editor.common.clear_multi_selection();
-                            Self::reorder_buffer_batch(&mut editor.songs, &mut indices, t);
-                        }
+                        let mut indices: Vec<usize> = ids
+                            .iter()
+                            .filter_map(|eid| editor.songs.iter().position(|s| s.entry_id == *eid))
+                            .collect();
+                        editor.common.clear_multi_selection();
+                        Self::reorder_buffer_batch(&mut editor.songs, &mut indices, to);
                     }
                     // Single-row drag: resolve the source by identity.
                     Some(ids) => {
-                        if let (Some(&eid), Some(t)) = (ids.first(), to)
+                        if let Some(&eid) = ids.first()
                             && let Some(f) = editor.songs.iter().position(|s| s.entry_id == eid)
-                            && f != t
+                            && f != to
                         {
                             let item = editor.songs.remove(f);
-                            let insert_at = if f < t { t - 1 } else { t };
+                            let insert_at = if f < to { to - 1 } else { to };
                             editor.songs.insert(insert_at, item);
                             // Keep the highlight on the moved row at its new
                             // position (mirrors the queue's `set_selected`).
@@ -349,7 +385,18 @@ impl Nokkvi {
     ) -> Task<Message> {
         match entry {
             QueueContextEntry::RemoveFromQueue => self.handle_editor_remove_at(idx),
-            // Get Info / everything else: no-op in the editor for now.
+            QueueContextEntry::GetInfo => {
+                // Resolve through the filtered view (slot indices are
+                // relative to the active search filter), then fresh-fetch by
+                // id — the shared queue-ShowInfo pattern: the staged buffer's
+                // thin projection can't fill the full info table.
+                let Some(song_id) = self.filter_editor_songs().get(idx).map(|s| s.id.clone())
+                else {
+                    return Task::none();
+                };
+                self.song_info_fetch_task(song_id)
+            }
+            // Everything else: no-op in the editor.
             _ => Task::none(),
         }
     }
@@ -361,6 +408,68 @@ impl Nokkvi {
     /// editor keeps an independent cursor/selection from the live queue. The
     /// total item count is the editor buffer's current length so navigation and
     /// selection clamp correctly.
+    /// Shift+↑/↓ in the editor: move the centered row within the STAGED
+    /// buffer (`editor.songs`) — a pure remove+insert with insert-before
+    /// semantics matching the queue's `handle_move_track`. No backend call:
+    /// persistence stays the audited Save flow (`handle_save_playlist_edits`),
+    /// and the dirty check picks the reorder up from the snapshot diff.
+    /// Gated off under an active search (slot indices are relative to the
+    /// filtered list — the filtered-indices bug class).
+    //
+    // M4 forward-guard: when `EditorSessionKind` lands, the Rules kind gates
+    // this off entirely (its results pane is a preview, not a track list).
+    pub(crate) fn handle_editor_move_track(&mut self, up: bool) -> Task<Message> {
+        // Rules kind: the results pane is a preview, not a track list — the
+        // grammar's Shift+arrows reorder SORT KEYS through the rules
+        // intercept instead; this track-buffer path must stay inert.
+        if self
+            .playlist_editor
+            .as_ref()
+            .is_some_and(|e| e.rules_session().is_some())
+        {
+            return Task::none();
+        }
+        let search_active = self
+            .playlist_editor
+            .as_ref()
+            .is_some_and(|e| !e.common.search_query.is_empty());
+        if search_active {
+            self.toast_info("Clear search to reorder");
+            return Task::none();
+        }
+        let Some(editor) = self.playlist_editor.as_mut() else {
+            return Task::none();
+        };
+        let total = editor.songs.len();
+        let Some(center_idx) = editor.common.slot_list.get_center_item_index(total) else {
+            return Task::none();
+        };
+
+        // Boundary check.
+        if up && center_idx == 0 {
+            return Task::none();
+        }
+        if !up && center_idx >= total.saturating_sub(1) {
+            return Task::none();
+        }
+
+        // Insert-before semantics, exactly like the queue's hotkey reorder.
+        let (from, to) = if up {
+            (center_idx, center_idx - 1)
+        } else {
+            (center_idx, center_idx + 2)
+        };
+        let item = editor.songs.remove(from);
+        let insert_at = if from < to { to - 1 } else { to };
+        editor.songs.insert(insert_at, item);
+
+        // The highlight follows the moved row.
+        editor.common.slot_list.set_offset(insert_at, total);
+
+        self.sfx_engine.play(nokkvi_data::audio::SfxType::Tab);
+        Task::none()
+    }
+
     fn handle_editor_slot_list(
         &mut self,
         msg: crate::widgets::SlotListPageMessage,
@@ -385,7 +494,7 @@ impl Nokkvi {
     /// fetched by another view. Mirrors `handle_queue_loaded`: the canonical
     /// 80 px album-id prefetch plus a large-artwork load for the centered row.
     /// A no-op when there is no backend or the buffer is empty.
-    fn editor_artwork_prefetch_tasks(&self) -> Task<Message> {
+    pub(crate) fn editor_artwork_prefetch_tasks(&self) -> Task<Message> {
         let (Some(editor), Some(shell)) =
             (self.playlist_editor.as_ref(), self.app_service.as_ref())
         else {

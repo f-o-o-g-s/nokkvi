@@ -1430,6 +1430,12 @@ fn playlist_entry(
         updated_at: updated_at.into(),
         artwork_album_ids: vec![],
         uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
     }
 }
@@ -1667,5 +1673,349 @@ fn append_reload_skips_when_tracks_dirty() {
     assert!(
         !app.editor_matches_clean_for_reload("pl_1"),
         "a track-dirty editor must not be auto-reloaded"
+    );
+}
+
+// --- M2a: editor keyboard reorder (Shift+↑/↓) ------------------------------
+
+/// Shift+Down in the editor moves the centered STAGED row (insert-before
+/// semantics, same gesture family as the queue's handle_move_track) without
+/// touching the live queue — persistence stays the audited Save flow.
+#[test]
+fn editor_shift_move_reorders_staged_buffer_only() {
+    let mut app = test_app();
+    seeded_editor(&mut app); // buffer: a, b, c
+    app.current_view = crate::View::PlaylistEditor;
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.common.slot_list.set_offset(0, 3);
+    }
+    let queue_before: Vec<String> = app
+        .library
+        .queue_songs
+        .iter()
+        .map(|s| s.id.clone())
+        .collect();
+
+    let _ = app.update(Message::Hotkey(
+        crate::app_message::HotkeyMessage::MoveTrackDown,
+    ));
+
+    assert_eq!(
+        app.editor_song_ids(),
+        vec!["b", "a", "c"],
+        "Shift+Down must move the centered staged row one slot down"
+    );
+    let queue_after: Vec<String> = app
+        .library
+        .queue_songs
+        .iter()
+        .map(|s| s.id.clone())
+        .collect();
+    assert_eq!(
+        queue_before, queue_after,
+        "the live queue must stay untouched by an editor reorder"
+    );
+
+    let _ = app.update(Message::Hotkey(
+        crate::app_message::HotkeyMessage::MoveTrackUp,
+    ));
+    assert_eq!(
+        app.editor_song_ids(),
+        vec!["a", "b", "c"],
+        "Shift+Up must move the row back"
+    );
+}
+
+/// An active editor search filters the slot indices, so reorder refuses with
+/// the same toast family as the queue (the filtered-indices bug class).
+#[test]
+fn editor_shift_move_refuses_under_active_search() {
+    let mut app = test_app();
+    seeded_editor(&mut app);
+    app.current_view = crate::View::PlaylistEditor;
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.common.search_query = "song".into();
+        editor.common.slot_list.set_offset(0, 3);
+    }
+
+    let _ = app.update(Message::Hotkey(
+        crate::app_message::HotkeyMessage::MoveTrackDown,
+    ));
+
+    assert_eq!(
+        app.editor_song_ids(),
+        vec!["a", "b", "c"],
+        "no reorder may happen while a search filter is active"
+    );
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.level),
+        Some(nokkvi_data::types::toast::ToastLevel::Info),
+        "the refusal surfaces the info toast"
+    );
+}
+
+// --- Deferred-create "New Playlist" flow -----------------------------------
+
+/// A blank-create session (no server row yet) refuses Save with an empty name:
+/// the server keys the row on the name, so an unnamed create is a mistake. The
+/// session stays mounted and no row is minted.
+#[test]
+fn create_save_blocks_on_empty_name() {
+    let mut app = test_app();
+    let edit = PlaylistEditState::new(
+        String::new(),
+        String::new(),
+        String::new(),
+        false,
+        Vec::new(),
+    );
+    app.playlist_editor = Some(PlaylistEditorState::new_create(edit));
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
+
+    let editor = app.playlist_editor.as_ref().expect("editor still mounted");
+    assert!(
+        editor.edit.playlist_id.is_empty(),
+        "no row minted for an empty name"
+    );
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.level),
+        Some(nokkvi_data::types::toast::ToastLevel::Warning)
+    );
+}
+
+/// PlaylistCreated (the first Save's outcome) adopts the new server id — the
+/// session becomes an ordinary edit and rebaselines its dirty snapshot +
+/// concurrency token so a second Save updates rather than re-creates.
+#[test]
+fn playlist_created_adopts_the_id_and_rebaselines() {
+    let mut app = test_app();
+    let edit = PlaylistEditState::new(
+        String::new(),
+        "My New Mix".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    );
+    app.playlist_editor = Some(PlaylistEditorState::new_create(edit));
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistCreated {
+        id: "new-42".into(),
+        updated_at: "T1".into(),
+    }));
+
+    let editor = app.playlist_editor.as_ref().expect("editor still mounted");
+    assert_eq!(
+        editor.edit.playlist_id, "new-42",
+        "session adopted the new id"
+    );
+    assert!(
+        !editor.edit.is_name_dirty(),
+        "the name rebaselined as saved (a second Save won't re-send it)"
+    );
+    assert_eq!(
+        editor.edit.loaded_updated_at(),
+        "T1",
+        "concurrency token seeded from the created row"
+    );
+}
+
+/// Setting a cover on an unsaved create session is gated (no upload target
+/// yet) — it toasts "save first" and leaves the session untouched, rather
+/// than opening a file picker against an empty id.
+#[test]
+fn cover_set_gated_on_unsaved_create() {
+    let mut app = test_app();
+    let edit = PlaylistEditState::new(
+        String::new(),
+        "New Mix".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    );
+    app.playlist_editor = Some(PlaylistEditorState::new_create(edit));
+
+    let _ = app.update(Message::Editor(EditorMessage::SetCover));
+
+    assert!(app.playlist_editor.is_some(), "session untouched");
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.level),
+        Some(nokkvi_data::types::toast::ToastLevel::Info),
+        "gated with a save-first hint"
+    );
+}
+
+/// The first Save on a deferred-create session marks it in-flight (creating),
+/// and a second Save while in-flight is refused — so a double-click can't mint
+/// duplicate playlists (the id isn't adopted until the async create returns).
+#[test]
+fn deferred_create_save_guards_against_double_submit() {
+    let mut app = test_app();
+    let edit = PlaylistEditState::new(
+        String::new(),
+        "My Mix".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    );
+    app.playlist_editor = Some(PlaylistEditorState::new_create(edit));
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
+    assert!(
+        app.playlist_editor.as_ref().unwrap().creating,
+        "first Save marks the create in-flight"
+    );
+
+    // A second Save while creating is a no-op — still creating, still no id.
+    let _ = app.update(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
+    let e = app.playlist_editor.as_ref().unwrap();
+    assert!(e.creating);
+    assert!(e.edit.playlist_id.is_empty());
+}
+
+/// PlaylistCreated clears the in-flight flag as it adopts the id.
+#[test]
+fn playlist_created_clears_the_creating_flag() {
+    let mut app = test_app();
+    let edit = PlaylistEditState::new(
+        String::new(),
+        "My Mix".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    );
+    let mut state = PlaylistEditorState::new_create(edit);
+    state.creating = true;
+    app.playlist_editor = Some(state);
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistCreated {
+        id: "new-9".into(),
+        updated_at: "T1".into(),
+    }));
+
+    let e = app.playlist_editor.as_ref().unwrap();
+    assert!(!e.creating, "create finished");
+    assert_eq!(e.edit.playlist_id, "new-9");
+}
+
+/// A create failure clears the flag (so a retry is possible) and toasts.
+#[test]
+fn create_failed_clears_the_creating_flag() {
+    let mut app = test_app();
+    let edit = PlaylistEditState::new(
+        String::new(),
+        "My Mix".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    );
+    let mut state = PlaylistEditorState::new_create(edit);
+    state.creating = true;
+    app.playlist_editor = Some(state);
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::PlaylistCreateFailed(
+        "boom".into(),
+    )));
+
+    let e = app.playlist_editor.as_ref().unwrap();
+    assert!(!e.creating, "flag cleared so the user can retry");
+    assert!(e.edit.playlist_id.is_empty(), "still a create session");
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.level),
+        Some(nokkvi_data::types::toast::ToastLevel::Error)
+    );
+}
+
+/// Discard is refused while a create is in flight — the async create can't
+/// complete after teardown and mint an orphan the user thinks they discarded.
+#[test]
+fn discard_refused_while_creating() {
+    let mut app = test_app();
+    let edit = PlaylistEditState::new(
+        String::new(),
+        "My Mix".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    );
+    let mut state = PlaylistEditorState::new_create(edit);
+    state.creating = true;
+    app.playlist_editor = Some(state);
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
+
+    assert!(
+        app.playlist_editor.is_some(),
+        "discard refused while creating — session stays mounted"
+    );
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.level),
+        Some(nokkvi_data::types::toast::ToastLevel::Warning)
+    );
+}
+
+// --- Drag/drop fixes ported from the Queue (a1c39327) -----------------------
+
+/// Dropping a row into the empty area past the last row APPENDS it, instead of
+/// snapping back (the queue does this; the editor silently no-op'd). A past-end
+/// target maps to None → unwrap_or(total) → append.
+#[test]
+fn editor_drop_past_last_row_appends() {
+    let mut app = test_app();
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl".into(),
+        "P".into(),
+        String::new(),
+        true,
+        Vec::new(),
+    )));
+    let rows: Vec<_> = (0..5)
+        .map(|i| make_queue_song(&format!("s{i}"), &format!("T{i}"), "A", "Al"))
+        .collect();
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(rows)));
+    // Default slot_count 9 > 5 songs → top-packs (slot N → item N).
+    let pick_id = app.playlist_editor.as_ref().unwrap().songs[0].id.clone();
+
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 0 },
+    )));
+    // Release over slot 8 — an empty padding slot past the 5 rows.
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Dropped {
+            index: 0,
+            target_index: 8,
+        },
+    )));
+
+    let songs = &app.playlist_editor.as_ref().unwrap().songs;
+    assert_eq!(songs.len(), 5, "no row lost");
+    assert_eq!(
+        songs.last().map(|s| s.id.as_str()),
+        Some(pick_id.as_str()),
+        "the dragged row appended to the end instead of snapping back"
+    );
+}
+
+/// Entering edit mode sizes the editor's stored slot_count to its real render
+/// (the drag mapper reads it) — NOT the stale SlotListView default of 9, which
+/// mis-mapped every drag off a >9-track or scrolled playlist.
+#[test]
+fn entering_edit_mode_resyncs_editor_slot_count_off_the_default() {
+    let mut app = test_app();
+    app.window.width = 1600.0;
+    app.window.height = 1000.0;
+
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
+        playlist_id: "pl".into(),
+        playlist_name: "P".into(),
+        playlist_comment: String::new(),
+        playlist_public: true,
+    }));
+
+    let editor = app.playlist_editor.as_ref().expect("editor mounted");
+    assert!(
+        editor.common.slot_list.slot_count > 9,
+        "resync sized the editor to its real render ({}), not the stale default 9",
+        editor.common.slot_list.slot_count
     );
 }

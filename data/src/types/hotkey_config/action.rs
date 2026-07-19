@@ -453,6 +453,30 @@ define_hotkey_actions! {
             settings_key: "hotkey.save_queue_as_playlist",
             default: KeyCombo::ctrl(KeyCode::Char('s')),
         },
+        TrawlSaveAsPlaylist {
+            display: "Trawl: Save Mix as Playlist",
+            description: "Save the Trawl mix as an ordinary playlist (mix builder only)",
+            category: "Item Actions",
+            toml_key: "trawl_save_as_playlist",
+            settings_key: "hotkey.trawl_save_as_playlist",
+            default: KeyCombo::shift(KeyCode::Char('p')),
+        },
+        NewSmartPlaylist {
+            display: "New Smart Playlist",
+            description: "Open the smart-playlist rules editor on a new playlist",
+            category: "Item Actions",
+            toml_key: "new_smart_playlist",
+            settings_key: "hotkey.new_smart_playlist",
+            default: KeyCombo::shift(KeyCode::Char('n')),
+        },
+        EditCenteredPlaylist {
+            display: "Edit Centered Playlist",
+            description: "Edit the centered playlist · rules editor for smart, track editor for regular",
+            category: "Item Actions",
+            toml_key: "edit_centered_playlist",
+            settings_key: "hotkey.edit_centered_playlist",
+            default: KeyCombo::key(KeyCode::Char('e')),
+        },
 
         // --- Sort & view ---
         PrevSortMode {

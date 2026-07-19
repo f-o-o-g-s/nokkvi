@@ -476,12 +476,14 @@ impl Nokkvi {
                             // the root persists the resolved URL, not the raw
                             // input.
                             let resolved_url = shell.auth().get_server_url().await;
+                            let user_id = shell.auth().user_id().await;
                             Ok(crate::app_message::LoginSuccess {
                                 shell,
                                 resolved_url,
+                                user_id,
                             })
                         },
-                        Message::LoginResult,
+                        |r| Message::LoginResult(Box::new(r)),
                     ),
                 ])
             }
@@ -554,12 +556,14 @@ impl Nokkvi {
                     }))
                     .await;
 
+                let user_id = shell.auth().user_id().await;
                 Ok(crate::app_message::LoginSuccess {
                     shell,
                     resolved_url,
+                    user_id,
                 })
             },
-            Message::LoginResult,
+            |r| Message::LoginResult(Box::new(r)),
         )
     }
 
@@ -572,11 +576,15 @@ impl Nokkvi {
                 let crate::app_message::LoginSuccess {
                     shell,
                     resolved_url,
+                    user_id,
                 } = success;
                 // Persist the RESOLVED server URL (the candidate that actually
                 // connected) so config save, SSE registration, and the resume
                 // path all use it rather than the raw typed input.
                 self.login_page.server_url = resolved_url;
+                // The ownership gate's session half (compared against
+                // `owner_id`, never owner names).
+                self.session_user_id = user_id;
                 info!(target: "nokkvi::auth", "Login successful");
 
                 // Save server_url + username to config.toml (no password)
@@ -750,6 +758,10 @@ impl Nokkvi {
                             }
                         },
                     ),
+                    // Sweep stray smart-playlist draft workspaces once per
+                    // auth — including the re-login after a 401, the exact
+                    // moment the own-pid orphan arm exists for.
+                    self.orphan_sweep_task(shell.clone()),
                 ]);
             }
             Err(e) => {

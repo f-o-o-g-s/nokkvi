@@ -125,7 +125,11 @@ impl<'a> LibraryOrchestrator<'a> {
             .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
         let (server_url, subsonic_credential) = self.auth.server_config().await;
         let playlists_api = PlaylistsApiService::new(client, server_url, subsonic_credential);
-        playlists_api.load_playlist_songs(playlist_id).await
+        // The playlist-level attrs (OpenSubsonic readonly) matter to the
+        // play-flow context lane, not to batch/entity resolution — drop
+        // them here.
+        let (songs, _attrs) = playlists_api.load_playlist_songs(playlist_id).await?;
+        Ok(songs)
     }
 
     /// Flatten + dedup a `BatchPayload` to `Vec<Song>`. Per-item dispatch goes

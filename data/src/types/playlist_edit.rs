@@ -108,6 +108,15 @@ impl PlaylistEditState {
     }
 
     /// Update the current public flag (called on toggle).
+    /// Re-baseline the metadata originals to the current values — called
+    /// after a successful rules-session save so the dirty checks read
+    /// clean without rebuilding the whole state.
+    pub fn mark_metadata_saved(&mut self) {
+        self.original_name = self.playlist_name.clone();
+        self.original_comment = self.playlist_comment.clone();
+        self.original_public = self.playlist_public;
+    }
+
     pub fn set_public(&mut self, value: bool) {
         self.playlist_public = value;
     }

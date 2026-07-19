@@ -140,6 +140,12 @@ pub enum TrawlModalMessage {
     PlayMixCompleted(Result<(), String>),
     AddMixToQueue,
     AddMixCompleted(Result<usize, String>),
+    /// Shift+P / the Save as Playlist CTA — resolve the mix, then hand the
+    /// song ids to the name dialog (M7).
+    SaveAsPlaylist,
+    /// The save-flow resolve settled: close the modal and open the name
+    /// dialog on Ok, keep the modal (with a toast) on Err.
+    SaveResolveCompleted(Result<Vec<String>, String>),
     /// Wheel over the chips tray — scrolls the horizontal chip strip.
     ChipsScrolled(f32),
 }
@@ -768,8 +774,8 @@ fn render_tray<'a>(
         container(
             text(
                 "The crate is empty — add seeds from the search above. Enter adds a seed, \
-                 Ctrl+Enter plays the mix, Shift+A queues it. Shift+Tab picks a control \
-                 below, Left/Right change it.",
+                 Ctrl+Enter plays the mix, Shift+A queues it, Shift+P saves it as a \
+                 playlist. Shift+Tab picks a control below, Left/Right change it.",
             )
             .size(12.0)
             .color(theme::fg4()),
@@ -903,6 +909,34 @@ fn render_tray<'a>(
         btn
     };
 
+    let save_btn = {
+        let mut btn = button(
+            text("Save as Playlist")
+                .size(13.0)
+                .wrapping(text::Wrapping::None)
+                .color(if empty { theme::fg4() } else { theme::fg0() }),
+        )
+        .padding([5, 14])
+        .style(move |_theme: &iced::Theme, _status| button::Style {
+            background: Some(theme::bg3().into()),
+            text_color: theme::fg0(),
+            border: Border {
+                color: if empty {
+                    theme::bg3()
+                } else {
+                    theme::accent_bright()
+                },
+                width: 1.0,
+                radius: theme::ui_border_radius(),
+            },
+            ..Default::default()
+        });
+        if !empty {
+            btn = btn.on_press(TrawlModalMessage::SaveAsPlaylist);
+        }
+        btn
+    };
+
     let queue_btn = {
         let mut btn = button(
             text("Add to Queue")
@@ -991,6 +1025,8 @@ fn render_tray<'a>(
         text(mix.blend.hint()).size(11.0).color(theme::fg4()),
         Space::new().width(Length::Fill),
         clear_btn,
+        Space::new().width(Length::Fixed(8.0)),
+        save_btn,
         Space::new().width(Length::Fixed(8.0)),
         queue_btn,
         Space::new().width(Length::Fixed(8.0)),

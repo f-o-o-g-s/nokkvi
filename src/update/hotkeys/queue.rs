@@ -6,6 +6,18 @@ use tracing::{debug, error, info};
 use crate::{Nokkvi, View, app_message::Message};
 
 impl Nokkvi {
+    /// Shift+P — Trawl-only: save the mix as an ordinary playlist. The
+    /// binding exists for the mix builder; with the modal closed it stays
+    /// quiet rather than guessing at a target.
+    pub(crate) fn handle_trawl_save_as_playlist_hotkey(&mut self) -> Task<Message> {
+        if self.trawl_modal.is_some() {
+            return self.handle_trawl_modal(
+                crate::widgets::trawl_modal::TrawlModalMessage::SaveAsPlaylist,
+            );
+        }
+        Task::none()
+    }
+
     pub(crate) fn handle_add_to_queue(&mut self) -> Task<Message> {
         debug!(" AddToQueue (Shift+A) hotkey pressed");
         // Trawl-first: with the modal open the one enqueueable thing is the
@@ -126,7 +138,9 @@ impl Nokkvi {
             return Task::none();
         }
 
-        // Fetch all playlists from server before opening the dialog
+        // Fetch all playlists from server before opening the dialog. Smart
+        // rows are filtered by the shared helper — an overwrite target must
+        // be track-editable (the server rejects with error 50/403).
         self.shell_task(
             |shell| async move {
                 let service = shell.playlists_api().await?;
@@ -134,10 +148,9 @@ impl Nokkvi {
                 let (playlists, _) = service
                     .load_playlists_with_libraries("name", "ASC", None, &library_ids)
                     .await?;
-                Ok(playlists
-                    .into_iter()
-                    .map(|p| (p.id, p.name))
-                    .collect::<Vec<_>>())
+                Ok(nokkvi_data::services::api::playlists::non_smart_name_pairs(
+                    &playlists,
+                ))
             },
             |result: Result<Vec<(String, String)>, anyhow::Error>| match result {
                 Ok(playlists) => Message::PlaylistsFetchedForDialog(playlists),
@@ -168,12 +181,11 @@ impl Nokkvi {
                 let (playlists, _) = service
                     .load_playlists_with_libraries("name", "ASC", None, &library_ids)
                     .await?;
-                Ok(playlists
-                    .into_iter()
-                    .map(|p| (p.id, p.name))
-                    .collect::<Vec<_>>())
+                // PRE-filter triples — the quick-add bypass must see smart
+                // rows (flagged) to refuse a smart default playlist.
+                Ok(nokkvi_data::services::api::playlists::playlist_add_target_triples(&playlists))
             },
-            move |result: Result<Vec<(String, String)>, anyhow::Error>| match result {
+            move |result: Result<Vec<(String, String, bool)>, anyhow::Error>| match result {
                 Ok(playlists) => Message::PlaylistsFetchedForAddToPlaylist(playlists, song_ids),
                 Err(e) => {
                     tracing::error!("Failed to fetch playlists for add to playlist dialog: {e}");
@@ -191,9 +203,61 @@ impl Nokkvi {
     /// Handle Shift+↑ / Shift+↓: move the centered queue track up or down.
     /// Shares the same preconditions as drag reorder: Queue view,
     /// no active search. Reuses the `QueueAction::MoveItem` backend persist path.
+    /// `EditCenteredPlaylist` (default `e`): on the centered Playlists row,
+    /// kind-dispatched — the same routing the queue-banner pencil uses.
+    pub(crate) fn handle_edit_centered_playlist(&mut self) -> Task<Message> {
+        if self.current_view != View::Playlists {
+            return Task::none();
+        }
+        let playlists = &self.library.playlists;
+        let total = self.playlists_page.expansion.flattened_len(playlists);
+        let Some(center_idx) = self.playlists_page.common.get_center_item_index(total) else {
+            return Task::none();
+        };
+        use crate::views::expansion::SlotListEntry;
+        let Some(SlotListEntry::Parent(playlist)) =
+            self.playlists_page
+                .expansion
+                .get_entry_at(center_idx, playlists, |p| &p.id)
+        else {
+            return Task::none(); // a child track row — nothing to edit
+        };
+        let (id, name, comment, public, is_smart, owner_id) = (
+            playlist.id.clone(),
+            playlist.name.clone(),
+            playlist.comment.clone(),
+            playlist.public,
+            playlist.is_smart,
+            playlist.owner_id.clone(),
+        );
+        if is_smart {
+            if crate::views::playlists::view::playlist_is_owned(&owner_id, &self.session_user_id) {
+                return self.handle_enter_rules_mode(crate::app_message::RulesEntryTarget::Edit {
+                    playlist_id: id,
+                });
+            }
+            self.toast_warn("Only the playlist's owner can edit its rules");
+            return Task::none();
+        }
+        Task::done(Message::SplitView(
+            crate::app_message::SplitViewMessage::EnterEditMode {
+                playlist_id: id,
+                playlist_name: name,
+                playlist_comment: comment,
+                playlist_public: public,
+            },
+        ))
+    }
+
     pub(crate) fn handle_move_track(&mut self, up: bool) -> Task<Message> {
         let direction = if up { "up" } else { "down" };
         debug!("📦 MoveTrack {} hotkey pressed", direction);
+
+        // Editor lane: reorder the STAGED buffer (persistence stays the
+        // audited Save flow) — same gesture family, different store.
+        if self.current_view == View::PlaylistEditor {
+            return self.handle_editor_move_track(up);
+        }
 
         // Guard: queue view only
         if self.current_view != View::Queue {

@@ -114,6 +114,14 @@ impl AuthGateway {
         Ok(factory(client))
     }
 
+    /// The authenticated user's Navidrome id (empty when unauthenticated).
+    /// See `AuthService::user_id` for provenance and the ownership-gate
+    /// contract.
+    pub async fn user_id(&self) -> String {
+        let auth_service = self.auth_service.lock().await;
+        auth_service.user_id().to_string()
+    }
+
     /// Fetches the server version dynamically using the Subsonic /rest/ping endpoint
     pub async fn fetch_server_version(&self) -> Result<String> {
         let auth_service = self.auth_service.lock().await;

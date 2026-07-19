@@ -189,6 +189,11 @@ impl AuthService {
         self.server_url = server_url.clone();
         self.username = username;
         self.token = jwt_token.clone();
+        // No login response on resume — recover the user id from the JWT's
+        // `uid` claim. Best-effort: an unparseable token degrades to an
+        // empty id, which the ownership gate reads as "not owned"
+        // (conservative — feature-hidden, never a wrong grant).
+        self.user_id = crate::services::api::client::decode_jwt_uid(&jwt_token).unwrap_or_default();
         self.subsonic_credential = subsonic_credential;
 
         let base_url = Url::parse(&server_url)?;
@@ -207,6 +212,16 @@ impl AuthService {
 
     pub fn get_subsonic_credential(&self) -> &str {
         &self.subsonic_credential
+    }
+
+    /// The authenticated user's Navidrome id — from the login response on a
+    /// fresh login, or the JWT `uid` claim on session resume. Empty when
+    /// unauthenticated (or when a resumed token carried no `uid`). The
+    /// playlist ownership gate compares this against `Playlist.owner_id`;
+    /// NEVER compare owner names (Navidrome logins are case-insensitive, so
+    /// name equality breaks for a "Foogs"/"foogs" login).
+    pub fn user_id(&self) -> &str {
+        &self.user_id
     }
 
     /// Get the initial JWT token (as received from login or resume).

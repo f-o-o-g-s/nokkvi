@@ -235,6 +235,53 @@ impl Nokkvi {
                     Task::none()
                 }
             },
+            TrawlModalMessage::SaveAsPlaylist => {
+                if self.trawl_crate.is_empty() {
+                    // Reachable via Shift+P with nothing seeded — same warn as
+                    // the other keyboard CTAs so the no-op explains itself.
+                    self.toast_warn("The crate is empty — add seeds first");
+                    return Task::none();
+                }
+                let mix = self.trawl_crate.clone();
+                self.shell_task(
+                    move |shell| async move { shell.resolve_trawl_song_ids(&mix).await },
+                    |result| {
+                        Message::TrawlModal(TrawlModalMessage::SaveResolveCompleted(
+                            result.map_err(|e| format!("{e:#}")),
+                        ))
+                    },
+                )
+            }
+            TrawlModalMessage::SaveResolveCompleted(result) => match result {
+                Ok(song_ids) => {
+                    // Close the modal and hand off to the name dialog; Cancel
+                    // reopens the modal (the crate itself lives on root state,
+                    // untouched either way).
+                    self.trawl_modal = None;
+                    let count = song_ids.len();
+                    let noun = if count == 1 { "song" } else { "songs" };
+                    self.text_input_dialog.open(
+                        "Save Mix as Playlist",
+                        "",
+                        "Playlist name...",
+                        crate::widgets::text_input_dialog::TextInputDialogAction::CreatePlaylistFromTrawl(song_ids),
+                    );
+                    self.text_input_dialog.set_note(format!(
+                        "Saves these {count} {noun} as an ordinary playlist — it won't update"
+                    ));
+                    Task::none()
+                }
+                Err(e) => {
+                    if nokkvi_data::types::error::NokkviError::is_unauthorized_str(&e) {
+                        return self.handle_session_expired();
+                    }
+                    error!(" Failed to resolve mix for saving: {e}");
+                    // Keep the modal open — the failure ("every song was
+                    // filtered out") is actionable right here.
+                    self.toast_error(format!("Failed to resolve mix: {e}"));
+                    Task::none()
+                }
+            },
             TrawlModalMessage::ChipsScrolled(delta) => iced::advanced::widget::operate(
                 iced::advanced::widget::operation::scrollable::scroll_by(
                     crate::widgets::trawl_modal::chips_scrollable_id(),

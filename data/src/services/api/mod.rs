@@ -20,3 +20,4 @@ pub mod songs;
 pub mod sort;
 pub mod star;
 pub mod subsonic;
+pub mod tags;

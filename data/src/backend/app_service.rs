@@ -966,6 +966,7 @@ impl AppService {
             artists_api,
             crate::services::api::artists::ArtistsApiService
         ),
+        (tags_api, crate::services::api::tags::TagsApiService),
     );
 
     subsonic_api_factory!(
@@ -1568,6 +1569,16 @@ impl AppService {
             OneShotShuffle::None,
         )
         .await
+    }
+
+    /// Resolve the trawl crate WITHOUT touching the queue — the blended
+    /// song ids in play order, for the Save-Mix-as-Playlist flow.
+    pub async fn resolve_trawl_song_ids(
+        &self,
+        mix: &crate::types::trawl::TrawlCrate,
+    ) -> Result<Vec<String>> {
+        let songs = self.library_orchestrator().resolve_trawl(mix).await?;
+        Ok(songs.into_iter().map(|s| s.id).collect())
     }
 
     /// Resolve the trawl crate and append the blended mix to the queue.

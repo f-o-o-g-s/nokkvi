@@ -47,27 +47,83 @@ pub(crate) fn playlists_updated_at_visible(
     user_visible || matches!(sort, crate::widgets::view_header::SortMode::UpdatedAt)
 }
 
+/// The ownership half of the Edit Rules gate. Compares ids, NEVER names:
+/// Navidrome logins are case-insensitive, so a user logging in as "Foogs"
+/// against DB user_name "foogs" would fail a name compare and silently lose
+/// Edit Rules on every playlist they own. Empty on either side reads "not
+/// owned" (conservative — feature-hidden, never a wrong grant).
+pub(crate) fn playlist_is_owned(owner_id: &str, session_user_id: &str) -> bool {
+    !session_user_id.is_empty() && !owner_id.is_empty() && owner_id == session_user_id
+}
+
+/// Named row flags for [`playlist_context_entries`] — a struct, not
+/// positional bools: two adjacent bools swapped would compile clean and
+/// silently flip menu gating (the transposition-prone drift class). Each
+/// field's effect is pinned independently by the gating tests below.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PlaylistRowFlags {
+    /// The playlist's `uploaded_image.is_some()` — gates "Reset Artwork"
+    /// (there is nothing to reset without an uploaded cover).
+    pub has_custom_art: bool,
+    /// Smart playlist (server-side rules). Hides Edit Playlist + Set as
+    /// Default — the server rejects track mutations on smart playlists
+    /// (error 50/403) — and, from M4, shows Edit Rules… instead.
+    pub is_smart: bool,
+    /// `owner_id == session user_id` (ids, NEVER names — Navidrome logins
+    /// are case-insensitive). Gates the Edit Rules entry — a session whose
+    /// Save always 403s is never offered.
+    pub is_owned: bool,
+}
+
+/// Keys of the header create dropdown (`action_dropdown` requires `Copy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaylistsCreateAction {
+    NewPlaylist,
+    NewSmartPlaylist,
+    ImportNsp,
+    CapsRetry,
+}
+
+/// Resolve the create dropdown's open/bounds state from the single-active
+/// overlay menu.
+fn playlists_create_dropdown_state(
+    open_menu: Option<&crate::app_message::OpenMenu>,
+) -> (bool, Option<iced::Rectangle>) {
+    match open_menu {
+        Some(crate::app_message::OpenMenu::PlaylistsCreate { trigger_bounds }) => {
+            (true, Some(*trigger_bounds))
+        }
+        _ => (false, None),
+    }
+}
+
 /// Build the full set of context menu entries for a playlist parent item.
-/// `has_custom_art` (the playlist's `uploaded_image.is_some()`) gates the
-/// "Reset Artwork" entry — there is nothing to reset without an uploaded
-/// cover.
-pub(crate) fn playlist_context_entries(has_custom_art: bool) -> Vec<PlaylistContextEntry> {
+pub(crate) fn playlist_context_entries(flags: PlaylistRowFlags) -> Vec<PlaylistContextEntry> {
     use crate::widgets::context_menu::LibraryContextEntry;
     let mut entries = vec![
         PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue),
         PlaylistContextEntry::Library(LibraryContextEntry::AddToMix),
         PlaylistContextEntry::Separator,
-        PlaylistContextEntry::EditPlaylist,
-        PlaylistContextEntry::Rename,
-        PlaylistContextEntry::Delete,
-        PlaylistContextEntry::Separator,
-        PlaylistContextEntry::SetCustomArtwork,
     ];
-    if has_custom_art {
+    // Smart rows: no Tracks editor (its saves would 403) — owned smart
+    // rows get Edit Rules… in its place; unowned smart rows get neither.
+    if !flags.is_smart {
+        entries.push(PlaylistContextEntry::EditPlaylist);
+    } else if flags.is_owned {
+        entries.push(PlaylistContextEntry::EditRules);
+    }
+    entries.push(PlaylistContextEntry::Rename);
+    entries.push(PlaylistContextEntry::Delete);
+    entries.push(PlaylistContextEntry::Separator);
+    entries.push(PlaylistContextEntry::SetCustomArtwork);
+    if flags.has_custom_art {
         entries.push(PlaylistContextEntry::ResetArtwork);
     }
     entries.push(PlaylistContextEntry::Separator);
-    entries.push(PlaylistContextEntry::SetAsDefault);
+    // Smart rows are never append targets (D4) — no Set as Default.
+    if !flags.is_smart {
+        entries.push(PlaylistContextEntry::SetAsDefault);
+    }
     entries.push(PlaylistContextEntry::Library(LibraryContextEntry::GetInfo));
     entries
 }
@@ -98,6 +154,11 @@ fn playlist_entry_view<'a, Message: Clone + 'a>(
             Some("assets/icons/list.svg"),
             "Edit Playlist",
             on_action(PlaylistContextEntry::EditPlaylist),
+        ),
+        PlaylistContextEntry::EditRules => menu_button(
+            Some("assets/icons/list-filter.svg"),
+            "Edit Rules…",
+            on_action(PlaylistContextEntry::EditRules),
         ),
         PlaylistContextEntry::SetAsDefault => menu_button(
             Some("assets/icons/star.svg"),
@@ -143,10 +204,16 @@ impl PlaylistsPage {
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).
+        // The header create dropdown (`OpenMenu::PlaylistsCreate`) is anchored
+        // to the toolbar, so it must hold the toolbar open exactly like the
+        // columns menu — otherwise moving the cursor off the toolbar and onto
+        // its own popup options collapses it and the menu vanishes.
         let autohide = crate::theme::is_autohide_toolbar();
-        let toolbar_collapsed = self
-            .common
-            .toolbar_collapsed(autohide, data.overlay.column_dropdown_open);
+        let (create_dropdown_open, _) = playlists_create_dropdown_state(data.overlay.open_menu);
+        let toolbar_collapsed = self.common.toolbar_collapsed(
+            autohide,
+            data.overlay.column_dropdown_open || create_dropdown_open,
+        );
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
@@ -161,15 +228,97 @@ impl PlaylistsPage {
             show_search: true,
             on_search_change: Box::new(PlaylistsMessage::SearchQueryChanged),
             // Playlists view doesn't need a center-on-playing button.
-            buttons: vec![
-                HeaderButton::SortToggle(PlaylistsMessage::ToggleSortOrder),
-                HeaderButton::Refresh(PlaylistsMessage::SlotList(
-                    crate::widgets::SlotListPageMessage::RefreshViewData,
-                )),
-                HeaderButton::Add("New Playlist", PlaylistsMessage::OpenCreatePlaylistDialog),
-                HeaderButton::Trailing(chip),
-                HeaderButton::Trailing(column_dropdown),
-            ],
+            buttons: {
+                let mut btns = vec![
+                    HeaderButton::SortToggle(PlaylistsMessage::ToggleSortOrder),
+                    HeaderButton::Refresh(PlaylistsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::RefreshViewData,
+                    )),
+                ];
+                // Create surface: on smart-capable servers the `+` becomes
+                // a labeled action dropdown (New Playlist / New Smart
+                // Playlist); a FAILED caps fetch renders a dimmed retry
+                // entry (never a silent omission); a genuinely-incapable
+                // server keeps the plain one-click Add.
+                if data.smart_available || data.caps_fetch_failed {
+                    let (create_open, create_bounds) =
+                        playlists_create_dropdown_state(data.overlay.open_menu);
+                    let items: Vec<(
+                        PlaylistsCreateAction,
+                        &'static str,
+                        &'static str,
+                        &'static str,
+                    )> = if data.smart_available {
+                        vec![
+                            (
+                                PlaylistsCreateAction::NewPlaylist,
+                                "assets/icons/list-music.svg",
+                                "New Playlist",
+                                "An ordinary playlist you fill yourself",
+                            ),
+                            (
+                                PlaylistsCreateAction::NewSmartPlaylist,
+                                "assets/icons/sparkles.svg",
+                                "New Smart Playlist",
+                                "Rules the server keeps up to date",
+                            ),
+                            (
+                                PlaylistsCreateAction::ImportNsp,
+                                "assets/icons/folder-open.svg",
+                                "Import .nsp File",
+                                "Create from a smart-playlist rules file",
+                            ),
+                        ]
+                    } else {
+                        vec![
+                            (
+                                PlaylistsCreateAction::NewPlaylist,
+                                "assets/icons/list-music.svg",
+                                "New Playlist",
+                                "An ordinary playlist you fill yourself",
+                            ),
+                            (
+                                PlaylistsCreateAction::CapsRetry,
+                                "assets/icons/refresh-cw.svg",
+                                "Smart playlists unavailable",
+                                "Server version unknown — select to retry",
+                            ),
+                        ]
+                    };
+                    let create_menu = crate::widgets::checkbox_dropdown::action_dropdown(
+                        "assets/icons/plus.svg",
+                        "New playlist (regular or smart)",
+                        items,
+                        |action| match action {
+                            PlaylistsCreateAction::NewPlaylist => {
+                                PlaylistsMessage::NewPlaylistInEditor
+                            }
+                            PlaylistsCreateAction::NewSmartPlaylist => {
+                                PlaylistsMessage::NewSmartPlaylist
+                            }
+                            PlaylistsCreateAction::ImportNsp => PlaylistsMessage::ImportNsp,
+                            PlaylistsCreateAction::CapsRetry => PlaylistsMessage::RetryCapsFetch,
+                        },
+                        |rect| match rect {
+                            Some(b) => PlaylistsMessage::SetOpenMenu(Some(
+                                crate::app_message::OpenMenu::PlaylistsCreate { trigger_bounds: b },
+                            )),
+                            None => PlaylistsMessage::SetOpenMenu(None),
+                        },
+                        create_open,
+                        create_bounds,
+                    );
+                    btns.push(HeaderButton::Trailing(create_menu.into()));
+                } else {
+                    btns.push(HeaderButton::Add(
+                        "New Playlist",
+                        PlaylistsMessage::NewPlaylistInEditor,
+                    ));
+                }
+                btns.push(HeaderButton::Trailing(chip));
+                btns.push(HeaderButton::Trailing(column_dropdown));
+                btns
+            },
             on_roulette: Some(PlaylistsMessage::Roulette),
             collapsed: toolbar_collapsed,
             on_hover_enter: autohide.then_some({
@@ -281,6 +430,7 @@ impl PlaylistsPage {
                         playlist_custom_art,
                         data.stable_viewport,
                         open_menu_for_rows,
+                        data.session_user_id,
                     );
                     crate::widgets::slot_list::wrap_with_select_column_for(
                         select_header_visible,
@@ -289,12 +439,24 @@ impl PlaylistsPage {
                         row,
                     )
                 }
-                SlotListEntry::Child(song, _parent_playlist_id) => {
+                SlotListEntry::Child(song, parent_playlist_id) => {
                     let sub_index_label =
                         self.expansion
                             .child_sub_index_label(ctx.item_index, playlists, |p| &p.id);
-                    let row =
-                        self.render_track_row(song, &ctx, &sub_index_label, data.stable_viewport);
+                    // Smart parents get no Remove-from-Playlist entry (the
+                    // server rejects track mutations on smart playlists).
+                    let parent_is_smart = playlists
+                        .iter()
+                        .find(|p| &p.id == parent_playlist_id)
+                        .is_some_and(|p| p.is_smart);
+                    let row = self.render_track_row(
+                        song,
+                        &ctx,
+                        &sub_index_label,
+                        data.stable_viewport,
+                        open_menu_for_rows,
+                        parent_is_smart,
+                    );
                     crate::widgets::slot_list::wrap_with_select_column_for(
                         select_header_visible,
                         &ctx,
@@ -493,6 +655,7 @@ impl PlaylistsPage {
         playlist_custom_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
+        session_user_id: &str,
     ) -> Element<'a, PlaylistsMessage> {
         use crate::widgets::slot_list::{SLOT_LIST_SLOT_PADDING, slot_list_index_column};
 
@@ -616,6 +779,43 @@ impl PlaylistsPage {
             )
         });
 
+        // Smart-badge glyph slot — always pushed so the row's widget tree
+        // shape stays identical between smart/regular states (the same
+        // discipline as the lock slot below). Regular renders a zero-width
+        // Space; smart renders a sparkles SVG tinted via the shared
+        // static-icon helper so it stays legible on loud-fill rows.
+        columns.push(if playlist.is_smart {
+            let badge_color = crate::widgets::slot_list::slot_list_static_icon_color(
+                style,
+                crate::theme::fg3(),
+                1.0,
+            );
+            let badge_icon = crate::embedded_svg::svg_widget("assets/icons/sparkles.svg")
+                .width(Length::Fixed(14.0))
+                .height(Length::Fixed(14.0))
+                .style(move |_theme, _status| iced::widget::svg::Style {
+                    color: Some(badge_color),
+                });
+            iced::widget::tooltip(
+                badge_icon,
+                iced::widget::container(
+                    iced::widget::text("Smart playlist — updates itself from rules")
+                        .size(11.0)
+                        .font(crate::theme::ui_font()),
+                )
+                .padding(4),
+                iced::widget::tooltip::Position::Top,
+            )
+            .gap(4)
+            .style(crate::theme::container_tooltip)
+            .into()
+        } else {
+            iced::widget::Space::new()
+                .width(Length::Fixed(0.0))
+                .height(Length::Fixed(14.0))
+                .into()
+        });
+
         // Visibility glyph slot — always pushed so the row's widget tree
         // shape stays identical between public/private states. Public renders
         // a zero-width Space; private renders a lock SVG whose tint tracks
@@ -712,7 +912,11 @@ impl PlaylistsPage {
         let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
         context_menu(
             slot_button,
-            playlist_context_entries(playlist.uploaded_image.is_some()),
+            playlist_context_entries(PlaylistRowFlags {
+                has_custom_art: playlist.uploaded_image.is_some(),
+                is_smart: playlist.is_smart,
+                is_owned: playlist_is_owned(&playlist.owner_id, session_user_id),
+            }),
             move |entry, length| {
                 playlist_entry_view(entry, length, |e| {
                     PlaylistsMessage::PlaylistContextAction(item_idx, e)
@@ -740,8 +944,10 @@ impl PlaylistsPage {
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         sub_index_label: &str,
         stable_viewport: bool,
+        open_menu: Option<&'a crate::app_message::OpenMenu>,
+        parent_is_smart: bool,
     ) -> Element<'a, PlaylistsMessage> {
-        super::super::expansion::render_child_track_row(
+        let track_el = super::super::expansion::render_child_track_row(
             song,
             ctx,
             sub_index_label,
@@ -752,6 +958,17 @@ impl PlaylistsPage {
                 .as_ref()
                 .map(|id| PlaylistsMessage::NavigateAndExpandArtist(id.clone())),
             1, // depth 1: child tracks under playlist
+        );
+
+        use crate::widgets::context_menu::{playlist_child_entries, wrap_library_row};
+        wrap_library_row(
+            crate::View::Playlists,
+            ctx.item_index,
+            track_el,
+            playlist_child_entries(parent_is_smart),
+            open_menu,
+            PlaylistsMessage::ContextMenuAction,
+            PlaylistsMessage::SetOpenMenu,
         )
     }
 }
@@ -760,47 +977,151 @@ impl PlaylistsPage {
 mod tests {
     use super::*;
 
-    /// "Set Custom Artwork…" is always offered on playlist rows; "Reset
-    /// Artwork" only when the playlist has an uploaded cover.
+    fn has(entries: &[PlaylistContextEntry], f: impl Fn(&PlaylistContextEntry) -> bool) -> bool {
+        entries.iter().any(f)
+    }
+
+    /// `has_custom_art` alone gates "Reset Artwork" — no other flag moves it.
+    /// "Set Custom Artwork…" is always offered.
     #[test]
     fn playlist_entries_gate_reset_on_custom_art() {
-        let with = playlist_context_entries(true);
+        let with = playlist_context_entries(PlaylistRowFlags {
+            has_custom_art: true,
+            ..Default::default()
+        });
         assert!(
-            with.iter()
-                .any(|e| matches!(e, PlaylistContextEntry::ResetArtwork)),
+            has(&with, |e| matches!(e, PlaylistContextEntry::ResetArtwork)),
             "custom-art playlist must offer Reset Artwork"
         );
-        let without = playlist_context_entries(false);
+        let without = playlist_context_entries(PlaylistRowFlags::default());
         assert!(
-            !without
-                .iter()
-                .any(|e| matches!(e, PlaylistContextEntry::ResetArtwork)),
+            !has(&without, |e| matches!(
+                e,
+                PlaylistContextEntry::ResetArtwork
+            )),
             "a playlist without custom art has nothing to reset"
         );
         for entries in [&with, &without] {
             assert!(
-                entries
-                    .iter()
-                    .any(|e| matches!(e, PlaylistContextEntry::SetCustomArtwork)),
+                has(entries, |e| matches!(
+                    e,
+                    PlaylistContextEntry::SetCustomArtwork
+                )),
                 "Set Custom Artwork… must always be offered"
             );
             // The pre-existing playlist actions survive in both forms.
             for check in [
-                entries
-                    .iter()
-                    .any(|e| matches!(e, PlaylistContextEntry::EditPlaylist)),
-                entries
-                    .iter()
-                    .any(|e| matches!(e, PlaylistContextEntry::Rename)),
-                entries
-                    .iter()
-                    .any(|e| matches!(e, PlaylistContextEntry::Delete)),
-                entries
-                    .iter()
-                    .any(|e| matches!(e, PlaylistContextEntry::SetAsDefault)),
+                has(entries, |e| matches!(e, PlaylistContextEntry::EditPlaylist)),
+                has(entries, |e| matches!(e, PlaylistContextEntry::Rename)),
+                has(entries, |e| matches!(e, PlaylistContextEntry::Delete)),
+                has(entries, |e| matches!(e, PlaylistContextEntry::SetAsDefault)),
             ] {
                 assert!(check, "pre-existing entries must survive the gating");
             }
         }
+    }
+
+    /// `is_smart` alone hides Edit Playlist + Set as Default (the server
+    /// rejects track mutations on smart playlists) while every other entry
+    /// survives. The custom-art flag stays independent of smartness.
+    #[test]
+    fn playlist_entries_gate_smart_rows_off_track_editing() {
+        let smart = playlist_context_entries(PlaylistRowFlags {
+            is_smart: true,
+            has_custom_art: true,
+            ..Default::default()
+        });
+        assert!(
+            !has(&smart, |e| matches!(e, PlaylistContextEntry::EditPlaylist)),
+            "smart rows must not offer the Tracks editor (saves would 403)"
+        );
+        assert!(
+            !has(&smart, |e| matches!(e, PlaylistContextEntry::SetAsDefault)),
+            "smart rows are never append targets — no Set as Default"
+        );
+        for (label, check) in [
+            (
+                "Rename",
+                has(&smart, |e| matches!(e, PlaylistContextEntry::Rename)),
+            ),
+            (
+                "Delete",
+                has(&smart, |e| matches!(e, PlaylistContextEntry::Delete)),
+            ),
+            (
+                "SetCustomArtwork",
+                has(&smart, |e| {
+                    matches!(e, PlaylistContextEntry::SetCustomArtwork)
+                }),
+            ),
+            (
+                "ResetArtwork (custom-art flag independent of smartness)",
+                has(&smart, |e| matches!(e, PlaylistContextEntry::ResetArtwork)),
+            ),
+        ] {
+            assert!(check, "{label} must survive on smart rows");
+        }
+    }
+
+    /// `is_owned` alone gates Edit Rules…: emitted ONLY for owned smart
+    /// rows (a session whose Save always 403s is never offered), and never
+    /// on regular rows regardless of ownership. (The M1 interim pinned
+    /// zero emission; this is the deliberate M4 swap.)
+    #[test]
+    fn playlist_entries_gate_edit_rules_on_owned_smart() {
+        let owned_smart = playlist_context_entries(PlaylistRowFlags {
+            is_smart: true,
+            is_owned: true,
+            ..Default::default()
+        });
+        assert!(
+            has(&owned_smart, |e| matches!(
+                e,
+                PlaylistContextEntry::EditRules
+            )),
+            "owned smart rows offer Edit Rules…"
+        );
+        for flags in [
+            PlaylistRowFlags {
+                is_smart: true,
+                is_owned: false,
+                ..Default::default()
+            },
+            PlaylistRowFlags {
+                is_smart: false,
+                is_owned: true,
+                ..Default::default()
+            },
+            PlaylistRowFlags::default(),
+        ] {
+            assert!(
+                !has(&playlist_context_entries(flags), |e| matches!(
+                    e,
+                    PlaylistContextEntry::EditRules
+                )),
+                "EditRules is owned-smart-only (flags {flags:?})"
+            );
+        }
+    }
+
+    /// The ownership gate compares ids, never names: the case-mismatch
+    /// login scenario (session username "Foogs" vs row owner_name "foogs")
+    /// is undetectable here BY CONSTRUCTION — the predicate never sees a
+    /// name. Matching ids ⇒ owned; empty on either side ⇒ not owned.
+    #[test]
+    fn ownership_gate_uses_ids_never_names() {
+        assert!(playlist_is_owned("user-9", "user-9"));
+        assert!(
+            !playlist_is_owned("user-9", "user-10"),
+            "differing ids are not owned"
+        );
+        assert!(
+            !playlist_is_owned("user-9", ""),
+            "unknown session id must read as not-owned (conservative)"
+        );
+        assert!(
+            !playlist_is_owned("", "user-9"),
+            "a row with no owner id must read as not-owned"
+        );
     }
 }

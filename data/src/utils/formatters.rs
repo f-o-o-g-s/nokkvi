@@ -211,6 +211,33 @@ pub fn format_date_concise(date_str: &str) -> String {
     date_str.split('T').next().unwrap_or(date_str).to_string()
 }
 
+/// Age-aware "evaluated …" stamp for smart playlists: within the last 24 h
+/// the LOCAL clock time ("evaluated 14:03"); older, the concise date form
+/// ("evaluated 7/12/26"). A bare clock time on a value that is routinely
+/// days old (Navidrome's lazy re-evaluation) would actively mislead — the
+/// stale case is the NORM on browse surfaces. `None` when the timestamp
+/// doesn't parse (render nothing rather than a lie).
+pub fn format_evaluated_stamp(
+    evaluated_at: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<String> {
+    use chrono::{DateTime, Local, Utc};
+    let utc: DateTime<Utc> = evaluated_at.parse().ok()?;
+    let age = now.signed_duration_since(utc);
+    if age.num_hours() < 24 && age.num_seconds() > -60 {
+        let local: DateTime<Local> = utc.into();
+        Some(format!("evaluated {}", local.format("%H:%M")))
+    } else {
+        Some(format!("evaluated {}", format_date_concise(evaluated_at)))
+    }
+}
+
+/// [`format_evaluated_stamp`] against the current wall clock — the UI-crate
+/// entry point (chrono is a data-crate dependency only).
+pub fn format_evaluated_stamp_now(evaluated_at: &str) -> Option<String> {
+    format_evaluated_stamp(evaluated_at, chrono::Utc::now())
+}
+
 pub fn format_date(date_str: &str) -> Result<String, anyhow::Error> {
     Ok(format_date_concise(date_str))
 }
@@ -435,5 +462,39 @@ mod tests {
     #[test]
     fn relative_time_invalid_returns_raw() {
         assert_eq!(format_relative_time("not a date"), "not a date");
+    }
+
+    // =========================================================================
+    // format_evaluated_stamp — the age-aware smart-playlist freshness stamp
+    // =========================================================================
+
+    /// 10 minutes old ⇒ clock form; 3 days old ⇒ dated form; garbage ⇒
+    /// None (never a fake stamp).
+    #[test]
+    fn evaluated_stamp_is_age_aware() {
+        use chrono::{Duration, Utc};
+        let now = "2026-07-15T12:00:00Z"
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap();
+
+        let fresh = (now - Duration::minutes(10)).to_rfc3339();
+        let stamp = format_evaluated_stamp(&fresh, now).expect("fresh stamp");
+        assert!(
+            stamp.starts_with("evaluated ") && stamp.len() <= "evaluated 23:59".len(),
+            "a minutes-old evaluation shows the clock form, got: {stamp}"
+        );
+        assert!(
+            !stamp.contains('/'),
+            "clock form carries no date, got: {stamp}"
+        );
+
+        let stale = (now - Duration::days(3)).to_rfc3339();
+        let stamp = format_evaluated_stamp(&stale, now).expect("stale stamp");
+        assert!(
+            stamp.contains('/'),
+            "a days-old evaluation shows the dated form, got: {stamp}"
+        );
+
+        assert_eq!(format_evaluated_stamp("not a date", now), None);
     }
 }

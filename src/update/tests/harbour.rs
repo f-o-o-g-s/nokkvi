@@ -46,6 +46,12 @@ fn harbour_playlist(id: &str, name: &str) -> PlaylistUIViewData {
         updated_at: String::new(),
         artwork_album_ids: Vec::new(),
         uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
     }
 }

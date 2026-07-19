@@ -68,10 +68,12 @@ pub struct DefaultPlaylistPickerState {
 
 impl DefaultPlaylistPickerState {
     /// Build a new picker state from the current playlists list.
-    /// Prepends the "Clear default" virtual entry.
+    /// Prepends the "Clear default" virtual entry. Smart playlists are
+    /// excluded — the default playlist is an APPEND target, and the server
+    /// rejects track mutations on smart playlists (error 50/403).
     pub(crate) fn new(playlists: &[PlaylistUIViewData]) -> Self {
         let mut all_entries = vec![PickerEntry::Clear];
-        for p in playlists {
+        for p in playlists.iter().filter(|p| !p.is_smart) {
             all_entries.push(PickerEntry::Playlist {
                 id: p.id.clone(),
                 name: p.name.clone(),
@@ -446,6 +448,12 @@ mod tests {
             updated_at: String::new(),
             artwork_album_ids: vec![],
             uploaded_image: None,
+            is_smart: false,
+            rules: None,
+            evaluated_at: None,
+            is_file_backed: false,
+            sync: false,
+            owner_id: String::new(),
             searchable_lower: name.to_lowercase(),
         }
     }

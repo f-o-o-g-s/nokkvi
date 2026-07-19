@@ -17,6 +17,12 @@ fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::
         updated_at: String::new(),
         artwork_album_ids: vec![],
         uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
     }
 }
@@ -276,36 +282,14 @@ fn text_input_dialog_combo_round_trip_preserves_public_off() {
 }
 
 #[test]
-fn open_create_playlist_dialog_defaults_to_public_and_no_combo() {
-    use crate::widgets::text_input_dialog::TextInputDialogAction;
-
-    let mut app = test_app();
-    app.text_input_dialog.open_create_playlist();
-
-    assert!(app.text_input_dialog.visible);
-    assert!(
-        app.text_input_dialog.public,
-        "Create-New-Playlist dialog must default the toggle to public"
-    );
-    assert!(
-        !app.text_input_dialog.save_playlist_mode,
-        "Create-New-Playlist must not show the existing-playlists combo"
-    );
-    assert!(matches!(
-        app.text_input_dialog.action,
-        Some(TextInputDialogAction::CreatePlaylistAndEdit)
-    ));
-}
-
-#[test]
-fn create_playlist_dialog_refused_when_already_editing() {
+fn new_playlist_refused_when_already_editing() {
     use crate::{
         app_message::{Message, SplitViewMessage},
         views::PlaylistsMessage,
     };
 
     let mut app = test_app();
-    // Enter split-view edit mode first.
+    // Enter split-view edit mode on an existing playlist first.
     let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "p1".into(),
         playlist_name: "Existing".into(),
@@ -314,41 +298,45 @@ fn create_playlist_dialog_refused_when_already_editing() {
     }));
     assert!(app.playlist_editor.is_some());
 
-    // User clicks the view-header `+` — message bubbles to root, guard fires.
-    let _ = app.update(Message::Playlists(
-        PlaylistsMessage::OpenCreatePlaylistDialog,
-    ));
+    // "New Playlist" now drops into a blank editor — the guard must refuse
+    // while an edit is in progress and leave the current session untouched.
+    let _ = app.update(Message::Playlists(PlaylistsMessage::NewPlaylistInEditor));
 
-    assert!(
-        !app.text_input_dialog.visible,
-        "guard must keep the dialog closed when already editing"
-    );
-    assert!(
-        app.playlist_editor.is_some(),
-        "guard must not disturb the in-progress edit"
+    assert_eq!(
+        app.playlist_editor
+            .as_ref()
+            .map(|e| e.edit.playlist_id.clone()),
+        Some("p1".to_string()),
+        "guard must not replace the in-progress edit with a blank create"
     );
 }
 
 #[test]
-fn create_playlist_dialog_opens_when_not_editing() {
-    use crate::{
-        app_message::Message, views::PlaylistsMessage,
-        widgets::text_input_dialog::TextInputDialogAction,
-    };
+fn new_playlist_drops_into_a_blank_editor() {
+    use crate::{app_message::Message, views::PlaylistsMessage};
 
     let mut app = test_app();
     assert!(app.playlist_editor.is_none());
 
-    let _ = app.update(Message::Playlists(
-        PlaylistsMessage::OpenCreatePlaylistDialog,
-    ));
+    let _ = app.update(Message::Playlists(PlaylistsMessage::NewPlaylistInEditor));
 
-    assert!(app.text_input_dialog.visible);
-    assert!(matches!(
-        app.text_input_dialog.action,
-        Some(TextInputDialogAction::CreatePlaylistAndEdit)
-    ));
-    assert!(app.text_input_dialog.public);
+    let editor = app.playlist_editor.as_ref().expect("blank editor mounted");
+    assert!(editor.rules_session().is_none(), "it's a Tracks session");
+    assert!(
+        editor.edit.playlist_id.is_empty(),
+        "no server row yet — deferred create"
+    );
+    assert!(
+        editor.edit.playlist_name.is_empty(),
+        "empty placeholder name"
+    );
+    assert_eq!(
+        editor.load_state,
+        crate::state::EditorLoadState::Loaded,
+        "no track resolve to wait for"
+    );
+    assert_eq!(app.current_view, crate::View::PlaylistEditor);
+    assert!(!app.text_input_dialog.visible, "no naming modal");
 }
 
 // ============================================================================
@@ -654,6 +642,12 @@ fn full_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::Playl
         updated_at: "2026-05-27T20:19:59-06:00".to_string(),
         artwork_album_ids: vec![],
         uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
     }
 }
@@ -726,3 +720,33 @@ fn resync_noops_with_no_active_playlist() {
 }
 
 // ============================================================================
+
+/// The default playlist is an APPEND target and the server rejects track
+/// mutations on smart playlists, so `DefaultPlaylistPickerState::new`
+/// excludes smart rows (a shipped M1 gate — this is its coverage).
+#[test]
+fn picker_excludes_smart_playlists() {
+    use crate::widgets::default_playlist_picker::{DefaultPlaylistPickerState, PickerEntry};
+
+    let mut regular = make_test_playlist("p1", "Road Trip");
+    let mut smart = make_test_playlist("sp1", "Loved");
+    smart.is_smart = true;
+    smart.rules = Some(serde_json::json!({ "all": [] }));
+    // Order the smart row first to prove the filter isn't index-luck.
+    let _ = &mut regular;
+    let state = DefaultPlaylistPickerState::new(&[smart, regular]);
+
+    let names: Vec<&str> = state
+        .all_entries
+        .iter()
+        .filter_map(|e| match e {
+            PickerEntry::Playlist { name, .. } => Some(name.as_str()),
+            PickerEntry::Clear => None,
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Road Trip"],
+        "smart rows are not append targets"
+    );
+}

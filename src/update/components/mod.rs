@@ -108,7 +108,7 @@ impl PaginatedFetch {
 
 /// Result type for the combined "resolve song IDs + fetch playlist list" async task.
 /// Pairs: `(playlist_id, playlist_name)` list + resolved song IDs.
-type PlaylistSongResolveResult = Result<(Vec<(String, String)>, Vec<String>), anyhow::Error>;
+type PlaylistSongResolveResult = Result<(Vec<(String, String, bool)>, Vec<String>), anyhow::Error>;
 
 impl Nokkvi {
     // ── Helper methods for deduplicating component handler patterns ──
@@ -937,9 +937,11 @@ impl Nokkvi {
                 let (playlists, _) = service
                     .load_playlists_with_libraries("name", "ASC", None, &library_ids)
                     .await?;
-                let playlist_pairs: Vec<(String, String)> =
-                    playlists.into_iter().map(|p| (p.id, p.name)).collect();
-                Ok((playlist_pairs, song_ids))
+                // PRE-filter triples: the quick-add bypass consumer must see
+                // smart rows (flagged) to refuse a smart default playlist.
+                let triples =
+                    nokkvi_data::services::api::playlists::playlist_add_target_triples(&playlists);
+                Ok((triples, song_ids))
             },
             |result| Self::map_add_to_playlist_result(result, error_ctx),
         )
@@ -1154,6 +1156,39 @@ impl Nokkvi {
             move |shell| async move { shell.play_next_batch(payload).await },
             "Added batch to play next".to_string(),
             "play next batch",
+        )
+    }
+
+    /// Fresh-fetch a song by id and open the Get Info modal with the full
+    /// record. Shared by the queue's ShowInfo arm and the Tracks editor's
+    /// GetInfo — both render from thin queue-row projections whose persisted
+    /// `Song` structs may predate newer fields (tags, compilation, …), so
+    /// the modal always re-reads the server.
+    pub(crate) fn song_info_fetch_task(&self, song_id: String) -> Task<Message> {
+        self.shell_task(
+            move |shell| async move {
+                let api = shell.songs_api().await?;
+                let song = api.load_song_by_id(&song_id).await?;
+                Ok(nokkvi_data::types::info_modal::InfoModalItem::from_song(
+                    &song,
+                ))
+            },
+            |result: Result<nokkvi_data::types::info_modal::InfoModalItem, anyhow::Error>| {
+                match result {
+                    Ok(item) => Message::InfoModal(
+                        crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
+                    ),
+                    Err(e) => {
+                        tracing::error!("Failed to load song info: {e}");
+                        Message::Toast(crate::app_message::ToastMessage::Push(
+                            nokkvi_data::types::toast::Toast::new(
+                                format!("Failed to load song info: {e}"),
+                                nokkvi_data::types::toast::ToastLevel::Error,
+                            ),
+                        ))
+                    }
+                }
+            },
         )
     }
 
@@ -1507,8 +1542,22 @@ impl Nokkvi {
             let task_manager = shell.task_manager();
             let engine = shell.audio_engine();
             let storage = shell.storage().clone();
+            // A live rules-session draft gets a best-effort DELETE ahead of
+            // the engine stop. On explicit logout auth is still valid; on
+            // the 401 path this fails harmlessly and the next login's
+            // orphan sweep (own-pid arm) covers it.
+            let draft_cleanup = self
+                .rules_session()
+                .and_then(|s| s.draft.as_ref().map(|d| d.id.clone()))
+                .map(|id| (id, shell.clone()));
             Task::perform(
                 async move {
+                    if let Some((draft_id, shell)) = draft_cleanup {
+                        if let Ok(api) = shell.playlists_api().await {
+                            let _ = api.delete_playlist(&draft_id).await;
+                        }
+                        tracing::debug!(" [SESSION-RESET] draft cleanup attempted");
+                    }
                     // (1) Stop the engine first (kills PipeWire streams, the
                     // decode loop, and the render thread). Lock, stop, drop the
                     // guard BEFORE the drain — never hold the engine lock across
@@ -1547,6 +1596,12 @@ impl Nokkvi {
         self.app_service = None;
         self.stored_session = None;
         self.should_auto_login = false;
+        self.session_user_id.clear();
+        // Capability gate is per-server; the generation carries FORWARD
+        // (bumped) like the Harbour/Trawl counters — an in-flight preview
+        // task holds a captured generation a zeroed counter would re-mint.
+        self.caps_state = crate::state::CapsState::default();
+        self.rules_preview_generation = self.rules_preview_generation.wrapping_add(1);
         self.screen = crate::Screen::Login;
 
         // Clear transient login state so re-login starts from a clean slate:

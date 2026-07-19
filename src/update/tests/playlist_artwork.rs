@@ -27,6 +27,12 @@ fn make_playlist(id: &str, name: &str, uploaded: bool) -> PlaylistUIViewData {
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         artwork_album_ids: Vec::new(),
         uploaded_image: uploaded.then(|| "cover-ref".to_string()),
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
     }
 }

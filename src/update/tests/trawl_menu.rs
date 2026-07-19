@@ -99,6 +99,12 @@ fn playlists_menu_add_to_mix_seeds_the_crate() {
         updated_at: String::new(),
         artwork_album_ids: vec![],
         uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: "night drive".to_string(),
     };
     app.library.playlists.append_page(vec![playlist], 1);
@@ -196,7 +202,12 @@ fn playlists_menu_list_offers_add_to_mix() {
     // that list shipped without AddToMix, an invisible gap the docs found.
     // Pin the list itself.
     for has_custom_art in [false, true] {
-        let entries = crate::views::playlists::view::playlist_context_entries(has_custom_art);
+        let entries = crate::views::playlists::view::playlist_context_entries(
+            crate::views::playlists::view::PlaylistRowFlags {
+                has_custom_art,
+                ..Default::default()
+            },
+        );
         assert!(
             entries.iter().any(|e| matches!(
                 e,

@@ -205,8 +205,10 @@ const fn pane_width_fraction(portion: u16) -> f32 {
     portion as f32 / (QUEUE_PANE_PORTION + BROWSER_PANE_PORTION) as f32
 }
 
-/// Slot-math width fraction for the queue (left) pane.
-const QUEUE_PANE_FRACTION: f32 = pane_width_fraction(QUEUE_PANE_PORTION);
+/// Slot-math width fraction for the queue (left) pane. Also the editor's
+/// render width fraction — `resync_slot_counts` reads it to size the editor's
+/// stored `slot_count` to match its actual footprint.
+pub(crate) const QUEUE_PANE_FRACTION: f32 = pane_width_fraction(QUEUE_PANE_PORTION);
 /// Slot-math width fraction for the browsing (right) pane.
 const BROWSER_PANE_FRACTION: f32 = pane_width_fraction(BROWSER_PANE_PORTION);
 
@@ -1597,6 +1599,51 @@ impl Nokkvi {
         // queue split is suppressed while a session is active so the editor's
         // browser never leaks into the Queue tab when the user peeks at it.
         let in_editor = self.current_view == View::PlaylistEditor;
+
+        // RULES session: its own two-pane layout (results | rule form) with
+        // NO browsing panel — rendered before the split-view branch, which
+        // requires a browsing panel the rules session deliberately lacks.
+        if in_editor
+            && let Some(editor) = self.playlist_editor.as_ref()
+            && let Some(session) = editor.rules_session()
+        {
+            use nokkvi_data::types::rules_session::RulesTarget;
+            // Cover: an edit session shows the playlist's custom cover (else
+            // its frozen quad); a create session shows a LIVE quad built from
+            // the current preview's distinct album covers.
+            let (custom_cover, cover_album_ids, cover_editable) = match &session.target {
+                RulesTarget::Edit { playlist_id, .. } => {
+                    let row = self.library.playlists.iter().find(|p| &p.id == playlist_id);
+                    let ids = row.map(|r| r.artwork_album_ids.clone()).unwrap_or_default();
+                    let custom = row
+                        .filter(|r| r.uploaded_image.is_some())
+                        .and_then(|_| self.artwork.playlist_custom_art.snapshot.get(playlist_id));
+                    (custom, ids, true)
+                }
+                RulesTarget::Create => {
+                    let mut ids: Vec<String> = Vec::new();
+                    for song in &session.preview.rows {
+                        if !song.album_id.is_empty() && !ids.contains(&song.album_id) {
+                            ids.push(song.album_id.clone());
+                            if ids.len() >= 4 {
+                                break;
+                            }
+                        }
+                    }
+                    (None, ids, false)
+                }
+            };
+            let rules_data = crate::views::playlist_editor::rules_view::RulesViewData {
+                session,
+                album_art: &self.artwork.album_art.snapshot,
+                window_height: self.window.height,
+                custom_cover,
+                cover_album_ids,
+                cover_editable,
+            };
+            return editor.rules_view(rules_data);
+        }
+
         if self.browsing_panel.is_some()
             && (in_editor || (self.current_view == View::Queue && self.playlist_editor.is_none()))
         {
@@ -1608,6 +1655,31 @@ impl Nokkvi {
                 Some(editor) if in_editor => {
                     let dirty = editor.edit.is_dirty(&self.editor_song_ids())
                         || editor.edit.has_metadata_changes();
+                    // Cover: a saved session shows the playlist's custom cover
+                    // (else its frozen quad); an unsaved create session shows a
+                    // LIVE quad built from the working buffer's album covers and
+                    // can't upload yet.
+                    let cover_editable = !editor.edit.playlist_id.is_empty();
+                    let (custom_cover, cover_album_ids) = if cover_editable {
+                        let pid = &editor.edit.playlist_id;
+                        let row = self.library.playlists.iter().find(|p| &p.id == pid);
+                        let ids = row.map(|r| r.artwork_album_ids.clone()).unwrap_or_default();
+                        let custom = row
+                            .filter(|r| r.uploaded_image.is_some())
+                            .and_then(|_| self.artwork.playlist_custom_art.snapshot.get(pid));
+                        (custom, ids)
+                    } else {
+                        let mut ids: Vec<String> = Vec::new();
+                        for song in &editor.songs {
+                            if !song.album_id.is_empty() && !ids.contains(&song.album_id) {
+                                ids.push(song.album_id.clone());
+                                if ids.len() >= 4 {
+                                    break;
+                                }
+                            }
+                        }
+                        (None, ids)
+                    };
                     let editor_data = views::EditorViewData {
                         songs: std::borrow::Cow::Borrowed(&editor.songs),
                         album_art: &self.artwork.album_art.snapshot,
@@ -1620,6 +1692,9 @@ impl Nokkvi {
                         comment: editor.edit.playlist_comment.clone(),
                         public: editor.edit.playlist_public,
                         dirty,
+                        custom_cover,
+                        cover_album_ids,
+                        cover_editable,
                         drop_indicator_slot: self.drop_indicator_slot(),
                         open_menu: self.open_menu.as_ref(),
                     };
@@ -1857,6 +1932,9 @@ impl Nokkvi {
                     stable_viewport: self.settings.stable_viewport,
                     elevated,
                     default_playlist_name: &self.settings.default_playlist_name,
+                    session_user_id: &self.session_user_id,
+                    smart_available: self.caps_state.smart_available(),
+                    caps_fetch_failed: self.caps_state.fetch_failed(),
                     overlay: views::OverlayMenuViewData {
                         column_dropdown_open,
                         column_dropdown_trigger_bounds,

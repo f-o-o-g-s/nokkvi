@@ -570,10 +570,11 @@ impl Nokkvi {
                             let (playlists, _) = service
                                 .load_playlists_with_libraries("name", "ASC", None, &library_ids)
                                 .await?;
-                            Ok(playlists
-                                .into_iter()
-                                .map(|p| (p.id, p.name))
-                                .collect::<Vec<_>>())
+                            // Smart rows filtered by the shared helper — an
+                            // overwrite target must be track-editable (D4).
+                            Ok(nokkvi_data::services::api::playlists::non_smart_name_pairs(
+                                &playlists,
+                            ))
                         },
                         |result: Result<Vec<(String, String)>, anyhow::Error>| match result {
                             Ok(playlists) => Message::PlaylistsFetchedForDialog(playlists),
@@ -591,18 +592,53 @@ impl Nokkvi {
                 }
             }
             QueueAction::EditPlaylist => {
-                // Enter edit mode for the currently-playing playlist. Prefer the
-                // freshest cached visibility from the playlists library; fall
-                // back to the context's own (played / persisted) flag when the
-                // playlists list hasn't loaded yet, rather than defaulting to
-                // public — a private playlist must not open looking public.
+                // Enter edit mode for the currently-playing playlist —
+                // routed by the best synchronously-available smartness
+                // signal (D4: a Tracks editor must never mount on a smart
+                // playlist; its saves would 403).
                 if let Some(ref ctx) = self.active_playlist_info {
-                    let playlist_public = self
-                        .library
-                        .playlists
-                        .iter()
-                        .find(|p| p.id == ctx.id)
-                        .map_or(ctx.public, |p| p.public);
+                    let lib_row = self.library.playlists.iter().find(|p| p.id == ctx.id);
+                    // Freshest native signal first (library row), then the
+                    // play-time context. `ctx.readonly` cannot upgrade an
+                    // unknown to "regular" — it is also true for unowned
+                    // regulars — so it never force-routes; it only rides
+                    // the None arm below into refusal.
+                    let known_smart = lib_row.map(|p| p.is_smart).or(ctx.smart);
+                    match known_smart {
+                        Some(true) => {
+                            // Route into the RULES session. A library row
+                            // means the fast path (rules already local);
+                            // context-only smartness (list never loaded)
+                            // takes the JIT meta fetch — the enter handler
+                            // needs the rules substrate.
+                            let playlist_id = ctx.id.clone();
+                            if lib_row.is_some() {
+                                return self.handle_enter_rules_mode(
+                                    crate::app_message::RulesEntryTarget::Edit { playlist_id },
+                                );
+                            }
+                            return self.dispatch_playlist_kind_fetch(playlist_id);
+                        }
+                        None => {
+                            // Unknown window (Harbour-played / restored
+                            // session, list never loaded): resolve with a
+                            // just-in-time meta fetch BEFORE routing — no
+                            // late 403s, no Tracks editor ever mounting on
+                            // a smart playlist. The conservative `readonly`
+                            // tripwire rides the same lane (it cannot
+                            // upgrade to "regular": it is also true for
+                            // unowned regulars).
+                            let playlist_id = ctx.id.clone();
+                            return self.dispatch_playlist_kind_fetch(playlist_id);
+                        }
+                        Some(false) => {}
+                    }
+                    // Prefer the freshest cached visibility from the
+                    // playlists library; fall back to the context's own
+                    // (played / persisted) flag when the playlists list
+                    // hasn't loaded yet, rather than defaulting to public —
+                    // a private playlist must not open looking public.
+                    let playlist_public = lib_row.map_or(ctx.public, |p| p.public);
                     return Task::done(Message::SplitView(SplitViewMessage::EnterEditMode {
                         playlist_id: ctx.id.clone(),
                         playlist_name: ctx.name.clone(),
@@ -615,36 +651,10 @@ impl Nokkvi {
                 return Task::done(Message::SplitView(SplitViewMessage::ToggleBrowsingPanel));
             }
             QueueAction::ShowInfo(index) => {
-                // Fetch fresh Song data from the API to ensure full field coverage.
-                // QueueManager may hold stale Song structs (persisted before new fields
-                // like tags, compilation, etc. were added).
+                // Fresh-fetch by id (shared helper): QueueManager may hold
+                // stale Song structs persisted before newer fields existed.
                 if let Some(song_id) = filtered_queue.get(index).map(|s| s.id.clone()) {
-                    return self.shell_task(
-                        move |shell| async move {
-                            let api = shell.songs_api().await?;
-                            let song = api.load_song_by_id(&song_id).await?;
-                            Ok(nokkvi_data::types::info_modal::InfoModalItem::from_song(
-                                &song,
-                            ))
-                        },
-                        |result: Result<
-                            nokkvi_data::types::info_modal::InfoModalItem,
-                            anyhow::Error,
-                        >| match result {
-                            Ok(item) => Message::InfoModal(
-                                crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
-                            ),
-                            Err(e) => {
-                                tracing::error!("Failed to load song info: {e}");
-                                Message::Toast(crate::app_message::ToastMessage::Push(
-                                    nokkvi_data::types::toast::Toast::new(
-                                        format!("Failed to load song info: {e}"),
-                                        nokkvi_data::types::toast::ToastLevel::Error,
-                                    ),
-                                ))
-                            }
-                        },
-                    );
+                    return self.song_info_fetch_task(song_id);
                 }
             }
             QueueAction::ShowInFolder(index) => {

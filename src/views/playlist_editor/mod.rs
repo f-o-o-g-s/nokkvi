@@ -41,6 +41,16 @@ pub(crate) struct EditorViewData<'a> {
     pub public: bool,
     /// Edit-bar: whether the editor has unsaved changes (tracks or metadata).
     pub dirty: bool,
+    /// Edit-bar cover: the uploaded custom cover, when set and warm (a saved
+    /// playlist only) — takes precedence over the derived quad.
+    pub custom_cover: Option<&'a iced::widget::image::Handle>,
+    /// Edit-bar cover: album ids feeding the 2×2 quad fallback (the saved
+    /// playlist's frozen ids, or a live set from the working buffer on an
+    /// unsaved create session).
+    pub cover_album_ids: Vec<String>,
+    /// Edit-bar cover: whether Set/Reset are live (a saved playlist); an
+    /// unsaved create session shows the quad but can't upload yet.
+    pub cover_editable: bool,
     /// Visual slot index where the cross-pane-drag drop indicator should draw —
     /// `Some` only when a drag is active and the cursor is over an editor slot.
     pub drop_indicator_slot: Option<usize>,
@@ -50,4 +60,6 @@ pub(crate) struct EditorViewData<'a> {
     pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
+pub(crate) mod cover;
+pub(crate) mod rules_view;
 pub(crate) mod view;

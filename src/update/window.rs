@@ -106,6 +106,32 @@ impl Nokkvi {
                 sc_expanded
             };
         }
+
+        // The playlist editor is NOT one of the pooled pages: it renders in
+        // place of the view header (its edit bar instead) at the narrower
+        // queue-pane width, so its footprint differs from every page above.
+        // Size it from its OWN view() chrome so the within-list drag maps
+        // slots→items against the real rendered count — otherwise the stored
+        // count stays at the SlotListView default and every drag off a >N-track
+        // (or scrolled) playlist grabs/drops the wrong row.
+        if self.playlist_editor.is_some() {
+            let width = self.content_pane_width() * crate::app_view::QUEUE_PANE_FRACTION;
+            if let Some(editor) = self.playlist_editor.as_mut()
+                // Tracks sessions only — a Rules session renders its evaluated
+                // preview through its own state, not `editor.common.slot_list`,
+                // and at a different pane width, so the Tracks chrome would set a
+                // wrong (and unused) count there.
+                && editor.rules_session().is_none()
+            {
+                let chrome = crate::views::playlist_editor::view::editor_effective_chrome(
+                    width,
+                    window_height,
+                    editor.columns.select,
+                );
+                editor.common.slot_list.slot_count =
+                    SlotListConfig::with_dynamic_slots(window_height, chrome).slot_count;
+            }
+        }
     }
 
     /// Prefetch mini artwork for whatever slots are currently visible in the

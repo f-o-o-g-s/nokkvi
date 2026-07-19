@@ -1445,3 +1445,131 @@ fn rebound_add_to_queue_captured_mid_typing_does_not_double_fire() {
         "captured Shift+Backspace already edited the field; it must not also fire AddMix"
     );
 }
+
+// ---- M7: Save Mix as Playlist ----------------------------------------------
+
+#[test]
+fn save_as_playlist_with_empty_crate_warns() {
+    let mut app = test_app();
+    open_modal(&mut app);
+    let _ = app.handle_trawl_modal(TrawlModalMessage::SaveAsPlaylist);
+    let toast = app.toast.toasts.back().expect("empty-crate warn");
+    assert!(toast.message.contains("crate is empty"));
+    assert!(app.trawl_modal.is_some(), "modal stays open");
+}
+
+#[test]
+fn save_resolve_ok_closes_modal_and_opens_name_dialog() {
+    let mut app = test_app();
+    open_modal(&mut app);
+    app.trawl_crate.add(seed("al1"));
+
+    let _ = app.handle_trawl_modal(TrawlModalMessage::SaveResolveCompleted(Ok(vec![
+        "s1".into(),
+        "s2".into(),
+        "s3".into(),
+    ])));
+
+    assert!(app.trawl_modal.is_none(), "modal hands off to the dialog");
+    assert!(app.text_input_dialog.visible);
+    assert_eq!(app.text_input_dialog.title, "Save Mix as Playlist");
+    match &app.text_input_dialog.action {
+        Some(
+            crate::widgets::text_input_dialog::TextInputDialogAction::CreatePlaylistFromTrawl(ids),
+        ) => assert_eq!(ids.len(), 3, "resolved ids ride the action"),
+        other => panic!("expected CreatePlaylistFromTrawl, got {other:?}"),
+    }
+    assert_eq!(
+        app.text_input_dialog.note.as_deref(),
+        Some("Saves these 3 songs as an ordinary playlist — it won't update"),
+        "the honesty subtitle, verbatim"
+    );
+}
+
+#[test]
+fn save_resolve_err_keeps_modal_and_toasts() {
+    let mut app = test_app();
+    open_modal(&mut app);
+    app.trawl_crate.add(seed("al1"));
+
+    let _ = app.handle_trawl_modal(TrawlModalMessage::SaveResolveCompleted(Err(
+        "every song was filtered out".into(),
+    )));
+
+    assert!(
+        app.trawl_modal.is_some(),
+        "failure is actionable in the modal"
+    );
+    assert!(!app.text_input_dialog.visible);
+    let toast = app.toast.toasts.back().expect("error toast");
+    assert!(toast.message.contains("Failed to resolve mix"));
+}
+
+#[test]
+fn name_dialog_cancel_reopens_trawl_modal() {
+    let mut app = test_app();
+    open_modal(&mut app);
+    app.trawl_crate.add(seed("al1"));
+    let _ = app.handle_trawl_modal(TrawlModalMessage::SaveResolveCompleted(Ok(vec![
+        "s1".into(),
+    ])));
+    assert!(app.trawl_modal.is_none());
+
+    let _ = app.update(crate::Message::TextInputDialog(
+        crate::widgets::text_input_dialog::TextInputDialogMessage::Cancel,
+    ));
+
+    assert!(!app.text_input_dialog.visible);
+    assert!(
+        app.trawl_modal.is_some(),
+        "cancel backs out of NAMING, not out of the mix"
+    );
+    assert_eq!(app.trawl_crate.len(), 1, "crate untouched");
+}
+
+#[test]
+fn shift_p_routes_to_save_only_inside_the_modal() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+
+    // Modal closed: quiet no-op (no dialog, no toast).
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("p".into()),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+    assert!(!app.text_input_dialog.visible);
+    assert!(
+        app.toast.toasts.is_empty(),
+        "closed-modal Shift+P stays quiet"
+    );
+
+    // Modal open, empty crate: routes trawl-first (the explanatory warn).
+    open_modal(&mut app);
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("p".into()),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+    let toast = app.toast.toasts.back().expect("empty-crate warn");
+    assert!(toast.message.contains("crate is empty"));
+}
+
+#[test]
+fn captured_shift_p_mid_typing_does_not_double_fire() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    open_modal(&mut app);
+    // A captured Shift+P already typed "P" into the search field — it must
+    // not ALSO trigger the save (whose empty-crate warn would betray the
+    // double-handling).
+    let _ = send_raw_key_captured(
+        &mut app,
+        iced::keyboard::Key::Character("p".into()),
+        iced::keyboard::Modifiers::SHIFT,
+    );
+    assert!(
+        app.toast.toasts.is_empty(),
+        "captured Shift+P already typed; it must not also fire the save"
+    );
+}

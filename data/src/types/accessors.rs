@@ -201,6 +201,10 @@ mod tests {
             updated_at: String::new(),
             uploaded_image: None,
             external_image_url: None,
+            rules: None,
+            evaluated_at: None,
+            path: String::new(),
+            sync: false,
         };
         assert_eq!(<Playlist as Named>::display_name(&playlist), "My Playlist");
         assert_eq!(<Playlist as HasId>::id(&playlist), "p1");

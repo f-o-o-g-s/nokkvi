@@ -57,6 +57,10 @@ pub enum LibraryContextEntry {
     FindSimilar,
     /// Open Top Songs panel for this artist
     TopSongs,
+    /// Remove this track (by playlist position) from its parent playlist.
+    /// Emitted only on child rows under a NON-smart playlist parent — the
+    /// server rejects track mutations on smart playlists.
+    RemoveFromPlaylist,
     ReplaceQueueWithAllFound,
     AddAllFoundToQueue,
     AddAllFoundToPlaylist,
@@ -85,6 +89,26 @@ pub(crate) fn library_entries_with_folder() -> Vec<LibraryContextEntry> {
         LibraryContextEntry::GetInfo,
         LibraryContextEntry::ShowInFolder,
     ]
+}
+
+/// Context entries for a track row expanded under a playlist parent.
+/// `RemoveFromPlaylist` (destructive, listed last after a separator) is
+/// hidden for smart parents — the server rejects track mutations on smart
+/// playlists (error 50/403), so the entry must never be offered there.
+pub(crate) fn playlist_child_entries(parent_is_smart: bool) -> Vec<LibraryContextEntry> {
+    let mut entries = vec![
+        LibraryContextEntry::ShufflePlay,
+        LibraryContextEntry::AddToQueue,
+        LibraryContextEntry::AddToPlaylist,
+        LibraryContextEntry::AddToMix,
+        LibraryContextEntry::Separator,
+        LibraryContextEntry::GetInfo,
+    ];
+    if !parent_is_smart {
+        entries.push(LibraryContextEntry::Separator);
+        entries.push(LibraryContextEntry::RemoveFromPlaylist);
+    }
+    entries
 }
 
 /// Library context menu entries for Songs view (includes FindSimilar/TopSongs).
@@ -177,6 +201,11 @@ pub(crate) fn library_entry_view<'a, Message: Clone + 'a>(
             Some("assets/icons/radar.svg"),
             "Find Similar",
             on_action(LibraryContextEntry::FindSimilar),
+        ),
+        LibraryContextEntry::RemoveFromPlaylist => menu_button(
+            Some("assets/icons/list-minus.svg"),
+            "Remove from Playlist",
+            on_action(LibraryContextEntry::RemoveFromPlaylist),
         ),
         LibraryContextEntry::TopSongs => menu_button(
             Some("assets/icons/sparkles.svg"),

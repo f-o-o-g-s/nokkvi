@@ -20,8 +20,6 @@ pub enum TextInputDialogAction {
     RenamePlaylist(String),
     /// Create a new playlist from the current queue
     CreatePlaylistFromQueue,
-    /// Create a new empty playlist and immediately enter split-view edit mode
-    CreatePlaylistAndEdit,
     /// Overwrite an existing playlist with the current queue (holds playlist_id)
     OverwritePlaylistFromQueue(String),
     /// Delete a playlist (holds playlist_id, playlist_name)
@@ -50,6 +48,30 @@ pub enum TextInputDialogAction {
     /// Complete Last.fm desktop auth: exchange the held request token (after the
     /// user authorized in the browser) for a session key.
     CompleteLastfmAuth(String),
+    /// M7 Trawl bridge — save the resolved mix as an ordinary playlist
+    /// (pre-resolved song ids in blend order; name from the input, public
+    /// from the toggle). Cancel reopens the Trawl modal.
+    CreatePlaylistFromTrawl(Vec<String>),
+    /// M6 .nsp import — create a NEW smart playlist from the imported file
+    /// (name from the input, public from the toggle, comment/rules from the
+    /// file).
+    ImportNspCreate {
+        comment: String,
+        rules: serde_json::Value,
+    },
+    /// M6 .nsp import — replace the RULES of an EXISTING owned smart
+    /// playlist. `comment`/`public` carry the TARGET's current metadata
+    /// (not the file's) so a rules-only update never silently blanks the
+    /// comment or flips visibility; the name follows the (editable) input.
+    /// `detach_sync` = also PUT `sync: false` (caps-gated at dialog-open on
+    /// `sync_via_put`).
+    ImportNspUpdate {
+        playlist_id: String,
+        detach_sync: bool,
+        comment: String,
+        public: bool,
+        rules: serde_json::Value,
+    },
 }
 
 /// An option in the playlist selection combo_box.
@@ -97,6 +119,13 @@ pub struct TextInputDialogState {
     pub secondary_placeholder: String,
     /// Mask the primary input (bullets) for secret entry, e.g. a scrobble token.
     pub secure: bool,
+    /// Optional dimmed note rendered under the input/message — honesty copy
+    /// for file-backed playlists (resurrect-on-scan, rules re-sync).
+    pub note: Option<String>,
+    /// Optional THIRD button `(label, action)` rendered between Cancel and
+    /// the primary Submit — the .nsp-import collision dialog's "Create new"
+    /// alternative. `SubmitExtra` swaps it in and submits.
+    pub extra_action: Option<(String, TextInputDialogAction)>,
 }
 
 impl Default for TextInputDialogState {
@@ -116,6 +145,8 @@ impl Default for TextInputDialogState {
             secondary_value: None,
             secondary_placeholder: String::new(),
             secure: false,
+            note: None,
+            extra_action: None,
         }
     }
 }
@@ -138,6 +169,14 @@ impl TextInputDialogState {
         self.secondary_value = None;
         self.secondary_placeholder.clear();
         self.secure = false;
+        self.note = None;
+        self.extra_action = None;
+    }
+
+    /// Attach the dimmed note line to an already-opened dialog (the `open_*`
+    /// helpers reset it, so call this after opening).
+    pub fn set_note(&mut self, note: impl Into<String>) {
+        self.note = Some(note.into());
     }
 
     /// Open the dialog with the given configuration.
@@ -197,22 +236,6 @@ impl TextInputDialogState {
         self.save_playlist_mode = true;
     }
 
-    /// Open the "Create New Playlist" dialog.
-    ///
-    /// Used by the playlists view-header `+` button. The submitted playlist
-    /// is created server-side with no songs, then the user is dropped into
-    /// split-view edit mode for it. No combo box (we never overwrite from
-    /// this entry point) — just name + public toggle + Create.
-    pub fn open_create_playlist(&mut self) {
-        self.reset_fields();
-        self.title = "Create New Playlist".to_string();
-        self.placeholder = "Playlist name...".to_string();
-        self.action = Some(TextInputDialogAction::CreatePlaylistAndEdit);
-        // No `save_playlist_mode = true` — that controls combo + overwrite UI
-        // we don't want here. The public toggle + pencil-line icon are
-        // gated separately (see `text_input_dialog_overlay`).
-    }
-
     /// Open the "Add to Playlist" dialog with existing playlist choices.
     ///
     /// `playlists` is a slice of `(id, name)` tuples for existing playlists.
@@ -238,10 +261,26 @@ impl TextInputDialogState {
     }
 
     /// Open a confirmation-only dialog (no text input, just a message + Delete/Cancel).
-    pub fn open_delete_confirmation(&mut self, playlist_id: String, playlist_name: String) {
+    pub fn open_delete_confirmation(
+        &mut self,
+        playlist_id: String,
+        playlist_name: String,
+        file_backed: bool,
+    ) {
         self.reset_fields();
         self.title = "Delete Playlist".to_string();
         self.confirmation_message = format!("This will permanently delete \"{playlist_name}\".");
+        if file_backed {
+            // Honest resurrect copy — verified against the server's scan
+            // import: a deleted row leaves nothing for the path lookup to
+            // find, so the backing file re-imports unconditionally. No
+            // client-side action prevents it while the file exists.
+            self.note = Some(
+                "This playlist is backed by a file on the server — it will return \
+                 on the next scan unless that file is removed."
+                    .to_owned(),
+            );
+        }
         self.action = Some(TextInputDialogAction::DeletePlaylist(
             playlist_id,
             playlist_name,
@@ -309,6 +348,9 @@ pub enum TextInputDialogMessage {
     SecondaryValueChanged(String),
     /// User submitted (Enter key or Submit button)
     Submit,
+    /// User pressed the optional third button — submit `extra_action`
+    /// instead of the primary action.
+    SubmitExtra,
 
     /// User cancelled (Escape key or Cancel button)
     Cancel,
@@ -439,7 +481,11 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         let is_playlist_naming_flow = state.save_playlist_mode
             || matches!(
                 state.action,
-                Some(TextInputDialogAction::CreatePlaylistAndEdit)
+                Some(
+                    TextInputDialogAction::CreatePlaylistFromTrawl(_)
+                        | TextInputDialogAction::ImportNspCreate { .. }
+                        | TextInputDialogAction::ImportNspUpdate { .. }
+                )
             );
         if is_playlist_naming_flow {
             let input_icon = crate::embedded_svg::svg_widget("assets/icons/pencil-line.svg")
@@ -473,12 +519,17 @@ pub(crate) fn text_input_dialog_overlay<'a>(
 
     // Public/Private toggle — shown for any playlist-creation flow that's
     // not overwriting an existing playlist. Default-public.
+    // Note: ImportNspUpdate deliberately omitted — a rules-only update keeps
+    // the target's visibility, so no toggle is shown.
     let public_toggle_visible = !is_overwrite
         && !state.confirmation_only
         && (state.save_playlist_mode
             || matches!(
                 state.action,
-                Some(TextInputDialogAction::CreatePlaylistAndEdit)
+                Some(
+                    TextInputDialogAction::CreatePlaylistFromTrawl(_)
+                        | TextInputDialogAction::ImportNspCreate { .. }
+                )
             ));
     if public_toggle_visible {
         let public_check = checkbox(state.public)
@@ -543,6 +594,16 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         content = content.push(warning);
     }
 
+    // Dimmed note line (file-backed honesty copy) — rendered after the
+    // input/message in every mode, capped to the dialog's width.
+    if let Some(note) = &state.note {
+        let note_text = text(note)
+            .size(12)
+            .font(theme::ui_font())
+            .color(theme::fg3());
+        content = content.push(container(note_text).width(Length::Fixed(340.0)));
+    }
+
     let is_destructive = state.confirmation_only
         && !matches!(
             state.action,
@@ -580,9 +641,17 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         if is_add_to_playlist { "Add" } else { "Create" }
     } else if matches!(
         state.action,
-        Some(TextInputDialogAction::CreatePlaylistAndEdit)
+        Some(
+            TextInputDialogAction::CreatePlaylistFromTrawl(_)
+                | TextInputDialogAction::ImportNspCreate { .. }
+        )
     ) {
         "Create"
+    } else if matches!(
+        state.action,
+        Some(TextInputDialogAction::ImportNspUpdate { .. })
+    ) {
+        "Update"
     } else {
         "Submit"
     };
@@ -653,9 +722,42 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         }
     });
 
-    let button_row = row![cancel_btn, submit_btn]
-        .spacing(8)
-        .align_y(Alignment::Center);
+    // Optional third button (the .nsp-import "Create new" alternative) —
+    // between Cancel and the primary Submit, so the overwriting primary
+    // stays LAST. Styled like the primary's non-destructive look.
+    let mut button_row = row![cancel_btn].spacing(8).align_y(Alignment::Center);
+    if let Some((label, _)) = &state.extra_action {
+        let extra_btn = button(
+            container(
+                text(label.as_str())
+                    .size(13)
+                    .font(theme::ui_font())
+                    .color(theme::fg0()),
+            )
+            .padding([4, 16]),
+        )
+        .on_press(TextInputDialogMessage::SubmitExtra)
+        .style(|_theme, status| {
+            let (bg, border_color) = match status {
+                button::Status::Hovered | button::Status::Pressed => {
+                    (theme::bg2(), theme::accent())
+                }
+                _ => (theme::bg3(), theme::accent_bright()),
+            };
+            button::Style {
+                background: Some(bg.into()),
+                text_color: theme::fg0(),
+                border: iced::Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: theme::ui_border_radius(),
+                },
+                ..Default::default()
+            }
+        });
+        button_row = button_row.push(extra_btn);
+    }
+    button_row = button_row.push(submit_btn);
 
     content = content.push(button_row);
 

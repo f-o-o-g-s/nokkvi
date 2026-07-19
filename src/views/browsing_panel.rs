@@ -74,52 +74,59 @@ impl BrowsingPanel {
         similar_label: Option<&str>,
         is_editing: bool,
     ) -> Element<'_, BrowsingPanelMessage> {
-        let tabs = BrowsingView::ALL.iter().map(|&view| {
-            let mut label_str = view.label();
-            if view == BrowsingView::Similar
-                && similar_label.is_some_and(|lbl| lbl.starts_with("Top Songs"))
-            {
-                label_str = "Top Songs";
-            }
+        let tabs = BrowsingView::ALL
+            .iter()
+            // Hide "Similar" while editing a playlist: the editor's track menu
+            // offers no "Find Similar", so the tab has no way to be populated
+            // from here (it only ever shows its empty prompt). The panel always
+            // opens on Songs, so the active tab can never be the hidden one.
+            .filter(|&&view| !(is_editing && view == BrowsingView::Similar))
+            .map(|&view| {
+                let mut label_str = view.label();
+                if view == BrowsingView::Similar
+                    && similar_label.is_some_and(|lbl| lbl.starts_with("Top Songs"))
+                {
+                    label_str = "Top Songs";
+                }
 
-            let label = text(label_str)
-                .font(theme::weighted_ui_font(iced::font::Weight::Medium))
-                .size(12)
-                .color(if view == self.active_view {
-                    theme::fg0()
+                let label = text(label_str)
+                    .font(theme::weighted_ui_font(iced::font::Weight::Medium))
+                    .size(12)
+                    .color(if view == self.active_view {
+                        theme::fg0()
+                    } else {
+                        theme::fg2()
+                    });
+
+                // Active tab keeps the accent border as a selection indicator.
+                // Both active and inactive use mouse_area + HoverOverlay(container)
+                // so the press scale effect actually fires.
+                let border_color = if view == self.active_view {
+                    theme::accent_bright()
                 } else {
-                    theme::fg2()
-                });
+                    iced::Color::TRANSPARENT
+                };
 
-            // Active tab keeps the accent border as a selection indicator.
-            // Both active and inactive use mouse_area + HoverOverlay(container)
-            // so the press scale effect actually fires.
-            let border_color = if view == self.active_view {
-                theme::accent_bright()
-            } else {
-                iced::Color::TRANSPARENT
-            };
+                let tab: Element<'_, BrowsingPanelMessage> = mouse_area(
+                    HoverOverlay::new(container(label).padding([6, 12]).style(move |_theme| {
+                        container::Style {
+                            background: Some(theme::bg0_soft().into()),
+                            border: iced::Border {
+                                color: border_color,
+                                width: 2.0,
+                                radius: theme::ui_border_radius(),
+                            },
+                            ..Default::default()
+                        }
+                    }))
+                    .border_radius(theme::ui_border_radius()),
+                )
+                .on_press(BrowsingPanelMessage::SwitchView(view))
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into();
 
-            let tab: Element<'_, BrowsingPanelMessage> = mouse_area(
-                HoverOverlay::new(container(label).padding([6, 12]).style(move |_theme| {
-                    container::Style {
-                        background: Some(theme::bg0_soft().into()),
-                        border: iced::Border {
-                            color: border_color,
-                            width: 2.0,
-                            radius: theme::ui_border_radius(),
-                        },
-                        ..Default::default()
-                    }
-                }))
-                .border_radius(theme::ui_border_radius()),
-            )
-            .on_press(BrowsingPanelMessage::SwitchView(view))
-            .interaction(iced::mouse::Interaction::Pointer)
-            .into();
-
-            tab
-        });
+                tab
+            });
 
         // Close button — hidden in playlist edit mode
         let close_button: Option<Element<'_, BrowsingPanelMessage>> = if is_editing {

@@ -6,9 +6,34 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Smart playlists are now recognized: a sparkles badge marks them in the Playlists view.
+- Expanded playlist tracks gained a right-click menu: play, queue/mix/playlist adds, Get Info, Remove from Playlist.
+- Shift+Up/Down reorders tracks inside the playlist editor; changes stay staged until Save.
+- Create-playlist dialogs warn when the name already exists, without blocking.
+- Get Info now works inside the playlist editor.
+- Smart playlists can now be created and edited in-app: a keyboard-first rules editor with live validation.
+- The Playlists header's + becomes a create menu (regular or smart) on capable servers.
+- Edit Rules… on owned smart rows; the queue banner pencil routes smart playlists there too.
+- New hotkeys: Shift+N opens a new smart playlist; `e` edits the centered playlist.
+- Rules editing includes seeded presets, a raw-JSON mode, and an honest evaluated-at freshness stamp.
+- Rule previews are server-evaluated through a private draft, fresh on every press, before anything saves.
+- Enter on a preview row plays it — tweak rules and hear matches in one loop.
+- Stray preview drafts clean themselves up at login; other clients see them clearly labeled meanwhile.
+- .nsp smart-playlist files import from the Playlists create menu, with update-or-create-new choice on name collision.
+- The rules editor's empty state can load a .nsp file straight into the open session.
+- The Trawl mix builder gained Save as Playlist (Shift+P): the resolved mix becomes an ordinary playlist.
+- Rule values are picked, not typed: genres and ratings choose from lists, dates from a calendar.
+- The playlist editor's edit bar shows the cover and sets custom art or resets it.
+
 ### Changed
 
+- Add-to-playlist pickers, quick-add, queue overwrite, and the default-playlist choice now skip smart playlists, whose tracks the server keeps read-only.
+- Creating a regular playlist drops into the editor to name it and add tracks, replacing the naming dialog.
+- Deleting or renaming a file-backed playlist now explains scan resurrection and rules re-sync honestly.
+
 ### Fixed
+
+- Renaming a smart playlist on Navidrome 0.61 no longer wipes its rules.
 
 ### Removed
 

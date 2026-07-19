@@ -395,6 +395,8 @@ impl Nokkvi {
                 self.handle_artist_rating_updated(artist_id, new_rating)
             }
             HotkeyMessage::ExpandCenter => self.handle_expand_center(),
+            HotkeyMessage::EditCenteredPlaylist => self.handle_edit_centered_playlist(),
+            HotkeyMessage::TrawlSaveAsPlaylist => self.handle_trawl_save_as_playlist_hotkey(),
             HotkeyMessage::MoveTrackUp => self.handle_move_track(true),
             HotkeyMessage::MoveTrackDown => self.handle_move_track(false),
             HotkeyMessage::GetInfo => self.handle_get_info(),
@@ -419,6 +421,334 @@ impl Nokkvi {
                 self.handle_roulette_message(crate::app_message::RouletteMessage::Start(view))
             }
         }
+    }
+
+    /// The rules-session keyboard grammar — the three-mode machine
+    /// (cursor / editing / JSON) plus the sub-pickers' modal-grade key
+    /// ownership. Returns `Some(task)` when the session owned the key
+    /// (including deliberate swallows) and `None` to fall through to
+    /// normal hotkey dispatch (Space→PlayPause etc. keep working from
+    /// cursor mode — the session is a view, not a modal).
+    fn rules_session_key_intercept(
+        &mut self,
+        key: &iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+        status: iced::event::Status,
+        resolved: &Option<Message>,
+    ) -> Option<Task<Message>> {
+        use iced::keyboard::key::Named;
+
+        use crate::app_message::{HotkeyMessage, RulesEditorMessage as R, SlotListMessage};
+
+        if self.current_view != crate::View::PlaylistEditor {
+            return None;
+        }
+        let session = self.rules_session()?;
+        let mode = session.mode;
+        let pane = session.pane;
+        let is_blank_create = session.is_blank_create();
+        let picker_open = session.sub_picker.is_some();
+        let date_picker = matches!(
+            session.sub_picker.as_ref().map(|p| &p.kind),
+            Some(crate::state::SubPickerKind::DateValue { .. })
+        );
+        let json_mode = session.json.is_some();
+        let is_edit_target = matches!(
+            session.target,
+            nokkvi_data::types::rules_session::RulesTarget::Edit { .. }
+        );
+        let _ = is_edit_target;
+
+        let named = match key {
+            iced::keyboard::Key::Named(n) => Some(*n),
+            iced::keyboard::Key::Character(_) | iced::keyboard::Key::Unidentified => None,
+        };
+        let is_char = |c: &str| matches!(key, iced::keyboard::Key::Character(s) if s.as_str().eq_ignore_ascii_case(c));
+        let captured = status == iced::event::Status::Captured;
+        let swallow = || Some(Task::none());
+
+        // --- Sub-picker open: modal-grade ownership -----------------------
+        // (a) the outer-gate rule: a non-nav resolved hotkey (t→OpenTrawl,
+        // Space→PlayPause) must never fire against the obscured form;
+        // (b) Up/Down/Enter/Escape drive the picker. Captured keys already
+        // typed into the picker's search input — swallowed, never
+        // double-handled (one press, one meaning).
+        if picker_open {
+            // A calendar date picker has no text search input, so the
+            // captured/uncaptured split (which exists only because a text_input
+            // swallows typed keys) does not apply — route all its keys
+            // uniformly. Left/Right = ±1 day, Up/Down = ∓1 week, PageUp/Down =
+            // month, Enter commits the focused day, Escape closes. Still inside
+            // the picker_open gate so the outer-gate rule holds.
+            if date_picker {
+                return match named {
+                    Some(Named::ArrowLeft) => {
+                        Some(self.update(Message::RulesEditor(R::DatePickerMoveDay { by: -1 })))
+                    }
+                    Some(Named::ArrowRight) => {
+                        Some(self.update(Message::RulesEditor(R::DatePickerMoveDay { by: 1 })))
+                    }
+                    Some(Named::ArrowUp) => {
+                        Some(self.update(Message::RulesEditor(R::DatePickerMoveDay { by: -7 })))
+                    }
+                    Some(Named::ArrowDown) => {
+                        Some(self.update(Message::RulesEditor(R::DatePickerMoveDay { by: 7 })))
+                    }
+                    Some(Named::PageUp) => {
+                        Some(self.update(Message::RulesEditor(R::DatePickerShiftMonth {
+                            forward: false,
+                        })))
+                    }
+                    Some(Named::PageDown) => {
+                        Some(self.update(Message::RulesEditor(R::DatePickerShiftMonth {
+                            forward: true,
+                        })))
+                    }
+                    Some(Named::Enter) => {
+                        Some(self.update(Message::RulesEditor(R::DatePickerCommit)))
+                    }
+                    Some(Named::Escape) => {
+                        Some(self.update(Message::RulesEditor(R::SubPickerCancel)))
+                    }
+                    _ => swallow(),
+                };
+            }
+            if captured {
+                return match named {
+                    Some(Named::Escape) => {
+                        Some(self.update(Message::RulesEditor(R::SubPickerCancel)))
+                    }
+                    // Enter on the focused input commits via on_submit —
+                    // the raw event must not double-commit.
+                    _ => swallow(),
+                };
+            }
+            return match named {
+                Some(Named::ArrowUp) => {
+                    Some(self.update(Message::RulesEditor(R::SubPickerMove { down: false })))
+                }
+                Some(Named::ArrowDown) => {
+                    Some(self.update(Message::RulesEditor(R::SubPickerMove { down: true })))
+                }
+                Some(Named::Enter) => Some(self.update(Message::RulesEditor(R::SubPickerCommit))),
+                Some(Named::Escape) => Some(self.update(Message::RulesEditor(R::SubPickerCancel))),
+                _ => swallow(),
+            };
+        }
+
+        // --- JSON mode: the text_editor owns most keys --------------------
+        if json_mode {
+            if named == Some(Named::Escape) {
+                return Some(self.update(Message::RulesEditor(R::JsonEscape)));
+            }
+            // Ctrl+Enter: apply the parse, then preview only when clean.
+            if named == Some(Named::Enter) && modifiers.control() {
+                let apply = self.update(Message::RulesEditor(R::JsonEscape));
+                let clean = self.rules_session().is_some_and(|s| s.json.is_none());
+                if clean {
+                    let preview = self.update(Message::RulesEditor(R::Preview));
+                    return Some(Task::batch([apply, preview]));
+                }
+                return Some(apply);
+            }
+            // Everything else belongs to the editor (captured) or is
+            // swallowed so no hotkey fires under the JSON surface.
+            return swallow();
+        }
+
+        // --- Editing mode: a value/name input is focused ------------------
+        if mode == crate::state::FormMode::Editing {
+            if captured {
+                return match named {
+                    // Escape reverts the CELL only — never the session.
+                    Some(Named::Escape) => {
+                        Some(self.update(Message::RulesEditor(R::RevertEditing)))
+                    }
+                    // Enter commits via on_submit; the raw event is
+                    // swallowed to avoid the double-commit.
+                    _ => swallow(),
+                };
+            }
+            return match named {
+                // Tab commits too ("Enter or Tab commits").
+                Some(Named::Tab) if !modifiers.shift() => {
+                    Some(self.update(Message::RulesEditor(R::CommitEditing)))
+                }
+                Some(Named::Escape) => Some(self.update(Message::RulesEditor(R::RevertEditing))),
+                Some(Named::Enter) => Some(self.update(Message::RulesEditor(R::CommitEditing))),
+                // An uncaptured key while Editing means focus was lost
+                // (mouse click elsewhere) — commit, then re-run the key now
+                // that we're back in Cursor mode so it still navigates. The
+                // commit task carries `unfocus_all()`; dropping it (the old
+                // `let _ = commit`) stranded a caret on a mixed
+                // keyboard/mouse sequence. No recursion loop: the commit
+                // flips mode to Cursor, so this arm can't re-fire.
+                _ => {
+                    let commit = self.update(Message::RulesEditor(R::CommitEditing));
+                    let navigate = self.handle_raw_key_event(key.clone(), modifiers, status);
+                    Some(Task::batch([commit, navigate]))
+                }
+            };
+        }
+
+        // --- Cursor mode --------------------------------------------------
+        // Mouse-heal: a click focused the edit-bar name/comment input
+        // without any message, so typing arrives Captured while the mirror
+        // still says Cursor. Adopt Editing lazily (cosmetic ring fix) and
+        // swallow — the input already consumed the keystroke.
+        if captured {
+            return match named {
+                Some(Named::Escape) => Some(self.update(Message::RulesEditor(R::EscapePressed))),
+                Some(Named::Tab) if modifiers.shift() => {
+                    Some(self.update(Message::RulesEditor(R::SwitchPane)))
+                }
+                Some(Named::Tab) => Some(self.update(Message::RulesEditor(R::StepCell))),
+                _ => {
+                    // Snapshot the edit-bar text so a later Escape can revert
+                    // the cell. Best-effort on this path: the click focused the
+                    // input natively (no message), so we only see it now on the
+                    // first captured keystroke — the baseline may already carry
+                    // that one char. Still far better than no revert.
+                    let (cur_name, cur_comment) = self
+                        .playlist_editor
+                        .as_ref()
+                        .map(|e| {
+                            (
+                                e.edit.playlist_name.clone(),
+                                e.edit.playlist_comment.clone(),
+                            )
+                        })
+                        .unwrap_or_default();
+                    self.with_rules_session(|s| {
+                        let revert = if s.cell == crate::state::FormCell::Comment {
+                            cur_comment.clone()
+                        } else {
+                            cur_name.clone()
+                        };
+                        s.mode = crate::state::FormMode::Editing;
+                        s.editing = Some(crate::state::EditingCell {
+                            row: crate::state::FormRow::EditBar,
+                            cell: s.cell,
+                            buffer: String::new(),
+                            revert,
+                        });
+                    });
+                    swallow()
+                }
+            };
+        }
+
+        // The discard confirm is showing: Enter confirms, Escape cancels.
+        if self.rules_session().is_some_and(|s| s.confirm_discard) {
+            return match named {
+                Some(Named::Enter) => Some(self.update(Message::RulesEditor(R::ConfirmDiscard))),
+                Some(Named::Escape) => Some(self.update(Message::RulesEditor(R::CancelDiscard))),
+                _ => swallow(),
+            };
+        }
+
+        // Blank create shows the Start-empty / Import / preset list in place
+        // of the form rows — drive THAT list's cursor with Up/Down/Enter, so
+        // the keys never walk the hidden form (where Enter would silently add
+        // a phantom rule). Tab/Left/Right fall through untouched.
+        if is_blank_create && pane == crate::state::RulesPane::Form {
+            match named {
+                Some(Named::ArrowUp) => {
+                    return Some(
+                        self.update(Message::RulesEditor(R::EmptyStateMove { down: false })),
+                    );
+                }
+                Some(Named::ArrowDown) => {
+                    return Some(
+                        self.update(Message::RulesEditor(R::EmptyStateMove { down: true })),
+                    );
+                }
+                Some(Named::Enter) if !modifiers.control() => {
+                    return Some(self.update(Message::RulesEditor(R::EmptyStateActivate)));
+                }
+                _ => {}
+            }
+        }
+
+        match named {
+            Some(Named::ArrowUp) if modifiers.shift() => {
+                return Some(self.update(Message::RulesEditor(R::MoveCursorRow { up: true })));
+            }
+            Some(Named::ArrowDown) if modifiers.shift() => {
+                return Some(self.update(Message::RulesEditor(R::MoveCursorRow { up: false })));
+            }
+            Some(Named::ArrowUp) => {
+                return Some(self.update(Message::RulesEditor(R::CursorMove { down: false })));
+            }
+            Some(Named::ArrowDown) => {
+                return Some(self.update(Message::RulesEditor(R::CursorMove { down: true })));
+            }
+            Some(Named::ArrowLeft) => {
+                return Some(self.update(Message::RulesEditor(R::CycleCell { forward: false })));
+            }
+            Some(Named::ArrowRight) => {
+                return Some(self.update(Message::RulesEditor(R::CycleCell { forward: true })));
+            }
+            Some(Named::Tab) if modifiers.shift() => {
+                return Some(self.update(Message::RulesEditor(R::SwitchPane)));
+            }
+            Some(Named::Tab) => return Some(self.update(Message::RulesEditor(R::StepCell))),
+            Some(Named::Enter) if modifiers.control() => {
+                return Some(self.update(Message::RulesEditor(R::Preview)));
+            }
+            Some(Named::Enter) => {
+                if pane == crate::state::RulesPane::Results {
+                    // The tweak-preview-HEAR loop: Enter plays the
+                    // centered evaluated row.
+                    return Some(self.update(Message::RulesEditor(R::PlayPreviewRow)));
+                }
+                return Some(self.update(Message::RulesEditor(R::EnterOnCursor)));
+            }
+            Some(Named::Delete | Named::Backspace) if !modifiers.shift() => {
+                if pane == crate::state::RulesPane::Form {
+                    return Some(self.update(Message::RulesEditor(R::DeleteCursorRow)));
+                }
+                return swallow();
+            }
+            Some(Named::Escape) => {
+                return Some(self.update(Message::RulesEditor(R::EscapePressed)));
+            }
+            _ => {}
+        }
+        // `x` doubles as the row-delete key in the form (the grammar's
+        // stated pair with Delete) — intercepted before its global
+        // ToggleRandom resolution, form-pane only.
+        if is_char("x") && pane == crate::state::RulesPane::Form {
+            return Some(self.update(Message::RulesEditor(R::DeleteCursorRow)));
+        }
+
+        // Action-level remaps (rebind-safe: keyed on the RESOLVED action,
+        // never the literal chord).
+        match resolved {
+            Some(Message::Hotkey(HotkeyMessage::SaveQueueAsPlaylist)) => {
+                return Some(self.update(Message::RulesEditor(R::Save)));
+            }
+            Some(Message::SlotList(SlotListMessage::ActivateCenterShuffled)) => {
+                return Some(self.update(Message::RulesEditor(R::Preview)));
+            }
+            Some(Message::Hotkey(HotkeyMessage::MoveTrackUp)) => {
+                return Some(self.update(Message::RulesEditor(R::MoveCursorRow { up: true })));
+            }
+            Some(Message::Hotkey(HotkeyMessage::MoveTrackDown)) => {
+                return Some(self.update(Message::RulesEditor(R::MoveCursorRow { up: false })));
+            }
+            Some(Message::Hotkey(HotkeyMessage::CycleSortMode(forward))) => {
+                return Some(self.update(Message::RulesEditor(R::CycleCell { forward: *forward })));
+            }
+            Some(Message::Hotkey(HotkeyMessage::SettingsCategoryMotion(_))) => {
+                return Some(self.update(Message::RulesEditor(R::SwitchPane)));
+            }
+            _ => {}
+        }
+
+        // Everything else falls through to normal dispatch — the session
+        // is a view, not a modal; Space/transport hotkeys keep working.
+        None
     }
 
     /// Translate a raw keyboard event into a hotkey action via the user's
@@ -489,7 +819,33 @@ impl Nokkvi {
 
         // Look up the key event against the user's hotkey config once — reused
         // by the modal-open guard below and the final dispatch.
-        let resolved = crate::hotkeys::handle_hotkey(key, modifiers, &self.hotkey_config);
+        let resolved = crate::hotkeys::handle_hotkey(key.clone(), modifiers, &self.hotkey_config);
+
+        // A root-level modal open OVER the rules split-view (the Trawl mix
+        // builder via `t`, EQ, Info, About, a text-input dialog, the
+        // default-playlist picker) owns the keyboard — its own gate below
+        // handles it. The rules intercept must NOT run underneath, or
+        // Escape/Enter/arrows would drive the hidden form (arming the
+        // invisible discard confirm, or discarding the dirty session under
+        // the modal) instead of closing/using the modal.
+        let any_blocking_modal = self.eq_modal.open
+            || self.about_modal.visible
+            || self.info_modal.visible
+            || self.text_input_dialog.visible
+            || self.default_playlist_picker.is_some()
+            || self.trawl_modal.is_some();
+
+        // Rules-session grammar: view-gated keys for the smart-playlist
+        // rules editor. Intercepted before any SFX/toolbar arms could fire
+        // on the resolved actions (the ui-views.md gate-placement
+        // invariant), but AFTER the no-modal check — the session is
+        // view-hosted, and its own sub-pickers get their modal-grade key
+        // ownership inside the intercept.
+        if !any_blocking_modal
+            && let Some(task) = self.rules_session_key_intercept(&key, modifiers, status, &resolved)
+        {
+            return task;
+        }
 
         // Modal-open suppression: the EQ / Info / About modals and the
         // default-playlist picker are mouse-opaque but not keyboard-capturing
@@ -500,13 +856,7 @@ impl Nokkvi {
         // existing ClearSearch cascade). The picker additionally lets its own
         // slot-list nav keys through — slot_list.rs already routes those to the
         // picker when it is open.
-        if self.eq_modal.open
-            || self.about_modal.visible
-            || self.info_modal.visible
-            || self.text_input_dialog.visible
-            || self.default_playlist_picker.is_some()
-            || self.trawl_modal.is_some()
-        {
+        if any_blocking_modal {
             let is_picker_nav = self.default_playlist_picker.is_some()
                 && matches!(
                     resolved,
@@ -541,6 +891,7 @@ impl Nokkvi {
                                 | crate::app_message::HotkeyMessage::CycleSortMode(_)
                                 | crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
                                 | crate::app_message::HotkeyMessage::AddToQueue
+                                | crate::app_message::HotkeyMessage::TrawlSaveAsPlaylist
                         )
                     )
                 );
@@ -567,6 +918,7 @@ impl Nokkvi {
                         crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
                             | crate::app_message::HotkeyMessage::CycleSortMode(_)
                             | crate::app_message::HotkeyMessage::AddToQueue
+                            | crate::app_message::HotkeyMessage::TrawlSaveAsPlaylist
                     ))
                 )
             {

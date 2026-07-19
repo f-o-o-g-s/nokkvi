@@ -63,6 +63,7 @@ mod menus;
 mod mpris;
 mod navigation;
 mod notifications;
+pub(crate) mod nsp_import;
 mod pending_expand_resolve;
 mod playback;
 mod player_bar;
@@ -73,6 +74,7 @@ mod queue;
 mod radio_artwork;
 mod radios;
 mod roulette;
+pub(crate) mod rules_editor;
 mod scrobbling;
 pub(crate) mod settings;
 mod similar;
@@ -153,12 +155,31 @@ impl Nokkvi {
             Message::SetOpenMenu(next) => self.handle_set_open_menu(next),
             Message::Roulette(msg) => self.handle_roulette_message(msg),
             Message::Login(msg) => self.handle_login(msg),
-            Message::LoginResult(res) => self.handle_login_result(res),
+            Message::LoginResult(res) => self.handle_login_result(*res),
             Message::ResumeSession => self.handle_resume_session(),
             Message::SessionExpired => self.handle_session_expired(),
             Message::ServerVersionFetched(ver) => {
-                if ver.is_some() {
-                    self.server_version = ver;
+                match &ver {
+                    Some(version) => {
+                        // Derive the smart-playlist capability set from the
+                        // same post-auth fetch (all-false on unparseable —
+                        // conservative: feature-hidden).
+                        self.caps_state = crate::state::CapsState::Fetched(
+                            nokkvi_data::types::smart_criteria::ServerCaps::from_version_str(
+                                version,
+                            ),
+                        );
+                        self.server_version = ver;
+                    }
+                    None => {
+                        // A transient failure must not silently hide the
+                        // feature all session — FetchFailed renders the
+                        // dimmed retry entry. Never downgrade an
+                        // already-Fetched state (About-modal re-fetches).
+                        if matches!(self.caps_state, crate::state::CapsState::Unfetched) {
+                            self.caps_state = crate::state::CapsState::FetchFailed;
+                        }
+                    }
                 }
                 Task::none()
             }
@@ -258,6 +279,7 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::LoadPlaylists => self.handle_load_playlists(),
             Message::LoadRadioStations => self.handle_load_radio_stations(),
+            Message::NspImportPicked(result) => self.handle_nsp_import_picked(result),
             Message::PlaylistMutated(mutation) => {
                 // When creating/overwriting a playlist from the queue, set the
                 // playlist context header so the queue shows the same header bar
@@ -308,31 +330,55 @@ impl Nokkvi {
                 Task::none()
             }
             Message::PlaylistsFetchedForAddToPlaylist(playlists, song_ids) => {
-                // Quick-add bypass: skip dialog when default playlist is configured
+                // Quick-add bypass: skip dialog when default playlist is
+                // configured. The triples are PRE-filter, so the bypass can
+                // distinguish a smart default (present, flagged — the server
+                // would reject the append with error 50/403) from a vanished
+                // one; neither case mislabels the other, and both fall
+                // through to the picker dialog.
                 if self.settings.quick_add_to_playlist
                     && let Some(ref default_id) = self.settings.default_playlist_id
                 {
-                    let playlist_id = default_id.clone();
-                    let id_for_msg = playlist_id.clone();
-                    let playlist_name = self.settings.default_playlist_name.clone();
-                    let count = song_ids.len();
-                    return self.shell_action_task(
-                        move |shell| async move {
-                            let service = shell.playlists_api().await?;
-                            service.add_songs_to_playlist(&playlist_id, &song_ids).await
-                        },
-                        Message::PlaylistMutated(crate::app_message::PlaylistMutation::Appended {
-                            name: format!(
-                                "{playlist_name}' ({count} song{})",
-                                if count == 1 { "" } else { "s" }
-                            ),
-                            id: id_for_msg,
-                        }),
-                        "quick-add to default playlist",
-                    );
+                    match playlists.iter().find(|(id, _, _)| id == default_id) {
+                        Some((_, _, true)) => {
+                            self.toast_warn("Default playlist is smart — pick a target");
+                        }
+                        None => {
+                            self.toast_warn("Default playlist unavailable — pick a target");
+                        }
+                        Some((_, _, false)) => {
+                            let playlist_id = default_id.clone();
+                            let id_for_msg = playlist_id.clone();
+                            let playlist_name = self.settings.default_playlist_name.clone();
+                            let count = song_ids.len();
+                            return self.shell_action_task(
+                                move |shell| async move {
+                                    let service = shell.playlists_api().await?;
+                                    service.add_songs_to_playlist(&playlist_id, &song_ids).await
+                                },
+                                Message::PlaylistMutated(
+                                    crate::app_message::PlaylistMutation::Appended {
+                                        name: format!(
+                                            "{playlist_name}' ({count} song{})",
+                                            if count == 1 { "" } else { "s" }
+                                        ),
+                                        id: id_for_msg,
+                                    },
+                                ),
+                                "quick-add to default playlist",
+                            );
+                        }
+                    }
                 }
+                // Dialog rows = the filtered projection of the triples (smart
+                // rows are never offered as add targets).
+                let pairs: Vec<(String, String)> = playlists
+                    .iter()
+                    .filter(|(_, _, is_smart)| !is_smart)
+                    .map(|(id, name, _)| (id.clone(), name.clone()))
+                    .collect();
                 self.text_input_dialog
-                    .open_add_to_playlist(&playlists, song_ids);
+                    .open_add_to_playlist(&pairs, song_ids);
                 Task::none()
             }
 
@@ -568,6 +614,7 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::BrowsingPanel(msg) => self.handle_browsing_panel_message(msg),
             Message::SplitView(msg) => self.handle_split_view_message(msg),
+            Message::RulesEditor(msg) => self.handle_rules_editor(msg),
             // Phase 1: no-op stub; real handling lands in Phase 3+.
             Message::Editor(msg) => self.handle_editor_message(msg),
 

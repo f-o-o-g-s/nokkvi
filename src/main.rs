@@ -180,6 +180,19 @@ pub struct Nokkvi {
     pub should_auto_login: bool,
     /// Stored session for JWT-based auto-login.
     pub stored_session: Option<crate::state::StoredSession>,
+    /// The authenticated user's Navidrome id, captured at login/resume
+    /// success (empty until then, and after logout). The playlist ownership
+    /// gate compares this against `PlaylistUIViewData.owner_id` — NEVER
+    /// against owner names (Navidrome logins are case-insensitive, so a
+    /// "Foogs" login vs a "foogs" owner_name would silently fail).
+    pub session_user_id: String,
+    /// Smart-playlist capability gate, fetched once post-auth (all-false
+    /// until `Fetched`; `FetchFailed` renders the dimmed retry entry).
+    pub caps_state: crate::state::CapsState,
+    /// Root-owned stale-drop counter for rules-preview loads (the Trawl
+    /// `trawl_search_generation` pattern — root-owned so session
+    /// close/reopen can't re-mint captured generations).
+    pub rules_preview_generation: u64,
 
     // -------------------------------------------------------------------------
     // Library Data (consolidated data vectors + counts)
@@ -434,6 +447,9 @@ impl Default for Nokkvi {
             editor_return_view: View::Queue,
             should_auto_login,
             stored_session,
+            session_user_id: String::new(),
+            caps_state: crate::state::CapsState::default(),
+            rules_preview_generation: 0,
             library: crate::state::LibraryData::default(),
             similar_songs: None,
             similar_songs_generation: 0,

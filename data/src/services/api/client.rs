@@ -112,20 +112,53 @@ impl Clone for ApiClient {
     }
 }
 
-/// Decode a JWT's `exp` claim (RFC 7519, registered claim). Returns the
-/// unix-seconds timestamp as i64. Does NOT verify the signature — the server
-/// already verified the token by accepting the request.
-fn decode_jwt_exp(jwt: &str) -> Result<i64> {
+/// The per-process client unique id sent as `X-ND-Client-Unique-Id` on
+/// every native request AND the SSE connection — Navidrome uses it to skip
+/// echoing a client's own mutations back over the event stream. Minted
+/// once from the existing `rand` dependency (no `uuid` crate exists in the
+/// workspace and none is added).
+pub fn client_unique_id() -> &'static str {
+    use std::sync::OnceLock;
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| {
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        (0..16)
+            .map(|_| format!("{:x}", rng.random_range(0..16)))
+            .collect()
+    })
+}
+
+/// Decode a JWT's payload segment to JSON. Does NOT verify the signature —
+/// the server already verified the token by accepting the request.
+fn decode_jwt_payload(jwt: &str) -> Result<serde_json::Value> {
     let payload = jwt
         .split('.')
         .nth(1)
         .context("token is not in JWT header.payload.signature form")?;
     let bytes = decode_base64url(payload).context("JWT payload is not valid base64url")?;
-    let v: serde_json::Value =
-        serde_json::from_slice(&bytes).context("JWT payload is not valid JSON")?;
-    v.get("exp")
+    serde_json::from_slice(&bytes).context("JWT payload is not valid JSON")
+}
+
+/// Decode a JWT's `exp` claim (RFC 7519, registered claim). Returns the
+/// unix-seconds timestamp as i64.
+fn decode_jwt_exp(jwt: &str) -> Result<i64> {
+    decode_jwt_payload(jwt)?
+        .get("exp")
         .and_then(|x| x.as_i64())
         .context("JWT payload has no numeric `exp` claim")
+}
+
+/// Decode a Navidrome JWT's `uid` claim — the authenticated user's id
+/// (`reference-navidrome/core/auth/claims.go`: `m["uid"] = c.UserID`). Used
+/// by session resume, where no login response carries the id; the playlist
+/// ownership gate (`owner_id == session user_id`) depends on it.
+pub(crate) fn decode_jwt_uid(jwt: &str) -> Result<String> {
+    decode_jwt_payload(jwt)?
+        .get("uid")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .context("JWT payload has no string `uid` claim")
 }
 
 /// Minimal base64url decoder (RFC 4648 §5, no padding). Inlined to avoid
@@ -329,7 +362,11 @@ impl ApiClient {
         Ok(self
             .client
             .request(method, url.as_str())
-            .header("X-ND-Authorization", self.bearer_header()))
+            .header("X-ND-Authorization", self.bearer_header())
+            // Navidrome skips echoing our own mutations over SSE for
+            // requests carrying the same unique id as the event-stream
+            // connection — the draft-workspace hardening layer.
+            .header("X-ND-Client-Unique-Id", client_unique_id()))
     }
 
     /// Apply the shared response status policy: 2xx returns the body, 401
@@ -515,14 +552,28 @@ impl ApiClient {
     /// body read must not turn a successful delete into an error nor mask
     /// the 401 → `Unauthorized` downcast.
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
-        let request = self.build_request(Method::DELETE, endpoint, &[])?;
-        self.execute(
-            request,
-            &format!("API DELETE {endpoint}"),
-            BodyPolicy::Tolerant,
-        )
-        .await?;
-        Ok(())
+        self.delete_with_params(endpoint, &[]).await.map(|_body| ())
+    }
+
+    /// DELETE with query parameters, returning the response body — the
+    /// playlist track-removal path inspects the echoed id (the
+    /// silent-no-op tripwire). Same pipeline and body policy as
+    /// [`Self::delete`]; an empty body on a 2xx surfaces as `Ok("")`, which
+    /// echo-checking callers treat as failure.
+    pub async fn delete_with_params(
+        &self,
+        endpoint: &str,
+        params: &[(&str, &str)],
+    ) -> Result<String> {
+        let request = self.build_request(Method::DELETE, endpoint, params)?;
+        let (body, _) = self
+            .execute(
+                request,
+                &format!("API DELETE {endpoint}"),
+                BodyPolicy::Tolerant,
+            )
+            .await?;
+        Ok(body)
     }
 }
 

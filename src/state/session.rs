@@ -37,6 +37,17 @@ pub struct ActivePlaylistContext {
     /// Last-updated timestamp (raw ISO-8601 string, formatted at render).
     /// Empty when unknown.
     pub updated: String,
+    /// `Some(true/false)` when built from native data ([`Self::from_playlist`]);
+    /// `None` from [`Self::minimal`] / [`Self::from_persisted`] (deliberately
+    /// NOT persisted — redb untouched; the banner pencil disambiguates the
+    /// `None` window). Closes the Harbour-play hole: a smart playlist played
+    /// without ever visiting the Playlists view still carries its smartness.
+    pub smart: Option<bool>,
+    /// OpenSubsonic `readonly` captured when the playlist was loaded for
+    /// playback via Subsonic `getPlaylist`. CONSERVATIVE: also `true` for
+    /// regular playlists the session user doesn't own — a tripwire signal
+    /// (never open a Tracks editor when `Some(true)`), not proof-of-smart.
+    pub readonly: Option<bool>,
 }
 
 impl ActivePlaylistContext {
@@ -52,6 +63,8 @@ impl ActivePlaylistContext {
             duration_secs: p.duration,
             public: p.public,
             updated: p.updated_at.clone(),
+            smart: Some(p.is_smart),
+            readonly: None,
         }
     }
 
@@ -78,6 +91,8 @@ impl ActivePlaylistContext {
             duration_secs,
             public,
             updated,
+            smart: None,
+            readonly: None,
         }
     }
 
@@ -93,6 +108,8 @@ impl ActivePlaylistContext {
             duration_secs: 0.0,
             public: false,
             updated: String::new(),
+            smart: None,
+            readonly: None,
         }
     }
 }

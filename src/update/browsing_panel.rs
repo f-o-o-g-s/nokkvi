@@ -24,6 +24,10 @@ enum SaveOutcome {
     /// re-read was skipped or failed) so the editor's optimistic-concurrency
     /// guard can advance for a subsequent save in the same still-mounted session.
     Saved(String),
+    /// A deferred-create session's first Save minted the playlist: carries the
+    /// new server id + `updatedAt` so the session adopts the id (becoming an
+    /// edit session) and its concurrency guard seeds.
+    Created { id: String, updated_at: String },
     /// Aborted: the server playlist changed since the editor opened; the
     /// destructive track overwrite was refused.
     Stale,
@@ -53,6 +57,13 @@ impl Nokkvi {
             SplitViewMessage::PlaylistEditsSaved(updated_at) => {
                 self.handle_playlist_edits_saved(updated_at)
             }
+            SplitViewMessage::PlaylistCreated { id, updated_at } => {
+                self.handle_playlist_created(id, updated_at)
+            }
+            SplitViewMessage::PlaylistCreateFailed(error) => {
+                self.handle_playlist_create_failed(error)
+            }
+            SplitViewMessage::EnterRulesMode { target } => self.handle_enter_rules_mode(target),
         }
     }
 
@@ -156,6 +167,22 @@ impl Nokkvi {
         playlist_comment: String,
         playlist_public: bool,
     ) -> Task<Message> {
+        // Central smart-gate backstop (D4): the server rejects track
+        // mutations on smart playlists (error 50/403), so a Tracks editor
+        // must never mount on one. The dispatch sites carry their own
+        // better-copy guards; this covers any chain that reaches the
+        // handler with a smart id (e.g. a future create path chaining into
+        // edit — the M6 import chain touches exactly this flow).
+        if self
+            .library
+            .playlists
+            .iter()
+            .any(|p| p.id == playlist_id && p.is_smart)
+        {
+            self.toast_warn("Smart playlists are edited by rules");
+            return Task::none();
+        }
+
         info!(
             " Entering playlist edit mode: \"{}\" ({}) [public={}]",
             playlist_name, playlist_id, playlist_public
@@ -229,6 +256,10 @@ impl Nokkvi {
             Task::none()
         };
 
+        // Warm the custom cover into the cache so the edit-bar thumbnail shows
+        // the uploaded art (not the quad fallback) if this playlist has one.
+        let cover_fetch = self.fetch_playlist_custom_mini_task(playlist_id.clone(), None);
+
         // Resolve the playlist's tracks into the editor's OWN buffer WITHOUT
         // touching the queue/engine/redb. The result is dispatched as
         // `EditorMessage::SongsLoaded`, which fills the buffer and seeds the
@@ -247,11 +278,99 @@ impl Nokkvi {
             },
         );
 
-        Task::batch([editor_load, songs_load])
+        // Size the editor's stored slot_count to its actual render NOW (it is
+        // not one of the pooled pages resync loops, and resize is the only other
+        // trigger) so the within-list drag maps correctly from the first drag.
+        self.resync_slot_counts();
+
+        Task::batch([editor_load, songs_load, cover_fetch])
+    }
+
+    /// Enter the drop-into-editor "New Playlist" create flow: mount a BLANK
+    /// Tracks editor with NO server row yet (the row is minted on the first
+    /// Save — deferred create). Mirrors the smart-create flow: an empty
+    /// placeholder name focused for immediate typing, the browsing panel open
+    /// to add tracks, private by default.
+    pub(crate) fn handle_enter_playlist_create_mode(&mut self) -> Task<Message> {
+        if self.playlist_editor.is_some() {
+            self.toast_warn("Finish or discard the current playlist edit first");
+            return Task::none();
+        }
+        info!(" Entering playlist create mode (drop-into-editor, deferred create)");
+        // Empty id + private default (matches the smart-create flow). The
+        // edit-bar name input collects the real name; Save mints the row.
+        let edit_state = nokkvi_data::types::playlist_edit::PlaylistEditState::new(
+            String::new(),
+            String::new(),
+            String::new(),
+            false,
+            Vec::new(),
+        );
+        self.playlist_editor = Some(crate::state::PlaylistEditorState::new_create(edit_state));
+        self.browsing_panel = Some(BrowsingPanel::new());
+        self.pane_focus = PaneFocus::Queue;
+        self.queue_page.playlist_strip_expanded = false;
+        self.editor_return_view = if self.current_view == View::PlaylistEditor {
+            View::Playlists
+        } else {
+            self.current_view
+        };
+        self.current_view = View::PlaylistEditor;
+
+        // Load the browser's Songs tab if it hasn't arrived, so tracks can be
+        // dragged in immediately.
+        let songs_load = if self.library.songs.is_empty() {
+            Task::done(Message::LoadSongs)
+        } else {
+            Task::none()
+        };
+        // Focus the edit-bar name input so the user types the name at once —
+        // no priming click (mirrors the smart-create focus seed).
+        let focus = iced::widget::operation::focus(
+            crate::views::playlist_editor::view::EDITOR_NAME_INPUT_ID,
+        );
+        // Size the editor's stored slot_count to its actual render (see the
+        // edit-mode path) so a drag in a fresh create session maps correctly.
+        self.resync_slot_counts();
+        Task::batch([songs_load, focus])
+    }
+
+    /// A deferred-create session's first Save minted the playlist. Adopt the
+    /// new server id (the session becomes an ordinary edit — a second Save now
+    /// updates rather than re-creates), then run the shared saved bookkeeping
+    /// (snapshot re-baseline, concurrency-token seed, toast, list refresh).
+    pub(crate) fn handle_playlist_created(
+        &mut self,
+        id: String,
+        updated_at: String,
+    ) -> Task<Message> {
+        if let Some(e) = self.playlist_editor.as_mut() {
+            e.edit.playlist_id = id;
+            e.creating = false;
+        }
+        self.handle_playlist_edits_saved(updated_at)
+    }
+
+    /// A deferred-create Save failed (or was refused). Clear the in-flight flag
+    /// so the user can retry, and surface the error. The session stays a create
+    /// session (empty id) — a retry re-attempts the create.
+    pub(crate) fn handle_playlist_create_failed(&mut self, error: String) -> Task<Message> {
+        if let Some(e) = self.playlist_editor.as_mut() {
+            e.creating = false;
+        }
+        self.toast_error(error);
+        Task::none()
     }
 
     /// Exit split-view playlist editing mode.
     pub(crate) fn handle_exit_playlist_edit_mode(&mut self) -> Task<Message> {
+        // A deferred-create is in flight — refuse discard so the async create
+        // can't complete after teardown, minting an orphan playlist the user
+        // thinks they discarded. Mirrors the rules-save guard.
+        if self.playlist_editor.as_ref().is_some_and(|e| e.creating) {
+            self.toast_warn("Creating the playlist… try again in a moment");
+            return Task::none();
+        }
         if let Some(edit_state) = self.playlist_editor.as_ref().map(|e| &e.edit) {
             let current_ids = self.editor_song_ids();
             let is_dirty = edit_state.is_dirty(&current_ids);
@@ -266,6 +385,12 @@ impl Nokkvi {
         // while the editor owns the pane) would resurface when the editor closes
         // — clear it here too, mirroring reset_session_state.
         self.clear_stranded_within_list_drag();
+        // Invalidate any in-flight rules-preview task (same reasoning as
+        // reset_session_state): a task whose captured generation still equals
+        // the root counter would otherwise be adopted by the NEXT session
+        // (e.g. a blank-create that dispatches no preview of its own),
+        // seeding it with a foreign draft handle + stale results.
+        self.rules_preview_generation = self.rules_preview_generation.wrapping_add(1);
         self.playlist_editor = None;
         self.browsing_panel = None;
         self.pane_focus = PaneFocus::Queue;
@@ -297,6 +422,15 @@ impl Nokkvi {
     /// Save the current queue as the edited playlist's tracks.
     /// Also renames the playlist if the name was changed.
     pub(crate) fn handle_save_playlist_edits(&mut self) -> Task<Message> {
+        // Kind gate: a RULES session saves through the rules lane (native
+        // rules PUT/POST), never the track-overwrite flow below.
+        if self
+            .playlist_editor
+            .as_ref()
+            .is_some_and(|e| e.rules_session().is_some())
+        {
+            return self.handle_rules_editor(crate::app_message::RulesEditorMessage::Save);
+        }
         // Gate the save on a successfully-loaded buffer: a still-loading or
         // failed resolve leaves an empty/partial buffer that is NOT the real
         // playlist, so persisting it would full-overwrite the server playlist
@@ -327,6 +461,77 @@ impl Nokkvi {
         // subset, never the live queue) — the editor buffer is the source of
         // truth for what gets persisted.
         let song_ids = self.editor_song_ids();
+
+        // Deferred-create session (drop-into-editor "New Playlist"): no server
+        // row exists yet. Mint it now — create_playlist POSTs the name + tracks
+        // + visibility in one call — then the SaveCompleted handler adopts the
+        // returned id so the session becomes an ordinary edit. A name is
+        // required (the server keys the row on it, and an empty name is a
+        // mistake); block the Save with a hint rather than creating "".
+        if playlist_id.is_empty() {
+            // A create is already in flight — refuse a second Save. The id is
+            // only adopted when the async create returns, so a double-click
+            // would otherwise spawn a SECOND create_playlist and mint a
+            // duplicate playlist the user must delete by hand.
+            if self.playlist_editor.as_ref().is_some_and(|e| e.creating) {
+                return Task::none();
+            }
+            if playlist_name.trim().is_empty() {
+                self.toast_warn("Name the playlist before saving");
+                return Task::none();
+            }
+            if let Some(e) = self.playlist_editor.as_mut() {
+                e.creating = true;
+            }
+            let create_name = playlist_name.clone();
+            let create_comment = playlist_comment.clone();
+            return self.shell_task(
+                move |shell| async move {
+                    let service = shell.playlists_api().await?;
+                    // Name + comment + tracks + visibility in one create — the
+                    // comment rides the create POST (the endpoint accepts it),
+                    // so a typed description is never dropped.
+                    let new_id = service
+                        .create_playlist(&create_name, &create_comment, &song_ids, playlist_public)
+                        .await?;
+                    // Seed the concurrency token from the freshly-minted row so a
+                    // second Save in the same session guards correctly.
+                    let updated_at = service
+                        .get_playlist_updated_at(&new_id)
+                        .await
+                        .unwrap_or_default();
+                    Ok::<SaveOutcome, anyhow::Error>(SaveOutcome::Created {
+                        id: new_id,
+                        updated_at,
+                    })
+                },
+                |result| match result {
+                    Ok(SaveOutcome::Created { id, updated_at }) => {
+                        Message::SplitView(SplitViewMessage::PlaylistCreated { id, updated_at })
+                    }
+                    // Created is the only Ok this branch yields; route the rest
+                    // through PlaylistCreateFailed so the `creating` flag clears
+                    // (a Toast alone would leave the session stuck mid-create).
+                    Ok(SaveOutcome::Saved(t)) => {
+                        Message::SplitView(SplitViewMessage::PlaylistEditsSaved(t))
+                    }
+                    Ok(SaveOutcome::Stale) => {
+                        Message::SplitView(SplitViewMessage::PlaylistCreateFailed(
+                            "Playlist changed on the server — reload before saving".to_string(),
+                        ))
+                    }
+                    Err(e) => {
+                        if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                            return msg;
+                        }
+                        error!(" Failed to create playlist: {}", e);
+                        Message::SplitView(SplitViewMessage::PlaylistCreateFailed(format!(
+                            "Failed to create playlist: {e}"
+                        )))
+                    }
+                },
+            );
+        }
         let name_changed = edit_state.is_name_dirty();
         let comment_changed = edit_state.is_comment_dirty();
         let public_changed = edit_state.is_public_dirty();
@@ -415,6 +620,12 @@ impl Nokkvi {
             |result| match result {
                 Ok(SaveOutcome::Saved(new_updated_at)) => {
                     Message::SplitView(SplitViewMessage::PlaylistEditsSaved(new_updated_at))
+                }
+                // Structurally unreachable on the update/replace path (only the
+                // empty-id create branch yields Created), but the match must be
+                // exhaustive — route it correctly rather than dropping it.
+                Ok(SaveOutcome::Created { id, updated_at }) => {
+                    Message::SplitView(SplitViewMessage::PlaylistCreated { id, updated_at })
                 }
                 Ok(SaveOutcome::Stale) => {
                     tracing::warn!(" Aborting playlist save — server changed since edit opened");

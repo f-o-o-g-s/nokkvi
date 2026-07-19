@@ -38,6 +38,10 @@ use crate::{
 /// above the shared `song_list_pane` rows.
 const EDIT_BAR_H: f32 = 60.0;
 
+/// `text_input` id for the Tracks edit-bar name field — focused when the
+/// drop-into-editor create flow mounts, so the user types the name at once.
+pub(crate) const EDITOR_NAME_INPUT_ID: &str = "editor_edit_bar_name";
+
 /// Total slot-list chrome for the editor view.
 ///
 /// The editor renders its [edit bar](PlaylistEditorState::edit_bar) **in place
@@ -60,6 +64,32 @@ pub(crate) fn editor_chrome_height(select_header_visible: bool) -> f32 {
         chrome += SELECT_HEADER_HEIGHT;
     }
     chrome
+}
+
+/// The effective slot-list chrome (editor chrome + vertical artwork) the
+/// editor's [`view`](PlaylistEditorState::view) budgets for these dimensions —
+/// the single input to `with_dynamic_slots`. Shared with `resync_slot_counts`
+/// so the stored `slot_count` (which the within-list drag maps slots→items
+/// against) always equals what the list actually renders. A drift here silently
+/// mis-lands drops, so both paths MUST read this one helper.
+pub(crate) fn editor_effective_chrome(
+    window_width: f32,
+    window_height: f32,
+    select_header_visible: bool,
+) -> f32 {
+    use crate::widgets::base_slot_list_layout::{
+        BaseSlotListLayoutConfig, vertical_artwork_chrome,
+    };
+
+    let chrome = editor_chrome_height(select_header_visible);
+    let layout = BaseSlotListLayoutConfig {
+        window_width,
+        window_height,
+        show_artwork_column: true,
+        slot_list_chrome: chrome,
+        elevated: false,
+    };
+    chrome + vertical_artwork_chrome(&layout)
 }
 
 impl PlaylistEditorState {
@@ -140,11 +170,12 @@ impl PlaylistEditorState {
             );
         }
 
-        let vertical_artwork_chrome =
-            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
+        // The rendered slot count comes from the shared effective-chrome helper
+        // so `resync_slot_counts` can reproduce the SAME count for the drag
+        // mapper (they must never drift).
         let config = SlotListConfig::with_dynamic_slots(
             data.window_height,
-            chrome_height + vertical_artwork_chrome,
+            editor_effective_chrome(data.window_width, data.window_height, self.columns.select),
         )
         .with_modifiers(data.modifiers);
 
@@ -303,6 +334,7 @@ impl PlaylistEditorState {
             .wrapping(iced::widget::text::Wrapping::None);
 
         let name_input = iced::widget::text_input("Playlist name", &data.name)
+            .id(EDITOR_NAME_INPUT_ID)
             .on_input(EditorMessage::NameChanged)
             .font(crate::theme::weighted_ui_font(iced::font::Weight::Bold))
             .size(14)
@@ -448,8 +480,22 @@ impl PlaylistEditorState {
             .spacing(2)
             .align_y(Alignment::Center);
 
+        // Cover thumbnail (shared with the smart edit bar) — click to upload a
+        // custom cover, Reset clears it. Gated to a saved playlist; an unsaved
+        // create session shows the live quad but toasts "save first".
+        let cover = super::cover::cover_thumbnail(
+            &super::cover::EditorCover {
+                custom: data.custom_cover,
+                album_ids: data.cover_album_ids.clone(),
+                album_art: data.album_art,
+                editable: data.cover_editable,
+            },
+            EditorMessage::SetCover,
+            EditorMessage::ResetCover,
+        );
+
         let content = container(
-            row![left, actions]
+            row![cover, left, actions]
                 .spacing(10)
                 .align_y(Alignment::Center)
                 .width(Length::Fill)

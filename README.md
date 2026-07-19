@@ -45,7 +45,8 @@ Things that shaped this project:
 - Browse albums, artists, songs, genres, playlists, internet radios, and similar songs; inline expansion, split-view browsing, and multi-library filtering included
 - Radio stations carry real artwork (an uploaded logo, or the stream's own now-playing image, remembered across restarts), and right-click "Set Custom Artwork" uploads a cover for any playlist or station to Navidrome
 - **Harbour** home view: collapsible discovery shelves — recently played, most played, recently added, plus random genre and playlist cover mosaics — fronted by nokkvi's first whole-library search that matches artists, albums, songs, genres, and playlists at once
-- **Trawl** mix builder: gather artist, album, song, genre, and playlist seeds into a crate, then blend them into the queue by round-robin interleave, per-seed weight, or shuffle-all, with length, rating, and track-count filters. Its panel is a living day-and-night seascape around the trawling longship, with rare sights for patient eyes
+- **Trawl** mix builder: gather artist, album, song, genre, and playlist seeds into a crate, then blend them into the queue by round-robin interleave, per-seed weight, or shuffle-all, with length, rating, and track-count filters (a good blend can be saved as an ordinary playlist). Its panel is a living day-and-night seascape around the trawling longship, with rare sights for patient eyes
+- **Smart playlists**, created and edited in-app: a keyboard-first rules editor with live validation, seeded presets, a raw-JSON mode, and server-evaluated previews you can audition before saving (Enter plays a preview row). Rules also import from `.nsp` files, and every surface gates honestly on what your Navidrome version supports (0.61+ for rules editing)
 - 23 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, Firmium, Enthroned, ...) picked from a searchable modal that paints each row in that theme's own palette, with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own. Two complete icon sets ship (Phosphor default, Lucide alternate)
 - Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling (library plays go through your server's Last.fm / ListenBrainz agents, and internet-radio streams scrobble directly from their broadcast metadata)
 - Sync your play queue to Navidrome and pull it back on another device or a fresh session, resuming at the exact track and position (needs the OpenSubsonic indexBasedQueue extension, Navidrome 0.58.5+)
@@ -62,7 +63,6 @@ Nokkvi is a fast, keyboard-driven music player, not a Navidrome admin panel. The
 - Server administration (library scans, user management)
 - Podcasts
 - Jukebox mode
-- Smart playlist generation
 - Bookmarks
 - Public sharing links
 - Offline download

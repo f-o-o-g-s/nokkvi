@@ -4,7 +4,7 @@ use iced::Task;
 
 use crate::{
     Nokkvi,
-    app_message::{Message, PlaylistMutation, SplitViewMessage},
+    app_message::{Message, PlaylistMutation},
     widgets::text_input_dialog::{PlaylistOption, TextInputDialogAction, TextInputDialogMessage},
 };
 
@@ -17,6 +17,27 @@ impl Nokkvi {
         match msg {
             TextInputDialogMessage::ValueChanged(val) => {
                 self.text_input_dialog.value = val;
+                // Live duplicate-name warning on every playlist-CREATE flow
+                // (warn, never block — a duplicate name is legal server-side).
+                // Immediate like search; the shared helper trims + case-folds.
+                if matches!(
+                    self.text_input_dialog.action,
+                    Some(
+                        TextInputDialogAction::CreatePlaylistFromQueue
+                            | TextInputDialogAction::CreatePlaylistWithSongs(_)
+                    )
+                ) {
+                    let dup = nokkvi_data::services::api::playlists::duplicate_playlist_name(
+                        &self.text_input_dialog.value,
+                        self.library.playlists.iter().map(|p| p.name.as_str()),
+                    );
+                    self.text_input_dialog.note = dup.map(|i| {
+                        format!(
+                            "A playlist named \"{}\" already exists",
+                            self.library.playlists[i].name
+                        )
+                    });
+                }
                 Task::none()
             }
             TextInputDialogMessage::SecondaryValueChanged(val) => {
@@ -26,7 +47,18 @@ impl Nokkvi {
                 Task::none()
             }
             TextInputDialogMessage::Cancel => {
+                // The Trawl save dialog reopens the mix builder on cancel —
+                // the user backed out of NAMING, not out of the mix (the
+                // crate lives on root state either way).
+                let reopen_trawl = matches!(
+                    self.text_input_dialog.action,
+                    Some(TextInputDialogAction::CreatePlaylistFromTrawl(_))
+                );
                 self.text_input_dialog.close();
+                if reopen_trawl {
+                    return self
+                        .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
+                }
                 Task::none()
             }
             TextInputDialogMessage::PlaylistSelected(option) => {
@@ -37,6 +69,14 @@ impl Nokkvi {
                 Task::none()
             }
             TextInputDialogMessage::Submit => self.handle_text_input_submit(),
+            TextInputDialogMessage::SubmitExtra => {
+                // Swap the third button's action into the primary slot and
+                // run the shared submit path (same validation + close).
+                if let Some((_, action)) = self.text_input_dialog.extra_action.take() {
+                    self.text_input_dialog.action = Some(action);
+                }
+                self.handle_text_input_submit()
+            }
         }
     }
 
@@ -123,7 +163,9 @@ impl Nokkvi {
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        let playlist_id = service.create_playlist(&name, &song_ids, public).await?;
+                        let playlist_id = service
+                            .create_playlist(&name, "", &song_ids, public)
+                            .await?;
                         Ok(playlist_id)
                     },
                     move |result: Result<String, anyhow::Error>| match result {
@@ -133,49 +175,6 @@ impl Nokkvi {
                         )),
                         Err(e) => {
                             tracing::error!(" Failed to create playlist from queue: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to create playlist: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
-                )
-            }
-            Some(TextInputDialogAction::CreatePlaylistAndEdit) => {
-                let value = self.text_input_dialog.value.trim().to_string();
-                if value.is_empty() {
-                    self.toast_warn("Name cannot be empty");
-                    return Task::none();
-                }
-                let public = self.text_input_dialog.public;
-                self.text_input_dialog.close();
-                let name = value.clone();
-                self.shell_task(
-                    move |shell| async move {
-                        let service = shell.playlists_api().await?;
-                        // Empty song_ids — the server-created playlist starts blank;
-                        // the user populates it from the browsing panel after entering
-                        // edit mode.
-                        let id = service.create_playlist(&name, &[], public).await?;
-                        Ok((id, name, public))
-                    },
-                    move |result: Result<(String, String, bool), anyhow::Error>| match result {
-                        Ok((playlist_id, playlist_name, playlist_public)) => {
-                            // Chain into edit mode for the newly created playlist.
-                            // `LoadPlaylists` is fired by the EnterPlaylistEditMode
-                            // handler's downstream save flow once edits land; we don't
-                            // need to dispatch PlaylistMutated::Created separately.
-                            Message::SplitView(SplitViewMessage::EnterEditMode {
-                                playlist_id,
-                                playlist_name,
-                                playlist_comment: String::new(),
-                                playlist_public,
-                            })
-                        }
-                        Err(e) => {
-                            tracing::error!(" Failed to create new playlist: {e}");
                             Message::Toast(crate::app_message::ToastMessage::Push(
                                 nokkvi_data::types::toast::Toast::new(
                                     format!("Failed to create playlist: {e}"),
@@ -237,7 +236,7 @@ impl Nokkvi {
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        service.create_playlist(&name, &song_ids, public).await
+                        service.create_playlist(&name, "", &song_ids, public).await
                     },
                     move |result: Result<String, anyhow::Error>| match result {
                         Ok(_playlist_id) => {
@@ -450,6 +449,99 @@ impl Nokkvi {
                             result,
                         ))
                     },
+                )
+            }
+            Some(TextInputDialogAction::CreatePlaylistFromTrawl(song_ids)) => {
+                let name = self.text_input_dialog.value.trim().to_string();
+                if name.is_empty() {
+                    self.text_input_dialog.action =
+                        Some(TextInputDialogAction::CreatePlaylistFromTrawl(song_ids));
+                    self.toast_warn("Name cannot be empty");
+                    return Task::none();
+                }
+                let public = self.text_input_dialog.public;
+                self.text_input_dialog.close();
+                let toast_name = name.clone();
+                self.shell_task(
+                    move |shell| async move {
+                        let service = shell.playlists_api().await?;
+                        service.create_playlist(&name, "", &song_ids, public).await
+                    },
+                    move |result: Result<String, anyhow::Error>| match result {
+                        // `None` id on purpose: the id-carrying arm sets the
+                        // queue's playlist-context header, and the queue is
+                        // NOT this playlist (the mix was saved, not played).
+                        Ok(_playlist_id) => {
+                            Message::PlaylistMutated(PlaylistMutation::Created(toast_name, None))
+                        }
+                        Err(e) => {
+                            tracing::error!(" Failed to save mix as playlist: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to save mix as playlist: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                )
+            }
+            Some(TextInputDialogAction::ImportNspCreate { comment, rules }) => {
+                let name = self.text_input_dialog.value.trim().to_string();
+                if name.is_empty() {
+                    self.text_input_dialog.action =
+                        Some(TextInputDialogAction::ImportNspCreate { comment, rules });
+                    self.toast_warn("Name cannot be empty");
+                    return Task::none();
+                }
+                let public = self.text_input_dialog.public;
+                self.text_input_dialog.close();
+                self.import_create_task(crate::update::nsp_import::NspImportPayload {
+                    name,
+                    comment,
+                    public,
+                    rules,
+                })
+            }
+            Some(TextInputDialogAction::ImportNspUpdate {
+                playlist_id,
+                detach_sync,
+                comment,
+                public,
+                rules,
+            }) => {
+                let name = self.text_input_dialog.value.trim().to_string();
+                if name.is_empty() {
+                    self.text_input_dialog.action = Some(TextInputDialogAction::ImportNspUpdate {
+                        playlist_id,
+                        detach_sync,
+                        comment,
+                        public,
+                        rules,
+                    });
+                    self.toast_warn("Name cannot be empty");
+                    return Task::none();
+                }
+                // `public`/`comment` are the target's own (rules-only update);
+                // the hidden toggle's value is deliberately ignored here.
+                self.text_input_dialog.close();
+                let toast_name = name.clone();
+                self.shell_action_task(
+                    move |shell| async move {
+                        let service = shell.playlists_api().await?;
+                        service
+                            .put_playlist_full(
+                                &playlist_id,
+                                &name,
+                                &comment,
+                                public,
+                                Some(&rules),
+                                detach_sync.then_some(false),
+                            )
+                            .await
+                    },
+                    Message::PlaylistMutated(PlaylistMutation::RulesSaved { name: toast_name }),
+                    "import rules onto existing playlist",
                 )
             }
             Some(TextInputDialogAction::CompleteLastfmAuth(token)) => {

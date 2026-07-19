@@ -243,8 +243,8 @@ impl PlaylistsPage {
                 PlaylistsMessage::OpenDefaultPlaylistPicker => {
                     (Task::none(), PlaylistsAction::OpenDefaultPlaylistPicker)
                 }
-                PlaylistsMessage::OpenCreatePlaylistDialog => {
-                    (Task::none(), PlaylistsAction::OpenCreatePlaylistDialog)
+                PlaylistsMessage::NewPlaylistInEditor => {
+                    (Task::none(), PlaylistsAction::NewPlaylistInEditor)
                 }
                 PlaylistsMessage::ToggleColumnVisible(col) => {
                     let new_value = self.column_visibility.toggle(col);
@@ -254,11 +254,78 @@ impl PlaylistsPage {
                     )
                 }
 
+                PlaylistsMessage::TrackRemovalSettled {
+                    playlist_id,
+                    removed,
+                } => (
+                    Task::none(),
+                    PlaylistsAction::TrackRemovalSettled {
+                        playlist_id,
+                        removed,
+                    },
+                ),
+                PlaylistsMessage::NewSmartPlaylist => {
+                    (Task::none(), PlaylistsAction::NewSmartPlaylist)
+                }
+                PlaylistsMessage::ImportNsp => (Task::none(), PlaylistsAction::ImportNsp),
+                PlaylistsMessage::RetryCapsFetch => (Task::none(), PlaylistsAction::RetryCapsFetch),
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
                     use nokkvi_data::types::batch::BatchItem;
 
                     use crate::widgets::context_menu::LibraryContextEntry;
+
+                    if matches!(entry, LibraryContextEntry::AddToMix) {
+                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                        let seeds =
+                            super::super::expansion::build_trawl_seeds(target_indices, |i| {
+                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                    Some(SlotListEntry::Parent(playlist)) => {
+                                        let songs = playlist.song_count;
+                                        let noun = if songs == 1 { "song" } else { "songs" };
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                            BatchItem::Playlist(playlist.id.clone()),
+                                            playlist.name.clone(),
+                                            format!("{songs} {noun}"),
+                                        ))
+                                    }
+                                    Some(SlotListEntry::Child(song, _)) => {
+                                        let item: nokkvi_data::types::song::Song =
+                                            song.clone().into();
+                                        Some(nokkvi_data::types::trawl::TrawlSeed::new(
+                                            BatchItem::Song(Box::new(item)),
+                                            song.title.clone(),
+                                            song.artist.clone(),
+                                        ))
+                                    }
+                                    None => None,
+                                }
+                            });
+                        return (Task::none(), PlaylistsAction::AddBatchToMix(seeds));
+                    }
+
+                    if matches!(entry, LibraryContextEntry::RemoveFromPlaylist) {
+                        // Single-row, ordinal-addressed (never id-addressed —
+                        // duplicate songs make ids ambiguous). Position is
+                        // 1-based on the wire. Smart parents never emit the
+                        // entry, so this resolve is regular-parent-only.
+                        if let (Some(SlotListEntry::Child(song, parent_id)), Some(ordinal)) = (
+                            self.expansion
+                                .get_entry_at(clicked_idx, playlists, |p| &p.id),
+                            self.expansion
+                                .child_ordinal_at(clicked_idx, playlists, |p| &p.id),
+                        ) {
+                            return (
+                                Task::none(),
+                                PlaylistsAction::RemoveTrackFromPlaylist {
+                                    playlist_id: parent_id,
+                                    song_id: song.id.clone(),
+                                    position: ordinal as u32 + 1,
+                                },
+                            );
+                        }
+                        return (Task::none(), PlaylistsAction::None);
+                    }
 
                     if matches!(
                         entry,
@@ -290,7 +357,10 @@ impl PlaylistsPage {
                                 return (Task::none(), PlaylistsAction::AddBatchToQueue(payload));
                             }
                             LibraryContextEntry::AddToPlaylist => {
-                                return (Task::none(), PlaylistsAction::None); // Handle AddToPlaylist if needed later, right now playlists might not be addable into playlists?
+                                return (
+                                    Task::none(),
+                                    PlaylistsAction::AddBatchToPlaylist(payload),
+                                );
                             }
                             _ => unreachable!(),
                         }
@@ -403,6 +473,10 @@ impl PlaylistsPage {
                                     playlist.comment.clone(),
                                     playlist.public,
                                 ),
+                            ),
+                            PlaylistContextEntry::EditRules => (
+                                Task::none(),
+                                PlaylistsAction::EditRules(playlist.id.clone()),
                             ),
                             PlaylistContextEntry::SetAsDefault => (
                                 Task::none(),

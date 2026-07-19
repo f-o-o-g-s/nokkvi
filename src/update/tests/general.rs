@@ -537,6 +537,12 @@ fn picker_nav_key_passes_through_when_picker_open() {
         updated_at: String::new(),
         artwork_album_ids: Vec::new(),
         uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: String::new(),
     };
     app.default_playlist_picker =

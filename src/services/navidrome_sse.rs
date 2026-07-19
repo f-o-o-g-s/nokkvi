@@ -234,6 +234,12 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                 .get(&url)
                 .header("Accept", "text/event-stream")
                 .header("X-ND-Authorization", format!("Bearer {token}"))
+                // Same unique id as the API requests — Navidrome skips
+                // echoing our own mutations back over this stream.
+                .header(
+                    "X-ND-Client-Unique-Id",
+                    nokkvi_data::services::api::client::client_unique_id(),
+                )
                 .send()
                 .await
             {

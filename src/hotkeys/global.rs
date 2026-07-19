@@ -138,6 +138,15 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::OpenTrawl => {
             Message::TrawlModal(crate::widgets::trawl_modal::TrawlModalMessage::Open)
         }
+        // Caps-gated in the handler (hidden-in-effect while the server
+        // capability is unknown/absent — a defensive toast, never a crash).
+        HotkeyAction::NewSmartPlaylist => {
+            Message::SplitView(crate::app_message::SplitViewMessage::EnterRulesMode {
+                target: crate::app_message::RulesEntryTarget::Create,
+            })
+        }
+        HotkeyAction::EditCenteredPlaylist => Message::Hotkey(HotkeyMessage::EditCenteredPlaylist),
+        HotkeyAction::TrawlSaveAsPlaylist => Message::Hotkey(HotkeyMessage::TrawlSaveAsPlaylist),
         HotkeyAction::ToggleCrossfade => Message::Playback(PlaybackMessage::ToggleCrossfade),
         HotkeyAction::ToggleLyrics => {
             Message::PlayerBar(crate::widgets::PlayerBarMessage::ToggleLyrics)

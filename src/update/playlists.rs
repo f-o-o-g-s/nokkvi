@@ -195,7 +195,10 @@ impl Nokkvi {
                 return self.expand_load_children_task(
                     move |shell| async move {
                         let playlists_service = shell.playlists_api().await?;
-                        playlists_service.load_playlist_songs(&id).await
+                        // Playlist-level attrs (OpenSubsonic readonly) are a
+                        // play-flow signal, not an expansion one — drop them.
+                        let (songs, _attrs) = playlists_service.load_playlist_songs(&id).await?;
+                        Ok(songs)
                     },
                     move |songs: Vec<nokkvi_data::types::song::Song>| {
                         let tracks: Vec<nokkvi_data::backend::songs::SongUIViewData> =
@@ -361,23 +364,135 @@ impl Nokkvi {
             PlaylistsAction::PlayNextBatch(payload) => {
                 return self.play_next_batch_task(payload);
             }
+            PlaylistsAction::AddBatchToPlaylist(payload) => {
+                return self.handle_add_batch_to_playlist(payload);
+            }
+            PlaylistsAction::RemoveTrackFromPlaylist {
+                playlist_id,
+                song_id,
+                position,
+            } => {
+                // Defensively built (the silent-no-op class): (i) verify-read
+                // confirms the song at the 1-based position, narrowing the
+                // reorder TOCTOU window; (ii) single-id DELETE — a stale
+                // position 404s server-side instead of deleting silently;
+                // (iii) the echoed-id check inside remove_playlist_track_at
+                // treats a no-op 200 as failure; (iv) the settle handler
+                // refreshes unconditionally, bounding any residual race.
+                let pid = playlist_id.clone();
+                return self.shell_task(
+                    move |shell| async move {
+                        let service = shell.playlists_api().await?;
+                        let (songs, _attrs) = service.load_playlist_songs(&playlist_id).await?;
+                        let at = songs.get(position.saturating_sub(1) as usize);
+                        if at.map(|s| s.id.as_str()) != Some(song_id.as_str()) {
+                            return Ok(false); // playlist changed under us
+                        }
+                        match service
+                            .remove_playlist_track_at(&playlist_id, position)
+                            .await
+                        {
+                            Ok(()) => Ok(true),
+                            // A 404 is the stale-position lane (the server's
+                            // len(ids)==1 ErrNotFound branch), not a hard
+                            // failure — same "changed" recovery.
+                            Err(e) if format!("{e:#}").contains("status 404") => Ok(false),
+                            Err(e) => Err(e),
+                        }
+                    },
+                    move |result: Result<bool, anyhow::Error>| match result {
+                        Ok(removed) => Message::Playlists(PlaylistsMessage::TrackRemovalSettled {
+                            playlist_id: pid.clone(),
+                            removed,
+                        }),
+                        Err(e) => {
+                            if let Some(msg) =
+                                crate::update::components::session_expired_message(&e)
+                            {
+                                return msg;
+                            }
+                            tracing::error!("Failed to remove track from playlist: {e:#}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to remove track: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                );
+            }
+            PlaylistsAction::TrackRemovalSettled {
+                playlist_id,
+                removed,
+            } => {
+                if removed {
+                    self.toast_success("Removed from playlist");
+                } else {
+                    self.toast_warn("Playlist changed — refresh and retry");
+                }
+                // Unconditional refresh: reload the list (counts) and re-pull
+                // the expansion children so the rows reflect server truth.
+                let id = playlist_id.clone();
+                let refetch = self.expand_load_children_task(
+                    move |shell| async move {
+                        let playlists_service = shell.playlists_api().await?;
+                        let (songs, _attrs) = playlists_service.load_playlist_songs(&id).await?;
+                        Ok(songs)
+                    },
+                    move |songs: Vec<nokkvi_data::types::song::Song>| {
+                        let tracks: Vec<nokkvi_data::backend::songs::SongUIViewData> =
+                            songs.into_iter().map(Into::into).collect();
+                        Message::Playlists(PlaylistsMessage::TracksLoaded(playlist_id, tracks))
+                    },
+                    "reload playlist tracks",
+                );
+                return Task::batch([Task::done(Message::LoadPlaylists), refetch]);
+            }
+            PlaylistsAction::EditRules(playlist_id) => {
+                return self.handle_enter_rules_mode(crate::app_message::RulesEntryTarget::Edit {
+                    playlist_id,
+                });
+            }
+            PlaylistsAction::NewSmartPlaylist => {
+                return self.handle_enter_rules_mode(crate::app_message::RulesEntryTarget::Create);
+            }
+            PlaylistsAction::ImportNsp => {
+                return self.handle_import_nsp();
+            }
+            PlaylistsAction::RetryCapsFetch => {
+                // Re-attempt the post-auth version fetch (the dimmed entry's
+                // whole purpose). Failure keeps FetchFailed → retry stays.
+                if let Some(shell) = self.app_service.clone() {
+                    return Task::perform(
+                        async move { shell.auth().fetch_server_version().await.ok() },
+                        Message::ServerVersionFetched,
+                    );
+                }
+            }
             PlaylistsAction::DeletePlaylist(playlist_id) => {
-                let name = self
-                    .library
-                    .playlists
-                    .iter()
-                    .find(|p| p.id == playlist_id)
-                    .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
+                let row = self.library.playlists.iter().find(|p| p.id == playlist_id);
+                let name = row.map_or_else(|| "playlist".to_string(), |p| p.name.clone());
+                // File-backed honesty (verified against the server's scan
+                // import: a deleted row leaves nothing for the path lookup
+                // to find, so the file re-imports UNCONDITIONALLY — no
+                // client-side action can prevent it while the file exists).
+                let file_backed = row.is_some_and(|p| p.is_file_backed);
                 self.text_input_dialog
-                    .open_delete_confirmation(playlist_id, name);
+                    .open_delete_confirmation(playlist_id, name, file_backed);
             }
             PlaylistsAction::RenamePlaylist(playlist_id) => {
-                let current_name = self
-                    .library
-                    .playlists
-                    .iter()
-                    .find(|p| p.id == playlist_id)
-                    .map_or_else(String::new, |p| p.name.clone());
+                let row = self.library.playlists.iter().find(|p| p.id == playlist_id);
+                let current_name = row.map_or_else(String::new, |p| p.name.clone());
+                // File-backed truth (verified against the server's scan
+                // re-sync, which PRESERVES the API-set name of a
+                // path-matched playlist): an in-app rename IS durable. The
+                // true residual is that a still-synced file's RULES keep
+                // overwriting rule edits on every scan — stated as a dimmed
+                // note, never a false resurrection warning. (The Detach
+                // offer lands with M4's ServerCaps — the sync PUT is a
+                // 0.62+ capability.)
+                let synced_file = row.is_some_and(|p| p.is_file_backed && p.sync);
                 self.text_input_dialog.open(
                     "Rename Playlist",
                     current_name,
@@ -386,6 +501,12 @@ impl Nokkvi {
                         playlist_id,
                     ),
                 );
+                if synced_file {
+                    self.text_input_dialog.set_note(
+                        "Renaming here won't rename the server-side file — and that \
+                         file's rules keep overwriting rule edits on every scan.",
+                    );
+                }
             }
             PlaylistsAction::EditPlaylist(
                 playlist_id,
@@ -393,6 +514,19 @@ impl Nokkvi {
                 playlist_comment,
                 playlist_public,
             ) => {
+                // Smart gate (D4): the Tracks editor's saves would 403 —
+                // smart rows route into the RULES session instead (owned;
+                // the enter handler owns the ownership refusal).
+                if self
+                    .library
+                    .playlists
+                    .iter()
+                    .any(|p| p.id == playlist_id && p.is_smart)
+                {
+                    return self.handle_enter_rules_mode(
+                        crate::app_message::RulesEntryTarget::Edit { playlist_id },
+                    );
+                }
                 return Task::done(Message::SplitView(SplitViewMessage::EnterEditMode {
                     playlist_id,
                     playlist_name,
@@ -439,16 +573,10 @@ impl Nokkvi {
                     crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,
                 ));
             }
-            views::PlaylistsAction::OpenCreatePlaylistDialog => {
-                // Refuse if already in split-view edit mode — creating a new
-                // playlist drops the user into edit mode for it, which would
-                // collide with the in-progress edit.
-                if self.playlist_editor.is_some() {
-                    self.toast_warn("Finish or discard the current playlist edit first");
-                    return Task::none();
-                }
-                self.text_input_dialog.open_create_playlist();
-                return Task::none();
+            views::PlaylistsAction::NewPlaylistInEditor => {
+                // Drop straight into a blank track editor (no naming modal) —
+                // the editor's own guard refuses if an edit is already open.
+                return self.handle_enter_playlist_create_mode();
             }
             views::PlaylistsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

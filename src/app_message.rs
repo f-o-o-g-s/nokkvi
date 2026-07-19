@@ -31,6 +31,10 @@ pub enum PlaylistMutation {
         name: String,
         id: String,
     },
+    /// A smart playlist's rules were saved (created or updated).
+    RulesSaved {
+        name: String,
+    },
 }
 
 impl std::fmt::Display for PlaylistMutation {
@@ -41,6 +45,7 @@ impl std::fmt::Display for PlaylistMutation {
             Self::Created(name, _) => write!(f, "Created playlist '{name}'"),
             Self::Overwritten(name, _) => write!(f, "Overwritten playlist '{name}'"),
             Self::Appended { name, .. } => write!(f, "Added songs to '{name}'"),
+            Self::RulesSaved { name } => write!(f, "Saved rules for '{name}'"),
         }
     }
 }
@@ -63,6 +68,11 @@ pub(crate) use nokkvi_data::types::view_preferences::AllViewPreferences;
 pub struct LoginSuccess {
     pub shell: AppService,
     pub resolved_url: String,
+    /// The authenticated user's Navidrome id (login response `id`, or the
+    /// JWT `uid` claim on resume). Stored on `Nokkvi.session_user_id` for
+    /// the playlist ownership gate. Empty when unavailable — conservative:
+    /// every ownership check then reads "not owned".
+    pub user_id: String,
 }
 
 /// Grouped playback state for cleaner message passing (R1 refactoring)
@@ -280,6 +290,14 @@ pub enum HotkeyMessage {
     /// Expand/collapse center item inline (Shift+Enter)
     ExpandCenter,
     /// Move centered queue track up (Shift+↑)
+    /// Edit the centered Playlists-view row — kind-dispatched: rules
+    /// session for owned smart, Tracks editor for regular, ownership toast
+    /// for unowned smart. The keyboard front door the mouse-only entry
+    /// points were missing.
+    EditCenteredPlaylist,
+    /// Save the Trawl mix as an ordinary playlist (Shift+P) — mix-builder
+    /// only; a quiet no-op with the modal closed.
+    TrawlSaveAsPlaylist,
     MoveTrackUp,
     /// Move centered queue track down (Shift+↓)
     MoveTrackDown,
@@ -607,6 +625,222 @@ pub enum SplitViewMessage {
     /// token (empty when unavailable) so the editor's optimistic-concurrency
     /// guard can advance for a subsequent save in the same still-mounted session.
     PlaylistEditsSaved(String),
+    /// A deferred-create session's first Save minted the playlist. The session
+    /// adopts the new `id` (becoming an edit session) and seeds its concurrency
+    /// guard from `updated_at`.
+    PlaylistCreated { id: String, updated_at: String },
+    /// A deferred-create Save failed or was refused — clears the in-flight
+    /// flag (so a retry is possible) and surfaces the error.
+    PlaylistCreateFailed(String),
+    /// Enter the smart-playlist RULES editor session (the one-screen create
+    /// flow dispatches this directly — no pre-dialog; the session's edit-bar
+    /// collects name/comment/public).
+    EnterRulesMode { target: RulesEntryTarget },
+}
+
+/// Light dispatch payload for `EnterRulesMode` — the handler resolves the
+/// full `RulesTarget` (file-backed/sync/updatedAt/rules) from library data
+/// or a fetch at open time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RulesEntryTarget {
+    Create,
+    Edit { playlist_id: String },
+}
+
+/// Messages for the rules-editor session (`EditorSessionKind::Rules`).
+/// The edit-bar name/comment/public inputs reuse `EditorMessage` (they
+/// mutate the shared `PlaylistEditState`); everything rule-form-specific
+/// lands here.
+#[derive(Debug, Clone)]
+pub enum RulesEditorMessage {
+    // --- cursor-mode grammar (view-gated keys, not hotkey rows) ---
+    CursorMove {
+        down: bool,
+    },
+    /// Tab: step the focused cell within the cursor row (wrapping).
+    StepCell,
+    /// Left/Right: cycle the focused enum cell's value (conjunction /
+    /// field / operator / direction / limit-mode); steps columns on the
+    /// edit-bar band.
+    CycleCell {
+        forward: bool,
+    },
+    /// Enter in cursor mode — per-cell action (Editing / sub-picker /
+    /// toggle / add-row append / JSON-mode entry).
+    EnterOnCursor,
+    /// Delete/`x` in cursor mode: remove the cursor row (rule / group
+    /// header / sort key).
+    DeleteCursorRow,
+    /// Shift+↑/↓: reorder within reorderable families (sort keys).
+    MoveCursorRow {
+        up: bool,
+    },
+    /// Shift+Tab: hop form↔results (a DELIBERATE divergence from Trawl's
+    /// control-ring Shift+Tab — a tall 2D form wants Up/Down for control
+    /// stepping and Shift+Tab for the pane hop; taught side-by-side in the
+    /// docs).
+    SwitchPane,
+    /// Escape in cursor mode: Discard with dirty-confirm.
+    EscapePressed,
+    ConfirmDiscard,
+    CancelDiscard,
+    /// A mouse click on a form cell — moves the cursor there and performs
+    /// the same per-cell action as Enter (one write path).
+    ClickCell {
+        row: usize,
+        cell: crate::state::FormCell,
+    },
+
+    // --- editing mode ---
+    EditingInput(String),
+    /// Enter/Tab: commit the buffer into the rules and return to cursor.
+    CommitEditing,
+    /// Escape: revert the CELL and defocus only — never discards.
+    RevertEditing,
+
+    // --- sub-pickers (modal overlays; join the outer hotkey gate) ---
+    SubPickerQuery(String),
+    SubPickerMove {
+        down: bool,
+    },
+    SubPickerCommit,
+    SubPickerCancel,
+    /// A mouse click on a sub-picker row — moves the picker cursor there
+    /// and commits (the keyboard path's one write path).
+    ClickPickerRow(usize),
+
+    // --- date picker (a sub-picker kind with a calendar grid, no list) ---
+    /// Step the displayed month one forward/back (‹ › arrows, PageUp/PageDown).
+    DatePickerShiftMonth {
+        forward: bool,
+    },
+    /// Keyboard day nav: move the focused day by `by` days, rolling across
+    /// month boundaries (Left/Right = ±1, Up/Down = ∓7).
+    DatePickerMoveDay {
+        by: i64,
+    },
+    /// A mouse click on a specific day in the displayed month — commits it.
+    DatePickerPickDay(u32),
+    /// Enter — commit the focused day.
+    DatePickerCommit,
+
+    // --- JSON mode ---
+    JsonEdited(iced::widget::text_editor::Action),
+    /// Escape in JSON mode: clean parse applies + exits; parse error
+    /// surfaces the keep-editing / revert two-choice line.
+    JsonEscape,
+    JsonRevertToLastGood,
+    JsonKeepEditing,
+
+    // --- preview / save ---
+    /// Ctrl+Enter. M4 interim: create sessions no-op with a hint (no
+    /// server object exists); edit sessions run the read-only re-GET of
+    /// the SAVED rules. M5 swaps in the true pre-save draft preview.
+    Preview,
+    /// The read-only tracks+meta re-GET of an edit session's saved rules
+    /// (the M4 "Re-evaluate" control).
+    ReEvaluate,
+    Save,
+    /// Fork: finalize under a fresh name, leaving the original untouched.
+    SaveAsNew,
+    /// Resolve a Save conflict (stale updatedAt) by overwriting anyway.
+    ConfirmOverwrite,
+    /// Resolve a Save conflict by reloading the server's rules.
+    ReloadServerRules,
+
+    /// Edit-bar cover clicked — Set custom artwork (edit sessions open the
+    /// file picker; create sessions toast "save first").
+    SetCover,
+    /// Reset the playlist's custom cover back to the derived quad (edit
+    /// sessions with a custom cover only).
+    ResetCover,
+
+    // --- create empty state ---
+    PresetChosen(usize),
+    StartEmpty,
+    /// Move the keyboard cursor through the blank-create empty-state list
+    /// (Start empty / Import / presets).
+    EmptyStateMove {
+        down: bool,
+    },
+    /// Activate the empty-state entry under the keyboard cursor.
+    EmptyStateActivate,
+    /// Empty-state "Import from .nsp file…" — pick + parse, then load the
+    /// criteria into the OPEN session (a disk-backed preset; no server
+    /// write happens here, unlike the header-dropdown import flow).
+    ImportNsp,
+    /// The in-session pick+parse resolved.
+    NspParsed(crate::update::nsp_import::NspPickResult),
+
+    // --- async carriers ---
+    /// The session-open playlists-list fetch resolved (feeds the
+    /// inPlaylist sub-picker + the list-gated diagnostics).
+    SessionPlaylistsLoaded(Vec<(String, String)>),
+    /// Tag discovery resolved (Err ⇒ hedged validation copy; the picker
+    /// degrades to static fields).
+    TagsDiscovered(Result<Vec<(String, String, u64)>, String>),
+    /// An evaluation read landed (draft preview / observe / re-evaluate).
+    /// Stale generations are dropped. `source_id` names the playlist the
+    /// rows were read from (the paging source).
+    PreviewLoaded {
+        generation: u64,
+        source_id: String,
+        rows: Vec<nokkvi_data::types::song::Song>,
+        total: Option<u32>,
+        evaluated_at: Option<String>,
+    },
+    /// A draft write + read completed: the draft now exists (or was
+    /// recreated) and `written_rules` is what the server holds.
+    DraftPreviewLoaded {
+        generation: u64,
+        draft: nokkvi_data::types::rules_session::DraftInfo,
+        written_rules: serde_json::Value,
+        rows: Vec<nokkvi_data::types::song::Song>,
+        total: Option<u32>,
+        evaluated_at: Option<String>,
+    },
+    /// The draft CREATE failed — authoring-only mode with a Retry
+    /// affordance (the form stays fully usable; validation is client-side).
+    DraftUnavailable {
+        generation: u64,
+        error: String,
+    },
+    /// A `_start > 0` page of the SAME completed evaluation landed —
+    /// appended to the pane.
+    PreviewPageLoaded {
+        generation: u64,
+        rows: Vec<nokkvi_data::types::song::Song>,
+    },
+    /// Enter on the centered preview row: play it (SongSource::Preloaded
+    /// through the guarded play path).
+    PlayPreviewRow,
+    PreviewFailed {
+        generation: u64,
+        error: String,
+    },
+    /// The banner pencil's just-in-time meta fetch resolved — routes to
+    /// Rules (owned smart) / Tracks (regular) / toast (unowned smart).
+    PlaylistKindResolved {
+        playlist_id: String,
+        result: Result<Box<nokkvi_data::types::playlist::Playlist>, String>,
+    },
+    /// The rules PUT/POST settled. `playlist_id` lets a create session
+    /// morph into an edit session of the new playlist; `detached` drives
+    /// the one-time sync-detach toast. `spun_off` marks a "Save as new"
+    /// fork FROM an edit session: the copy is a side effect, so the
+    /// original session keeps its target, token, draft, and dirty state.
+    SaveCompleted {
+        playlist_id: String,
+        name: String,
+        saved_updated_at: String,
+        detached: bool,
+        spun_off: bool,
+    },
+    SaveFailed(String),
+    /// The optimistic-concurrency check found a moved updatedAt.
+    SaveConflict,
+    /// The save target vanished (404) — single recovery: Save as new.
+    SaveTargetGone,
 }
 
 /// Playlist-editor messages, namespaced under `Message::Editor(..)`.
@@ -652,6 +886,11 @@ pub enum EditorMessage {
     CommentChanged(String),
     /// Edit-bar: public/private toggled.
     PublicToggled(bool),
+    /// Edit-bar cover: upload a custom playlist cover (native file picker).
+    /// On an unsaved create session (no id yet) it toasts "save first".
+    SetCover,
+    /// Edit-bar cover: clear the custom cover back to the derived quad.
+    ResetCover,
     /// Persist the editor buffer back to the playlist.
     Save,
     /// Edit-bar discard / exit control — forwards to the shared
@@ -901,6 +1140,9 @@ pub enum OpenMenu {
     /// matching `View` variant, so it gets its own discriminator instead of
     /// shoehorning a synthetic `View::Similar` through the rest of the app.
     CheckboxDropdownSimilar { trigger_bounds: iced::Rectangle },
+    /// The Playlists header's create dropdown (New Playlist / New Smart
+    /// Playlist / Import .nsp…) — the QueueSync `action_dropdown` chassis.
+    PlaylistsCreate { trigger_bounds: iced::Rectangle },
     /// Queue view's server-sync action menu (push / pull the server-saved
     /// queue). A close-on-click action dropdown anchored below its header
     /// trigger; `trigger_bounds` are captured at click time exactly like
@@ -969,7 +1211,10 @@ pub enum Message {
     SetOpenMenu(Option<OpenMenu>),
 
     // --- Login Result (handled at app level since it transitions screens) ---
-    LoginResult(Result<LoginSuccess, String>),
+    /// Boxed: `LoginSuccess` (AppService + URLs + user id) dwarfs every
+    /// other variant and would bloat the whole `Message` enum
+    /// (`large_enum_variant`) — same treatment as `Ipc(Box<..>)`.
+    LoginResult(Box<Result<LoginSuccess, String>>),
     /// Resume session from stored JWT (no password needed)
     ResumeSession,
     /// Response from pinging the server to fetch its native application version
@@ -1008,10 +1253,18 @@ pub enum Message {
     HarbourLoader(HarbourLoaderMessage),
     /// Playlist was mutated (created/deleted/renamed/overwritten/appended) — toast and reload
     PlaylistMutated(PlaylistMutation),
-    /// Playlists fetched on-demand for Save Queue as Playlist dialog
+    /// The header-dropdown .nsp import's pick+parse resolved — route into
+    /// the collision dialog / direct create (M6).
+    NspImportPicked(crate::update::nsp_import::NspPickResult),
+    /// Playlists fetched on-demand for Save Queue as Playlist dialog.
+    /// Producers pre-filter smart rows via `non_smart_name_pairs` — an
+    /// overwrite target must be track-editable (D4).
     PlaylistsFetchedForDialog(Vec<(String, String)>), // (id, name) pairs
-    /// Playlists fetched for Add to Playlist dialog (playlists, pre-resolved song_ids)
-    PlaylistsFetchedForAddToPlaylist(Vec<(String, String)>, Vec<String>),
+    /// Playlists fetched for Add to Playlist dialog (PRE-filter
+    /// `(id, name, is_smart)` triples + pre-resolved song_ids). The
+    /// quick-add bypass must SEE smart rows to refuse a smart default with
+    /// the right toast; the dialog rows are the filtered projection.
+    PlaylistsFetchedForAddToPlaylist(Vec<(String, String, bool)>, Vec<String>),
     LoadSongs,
     /// Fetch one page of songs and append to queue, then chain next page if needed.
     /// Enables per-page UI refresh during progressive queue building.
@@ -1185,6 +1438,8 @@ pub enum Message {
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),
     SplitView(SplitViewMessage),
+    /// Rules-editor session messages (`EditorSessionKind::Rules`).
+    RulesEditor(RulesEditorMessage),
     /// Playlist editor (owns its own buffer; decoupled from the live queue).
     /// Phase 1 routes to a no-op stub; real handling lands in Phase 3+.
     Editor(EditorMessage),

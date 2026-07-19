@@ -208,7 +208,9 @@ impl SongsPage {
                         LibraryContextEntry::Separator
                         | LibraryContextEntry::ReplaceQueueWithAllFound
                         | LibraryContextEntry::AddAllFoundToQueue
-                        | LibraryContextEntry::AddAllFoundToPlaylist => {
+                        | LibraryContextEntry::AddAllFoundToPlaylist
+                        // Playlist-child-only entry — never emitted here.
+                        | LibraryContextEntry::RemoveFromPlaylist => {
                             (Task::none(), SongsAction::None)
                         }
                     }

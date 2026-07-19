@@ -80,6 +80,18 @@ pub struct PlaylistsViewData<'a> {
     /// Current default playlist's display name (empty when no default set).
     /// Surfaced in the view-header chip.
     pub default_playlist_name: &'a str,
+    /// The session user's Navidrome id (`Nokkvi.session_user_id`) — the
+    /// ownership half of the Edit Rules gate (`owner_id == session id`,
+    /// ids NEVER names). Empty when unknown ⇒ every row reads "not owned"
+    /// (conservative).
+    pub session_user_id: &'a str,
+    /// Smart-playlist capability (`CapsState::smart_available()`): gates
+    /// the header create dropdown's smart entry.
+    pub smart_available: bool,
+    /// The caps fetch FAILED (unknown capability, not known-incapable) —
+    /// renders the dimmed retry entry instead of silently omitting the
+    /// smart entry.
+    pub caps_fetch_failed: bool,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
     /// `open_menu` reference). See `super::OverlayMenuViewData`.
     pub overlay: super::OverlayMenuViewData<'a>,
@@ -101,6 +113,12 @@ pub enum PlaylistContextEntry {
     Rename,
     /// Edit playlist tracks in split-view
     EditPlaylist,
+    /// Edit a smart playlist's rules (replaces EditPlaylist on smart rows;
+    /// emitted only for rows owned by the session user — a session whose
+    /// Save always 403s is never offered). Emission starts in M4 with the
+    /// rules session; the variant + render arm land early so M4's diff on
+    /// this file stays a one-line emit.
+    EditRules,
     /// Set this playlist as the default for quick-add
     SetAsDefault,
     /// Pick an image file and upload it as the playlist's custom cover.
@@ -129,6 +147,23 @@ pub enum PlaylistsMessage {
     FocusAndExpand(usize), // Clicked 'X songs' or playlist name — focus that row and expand it
     CollapseExpansion,     // Collapse current expansion (Escape when expanded)
     TracksLoaded(String, Vec<SongUIViewData>), // playlist_id, tracks
+    /// A remove-from-playlist attempt settled — carried back into the page
+    /// so it surfaces as `PlaylistsAction::TrackRemovalSettled` for the
+    /// root (toast + list/expansion refresh).
+    TrackRemovalSettled {
+        playlist_id: String,
+        removed: bool,
+    },
+
+    /// Header create dropdown: open the rules editor on a new smart
+    /// playlist (caps-gated at the render).
+    NewSmartPlaylist,
+    /// Header create dropdown: import a .nsp smart-playlist file from disk
+    /// (caps-gated at the render alongside New Smart Playlist).
+    ImportNsp,
+    /// Header create dropdown's dimmed entry while the caps fetch failed —
+    /// re-attempts the server-version fetch.
+    RetryCapsFetch,
 
     // View header (sort/search stay per-view — handled by impl_expansion_update! macro)
     SortModeSelected(crate::widgets::view_header::SortMode),
@@ -160,9 +195,9 @@ pub enum PlaylistsMessage {
     ResetCustomArtwork(String, String),
     /// Header chip clicked — bubble to root, opens the default-playlist picker.
     OpenDefaultPlaylistPicker,
-    /// View-header `+` button clicked — bubble to root to open the
-    /// Create-New-Playlist dialog.
-    OpenCreatePlaylistDialog,
+    /// Header create dropdown "New Playlist": drop into a blank track editor
+    /// (deferred create — the row is minted on Save, no naming modal).
+    NewPlaylistInEditor,
     /// Toggle a playlists column's visibility.
     ToggleColumnVisible(PlaylistsColumn),
 }
@@ -190,6 +225,33 @@ pub enum PlaylistsAction {
     DeletePlaylist(String),                     // playlist_id
     RenamePlaylist(String),                     // playlist_id — triggers rename flow
     EditPlaylist(String, String, String, bool), // (playlist_id, playlist_name, comment, public) — enter split-view edit mode
+    /// Open the rules session for an owned smart playlist (M4 wires the
+    /// real routing; unreachable until the context menu emits EditRules).
+    EditRules(String), // playlist_id
+    /// Add the resolved child-track batch to a playlist (opens the shared
+    /// add-to-playlist dialog through `handle_add_batch_to_playlist`).
+    AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
+    /// Remove ONE track (1-based `position`) from a non-smart playlist.
+    /// `song_id` is the verify-read token: the root flow re-reads the
+    /// playlist and aborts if the song at `position` no longer matches.
+    RemoveTrackFromPlaylist {
+        playlist_id: String,
+        song_id: String,
+        position: u32,
+    },
+    /// A track-removal attempt settled (`removed: false` = the playlist
+    /// changed under us / stale position). Root toasts + refreshes.
+    TrackRemovalSettled {
+        playlist_id: String,
+        removed: bool,
+    },
+    /// Header create dropdown: open the rules editor on a new smart
+    /// playlist.
+    NewSmartPlaylist,
+    /// Root should run the .nsp pick → parse → collision-route import flow.
+    ImportNsp,
+    /// Re-attempt the server-version fetch (the dimmed caps-retry entry).
+    RetryCapsFetch,
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
     /// Root should run the pick-file → upload flow. `(playlist_id, name)`.
@@ -200,8 +262,8 @@ pub enum PlaylistsAction {
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
     /// Bubble to root: open the default-playlist picker overlay.
     OpenDefaultPlaylistPicker,
-    /// Bubble to root: open the Create-New-Playlist dialog.
-    OpenCreatePlaylistDialog,
+    /// Bubble to root: enter the drop-into-editor create flow (no modal).
+    NewPlaylistInEditor,
     /// Persist a column-visibility toggle change (col, new_value).
     ColumnVisibilityChanged(PlaylistsColumn, bool),
 

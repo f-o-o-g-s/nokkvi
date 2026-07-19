@@ -11,6 +11,8 @@ fn make_playlist_ctx() -> ActivePlaylistContext {
         duration_secs: 2730.0,
         public: true,
         updated: "2026-05-28T10:00:00Z".to_string(),
+        smart: Some(false),
+        readonly: None,
     }
 }
 
@@ -414,6 +416,12 @@ fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::
         updated_at: String::new(),
         artwork_album_ids: vec![],
         uploaded_image: None,
+        is_smart: false,
+        rules: None,
+        evaluated_at: None,
+        is_file_backed: false,
+        sync: false,
+        owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
     }
 }
