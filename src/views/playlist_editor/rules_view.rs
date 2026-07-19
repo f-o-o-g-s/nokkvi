@@ -305,11 +305,23 @@ fn results_pane<'a>(
         _ if is_create => String::new(),
         _ => "Showing the saved rules' matches".to_owned(),
     };
+    // A persistent "PREVIEW" eyebrow (mirrors the rules pane's eyebrow) so a
+    // populated pane can't be mistaken for the saved playlist's tracks — these
+    // are the rules' current matches, not what's committed.
     let header = container(
-        text(header_text)
-            .size(11)
-            .font(theme::ui_font())
-            .color(theme::fg3()),
+        row![
+            text("PREVIEW")
+                .size(9.5)
+                .font(theme::weighted_ui_font(iced::font::Weight::Semibold))
+                .color(theme::accent())
+                .wrapping(iced::widget::text::Wrapping::None),
+            text(header_text)
+                .size(11)
+                .font(theme::ui_font())
+                .color(theme::fg3()),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
     )
     .padding([4, 10])
     .width(Length::Fill);
