@@ -39,21 +39,15 @@ Things that shaped this project:
 
 ## Highlights
 
-- Native PipeWire audio engine: gapless playback, a 10-band EQ, and AGC + ReplayGain volume normalization. Configurable crossfade (selectable curves, gapless-album and minimum-length policies), with optional fades on pause, stop, skip, and radio.
-- Opt-in **bit-perfect** playback bypasses DSP (EQ, software volume, limiter) and follows each track's native sample rate. It runs in a Strict mode, or a Relaxed mode that still crossfades same-format tracks (same sample rate and channel count). The now-playing badge reads the real hardware clock and shows `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED` rather than trusting the requested rate.
-- GPU-accelerated visualizer with `bars`, `lines`, and `scope` (circular oscilloscope) modes. Beat-reactive neon glow and bloom, plus optional motion trails, echo, and CRT/film post-processing. `bars` and `lines` can sit in a band above the player bar or draw over the now-playing cover art.
-- Browse albums, artists, songs, genres, playlists, internet radios, and similar songs, with inline expansion, split-view browsing, and multi-library filtering.
-- Radio stations show real artwork: an uploaded logo or the stream's own now-playing image, remembered across restarts. Right-click "Set Custom Artwork" to upload a cover for any playlist or station to Navidrome.
-- **Harbour** home view: collapsible discovery shelves for recently played, most played, and recently added, plus random genre and playlist cover mosaics. Up top is nokkvi's first whole-library search, matching artists, albums, songs, genres, and playlists at once.
-- **Trawl** mix builder: gather artist, album, song, genre, and playlist seeds into a crate, then blend them into the queue by round-robin interleave, per-seed weight, or shuffle-all. Length, rating, and track-count filters apply, and you can save a blend as a normal playlist. The panel behind it is an animated day-and-night seascape around a trawling longship, with a few rare sights if you leave it up long enough.
-- **Smart playlists**, created and edited in-app. Keyboard-first rules editor with live validation, seeded presets, a raw-JSON mode, and server-evaluated previews you can audition before saving (Enter plays a preview row). Rules also import from `.nsp` files. Every surface checks what your Navidrome version supports (0.61+ for rules editing).
-- 23 built-in themes (default **Svalbard**, plus Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, Firmium, Enthroned, and more), picked from a searchable modal that paints each row in that theme's own palette. Hot-reload is instant, and dropping a `.toml` in `~/.config/nokkvi/themes/` adds your own. Two full icon sets ship: Phosphor by default, Lucide as the alternate.
-- Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling. Library plays route through your server's Last.fm and ListenBrainz agents; internet-radio streams scrobble directly from their broadcast metadata.
-- Sync your play queue to Navidrome and pull it back on another device or a fresh session, resuming at the exact track and position. Needs the OpenSubsonic indexBasedQueue extension (Navidrome 0.58.5+).
-- Synced lyrics over the Queue cover art, toggled from the player bar or hotkey `L`. Sources are a local `.lrc` store, your server's OpenSubsonic lyrics, or LRCLIB, whose fetches are cached to the local store for offline replay. Lines ease as they follow, a soft glyph halo (plus optional cover blur) keeps them readable over any art, and tracks dissolve into each other on crossfade. The visualizer keeps playing behind the words.
-- Fully keyboard-driven with configurable shortcuts, MPRIS, an optional system tray icon, and right-click menus everywhere.
-- Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull). Handy for WM hotkeys and status bars.
-- Designed on a tiling WM. The player bar folds controls into a kebab menu as width shrinks. Library views use a **slot-paginated list**: the viewport is always a fixed odd number of whole-row slots, never partial rows. Slot count adapts to window height (up to 29), and text, album artwork, and star icons scale with each slot.
+- Native **PipeWire** audio engine: gapless playback, a 10-band EQ, ReplayGain and AGC normalization, and configurable crossfade with transition fades.
+- Opt-in **bit-perfect** playback (Strict or Relaxed, follows the native sample rate) with a badge that reads the real hardware clock as `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED`.
+- GPU visualizer with `bars`, `lines`, and `scope` modes plus beat glow, bloom, trails, echo, and CRT, shown in a band above the player bar or over the cover art.
+- **Smart playlists** authored in-app: a keyboard-first rules editor with live validation, presets, a raw-JSON mode, and server-evaluated previews. Also imports `.nsp` (needs Navidrome 0.61+).
+- **Trawl** mix builder: blend artist, album, song, genre, and playlist seeds into a crate (round-robin, weighted, or shuffle-all) and save the result as a playlist.
+- Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull).
+- **23 built-in themes** (default **Svalbard**), drop-in `.toml` with instant hot-reload, a searchable picker that paints each row in its own palette, and two icon sets (Phosphor, Lucide).
+- Built for tiling WMs: a width-adaptive player bar and a **slot-paginated list** (up to 29 whole rows, no scrollbar, contents scale per slot).
+- Plus the essentials: browse albums, artists, songs, genres, playlists, radio, and similar songs; a **Harbour** home with whole-library search; persistent queue, multi-select, drag-and-drop, star ratings; synced lyrics; custom cover art; server queue sync (Navidrome 0.58.5+); scrobbling (library and radio); MPRIS; an optional tray icon; and full keyboard control.
 
 Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).
 
