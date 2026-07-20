@@ -533,6 +533,33 @@ impl AudioDecoder {
             let mut content_length = match client.head(&self.url).send().await {
                 Ok(head_response) if head_response.status().is_success() => {
                     let headers = head_response.headers();
+                    // Navidrome answers Subsonic errors with HTTP **200** and an
+                    // error envelope in the body (`sendResponseWithStatus` is
+                    // called with status 0, so `WriteHeader` never runs). A
+                    // track id the server can't resolve therefore sails past
+                    // `is_success()` and hands Symphonia a JSON document, which
+                    // surfaces as an opaque "format probe failed" rather than
+                    // "the server doesn't have this track" — exactly the wrong
+                    // diagnostic when a server-side id migration has invalidated
+                    // a persisted queue. Content-type is a safe discriminator:
+                    // no audio stream, including ICY radio, is served as
+                    // JSON/XML, so this cannot reject a working stream.
+                    if let Some(ct) = headers
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        let lowered = ct.to_ascii_lowercase();
+                        if lowered.starts_with("application/json")
+                            || lowered.starts_with("text/xml")
+                            || lowered.starts_with("application/xml")
+                        {
+                            anyhow::bail!(
+                                "server returned an error response instead of audio \
+                                 (content-type {ct}); the track may no longer exist \
+                                 on the server"
+                            );
+                        }
+                    }
                     is_radio = is_radio_response(headers);
 
                     if is_radio {

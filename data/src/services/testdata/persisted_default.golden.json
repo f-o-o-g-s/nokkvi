@@ -92,7 +92,7 @@
     0.0
   ],
   "custom_eq_presets": [],
-  "verbose_config": "off",
+  "verbose_config": "clean",
   "library_page_size": "default",
   "artwork_resolution": "default",
   "show_album_artists_only": true,

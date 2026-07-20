@@ -750,11 +750,23 @@ impl Nokkvi {
                                 Ok(libs) => Message::Library(
                                     crate::app_message::LibraryMessage::Loaded(libs),
                                 ),
-                                Err(e) => Message::Library(
-                                    crate::app_message::LibraryMessage::LoadFailed(format!(
-                                        "{e:#}"
-                                    )),
-                                ),
+                                Err(e) => {
+                                    // This runs on EVERY login, so a rejected
+                                    // token here must route to the session-
+                                    // expired teardown rather than a generic
+                                    // toast that leaves a dead session looking
+                                    // alive.
+                                    if let Some(msg) =
+                                        crate::update::components::session_expired_message(&e)
+                                    {
+                                        return msg;
+                                    }
+                                    Message::Library(
+                                        crate::app_message::LibraryMessage::LoadFailed(format!(
+                                            "{e:#}"
+                                        )),
+                                    )
+                                }
                             }
                         },
                     ),

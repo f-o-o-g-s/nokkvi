@@ -314,11 +314,11 @@ define_settings! {
                      Off: only changed settings, with comments · \
                      Clean: only changed settings, no comments",
                 ),
-                default: "Off",
-                // Ordered as a verbosity gradient (most → default → least
-                // output), NOT default-first — the badge row reads On | Off |
-                // Clean to mirror the user's mental model. Intentional; leave
-                // as-is through convention syncs.
+                default: "Clean",
+                // Ordered as a verbosity gradient (most → least output), NOT
+                // default-first — the badge row reads On | Off | Clean to
+                // mirror the user's mental model. Intentional; leave as-is
+                // through convention syncs.
                 options: &["On", "Off", "Clean"],
                 read_field: |d| d.verbose_config.as_ref(),
             },
@@ -737,7 +737,7 @@ mod tests {
             enter_behavior: "Play All".into(),
             enter_shuffle: false,
             local_music_path: "".into(),
-            verbose_config: "Off".into(),
+            verbose_config: "Clean".into(),
             library_page_size: "Default (500)".into(),
             artwork_resolution: "Default (1000px)".into(),
             show_album_artists_only: true,
@@ -801,12 +801,16 @@ mod tests {
     #[test]
     fn dispatch_general_verbose_config_emits_write_side_effect() {
         let (mut mgr, _tmp) = make_test_manager();
-        assert_eq!(mgr.get_player_settings().verbose_config, VerboseConfig::Off);
+        // `Clean` is the shipped default; dispatch a genuine transition to `On`.
+        assert_eq!(
+            mgr.get_player_settings().verbose_config,
+            VerboseConfig::Clean
+        );
 
         let result = dispatch_general_tab_setting(
             "general.verbose_config",
             SettingValue::Enum {
-                val: "Clean".to_string(),
+                val: "On".to_string(),
                 options: vec![],
             },
             &mut mgr,
@@ -814,13 +818,13 @@ mod tests {
 
         match result {
             Some(Ok(SettingsSideEffect::WriteVerboseConfig {
-                mode: VerboseConfig::Clean,
+                mode: VerboseConfig::On,
             })) => {}
-            other => panic!("expected WriteVerboseConfig {{ mode: Clean }}, got {other:?}"),
+            other => panic!("expected WriteVerboseConfig {{ mode: On }}, got {other:?}"),
         }
         assert_eq!(
             mgr.get_player_settings().verbose_config,
-            VerboseConfig::Clean,
+            VerboseConfig::On,
             "setter must run synchronously even though the TOML write defers to the UI handler"
         );
     }

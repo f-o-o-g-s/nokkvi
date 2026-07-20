@@ -17,8 +17,8 @@
 //!
 //! ## Path shape
 //!
-//! `$XDG_CACHE_HOME/nokkvi/mpris-art-<pid>-<cover_id>.jpg` (falling back to
-//! `$HOME/.cache/nokkvi/...`). The `<pid>` suffix matches nokkvi's existing
+//! `$XDG_CACHE_HOME/nokkvi/mpris-art-<pid>-<cover_id>_<hash>.jpg` (falling back
+//! to `$HOME/.cache/nokkvi/...`). The `<pid>` suffix matches nokkvi's existing
 //! MPRIS bus-name pattern (see `.claude/rules/gotchas.md` — "MPRIS multi-instance
 //! bus name") so two simultaneously-running instances don't fight over the same
 //! file. The `<cover_id>` suffix makes the URI unique per track — desktop
@@ -45,11 +45,17 @@ use std::{
 use tokio::sync::Mutex;
 use tracing::warn;
 
-/// Filename-safe truncation cap for the sanitized cover-id suffix. Subsonic
-/// cover ids are typically <40 chars; the cap guards against pathological
-/// inputs blowing past `NAME_MAX` (255 on ext4/btrfs) once the
-/// `mpris-art-<pid>-` prefix and `.jpg` extension are factored in.
-const SANITIZED_COVER_ID_MAX_LEN: usize = 80;
+/// Filename-safe truncation cap for the READABLE STEM of the sanitized
+/// cover-id suffix. Subsonic cover ids are typically <40 chars; the cap guards
+/// against pathological inputs blowing past `NAME_MAX` (255 on ext4/btrfs)
+/// once the `mpris-art-<pid>-` prefix, the hash suffix, and the `.jpg`
+/// extension are factored in.
+const SANITIZED_COVER_ID_STEM_MAX_LEN: usize = 80;
+
+/// Byte length of the `_<16 hex digits>` disambiguating suffix appended by
+/// [`sanitize_cover_id`]. Only the NAME_MAX bound test reads it.
+#[cfg(test)]
+const HASH_SUFFIX_LEN: usize = 17;
 
 /// Tracks the most recently-written cache entry so repeat ticks for the
 /// same `(server_url, cover_id)` skip the fetch + write.
@@ -117,18 +123,47 @@ fn resolve_cache_root() -> Option<PathBuf> {
     Some(p.join(".cache"))
 }
 
-/// Per-track cache path: `<dir>/mpris-art-<pid>-<sanitized_cover_id>.jpg`.
+/// Per-track cache path: `<dir>/mpris-art-<pid>-<cover_id>_<hash>.jpg`, where
+/// the `<cover_id>_<hash>` half is produced wholesale by [`sanitize_cover_id`].
 fn cache_file_path_for(cache_dir: &Path, cover_id: &str) -> PathBuf {
     let pid = std::process::id();
     let safe = sanitize_cover_id(cover_id);
     cache_dir.join(format!("mpris-art-{pid}-{safe}.jpg"))
 }
 
-/// Replace anything that isn't `[A-Za-z0-9._-]` with `_`, cap to
-/// [`SANITIZED_COVER_ID_MAX_LEN`], and emit `_` for an empty input. Subsonic
-/// cover ids are already filename-safe in practice; this is a defensive
-/// belt against future server quirks or non-Navidrome backends.
+/// Replace anything that isn't `[A-Za-z0-9._-]` with `_`, cap the readable
+/// stem to [`SANITIZED_COVER_ID_STEM_MAX_LEN`], then append a stable hash of
+/// the FULL id. Subsonic cover ids are already filename-safe in practice; this
+/// is a defensive belt against future server quirks or non-Navidrome backends.
+///
+/// The hash suffix is what makes the mapping injective. Sanitization is lossy
+/// twice over — every unsafe byte collapses to `_`, and anything past the cap
+/// is dropped — so without it two distinct cover ids could name the same cache
+/// file and one track would render the other's art.
+///
+/// Be clear about the scope: with Navidrome this is unreachable. The longest
+/// shape it emits is `dc-<id>:<disc>_<hex>` at ~48 bytes against an 80-byte
+/// cap, and the only unsafe character in any real id is the single structural
+/// `:` in `dc-`, which cannot alias onto anything (base62 and hex ids contain
+/// no `_` of their own). This is a belt for non-Navidrome Subsonic backends
+/// and future id shapes, not a fix for an observed collision.
+///
+/// Determinism is load-bearing, but NOT because any path is re-derived to
+/// delete it — `write_art_inner` deletes via the `PathBuf` stashed in
+/// `ArtCacheState::last_written`. It matters because that same function derives
+/// `new_path` and compares `prev != new_path` to decide whether the superseded
+/// file is a distinct file at all; a non-deterministic suffix would make every
+/// repeat write look like a new track and churn the cache dir.
+///
+/// The FNV-1a suffix is identical to `lyrics_source::sanitize_filename`. The
+/// stem capping deliberately is NOT: that one uses Unicode `is_alphanumeric()`
+/// and so needs a byte-aware push loop, whereas this one keeps only
+/// `is_ascii_alphanumeric()` and can therefore `truncate()` outright. Relaxing
+/// the closure below to Unicode alphanumerics without also porting that loop
+/// would turn the `truncate` into a panic on a multi-byte cover id.
 fn sanitize_cover_id(cover_id: &str) -> String {
+    // Sanitization maps every non-ASCII-alphanumeric char to `_`, so the stem
+    // is pure ASCII and a byte truncate can never split a char boundary.
     let mut out: String = cover_id
         .chars()
         .map(|c| {
@@ -139,13 +174,18 @@ fn sanitize_cover_id(cover_id: &str) -> String {
             }
         })
         .collect();
-    if out.len() > SANITIZED_COVER_ID_MAX_LEN {
-        out.truncate(SANITIZED_COVER_ID_MAX_LEN);
+    if out.len() > SANITIZED_COVER_ID_STEM_MAX_LEN {
+        out.truncate(SANITIZED_COVER_ID_STEM_MAX_LEN);
     }
-    if out.is_empty() {
-        out.push('_');
+    // FNV-1a over the full id. Stable and well-distributed, but a 64-bit
+    // non-cryptographic hash — it makes accidental aliasing vanishingly
+    // unlikely, not impossible, and resists nothing adversarial.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in cover_id.bytes() {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    out
+    format!("{out}_{hash:016x}")
 }
 
 /// Cache the album art bytes for `(server_url, cover_id)` to a local file and
@@ -209,9 +249,15 @@ async fn sweep_dead_pid_files_in(dir: &Path) {
     .await;
 }
 
-/// Extract the `<pid>` portion from either filename shape:
-///   - `mpris-art-<pid>.jpg`             (pre-NF2 legacy)
-///   - `mpris-art-<pid>-<cover_id>.jpg`  (post-fix)
+/// Extract the `<pid>` portion from any of the three filename shapes:
+///   - `mpris-art-<pid>.jpg`                    (pre-NF2 legacy)
+///   - `mpris-art-<pid>-<cover_id>.jpg`         (per-cover, pre-hash)
+///   - `mpris-art-<pid>-<cover_id>_<hash>.jpg`  (current)
+///
+/// All three are handled by the same rule — the pid is everything up to the
+/// first `-` after the prefix — so the cover segment's shape is irrelevant.
+/// Keep it that way: parsing the cover segment would break the upgrade path,
+/// where a user's cache dir holds all three at once.
 ///
 /// Returns `None` if the prefix / extension don't match or the pid segment
 /// doesn't parse as a `u32`.
@@ -458,9 +504,11 @@ mod tests {
         let path = cache_file_path_for(&dir, "al-abc123");
         let s = path.to_string_lossy();
         let pid = std::process::id();
+        // Exact tail, so the hash is pinned as the LAST component — a
+        // `contains` check would accept a stray segment after it.
         assert!(
-            s.ends_with(&format!("mpris-art-{pid}-al-abc123.jpg")),
-            "path should end with 'mpris-art-<pid>-<cover>.jpg', got: {s}"
+            s.ends_with(&format!("mpris-art-{pid}-al-abc123_29acc9e7096cd157.jpg")),
+            "path should be 'mpris-art-<pid>-<cover>_<hash>.jpg', got: {s}"
         );
         assert!(
             s.starts_with("/tmp/scratch/nokkvi/"),
@@ -468,10 +516,12 @@ mod tests {
         );
     }
 
+    /// The readable stem must survive verbatim so cache files stay greppable;
+    /// only the disambiguating hash suffix is appended.
     #[test]
     fn sanitize_cover_id_keeps_safe_chars() {
-        assert_eq!(sanitize_cover_id("al-abc_123.foo"), "al-abc_123.foo");
-        assert_eq!(sanitize_cover_id("ABCxyz09"), "ABCxyz09");
+        assert!(sanitize_cover_id("al-abc_123.foo").starts_with("al-abc_123.foo_"));
+        assert!(sanitize_cover_id("ABCxyz09").starts_with("ABCxyz09_"));
     }
 
     #[test]
@@ -479,9 +529,17 @@ mod tests {
         // Defensive: Subsonic ids are typically `[A-Za-z0-9-]`, but if a
         // backend ever returns slashes / spaces / colons the sanitizer must
         // collapse them so we don't escape the cache dir or break the format.
-        assert_eq!(sanitize_cover_id("al/abc:def"), "al_abc_def");
-        assert_eq!(sanitize_cover_id("a b\tc\nd"), "a_b_c_d");
-        assert_eq!(sanitize_cover_id("../etc/passwd"), ".._etc_passwd");
+        assert!(sanitize_cover_id("al/abc:def").starts_with("al_abc_def_"));
+        assert!(sanitize_cover_id("a b\tc\nd").starts_with("a_b_c_d_"));
+        assert!(sanitize_cover_id("../etc/passwd").starts_with(".._etc_passwd_"));
+        // No sanitized output may contain a path separator, whatever the input.
+        for probe in ["../../x", "a/b/c", "a\\b"] {
+            let out = sanitize_cover_id(probe);
+            assert!(
+                !out.contains('/') && !out.contains('\\'),
+                "sanitized output must not contain a separator, got: {out}"
+            );
+        }
     }
 
     #[test]
@@ -489,16 +547,65 @@ mod tests {
         let long = "a".repeat(500);
         let out = sanitize_cover_id(&long);
         assert!(
-            out.len() <= SANITIZED_COVER_ID_MAX_LEN,
-            "sanitize must cap output to {} chars, got {}",
-            SANITIZED_COVER_ID_MAX_LEN,
+            out.len() <= SANITIZED_COVER_ID_STEM_MAX_LEN + HASH_SUFFIX_LEN,
+            "sanitize must cap output to {} bytes, got {}",
+            SANITIZED_COVER_ID_STEM_MAX_LEN + HASH_SUFFIX_LEN,
             out.len()
+        );
+        // The full filename must stay inside Linux's 255-byte NAME_MAX at the
+        // WORST case, not at whatever pid the test happens to run under: the
+        // kernel's `pid_max` ceiling is 2^22, so pin the widest pid rather than
+        // `std::process::id()` (5-7 digits in CI, which would let a future stem
+        // cap bump pass here and still overflow in the field).
+        let name_len = format!("mpris-art-{}-{out}.jpg", 4_194_304_u32).len();
+        assert!(
+            name_len <= 255,
+            "filename must fit NAME_MAX, got {name_len}"
         );
     }
 
+    /// Golden values, not shape assertions: these pin the FNV-1a basis and
+    /// prime. An accidental edit to either constant silently repartitions every
+    /// cache filename, which a `starts_with` check would sail straight past.
     #[test]
-    fn sanitize_cover_id_handles_empty_input() {
-        assert_eq!(sanitize_cover_id(""), "_");
+    fn sanitize_cover_id_pins_hash_output() {
+        assert_eq!(sanitize_cover_id(""), "_cbf29ce484222325");
+        assert_eq!(sanitize_cover_id("al-abc123"), "al-abc123_29acc9e7096cd157");
+    }
+
+    /// Two distinct cover ids that agree on their first
+    /// [`SANITIZED_COVER_ID_STEM_MAX_LEN`] sanitized bytes previously collided
+    /// onto one cache file, so one track rendered the other's art. The hash is
+    /// taken over the FULL id, so the suffix separates them.
+    #[test]
+    fn sanitize_cover_id_disambiguates_ids_sharing_a_truncated_prefix() {
+        let prefix = "x".repeat(SANITIZED_COVER_ID_STEM_MAX_LEN);
+        let a = format!("{prefix}AAA");
+        let b = format!("{prefix}BBB");
+        assert_ne!(sanitize_cover_id(&a), sanitize_cover_id(&b));
+    }
+
+    /// Collisions also arise without truncation: distinct unsafe characters
+    /// all sanitize to `_`.
+    #[test]
+    fn sanitize_cover_id_disambiguates_ids_that_sanitize_alike() {
+        assert_ne!(sanitize_cover_id("al/abc"), sanitize_cover_id("al:abc"));
+        assert_ne!(sanitize_cover_id(""), sanitize_cover_id("/"));
+    }
+
+    /// The hash must depend on the FULL id, not just the retained stem —
+    /// otherwise capping still collapses long ids onto one file. Distinct
+    /// beyond-the-cap tails must produce distinct hashes for the SAME stem.
+    #[test]
+    fn sanitize_cover_id_hashes_the_full_id_not_the_stem() {
+        let stem = "y".repeat(SANITIZED_COVER_ID_STEM_MAX_LEN);
+        let a = sanitize_cover_id(&format!("{stem}tail-one"));
+        let b = sanitize_cover_id(&format!("{stem}tail-two"));
+        assert!(
+            a.starts_with(&stem) && b.starts_with(&stem),
+            "both must retain the same capped stem"
+        );
+        assert_ne!(a, b, "hash must separate ids differing only past the cap");
     }
 
     #[tokio::test]
@@ -739,9 +846,11 @@ mod tests {
         let dir = ScratchDir::new();
         let pid = std::process::id();
 
+        // One legacy-shape and one current hashed-shape file, so the sweep is
+        // pinned against BOTH: a user upgrading carries the old shape forward.
         let mine = [
             format!("mpris-art-{pid}-al-aaa.jpg"),
-            format!("mpris-art-{pid}-al-bbb.jpg"),
+            format!("mpris-art-{pid}-{}.jpg", sanitize_cover_id("al-bbb")),
         ];
         let other = [
             format!("mpris-art-{}-al-xxx.jpg", pid.wrapping_add(1)),
@@ -919,6 +1028,24 @@ mod tests {
         assert_eq!(parse_pid_from_filename("mpris-art-1-al-abc.jpg"), Some(1));
     }
 
+    /// The parser must handle the CURRENT (hashed) shape, fed through the real
+    /// `sanitize_cover_id` rather than a hand-written literal — the other
+    /// fixtures in this module predate the hash suffix and would all still pass
+    /// if the cover segment were ever parsed instead of skipped. Without this,
+    /// tightening `parse_pid_from_filename` could sweep a LIVE instance's cache
+    /// file out from under it and no test would notice.
+    #[test]
+    fn parse_pid_from_filename_extracts_pid_for_hashed_format() {
+        for cover in ["al-abc123", "", "/", "..", "-", "x".repeat(200).as_str()] {
+            let name = format!("mpris-art-3785659-{}.jpg", sanitize_cover_id(cover));
+            assert_eq!(
+                parse_pid_from_filename(&name),
+                Some(3_785_659),
+                "hashed shape must still yield its pid: {name}"
+            );
+        }
+    }
+
     #[test]
     fn parse_pid_from_filename_rejects_non_matching() {
         assert_eq!(parse_pid_from_filename("unrelated.jpg"), None);
@@ -952,7 +1079,9 @@ mod tests {
         let dead_legacy = format!("mpris-art-{dead_pid}.jpg");
         let dead_per_cover = format!("mpris-art-{dead_pid}-al-zzz.jpg");
         let alive_other = "mpris-art-1-al-xyz.jpg".to_string();
-        let current_self = format!("mpris-art-{my_pid}-al-mine.jpg");
+        // Current shape, built through the real sanitizer: a LIVE instance's
+        // hashed file must survive another instance's boot sweep.
+        let current_self = format!("mpris-art-{my_pid}-{}.jpg", sanitize_cover_id("al-mine"));
         let wrong_ext = format!("mpris-art-{dead_pid}.png");
         let unrelated = "something-else.jpg".to_string();
 

@@ -117,9 +117,14 @@ impl Nokkvi {
                 |shell| async move { shell.refresh_libraries().await },
                 |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| match result {
                     Ok(libs) => Message::Library(crate::app_message::LibraryMessage::Loaded(libs)),
-                    Err(e) => Message::Library(crate::app_message::LibraryMessage::LoadFailed(
-                        format!("{e:#}"),
-                    )),
+                    Err(e) => {
+                        if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                            return msg;
+                        }
+                        Message::Library(crate::app_message::LibraryMessage::LoadFailed(format!(
+                            "{e:#}"
+                        )))
+                    }
                 },
             ));
         }

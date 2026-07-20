@@ -1466,7 +1466,7 @@ mod sentinel_roundtrip_tests {
             }],
 
             // Verbose / library
-            verbose_config: crate::types::player_settings::VerboseConfig::On, // default Off
+            verbose_config: crate::types::player_settings::VerboseConfig::On, // default Clean
             library_page_size: LibraryPageSize::Massive,                      // default Default
             artwork_resolution: ArtworkResolution::Original,                  // default Default
             show_album_artists_only: false,                                   // default true

@@ -10,7 +10,7 @@ use tokio::sync::{
     Mutex,
     mpsc::{self, UnboundedReceiver},
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     audio::engine::CustomAudioEngine,
@@ -158,7 +158,22 @@ impl PlaybackController {
                             let _ = queue_tx.send(());
                         }
                         Err(e) => {
-                            debug!(" [COMPLETION] Error during auto-advance: {}", e);
+                            // Surface rather than swallow. A failed transition
+                            // leaves the engine stopped while the UI still shows
+                            // "playing", and a debug-only log gave the user no
+                            // signal whatsoever — silence is the worst possible
+                            // response to playback simply stopping mid-queue.
+                            //
+                            // Drop the engine lock BEFORE the refresh await, as
+                            // both sibling arms do. Then return Err so
+                            // TaskManager reports `TaskStatus::Failed` and the
+                            // UI toasts it (`handle_task_status_changed`).
+                            warn!(" [COMPLETION] Auto-advance failed: {}", e);
+                            drop(engine);
+                            // Reconcile the view with the now-stopped engine.
+                            let _ = qvm.refresh_from_queue().await;
+                            let _ = queue_tx.send(());
+                            return Err(e);
                         }
                     }
                     Ok(())

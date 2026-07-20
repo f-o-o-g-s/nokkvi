@@ -269,6 +269,13 @@ impl Nokkvi {
             |result| match result {
                 Ok(rows) => Message::Editor(EditorMessage::SongsLoaded(rows)),
                 Err(e) => {
+                    // A rejected token has to reach the session-expired
+                    // teardown; without this the error is flattened into a
+                    // payload-free `SongsLoadFailed` and the dead session keeps
+                    // looking alive.
+                    if let Some(msg) = crate::update::components::session_expired_message(&e) {
+                        return msg;
+                    }
                     // Mark the session Failed AND surface the error: the
                     // `SongsLoadFailed` handler sets the load-state marker (so
                     // save/mutations are gated off) and pushes the error toast.

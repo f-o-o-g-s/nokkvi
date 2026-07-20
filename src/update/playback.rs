@@ -1178,11 +1178,35 @@ impl Nokkvi {
         if self.playback.has_track() {
             self.playback.playing = true;
             self.playback.paused = false;
+            // Propagate rather than discarding the Result. Scope, honestly:
+            // `has_track()` is `playing || paused` (pure UI state), and both
+            // states resume inside the engine without re-running `decoder.init`,
+            // so they return `Ok`. A dead/unresolvable track id is NOT surfaced
+            // here — it can't be, because nothing seeds `playing`/`paused` on
+            // session restore, so that case lands in the cold-start branch below
+            // (which already toasts). The reachable Err is the narrow window
+            // where a source was staged on a silenced engine and the UI's
+            // `paused` flag is briefly stale; `handle_tick` re-reads
+            // `engine.playing()` unconditionally, so the optimistic flag
+            // self-corrects within 100ms either way.
+            //
+            // Reuses the sibling cold-start string deliberately — this is the
+            // same user-visible failure, and "resume" is already taken by
+            // session resume.
             return self.shell_task(
-                |shell| async move {
-                    let _ = shell.play().await;
+                |shell| async move { shell.play().await },
+                |result| match result {
+                    Ok(()) => Message::Playback(PlaybackMessage::Tick),
+                    Err(e) => {
+                        tracing::error!(" Play resume failed: {}", e);
+                        Message::Toast(crate::app_message::ToastMessage::Push(
+                            nokkvi_data::types::toast::Toast::new(
+                                format!("Failed to start playback: {e}"),
+                                nokkvi_data::types::toast::ToastLevel::Error,
+                            ),
+                        ))
+                    }
                 },
-                |_| Message::Playback(PlaybackMessage::Tick),
             );
         }
 

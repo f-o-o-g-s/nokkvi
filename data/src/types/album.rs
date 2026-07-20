@@ -45,8 +45,17 @@ pub struct Album {
     #[serde(rename = "playCount")]
     pub play_count: Option<u32>,
     // Additional fields from API response
+    // Signed purely for consistency with our own `Library::id` (i32). Upstream
+    // is `int` on both `model.Library.ID` and `model.Album.LibraryID` (64-bit
+    // on amd64) backed by an autoincrement rowid, so neither a negative value
+    // nor an i32 overflow is reachable — this is tidiness, not a fix.
+    //
+    // Emitted by the native `/api/album` only; Subsonic never sends it. Nothing
+    // in nokkvi reads this field today, so it is deserialize-only. Library ids
+    // are exempt from Navidrome's canonical-id migration (they stay integers),
+    // so this stays an integer too.
     #[serde(rename = "libraryId")]
-    pub library_id: Option<u32>,
+    pub library_id: Option<i32>,
     #[serde(rename = "libraryPath")]
     pub library_path: Option<String>,
     #[serde(rename = "libraryName")]

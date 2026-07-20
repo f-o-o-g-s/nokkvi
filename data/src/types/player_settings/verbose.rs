@@ -17,7 +17,10 @@ define_labeled_enum! {
     /// `On` and `Off` preserve the historical two-state behavior; legacy
     /// `true`/`false` bool values from the pre-enum era load via
     /// [`deserialize_verbose_config_with_bool_compat`] (`true` → `On`,
-    /// `false` → `Off`). The default is `Off`.
+    /// `false` → `Off`). The default is `Clean` — a tidy, comment-free
+    /// file for fresh installs. A legacy `false` still loads as `Off`
+    /// (sparse *with* comments), preserving that explicit pre-enum choice;
+    /// only a store with no value at all picks up the new `Clean` default.
     ///
     /// Serializes to snake_case strings in `config.toml` and the redb-backed
     /// `PersistedPlayerSettings`.
@@ -27,9 +30,9 @@ define_labeled_enum! {
         /// Write every setting, including unchanged defaults.
         On { label: "On", wire: "on" },
         /// Sparse — only non-default keys, with descriptive comments.
-        #[default]
         Off { label: "Off", wire: "off" },
         /// Sparse — only non-default keys, no comments.
+        #[default]
         Clean { label: "Clean", wire: "clean" },
     }
 }
@@ -129,13 +132,13 @@ mod tests {
     }
 
     #[test]
-    fn default_variant_is_off() {
-        assert_eq!(VerboseConfig::default(), VerboseConfig::Off);
+    fn default_variant_is_clean() {
+        assert_eq!(VerboseConfig::default(), VerboseConfig::Clean);
     }
 
     #[test]
     fn from_label_unknown_falls_back_to_default() {
-        assert_eq!(VerboseConfig::from_label("Nonsense"), VerboseConfig::Off);
+        assert_eq!(VerboseConfig::from_label("Nonsense"), VerboseConfig::Clean);
     }
 
     #[test]
