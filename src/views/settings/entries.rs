@@ -133,8 +133,10 @@ impl SettingsPage {
         let nq = query.trim().to_lowercase();
         let mut sections = Vec::new();
         for tab in SettingsTab::ALL {
-            let tab_score =
-                fuzzy::fuzzy_score(tab.label(), &nq).filter(|s| fuzzy::is_strong_score(*s, &nq));
+            // Prefix-anchored: a tab name seeds a baseline for EVERY row in the
+            // tab, so a mid-word hit is the most expensive false positive in
+            // the whole scorer — "lay" inside "Playback" pulled in 88 rows.
+            let tab_score = fuzzy::prefix_query_score(tab.label(), &nq);
             let entries = Self::build_tab_entries(*tab, data);
             sections.extend(score_sections(entries, &nq, tab_score));
         }
@@ -179,8 +181,9 @@ fn score_sections(
         match entry {
             SettingsEntry::Header { label, icon } => {
                 flush_section(&mut sections, cur_header.take(), &mut cur_items);
-                cur_header_score =
-                    fuzzy::fuzzy_score(label, nq).filter(|s| fuzzy::is_strong_score(*s, nq));
+                // Contiguous, like the other context tiers: a header baseline
+                // applies to every row under it, so scattered hits are costly.
+                cur_header_score = fuzzy::contiguous_query_score(label, nq);
                 cur_header = Some(SettingsEntry::Header { label, icon });
             }
             SettingsEntry::Item(item) => {
@@ -205,29 +208,31 @@ fn score_item(
     tab_score: Option<i32>,
 ) -> Option<ScoredItem> {
     let mut best = i32::MIN;
-    if let Some(s) = fuzzy::fuzzy_score(&item.label, nq).filter(|s| fuzzy::is_strong_score(*s, nq))
-    {
+    if let Some(s) = fuzzy::query_score(&item.label, nq) {
         best = best.max(tier(LABEL_BASE, i32::MAX, s));
     }
-    for kw in setting_keywords::keywords_for(&item.key) {
-        if let Some(s) = fuzzy::fuzzy_score(kw, nq).filter(|s| fuzzy::is_strong_score(*s, nq)) {
+    for kw in setting_keywords::all_keywords_for(&item.key) {
+        if let Some(s) = fuzzy::query_score(kw, nq) {
             best = best.max(tier(KEYWORD_BASE, LABEL_BASE, s));
         }
     }
     // Hotkey rows are searchable by their current key binding ("ctrl", "space").
     if let SettingValue::Hotkey(binding) = &item.value
-        && let Some(s) = fuzzy::fuzzy_score(binding, nq).filter(|s| fuzzy::is_strong_score(*s, nq))
+        && let Some(s) = fuzzy::query_score(binding, nq)
     {
         best = best.max(tier(BINDING_BASE, KEYWORD_BASE, s));
     }
+    // Subtitles and categories are PROSE, so they take the contiguous gate: a
+    // subsequence walk across a long sentence reliably finds any query's
+    // letters somewhere, which made rows with the longest explanations match
+    // nearly everything. A literal substring still matches, so subtitle-only
+    // vocabulary ("pipewire", "waybar", "hyprland") keeps working.
     if let Some(sub) = item.subtitle.as_deref()
-        && let Some(s) = fuzzy::fuzzy_score(sub, nq).filter(|s| fuzzy::is_strong_score(*s, nq))
+        && let Some(s) = fuzzy::contiguous_query_score(sub, nq)
     {
         best = best.max(tier(SUBTITLE_BASE, BINDING_BASE, s));
     }
-    if let Some(s) =
-        fuzzy::fuzzy_score(item.category, nq).filter(|s| fuzzy::is_strong_score(*s, nq))
-    {
+    if let Some(s) = fuzzy::contiguous_query_score(item.category, nq) {
         best = best.max(tier(CATEGORY_BASE, SUBTITLE_BASE, s));
     }
     // Weak baseline from a matching section header or tab name.

@@ -16,6 +16,43 @@
 //! macro-generated and hand-built rows, and degrades gracefully: a renamed key
 //! simply stops resolving aliases (no breakage, just a dud synonym).
 
+/// Declare the alias table once, emitting both the [`keywords_for`] lookup and
+/// the enumerable [`TABLE_KEYS`] list.
+///
+/// A plain `match` cannot be enumerated at runtime, so the "is this entry still
+/// live?" direction had no way to be tested and four entries rotted unnoticed.
+/// Deriving both from one list closes that: an entry cannot be in the lookup
+/// but missing from the audit list.
+macro_rules! keyword_table {
+    ($( $($key:literal)|+ => $terms:expr ),* $(,)?) => {
+        /// Curated alias terms for a settings row, keyed by its
+        /// (palette-normalized) config key. Returns `&[]` for rows without
+        /// aliases.
+        ///
+        /// Terms are lowercase and intentionally add vocabulary the
+        /// label/subtitle lacks — acronyms, domain synonyms, and common
+        /// alternate names — rather than repeating words the visible text
+        /// already carries.
+        ///
+        /// **Every row the settings UI renders must resolve here** (or via
+        /// [`family_keywords_for`]); `every_settings_row_has_search_keywords`
+        /// in `src/views/settings/entries.rs` fails the build otherwise. Keys
+        /// must also stay live — `no_dead_keyword_table_keys` rejects an entry
+        /// whose row no longer exists.
+        pub fn keywords_for(key: &str) -> &'static [&'static str] {
+            match normalize(key) {
+                $( $($key)|+ => $terms, )*
+                _ => &[],
+            }
+        }
+
+        /// Every key the alias table declares, for coverage auditing. Order
+        /// follows the declaration, and palette-prefixed rows appear in their
+        /// normalized (prefix-stripped) form.
+        pub const TABLE_KEYS: &[&str] = &[ $( $($key),+ ),* ];
+    };
+}
+
 /// Strip a leading `dark.` / `light.` palette segment so both theme palettes
 /// share one alias list. Non-palette keys (e.g. `general.light_mode`) are
 /// returned unchanged — only a literal `dark.` / `light.` *prefix* is removed.
@@ -25,21 +62,106 @@ fn normalize(key: &str) -> &str {
         .unwrap_or(key)
 }
 
-/// Curated alias terms for a settings row, keyed by its (palette-normalized)
-/// config key. Returns `&[]` for rows without aliases.
+/// Alias terms shared by a whole *family* of keys, so vocabulary that applies
+/// uniformly is declared once instead of copied onto every row.
 ///
-/// Terms are lowercase and intentionally add vocabulary the label/subtitle
-/// lacks — acronyms, domain synonyms, and common alternate names — rather than
-/// repeating words the visible text already carries.
-pub fn keywords_for(key: &str) -> &'static [&'static str] {
-    match normalize(key) {
-        // ── Hotkeys ──────────────────────────────────────────────────────────
+/// Kept separate from [`keywords_for`] because a `match` arm returns one slice:
+/// a per-key arm and a family arm cannot be concatenated there without either
+/// duplicating the shared terms into all 53 hotkey arms or losing the per-key
+/// ones. [`all_keywords_for`] is what search iterates.
+pub fn family_keywords_for(key: &str) -> &'static [&'static str] {
+    if key.starts_with("hotkey.") || key == "__restore_all_hotkeys" {
+        // Nothing on a hotkey row's label, subtitle or category carries the
+        // words a user actually types to find the tab.
+        return &["shortcut", "keybind", "key binding", "keyboard", "hotkey"];
+    }
+    &[]
+}
+
+/// Every alias term for a row: its own plus its family's. This is the search
+/// path's entry point — prefer it over [`keywords_for`].
+pub fn all_keywords_for(key: &str) -> impl Iterator<Item = &'static str> {
+    keywords_for(key)
+        .iter()
+        .chain(family_keywords_for(key))
+        .copied()
+}
+
+// The alias table. Four entries rotted here before this was auditable: two when
+// the inline theme colour editors were removed, two when their fields were
+// folded into a ToggleSet whose row carries a sentinel key instead.
+keyword_table! {
+        // ── Hotkeys · Views ──────────────────────────────────────────────────
+        // (every hotkey row also inherits `family_keywords_for`)
+        "__restore_all_hotkeys" => &["reset", "defaults", "revert", "factory"],
+        "hotkey.switch_to_queue"
+        | "hotkey.switch_to_albums"
+        | "hotkey.switch_to_artists"
+        | "hotkey.switch_to_songs"
+        | "hotkey.switch_to_genres"
+        | "hotkey.switch_to_playlists"
+        | "hotkey.switch_to_radios"
+        | "hotkey.switch_to_harbour"
+        | "hotkey.switch_to_settings" => &["go to", "jump to", "open view", "navigate", "switch"],
+
+        // ── Hotkeys · Playback ───────────────────────────────────────────────
+        "hotkey.toggle_play" => &["pause", "resume", "start", "stop", "space"],
+        "hotkey.toggle_random" => &["shuffle", "randomize", "mix"],
+        "hotkey.toggle_repeat" => &["loop", "again", "replay"],
+        "hotkey.toggle_consume" => &["remove after play", "burn", "pop"],
+        "hotkey.toggle_sfx" => &["sound effects", "clicks", "audio feedback", "beeps"],
+        "hotkey.cycle_vis" => &["spectrum", "bars", "lines", "scope", "waveform"],
+        "hotkey.toggle_eq_modal" => &["eq", "bands", "tone", "treble", "bass"],
         "hotkey.open_trawl" => &["mix", "trawl", "crate", "builder", "blend", "anchor"],
+        "hotkey.toggle_crossfade" => &["fade", "blend", "gapless"],
+        "hotkey.toggle_lyrics" => &["karaoke", "synced", "words", "subtitles"],
+        "hotkey.toggle_bit_perfect" => &["lossless", "audiophile", "hi-res", "passthrough"],
+
+        // ── Hotkeys · Navigation ─────────────────────────────────────────────
+        "hotkey.slot_list_up" | "hotkey.slot_list_down" => {
+            &["scroll", "move cursor", "navigate", "arrow"]
+        },
+        "hotkey.activate" => &["enter", "play", "open", "select"],
+        "hotkey.expand_center" => &["open", "unfold", "drill down", "show tracks"],
+        "hotkey.shuffle_play" => &["random", "randomize", "mix"],
+        "hotkey.toggle_browsing_panel" => &["split view", "side by side", "browser", "panel"],
+        "hotkey.center_playing" => &["scroll to", "jump to current", "find playing", "locate"],
+        "hotkey.focus_search" => &["find", "filter", "query", "type"],
+        "hotkey.settings_category_next" | "hotkey.settings_category_prev" => {
+            &["settings tab", "sidebar", "category"]
+        },
+
+        // ── Hotkeys · Item Actions ───────────────────────────────────────────
+        "hotkey.toggle_star" => &["heart", "favorite", "loved", "like"],
+        "hotkey.add_to_queue" => &["enqueue", "append", "play later"],
+        "hotkey.remove_from_queue" => &["delete", "drop", "unqueue"],
+        "hotkey.clear_queue" => &["empty", "wipe", "reset queue"],
+        "hotkey.increase_rating" | "hotkey.decrease_rating" => &["stars", "rate"],
+        "hotkey.get_info" => &["properties", "details", "metadata", "tags"],
+        "hotkey.find_similar" => &["related", "more like this", "recommendations", "discover"],
+        "hotkey.find_top_songs" => &["best of", "popular", "greatest hits", "most played"],
+        "hotkey.move_track_up" | "hotkey.move_track_down" => &["reorder", "rearrange", "shift"],
+        "hotkey.save_queue_as_playlist" => &["export", "store", "create playlist"],
+        "hotkey.trawl_save_as_playlist" => &["mix", "crate", "export", "create playlist"],
+        "hotkey.new_smart_playlist" => &["nsp", "rules", "dynamic playlist", "auto playlist"],
+        "hotkey.edit_centered_playlist" => &["rename", "modify", "change playlist"],
+
+        // ── Hotkeys · Sort & View / Settings Edit ────────────────────────────
+        "hotkey.cycle_view_left" | "hotkey.cycle_view_right" => {
+            &["sort", "ordering", "arrange"]
+        },
+        "hotkey.toggle_sort_order" => &["ascending", "descending", "reverse", "flip"],
+        "hotkey.refresh_view" => &["reload", "rescan", "update", "sync"],
+        "hotkey.roulette" => &["random pick", "slot machine", "surprise me", "spin"],
+        "hotkey.edit_up" | "hotkey.edit_down" => {
+            &["change value", "adjust", "increment", "decrement"]
+        },
+
         // ── General · Library / Display / Behavior ───────────────────────────
         "general.library_page_size" => &["pagination", "batch size", "fetch count"],
         "general.artwork_resolution" => {
             &["cover art", "album art", "image quality", "thumbnail size"]
-        }
+        },
         "general.show_album_artists_only" => &["compilation", "featured", "guest artists"],
         "general.start_view" => &["home", "startup", "landing page", "default page"],
         "general.enter_behavior" => &["return key", "double click", "activate"],
@@ -48,7 +170,7 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "general.stable_viewport" => &["no scroll", "click to select", "anchor", "in place"],
         "general.suppress_library_refresh_toasts" => {
             &["notification", "rescan", "popup", "hide toast"]
-        }
+        },
 
         // ── General · Window & Tray / Advanced / Account ─────────────────────
         "general.show_tray_icon" => &["systray", "notification area", "status indicator"],
@@ -65,7 +187,29 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "general.slot_row_height" => &["compact", "spacing", "list density"],
         "general.horizontal_volume" => &["volume layout", "slider orientation"],
         "general.autohide_toolbar" => &["collapse toolbar", "hide search bar", "hide sort bar"],
+        "general.autohide_collapsed_appearance" => {
+            &["hairline", "strip", "collapsed toolbar", "sliver"]
+        },
+        "general.autohide_toolbar_height" => &["reveal zone", "strip height", "toolbar size"],
+        "general.autohide_toolbar_grip" => &["handle", "grab bar", "pull tab", "toolbar grip"],
+        "general.scrollbar_visibility" => &["scroll bar", "gutter", "handle", "thumb", "track"],
+        "general.icon_set" => &["phosphor", "lucide", "glyphs", "symbols", "iconography"],
         "general.track_info_display" => &["now playing", "song info", "metadata"],
+        "__toggle_mini_player_controls" => {
+            &["mini player", "transport", "buttons", "volume", "shuffle repeat"]
+        },
+        // Salvaged from `general.strip_show_format_info`, which is a field
+        // INSIDE this ToggleSet — search only ever sees the parent row's key.
+        "__toggle_strip_fields" => {
+            &["codec", "bitrate", "quality", "flac", "sample rate", "now playing fields"]
+        },
+        "general.strip_show_labels" => &["captions", "field names", "prefix"],
+        // Salvaged from `general.albums_artwork_overlay` (same ToggleSet story).
+        "__toggle_artwork_overlays" => {
+            &["caption", "label on cover", "title on art", "hover text"]
+        },
+        "general.artwork_auto_max_pct" => &["cover size", "artwork size", "max width", "panel"],
+        "general.artwork_vertical_height_pct" => &["cover size", "artwork height", "panel"],
         "general.strip_separator" => &["delimiter", "divider"],
         "general.artwork_column_mode" => &["cover art", "album art panel", "sidebar art"],
         "general.artwork_column_stretch_fit" => &["crop", "fill", "aspect ratio", "cover"],
@@ -75,10 +219,11 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
             "jump to artist",
             "jump to album",
         ],
-        "general.albums_artwork_overlay" => {
-            &["caption", "label on cover", "title on art", "hover text"]
-        }
-        "general.strip_show_format_info" => &["codec", "bitrate", "quality", "flac", "sample rate"],
+        // `general.albums_artwork_overlay` and `general.strip_show_format_info`
+        // used to be keyed here, but both are fields inside a ToggleSet row —
+        // search only ever sees the parent sentinel key, so the entries were
+        // unreachable. Their vocabulary now lives on `__toggle_artwork_overlays`
+        // and `__toggle_strip_fields` above.
         "general.strip_merged_mode" => &["combined", "single line", "joined"],
         "general.strip_click_action" => &["tap", "on click", "copy info"],
         "font_family" => &["typeface", "typography"],
@@ -107,7 +252,7 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "general.fade_stop_ms" => &["stop fade length", "ramp"],
         "general.fade_radio_transitions" => {
             &["radio fade", "station switch", "soft switch", "click"]
-        }
+        },
         "general.fade_on_skip" => &[
             "skip fade",
             "next fade",
@@ -141,7 +286,7 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         // ── Playback · Volume Normalization ──────────────────────────────────
         "general.volume_normalization" => {
             &["loudness", "replaygain", "rg", "agc", "leveling", "gain"]
-        }
+        },
         "general.normalization_level" => &["loudness target", "lufs", "gain"],
         "general.replay_gain_preamp_db" => &["rg", "preamp", "gain boost"],
         "general.replay_gain_fallback_db" => &["replaygain", "rg", "untagged", "default gain"],
@@ -161,22 +306,58 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         ],
         "general.love_change_notification_enabled" => {
             &["heart", "favorite", "loved", "star", "hotkey", "notify"]
-        }
+        },
         "general.rating_reminder_trigger" => &["stars", "when to remind", "rate prompt"],
+        "general.rating_reminder_percent" => &["stars", "how far", "rate prompt", "progress"],
+
+        // ── Playback · Radio Scrobbling ──────────────────────────────────────
+        // The section's labels say "Radio", never the service names a user
+        // types to find it.
+        "general.radio_scrobbling_enabled" => &[
+            "last.fm",
+            "lastfm",
+            "listenbrainz",
+            "stream history",
+            "internet radio",
+        ],
+        "general.radio_scrobble_threshold_secs" => {
+            &["last.fm", "lastfm", "listenbrainz", "submit point", "how long"]
+        },
+        "general.radio_now_playing_enabled" => {
+            &["last.fm", "lastfm", "listenbrainz", "now playing", "status"]
+        },
+        "__set_listenbrainz_token" => &["api key", "credentials", "user token", "scrobble"],
+        "__verify_listenbrainz" => &["test", "check token", "validate", "scrobble"],
+        "__set_lastfm_credentials" => &["api key", "secret", "credentials", "scrobble"],
+        "__connect_lastfm" => &["authorize", "sign in", "link account", "scrobble"],
+        "__disconnect_lastfm" => &["sign out", "unlink", "revoke", "scrobble"],
         "general.quick_add_to_playlist" => &["skip dialog", "one click add", "fast add"],
         "general.default_playlist_name" => {
             &["preferred playlist", "target playlist", "favorite list"]
-        }
+        },
         "general.queue_show_default_playlist" => &["badge", "pill", "header chip"],
 
         // ── Theme · Mode / Display / Colors ──────────────────────────────────
         "general.light_mode" => &["dark mode", "light mode", "appearance", "color scheme"],
         "general.rounded_mode" => &["border radius", "square corners", "shape"],
         "general.opacity_gradient" => &["fade", "dim", "transparency"],
-        "accent.primary" => &["highlight", "brand color", "theme color"],
-        "border" => &["outline", "divider", "hairline"],
+        // Theme COLORS moved out of the GUI into the theme TOML files, so the
+        // picker is now the only row a colour search can land on. It inherits
+        // the vocabulary the deleted `accent.primary` / `border` rows carried.
+        "__theme_picker" => &[
+            "colors",
+            "palette",
+            "accent",
+            "highlight",
+            "background",
+            "border",
+            "outline",
+            "appearance",
+            "skin",
+        ],
 
         // ── Visualizer · Frame / Signal / Bars / Lines / Scope ───────────────
+        "__restore_visualizer" => &["reset", "defaults", "revert", "factory"],
         "visualizer.height_percent" => &["size"],
         "visualizer.noise_reduction" => &["smoothing", "denoise"],
         "visualizer.lower_cutoff_freq" => &["bass", "low frequency", "highpass"],
@@ -222,11 +403,16 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         ],
         "visualizer.auto_sensitivity" => &["agc", "auto gain", "normalize", "auto scale"],
         "visualizer.waves" => &["spline", "rolling hills", "catmull-rom"],
+        "visualizer.waves_smoothing" => &["spline", "rolling hills", "wave amount", "catmull-rom"],
         "visualizer.monstercat" => &["spread", "falloff", "blur", "cava"],
         "visualizer.bars.led_bars" => &["vu meter", "segments", "blocks"],
         "visualizer.bars.led_segment_height" => &["block", "segment size", "vu"],
         "visualizer.bars.max_bars" => &["bands", "resolution", "number of bars"],
         "visualizer.bars.bar_spacing" => &["gap", "padding", "separation"],
+        "visualizer.bars.bar_width_min" => &["thin bars", "narrow", "bar size"],
+        "visualizer.bars.bar_width_max" => &["thick bars", "wide", "bar size"],
+        "visualizer.bars.border_width" => &["outline", "stroke", "edge"],
+        "visualizer.bars.peak_fade_time" => &["cap", "tip", "fade out", "decay"],
         "visualizer.bars.gradient_mode" => &["color mode", "shimmer", "energy", "coloring"],
         "visualizer.bars.gradient_orientation" => &["direction", "axis", "horizontal", "vertical"],
         "visualizer.bars.peak_mode" => &["cap", "tip", "falling peaks"],
@@ -237,11 +423,23 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "visualizer.bars.bar_depth_3d" => &["3d", "perspective"],
         "visualizer.bars.flash_intensity" => {
             &["beat flash", "bloom", "pulse", "peak flash", "punch"]
-        }
+        },
         "visualizer.bar_gradient_colors" => {
             &["palette", "color stops", "rainbow", "spectrum colors"]
-        }
+        },
+        // Bar Colors sections — one arm each serves the Dark and Light rows
+        // (`normalize` strips the palette prefix).
+        "visualizer.border_color" => &["outline", "stroke", "edge color"],
+        "visualizer.border_opacity" => &["outline", "stroke", "alpha", "transparency"],
+        "visualizer.led_border_opacity" => {
+            &["vu", "segment", "outline", "alpha", "transparency"]
+        },
+        "visualizer.peak_gradient_colors" => &["cap", "tip", "palette", "color stops"],
         "visualizer.lines.point_count" => &["resolution", "detail", "samples", "vertices"],
+        "visualizer.lines.line_thickness" => &["stroke", "weight", "width"],
+        "visualizer.lines.outline_thickness" => &["stroke", "border", "edge"],
+        "visualizer.lines.outline_opacity" => &["stroke", "border", "alpha", "transparency"],
+        "visualizer.lines.animation_speed" => &["breathing", "motion", "tempo", "rate"],
         "visualizer.lines.gradient_mode" => &["color mode", "breathing", "rainbow", "coloring"],
         "visualizer.lines.fill_opacity" => &["area fill", "shade under", "filled curve"],
         "visualizer.lines.glow_intensity" => &["neon", "halo", "bloom", "glow", "luminous"],
@@ -257,9 +455,20 @@ pub fn keywords_for(key: &str) -> &'static [&'static str] {
         "visualizer.scope.glow_intensity" => &["neon", "halo", "bloom", "glow", "luminous"],
         "visualizer.scope.beam" => &["beam", "neon", "glow", "halo", "trace glow"],
         "visualizer.scope.style" => &["smooth", "angular", "curve", "interpolation"],
-
-        _ => &[],
-    }
+        // "Scope" is shorter than "oscilloscope", so the needle can never match
+        // the label or section header — every Scope row has to carry the word.
+        "visualizer.scope.line_thickness" => &["oscilloscope", "stroke", "weight", "width"],
+        "visualizer.scope.fill_opacity" => &["oscilloscope", "area fill", "shade under", "alpha"],
+        "visualizer.scope.outline_thickness" => {
+            &["oscilloscope", "stroke", "border", "edge"]
+        },
+        "visualizer.scope.outline_opacity" => {
+            &["oscilloscope", "stroke", "border", "alpha", "transparency"]
+        },
+        "visualizer.scope.gradient_mode" => {
+            &["oscilloscope", "color mode", "rainbow", "coloring"]
+        },
+        "visualizer.scope.animation_speed" => &["oscilloscope", "motion", "tempo", "rate"],
 }
 
 #[cfg(test)]
@@ -280,13 +489,14 @@ mod tests {
 
     #[test]
     fn palette_prefix_is_normalized() {
-        // Both theme palettes resolve to the same alias list.
+        // Both theme palettes resolve to the same alias list — the Bar Colors
+        // sections render one row per palette off a single entry here.
         assert_eq!(
-            keywords_for("dark.accent.primary"),
-            keywords_for("light.accent.primary")
+            keywords_for("dark.visualizer.border_color"),
+            keywords_for("light.visualizer.border_color")
         );
-        assert!(keywords_for("dark.accent.primary").contains(&"highlight"));
-        assert!(keywords_for("light.border").contains(&"outline"));
+        assert!(keywords_for("dark.visualizer.border_color").contains(&"outline"));
+        assert!(keywords_for("light.visualizer.peak_gradient_colors").contains(&"cap"));
     }
 
     #[test]

@@ -6,10 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Settings search now reaches every row by synonym, including all 53 hotkey rows, radio scrobbling, and the Scope visualizer controls.
+- Hotkey rows now answer searches for "shortcut", "keybind", and "keyboard".
+- The theme picker now answers color searches like "palette", "accent", and "border".
+
 ### Changed
 
 - New installs default the Verbose Config setting to Clean, so config.toml stays free of the inline comments the previous Off default injected.
 - The Artists view now bolds the centered row's artist name, matching the other library views.
+- Settings search now matches words in any order, so "radio scrobble" finds the Scrobble Radio row.
 
 ### Fixed
 
@@ -17,6 +22,9 @@ All notable changes to this project will be documented in this file.
 - An expired session during a library refresh now returns you to the login screen instead of a generic error toast.
 - A server error sent in place of audio now reports the track as unavailable instead of a format failure.
 - Artist names in the Artists view now stop being clickable when Slot Text Links is off.
+- Settings search no longer lists unrelated rows for a term nokkvi has no setting for.
+- A search fragment matching mid-word in a tab name, like "lay" in Playback, no longer pulls in that whole tab.
+- Ten settings rows now show help text that was previously invisible.
 
 ### Removed
 

@@ -446,11 +446,13 @@ impl SettingsPage {
                     } else {
                         None
                     };
-                    let match_spans = query_lower.as_deref().and_then(|q| {
-                        fuzzy::fuzzy_match(&item.label, q)
-                            .filter(|m| fuzzy::is_strong(m, q))
-                            .map(|m| m.ranges)
-                    });
+                    // Must stay the same entry point the LABEL tier ranks on
+                    // (`score_item` in entries.rs) — if ranking tokenizes and
+                    // highlighting does not, a row can rank first with nothing
+                    // highlighted.
+                    let match_spans = query_lower
+                        .as_deref()
+                        .and_then(|q| fuzzy::query_match(&item.label, q).map(|m| m.ranges));
                     render_detail_row(
                         item,
                         idx,

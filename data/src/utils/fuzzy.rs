@@ -222,6 +222,103 @@ pub fn fuzzy_score(haystack: &str, needle: &str) -> Option<i32> {
     fuzzy_match(haystack, needle).map(|m| m.score)
 }
 
+/// A strength-gated match of a whole user *query* (one or more whitespace-
+/// separated tokens) against one field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryMatch {
+    /// Relevance score; higher is better. Only comparable across candidates for
+    /// the *same* query.
+    pub score: i32,
+    /// Coalesced, sorted, non-overlapping byte ranges in the haystack, suitable
+    /// for highlighting. Always safe to feed to the renderer: overlapping or
+    /// out-of-order per-token ranges are merged before they escape.
+    pub ranges: Vec<(usize, usize)>,
+    /// Every token matched as a literal contiguous substring (no scattered
+    /// subsequence). Callers gate prose fields on this — a subsequence walk
+    /// across a long sentence carries no signal, only noise.
+    pub contiguous: bool,
+}
+
+/// Match a whole query against `haystack`, already gated on match strength.
+///
+/// Tokenized: the query is split on whitespace and **every** token must match,
+/// each clearing [`is_strong_score`] on its own. This is what makes word order
+/// irrelevant — `"radio scrobble"` finds `"Scrobble Radio"`, which a single
+/// whole-needle subsequence walk cannot.
+///
+/// A whole-query match is preferred when it is contiguous, so an exact phrase
+/// keeps one highlight span (`"volume normalization"` highlights as a single
+/// run rather than two), and so a phrase hit outscores the same words scattered.
+///
+/// The score is the **sum** of the per-token scores. Summing (rather than the
+/// max) is what lets a second token influence ranking at all; gating each token
+/// on its own strength floor is what stops a 1-char token from riding along as
+/// a near-vacuous conjunct.
+pub fn query_match(haystack: &str, query: &str) -> Option<QueryMatch> {
+    let mut tokens = query.split_whitespace();
+    let first = tokens.next()?;
+    let rest: Vec<&str> = tokens.collect();
+
+    if rest.is_empty() {
+        let m = fuzzy_match(haystack, first).filter(|m| is_strong(m, first))?;
+        return Some(QueryMatch {
+            contiguous: m.ranges.len() == 1,
+            score: m.score,
+            ranges: m.ranges,
+        });
+    }
+
+    // Exact-phrase fast path (contiguous only — a scattered whole-query walk is
+    // precisely the noise the per-token path avoids).
+    if let Some(m) = fuzzy_match(haystack, query).filter(|m| is_strong(m, query))
+        && m.ranges.len() == 1
+    {
+        return Some(QueryMatch {
+            score: m.score,
+            ranges: m.ranges,
+            contiguous: true,
+        });
+    }
+
+    let mut score = 0i32;
+    let mut ranges = Vec::new();
+    let mut contiguous = true;
+    for tok in std::iter::once(first).chain(rest) {
+        let m = fuzzy_match(haystack, tok).filter(|m| is_strong(m, tok))?;
+        score = score.saturating_add(m.score);
+        contiguous &= m.ranges.len() == 1;
+        ranges.extend(m.ranges);
+    }
+    Some(QueryMatch {
+        score,
+        ranges: coalesce(ranges),
+        contiguous,
+    })
+}
+
+/// Score-only [`query_match`] for fields that need no highlight ranges.
+pub fn query_score(haystack: &str, query: &str) -> Option<i32> {
+    query_match(haystack, query).map(|m| m.score)
+}
+
+/// [`query_score`] restricted to literal contiguous matches — the gate for
+/// prose fields (subtitles, categories, section headers), where a scattered
+/// subsequence across a long sentence is noise rather than intent.
+pub fn contiguous_query_score(haystack: &str, query: &str) -> Option<i32> {
+    query_match(haystack, query)
+        .filter(|m| m.contiguous)
+        .map(|m| m.score)
+}
+
+/// [`contiguous_query_score`] further anchored at the start of the haystack —
+/// the gate for the tab-name tier, where a mid-word hit (`"lay"` inside
+/// `"Playback"`) would otherwise seed a baseline for every row in that tab.
+pub fn prefix_query_score(haystack: &str, query: &str) -> Option<i32> {
+    query_match(haystack, query)
+        .filter(|m| m.contiguous && m.ranges.first().is_some_and(|r| r.0 == 0))
+        .map(|m| m.score)
+}
+
 /// Whether a raw score clears the structure floor for `needle` — used to drop
 /// weak scattered matches while keeping substrings, prefixes, and acronyms.
 pub fn is_strong_score(score: i32, needle: &str) -> bool {
@@ -348,5 +445,114 @@ mod tests {
         let s = fuzzy_score("Crossfade Duration", "fade").unwrap();
         let m = fuzzy_match("Crossfade Duration", "fade").unwrap();
         assert_eq!(s, m.score);
+    }
+
+    // ── query_match (tokenized) ─────────────────────────────────────────────
+
+    #[test]
+    fn word_order_does_not_matter() {
+        // The whole point: a single subsequence walk cannot find "radio
+        // scrobble" in "Scrobble Radio" — the tokens do.
+        assert!(fuzzy_match("Scrobble Radio", "radio scrobble").is_none());
+        let m = query_match("Scrobble Radio", "radio scrobble").expect("tokens should match");
+        assert!(m.contiguous);
+        assert_eq!(m.ranges, vec![(0, 8), (9, 14)]);
+    }
+
+    #[test]
+    fn all_tokens_must_match() {
+        assert!(query_match("Scrobble Radio", "radio zzzz").is_none());
+    }
+
+    #[test]
+    fn single_token_query_is_unchanged() {
+        let q = query_match("Volume Normalization", "volume").expect("match");
+        let m = fuzzy_match("Volume Normalization", "volume").expect("match");
+        assert_eq!(q.score, m.score);
+        assert_eq!(q.ranges, m.ranges);
+    }
+
+    #[test]
+    fn exact_phrase_keeps_one_span() {
+        // The phrase fast path must not split a contiguous hit into per-token
+        // spans — the renderer would otherwise drop the space from the
+        // highlight.
+        let m = query_match("Volume Normalization", "volume normalization").expect("phrase");
+        assert_eq!(m.ranges, vec![(0, 20)]);
+        assert!(m.contiguous);
+    }
+
+    #[test]
+    fn interior_double_space_does_not_empty_the_query() {
+        // `split(' ')` would yield an empty token here, and an empty needle
+        // makes `fuzzy_match` return None — silently zeroing the result set.
+        assert!(query_match("Scrobble Radio", "radio  scrobble").is_some());
+        assert!(query_match("Scrobble Radio", "   ").is_none());
+    }
+
+    #[test]
+    fn token_scores_sum_so_a_second_token_ranks() {
+        // A max-aggregate would make these identical; summing separates them.
+        let one = query_score("Fade on Skip", "fade").expect("one token");
+        let two = query_score("Fade on Skip", "fade skip").expect("two tokens");
+        assert!(two > one, "two-token {two} should outrank one-token {one}");
+    }
+
+    #[test]
+    fn weak_token_cannot_ride_along() {
+        // Each token clears the floor independently, so a scattered low-
+        // structure token drops the whole row rather than passing for free.
+        assert!(query_match("Stable Viewport", "stable al").is_none());
+    }
+
+    #[test]
+    fn contiguous_flag_separates_substrings_from_subsequences() {
+        assert!(query_match("Crossfade Duration", "crossfade").is_some_and(|m| m.contiguous));
+        assert!(query_match("Crossfade Duration", "crssfade").is_some_and(|m| !m.contiguous));
+    }
+
+    #[test]
+    fn contiguous_gate_drops_scattered_prose_matches() {
+        // A long prose subtitle is a subsequence sponge: "sleep timer" walks it
+        // letter by letter. The contiguous gate is what rejects that while
+        // keeping a real literal hit in the same string.
+        let prose = "Bypass resampling so the DAC receives the original sample rate, \
+                     re-clocking PipeWire to each track";
+        // "bass" walks B-yp-a-ss: a strong scattered match, and pure noise.
+        assert!(query_score(prose, "bass").is_some());
+        assert!(contiguous_query_score(prose, "bass").is_none());
+        // Literal vocabulary that lives ONLY in prose like this must survive.
+        assert!(contiguous_query_score(prose, "pipewire").is_some());
+        assert!(contiguous_query_score(prose, "resampling dac").is_some());
+    }
+
+    #[test]
+    fn prefix_gate_rejects_midword_tab_hits() {
+        // "lay" inside "Playback" must not seed a baseline for the whole tab.
+        assert!(contiguous_query_score("Playback", "lay").is_some());
+        assert!(prefix_query_score("Playback", "lay").is_none());
+        assert!(prefix_query_score("Playback", "play").is_some());
+        assert!(prefix_query_score("Visualizer", "visual").is_some());
+    }
+
+    #[test]
+    fn multibyte_token_ranges_stay_sorted_and_disjoint() {
+        // Out-of-order token matches must be coalesced before they reach the
+        // renderer, which has no ordering guard of its own.
+        let m = query_match("café latté", "latté café").expect("both tokens");
+        assert_eq!(m.ranges, vec![(0, 5), (6, 12)]);
+        for w in m.ranges.windows(2) {
+            assert!(w[0].1 <= w[1].0, "ranges must be sorted and disjoint");
+        }
+        assert_eq!(&"café latté"[m.ranges[0].0..m.ranges[0].1], "café");
+        assert_eq!(&"café latté"[m.ranges[1].0..m.ranges[1].1], "latté");
+    }
+
+    #[test]
+    fn repeated_token_ranges_do_not_duplicate() {
+        // Same region matched twice must coalesce, or the renderer would emit
+        // the overlapping slice twice.
+        let m = query_match("Fade on Skip", "fade fade").expect("match");
+        assert_eq!(m.ranges, vec![(0, 4)]);
     }
 }

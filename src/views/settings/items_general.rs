@@ -93,20 +93,14 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             icon: ACC,
         },
         SettingItem::text(
-            SettingMeta::new(
-                "general.server_url",
-                "Server URL",
-                "Read-only · configured at login",
-            ),
+            SettingMeta::new("general.server_url", "Server URL", "Account")
+                .with_subtitle("Read-only · configured at login"),
             data.server_url.as_ref(),
             data.server_url.as_ref(),
         ),
         SettingItem::text(
-            SettingMeta::new(
-                "general.username",
-                "Username",
-                "Read-only · configured at login",
-            ),
+            SettingMeta::new("general.username", "Username", "Account")
+                .with_subtitle("Read-only · configured at login"),
             data.username.as_ref(),
             data.username.as_ref(),
         ),

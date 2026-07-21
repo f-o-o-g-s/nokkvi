@@ -128,8 +128,9 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             SettingMeta::new(
                 "general.normalization_level",
                 "AGC Target Level",
-                "Quiet (headroom) · Normal · Loud (boost)",
-            ),
+                "Volume Normalization",
+            )
+            .with_subtitle("Quiet (headroom) · Normal · Loud (boost)"),
             data.normalization_level.as_ref(),
             "Normal",
             vec!["Quiet", "Normal", "Loud"],
@@ -146,7 +147,11 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             SettingMeta::new(
                 "general.replay_gain_preamp_db",
                 "ReplayGain Pre-amp",
-                "Boost on top of the tag value · 0 dB matches reference, +6 is typical for modern listeners",
+                "Volume Normalization",
+            )
+            .with_subtitle(
+                "Boost on top of the tag value · 0 dB matches reference, +6 is typical \
+                 for modern listeners",
             ),
             data.replay_gain_preamp_db,
             0,
@@ -159,7 +164,11 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             SettingMeta::new(
                 "general.replay_gain_fallback_db",
                 "Untagged Track Fallback",
-                "dB applied when a track has no ReplayGain tags · ignored if Use AGC for Untagged is on",
+                "Volume Normalization",
+            )
+            .with_subtitle(
+                "dB applied when a track has no ReplayGain tags · ignored if Use AGC \
+                 for Untagged is on",
             ),
             data.replay_gain_fallback_db,
             0,
@@ -172,8 +181,9 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             SettingMeta::new(
                 "general.replay_gain_fallback_to_agc",
                 "Use AGC for Untagged Tracks",
-                "Falls through to real-time AGC when a track has no ReplayGain tags",
-            ),
+                "Volume Normalization",
+            )
+            .with_subtitle("Falls through to real-time AGC when a track has no ReplayGain tags"),
             data.replay_gain_fallback_to_agc,
             false,
         ));
@@ -181,8 +191,9 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             SettingMeta::new(
                 "general.replay_gain_prevent_clipping",
                 "Prevent Clipping",
-                "Clamp gain so track_peak × gain ≤ 1.0",
-            ),
+                "Volume Normalization",
+            )
+            .with_subtitle("Clamp gain so track_peak × gain ≤ 1.0"),
             data.replay_gain_prevent_clipping,
             true,
         ));
@@ -306,7 +317,11 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             SettingMeta::new(
                 "general.default_playlist_name",
                 "Default Playlist",
-                "Click to choose a playlist · also settable from the Playlists header chip or right-click menu",
+                "Playlists",
+            )
+            .with_subtitle(
+                "Click to choose a playlist · also settable from the Playlists header \
+                     chip or right-click menu",
             ),
             if data.default_playlist_name.is_empty() {
                 "Not set"

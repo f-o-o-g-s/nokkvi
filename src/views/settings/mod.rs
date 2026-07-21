@@ -25,6 +25,8 @@ mod items_theme;
 mod items_visualizer;
 pub(crate) mod presets;
 mod rendering;
+#[cfg(test)]
+mod search_coverage_tests;
 pub(crate) mod sentinel;
 mod sub_lists;
 #[cfg(test)]

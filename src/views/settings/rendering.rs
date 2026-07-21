@@ -87,7 +87,11 @@ fn highlighted_label<'a>(
     // `spans` are coalesced, sorted, non-overlapping byte ranges from the fuzzy
     // matcher; the boundary guards defend against any malformed input.
     for &(start, end) in spans {
+        // `start < cursor` rejects an unsorted or overlapping span: without it
+        // the slice below would re-emit already-rendered text, duplicating part
+        // of the label on screen.
         if start >= end
+            || start < cursor
             || end > label.len()
             || !label.is_char_boundary(start)
             || !label.is_char_boundary(end)

@@ -94,11 +94,8 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         },
         macro_rows.take("general.track_info_display"),
         SettingItem::toggle_set(
-            SettingMeta::new(
-                "__toggle_strip_fields",
-                "Visible Fields",
-                "Choose which metadata fields appear in the strip",
-            ),
+            SettingMeta::new("__toggle_strip_fields", "Visible Fields", "Metadata Strip")
+                .with_subtitle("Choose which metadata fields appear in the strip"),
             vec![
                 (
                     "Title".to_string(),
@@ -135,8 +132,9 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             SettingMeta::new(
                 "__toggle_artwork_overlays",
                 "Text Overlay On Artwork",
-                "Show the metadata text overlay on the large artwork in each view",
-            ),
+                "Artwork Overlays",
+            )
+            .with_subtitle("Show the metadata text overlay on the large artwork in each view"),
             vec![
                 (
                     "Albums".to_string(),
@@ -187,8 +185,9 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             SettingMeta::new(
                 "__toggle_mini_player_controls",
                 "Visible Controls",
-                "Choose which controls appear in the mini-player bar",
-            ),
+                "Player Bar",
+            )
+            .with_subtitle("Choose which controls appear in the mini-player bar"),
             vec![
                 (
                     "Volume".to_string(),
@@ -218,7 +217,11 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             SettingMeta::new(
                 "general.artwork_column_stretch_fit",
                 "Stretch Fit",
-                "Cover: crop to fill, preserve aspect · Fill: true stretch, distorts album art",
+                "Artwork Column",
+            )
+            .with_subtitle(
+                "Cover: crop to fill, preserve aspect · Fill: true stretch, distorts \
+                 album art",
             ),
             data.artwork_column_stretch_fit.as_ref(),
             "Cover",
