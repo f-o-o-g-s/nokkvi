@@ -447,26 +447,27 @@ impl ArtistsPage {
             ));
         }
         content_row = content_row.push({
+            use crate::widgets::slot_list::slot_list_text_column;
             let title_click = Some(ArtistsMessage::ContextMenuAction(
                 ctx.item_index,
                 crate::widgets::context_menu::LibraryContextEntry::GetInfo,
             ));
-            let link_color = if ctx.is_center {
-                style.text_color
-            } else {
-                crate::theme::accent_bright()
-            };
-            container(
-                crate::widgets::link_text::LinkText::new(artist_name)
-                    .size(title_size)
-                    .color(style.text_color)
-                    .hover_color(link_color)
-                    .on_press(title_click),
+            // Artists carry no subtitle, so this lands in the helper's
+            // title-only branch. Routing through the shared helper (rather than
+            // a hand-rolled `LinkText`) keeps the `slot_text_links` gate, the
+            // hover color, and the centered-row bold in lockstep with every
+            // other view — the hand-rolled column silently missed the gate.
+            slot_list_text_column(
+                artist_name,
+                title_click,
+                String::new(),
+                None,
+                title_size,
+                metadata_size,
+                style,
+                ctx.is_center,
+                name_portion,
             )
-            .width(Length::FillPortion(name_portion))
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center)
         });
 
         // Stars column (auto-show on sort=Rating). Replaces the old inline

@@ -9,12 +9,14 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - New installs default the Verbose Config setting to Clean, so config.toml stays free of the inline comments the previous Off default injected.
+- The Artists view now bolds the centered row's artist name, matching the other library views.
 
 ### Fixed
 
 - Playback that stops because the next track fails to load now reports the error instead of stopping silently.
 - An expired session during a library refresh now returns you to the login screen instead of a generic error toast.
 - A server error sent in place of audio now reports the track as unavailable instead of a format failure.
+- Artist names in the Artists view now stop being clickable when Slot Text Links is off.
 
 ### Removed
 
