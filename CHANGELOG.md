@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.18.2 — 2026-07-22
+
+### Added
+
 - Settings search now reaches every row by synonym, including all 53 hotkey rows, radio scrobbling, and the Scope visualizer controls.
 - Hotkey rows now answer searches for "shortcut", "keybind", and "keyboard".
 - The theme picker now answers color searches like "palette", "accent", and "border".
@@ -27,8 +37,6 @@ All notable changes to this project will be documented in this file.
 - Settings search no longer lists unrelated rows for a term nokkvi has no setting for.
 - A search fragment matching mid-word in a tab name, like "lay" in Playback, no longer pulls in that whole tab.
 - Ten settings rows now show help text that was previously invisible.
-
-### Removed
 
 ## v0.18.1 — 2026-07-19
 
