@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Settings search now reaches every row by synonym, including all 53 hotkey rows, radio scrobbling, and the Scope visualizer controls.
 - Hotkey rows now answer searches for "shortcut", "keybind", and "keyboard".
 - The theme picker now answers color searches like "palette", "accent", and "border".
+- The smart-playlist editor gains an Add group row, so mixing All and Any logic no longer requires the raw JSON editor.
 
 ### Changed
 

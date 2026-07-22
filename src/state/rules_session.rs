@@ -109,6 +109,10 @@ pub enum FormRow {
     GroupHeader(Vec<usize>),
     /// Trailing add-row of the group at this path (`[]` = root).
     AddRule(Vec<usize>),
+    /// Root-only add-row that wraps a fresh sub-group (seeded with one
+    /// rule) into the root. Root-only by construction: a group inside a
+    /// group would be depth 2, which locks the form to read-only.
+    AddGroup,
     /// One sort key row (`[key] [asc/desc]`), index into effective keys.
     SortKey(usize),
     /// Trailing add-row of the sort builder.
@@ -434,6 +438,7 @@ impl RulesSessionUi {
             flatten_group(&root.nodes, &mut Vec::new(), &mut rows);
         }
         rows.push(FormRow::AddRule(Vec::new()));
+        rows.push(FormRow::AddGroup);
         for (i, _) in self.rules.effective_sort_keys().iter().enumerate() {
             rows.push(FormRow::SortKey(i));
         }
@@ -485,7 +490,7 @@ impl RulesSessionUi {
                 FormCell::LimitMode,
                 FormCell::OffsetValue,
             ],
-            FormRow::AddRule(_) | FormRow::AddSortKey | FormRow::JsonToggle => {
+            FormRow::AddRule(_) | FormRow::AddGroup | FormRow::AddSortKey | FormRow::JsonToggle => {
                 vec![FormCell::RowAction]
             }
         }
@@ -645,11 +650,7 @@ impl RulesSessionUi {
     /// the cursor onto it. The default rule mirrors the corpus's most
     /// common shape: `rating is 5`.
     pub fn add_rule(&mut self, group_path: &[usize]) {
-        let leaf = CriteriaNode::Leaf(RuleLeaf::new(
-            RuleOperator::Is,
-            "rating",
-            serde_json::json!(5),
-        ));
+        let leaf = default_rule_leaf();
         let new_path = if group_path.is_empty() {
             let root = self
                 .rules
@@ -668,10 +669,48 @@ impl RulesSessionUi {
         };
         self.dirty = true;
         self.rebuild_rows();
+        self.focus_rule(&new_path);
+    }
+
+    /// Append a fresh sub-group to the ROOT, seeded with one default rule,
+    /// and move the cursor onto that rule. This is the affordance that lets
+    /// the typed form author mixed polarity — `A and (B or C)` — without
+    /// dropping into raw JSON.
+    ///
+    /// The new group takes the OPPOSITE conjunction of the root: nesting a
+    /// group that matches its parent's polarity is a logical no-op, so the
+    /// only useful default is the flip.
+    ///
+    /// Root-only by construction. The typed form edits at most
+    /// flat-plus-one ([`Self::form_editable`]), so authoring a group inside
+    /// a group would lock the very form that created it.
+    pub fn add_group(&mut self) {
+        let root = self
+            .rules
+            .root
+            .get_or_insert_with(|| CriteriaGroup::new(Conjunction::All));
+        let mut group = CriteriaGroup::new(match root.conjunction {
+            Conjunction::All => Conjunction::Any,
+            Conjunction::Any => Conjunction::All,
+        });
+        // Seeded, never empty: an empty group is a Save-blocking validation
+        // error ("Empty group — add a rule or remove it"), so handing the
+        // user one would make the button author an invalid tree.
+        group.nodes.push(default_rule_leaf());
+        root.nodes.push(CriteriaNode::Group(group));
+        let new_path = vec![root.nodes.len() - 1, 0];
+        self.dirty = true;
+        self.rebuild_rows();
+        self.focus_rule(&new_path);
+    }
+
+    /// Park the cursor on the rule row at `path`, on its field cell. Shared
+    /// by every rule-appending path so a new row always lands the same way.
+    fn focus_rule(&mut self, path: &[usize]) {
         if let Some(idx) = self
             .rows
             .iter()
-            .position(|r| matches!(r, FormRow::Rule(p) if *p == new_path))
+            .position(|r| matches!(r, FormRow::Rule(p) if p == path))
         {
             self.cursor = idx;
             self.cell = FormCell::Field;
@@ -798,6 +837,17 @@ impl RulesSessionUi {
     }
 }
 
+/// The default rule every add-path seeds: `rating is 5`, the corpus's most
+/// common shape. One definition so the root add-row, a group's add-row, and
+/// a freshly authored group can't drift apart.
+fn default_rule_leaf() -> CriteriaNode {
+    CriteriaNode::Leaf(RuleLeaf::new(
+        RuleOperator::Is,
+        "rating",
+        serde_json::json!(5),
+    ))
+}
+
 fn flatten_group(nodes: &[CriteriaNode], path: &mut Vec<usize>, rows: &mut Vec<FormRow>) {
     for (i, node) in nodes.iter().enumerate() {
         path.push(i);
@@ -868,8 +918,8 @@ mod tests {
     }
 
     /// The flattened row list: edit-bar row 0, match row, rules (group
-    /// headers + children + per-group add-rows), root add-row, sort rows +
-    /// add, limit, JSON toggle.
+    /// headers + children + per-group add-rows), root add-row, root
+    /// add-GROUP row, sort rows + add, limit, JSON toggle.
     #[test]
     fn flattened_rows_cover_the_full_form() {
         let session = RulesSessionUi::open(edit_target(), tiered_rules(), ServerCaps::default());
@@ -885,10 +935,15 @@ mod tests {
         );
         assert!(matches!(rows[6], FormRow::Rule(ref p) if p == &vec![1]));
         assert!(matches!(rows[7], FormRow::AddRule(ref p) if p.is_empty()));
-        assert_eq!(rows[8], FormRow::SortKey(0));
-        assert_eq!(rows[9], FormRow::AddSortKey);
-        assert_eq!(rows[10], FormRow::Limit);
-        assert_eq!(rows[11], FormRow::JsonToggle);
+        assert_eq!(
+            rows[8],
+            FormRow::AddGroup,
+            "the add-group row is root-only and trails the root add-rule"
+        );
+        assert_eq!(rows[9], FormRow::SortKey(0));
+        assert_eq!(rows[10], FormRow::AddSortKey);
+        assert_eq!(rows[11], FormRow::Limit);
+        assert_eq!(rows[12], FormRow::JsonToggle);
     }
 
     /// Up from the match row lands on the edit-bar band; the band's cells

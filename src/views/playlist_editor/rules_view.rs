@@ -853,6 +853,10 @@ fn render_form_row<'a>(
             ]
             .into()
         }
+        FormRow::AddGroup => ring_wrap(
+            cursor_here,
+            dim_action("+ Add group", click(FormCell::RowAction)),
+        ),
         FormRow::SortKey(i) => {
             let keys = session.rules.effective_sort_keys();
             let Some(key) = keys.get(*i).cloned() else {
@@ -1567,7 +1571,8 @@ fn form_section(row: &FormRow) -> u8 {
         | FormRow::Match
         | FormRow::GroupHeader(_)
         | FormRow::Rule(_)
-        | FormRow::AddRule(_) => 0,
+        | FormRow::AddRule(_)
+        | FormRow::AddGroup => 0,
         FormRow::SortKey(_) | FormRow::AddSortKey => 1,
         FormRow::Limit => 2,
         FormRow::JsonToggle => 3,

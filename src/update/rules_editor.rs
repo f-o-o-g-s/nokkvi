@@ -1418,6 +1418,9 @@ impl Nokkvi {
                 (FormRow::AddRule(path), _) if s.form_editable() => {
                     s.add_rule(path);
                 }
+                (FormRow::AddGroup, _) if s.form_editable() => {
+                    s.add_group();
+                }
                 (FormRow::SortKey(i), FormCell::SortField) => {
                     s.sub_picker = Some(SubPicker {
                         kind: SubPickerKind::SortField { index: *i },

@@ -1844,3 +1844,188 @@ fn date_picker_month_shift_clamps_the_focused_day() {
         "Jan 31 clamped to Feb 28"
     );
 }
+
+// --- Add group -------------------------------------------------------------
+
+/// "+ Add group" appends a sub-group seeded with one rule and parks the
+/// cursor on that rule's field cell. The group defaults to the OPPOSITE
+/// conjunction of the root — nesting a same-polarity group is a logical
+/// no-op, and mixing All with Any is the whole reason to nest. Depth stays
+/// 1, so the typed form stays editable.
+#[test]
+fn add_group_row_seeds_an_opposite_conjunction_group() {
+    use nokkvi_data::types::smart_criteria::Conjunction;
+
+    let mut app = capable_app();
+    open_edit(&mut app);
+
+    app.with_rules_session(|s| {
+        s.cursor = s
+            .rows
+            .iter()
+            .position(|r| matches!(r, FormRow::AddGroup))
+            .expect("add-group row");
+        s.cell = FormCell::RowAction;
+    });
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+
+    let s = session(&app);
+    assert_eq!(
+        s.rules.root.as_ref().map(|r| r.nodes.len()),
+        Some(2),
+        "the group landed beside the existing rule"
+    );
+    let Some(CriteriaNode::Group(group)) = s.node_at(&[1]) else {
+        panic!("a group node at [1]");
+    };
+    assert_eq!(
+        group.conjunction,
+        Conjunction::Any,
+        "an All root seeds an Any group"
+    );
+    assert_eq!(group.nodes.len(), 1, "seeded with one rule, never empty");
+    assert!(
+        matches!(&s.rows[s.cursor], FormRow::Rule(p) if *p == vec![1, 0]),
+        "cursor lands on the seeded rule"
+    );
+    assert_eq!(s.cell, FormCell::Field);
+    assert_eq!(s.rules.max_depth(), 1, "flat-plus-one");
+    assert!(s.form_editable(), "the form stays editable");
+    assert!(s.dirty);
+}
+
+/// The polarity flip mirrors: an Any root seeds an All group.
+#[test]
+fn add_group_mirrors_an_any_root() {
+    use nokkvi_data::types::smart_criteria::{Conjunction, SmartRules};
+
+    let mut app = capable_app();
+    open_create(&mut app);
+    app.with_rules_session(|s| {
+        s.rules = SmartRules::parse(&serde_json::json!({
+            "any": [ { "is": { "loved": true } } ]
+        }));
+        s.dirty = true;
+        s.mode = FormMode::Cursor;
+        s.rebuild_rows();
+        s.cursor = s
+            .rows
+            .iter()
+            .position(|r| matches!(r, FormRow::AddGroup))
+            .expect("add-group row");
+        s.cell = FormCell::RowAction;
+    });
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+
+    let s = session(&app);
+    let Some(CriteriaNode::Group(group)) = s.node_at(&[1]) else {
+        panic!("a group node at [1]");
+    };
+    assert_eq!(group.conjunction, Conjunction::All);
+}
+
+/// The add-group row is ROOT-ONLY: a tree that already carries a sub-group
+/// still offers exactly one, so the form can never author depth 2.
+#[test]
+fn add_group_row_is_root_only() {
+    let mut app = capable_app();
+    open_edit(&mut app);
+    app.with_rules_session(|s| {
+        s.cursor = s
+            .rows
+            .iter()
+            .position(|r| matches!(r, FormRow::AddGroup))
+            .expect("add-group row");
+        s.cell = FormCell::RowAction;
+    });
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+
+    let s = session(&app);
+    assert_eq!(
+        s.rows
+            .iter()
+            .filter(|r| matches!(r, FormRow::AddGroup))
+            .count(),
+        1,
+        "one add-group row even once a group exists"
+    );
+    assert!(
+        s.rows
+            .iter()
+            .any(|r| matches!(r, FormRow::AddRule(p) if *p == vec![1])),
+        "the new group gets its own add-rule row"
+    );
+}
+
+/// The group's own "+ Add rule" appends INSIDE it — the second half of the
+/// (A or B) flow — and the tree stays at depth 1.
+#[test]
+fn group_add_rule_row_appends_inside_the_group() {
+    let mut app = capable_app();
+    open_edit(&mut app);
+    app.with_rules_session(|s| {
+        s.cursor = s
+            .rows
+            .iter()
+            .position(|r| matches!(r, FormRow::AddGroup))
+            .expect("add-group row");
+        s.cell = FormCell::RowAction;
+    });
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+
+    app.with_rules_session(|s| {
+        s.cursor = s
+            .rows
+            .iter()
+            .position(|r| matches!(r, FormRow::AddRule(p) if *p == vec![1]))
+            .expect("the group's add-rule row");
+        s.cell = FormCell::RowAction;
+    });
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+
+    let s = session(&app);
+    let Some(CriteriaNode::Group(group)) = s.node_at(&[1]) else {
+        panic!("a group node at [1]");
+    };
+    assert_eq!(group.nodes.len(), 2, "the second rule landed in the group");
+    assert_eq!(s.rules.max_depth(), 1);
+    assert!(
+        matches!(&s.rows[s.cursor], FormRow::Rule(p) if *p == vec![1, 1]),
+        "cursor follows into the group"
+    );
+}
+
+/// A locked (depth ≥ 2) tree refuses the add-group action, exactly like the
+/// other structural row actions — the form never deepens a tree it cannot
+/// edit.
+#[test]
+fn add_group_is_refused_while_the_form_is_locked() {
+    use nokkvi_data::types::smart_criteria::SmartRules;
+
+    let mut app = capable_app();
+    open_create(&mut app);
+    app.with_rules_session(|s| {
+        s.rules = SmartRules::parse(&serde_json::json!({
+            "all": [ { "any": [ { "all": [ { "is": { "loved": true } } ] } ] } ]
+        }));
+        s.dirty = true;
+        s.mode = FormMode::Cursor;
+        s.rebuild_rows();
+        s.cursor = s
+            .rows
+            .iter()
+            .position(|r| matches!(r, FormRow::AddGroup))
+            .expect("add-group row");
+        s.cell = FormCell::RowAction;
+    });
+    assert!(!session(&app).form_editable(), "precondition: locked");
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+
+    let s = session(&app);
+    assert_eq!(
+        s.rules.root.as_ref().map(|r| r.nodes.len()),
+        Some(1),
+        "no group appended while locked"
+    );
+    assert_eq!(s.rules.max_depth(), 2, "depth unchanged");
+}
