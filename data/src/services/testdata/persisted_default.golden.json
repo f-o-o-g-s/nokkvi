@@ -159,7 +159,7 @@
   "artwork_column_mode": "auto",
   "artwork_column_stretch_fit": "cover",
   "artwork_column_width_pct": 0.4,
-  "artwork_auto_max_pct": 0.4,
+  "artwork_auto_max_pct": 0.7,
   "artwork_vertical_height_pct": 0.4,
   "show_tray_icon": false,
   "close_to_tray": false,

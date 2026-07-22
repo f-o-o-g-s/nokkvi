@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - New installs default the Verbose Config setting to Clean, so config.toml stays free of the inline comments the previous Off default injected.
 - The Artists view now bolds the centered row's artist name, matching the other library views.
 - Settings search now matches words in any order, so "radio scrobble" finds the Scrobble Radio row.
+- New installs now default the Auto-mode artwork size to its largest setting, so album art is bigger out of the box.
 
 ### Fixed
 

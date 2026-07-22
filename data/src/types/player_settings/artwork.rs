@@ -17,7 +17,7 @@ pub const ARTWORK_COLUMN_WIDTH_PCT_MIN: f32 = 0.05;
 pub const ARTWORK_COLUMN_WIDTH_PCT_MAX: f32 = 0.80;
 
 // Auto-mode max-percent slider.
-pub const ARTWORK_AUTO_MAX_PCT_DEFAULT: f32 = 0.40;
+pub const ARTWORK_AUTO_MAX_PCT_DEFAULT: f32 = 0.70;
 pub const ARTWORK_AUTO_MAX_PCT_MIN: f32 = 0.30;
 pub const ARTWORK_AUTO_MAX_PCT_MAX: f32 = 0.70;
 
