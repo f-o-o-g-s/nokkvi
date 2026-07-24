@@ -44,6 +44,7 @@ Cross-entity helpers in `backend/mod.rs`: `Starable` / `Ratable` / `PlayCountabl
 - All queue mutators — mode toggles (`toggle_shuffle`, `set_repeat`, `toggle_consume`), reorders (`move_item`, `insert_*`, `remove_*`, `sort_queue`, `shuffle_queue`), and full replacements (`set_queue`, `add_songs`, `reposition_to_index`) — return `NextTrackResetEffect` (`types/next_track_reset.rs`). The `#[must_use]` discharge contract makes engine gapless-prep invalidation a compile-time obligation across every reorder path, closing the queue/engine desync window that a shuffle + crossfade reorder used to open. `apply_to(&Mutex)` locks the engine internally; `apply_locked(&mut Engine)` is for callers already holding the engine lock (completion callback consume path, `play_next` / `play_previous`).
 - Progressive build: everything already loaded in the songs `PagedBuffer` plays immediately; a recursive `ProgressiveQueueAppendPage` chain (`src/update/progressive_queue.rs`) fetches the rest at `library_page_size` per page (100/500/1000/5000, default 500).
 - **Reshuffle on repeat wrap**: shuffle + repeat-playlist re-shuffles the order array when the queue wraps back to the start.
+- **Server queue sync** (`play_queue_api`, OpenSubsonic index-based `savePlayQueueByIndex` / `getPlayQueueByIndex` — NOT the legacy `savePlayQueue`): `AppService::push_queue` uploads the local queue + playhead; `pull_queue` replaces the model with the server's and **CUES** it via `PlaybackController::cue_pulled_queue` (restore position without auto-playing — see audio-engine.md), never `play()`. Also reachable through the `queue-push` / `queue-pull` CLI verbs.
 
 ## Batch Operations
 
@@ -58,6 +59,7 @@ Cross-entity helpers in `backend/mod.rs`: `Starable` / `Ratable` / `PlayCountabl
 | **Theme files** (`~/.config/nokkvi/themes/`) | `services/theme_loader.rs` | Named `.toml`. Built-in themes compiled via `include_str!`, seeded on first run; `svalbard` is the first-run default. Discovery, load/save, restore-builtin |
 | **Config writer** | `src/config_writer.rs` (UI crate) | Typed `ConfigKey { AppScalar, Theme, ThemeArrayEntry }`. Per-key TOML updates routed through `nokkvi_data::utils::paths::write_atomic` (watcher self-write suppression: see gotchas.md "Config & Persistence") |
 | **Credentials** | `data/src/credentials.rs` | `server_url` / `username` in `config.toml`; JWT + Subsonic credential in redb. **No password on disk** — JWT auto-refreshes via `X-ND-Authorization`; expired JWT (48h default) drops to the login screen |
+| **Lyrics store** (`~/.local/share/nokkvi/lyrics/`) — a **third XDG root** (data_dir, distinct from config + state) | `services/lyrics_source.rs` + `utils/paths.rs::get_lyrics_dir` | `.lrc` corpus matched to tracks by internal tags via `LyricsIndex::find`; LRCLIB downloads cached under `.cache/` via `cache_to_store()` |
 
 ## SettingsService & SettingsManager
 
@@ -86,6 +88,7 @@ Iced-free. Key types:
 - `TrawlCrate` / `TrawlBlend` (Interleave/Weighted/ShuffleAll) / `TrawlRatingFilter` (star-threshold + `Unrated`) + the pure `blend_trawl()` engine (`trawl.rs`) — Trawl mix-builder domain, resolved via `LibraryOrchestrator::resolve_trawl`
 - `LibrarySearchResults` (`library_search.rs`) — five typed groups (artists/albums/songs/genres/playlists) returned by `AppService::search_library`, backing the Harbour whole-library search
 - `ReactiveProperty<T>` / `ReactiveVecProperty<T>` (`reactive.rs`) — thread-safe shared property with subscribe-on-change
+- `smart_criteria.rs` — the `.nsp` smart-playlist rule model: `CriteriaNode` (nested AND/OR groups) / `RuleLeaf` / `FieldRegistry` + `parse_nsp_envelope` (`NSP_MAX_BYTES` guard). The rules editor sources field values from `tags_api` / `TagsApiService`; authoring writes back to Navidrome via the playlists API (no local `.nsp` persistence)
 
 ## API Patterns
 

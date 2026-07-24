@@ -26,7 +26,7 @@
 - Complex views/services/handlers use directory modules (e.g., `views/settings/mod.rs`, `services/queue/mod.rs`, `update/hotkeys/mod.rs`).
 - Handler files in `update/` correspond 1:1 to views, plus specialized handlers for cross-cutting concerns. `ls src/update/` to see them.
 - `shell_task` / `shell_spawn` are methods on `Nokkvi` (`src/main.rs`) — they bridge UI handlers to async `AppService` work.
-- Shared action/entity/artwork-prefetch helpers live in `update/components/` (`mod.rs` + `artwork_prefetch.rs`) — `ls` it rather than trusting a list here. For auth/session work: `session_expired_message(&anyhow::Error) -> Option<Message>` collapses the prior inline 401 downcasts, and `Nokkvi::reset_session_state(&mut self) -> Task<Message>` is the single source for the full logout + session-expired teardown (engine, task manager, library/queue/scrobble caches, modals).
+- Shared action/entity/artwork-prefetch helpers live in `update/components/` — `ls` it rather than trusting a list here. For auth/session work: `session_expired_message(&anyhow::Error) -> Option<Message>` collapses the prior inline 401 downcasts, and `Nokkvi::reset_session_state(&mut self) -> Task<Message>` is the single source for the full logout + session-expired teardown (engine, task manager, library/queue/scrobble caches, modals).
 
 ### File placement & naming
 

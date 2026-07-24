@@ -59,7 +59,7 @@ Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. Center-entry resolution is 
 
 ## Column Visibility (Albums / Artists / Genres / Playlists / Queue / Songs / Similar)
 
-Column toggles use the `checkbox_dropdown` widget, wrapped per view by `view_columns_dropdown` — see `widgets.md`. Similar lives only inside the browsing panel and lacks a `View::Similar` variant, so it uses its own `OpenMenu::CheckboxDropdownSimilar { trigger_bounds }`. Column flags persist on `PersistedPlayerSettings.view_columns` (the canonical `ViewColumns` struct in `data/src/types/view_columns.rs`, serde-flattened so the `{view}_show_*` keys — `_select`, `_index`, `_thumbnail`, `_album`, `_genre`, `_stars`, etc. — stay flat on the wire; `queue_show_default_playlist` is a header chip, not a column, and stays a direct field). Stars use responsive hide rather than per-mode toggling.
+Column toggles use the `checkbox_dropdown` widget, wrapped per view by `view_columns_dropdown` — see `widgets.md`. Similar lives only inside the browsing panel and lacks a `View::Similar` variant, so it uses its own `OpenMenu::CheckboxDropdownSimilar { trigger_bounds }`; the rules-editor preview pane likewise uses `OpenMenu::CheckboxDropdownPreview { trigger_bounds }`. Column flags persist on `PersistedPlayerSettings.view_columns` (the canonical `ViewColumns` struct in `data/src/types/view_columns.rs`, serde-flattened so the `{view}_show_*` keys — `_select`, `_index`, `_thumbnail`, `_album`, `_genre`, `_stars`, etc. — stay flat on the wire; `queue_show_default_playlist` is a header chip, not a column, and stays a direct field). Stars use responsive hide rather than per-mode toggling.
 
 Each `define_view_columns!` entry has the form `Variant("Label"): field = default [=> setter @ settings_field]` — the macro emits the enum/struct/Default/get/set/toggle pieces plus `dropdown_entries()`, which builds the dropdown's `Vec<(Key, &'static str, bool)>` items. Declaration order == dropdown order and labels live in the declaration, so views pass `self.column_visibility.dropdown_entries()` to `view_columns_dropdown` / `similar_columns_dropdown` instead of hand-written `vec!`s. The Queue/Songs dropdown order (Genre right after Album) is pinned by `queue_and_songs_dropdown_order_is_pinned` in `update/tests/settings.rs`.
 
@@ -81,7 +81,9 @@ Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`
 
 ## Playlist Editing
 
-`PlaylistEditState` for dirty detection. Inline name/comment editing lives in the dedicated `View::PlaylistEditor` view's edit-bar header (eyebrow + name input + comment input, stacked vertically). Save via `handle_save_playlist_edits()`. Browsing panel cannot close during edit.
+`PlaylistEditState` for dirty detection. `View::PlaylistEditor` hosts two session kinds (`EditorSessionKind::{Tracks, Rules}`, `src/state/playlist_editor.rs`):
+- **Tracks** — the ordered-track editor. Edit-bar header: eyebrow + name input + comment input (left), public/lock toggle + save + discard (right). Save via `handle_save_playlist_edits()`. Browsing panel cannot close during edit.
+- **Rules** — the smart-playlist rules editor (`views/playlist_editor/rules_view.rs`; handlers `update/rules_editor.rs` + `.nsp` import `update/nsp_import.rs`; root msgs `Message::RulesEditor(RulesEditorMessage)` + `NspImportPicked`). Two-pane `[results/preview | rules form]` layout with nested rule groups, chip cells, and an inline calendar date-picker overlay; no browsing panel. The preview pane owns its own columns dropdown (`OpenMenu::CheckboxDropdownPreview` — no `View` variant, parallel to Similar). Reached via `PlaylistContextEntry::EditRules` and the Playlists-header create menu (`OpenMenu::PlaylistsCreate`: New Playlist / New Smart Playlist / Import .nsp…). Editing-mode keys route through `rules_session_key_intercept` (see gotchas.md — bare-modifier keydowns).
 
 ## Queue Sort
 
@@ -97,6 +99,14 @@ entry_id rules: see gotchas.md "Queue & Indices".
 ## Queue Shuffle
 
 Re-shuffles the order array when a shuffled queue with repeat-playlist wraps back to the start, instead of replaying the same shuffle sequence.
+
+## Synced Lyrics Overlay
+
+A synced-lyrics layer overlays the now-playing Queue cover (handler `update/lyrics.rs`, state `src/state/lyrics.rs`; resolve pipeline via `Message::LyricsLoader`, `LyricsIndexReady` / `LyricsBlurReady`). It is an **overlay, not a modal** — it renders only when the cover panel actually shows the now-playing track (the `cover_shows_now_playing` gate in `views/queue/view.rs`), behind a frosted-cover backdrop. Identity gates (transport-gate the layer; key it to the shown cover, not the playing track): see gotchas.md.
+
+## Queue Server Sync
+
+The Queue header carries a folded server-sync action menu (`OpenMenu::QueueSync`) with push / pull, backed by `push_queue_task` / `pull_queue_task` (`update/queue.rs`) and also reachable via the `queue-push` / `queue-pull` CLI verbs. Gated on `supports_index_based_queue()` (server advertises the OpenSubsonic indexBasedQueue extension AND radio inactive). Pull cues without auto-playing — see backend-services.md / audio-engine.md.
 
 ## Radio Station Artwork (Radios)
 

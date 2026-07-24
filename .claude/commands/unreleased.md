@@ -21,7 +21,7 @@ Propose entries for the `## [Unreleased]` block of `CHANGELOG.md` from commits m
 4. Apply the canonical changelog style rubric in `.agent/workflows/package.md` § 1 (full rules + a before/after example live there). Load-bearing summary:
    - **One bullet = one sentence = one user-visible effect, ≤ 25 words (a hard cap).** Lead with what the user perceives now and stop.
    - The mechanism/why lives in the commit body where `git log -1 <sha>` surfaces it, not here. If the effect truly needs two sentences, it's two changes — split them.
-   - Skip internal names/paths/PR numbers and CI/dep-bump churn; collapse a multi-commit feature into one bullet.
+   - Skip internal names/paths/PR numbers and CI/dep-bump churn. Collapse per-commit *churn*, never *effects*: a feature spread over several commits gets one bullet per user-visible effect — never one bullet per commit, never all effects braided into one (see § 1's "N perceivable effects → N adjacent bullets").
 
 5. Skip any commit whose user-visible effect is already covered by an existing bullet under `## [Unreleased]`. When in doubt, ask the user rather than duplicate.
 
