@@ -521,7 +521,9 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
             song.artist.clone(),
             on_artist_click,
             title_size,
-            meta_size,
+            // Standard subtitle size — the artist line is a subtitle like on
+            // every parent row, not metadata (which sizes the track#/duration).
+            ctx.metrics.subtitle_size,
             style,
             true,
             80, // combined width 60+20
@@ -642,7 +644,9 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
             },
             if show_artist { on_artist_click } else { None },
             title_size,
-            meta_size,
+            // Standard subtitle size — the artist line is a subtitle like on
+            // every parent row, not metadata (which sizes the year/duration).
+            ctx.metrics.subtitle_size,
             style,
             true,
             name_portion + if show_artist { 20 } else { 0 },

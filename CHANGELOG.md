@@ -13,12 +13,16 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Harbour's random rows sit together after Most Played, ordered like the nav bar: Album, Artist, Songs, Genre, Playlist.
+- The queue's album and genre column now renders at the standard metadata size, matching the Songs view.
+- Expanded track and album rows now show their artist line at the standard subtitle size.
+- The Songs plays column is right-aligned, matching the queue and the duration column.
 
 ### Fixed
 
 - Shift+Enter on a Harbour item row now collapses its section, matching the other library views.
 - The configured font now applies to all text from launch; some labels previously stayed in the built-in Fira Sans.
 - Harbour section headers now share the rows' text layout, fixing uneven title-subtitle spacing and subtitle color.
+- A centered Genres row now bolds its name like the other views.
 
 ### Removed
 

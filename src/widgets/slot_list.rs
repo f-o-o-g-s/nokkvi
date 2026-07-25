@@ -77,6 +77,9 @@ pub(crate) struct SlotListRowMetrics {
     pub subtitle_size: f32,
     /// Metadata / index text — base 12.0
     pub metadata_size: f32,
+    /// The small genre line stacked under the album in the queue/songs
+    /// album+genre column — base 10.0 (was a literal duplicated per view)
+    pub genre_stack_size: f32,
     /// Star/heart icon size for parent rows: `clamp(16.0, 24.0)`
     pub star_size: f32,
     /// Star/heart icon size for expansion child rows: `clamp(14.0, 20.0)`
@@ -93,6 +96,7 @@ impl SlotListRowMetrics {
             title_size: calculate_font_size(14.0, row_height, scale_factor) * scale_factor,
             subtitle_size: calculate_font_size(13.0, row_height, scale_factor) * scale_factor,
             metadata_size: calculate_font_size(12.0, row_height, scale_factor) * scale_factor,
+            genre_stack_size: calculate_font_size(10.0, row_height, scale_factor) * scale_factor,
             star_size: (row_height * 0.3 * scale_factor).clamp(16.0, 24.0),
             star_size_child: (row_height * 0.3 * scale_factor).clamp(14.0, 20.0),
         }
@@ -532,6 +536,11 @@ pub(crate) fn slot_list_border_radius() -> iced::border::Radius {
 
 /// Standard vertical spacing between slot list slot elements
 pub(crate) const SLOT_LIST_COL_SPACING: f32 = 4.0;
+
+/// Tighter vertical spacing for the stacked album+genre pair inside one
+/// column cell (queue/songs) — the two lines read as one unit, not a
+/// title/subtitle pair.
+pub(crate) const SLOT_LIST_STACK_SPACING: f32 = 2.0;
 
 /// Standard width for the index column (supports up to 4 digits)
 pub(crate) const SLOT_LIST_INDEX_WIDTH: f32 = 60.0;

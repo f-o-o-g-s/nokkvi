@@ -298,11 +298,6 @@ where
                         } else {
                             genre.clone()
                         };
-                        let stacked_genre_size = nokkvi_data::utils::scale::calculate_font_size(
-                            10.0,
-                            ctx.row_height,
-                            ctx.scale_factor,
-                        ) * ctx.scale_factor;
                         let make_link =
                             |label: String, font_size: f32, click: M| -> Element<'_, M> {
                                 crate::widgets::link_text::LinkText::new(label)
@@ -313,15 +308,21 @@ where
                                     .on_press(if links_enabled { Some(click) } else { None })
                                     .into()
                             };
+                        // Metadata size, matching the same column in the Songs
+                        // view and every other info column — the queue briefly
+                        // ran it a point larger (subtitle-size) and read as a
+                        // bigger font than its sibling views.
                         let content: Element<'_, M> = match (show_album_column, show_genre_column) {
                             (true, true) => {
-                                let album_widget = make_link(album, subtitle_size, click_album);
+                                let album_widget = make_link(album, m.metadata_size, click_album);
                                 let genre_widget =
-                                    make_link(genre_label, stacked_genre_size, click_genre);
-                                column![album_widget, genre_widget].spacing(2.0).into()
+                                    make_link(genre_label, m.genre_stack_size, click_genre);
+                                column![album_widget, genre_widget]
+                                    .spacing(crate::widgets::slot_list::SLOT_LIST_STACK_SPACING)
+                                    .into()
                             }
-                            (true, false) => make_link(album, subtitle_size, click_album),
-                            (false, true) => make_link(genre_label, subtitle_size, click_genre),
+                            (true, false) => make_link(album, m.metadata_size, click_album),
+                            (false, true) => make_link(genre_label, m.metadata_size, click_genre),
                             (false, false) => unreachable!(),
                         };
                         content

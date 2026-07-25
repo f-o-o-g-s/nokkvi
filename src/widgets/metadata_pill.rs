@@ -71,7 +71,12 @@ pub(crate) fn auth_status_row<'a, M: 'a>(
         .align_y(iced::Alignment::Center);
     for (i, item) in items.into_iter().enumerate() {
         if i > 0 {
-            row = row.push(text("•").size(13).color(theme::fg3()));
+            row = row.push(
+                text("•")
+                    .size(13)
+                    .font(theme::ui_font())
+                    .color(theme::fg3()),
+            );
         }
         row = row.push(item);
     }

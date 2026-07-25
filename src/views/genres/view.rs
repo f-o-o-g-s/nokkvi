@@ -265,9 +265,7 @@ impl GenresPage {
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
-        use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, slot_list_index_column, slot_list_text,
-        };
+        use crate::widgets::slot_list::{SLOT_LIST_SLOT_PADDING, slot_list_index_column};
 
         let is_expanded = self.expansion.is_expanded_parent(&genre.id);
         let style = ctx.slot_style(is_expanded, false, 0);
@@ -315,17 +313,20 @@ impl GenresPage {
                 ),
             });
         }
-        content = content.push(
-            container(slot_list_text(
-                genre.name.clone(),
-                title_size,
-                style.text_color,
-            ))
-            .width(Length::FillPortion(45))
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center),
-        );
+        // Shared text chassis (title-only branch) so the centered row bolds
+        // like every other view — the prior hand-built slot_list_text had no
+        // weight path and a centered genre could never bold.
+        content = content.push(crate::widgets::slot_list::slot_list_text_column(
+            genre.name.clone(),
+            None,
+            String::new(),
+            None,
+            title_size,
+            m.subtitle_size,
+            style,
+            ctx.is_center,
+            45,
+        ));
         if self.column_visibility.albumcount {
             use crate::widgets::slot_list::slot_list_metadata_column;
             let album_text = if genre.album_count == 1 {

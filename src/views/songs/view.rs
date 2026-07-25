@@ -310,11 +310,6 @@ impl SongsPage {
                     } else {
                         song_genre.clone()
                     };
-                    let stacked_genre_size = nokkvi_data::utils::scale::calculate_font_size(
-                        10.0,
-                        ctx.row_height,
-                        ctx.scale_factor,
-                    ) * ctx.scale_factor;
                     let links_enabled = crate::theme::is_slot_text_links();
                     let make_link = |label: String,
                                      font_size: f32,
@@ -332,8 +327,10 @@ impl SongsPage {
                         (true, true) => {
                             let album_widget = make_link(song_album, metadata_size, album_click);
                             let genre_widget =
-                                make_link(genre_label, stacked_genre_size, genre_click);
-                            column![album_widget, genre_widget].spacing(2.0).into()
+                                make_link(genre_label, m.genre_stack_size, genre_click);
+                            column![album_widget, genre_widget]
+                                .spacing(crate::widgets::slot_list::SLOT_LIST_STACK_SPACING)
+                                .into()
                         }
                         (true, false) => make_link(song_album, metadata_size, album_click),
                         (false, true) => make_link(genre_label, metadata_size, genre_click),
@@ -362,14 +359,20 @@ impl SongsPage {
                 }
 
                 if show_plays {
-                    use crate::widgets::slot_list::slot_list_metadata_column;
-                    content_row = content_row.push(slot_list_metadata_column(
-                        format!("{play_count} plays"),
-                        None,
-                        metadata_size,
-                        style,
-                        PLAYS_PORTION,
-                    ));
+                    // Right-aligned like the queue's plays column (and the
+                    // duration column below) — the two views rendered the same
+                    // column with opposite alignments.
+                    content_row = content_row.push(
+                        container(slot_list_text(
+                            format!("{play_count} plays"),
+                            metadata_size,
+                            style.subtext_color,
+                        ))
+                        .width(Length::FillPortion(PLAYS_PORTION))
+                        .height(Length::Fill)
+                        .align_x(Alignment::End)
+                        .align_y(Alignment::Center),
+                    );
                 }
 
                 if show_dynamic_slot {

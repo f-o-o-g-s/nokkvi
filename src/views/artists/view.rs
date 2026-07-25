@@ -463,7 +463,10 @@ impl ArtistsPage {
                 String::new(),
                 None,
                 title_size,
-                metadata_size,
+                // Unused today (empty subtitle → title-only branch), but plumb
+                // the STANDARD subtitle size so a future subtitle can't land
+                // silently undersized at metadata size.
+                m.subtitle_size,
                 style,
                 ctx.is_center,
                 name_portion,
