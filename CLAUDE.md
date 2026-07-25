@@ -71,9 +71,11 @@ AppService (orchestrator)
 │                              (random/repeat/consume) + reset_next_track()
 ├── Domain Services          — Albums, Artists, Songs, Queue, Settings, Auth
 │                              (each lazy-inits its API client via tokio OnceCell)
-├── API factory methods      — songs_api(), genres_api(), libraries_api(), playlists_api(),
-│                              radios_api(), similar_api() (construct *ApiService instances on
-│                              demand; not stored on AppService)
+├── API factory methods      — songs_api(), albums_api(), artists_api(), tags_api() (native)
+│                              + genres_api(), libraries_api(), playlists_api(), radios_api(),
+│                              random_api(), similar_api(), lyrics_api(), play_queue_api()
+│                              (Subsonic). Construct *ApiService instances on demand; not
+│                              stored on AppService. `ls data/src/services/api/` is canonical.
 └── TaskManager              — centralized spawn tracking + status channel for UI notifications
 ```
 

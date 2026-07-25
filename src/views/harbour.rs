@@ -17,7 +17,8 @@
 //!   large artwork column, [`section_preview_panel`]) — followed by the
 //!   Random block: five one-press [`HarbourRow::RandomPlay`] action rows
 //!   (Albums, Artists, Songs, Genres, Playlists — mirroring the top nav's tab
-//!   order) that draw fresh random content and play it on activation.
+//!   order), each previewing a PRE-DRAWN pick that activation plays verbatim.
+//!   Picks re-roll on every shelves load, so Refresh is the re-roll.
 //! - **Search** (non-empty header search): the whole-library search grouped
 //!   into expandable per-entity sections, each defaulting to expanded.
 
@@ -73,6 +74,11 @@ pub(crate) const SEARCH_PREVIEW_LIMIT: usize = 8;
 /// row subtitles ("Play {N} random songs") and the fetch cap can never drift.
 pub(crate) const RANDOM_SONGS_DRAW: usize = 100;
 
+// The draws go through Subsonic `getRandomSongs`, which Navidrome clamps to its
+// own row cap. Past that the server silently truncates and every row subtitle
+// would over-promise, so make the ceiling a compile error rather than a warn log.
+const _: () = assert!(RANDOM_SONGS_DRAW <= nokkvi_data::services::api::random::MAX_RANDOM_SONGS);
+
 /// Stable identity for every collapsible Harbour section (shelf + search
 /// group). Membership in the page's `collapsed` set is keyed on this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -92,8 +98,9 @@ pub enum HarbourSectionId {
 
 /// The five one-press random draws of the Random block, in render order —
 /// mirroring the top nav's tab order (`NAV_TABS`: Albums, Artists, Songs,
-/// Genres, Playlists). Activation fetches fresh random content of the kind
-/// and plays it (`play_random_kind` in `update::harbour`).
+/// Genres, Playlists). Activation plays the row's PRE-DRAWN pick — exactly what
+/// the row previews (`play_random_kind` in `update::harbour`); a shelves reload
+/// is what re-rolls it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RandomKind {
     Albums,
@@ -315,9 +322,15 @@ pub(crate) enum HarbourRow {
         art_album_ids: Vec<String>,
         play: PlayTarget,
     },
-    /// A one-press random draw (the Random block): activation fetches fresh
-    /// random content of the kind and plays it immediately. Deliberately NOT
-    /// a `Section` — nothing to expand, nothing joins the collapse machinery.
+    /// A one-press random draw (the Random block): activation plays the
+    /// PRE-DRAWN pick this row previews ([`random_teaser`]), so the played
+    /// content matches the previewed content. What is pre-drawn is the ENTITY —
+    /// the album / artist / song batch / genre / playlist — and picks re-roll on
+    /// the next shelves load. [`RandomKind::Genres`] is the one partial case: only
+    /// the genre identity is pre-drawn, and its capped track list is fetched fresh
+    /// on each activation, so two presses play two different track sets from the
+    /// same genre. Deliberately NOT a `Section` — nothing to expand, nothing joins
+    /// the collapse machinery.
     RandomPlay { kind: RandomKind },
     /// A non-interactive centered hint (search prompts / empty states).
     Hint(String),
@@ -429,9 +442,11 @@ pub(crate) fn build_harbour_rows(
                 collapsed,
             );
         }
-        // The "Random" block: five one-press quick-play rows (no expansion,
-        // no picks to browse — activation draws fresh random content and
-        // plays it), ordered to mirror the top nav's tab order (`NAV_TABS`).
+        // The "Random" block: five one-press quick-play rows (no expansion, no
+        // picks to browse — each previews the pre-drawn pick activation plays),
+        // ordered to mirror the top nav's tab order (`NAV_TABS`). Pushed
+        // unconditionally: a row whose draw hasn't landed shows its action copy
+        // and its entity glyph rather than vanishing from the index.
         for kind in RandomKind::ALL {
             rows.push(HarbourRow::RandomPlay { kind });
         }
@@ -673,6 +688,28 @@ fn albums_label(n: u32) -> String {
     format!("{n} {}", if n == 1 { "album" } else { "albums" })
 }
 
+/// A `"N songs"` fact. Pluralises like [`plays_label`]; `usize` so the song-batch
+/// teaser (a `Vec` length) and the entity counts (`u32`) share one formatter
+/// instead of each hardcoding the plural.
+fn songs_label(n: usize) -> String {
+    format!("{n} {}", if n == 1 { "song" } else { "songs" })
+}
+
+/// The Random Genre pick's song fact — what one press actually plays. The draw is
+/// capped at [`RANDOM_SONGS_DRAW`], so a big genre reads "100 of 4210 songs"
+/// rather than promising its whole catalogue; a genre at or under the cap plays
+/// in full and reads plainly. `None` when the count is unknown (the count rides
+/// the opportunistic Subsonic `getGenres` enrichment, which degrades to zeros) —
+/// the fact drops rather than claiming "0 songs".
+fn genre_songs_fact(song_count: u32) -> Option<String> {
+    let total = song_count as usize;
+    match total {
+        0 => None,
+        n if n <= RANDOM_SONGS_DRAW => Some(songs_label(n)),
+        n => Some(format!("{RANDOM_SONGS_DRAW} of {n} songs")),
+    }
+}
+
 /// A RandomPlay row's teaser: the pre-drawn pick's facts + the art keys its
 /// 80px square resolves through the shared custom→quad→single ladder — or the
 /// action-copy fallback ([`RandomKind::subtitle`]) with no art while the draw
@@ -735,7 +772,7 @@ pub(crate) fn random_teaser(
                 subtitle: join_facts(vec![
                     Some(s.title.clone()),
                     (!s.artist.is_empty()).then(|| s.artist.clone()),
-                    Some(format!("{n} {}", if n == 1 { "song" } else { "songs" })),
+                    Some(songs_label(n)),
                 ]),
                 art_album_id: s.album_id.clone(),
                 art_album_ids: s.album_id.clone().into_iter().collect(),
@@ -747,10 +784,13 @@ pub(crate) fn random_teaser(
                 .random_genre
                 .as_ref()
                 .map_or_else(fallback, |g| RandomTeaser {
-                    subtitle: format!(
-                        "{} • {} albums • {} songs",
-                        g.name, g.album_count, g.song_count
-                    ),
+                    // Album count is deliberately absent: this row plays songs,
+                    // and pairing "312 albums" with a 100-song draw reads as a
+                    // contradiction. `genre_songs_fact` names what plays.
+                    subtitle: join_facts(vec![
+                        Some(g.name.clone()),
+                        genre_songs_fact(g.song_count),
+                    ]),
                     art_album_id: g.artwork_album_ids.first().cloned(),
                     art_album_ids: g.artwork_album_ids.clone(),
                     custom_playlist_id: None,
@@ -761,17 +801,34 @@ pub(crate) fn random_teaser(
                 .random_playlist
                 .as_ref()
                 .map_or_else(fallback, |p| RandomTeaser {
-                    subtitle: format!(
-                        "{} • {} songs • {}",
-                        p.name,
-                        p.song_count,
-                        nokkvi_data::utils::formatters::format_duration_short(p.duration as f64)
-                    ),
+                    subtitle: join_facts(vec![
+                        Some(p.name.clone()),
+                        Some(songs_label(p.song_count as usize)),
+                        Some(nokkvi_data::utils::formatters::format_duration_short(
+                            p.duration as f64,
+                        )),
+                    ]),
                     art_album_id: p.artwork_album_ids.first().cloned(),
                     art_album_ids: p.artwork_album_ids.clone(),
                     custom_playlist_id: Some(p.id.clone()),
                 })
         }
+    }
+}
+
+/// Whether a RandomPlay row's pick has landed. ONE predicate, read by all three
+/// paths that must agree about it: the activate-SFX classifier
+/// (`update::slot_list`), the play handler (`play_random_kind`) and the
+/// add-to-queue handler (`add_random_kind_to_queue`). A RandomPlay row renders
+/// whether or not its draw succeeded, so without a shared predicate the
+/// "activates nothing" escape cue could disagree with the "no pick" toast.
+pub(crate) fn has_random_pick(harbour: &crate::state::HarbourState, kind: RandomKind) -> bool {
+    match kind {
+        RandomKind::Albums => harbour.random_album.is_some(),
+        RandomKind::Artists => harbour.random_artist.is_some(),
+        RandomKind::Songs => !harbour.random_songs.is_empty(),
+        RandomKind::Genres => harbour.random_genre.is_some(),
+        RandomKind::Playlists => harbour.random_playlist.is_some(),
     }
 }
 
@@ -1666,9 +1723,19 @@ fn render_row<'a>(
             let m = ctx.metrics;
             let style = ctx.slot_style(false, false, 0);
             let teaser = random_teaser(data.harbour, *kind);
+            // A playlist pick ALWAYS carries `custom_playlist_id` (it is the
+            // cache key, not evidence of a cover), so it only counts as art once
+            // that 80px mini is actually cached — Harbour never warms playlist
+            // minis for its own rows. Gating on the id alone made the Random
+            // Playlist row skip the glyph branch and render a bare grey square
+            // whenever its quad ids were unresolved.
+            let has_custom_art = teaser
+                .custom_playlist_id
+                .as_deref()
+                .is_some_and(|pid| data.playlist_custom_art.contains_key(pid));
             let art_el: Element<'a, HarbourMessage> = if teaser.art_album_id.is_some()
                 || !teaser.art_album_ids.is_empty()
-                || teaser.custom_playlist_id.is_some()
+                || has_custom_art
             {
                 harbour_art_element(
                     teaser.custom_playlist_id.as_deref(),

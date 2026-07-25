@@ -40,6 +40,48 @@ impl ArtistsApiService {
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Artist>, u32)> {
+        let (artists, total_count_header) = self
+            .load_artists_raw(
+                sort_mode,
+                sort_order,
+                search_query,
+                filter,
+                library_ids,
+                album_artists_only,
+                offset,
+                limit,
+            )
+            .await?;
+
+        // Get total count from X-Total-Count header, fallback to artists length
+        let total_count = total_count_header.unwrap_or(artists.len() as u32);
+
+        debug!(
+            " ArtistsService: Loaded {} artists, X-Total-Count header: {:?}, using total_count: {}",
+            artists.len(),
+            total_count_header,
+            total_count
+        );
+
+        Ok((artists, total_count))
+    }
+
+    /// [`Self::load_artists`] without the total-count coalescing — returns the RAW
+    /// `X-Total-Count` so [`pagination::draw_random_row`] can DETECT a missing
+    /// header and warn (the drawn row is the same either way). See the
+    /// [`crate::services::api::albums::AlbumsApiService`] twin.
+    #[allow(clippy::too_many_arguments)]
+    async fn load_artists_raw(
+        &self,
+        sort_mode: &str,
+        sort_order: &str,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
+        album_artists_only: bool,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<(Vec<Artist>, Option<u32>)> {
         // For random view, we load by name and shuffle client-side
         // (Navidrome doesn't support random sorting for artists)
         let (is_random, actual_sort_mode) = sort::resolve_random_sort_mode(sort_mode);
@@ -85,71 +127,36 @@ impl ArtistsApiService {
             }
         }
 
-        // Get total count from X-Total-Count header, fallback to artists length
-        let total_count = total_count_header.unwrap_or(artists.len() as u32);
-
-        debug!(
-            " ArtistsService: Loaded {} artists, X-Total-Count header: {:?}, using total_count: {}",
-            artists.len(),
-            total_count_header,
-            total_count
-        );
-
-        Ok((artists, total_count))
+        Ok((artists, total_count_header))
     }
 
-    /// Draw ONE uniformly-random artist: probe the table size with a 1-row
-    /// page, then fetch a single row at a random offset. Two tiny requests
-    /// where `sort_mode = "random"` would download the whole table (Navidrome
-    /// cannot server-randomize artists, so that path shuffles client-side).
-    /// Uniformity rests on the `X-Total-Count` header (Navidrome's native API
-    /// always sends it; without it the fallback total collapses to the probe
-    /// page and the draw degrades to the first artist). `Ok(None)` when the
+    /// Draw ONE uniformly-random artist via the shared count-probe +
+    /// random-offset helper, over the stable [`pagination::RANDOM_DRAW_SORT`] —
+    /// two tiny requests where `sort_mode = "random"` would download the whole
+    /// table (Navidrome cannot server-randomize artists, so that path shuffles
+    /// client-side). See [`pagination::draw_random_row`] for the uniformity
+    /// contract and both degradation paths. `Ok(None)` when the
     /// (library-scoped) table is empty.
     pub async fn load_random_artist(
         &self,
         library_ids: &[i32],
         album_artists_only: bool,
     ) -> Result<Option<Artist>> {
-        use rand::RngExt;
-
-        let (first_page, total) = self
-            .load_artists(
-                "name",
-                "ASC",
-                None,
-                None,
-                library_ids,
-                album_artists_only,
-                Some(0),
-                Some(1),
-            )
-            .await?;
-        if total == 0 || first_page.is_empty() {
-            return Ok(None);
-        }
-        let offset = rand::rng().random_range(0..total) as usize;
-        if offset == 0 {
-            return Ok(first_page.into_iter().next());
-        }
-        let (page, _) = self
-            .load_artists(
-                "name",
-                "ASC",
+        let (sort_mode, order) = pagination::RANDOM_DRAW_SORT;
+        pagination::draw_random_row("random-artist", |offset, limit| async move {
+            self.load_artists_raw(
+                sort_mode,
+                order,
                 None,
                 None,
                 library_ids,
                 album_artists_only,
                 Some(offset),
-                Some(1),
+                Some(limit),
             )
-            .await?;
-        // A between-requests library shrink can leave the offset past the end;
-        // the probe row is a fine draw in that racy sliver.
-        Ok(page
-            .into_iter()
-            .next()
-            .or_else(|| first_page.into_iter().next()))
+            .await
+        })
+        .await
     }
 
     /// Build the `_sort` / `_order` / role / filter / search / pagination /

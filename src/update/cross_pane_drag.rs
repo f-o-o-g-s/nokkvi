@@ -359,6 +359,18 @@ impl Nokkvi {
         Task::done(msg)
     }
 
+    /// The drag ghost's text-only fallback, used wherever the centered row cannot
+    /// be resolved into a slot replica. One builder for all four fallback sites so
+    /// the copy and the font stay in lockstep — the explicit `.font()` is required
+    /// because the daemon's default font is a launch-time snapshot that an
+    /// in-session font change does not reach (see `main.rs`).
+    fn drag_fallback_label() -> iced::Element<'static, Message> {
+        iced::widget::text("Drag to queue")
+            .font(crate::theme::ui_font())
+            .color(crate::theme::fg0())
+            .into()
+    }
+
     /// Render a full slot list slot replica for the centered browsing panel item.
     /// Uses the same shared helpers (`slot_list_artwork_column`, `slot_list_text_column`,
     /// `slot_list_metadata_column`) as the actual views for pixel-perfect fidelity.
@@ -368,25 +380,19 @@ impl Nokkvi {
         let panel = match self.browsing_panel.as_ref() {
             Some(p) => p,
             None => {
-                return iced::widget::text("Drag to queue")
-                    .color(crate::theme::fg0())
-                    .into();
+                return Self::drag_fallback_label();
             }
         };
 
         let Some(drag) = self.cross_pane_drag.active.as_ref() else {
-            return iced::widget::text("Drag to queue")
-                .color(crate::theme::fg0())
-                .into();
+            return Self::drag_fallback_label();
         };
         let selection_count = drag.selection_count;
 
         let center_idx = match drag.center_index {
             Some(idx) => idx,
             None => {
-                return iced::widget::text("Drag to queue")
-                    .color(crate::theme::fg0())
-                    .into();
+                return Self::drag_fallback_label();
             }
         };
 
@@ -445,9 +451,7 @@ impl Nokkvi {
             Some((art, title, subtitle, meta)) => {
                 Self::build_drag_preview_row(art, title, subtitle, meta)
             }
-            None => iced::widget::text("Drag to queue")
-                .color(crate::theme::fg0())
-                .into(),
+            None => Self::drag_fallback_label(),
         };
 
         Self::wrap_drag_preview_slot(slot_content, selection_count)

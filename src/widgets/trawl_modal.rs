@@ -390,6 +390,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
         let noun = if n == 1 { "seed" } else { "seeds" };
         text(format!("{n} {noun}"))
             .size(11.0)
+            .font(theme::ui_font())
             .color(theme::fg3())
             .into()
     };
@@ -440,6 +441,7 @@ pub(crate) fn trawl_modal_overlay<'a>(
         container(
             text(msg.clone())
                 .size(14)
+                .font(theme::ui_font())
                 .color(theme::fg4())
                 .align_x(Alignment::Center),
         )
@@ -541,11 +543,16 @@ fn render_trawl_slot<'a>(
             .padding(Padding::new(0.0).left(12.0).bottom(6.0))
             .into()
         }
-        TrawlRow::Hint(msg) => container(text(msg.clone()).size(14).color(theme::fg4()))
-            .width(Length::Fill)
-            .height(Length::Fixed(row_height))
-            .center(Length::Fill)
-            .into(),
+        TrawlRow::Hint(msg) => container(
+            text(msg.clone())
+                .size(14)
+                .font(theme::ui_font())
+                .color(theme::fg4()),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(row_height))
+        .center(Length::Fill)
+        .into(),
         TrawlRow::Result {
             seed,
             art_album_id,
@@ -778,6 +785,7 @@ fn render_tray<'a>(
                  playlist. Shift+Tab picks a control below, Left/Right change it.",
             )
             .size(12.0)
+            .font(theme::ui_font())
             .color(theme::fg4()),
         )
         .width(Length::Fill)
@@ -899,7 +907,10 @@ fn render_tray<'a>(
     );
 
     let clear_btn = {
-        let label = text("Clear").size(12.0).color(theme::fg2());
+        let label = text("Clear")
+            .size(12.0)
+            .font(theme::ui_font())
+            .color(theme::fg2());
         let mut btn = button(label)
             .style(theme::transparent_button_style)
             .padding([4, 8]);
@@ -913,6 +924,7 @@ fn render_tray<'a>(
         let mut btn = button(
             text("Save as Playlist")
                 .size(13.0)
+                .font(theme::ui_font())
                 .wrapping(text::Wrapping::None)
                 .color(if empty { theme::fg4() } else { theme::fg0() }),
         )
@@ -941,6 +953,7 @@ fn render_tray<'a>(
         let mut btn = button(
             text("Add to Queue")
                 .size(13.0)
+                .font(theme::ui_font())
                 .wrapping(text::Wrapping::None)
                 .color(if empty { theme::fg4() } else { theme::fg0() }),
         )
@@ -1022,7 +1035,10 @@ fn render_tray<'a>(
     // ── Actions row: blend hint left, CTAs right (always rendered —
     // height stability; the keyboard facts live in the empty-crate hint) ──
     let hint_line = row![
-        text(mix.blend.hint()).size(11.0).color(theme::fg4()),
+        text(mix.blend.hint())
+            .size(11.0)
+            .font(theme::ui_font())
+            .color(theme::fg4()),
         Space::new().width(Length::Fill),
         clear_btn,
         Space::new().width(Length::Fixed(8.0)),

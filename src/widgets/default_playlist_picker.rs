@@ -193,6 +193,7 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
         container(
             text("No playlists match the search query")
                 .size(14)
+                .font(theme::ui_font())
                 .color(theme::fg4()),
         )
         .width(Length::Fill)

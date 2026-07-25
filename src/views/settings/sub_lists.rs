@@ -484,11 +484,16 @@ impl SettingsPage {
         _font: iced::Font,
     ) -> Element<'a, SettingsMessage> {
         if sub.colors.is_empty() {
-            return container(text("Empty gradient").size(14).color(theme::fg4()))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .into();
+            return container(
+                text("Empty gradient")
+                    .size(14)
+                    .font(theme::ui_font())
+                    .color(theme::fg4()),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .into();
         }
 
         let config = slot_list::SlotListConfig::with_dynamic_slots(

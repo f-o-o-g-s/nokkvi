@@ -19,7 +19,6 @@ use nokkvi_data::{
     },
     types::{
         batch::{BatchItem, BatchPayload},
-        filter::LibraryFilter,
         one_shot_shuffle::OneShotShuffle,
     },
 };
@@ -154,8 +153,9 @@ async fn resolve_genre_album_ids(
 
 /// Playlist mirror of [`resolve_genre_album_ids`]: fan out each playlist's
 /// album-id lookup (feeding its 2×2 quad cover), one failed lookup degrading to
-/// an empty tile set. Used by the search quad-id fan-out (search-result
-/// playlists are the only playlist rows Harbour renders).
+/// an empty tile set. Shared by the shelf warm (`warm_harbour_artwork`, for the
+/// Random Playlist pick) and the search quad-id fan-out
+/// (`fan_out_search_collage_ids`) so both resolve playlists identically.
 async fn resolve_playlist_album_ids(
     shell: &AppService,
     playlist_ids: Vec<String>,
@@ -177,6 +177,89 @@ async fn resolve_playlist_album_ids(
         }
     });
     futures::future::join_all(futures).await
+}
+
+/// Fetch the [`crate::views::harbour::RANDOM_SONGS_DRAW`]-song random batch for
+/// a genre, scoped to the active libraries. ONE fetch shared by the genre play
+/// paths (`play_harbour_genre`) and the genre add-to-queue paths
+/// (`Nokkvi::enqueue_genre_draw`), so Shift+A enqueues the same shape of batch
+/// Enter plays.
+///
+/// `genre_name` is the genre NAME: Navidrome's `getRandomSongs?genre=` matches
+/// against the tag VALUE, while `Genre::id` from `/api/genre` is a separate
+/// `tag.id` hash.
+async fn random_genre_songs(
+    shell: &AppService,
+    genre_name: &str,
+) -> anyhow::Result<Vec<nokkvi_data::types::song::Song>> {
+    let ids = shell.active_library_ids_vec();
+    shell
+        .random_api()
+        .await?
+        .get_random_songs(
+            crate::views::harbour::RANDOM_SONGS_DRAW,
+            Some(genre_name),
+            &ids,
+        )
+        .await
+}
+
+/// The success toast every Harbour enqueue path reports. A fn rather than a const
+/// because `Message` is not const-constructible; the point is that the copy exists
+/// once, so the batch / genre-draw / Random-block paths cannot drift apart.
+fn added_to_queue_message() -> Message {
+    Message::Toast(crate::app_message::ToastMessage::Push(
+        nokkvi_data::types::toast::Toast::new(
+            "Added to queue",
+            nokkvi_data::types::toast::ToastLevel::Success,
+        ),
+    ))
+}
+
+/// Error context for every Harbour enqueue path (`shell_action_task` renders it
+/// as "Failed to {ctx}: {e}"). Paired with [`added_to_queue_message`].
+const ADD_TO_QUEUE_CTX: &str = "add to queue";
+
+/// Fold a resolved track list into a `BatchPayload` of song items. Used wherever
+/// Harbour enqueues concrete songs rather than an entity id.
+fn song_batch(songs: Vec<nokkvi_data::types::song::Song>) -> BatchPayload {
+    songs
+        .into_iter()
+        .fold(BatchPayload::new(), |payload, song| {
+            payload.with_item(BatchItem::Song(Box::new(song)))
+        })
+}
+
+/// The `BatchPayload` a RandomPlay row's pick enqueues — the add-to-queue mirror
+/// of what `play_random_kind` plays. A free fn over `&HarbourState` so the
+/// per-kind payload shape is unit-testable without an `app_service`: the
+/// handler-level test can only observe "no toast", which a silent no-op also
+/// produces.
+///
+/// `None` for [`RandomKind::Genres`], whose batch is a fetch
+/// (`Nokkvi::enqueue_genre_draw`), and for any kind whose draw hasn't landed.
+pub(super) fn random_kind_batch_payload(
+    harbour: &crate::state::HarbourState,
+    kind: RandomKind,
+) -> Option<BatchPayload> {
+    match kind {
+        RandomKind::Albums => harbour
+            .random_album
+            .as_ref()
+            .map(|a| BatchPayload::new().with_item(BatchItem::Album(a.id.clone()))),
+        RandomKind::Artists => harbour
+            .random_artist
+            .as_ref()
+            .map(|a| BatchPayload::new().with_item(BatchItem::Artist(a.id.clone()))),
+        RandomKind::Songs => {
+            (!harbour.random_songs.is_empty()).then(|| song_batch(harbour.random_songs.clone()))
+        }
+        RandomKind::Playlists => harbour
+            .random_playlist
+            .as_ref()
+            .map(|p| BatchPayload::new().with_item(BatchItem::Playlist(p.id.clone()))),
+        RandomKind::Genres => None,
+    }
 }
 
 impl Nokkvi {
@@ -248,7 +331,8 @@ impl Nokkvi {
                     return self
                         .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
                 }
-                // A RandomPlay row draws fresh random content and plays it.
+                // A RandomPlay row plays its pre-drawn pick — the one the row
+                // previews; only a shelves reload re-rolls it.
                 if let Some(HarbourRow::RandomPlay { kind }) = center.and_then(|i| rows.get(i)) {
                     let kind = *kind;
                     return self.play_random_kind(kind, force);
@@ -265,26 +349,41 @@ impl Nokkvi {
             }
             SlotListPageAction::AddCenterToQueue => {
                 let center = self.harbour_page.common.get_center_item_index(total);
-                if let Some(HarbourRow::Item {
-                    play: PlayTarget::Item(batch_item),
-                    ..
-                }) = center.and_then(|i| rows.get(i))
-                {
-                    let payload = BatchPayload::new().with_item(batch_item.clone());
-                    self.shell_action_task(
-                        move |shell| async move { shell.add_batch_to_queue(payload).await },
-                        Message::Toast(crate::app_message::ToastMessage::Push(
-                            nokkvi_data::types::toast::Toast::new(
-                                "Added to queue",
-                                nokkvi_data::types::toast::ToastLevel::Success,
-                            ),
-                        )),
-                        "add to queue",
+                match center.and_then(|i| rows.get(i)) {
+                    Some(HarbourRow::Item {
+                        play: PlayTarget::Item(batch_item),
+                        ..
+                    }) => {
+                        let payload = BatchPayload::new().with_item(batch_item.clone());
+                        self.enqueue_harbour_batch(payload)
+                    }
+                    // A RandomPlay row previews a concrete pick, so Shift+A must
+                    // enqueue it rather than silently doing nothing (Enter on the
+                    // very same row already plays it).
+                    Some(HarbourRow::RandomPlay { kind }) => {
+                        let kind = *kind;
+                        self.add_random_kind_to_queue(kind)
+                    }
+                    // A genre item row's Enter plays a capped random draw, so its
+                    // Shift+A enqueues the same shape — the Random Genre row and a
+                    // Most Played Genres row must not disagree on the hotkey.
+                    Some(HarbourRow::Item {
+                        play: PlayTarget::GenreRandom(name),
+                        ..
+                    }) => {
+                        let name = name.clone();
+                        self.enqueue_genre_draw(name)
+                    }
+                    Some(
+                        HarbourRow::Section { .. } | HarbourRow::Trawl { .. } | HarbourRow::Hint(_),
                     )
-                } else {
-                    Task::none()
+                    | None => Task::none(),
                 }
             }
+            // `handle_load_harbour` owns the in-flight guard, so the header
+            // Refresh button, the `r` hotkey (which routes through
+            // `reload_message()` → `Message::LoadHarbour`) and Escape-on-empty-
+            // search are all covered by one check.
             SlotListPageAction::RefreshViewData => self.handle_load_harbour(),
             SlotListPageAction::None => {
                 // Warm the newly-centered row's large artwork (crisp single
@@ -642,6 +741,74 @@ impl Nokkvi {
         }
     }
 
+    /// Enqueue a resolved Harbour batch with the shared "Added to queue" toast.
+    /// One builder for the item rows and the Random block so both report the
+    /// same success/failure copy.
+    fn enqueue_harbour_batch(&self, payload: BatchPayload) -> Task<Message> {
+        self.shell_action_task(
+            move |shell| async move { shell.add_batch_to_queue(payload).await },
+            added_to_queue_message(),
+            ADD_TO_QUEUE_CTX,
+        )
+    }
+
+    /// Enqueue a genre's capped random draw. Genres have no pre-resolved track
+    /// list — the "pick" is the genre — so the batch is fetched, using the same
+    /// [`random_genre_songs`] draw the play path runs. Shared by the Random Genre
+    /// row and the genre item rows so Shift+A behaves identically on both.
+    fn enqueue_genre_draw(&self, genre_name: String) -> Task<Message> {
+        self.shell_action_task(
+            move |shell| async move {
+                let songs = random_genre_songs(&shell, &genre_name).await?;
+                shell.add_batch_to_queue(song_batch(songs)).await
+            },
+            added_to_queue_message(),
+            ADD_TO_QUEUE_CTX,
+        )
+    }
+
+    /// Add-to-queue twin of [`Self::play_random_kind`]: enqueue the row's
+    /// PRE-DRAWN pick so Shift+A adds what Enter would play. The four
+    /// entity/track picks resolve synchronously through
+    /// [`random_kind_batch_payload`]; Genres alone needs a fetch.
+    fn add_random_kind_to_queue(&mut self, kind: RandomKind) -> Task<Message> {
+        if !crate::views::harbour::has_random_pick(&self.harbour, kind) {
+            return self.random_no_pick_toast(kind);
+        }
+        if kind == RandomKind::Genres {
+            // `BatchItem::Genre` would enqueue the WHOLE genre; the row promises
+            // a capped draw, so resolve it through the same fetch the play uses.
+            return self
+                .harbour
+                .random_genre
+                .as_ref()
+                .map(|g| g.name.clone())
+                .map_or_else(Task::none, |name| self.enqueue_genre_draw(name));
+        }
+        random_kind_batch_payload(&self.harbour, kind)
+            .map_or_else(Task::none, |payload| self.enqueue_harbour_batch(payload))
+    }
+
+    /// The toast a RandomPlay row shows when its draw hasn't landed. Split from
+    /// the activation paths so play and add-to-queue explain the same state the
+    /// same way. Deliberately action-neutral (it serves both Enter and Shift+A)
+    /// and deliberately silent about the CAUSE once the load has settled: an
+    /// absent pick is either a library with none of this kind or a draw that
+    /// failed (`recover_pick` collapses both to `None`), and nothing distinguishes
+    /// them here — so the copy states the fact and suggests the one action that
+    /// might help, without claiming the library is empty.
+    fn random_no_pick_toast(&mut self, kind: RandomKind) -> Task<Message> {
+        if self.harbour.shelves_loading {
+            self.toast_info("Still drawing the Random picks — try again in a moment");
+        } else {
+            self.toast_info(format!(
+                "No random {} drawn — Refresh to try again",
+                kind.noun().to_lowercase()
+            ));
+        }
+        Task::none()
+    }
+
     /// Activate a RandomPlay row: play the row's PRE-DRAWN pick — exactly what
     /// the row previews (thumbnail, facts, panel). Picks re-roll on every
     /// shelves load, so the Refresh hotkey is the re-roll. Runs the same
@@ -660,12 +827,15 @@ impl Nokkvi {
     ) -> Task<Message> {
         use crate::views::harbour::RandomKind;
 
-        // No pick yet: the shelves are still loading (or the library is empty
-        // of this kind) — nothing previewed, nothing to play.
-        let no_pick = |app: &mut Self| {
-            app.toast_info("No pick drawn yet — refresh Harbour to re-roll");
-            Task::none()
-        };
+        // No pick yet: the shelves are still loading, or the library holds none of
+        // this kind — nothing previewed, nothing to play. Gate on the SAME
+        // predicate the activate-SFX classifier reads, so the "activates nothing"
+        // escape cue and this toast can never disagree. The per-arm `else`
+        // branches below stay as defensive extraction failures.
+        if !crate::views::harbour::has_random_pick(&self.harbour, kind) {
+            return self.random_no_pick_toast(kind);
+        }
+        let no_pick = |app: &mut Self| app.random_no_pick_toast(kind);
 
         match kind {
             RandomKind::Albums => {
@@ -799,35 +969,18 @@ impl Nokkvi {
     }
 
     /// Play [`crate::views::harbour::RANDOM_SONGS_DRAW`] server-random songs of
-    /// a genre. Uses a songs page fetch (with the `GenreId` filter + `random`
-    /// sort) rather than `BatchItem::Genre`, which would enqueue the entire
-    /// genre; this path also respects the active library filter. Assumes the
-    /// caller already ran the play guard + new-context reset.
+    /// a genre. Uses Subsonic `getRandomSongs` (`genre` + `musicFolderId`) rather
+    /// than `BatchItem::Genre`, which would enqueue the entire genre, and rather
+    /// than a `_sort=random` songs page, which would re-seed Navidrome's
+    /// seeded-random ordering and corrupt an in-progress Songs "Random"-sort
+    /// pagination (see `services::api::random`). Takes the genre NAME — the
+    /// endpoint's `genre` param matches the tag VALUE, and `Genre::id` from
+    /// `/api/genre` is a separate `tag.id` hash. Assumes the caller already ran
+    /// the play guard + new-context reset.
     fn play_harbour_genre(&mut self, genre_name: String) -> Task<Message> {
         self.shell_action_task(
             move |shell| async move {
-                let ids = shell.active_library_ids_vec();
-                let filter = LibraryFilter::GenreId {
-                    id: genre_name.clone(),
-                    name: genre_name,
-                };
-                // Per-call API service, NOT the shared SongsService singleton:
-                // the raw-page wrapper writes the browse views' shared
-                // `total_count` reactive, which a background genre play must
-                // not clobber (same rationale as `search_library`).
-                let (songs, _total) = shell
-                    .songs_api()
-                    .await?
-                    .load_songs(
-                        "random",
-                        "ASC",
-                        None,
-                        Some(&filter),
-                        &ids,
-                        Some(0),
-                        Some(crate::views::harbour::RANDOM_SONGS_DRAW),
-                    )
-                    .await?;
+                let songs = random_genre_songs(&shell, &genre_name).await?;
                 shell.play_songs(songs, 0, OneShotShuffle::None).await
             },
             Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
@@ -839,7 +992,21 @@ impl Nokkvi {
     /// generation and arms the loading flag before dispatching, so a result that
     /// lands after a newer load (or a library-filter change) is discarded by
     /// [`Self::handle_harbour_loader`].
+    ///
+    /// Skips while a load is already in flight. The guard lives HERE rather than
+    /// at the call sites because four paths reach this function — the header
+    /// Refresh button (`RefreshViewData`), the `r` hotkey and Escape-on-empty-
+    /// search (both via `reload_message()` → `Message::LoadHarbour`), the
+    /// start-view load, and the library-filter change — and a per-site guard
+    /// covered only the first. Without it, a held `r` fires N overlapping
+    /// ~10-request fan-outs (100-song draw included) of which the generation gate
+    /// then discards all but one. `shelves_loading` is set synchronously below, so
+    /// the guard is exact rather than one frame late; `invalidate_shelves` clears
+    /// it, which is what lets a library-filter change supersede an in-flight load.
     pub(crate) fn handle_load_harbour(&mut self) -> Task<Message> {
+        if self.harbour.shelves_loading {
+            return Task::none();
+        }
         self.harbour.shelves_generation = self.harbour.shelves_generation.wrapping_add(1);
         let generation = self.harbour.shelves_generation;
         self.harbour.shelves_loading = true;
@@ -943,44 +1110,54 @@ impl Nokkvi {
                 // The Random block's pre-drawn picks — re-rolled on every
                 // shelves load (so the Refresh hotkey doubles as the re-roll),
                 // previewed on the rows, and played verbatim on activation.
-                // Albums + songs draw server-side (`_sort=random`); artists
-                // can't be server-randomized, so `load_random_artist` does a
-                // uniform count+offset draw; genres/playlists shuffle
-                // client-side inside their loaders, so `first()` IS the draw.
+                //
+                // NONE of these may use `_sort=random`: Navidrome re-seeds its
+                // per-(table, user) seeded-random ordering for every such query
+                // that arrives with `_start=0`, which silently re-permutes an
+                // in-progress Albums/Songs "Random"-sort pagination in the
+                // browse views (dup/gap on the next page). Albums + artists take
+                // the uniform count+offset draw over a stable sort; songs take
+                // Subsonic `getRandomSongs`, whose `ORDER BY random()` touches no
+                // shared seed. Genres/playlists shuffle client-side inside their
+                // loaders, so `first()` IS the draw.
                 let random_album_fut = async {
                     let api = shell.albums_api().await?;
-                    api.load_albums("random", "ASC", None, None, &ids, Some(0), Some(1))
-                        .await
-                        .map(|(albums, _total)| albums.into_iter().next())
+                    api.load_random_album(&ids).await
                 };
                 let random_artist_fut = async {
                     let api = shell.artists_api().await?;
                     api.load_random_artist(&ids, true).await
                 };
                 let random_songs_fut = async {
-                    let api = shell.songs_api().await?;
-                    api.load_songs(
-                        "random",
-                        "ASC",
-                        None,
-                        None,
-                        &ids,
-                        Some(0),
-                        Some(crate::views::harbour::RANDOM_SONGS_DRAW),
-                    )
-                    .await
-                    .map(|(songs, _total)| songs)
+                    let api = shell.random_api().await?;
+                    api.get_random_songs(crate::views::harbour::RANDOM_SONGS_DRAW, None, &ids)
+                        .await
                 };
-                // Both lists arrive client-shuffled, so `find` = the first
-                // PLAYABLE pick in random order — an empty playlist (a fresh
-                // "New Playlist" is ordinary) or a zero-song genre would turn
-                // the one-press play into an error toast.
+                // The list arrives client-shuffled, so the first PLAYABLE genre is
+                // the draw. The playability filter is a PREFERENCE, not a gate:
+                // `song_count` rides the opportunistic Subsonic `getGenres`
+                // enrichment, which `load_genres_with_libraries` degrades to an
+                // empty counts map on failure — gating on it would zero every
+                // candidate and deaden the row on any server that only exposes
+                // `/api/`. Falling back to the first shuffled genre keeps the
+                // one-press play working (Navidrome only lists tagged genres, so
+                // a genre in the list has songs regardless of the count).
                 let random_genre_fut = async {
                     let svc = shell.genres_api().await?;
                     svc.load_genres_with_libraries("random", "ASC", None, &ids)
                         .await
-                        .map(|(genres, _total)| genres.into_iter().find(|g| g.song_count > 0))
+                        .map(|(genres, _total)| {
+                            genres
+                                .iter()
+                                .find(|g| g.song_count > 0)
+                                .cloned()
+                                .or_else(|| genres.into_iter().next())
+                        })
                 };
+                // Playlists keep a hard playability gate: `song_count` comes from
+                // the native `/api/playlist` (always sent), and an empty playlist
+                // is ordinary — a fresh "New Playlist" would turn the one-press
+                // play into an error toast.
                 let random_playlist_fut = async {
                     let svc = shell.playlists_api().await?;
                     svc.load_playlists_with_libraries("random", "ASC", None, &ids)

@@ -74,7 +74,12 @@ pub struct Song {
     pub comment: Option<String>,
     #[serde(rename = "rating", alias = "userRating")]
     pub rating: Option<u32>,
-    #[serde(rename = "albumArtist")]
+    // `displayAlbumArtist` is the Subsonic `Child` spelling (Navidrome sets it
+    // from `mf.AlbumArtist`); the native `/api/song` sends `albumArtist`. The
+    // alias keeps the crossfade policy's "Various Artists" compilation heuristic
+    // alive for every Subsonic-sourced batch (getRandomSongs, getSimilarSongs2,
+    // getTopSongs), which carry no `compilation` flag at all.
+    #[serde(rename = "albumArtist", alias = "displayAlbumArtist")]
     pub album_artist: Option<String>,
     #[serde(rename = "suffix")]
     pub suffix: Option<String>,

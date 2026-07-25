@@ -980,6 +980,7 @@ impl AppService {
             crate::services::api::playlists::PlaylistsApiService
         ),
         (radios_api, crate::services::api::radios::RadiosApiService),
+        (random_api, crate::services::api::random::RandomApiService),
         (
             similar_api,
             crate::services::api::similar::SimilarApiService

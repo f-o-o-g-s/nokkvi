@@ -1356,10 +1356,16 @@ pub fn main() -> iced::Result {
 
     // Seed the UI font from config.toml BEFORE the daemon captures its
     // default font — `.default_font()` is evaluated exactly once, and the
-    // async settings load lands long after. Without this seed every bare
-    // `text()` (no explicit `.font(...)`) rendered the built-in Fira Sans
-    // while helper-routed text used the configured family, splitting single
-    // views between two fonts.
+    // async settings load lands long after. Without this seed the launch
+    // frame rendered the built-in Fira Sans wherever no font was set.
+    //
+    // The seed fixes only that STARTUP snapshot: because `.default_font()`
+    // never re-reads, a font change from Settings → Interface repaints
+    // `theme::ui_font()` for helper-routed text while anything relying on the
+    // daemon default stays on the launch family until restart. So the
+    // invariant every text site owes: render through a helper
+    // (`slot_list_text*`, `weighted_ui_font`) or set `.font(theme::ui_font())`
+    // explicitly — never lean on the daemon default.
     if let Ok(Some(settings)) = nokkvi_data::services::toml_settings_io::read_toml_settings() {
         theme::set_font_family(settings.font_family);
     }

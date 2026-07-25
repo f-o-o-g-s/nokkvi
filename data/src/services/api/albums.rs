@@ -39,6 +39,70 @@ impl AlbumsApiService {
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Album>, u32)> {
+        let (albums, total_count_header) = self
+            .load_albums_raw(
+                sort_mode,
+                sort_order,
+                search_query,
+                filter,
+                library_ids,
+                offset,
+                limit,
+            )
+            .await?;
+
+        // Get total count from X-Total-Count header, fallback to albums length
+        let total_count = total_count_header.unwrap_or(albums.len() as u32);
+
+        debug!(
+            " AlbumService: Loaded {} albums, X-Total-Count header: {:?}, using total_count: {}",
+            albums.len(),
+            total_count_header,
+            total_count
+        );
+
+        Ok((albums, total_count))
+    }
+
+    /// Draw ONE uniformly-random album via the shared count-probe + random-offset
+    /// helper, over the stable [`pagination::RANDOM_DRAW_SORT`]. Deliberately NOT
+    /// `sort_mode = "random"`: that would re-seed Navidrome's per-`(table, user)`
+    /// seeded-random ordering and corrupt an in-progress Albums "Random"-sort
+    /// pagination — see [`pagination::draw_random_row`] for the full mechanism.
+    /// `Ok(None)` when the (library-scoped) album table is empty.
+    pub async fn load_random_album(&self, library_ids: &[i32]) -> Result<Option<Album>> {
+        let (sort_mode, order) = pagination::RANDOM_DRAW_SORT;
+        pagination::draw_random_row("random-album", |offset, limit| async move {
+            self.load_albums_raw(
+                sort_mode,
+                order,
+                None,
+                None,
+                library_ids,
+                Some(offset),
+                Some(limit),
+            )
+            .await
+        })
+        .await
+    }
+
+    /// [`Self::load_albums`] without the total-count coalescing — returns the RAW
+    /// `X-Total-Count` so [`pagination::draw_random_row`] can DETECT a missing
+    /// header and warn. The drawn row is the same either way (a coalesced total of
+    /// `1` on a 1-row probe also resolves to the probe row); what the raw header
+    /// buys is that a frozen draw is logged rather than mistaken for bad luck.
+    #[allow(clippy::too_many_arguments)]
+    async fn load_albums_raw(
+        &self,
+        sort_mode: &str,
+        sort_order: &str,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<(Vec<Album>, Option<u32>)> {
         // Map viewType to API sort parameter
         let sort_param = sort::map_sort_mode(SortDomain::Albums, sort_mode);
         let order_param = sort::resolve_order(SortDomain::Albums, sort_mode, sort_order);
@@ -74,9 +138,6 @@ impl AlbumsApiService {
         let albums: Vec<Album> =
             parse::parse_json_with_preview(&response_text, "albums JSON response")?;
 
-        // Get total count from X-Total-Count header, fallback to albums length
-        let total_count = total_count_header.unwrap_or(albums.len() as u32);
-
         // Debug: check if updatedAt is being parsed
         if let Some(first_album) = albums.first() {
             trace!(
@@ -85,14 +146,7 @@ impl AlbumsApiService {
             );
         }
 
-        debug!(
-            " AlbumService: Loaded {} albums, X-Total-Count header: {:?}, using total_count: {}",
-            albums.len(),
-            total_count_header,
-            total_count
-        );
-
-        Ok((albums, total_count))
+        Ok((albums, total_count_header))
     }
 
     /// Build the `_sort` / `_order` / filter / search / pagination /

@@ -14,6 +14,7 @@ pub(crate) mod parse;
 pub mod play_queue;
 pub mod playlists;
 pub mod radios;
+pub mod random;
 pub mod rating;
 pub mod similar;
 pub mod songs;

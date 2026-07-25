@@ -44,21 +44,28 @@ pub struct HarbourState {
     //     so the Refresh hotkey doubles as the re-roll). Each RandomPlay row
     //     previews its pick (thumbnail + facts + large panel) and activation
     //     plays exactly what is shown. ---
-    /// Random Album pick (server `_sort=random`, one row).
+    /// Random Album pick (uniform count+offset draw — `load_random_album`).
+    /// Deliberately not `_sort=random`: see `services::api::pagination`.
     pub random_album: Option<AlbumUIViewData>,
     /// Random Artist pick (uniform count+offset draw — `load_random_artist`).
     pub random_artist: Option<Artist>,
-    /// Random Songs pre-drawn batch ([`RANDOM_SONGS_DRAW`] server-random
-    /// songs); the first song is the row's teaser, activation plays the batch.
+    /// Random Songs pre-drawn batch ([`RANDOM_SONGS_DRAW`] songs from Subsonic
+    /// `getRandomSongs`); the first song is the row's teaser, activation plays
+    /// the batch.
     ///
     /// [`RANDOM_SONGS_DRAW`]: crate::views::harbour::RANDOM_SONGS_DRAW
     pub random_songs: Vec<Song>,
-    /// Random Genre pick (client-shuffled genres list, first). Its
-    /// `artwork_album_ids` are filled by the shared genre quad fan-out.
+    /// Random Genre pick (client-shuffled genres list; a non-zero `song_count` is
+    /// preferred but not required — the count rides an opportunistic enrichment
+    /// that can be absent). Its `artwork_album_ids` are filled by the shared
+    /// genre quad fan-out.
     pub random_genre: Option<GenreUIViewData>,
-    /// Random Playlist pick (client-shuffled playlists list, first). Its
-    /// `artwork_album_ids` are filled by the playlist quad fan-out; a custom
-    /// cover wins in render.
+    /// Random Playlist pick (client-shuffled playlists list, first with songs —
+    /// an empty playlist can't be played). Its `artwork_album_ids` are filled by
+    /// the playlist quad fan-out. A user-uploaded cover wins in render, but only
+    /// once some other surface has warmed that 80px mini — `warm_harbour_artwork`
+    /// does not fetch playlist custom minis, which is why the row's art gate
+    /// checks the CACHE rather than the pick's id.
     pub random_playlist: Option<PlaylistUIViewData>,
 
     // --- Shelf load lifecycle ---

@@ -613,11 +613,16 @@ impl SettingsPage {
 
 /// Centered dim-text body for a picker modal's empty state.
 fn picker_empty_state<'a>(msg: &'static str) -> Element<'a, SettingsMessage> {
-    container(text(msg).size(14).color(theme::fg4()))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center(Length::Fill)
-        .into()
+    container(
+        text(msg)
+            .size(14)
+            .font(theme::ui_font())
+            .color(theme::fg4()),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .into()
 }
 
 /// Shared chrome for the settings picker modals (font + theme): a dimmed

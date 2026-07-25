@@ -1878,7 +1878,7 @@ impl Nokkvi {
 
                 col![tab_bar, view_content].into()
             } else {
-                container(iced::widget::text("No library browser"))
+                container(iced::widget::text("No library browser").font(crate::theme::ui_font()))
                     .center(Length::Fill)
                     .into()
             };

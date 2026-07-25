@@ -678,8 +678,11 @@ fn random_teaser_shows_the_picks_facts_and_art_keys() {
     assert_eq!(t.subtitle, "Kiara • Bonobo • 1 song");
     assert_eq!(t.art_album_id.as_deref(), Some("al9"));
 
+    // The genre teaser names what ONE PRESS PLAYS, not the genre's size: the
+    // draw is capped at RANDOM_SONGS_DRAW, and the old "3 albums • 30 songs"
+    // line promised the whole catalogue on a big genre.
     let t = random_teaser(&app.harbour, RandomKind::Genres);
-    assert_eq!(t.subtitle, "Rock • 3 albums • 30 songs");
+    assert_eq!(t.subtitle, "Rock • 30 songs");
     assert_eq!(t.art_album_ids, vec!["g1".to_string(), "g2".to_string()]);
 
     let t = random_teaser(&app.harbour, RandomKind::Playlists);
@@ -689,6 +692,116 @@ fn random_teaser_shows_the_picks_facts_and_art_keys() {
         Some("p1"),
         "a cached custom cover wins the row square"
     );
+}
+
+/// A genre bigger than the capped draw must say so rather than advertising its
+/// whole catalogue — activation plays RANDOM_SONGS_DRAW songs, no more.
+#[test]
+fn random_genre_teaser_caps_its_song_fact_at_the_draw_size() {
+    use crate::views::harbour::{RANDOM_SONGS_DRAW, RandomKind, random_teaser};
+
+    let mut app = test_app();
+    let mut g = make_genre("Rock", "Rock");
+    g.song_count = 4210;
+    app.harbour.random_genre = Some(g);
+
+    let t = random_teaser(&app.harbour, RandomKind::Genres);
+    assert_eq!(
+        t.subtitle,
+        format!("Rock • {RANDOM_SONGS_DRAW} of 4210 songs")
+    );
+}
+
+/// `song_count` rides the opportunistic Subsonic `getGenres` enrichment, which
+/// degrades to zeros when that side-call fails. An unknown count must DROP the
+/// fact, never render "0 songs" on a genre that plays fine.
+#[test]
+fn random_genre_teaser_drops_an_unknown_song_count() {
+    use crate::views::harbour::{RandomKind, random_teaser};
+
+    let mut app = test_app();
+    let mut g = make_genre("Rock", "Rock");
+    g.song_count = 0;
+    g.album_count = 0;
+    app.harbour.random_genre = Some(g);
+
+    let t = random_teaser(&app.harbour, RandomKind::Genres);
+    assert_eq!(t.subtitle, "Rock");
+}
+
+/// Every count fact in the Random block pluralises — the genre and playlist arms
+/// used to hardcode "albums"/"songs" and rendered "1 songs" on a one-track pick.
+#[test]
+fn random_teasers_pluralise_single_counts() {
+    use crate::views::harbour::{RandomKind, random_teaser};
+
+    let mut app = test_app();
+    let mut g = make_genre("Ambient", "Ambient");
+    g.song_count = 1;
+    app.harbour.random_genre = Some(g);
+    let mut p = harbour_playlist("p1", "Solo");
+    p.song_count = 1;
+    app.harbour.random_playlist = Some(p);
+    app.harbour.random_songs = vec![make_recent_song("s1", "Only", "A", "al1")];
+
+    assert_eq!(
+        random_teaser(&app.harbour, RandomKind::Genres).subtitle,
+        "Ambient • 1 song"
+    );
+    assert!(
+        random_teaser(&app.harbour, RandomKind::Playlists)
+            .subtitle
+            .starts_with("Solo • 1 song •"),
+        "playlist teaser pluralises its song fact"
+    );
+    assert_eq!(
+        random_teaser(&app.harbour, RandomKind::Songs).subtitle,
+        "Only • A • 1 song"
+    );
+}
+
+/// Seed EXACTLY one Random-block pick, leaving the other four undrawn.
+fn seed_only_pick(app: &mut crate::Nokkvi, kind: crate::views::harbour::RandomKind) {
+    use crate::views::harbour::RandomKind;
+    match kind {
+        RandomKind::Albums => app.harbour.random_album = Some(make_album("ra1", "Drawn", "Artist")),
+        RandomKind::Artists => app.harbour.random_artist = Some(search_artist("rar1", "Artist")),
+        RandomKind::Songs => {
+            app.harbour.random_songs = vec![make_recent_song("rs1", "Song", "Artist", "al1")];
+        }
+        RandomKind::Genres => app.harbour.random_genre = Some(make_genre("Rock", "Rock")),
+        RandomKind::Playlists => app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix")),
+    }
+}
+
+/// `has_random_pick` is the ONE predicate the activate-SFX classifier, the play
+/// handler and the add-to-queue handler share, so the "activates nothing" escape
+/// cue can never drift from the no-pick toast. Seed ONE kind at a time: an
+/// all-empty-then-all-full check would pass even with two kinds cross-wired.
+#[test]
+fn has_random_pick_tracks_each_kind_independently() {
+    use crate::views::harbour::{RandomKind, has_random_pick};
+
+    let app = test_app();
+    for kind in RandomKind::ALL {
+        assert!(
+            !has_random_pick(&app.harbour, kind),
+            "{kind:?}: a fresh state has drawn nothing"
+        );
+    }
+
+    for seeded in RandomKind::ALL {
+        let mut app = test_app();
+        seed_only_pick(&mut app, seeded);
+        for kind in RandomKind::ALL {
+            assert_eq!(
+                has_random_pick(&app.harbour, kind),
+                kind == seeded,
+                "seeded {seeded:?}: {kind:?} must report {}",
+                kind == seeded
+            );
+        }
+    }
 }
 
 // --- Section toggling via message + activate-center ---
@@ -906,16 +1019,177 @@ fn expand_center_on_random_play_row_is_a_noop() {
     );
 }
 
+/// Shift+A on a RandomPlay row whose draw hasn't landed has nothing to enqueue,
+/// so it explains itself rather than enqueuing a bogus target — and the copy must
+/// match the STATE: a load still in flight is retryable, a settled one is not
+/// diagnosable, so neither branch may claim the library is empty.
 #[test]
-fn add_center_to_queue_on_random_play_row_is_noop() {
-    let mut app = test_app();
-    center_random_play_row(&mut app, crate::views::harbour::RandomKind::Playlists);
+fn add_center_to_queue_on_random_play_row_without_a_pick_toasts_per_state() {
+    use crate::views::harbour::RandomKind;
 
-    let _ = app.handle_harbour(HarbourMessage::SlotList(
+    let mut settled = test_app();
+    settled.harbour.shelves_loading = false;
+    center_random_play_row(&mut settled, RandomKind::Playlists);
+    let _ = settled.handle_harbour(HarbourMessage::SlotList(
         SlotListPageMessage::AddCenterToQueue,
     ));
+    let msg = settled
+        .toast
+        .toasts
+        .front()
+        .map(|t| t.message.clone())
+        .expect("no pick to enqueue — the user is told instead of nothing happening");
+    assert!(
+        msg.contains("No random playlist drawn"),
+        "settled copy names the kind: {msg}"
+    );
+    assert!(
+        !msg.to_lowercase().contains("library"),
+        "an absent pick can be a FAILED draw, so the copy must not blame the \
+         library: {msg}"
+    );
 
-    assert!(app.toast.toasts.is_empty(), "nothing to enqueue, no toast");
+    let mut loading = test_app();
+    loading.harbour.shelves_loading = true;
+    center_random_play_row(&mut loading, RandomKind::Albums);
+    let _ = loading.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::AddCenterToQueue,
+    ));
+    let msg = loading
+        .toast
+        .toasts
+        .front()
+        .map(|t| t.message.clone())
+        .expect("an in-flight load still explains itself");
+    assert!(
+        msg.contains("Still drawing"),
+        "in-flight copy says to wait, not to retry: {msg}"
+    );
+}
+
+/// Shift+A on a RandomPlay row with a landed pick must enqueue THAT pick: the row
+/// previews a concrete album/artist/playlist that Enter already plays, so the
+/// Add-to-Queue hotkey silently doing nothing read as a broken key.
+///
+/// Asserted against the resolved `BatchPayload` rather than the handler's task —
+/// under `test_app()` `app_service` is `None`, so a handler-level "no toast"
+/// assertion is exactly what the pre-fix silent no-op produced and would pass with
+/// the whole feature reverted.
+#[test]
+fn random_kind_batch_payload_resolves_each_picks_batch_items() {
+    use nokkvi_data::types::batch::BatchItem;
+
+    use crate::{update::harbour::random_kind_batch_payload, views::harbour::RandomKind};
+
+    // No pick drawn: nothing to enqueue, for every kind.
+    let empty = test_app();
+    for kind in RandomKind::ALL {
+        assert!(
+            random_kind_batch_payload(&empty.harbour, kind).is_none(),
+            "{kind:?}: an undrawn pick resolves no batch"
+        );
+    }
+
+    let mut app = test_app();
+    app.harbour.random_album = Some(make_album("ra1", "Drawn", "Artist"));
+    app.harbour.random_artist = Some(search_artist("rar1", "Artist"));
+    app.harbour.random_songs = vec![
+        make_recent_song("rs1", "One", "A", "al1"),
+        make_recent_song("rs2", "Two", "B", "al2"),
+    ];
+    app.harbour.random_playlist = Some(harbour_playlist("p1", "Mix"));
+    app.harbour.random_genre = Some(make_genre("Rock", "Rock"));
+
+    let items = |kind| {
+        random_kind_batch_payload(&app.harbour, kind)
+            .map(|p| p.items)
+            .unwrap_or_default()
+    };
+
+    assert!(
+        matches!(items(RandomKind::Albums).as_slice(), [BatchItem::Album(id)] if id == "ra1"),
+        "the album pick enqueues exactly its own album id"
+    );
+    assert!(
+        matches!(items(RandomKind::Artists).as_slice(), [BatchItem::Artist(id)] if id == "rar1"),
+        "the artist pick enqueues exactly its own artist id"
+    );
+    assert!(
+        matches!(items(RandomKind::Playlists).as_slice(), [BatchItem::Playlist(id)] if id == "p1"),
+        "the playlist pick enqueues exactly its own playlist id"
+    );
+
+    let songs = items(RandomKind::Songs);
+    assert_eq!(songs.len(), 2, "the song batch enqueues every drawn track");
+    let ids: Vec<&str> = songs
+        .iter()
+        .map(|item| match item {
+            BatchItem::Song(s) => s.id.as_str(),
+            _ => "not-a-song",
+        })
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["rs1", "rs2"],
+        "drawn order is preserved — the batch IS the previewed batch"
+    );
+
+    // Genres resolve through a fetch (`enqueue_genre_draw`), not a pre-built
+    // payload: `BatchItem::Genre` would enqueue the whole genre, over-delivering
+    // against a row that promises a capped draw.
+    assert!(
+        random_kind_batch_payload(&app.harbour, RandomKind::Genres).is_none(),
+        "the genre pick is resolved by fetch, not by a pre-built batch"
+    );
+}
+
+/// An in-flight shelf load must not be superseded by an overlapping fan-out: each
+/// one is ~10 requests including a 100-song draw, and the generation gate then
+/// discards all but the last.
+///
+/// The guard lives in `handle_load_harbour` itself, because the header Refresh
+/// button (`RefreshViewData`) and the `r` hotkey / Escape-on-empty-search
+/// (`reload_message()` → `Message::LoadHarbour`) reach it by different routes —
+/// a guard on the action arm alone left the held-`r` storm live. Both routes are
+/// exercised here.
+#[test]
+fn every_refresh_route_is_skipped_while_a_shelf_load_is_in_flight() {
+    let button = HarbourMessage::SlotList(SlotListPageMessage::RefreshViewData);
+
+    // Route 1: the header Refresh button.
+    let mut app = test_app();
+    app.harbour.shelves_loading = true;
+    let before = app.harbour.shelves_generation;
+    let _ = app.handle_harbour(button);
+    assert_eq!(
+        app.harbour.shelves_generation, before,
+        "header Refresh must not supersede an in-flight load"
+    );
+    app.harbour.shelves_loading = false;
+    let _ = app.handle_harbour(HarbourMessage::SlotList(
+        SlotListPageMessage::RefreshViewData,
+    ));
+    assert_ne!(
+        app.harbour.shelves_generation, before,
+        "an idle Harbour still refreshes on demand"
+    );
+
+    // Route 2: the `r` hotkey / Escape-on-empty-search, which dispatch the view's
+    // `reload_message()` rather than a slot-list action.
+    let mut app = test_app();
+    app.current_view = View::Harbour;
+    let reload = app
+        .current_view_page()
+        .and_then(|p| p.reload_message())
+        .expect("Harbour is reloadable");
+    app.harbour.shelves_loading = true;
+    let before = app.harbour.shelves_generation;
+    let _ = app.update(reload);
+    assert_eq!(
+        app.harbour.shelves_generation, before,
+        "the reload_message route must share the in-flight guard — a held `r` \
+         otherwise fires N overlapping fan-outs"
+    );
 }
 
 // --- ExpandCenter (Shift+Enter) ---

@@ -158,13 +158,17 @@ impl Nokkvi {
             .find(|a| a.id == artist_id)
             .and_then(|a| a.image_url.clone())
             .or_else(|| {
-                // Harbour rows (Most Played Artists shelf / search results)
-                // hold raw `Artist`s that may never enter the Artists view's
-                // paged buffer — resolve their external poster the same way
-                // `ArtistUIViewData` does (large, falling back to medium).
+                // Harbour rows (Most Played Artists shelf / the Random Artist
+                // pick / search results) hold raw `Artist`s that may never enter
+                // the Artists view's paged buffer — resolve their external poster
+                // the same way `ArtistUIViewData` does (large, falling back to
+                // medium). Every Harbour surface that renders an artist must be
+                // in this chain, or centering that row shows local `ar-{id}` art
+                // (or a blank square) where the shelf shows the full poster.
                 self.harbour
                     .most_played_artists
                     .iter()
+                    .chain(self.harbour.random_artist.iter())
                     .chain(
                         self.harbour
                             .search_results

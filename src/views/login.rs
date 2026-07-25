@@ -361,7 +361,10 @@ fn input_field<'a>(
     on_input: fn(String) -> LoginMessage,
 ) -> iced::widget::Column<'a, LoginMessage> {
     column![
-        text(label).size(13).color(theme::fg1()),
+        text(label)
+            .size(13)
+            .font(theme::ui_font())
+            .color(theme::fg1()),
         text_input(placeholder, value)
             .id(id)
             .on_input(on_input)
@@ -482,6 +485,7 @@ impl LoginPage {
             server_block = server_block.push(
                 text("Unencrypted connection. Credentials will be sent in clear text.")
                     .size(11)
+                    .font(theme::ui_font())
                     .color(theme::warning())
                     .width(Length::Fill),
             );
@@ -514,6 +518,7 @@ impl LoginPage {
                 text(&err.message)
                     .color(theme::danger_bright())
                     .size(13)
+                    .font(theme::ui_font())
                     .width(Length::Fill)
                     .align_x(Alignment::Center),
             );
@@ -531,20 +536,25 @@ impl LoginPage {
         };
         mouse_area(
             crate::widgets::hover_overlay::HoverOverlay::<'_, LoginMessage>::new(
-                container(text(label).width(Length::Fill).align_x(Alignment::Center))
-                    .padding(14)
-                    .width(Length::Fill)
-                    .style(|_theme| container::Style {
-                        background: Some(theme::accent().into()),
-                        text_color: Some(theme::bg0_hard()),
-                        border: iced::Border {
-                            color: theme::accent_border_light(),
-                            width: 1.0,
-                            radius: theme::ui_radius_sm(),
-                        },
-                        shadow: iced::Shadow::default(),
-                        snap: false,
-                    }),
+                container(
+                    text(label)
+                        .font(theme::ui_font())
+                        .width(Length::Fill)
+                        .align_x(Alignment::Center),
+                )
+                .padding(14)
+                .width(Length::Fill)
+                .style(|_theme| container::Style {
+                    background: Some(theme::accent().into()),
+                    text_color: Some(theme::bg0_hard()),
+                    border: iced::Border {
+                        color: theme::accent_border_light(),
+                        width: 1.0,
+                        radius: theme::ui_radius_sm(),
+                    },
+                    shadow: iced::Shadow::default(),
+                    snap: false,
+                }),
             )
             .border_radius(theme::ui_radius_sm()),
         )
@@ -559,6 +569,7 @@ impl LoginPage {
         container(
             text(format!("v{}", env!("CARGO_PKG_VERSION")))
                 .size(12)
+                .font(theme::ui_font())
                 .color(theme::fg4()),
         )
         .width(Length::Fill)
