@@ -11,6 +11,11 @@ description: Build, test, and lint the project
 cargo +nightly fmt --all -- --check
 ```
 
+CI runs this against the *latest* nightly rather than a pinned one, so a
+months-stale local nightly can pass here and fail there. No need to update on
+every build — `/package` refreshes both channels (`rustup update stable
+nightly`, no root) as part of the release gate.
+
 2. Run clippy to enforce zero warnings (matches CI strictness):
 ```bash
 cargo clippy --all-targets -- -D warnings

@@ -69,6 +69,29 @@ Update `version = "X.Y.Z"` in `Cargo.toml` (root, first occurrence under `[packa
 
 ## 4. Run the CI gate locally
 
+**Refresh the toolchains first.** CI does not pin a version — it installs the
+*latest* upstream release every run: `dtolnay/rust-toolchain@nightly` for the
+format check and `@stable` for clippy/test/build (`.github/workflows/ci.yml`),
+plus `@stable` again for the release build (`.github/workflows/release.yml`).
+A stale local toolchain is the classic green-local/red-CI trap — rustfmt's
+default style evolves between nightlies, and each stable adds lints and
+future-incompat warnings that CI's `-D warnings` promotes to errors. Rustup is
+a per-user install under `~/.rustup` and `~/.cargo`, so this needs **no root**:
+
+```bash
+rustup update stable nightly
+```
+
+It is a fast no-op when both channels are current (prints `unchanged`), so run
+it every release. If the newer rustfmt does want changes, apply them with
+`cargo +nightly fmt --all` and let that diff ride in the release commit — CI
+would have demanded it anyway. One caveat when a second session is working the
+same tree: a toolchain bump plus `cargo fmt` can fold a repo-wide reformat into
+whatever that session is about to commit, so land the reformat on its own or
+wait for a clean tree.
+
+Then run the four gates, in CI's order:
+
 ```bash
 cargo +nightly fmt --all -- --check
 ```
