@@ -315,7 +315,7 @@ define_hotkey_actions! {
         },
         ExpandCenter {
             display: "Expand / Collapse",
-            description: "Expand/collapse item. Works in albums/artists/playlists/genres only.",
+            description: "Expand/collapse item. Works in albums/artists/playlists/genres/harbour only.",
             category: "Navigation",
             toml_key: "expand_center",
             settings_key: "hotkey.expand_center",

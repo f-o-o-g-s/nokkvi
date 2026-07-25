@@ -291,8 +291,12 @@ impl Nokkvi {
                         audio::SfxType::ExpandCollapse
                     }
                     Some(crate::views::harbour::HarbourRow::Item { .. }) => audio::SfxType::Enter,
-                    // The Trawl row activates something (the modal) — Enter cue.
-                    Some(crate::views::harbour::HarbourRow::Trawl { .. }) => audio::SfxType::Enter,
+                    // The Trawl row activates something (the modal) — Enter
+                    // cue; a RandomPlay row plays a fresh draw — Enter too.
+                    Some(
+                        crate::views::harbour::HarbourRow::Trawl { .. }
+                        | crate::views::harbour::HarbourRow::RandomPlay { .. },
+                    ) => audio::SfxType::Enter,
                     // A Hint row (keep-typing / searching / no matches)
                     // activates nothing — same escape cue as an empty list.
                     Some(crate::views::harbour::HarbourRow::Hint(_)) | None => {

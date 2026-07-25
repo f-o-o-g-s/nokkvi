@@ -1071,12 +1071,15 @@ pub enum QueueLoaderMessage {
 pub struct HarbourShelvesData {
     pub recently_played: Vec<nokkvi_data::types::song::Song>,
     pub recently_added: Vec<nokkvi_data::backend::albums::AlbumUIViewData>,
-    pub playlists: Vec<nokkvi_data::backend::playlists::PlaylistUIViewData>,
-    pub genres: Vec<nokkvi_data::backend::genres::GenreUIViewData>,
     pub most_played_songs: Vec<nokkvi_data::types::song::Song>,
     pub most_played_albums: Vec<nokkvi_data::backend::albums::AlbumUIViewData>,
     pub most_played_artists: Vec<nokkvi_data::types::artist::Artist>,
     pub most_played_genres: Vec<nokkvi_data::backend::genres::GenreUIViewData>,
+    pub random_album: Option<nokkvi_data::backend::albums::AlbumUIViewData>,
+    pub random_artist: Option<nokkvi_data::types::artist::Artist>,
+    pub random_songs: Vec<nokkvi_data::types::song::Song>,
+    pub random_genre: Option<nokkvi_data::backend::genres::GenreUIViewData>,
+    pub random_playlist: Option<nokkvi_data::backend::playlists::PlaylistUIViewData>,
 }
 
 /// Backend results for the Harbour home view. Each variant carries the
@@ -1093,14 +1096,14 @@ pub enum HarbourLoaderMessage {
         generation: u64,
         result: Result<Box<HarbourShelvesData>, String>,
     },
-    /// Per-playlist album-id lists for the 2×2 quad covers arrived
+    /// The Random Playlist pick's album-id list for its 2×2 quad cover arrived
     /// (`(playlist_id, album_ids)` pairs).
     PlaylistQuadIdsLoaded {
         generation: u64,
         results: Vec<(String, Vec<String>)>,
     },
-    /// Per-genre album-id lists for the 2×2 quad covers arrived
-    /// (`(genre_id, album_ids)` pairs).
+    /// Per-genre album-id lists for the Most Played Genres / Random Genre 2×2
+    /// quad covers arrived (`(genre_id, album_ids)` pairs).
     GenreQuadIdsLoaded {
         generation: u64,
         results: Vec<(String, Vec<String>)>,

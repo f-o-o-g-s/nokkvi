@@ -1354,6 +1354,16 @@ pub fn main() -> iced::Result {
     // the session from app.redb via `credentials::load_session`).
     nokkvi_data::utils::paths::migrate_to_state_dir();
 
+    // Seed the UI font from config.toml BEFORE the daemon captures its
+    // default font — `.default_font()` is evaluated exactly once, and the
+    // async settings load lands long after. Without this seed every bare
+    // `text()` (no explicit `.font(...)`) rendered the built-in Fira Sans
+    // while helper-routed text used the configured family, splitting single
+    // views between two fonts.
+    if let Ok(Some(settings)) = nokkvi_data::services::toml_settings_io::read_toml_settings() {
+        theme::set_font_family(settings.font_family);
+    }
+
     iced::daemon(boot, Nokkvi::update, Nokkvi::view)
         .title(Nokkvi::title)
         .default_font(theme::ui_font())

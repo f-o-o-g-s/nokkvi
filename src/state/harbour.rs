@@ -24,12 +24,6 @@ pub struct HarbourState {
     pub recently_played: Vec<Song>,
     /// "Recently Added" shelf (albums, `_sort=recentlyAdded`).
     pub recently_added: Vec<AlbumUIViewData>,
-    /// "Random Playlists" shelf (2×2 quad tiles). `artwork_album_ids` are filled
-    /// by a follow-up quad-id fan-out after the shelves land.
-    pub playlists: Vec<PlaylistUIViewData>,
-    /// "Random Genres" shelf (2×2 quad tiles). `artwork_album_ids` are filled
-    /// by a follow-up quad-id fan-out after the shelves land.
-    pub genres: Vec<GenreUIViewData>,
 
     // --- "Most Played" shelves (each a fixed top-N by play count) ---
     /// "Most Played Tracks" shelf (songs, `_sort=mostPlayed`).
@@ -42,9 +36,30 @@ pub struct HarbourState {
     pub most_played_artists: Vec<Artist>,
     /// "Most Played Genres" shelf — a client-side tally of the top-played songs
     /// by genre (Navidrome can't sort genres by plays). `artwork_album_ids` are
-    /// filled by the shared genre quad-id fan-out; `song_count` carries the
-    /// number of the user's top tracks in the genre (drives the subtitle).
+    /// filled by the genre quad-id fan-out; `song_count` carries the number of
+    /// the user's top tracks in the genre (drives the subtitle).
     pub most_played_genres: Vec<GenreUIViewData>,
+
+    // --- The Random block's pre-drawn picks (re-rolled every shelves load,
+    //     so the Refresh hotkey doubles as the re-roll). Each RandomPlay row
+    //     previews its pick (thumbnail + facts + large panel) and activation
+    //     plays exactly what is shown. ---
+    /// Random Album pick (server `_sort=random`, one row).
+    pub random_album: Option<AlbumUIViewData>,
+    /// Random Artist pick (uniform count+offset draw — `load_random_artist`).
+    pub random_artist: Option<Artist>,
+    /// Random Songs pre-drawn batch ([`RANDOM_SONGS_DRAW`] server-random
+    /// songs); the first song is the row's teaser, activation plays the batch.
+    ///
+    /// [`RANDOM_SONGS_DRAW`]: crate::views::harbour::RANDOM_SONGS_DRAW
+    pub random_songs: Vec<Song>,
+    /// Random Genre pick (client-shuffled genres list, first). Its
+    /// `artwork_album_ids` are filled by the shared genre quad fan-out.
+    pub random_genre: Option<GenreUIViewData>,
+    /// Random Playlist pick (client-shuffled playlists list, first). Its
+    /// `artwork_album_ids` are filled by the playlist quad fan-out; a custom
+    /// cover wins in render.
+    pub random_playlist: Option<PlaylistUIViewData>,
 
     // --- Shelf load lifecycle ---
     /// A shelf load is in flight.
@@ -79,18 +94,22 @@ impl HarbourState {
     pub fn shelves_empty(&self) -> bool {
         self.recently_played.is_empty()
             && self.recently_added.is_empty()
-            && self.playlists.is_empty()
-            && self.genres.is_empty()
             && self.most_played_songs.is_empty()
             && self.most_played_albums.is_empty()
             && self.most_played_artists.is_empty()
             && self.most_played_genres.is_empty()
+            && self.random_album.is_none()
+            && self.random_artist.is_none()
+            && self.random_songs.is_empty()
+            && self.random_genre.is_none()
+            && self.random_playlist.is_none()
     }
 
-    /// Distinct album ids across the album shelf (Recently Added), in a stable
-    /// order — the set whose 80px covers the shelf renderer needs warmed. The
-    /// Recently Played shelf is songs now, so its row/panel covers are warmed by
-    /// `album_id` through the quad-id warmer instead (see `warm_harbour_artwork`).
+    /// Distinct album ids across the album shelves (Recently Added, Most
+    /// Played Albums) plus the Random Album pick, in a stable order — the set
+    /// whose 80px covers the shelf renderer needs warmed. The song shelves
+    /// warm their covers by `album_id` through the quad-id warmer instead
+    /// (see `warm_harbour_artwork`).
     pub fn shelf_album_art_triples(&self) -> Vec<(String, Option<String>, String)> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
@@ -98,6 +117,7 @@ impl HarbourState {
             .recently_added
             .iter()
             .chain(self.most_played_albums.iter())
+            .chain(self.random_album.iter())
         {
             if seen.insert(album.id.clone()) {
                 out.push((
@@ -121,12 +141,15 @@ impl HarbourState {
     pub fn invalidate_shelves(&mut self) {
         self.recently_played.clear();
         self.recently_added.clear();
-        self.playlists.clear();
-        self.genres.clear();
         self.most_played_songs.clear();
         self.most_played_albums.clear();
         self.most_played_artists.clear();
         self.most_played_genres.clear();
+        self.random_album = None;
+        self.random_artist = None;
+        self.random_songs.clear();
+        self.random_genre = None;
+        self.random_playlist = None;
         self.shelves_loading = false;
         self.shelves_generation = self.shelves_generation.wrapping_add(1);
         // The active search's results are scope-stale too; a bumped generation

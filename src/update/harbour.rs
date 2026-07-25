@@ -3,9 +3,10 @@
 //! Built up across milestones:
 //! - M2: message dispatch skeleton — search-query capture + load lifecycle flag.
 //! - M3 (here): the joined shelf fetch + generation-gated population +
-//!   artwork warm-up (shelf covers, playlist quad tiles).
+//!   artwork warm-up (shelf covers, genre quad tiles).
 //! - M4: card / genre play actions.
 //! - M5: the whole-library search fan-out + grouped results.
+//! - Later: the Random block's one-press draws (`play_random_kind`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -32,8 +33,8 @@ use crate::{
     views::{
         HarbourMessage,
         harbour::{
-            HOT_PICKS_PER_SECTION, HarbourRow, HarbourSectionId, PlayTarget, SEARCH_MIN_CHARS,
-            SEARCH_PREVIEW_LIMIT, build_harbour_rows,
+            HOT_PICKS_PER_SECTION, HarbourRow, HarbourSectionId, PlayTarget, RandomKind,
+            SEARCH_MIN_CHARS, SEARCH_PREVIEW_LIMIT, build_harbour_rows,
         },
     },
 };
@@ -45,6 +46,16 @@ fn recover_shelf<T>(label: &str, result: anyhow::Result<Vec<T>>) -> Vec<T> {
     result.unwrap_or_else(|e| {
         tracing::warn!("Harbour: {label} shelf failed: {e:#}");
         Vec::new()
+    })
+}
+
+/// Single-pick twin of [`recover_shelf`] for the Random block's draws — a
+/// failed draw degrades to an empty row (action-copy fallback), never a blank
+/// home view.
+fn recover_pick<T>(label: &str, result: anyhow::Result<Option<T>>) -> Option<T> {
+    result.unwrap_or_else(|e| {
+        tracing::warn!("Harbour: {label} draw failed: {e:#}");
+        None
     })
 }
 
@@ -143,7 +154,8 @@ async fn resolve_genre_album_ids(
 
 /// Playlist mirror of [`resolve_genre_album_ids`]: fan out each playlist's
 /// album-id lookup (feeding its 2×2 quad cover), one failed lookup degrading to
-/// an empty tile set. Shared by the shelf and search quad-id fan-outs.
+/// an empty tile set. Used by the search quad-id fan-out (search-result
+/// playlists are the only playlist rows Harbour renders).
 async fn resolve_playlist_album_ids(
     shell: &AppService,
     playlist_ids: Vec<String>,
@@ -223,7 +235,7 @@ impl Nokkvi {
         match action {
             SlotListPageAction::ActivateCenter(force) => {
                 // A centered section header toggles; a centered item plays.
-                if self.toggle_centered_harbour_section(&rows, total) {
+                if self.toggle_centered_harbour_section(&rows, total, false) {
                     // The toggle changed the row list under the stationary
                     // center — re-warm whatever row sits there now.
                     return self.warm_harbour_current_center();
@@ -235,6 +247,11 @@ impl Nokkvi {
                 if let Some(HarbourRow::Trawl { .. }) = center.and_then(|i| rows.get(i)) {
                     return self
                         .handle_trawl_modal(crate::widgets::trawl_modal::TrawlModalMessage::Open);
+                }
+                // A RandomPlay row draws fresh random content and plays it.
+                if let Some(HarbourRow::RandomPlay { kind }) = center.and_then(|i| rows.get(i)) {
+                    let kind = *kind;
+                    return self.play_random_kind(kind, force);
                 }
                 if let Some(HarbourRow::Item { play, .. }) = center.and_then(|i| rows.get(i)) {
                     let play = play.clone();
@@ -360,17 +377,57 @@ impl Nokkvi {
                 crate::views::harbour::section_cover_album_id(&self.harbour, *id),
                 None,
             ),
+            // A RandomPlay row previews its pre-drawn pick: album/song picks
+            // warm the album large cover; the artist pick routes through the
+            // artist loader (an album LoadLarge on an artist id would 404);
+            // the genre/playlist picks warm their collage below and fall back
+            // to their first quad tile as the single cover.
+            Some(HarbourRow::RandomPlay { kind }) => match kind {
+                RandomKind::Albums => (
+                    self.harbour.random_album.as_ref().map(|a| a.id.clone()),
+                    None,
+                ),
+                RandomKind::Artists => (
+                    None,
+                    self.harbour.random_artist.as_ref().map(|a| a.id.clone()),
+                ),
+                RandomKind::Songs => (
+                    self.harbour
+                        .random_songs
+                        .first()
+                        .and_then(|s| s.album_id.clone()),
+                    None,
+                ),
+                RandomKind::Genres => (
+                    self.harbour
+                        .random_genre
+                        .as_ref()
+                        .and_then(|g| g.artwork_album_ids.first().cloned()),
+                    None,
+                ),
+                RandomKind::Playlists => (
+                    self.harbour
+                        .random_playlist
+                        .as_ref()
+                        .and_then(|p| p.artwork_album_ids.first().cloned()),
+                    None,
+                ),
+            },
             _ => (None, None),
         };
         let collage = self.harbour_center_collage_target(center);
         // A centered custom-cover playlist warms its resolution-sized cover so
         // the large column shows it crisp (the warm no-ops for album-art
-        // playlists). `None` for section headers / non-playlist items.
+        // playlists). Search items and the Random Playlist pick both qualify;
+        // `None` for section headers / non-playlist rows.
         let custom_playlist = match center {
             Some(HarbourRow::Item {
                 play: PlayTarget::Item(BatchItem::Playlist(pid)),
                 ..
             }) => Some(pid.clone()),
+            Some(HarbourRow::RandomPlay {
+                kind: RandomKind::Playlists,
+            }) => self.harbour.random_playlist.as_ref().map(|p| p.id.clone()),
             _ => None,
         };
 
@@ -401,6 +458,24 @@ impl Nokkvi {
         match center? {
             // The Trawl action row previews no collection.
             HarbourRow::Trawl { .. } => None,
+            // The genre/playlist RandomPlay picks preview their own collage.
+            HarbourRow::RandomPlay { kind } => match kind {
+                RandomKind::Genres => self.harbour.random_genre.as_ref().map(|g| {
+                    (
+                        CollageTarget::Genre,
+                        g.id.clone(),
+                        g.artwork_album_ids.clone(),
+                    )
+                }),
+                RandomKind::Playlists => self.harbour.random_playlist.as_ref().map(|p| {
+                    (
+                        CollageTarget::Playlist,
+                        p.id.clone(),
+                        p.artwork_album_ids.clone(),
+                    )
+                }),
+                RandomKind::Albums | RandomKind::Artists | RandomKind::Songs => None,
+            },
             HarbourRow::Item {
                 art_album_ids,
                 play,
@@ -465,9 +540,11 @@ impl Nokkvi {
         )
     }
 
-    /// Shift+Enter on Harbour: if a section header is centered, toggle its
-    /// collapsed state (mirrors the other views' expand-center hotkey). Centered
-    /// on an item or hint is a no-op. Rebuilds rows from the same
+    /// Shift+Enter on Harbour: toggle the centered section header, or — centered
+    /// on an item row — collapse its owning section (the expansion views'
+    /// collapse-from-child contract, so browsing into a section's items never
+    /// strands the hotkey). Centered on the Trawl door, a RandomPlay row, or a
+    /// hint is a no-op (nothing to expand). Rebuilds rows from the same
     /// `(&harbour, &collapsed)` inputs the view renders, so the centered index
     /// resolves to the row the user sees.
     fn handle_harbour_expand_center(&mut self) -> Task<Message> {
@@ -477,7 +554,7 @@ impl Nokkvi {
             &self.trawl_crate,
         );
         let total = rows.len();
-        if self.toggle_centered_harbour_section(&rows, total) {
+        if self.toggle_centered_harbour_section(&rows, total, true) {
             // Rows shifted under the stationary center — re-warm it.
             return self.warm_harbour_current_center();
         }
@@ -487,21 +564,65 @@ impl Nokkvi {
     /// If the centered row is a `Section`, toggle its collapsed state and return
     /// `true`. Shared by the ActivateCenter (Enter) and ExpandCenter
     /// (Shift+Enter) paths so both resolve the center against the same rows.
-    fn toggle_centered_harbour_section(&mut self, rows: &[HarbourRow], total: usize) -> bool {
-        let center = self.harbour_page.common.get_center_item_index(total);
-        if let Some(HarbourRow::Section { id, .. }) = center.and_then(|i| rows.get(i)) {
-            let id = *id;
-            self.harbour_page.toggle_section(id);
-            true
-        } else {
-            false
+    ///
+    /// `collapse_from_child` extends the reach for Shift+Enter only: centered on
+    /// an `Item`, collapse its owning section — the nearest `Section` above it
+    /// (items only ever render directly under their expanded header) — and
+    /// re-center on that header. Enter keeps `false` so activating an item still
+    /// plays it.
+    fn toggle_centered_harbour_section(
+        &mut self,
+        rows: &[HarbourRow],
+        total: usize,
+        collapse_from_child: bool,
+    ) -> bool {
+        let Some(center) = self.harbour_page.common.get_center_item_index(total) else {
+            return false;
+        };
+        match rows.get(center) {
+            Some(HarbourRow::Section { id, .. }) => {
+                let id = *id;
+                self.harbour_page.toggle_section(id);
+                true
+            }
+            Some(HarbourRow::Item { .. }) if collapse_from_child => {
+                let Some((header_idx, id)) =
+                    rows[..center].iter().enumerate().rev().find_map(|(i, r)| {
+                        if let HarbourRow::Section { id, .. } = r {
+                            Some((i, *id))
+                        } else {
+                            None
+                        }
+                    })
+                else {
+                    return false;
+                };
+                self.harbour_page.toggle_section(id);
+                // Re-center on the header — its index is unchanged (collapsing
+                // only removes the rows after it), while the centered item's
+                // index now points at a different or vanished row. Routed
+                // through `handle_set_offset` (clears the click-to-focus
+                // marker AND records the scroll, so the transient scrollbar
+                // flashes on the jump exactly like `ExpansionState::collapse`).
+                let new_total = build_harbour_rows(
+                    &self.harbour,
+                    &self.harbour_page.collapsed,
+                    &self.trawl_crate,
+                )
+                .len();
+                self.harbour_page
+                    .common
+                    .handle_set_offset(header_idx, new_total);
+                true
+            }
+            _ => false,
         }
     }
 
     /// Play a resolved Harbour item target (guard radio-to-queue, reset context,
     /// then play the single-item batch / genre-random page). `force` is the
     /// Ctrl+Enter shuffle directive, applied to the batch play; genre-random
-    /// already draws ~100 server-random songs, so it ignores it.
+    /// already draws server-random songs, so it ignores it.
     fn play_harbour_target(&mut self, play: PlayTarget, force: bool) -> Task<Message> {
         match play {
             PlayTarget::Item(batch) => {
@@ -517,6 +638,106 @@ impl Nokkvi {
                 }
                 self.enter_new_playback_context();
                 self.play_harbour_genre(name)
+            }
+        }
+    }
+
+    /// Activate a RandomPlay row: play the row's PRE-DRAWN pick — exactly what
+    /// the row previews (thumbnail, facts, panel). Picks re-roll on every
+    /// shelves load, so the Refresh hotkey is the re-roll. Runs the same
+    /// pre-play sequence as every Harbour play (radio guard, new playback
+    /// context) and lands on the Queue. `force` carries Ctrl+Enter's one-shot
+    /// shuffle for the album/artist/playlist picks; the song draws are already
+    /// random and ignore it.
+    ///
+    /// The playlist arm mirrors the Playlists view's play path: it SETS the
+    /// active-playlist context (the queue's "Playing From" strip + quad)
+    /// before `play_playlist`, where every other arm clears it.
+    pub(crate) fn play_random_kind(
+        &mut self,
+        kind: crate::views::harbour::RandomKind,
+        force: bool,
+    ) -> Task<Message> {
+        use crate::views::harbour::RandomKind;
+
+        // No pick yet: the shelves are still loading (or the library is empty
+        // of this kind) — nothing previewed, nothing to play.
+        let no_pick = |app: &mut Self| {
+            app.toast_info("No pick drawn yet — refresh Harbour to re-roll");
+            Task::none()
+        };
+
+        match kind {
+            RandomKind::Albums => {
+                let Some(id) = self.harbour.random_album.as_ref().map(|a| a.id.clone()) else {
+                    return no_pick(self);
+                };
+                if let Some(task) = self.guard_play_action() {
+                    return task;
+                }
+                self.enter_new_playback_context();
+                self.play_batch_task(BatchPayload::new().with_item(BatchItem::Album(id)), force)
+            }
+            RandomKind::Artists => {
+                let Some(id) = self.harbour.random_artist.as_ref().map(|a| a.id.clone()) else {
+                    return no_pick(self);
+                };
+                if let Some(task) = self.guard_play_action() {
+                    return task;
+                }
+                self.enter_new_playback_context();
+                self.play_batch_task(BatchPayload::new().with_item(BatchItem::Artist(id)), force)
+            }
+            RandomKind::Songs => {
+                if self.harbour.random_songs.is_empty() {
+                    return no_pick(self);
+                }
+                if let Some(task) = self.guard_play_action() {
+                    return task;
+                }
+                self.enter_new_playback_context();
+                self.clear_active_playlist();
+                let songs = self.harbour.random_songs.clone();
+                self.shell_action_task(
+                    move |shell| async move { shell.play_songs(songs, 0, OneShotShuffle::None).await },
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "play random songs",
+                )
+            }
+            RandomKind::Genres => {
+                let Some(name) = self.harbour.random_genre.as_ref().map(|g| g.name.clone()) else {
+                    return no_pick(self);
+                };
+                if let Some(task) = self.guard_play_action() {
+                    return task;
+                }
+                self.enter_new_playback_context();
+                self.clear_active_playlist();
+                self.play_harbour_genre(name)
+            }
+            RandomKind::Playlists => {
+                let Some(playlist) = self.harbour.random_playlist.clone() else {
+                    return no_pick(self);
+                };
+                if let Some(task) = self.guard_play_action() {
+                    return task;
+                }
+                self.enter_new_playback_context();
+                // The Playlists view's PlayAll contract: set the queue header's
+                // "Playing From" context BEFORE the play so the strip renders
+                // it on arrival (handle_queue_loaded freezes the strip quad
+                // from it).
+                self.active_playlist_info = Some(
+                    crate::state::ActivePlaylistContext::from_playlist(&playlist),
+                );
+                self.persist_active_playlist_info();
+                let shuffle = self.activate_shuffle_directive(force, false);
+                let id = playlist.id;
+                self.shell_action_task(
+                    move |shell| async move { shell.play_playlist(&id, shuffle).await },
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "play playlist",
+                )
             }
         }
     }
@@ -577,11 +798,11 @@ impl Nokkvi {
         )
     }
 
-    /// Play ~100 server-random songs of a genre. Uses a songs page fetch (with
-    /// the `GenreId` filter + `random` sort, capped at 100) rather than
-    /// `BatchItem::Genre`, which would enqueue the entire genre; this path also
-    /// respects the active library filter. Assumes the caller already ran the
-    /// play guard + new-context reset.
+    /// Play [`crate::views::harbour::RANDOM_SONGS_DRAW`] server-random songs of
+    /// a genre. Uses a songs page fetch (with the `GenreId` filter + `random`
+    /// sort) rather than `BatchItem::Genre`, which would enqueue the entire
+    /// genre; this path also respects the active library filter. Assumes the
+    /// caller already ran the play guard + new-context reset.
     fn play_harbour_genre(&mut self, genre_name: String) -> Task<Message> {
         self.shell_action_task(
             move |shell| async move {
@@ -604,7 +825,7 @@ impl Nokkvi {
                         Some(&filter),
                         &ids,
                         Some(0),
-                        Some(100),
+                        Some(crate::views::harbour::RANDOM_SONGS_DRAW),
                     )
                     .await?;
                 shell.play_songs(songs, 0, OneShotShuffle::None).await
@@ -669,22 +890,6 @@ impl Nokkvi {
                     .map(|(albums, _total)| albums)
                 };
 
-                // Playlists + genres load with a `random` sort — the loaders
-                // shuffle client-side (resolve_random_sort_mode), so the order is
-                // fixed once here at load time, not re-rolled every frame.
-                let playlists_fut = async {
-                    let svc = shell.playlists_api().await?;
-                    svc.load_playlists_with_libraries("random", "ASC", None, &ids)
-                        .await
-                        .map(|(playlists, _total)| playlists)
-                };
-                let genres_fut = async {
-                    let svc = shell.genres_api().await?;
-                    svc.load_genres_with_libraries("random", "ASC", None, &ids)
-                        .await
-                        .map(|(genres, _total)| genres)
-                };
-
                 // "Most Played" shelves (play_count DESC). The tracks fetch is
                 // deliberately deep (MOST_PLAYED_TALLY_POOL): it doubles as the
                 // genre-tally sample, so Most Played Tracks + Most Played Genres
@@ -735,22 +940,76 @@ impl Nokkvi {
                     .map(|(artists, _total)| artists)
                 };
 
+                // The Random block's pre-drawn picks — re-rolled on every
+                // shelves load (so the Refresh hotkey doubles as the re-roll),
+                // previewed on the rows, and played verbatim on activation.
+                // Albums + songs draw server-side (`_sort=random`); artists
+                // can't be server-randomized, so `load_random_artist` does a
+                // uniform count+offset draw; genres/playlists shuffle
+                // client-side inside their loaders, so `first()` IS the draw.
+                let random_album_fut = async {
+                    let api = shell.albums_api().await?;
+                    api.load_albums("random", "ASC", None, None, &ids, Some(0), Some(1))
+                        .await
+                        .map(|(albums, _total)| albums.into_iter().next())
+                };
+                let random_artist_fut = async {
+                    let api = shell.artists_api().await?;
+                    api.load_random_artist(&ids, true).await
+                };
+                let random_songs_fut = async {
+                    let api = shell.songs_api().await?;
+                    api.load_songs(
+                        "random",
+                        "ASC",
+                        None,
+                        None,
+                        &ids,
+                        Some(0),
+                        Some(crate::views::harbour::RANDOM_SONGS_DRAW),
+                    )
+                    .await
+                    .map(|(songs, _total)| songs)
+                };
+                // Both lists arrive client-shuffled, so `find` = the first
+                // PLAYABLE pick in random order — an empty playlist (a fresh
+                // "New Playlist" is ordinary) or a zero-song genre would turn
+                // the one-press play into an error toast.
+                let random_genre_fut = async {
+                    let svc = shell.genres_api().await?;
+                    svc.load_genres_with_libraries("random", "ASC", None, &ids)
+                        .await
+                        .map(|(genres, _total)| genres.into_iter().find(|g| g.song_count > 0))
+                };
+                let random_playlist_fut = async {
+                    let svc = shell.playlists_api().await?;
+                    svc.load_playlists_with_libraries("random", "ASC", None, &ids)
+                        .await
+                        .map(|(playlists, _total)| playlists.into_iter().find(|p| p.song_count > 0))
+                };
+
                 let (
                     recently_played,
                     recently_added,
-                    playlists,
-                    genres,
                     most_played_songs,
                     most_played_albums,
                     most_played_artists,
+                    random_album,
+                    random_artist,
+                    random_songs,
+                    random_genre,
+                    random_playlist,
                 ) = futures::join!(
                     recently_played_fut,
                     recently_added_fut,
-                    playlists_fut,
-                    genres_fut,
                     most_played_songs_fut,
                     most_played_albums_fut,
-                    most_played_artists_fut
+                    most_played_artists_fut,
+                    random_album_fut,
+                    random_artist_fut,
+                    random_songs_fut,
+                    random_genre_fut,
+                    random_playlist_fut
                 );
 
                 // Recently-added is the backbone: a hard failure there is an
@@ -770,11 +1029,6 @@ impl Nokkvi {
                     Err(e) => return Err(format!("{e:#}")),
                 };
 
-                let mut playlists = recover_shelf("playlists", playlists);
-                playlists.truncate(HOT_PICKS_PER_SECTION);
-                let mut genres = recover_shelf("genres", genres);
-                genres.truncate(HOT_PICKS_PER_SECTION);
-
                 // Tally the full tracks pool by genre BEFORE truncating it to the
                 // Most Played Tracks shelf's top picks.
                 let mut most_played_songs = recover_shelf("most-played-tracks", most_played_songs);
@@ -787,6 +1041,13 @@ impl Nokkvi {
                     recover_shelf("most-played-artists", most_played_artists);
                 most_played_artists.truncate(HOT_PICKS_PER_SECTION);
 
+                let random_album = recover_pick("random-album", random_album)
+                    .map(|a| AlbumUIViewData::from_album(&a, &url, &cred));
+                let random_playlist = recover_pick("random-playlist", random_playlist)
+                    .map(nokkvi_data::backend::playlists::PlaylistUIViewData::from);
+                let random_genre = recover_pick("random-genre", random_genre)
+                    .map(nokkvi_data::backend::genres::GenreUIViewData::from);
+
                 Ok(Box::new(HarbourShelvesData {
                     recently_played: recover_shelf("recently-played", recently_played),
                     recently_added,
@@ -794,14 +1055,11 @@ impl Nokkvi {
                     most_played_albums,
                     most_played_artists,
                     most_played_genres,
-                    playlists: playlists
-                        .into_iter()
-                        .map(nokkvi_data::backend::playlists::PlaylistUIViewData::from)
-                        .collect(),
-                    genres: genres
-                        .into_iter()
-                        .map(nokkvi_data::backend::genres::GenreUIViewData::from)
-                        .collect(),
+                    random_album,
+                    random_artist: recover_pick("random-artist", random_artist),
+                    random_songs: recover_shelf("random-songs", random_songs),
+                    random_genre,
+                    random_playlist,
                 }))
             },
             move |result| {
@@ -829,8 +1087,11 @@ impl Nokkvi {
                         self.harbour.most_played_albums = data.most_played_albums;
                         self.harbour.most_played_artists = data.most_played_artists;
                         self.harbour.most_played_genres = data.most_played_genres;
-                        self.harbour.playlists = data.playlists;
-                        self.harbour.genres = data.genres;
+                        self.harbour.random_album = data.random_album;
+                        self.harbour.random_artist = data.random_artist;
+                        self.harbour.random_songs = data.random_songs;
+                        self.harbour.random_genre = data.random_genre;
+                        self.harbour.random_playlist = data.random_playlist;
                         // A fresh shelf load never moves the center, so no
                         // navigation event warms the centered row — without the
                         // explicit center warm the large column stays stuck on
@@ -858,9 +1119,9 @@ impl Nokkvi {
                 for (playlist_id, album_ids) in results {
                     if let Some(playlist) = self
                         .harbour
-                        .playlists
-                        .iter_mut()
-                        .find(|p| p.id == playlist_id)
+                        .random_playlist
+                        .as_mut()
+                        .filter(|p| p.id == playlist_id)
                     {
                         playlist.artwork_album_ids = album_ids;
                     }
@@ -880,13 +1141,13 @@ impl Nokkvi {
                     return Task::none();
                 }
                 for (genre_id, album_ids) in results {
-                    // A genre can appear on both the Random and Most Played Genres
-                    // shelves — set its ids on whichever holds it.
+                    // The id can name the Random Genre pick, a Most Played
+                    // genre, or both — set every match.
                     for genre in self
                         .harbour
-                        .genres
+                        .most_played_genres
                         .iter_mut()
-                        .chain(self.harbour.most_played_genres.iter_mut())
+                        .chain(self.harbour.random_genre.iter_mut())
                         .filter(|g| g.id == genre_id)
                     {
                         genre.artwork_album_ids = album_ids.clone();
@@ -953,10 +1214,11 @@ impl Nokkvi {
     }
 
     /// After the shelves land: warm 80px shelf covers and kick off the
-    /// per-playlist album-id fan-out that feeds the quad tiles. Also re-run on
-    /// Harbour re-entry (`pub(super)` for the switch-view arm) — the LRU may
-    /// have evicted shelf covers while the user browsed other views, and every
-    /// fetch here is cache/pending/failed-gated so a warm cache re-runs free.
+    /// per-genre album-id fan-out that feeds the Most Played Genres quad tiles.
+    /// Also re-run on Harbour re-entry (`pub(super)` for the switch-view arm) —
+    /// the LRU may have evicted shelf covers while the user browsed other
+    /// views, and every fetch here is cache/pending/failed-gated so a warm
+    /// cache re-runs free.
     pub(super) fn warm_harbour_artwork(&mut self, generation: u64) -> Task<Message> {
         let Some(shell) = &self.app_service else {
             return Task::none();
@@ -979,17 +1241,19 @@ impl Nokkvi {
             ));
         }
 
-        // Recently Played is songs now: warm each song's 80px album cover by
-        // `album_id` (skip songs with no album). Reuses the by-id quad warmer
-        // with single-element slices, inserting the queued ids into
-        // `album_art_pending` exactly like the playlist/genre quad warmers do —
-        // without this the song rows and the section preview panel would show no
-        // thumbnail.
+        // The song shelves (Recently Played, Most Played Tracks) plus the
+        // Random Songs pick's teaser (its first song): warm each song's 80px
+        // album cover by `album_id` (skip songs with no album). Reuses the
+        // by-id quad warmer with single-element slices, inserting the queued
+        // ids into `album_art_pending` exactly like the genre quad warmer does
+        // — without this the song rows and the section preview panel would
+        // show no thumbnail.
         let song_album_ids: Vec<Vec<String>> = self
             .harbour
             .recently_played
             .iter()
             .chain(self.harbour.most_played_songs.iter())
+            .chain(self.harbour.random_songs.first())
             .filter_map(|s| s.album_id.clone())
             .map(|id| vec![id])
             .collect();
@@ -997,23 +1261,24 @@ impl Nokkvi {
             tasks.extend(self.warm_harbour_quad_ids(&albums_vm, song_album_ids));
         }
 
-        // Most Played Artists shelf: warm each artist's `ar-{id}` 80px mini into
-        // album_art (the shelf's only cover source — the album/song warmers don't
-        // cover artist ids).
+        // The artist rows (Most Played Artists shelf + the Random Artist pick):
+        // warm each artist's `ar-{id}` 80px mini into album_art (the rows' only
+        // cover source — the album/song warmers don't cover artist ids).
         let artist_ids: Vec<String> = self
             .harbour
             .most_played_artists
             .iter()
+            .chain(self.harbour.random_artist.iter())
             .map(|a| a.id.clone())
             .collect();
         let artist_tasks = self.artist_mini_warm_tasks(artist_ids, &albums_vm);
         tasks.extend(artist_tasks);
 
-        // Per-playlist album-id fan-out feeding PlaylistQuadIdsLoaded, which then
-        // warms the individual quad tiles.
+        // The Random Playlist pick's album-id fan-out feeding
+        // PlaylistQuadIdsLoaded, which then warms the individual quad tiles.
         let playlist_ids: Vec<String> = self
             .harbour
-            .playlists
+            .random_playlist
             .iter()
             .filter(|p| p.artwork_album_ids.is_empty())
             .map(|p| p.id.clone())
@@ -1030,14 +1295,14 @@ impl Nokkvi {
             ));
         }
 
-        // Per-genre album-id fan-out feeding GenreQuadIdsLoaded, the genre
-        // mirror of the playlist path.
+        // Per-genre album-id fan-out feeding GenreQuadIdsLoaded (the Most
+        // Played Genres shelf + the Random Genre pick).
         let mut seen_genre_ids = HashSet::new();
         let genres_needing_ids: Vec<String> = self
             .harbour
-            .genres
+            .most_played_genres
             .iter()
-            .chain(self.harbour.most_played_genres.iter())
+            .chain(self.harbour.random_genre.iter())
             .filter(|g| g.artwork_album_ids.is_empty())
             .map(|g| g.id.clone())
             .filter(|id| seen_genre_ids.insert(id.clone()))
@@ -1089,8 +1354,8 @@ impl Nokkvi {
         tasks
     }
 
-    /// Warm the quad tiles for every Harbour playlist whose album ids are now
-    /// resolved. Mirrors the collage prefetch's `album_art_pending` bookkeeping.
+    /// Warm the Random Playlist pick's quad tiles once its album ids resolve.
+    /// Mirrors the collage prefetch's `album_art_pending` bookkeeping.
     fn warm_harbour_playlist_quads(&mut self) -> Task<Message> {
         let Some(shell) = &self.app_service else {
             return Task::none();
@@ -1098,15 +1363,16 @@ impl Nokkvi {
         let albums_vm = shell.albums().clone();
         let id_groups: Vec<Vec<String>> = self
             .harbour
-            .playlists
+            .random_playlist
             .iter()
             .map(|p| p.artwork_album_ids.clone())
             .collect();
         Task::batch(self.warm_harbour_quad_ids(&albums_vm, id_groups))
     }
 
-    /// Warm the quad tiles for every Harbour genre whose album ids are now
-    /// resolved. Genre mirror of [`Self::warm_harbour_playlist_quads`].
+    /// Warm the quad tiles for every Harbour genre (Most Played + the Random
+    /// pick) whose album ids are now resolved. Genre mirror of
+    /// [`Self::warm_harbour_playlist_quads`].
     fn warm_harbour_genre_quads(&mut self) -> Task<Message> {
         let Some(shell) = &self.app_service else {
             return Task::none();
@@ -1114,9 +1380,9 @@ impl Nokkvi {
         let albums_vm = shell.albums().clone();
         let id_groups: Vec<Vec<String>> = self
             .harbour
-            .genres
+            .most_played_genres
             .iter()
-            .chain(self.harbour.most_played_genres.iter())
+            .chain(self.harbour.random_genre.iter())
             .map(|g| g.artwork_album_ids.clone())
             .collect();
         Task::batch(self.warm_harbour_quad_ids(&albums_vm, id_groups))

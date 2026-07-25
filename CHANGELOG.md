@@ -6,11 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Harbour gains a Random block: five rows each previewing a drawn album, artist, playlist, genre, or 100-song mix — one press plays it.
+- Refreshing Harbour re-rolls the Random block's draws.
+- Harbour's header gains the standard refresh button.
+
 ### Changed
+
+- Harbour's random rows sit together after Most Played, ordered like the nav bar: Album, Artist, Songs, Genre, Playlist.
 
 ### Fixed
 
+- Shift+Enter on a Harbour item row now collapses its section, matching the other library views.
+- The configured font now applies to all text from launch; some labels previously stayed in the built-in Fira Sans.
+- Harbour section headers now share the rows' text layout, fixing uneven title-subtitle spacing and subtitle color.
+
 ### Removed
+
+- The Random Playlists and Random Genres four-pick shelves; their quick-play rows replace them.
 
 ## v0.18.2 — 2026-07-22
 

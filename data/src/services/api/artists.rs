@@ -98,6 +98,60 @@ impl ArtistsApiService {
         Ok((artists, total_count))
     }
 
+    /// Draw ONE uniformly-random artist: probe the table size with a 1-row
+    /// page, then fetch a single row at a random offset. Two tiny requests
+    /// where `sort_mode = "random"` would download the whole table (Navidrome
+    /// cannot server-randomize artists, so that path shuffles client-side).
+    /// Uniformity rests on the `X-Total-Count` header (Navidrome's native API
+    /// always sends it; without it the fallback total collapses to the probe
+    /// page and the draw degrades to the first artist). `Ok(None)` when the
+    /// (library-scoped) table is empty.
+    pub async fn load_random_artist(
+        &self,
+        library_ids: &[i32],
+        album_artists_only: bool,
+    ) -> Result<Option<Artist>> {
+        use rand::RngExt;
+
+        let (first_page, total) = self
+            .load_artists(
+                "name",
+                "ASC",
+                None,
+                None,
+                library_ids,
+                album_artists_only,
+                Some(0),
+                Some(1),
+            )
+            .await?;
+        if total == 0 || first_page.is_empty() {
+            return Ok(None);
+        }
+        let offset = rand::rng().random_range(0..total) as usize;
+        if offset == 0 {
+            return Ok(first_page.into_iter().next());
+        }
+        let (page, _) = self
+            .load_artists(
+                "name",
+                "ASC",
+                None,
+                None,
+                library_ids,
+                album_artists_only,
+                Some(offset),
+                Some(1),
+            )
+            .await?;
+        // A between-requests library shrink can leave the offset past the end;
+        // the probe row is a fine draw in that racy sliver.
+        Ok(page
+            .into_iter()
+            .next()
+            .or_else(|| first_page.into_iter().next()))
+    }
+
     /// Build the `_sort` / `_order` / role / filter / search / pagination /
     /// `library_id` params for an `/api/artist` browse request. Extracted
     /// (mirroring `SongsApiService::build_song_params`) so the wire shape is

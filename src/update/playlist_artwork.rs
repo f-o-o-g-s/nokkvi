@@ -189,17 +189,22 @@ impl Nokkvi {
     ) -> Task<Message> {
         // Only custom-cover playlists have anything to fetch; read the LIVE
         // library field so an SSE reload that cleared it stops the fetch. The
-        // Harbour home view holds its own playlist lists — the Random Playlists
-        // shelf AND the whole-library search results — so fall back to them for
-        // a playlist centered there that the library view never loaded. The
-        // search rows carry raw `Playlist`s, which gate custom art on
-        // `custom_image()` (the empty-string form must not count).
+        // Harbour home view holds playlists the library view never loaded —
+        // its Random Playlist pick AND the whole-library search results — so
+        // fall back to them for a playlist centered there. The search rows
+        // carry raw `Playlist`s, which gate custom art on `custom_image()`
+        // (the empty-string form must not count).
         let live = self
             .library
             .playlists
             .iter()
             .find(|p| p.id == playlist_id)
-            .or_else(|| self.harbour.playlists.iter().find(|p| p.id == playlist_id))
+            .or_else(|| {
+                self.harbour
+                    .random_playlist
+                    .as_ref()
+                    .filter(|p| p.id == playlist_id)
+            })
             .map(|p| (p.uploaded_image.is_some(), p.updated_at.clone()))
             .or_else(|| {
                 self.harbour
