@@ -91,7 +91,9 @@ pub struct HarbourState {
     /// across keystrokes so a re-search never re-resolves a known playlist.
     pub search_playlist_album_ids: HashMap<String, Vec<String>>,
     /// Resolved album ids for each searched genre's quad thumbnail, keyed by
-    /// genre name (== id). Genre mirror of [`Self::search_playlist_album_ids`].
+    /// genre NAME — Harbour's genre identity throughout (a `Genre::id` from the
+    /// server is a `tag.id` hash, not the name). Genre mirror of
+    /// [`Self::search_playlist_album_ids`].
     pub search_genre_album_ids: HashMap<String, Vec<String>>,
 }
 

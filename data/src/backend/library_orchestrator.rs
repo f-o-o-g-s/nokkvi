@@ -105,7 +105,9 @@ impl<'a> LibraryOrchestrator<'a> {
         self.artists.load_artist_songs(artist_id).await
     }
 
-    /// Genre is keyed by name (Navidrome API contract). Constructs
+    /// Genre is keyed by NAME — the client-wide genre-identity convention
+    /// (Navidrome's tag filters match the name's value atom; see gotchas.md
+    /// "Genre identity"). Constructs
     /// `SongsApiService` on demand through the shared
     /// [`AuthGateway::build_native_api`] factory path.
     pub(crate) async fn resolve_genre(&self, genre_name: &str) -> Result<Vec<Song>> {

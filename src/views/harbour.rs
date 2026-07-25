@@ -1415,11 +1415,13 @@ impl HarbourPage {
                     .as_ref()
                     .and_then(|pid| data.playlist_custom_large_art.get(pid));
                 let collage = match kind {
+                    // Read by NAME — the key `harbour_center_collage_target`
+                    // warms under (a genre's `id` is a `tag.id` hash).
                     RandomKind::Genres => data
                         .harbour
                         .random_genre
                         .as_ref()
-                        .and_then(|g| data.genre_collage.get(&g.id)),
+                        .and_then(|g| data.genre_collage.get(&g.name)),
                     RandomKind::Playlists => data
                         .harbour
                         .random_playlist
@@ -2044,9 +2046,11 @@ pub(crate) fn section_collage_source(
     use crate::app_message::CollageTarget;
     match id {
         HarbourSectionId::MostPlayedGenres => harbour.most_played_genres.first().map(|g| {
+            // NAME, like every genre-collage key in Harbour. (Tally genres
+            // synthesize `id == name`, so this is identity-only hygiene.)
             (
                 CollageTarget::Genre,
-                g.id.as_str(),
+                g.name.as_str(),
                 g.artwork_album_ids.as_slice(),
             )
         }),

@@ -230,9 +230,17 @@ impl GenresApiService {
         Ok(genres)
     }
 
-    /// Load albums for a specific genre (for artwork display)
-    /// Returns up to 9 album IDs for the 3x3 collage
-    pub async fn load_genre_albums(&self, genre_name: &str) -> Result<Vec<String>> {
+    /// Load albums for a specific genre (for artwork display).
+    /// Returns up to 9 album IDs for the 3x3 collage.
+    ///
+    /// `genre_key` may be the genre NAME or its `/api/genre` id: Navidrome's
+    /// `genre_id` filter (`tagIDFilter` in `persistence/sql_tags.go`) runs
+    /// `json_tree` over each row's `tags` JSON and matches the given value
+    /// against EITHER leaf of `{"id": …, "value": …}`, so both identities
+    /// filter correctly. Callers in this client pass the NAME everywhere
+    /// except the Genres view's collage pipeline, whose cache is id-keyed
+    /// end-to-end — see gotchas.md "Genre identity".
+    pub async fn load_genre_albums(&self, genre_key: &str) -> Result<Vec<String>> {
         // Use Native API to load albums filtered by genre
         // The API endpoint is /api/album with genre_id filter
         let params = vec![
@@ -240,7 +248,7 @@ impl GenresApiService {
             ("_order", "ASC"),
             ("_start", "0"),
             ("_end", "9"), // Only need 9 for collage
-            ("genre_id", genre_name),
+            ("genre_id", genre_key),
         ];
 
         let result = self.client.get_with_headers("/api/album", &params).await;
@@ -264,7 +272,7 @@ impl GenresApiService {
             Err(e) => {
                 warn!(
                     " GenresApiService: Failed to load albums for genre '{}': {}",
-                    genre_name, e
+                    genre_key, e
                 );
                 Ok(Vec::new())
             }
@@ -272,7 +280,9 @@ impl GenresApiService {
     }
 
     /// Load full album objects for a specific genre (for expansion display).
-    /// Returns all albums in the genre as full Album structs.
+    /// Returns all albums in the genre as full Album structs. Takes the genre
+    /// NAME (all callers pass it; the id would also match — see
+    /// [`Self::load_genre_albums`]).
     pub async fn load_genre_albums_full(
         &self,
         genre_name: &str,

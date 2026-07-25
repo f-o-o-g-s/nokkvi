@@ -1628,7 +1628,10 @@ fn shelves_loaded_warms_the_centered_random_pick() {
 #[test]
 fn centering_the_random_genre_pick_warms_its_collage() {
     let mut app = test_app();
-    let mut g = make_genre("Rock", "Rock");
+    // A REAL server genre: `id` is a tag.id hash, distinct from the name. The
+    // collage must key on the NAME (Harbour's genre identity everywhere) — an
+    // id-keyed warm would cache under the hash while the render reads the name.
+    let mut g = make_genre("1b9a7fc06e21f14b6b1e35c22bcb0d0a", "Rock");
     g.artwork_album_ids = vec!["al1".into()];
     app.harbour.random_genre = Some(g);
 
@@ -1643,7 +1646,70 @@ fn centering_the_random_genre_pick_warms_its_collage() {
 
     assert!(
         app.artwork.genre.pending.contains("Rock"),
-        "centering the Random Genre pick marks its 300px collage pending"
+        "centering the Random Genre pick marks its 300px collage pending under the NAME"
+    );
+    assert!(
+        !app.artwork
+            .genre
+            .pending
+            .contains("1b9a7fc06e21f14b6b1e35c22bcb0d0a"),
+        "the tag.id hash is not a Harbour collage key"
+    );
+}
+
+/// The shelf quad fan-out and its reply are keyed by genre NAME: a real server
+/// pick's `id` is a `tag.id` hash, so id-keyed matching would never fill the
+/// pick's `artwork_album_ids` (and its row would stay quad-less forever).
+#[test]
+fn genre_quad_ids_land_on_the_pick_and_tally_by_name() {
+    let mut app = test_app();
+    app.harbour.shelves_generation = 3;
+    // The pick: real server genre (hash id). The tally twin: synthesized
+    // (id == name). One NAME-keyed reply must fill both.
+    app.harbour.random_genre = Some(make_genre("1b9a7fc06e21f14b6b1e35c22bcb0d0a", "Rock"));
+    app.harbour.most_played_genres = vec![make_genre("Rock", "Rock")];
+
+    let _ = app.handle_harbour_loader(HarbourLoaderMessage::GenreQuadIdsLoaded {
+        generation: 3,
+        results: vec![(
+            "Rock".to_string(),
+            vec!["al1".to_string(), "al2".to_string()],
+        )],
+    });
+
+    assert_eq!(
+        app.harbour
+            .random_genre
+            .as_ref()
+            .map(|g| g.artwork_album_ids.clone()),
+        Some(vec!["al1".to_string(), "al2".to_string()]),
+        "the hash-id pick is matched by NAME"
+    );
+    assert_eq!(
+        app.harbour.most_played_genres[0].artwork_album_ids,
+        vec!["al1".to_string(), "al2".to_string()],
+        "the same-name tally genre cross-fills from the one reply"
+    );
+
+    // A reply keyed by the HASH must fill nothing — it would mean the fan-out
+    // regressed to sending `Genre::id`, the drift this test exists to catch.
+    let mut app = test_app();
+    app.harbour.shelves_generation = 3;
+    app.harbour.random_genre = Some(make_genre("1b9a7fc06e21f14b6b1e35c22bcb0d0a", "Rock"));
+    let _ = app.handle_harbour_loader(HarbourLoaderMessage::GenreQuadIdsLoaded {
+        generation: 3,
+        results: vec![(
+            "1b9a7fc06e21f14b6b1e35c22bcb0d0a".to_string(),
+            vec!["al1".to_string()],
+        )],
+    });
+    assert_eq!(
+        app.harbour
+            .random_genre
+            .as_ref()
+            .map(|g| g.artwork_album_ids.len()),
+        Some(0),
+        "a hash-keyed reply matches no genre — the convention is NAME"
     );
 }
 

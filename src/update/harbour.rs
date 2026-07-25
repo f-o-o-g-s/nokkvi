@@ -122,30 +122,34 @@ pub(crate) fn search_warm_album_ids(
 }
 
 /// Fan out each genre's album-id lookup (feeding its 2×2 quad cover)
-/// concurrently, mapping `genre_id → its album ids`. One failed lookup degrades
-/// to an empty tile set (`unwrap_or_default`) rather than dropping the whole
-/// fan-out. `load_genre_albums` keys on the genre NAME, which equals
-/// `GenreUIViewData::id` (the `LibraryFilter::GenreId` convention
-/// `play_harbour_genre` relies on). Shared by the shelf warm
-/// (`warm_harbour_artwork`) and the search warm (`fan_out_search_collage_ids`)
-/// so both resolve genres identically.
+/// concurrently, mapping `genre name → its album ids`. One failed lookup
+/// degrades to an empty tile set (`unwrap_or_default`) rather than dropping the
+/// whole fan-out.
+///
+/// Takes genre NAMES — Harbour's genre identity throughout (fan-out keys, the
+/// quad/collage side-maps, `PlayTarget::GenreRandom`), NOT `GenreUIViewData::id`,
+/// which for server genres is a `tag.id` hash that only equals the name on the
+/// synthesized tally genres. Shared by the shelf warm (`warm_harbour_artwork`)
+/// and the search warm (`fan_out_search_collage_ids`) so both resolve genres
+/// identically. (See gotchas.md "Genre identity" for why either would work on
+/// the wire — and why this module still standardizes on the name.)
 async fn resolve_genre_album_ids(
     shell: &AppService,
-    genre_ids: Vec<String>,
+    genre_names: Vec<String>,
 ) -> Vec<(String, Vec<String>)> {
     let (server_url, cred) = shell.auth().server_config().await;
     let Some(client) = shell.auth().get_client().await else {
         return Vec::new();
     };
-    let futures = genre_ids.into_iter().map(|id| {
+    let futures = genre_names.into_iter().map(|name| {
         let client = client.clone();
         let server_url = server_url.clone();
         let cred = cred.clone();
         async move {
             let svc =
                 nokkvi_data::services::api::genres::GenresApiService::new(client, server_url, cred);
-            let ids = svc.load_genre_albums(&id).await.unwrap_or_default();
-            (id, ids)
+            let ids = svc.load_genre_albums(&name).await.unwrap_or_default();
+            (name, ids)
         }
     });
     futures::future::join_all(futures).await
@@ -559,10 +563,13 @@ impl Nokkvi {
             HarbourRow::Trawl { .. } => None,
             // The genre/playlist RandomPlay picks preview their own collage.
             HarbourRow::RandomPlay { kind } => match kind {
+                // Keyed by NAME — Harbour's genre-collage key everywhere (the
+                // search item rows key via `PlayTarget::GenreRandom`, which
+                // carries the name), and the render arm reads the same key.
                 RandomKind::Genres => self.harbour.random_genre.as_ref().map(|g| {
                     (
                         CollageTarget::Genre,
-                        g.id.clone(),
+                        g.name.clone(),
                         g.artwork_album_ids.clone(),
                     )
                 }),
@@ -1317,15 +1324,17 @@ impl Nokkvi {
                 if generation != self.harbour.shelves_generation {
                     return Task::none();
                 }
-                for (genre_id, album_ids) in results {
-                    // The id can name the Random Genre pick, a Most Played
-                    // genre, or both — set every match.
+                for (genre_name, album_ids) in results {
+                    // Matched by NAME (the fan-out's key): the name can belong
+                    // to the Random Genre pick, a Most Played genre, or both —
+                    // set every match. `g.id` would miss the pick, whose id is
+                    // a `tag.id` hash.
                     for genre in self
                         .harbour
                         .most_played_genres
                         .iter_mut()
                         .chain(self.harbour.random_genre.iter_mut())
-                        .filter(|g| g.id == genre_id)
+                        .filter(|g| g.name == genre_name)
                     {
                         genre.artwork_album_ids = album_ids.clone();
                     }
@@ -1473,16 +1482,19 @@ impl Nokkvi {
         }
 
         // Per-genre album-id fan-out feeding GenreQuadIdsLoaded (the Most
-        // Played Genres shelf + the Random Genre pick).
-        let mut seen_genre_ids = HashSet::new();
+        // Played Genres shelf + the Random Genre pick). Keyed by NAME, like
+        // every genre key in Harbour — the pick's `id` is a `tag.id` hash, and
+        // keying by name also dedups a genre that appears both as the pick and
+        // in the tally (whose synthesized ids ARE names).
+        let mut seen_genre_names = HashSet::new();
         let genres_needing_ids: Vec<String> = self
             .harbour
             .most_played_genres
             .iter()
             .chain(self.harbour.random_genre.iter())
             .filter(|g| g.artwork_album_ids.is_empty())
-            .map(|g| g.id.clone())
-            .filter(|id| seen_genre_ids.insert(id.clone()))
+            .map(|g| g.name.clone())
+            .filter(|name| seen_genre_names.insert(name.clone()))
             .collect();
         if !genres_needing_ids.is_empty() {
             tasks.push(
