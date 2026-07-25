@@ -6,27 +6,40 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Harbour gains a Random block: five rows each previewing a drawn album, artist, playlist, genre, or 100-song mix — one press plays it.
-- Refreshing Harbour re-rolls the Random block's draws.
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.18.3 — 2026-07-25
+
+### Added
+
+- Harbour gains a Random block: one row each for a random album, artist, playlist, genre, and 100-song mix.
+- Each Random row shows the pick it drew, with artwork and details.
+- Pressing a Random row plays the pick it shows.
+- Refreshing Harbour re-rolls every Random row's pick.
 - Harbour's header gains the standard refresh button.
 
 ### Changed
 
-- Harbour's random rows sit together after Most Played, ordered like the nav bar: Album, Artist, Songs, Genre, Playlist.
-- The queue's album and genre column now renders at the standard metadata size, matching the Songs view.
-- Expanded track and album rows now show their artist line at the standard subtitle size.
-- The Songs plays column is right-aligned, matching the queue and the duration column.
+- Harbour's Random rows follow the nav bar's order: Album, Artist, Songs, Genre, Playlist.
+- The queue's album and genre column now uses the same text size as the Songs view.
+- Artist lines on expansion child rows now use the standard subtitle size.
+- The Songs plays column is now right-aligned.
 
 ### Fixed
 
-- Shift+Enter on a Harbour item row now collapses its section, matching the other library views.
-- The configured font now applies to all text from launch; some labels previously stayed in the built-in Fira Sans.
-- Harbour section headers now share the rows' text layout, fixing uneven title-subtitle spacing and subtitle color.
-- A centered Genres row now bolds its name like the other views.
+- Shift+Enter on a Harbour item row now collapses its section.
+- Labels that ignored the Settings font at launch now use it.
+- Harbour section headers now use the same title-subtitle spacing as the rows below.
+- Harbour section header subtitles now use the same color as every other subtitle.
+- A centered Genres row now bolds its name.
 
 ### Removed
 
-- The Random Playlists and Random Genres four-pick shelves; their quick-play rows replace them.
+- The four-pick Random Playlists and Random Genres shelves.
 
 ## v0.18.2 — 2026-07-22
 
