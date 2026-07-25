@@ -10,6 +10,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+### Removed
+
+## v0.18.4 — 2026-07-25
+
+### Fixed
+
 - Browsing Albums or Songs sorted Random no longer repeats or skips rows after a visit to Harbour.
 - The Random Genre row now works on servers that do not report genre song counts.
 - The Random Playlist row now shows its icon instead of a blank square while artwork loads.
@@ -18,15 +24,14 @@ All notable changes to this project will be documented in this file.
 - Add to Queue now works on Harbour's genre rows.
 - Holding the refresh key on Harbour no longer starts overlapping reloads.
 - The Random Genre row no longer lists more songs than one press plays.
-- Genre and playlist details no longer read "1 songs".
+- The Random Genre row's details no longer read "1 songs".
+- The Random Playlist row's details no longer read "1 songs".
 - Random rows with no pick drawn now play the dismiss sound, not the confirm sound.
 - Harbour's no-pick message no longer blames an empty library when a draw simply failed.
-- A failed random draw now reports the error instead of reading as an empty library.
+- Playing a random genre now surfaces the server's error instead of reporting no songs to play.
 - The Random Artist row now keeps its pick when one request fails mid-draw.
-- Gapless album joining now recognizes Various Artists albums in random and similar-song queues.
+- Various Artists albums in random and similar-song queues no longer join gaplessly as one album.
 - Changing the font in Settings now updates the Trawl modal, login form, and empty-state labels too.
-
-### Removed
 
 ## v0.18.3 — 2026-07-25
 
