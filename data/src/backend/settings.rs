@@ -241,7 +241,8 @@ impl SettingsService {
     delegate_setter!(set_strip_click_action, StripClickAction);
     delegate_setter!(
         /// Set strip label visibility (`title:` / `artist:` / `album:` prefixes)
-        set_strip_show_labels, bool
+        set_strip_show_labels,
+        bool
     );
     delegate_setter!(set_strip_separator, StripSeparator);
 
@@ -256,15 +257,18 @@ impl SettingsService {
     delegate_setter!(set_artwork_column_stretch_fit, ArtworkStretchFit);
     delegate_setter!(
         /// Set the artwork column width fraction (0.05..=0.80)
-        set_artwork_column_width_pct, f32
+        set_artwork_column_width_pct,
+        f32
     );
     delegate_setter!(
         /// Set the Auto-mode max artwork fraction (0.30..=0.70)
-        set_artwork_auto_max_pct, f32
+        set_artwork_auto_max_pct,
+        f32
     );
     delegate_setter!(
         /// Set the Always-Vertical artwork height fraction (0.10..=0.80)
-        set_artwork_vertical_height_pct, f32
+        set_artwork_vertical_height_pct,
+        f32
     );
 
     // -- Per-view column visibility --
@@ -335,17 +339,20 @@ impl SettingsService {
     delegate_setter!(set_volume_normalization, VolumeNormalizationMode);
     delegate_setter!(
         /// Set normalization level (AGC mode only)
-        set_normalization_level, NormalizationLevel
+        set_normalization_level,
+        NormalizationLevel
     );
     delegate_setter!(set_replay_gain_preamp_db, f32);
     delegate_setter!(
         /// Set ReplayGain fallback dB (used when track has no tags)
-        set_replay_gain_fallback_db, f32
+        set_replay_gain_fallback_db,
+        f32
     );
     delegate_setter!(set_replay_gain_fallback_to_agc, bool);
     delegate_setter!(
         /// Set ReplayGain peak-aware clipping prevention
-        set_replay_gain_prevent_clipping, bool
+        set_replay_gain_prevent_clipping,
+        bool
     );
 
     delegate_setter!(set_verbose_config, VerboseConfig);
