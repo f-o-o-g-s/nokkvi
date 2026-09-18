@@ -73,7 +73,7 @@ jobs:
           archive_pattern="^## v${prev_major}\.${prev_minor}\."
           if grep -qE "$archive_pattern" CHANGELOG.md; then
             echo "::error::CHANGELOG.md still contains v${prev_major}.${prev_minor}.* entries — close out the previous minor first."
-            echo "::error::Move those blocks into changelog-archive/CHANGELOG-${prev_major}.${prev_minor}.md and add a v${prev_major}.${prev_minor}.x line to the 'Older releases' footer (see .agent/workflows/package.md step 1)."
+            echo "::error::Move those blocks into changelog-archive/CHANGELOG-${prev_major}.${prev_minor}.md and add a v${prev_major}.${prev_minor}.x line to the 'Older releases' footer (see .claude/skills/package/SKILL.md step 1)."
             echo "::error::Recover with:"
             echo "::error::  git push --delete origin $RELEASE_TAG && git tag -d $RELEASE_TAG"
             echo "::error::  # archive, commit, push, re-tag (annotated for minor/major)"

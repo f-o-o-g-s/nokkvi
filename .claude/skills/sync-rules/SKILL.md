@@ -1,18 +1,17 @@
 ---
-description: Audit and update .claude/rules/, .claude/skills/, .agent/workflows/, and CLAUDE.md to match the current codebase
+description: Audit and update .claude/rules/, .claude/skills/, and CLAUDE.md to match the current codebase
 ---
 
 # Sync Agent Rules
 
-Audit every `.claude/rules/*.md` rule, `.claude/skills/*/SKILL.md` skill, and `.agent/workflows/*.md` workflow against the live codebase and rewrite the stale ones. Then audit `CLAUDE.md` separately under a stricter rubric.
+Audit every `.claude/rules/*.md` rule and every `.md` file under `.claude/skills/` (each `SKILL.md` plus its supporting files) against the live codebase and rewrite the stale ones. Then audit `CLAUDE.md` separately under a stricter rubric.
 
-**Economics (this inverts the old rubric):** `.claude/rules/` files AUTO-INJECT — `code-standards.md` (no `paths:`) loads in every session; path-scoped rules inject on the first Read of a matching file, including in subagents. Verbosity is no longer free. Rules hold **invariants, contracts, and whys** — never enumerated variant lists, field catalogs, file inventories, or churning counts (in-code doc-comments are canonical for those). Treat re-introduction of a catalog into a rule file as a sync FAILURE: point the author at the code instead. `.agent/workflows/` files are read on demand by slash commands, so verbosity there is still acceptable when accuracy demands it.
+**Economics (this inverts the old rubric):** `.claude/rules/` files AUTO-INJECT — `code-standards.md` (no `paths:`) loads in every session; path-scoped rules inject on the first Read of a matching file, including in subagents. Verbosity is no longer free. Rules hold **invariants, contracts, and whys** — never enumerated variant lists, field catalogs, file inventories, or churning counts (in-code doc-comments are canonical for those). Treat re-introduction of a catalog into a rule file as a sync FAILURE: point the author at the code instead. Skill **bodies** and supporting files load only when the skill runs, so verbosity there is still acceptable when accuracy demands it — but every model-invocable skill's `description` frontmatter loads in every session, so keep descriptions to one or two sentences.
 
 ## 1. Enumerate files and check staleness
 
-// turbo
 ```bash
-for f in $(find .claude/rules .claude/skills .claude/commands .agent/workflows -type f -name '*.md' | sort) CLAUDE.md; do
+for f in $(find .claude/rules .claude/skills -type f -name '*.md' | sort) CLAUDE.md; do
   last_commit=$(git log -1 --format='%H %ai %s' -- "$f")
   last_hash=$(echo "$last_commit" | awk '{print $1}')
   commits_since=$(git rev-list --count "${last_hash}..HEAD" 2>/dev/null || echo "N/A")
@@ -25,7 +24,6 @@ done
 
 ## 2. Pull commit summaries scoped to each stale file
 
-// turbo
 For files with meaningful drift, scope `git log` to the paths each rule documents:
 
 ```bash
@@ -41,7 +39,6 @@ For each stale file:
 
 ## 4. Structural audits (every run, cheap)
 
-// turbo
 - **Glob liveness** — every `paths:` glob in `.claude/rules/*.md` frontmatter must still match at least one existing file; a stale glob is a silently dead rule:
   ```bash
   python3 - << 'EOF'
@@ -62,7 +59,7 @@ For each stale file:
   grep -rn "gotchas.md" src/ data/ | grep -o '"[^"]*"' | sort -u
   # assert each quoted name appears in .claude/rules/gotchas.md
   ```
-- **No stale paths** — `git grep -n "\.agent/rules" -- ':!*sync-rules.md'` must return nothing (that directory is gone; rules live in `.claude/rules/`; the exclusion skips this procedure's own text).
+- **No stale paths** — `git grep -nE '\.agent/|\.claude/commands' -- ':!.claude/skills/sync-rules/' ':!CHANGELOG.md' ':!changelog-archive/'` must return nothing. Both directories are gone: rules live in `.claude/rules/`, and procedures (the old commands + workflows) live as skills in `.claude/skills/`. The exclusions skip this procedure's own text and the immutable release history.
 
 ## 5. Rewrite stale files
 
@@ -76,7 +73,7 @@ For each stale file:
 CLAUDE.md is auto-injected every session. Treat it as an index + load-bearing rules, not a knowledge base.
 
 Verify only:
-- **Catalog accuracy** — the `.claude/rules/` description block and `.agent/workflows/` list point to files that still exist with descriptions that still match.
+- **Catalog accuracy** — the `.claude/rules/` description block and the skills list point to files that still exist with descriptions that still match.
 - **Architecture summaries** — the workspace table, TEA pattern, `AppService` tree, and `CustomAudioEngine` diagram still describe reality at a coarse level.
 - **Inline gotchas** — each one still applies. Resolved gotchas get deleted, not updated. The inline "Gotchas (the silent ones)" block STAYS even though `gotchas.md` auto-injects — path-scoped rules are lost after /compact until a matching file is re-read; the inline block is the compaction-resilient safety net.
 - **Commands** — build/test invocations, system deps still correct.
@@ -87,7 +84,7 @@ Hard rule: **do not expand CLAUDE.md.** New detail goes in a rule file; CLAUDE.m
 ## 7. Commit
 
 ```bash
-git add .claude/rules .claude/skills .claude/commands .agent/workflows CLAUDE.md && git commit -m "chore(rules): sync agent rules and workflows with current codebase"
+git add .claude/rules .claude/skills CLAUDE.md && git commit -m "chore(rules): sync agent rules and skills with current codebase"
 ```
 
-Stage only the audited paths — never `git add .claude/` wholesale (it would catch `settings.local.json`). Omit untouched paths from the `git add`. End the commit message at the subject — no `Co-Authored-By` trailer. If nothing changed, skip the commit.
+Stage only the audited paths — never `git add .claude/` wholesale (it would catch `settings.local.json`). Omit untouched paths from the `git add`. End the commit message at the subject. If nothing changed, skip the commit and say so.

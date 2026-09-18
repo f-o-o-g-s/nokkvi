@@ -1,10 +1,6 @@
----
-description: How to add a new slot list view to the application
----
-
 # Add a New View
 
-Steps to add a new slot-list-based view, in order.
+Steps to add a new slot-list-based view, in order. Supporting file of the `new-feature-checklist` skill — run the checklist's Cross-Cutting and Verification sections too.
 
 1. Create `src/views/{name}.rs` (or `src/views/{name}/mod.rs` for complex views) with:
    - `{Name}Page` struct with `common: SlotListPageState`

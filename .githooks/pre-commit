@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Updates README.md with the currently tested versions before commit,
 # and refuses minor/major Cargo.toml bumps that leave the previous minor's
-# entries unarchived in CHANGELOG.md (see .agent/workflows/package.md step 1).
+# entries unarchived in CHANGELOG.md (see .claude/skills/package/SKILL.md step 1).
 
 set -e
 
@@ -38,7 +38,7 @@ if git diff --cached --name-only | grep -qx 'Cargo.toml'; then
                 echo "  Move those release blocks into:"
                 echo "      changelog-archive/CHANGELOG-${old_major}.${old_minor}.md"
                 echo "  and add a v${old_major}.${old_minor}.x line to the 'Older releases' footer."
-                echo "  See .agent/workflows/package.md step 1 (Archive boundary)."
+                echo "  See .claude/skills/package/SKILL.md step 1 (Archive boundary)."
                 exit 1
             fi
         fi

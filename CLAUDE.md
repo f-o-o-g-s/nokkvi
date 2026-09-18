@@ -20,7 +20,7 @@ cargo +nightly fmt --all                     # format (NIGHTLY rustfmt required 
 cargo +nightly fmt --all -- --check          # format check
 ```
 
-CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build). All must pass before merging. `rustfmt.toml` uses unstable features (`imports_granularity = "Crate"`, `group_imports = "StdExternalCrate"`), which is why nightly is required.
+CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build) on the latest unpinned stable + nightly, so a stale local toolchain can pass here and fail there (`/package` runs `rustup update stable nightly`). All must pass before merging. `rustfmt.toml` uses unstable features (`imports_granularity = "Crate"`, `group_imports = "StdExternalCrate"`), which is why nightly is required.
 
 System dependencies (Arch): `pacman -S pipewire alsa-lib fontconfig pkgconf cmake`. The audio engine links against `libpipewire-0.3` at build time; `cmake` is used to compile the bundled libopus shipped with `symphonia-adapter-libopus` (Symphonia 0.5 ships no native Opus decoder — see GH#3).
 
@@ -148,9 +148,9 @@ Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod test
 
 The full rule set lives in `.claude/rules/` and **auto-injects**: `code-standards.md` loads in every session; the rest are path-scoped and inject on the first Read of a matching file (`audio-engine.md` — engine internals, crossfade, EQ; `backend-services.md` — services, persistence, queue system; `ui-views.md` — slot list views, expansion, browsing panel, modals; `widgets.md` — widget catalog, layout constants, menu/modal chrome, SVG icons; `visualizer.md` — FFT pipeline, shaders, effects; `settings-view.md` — settings module structure, SettingValue types; `gotchas.md` — the subtle pitfalls, fires on any code read). Subagents spawned without having read matching files can Read these directly.
 
-Building or extending a feature (new view, setting, hotkey, menu entry, playback behavior)? Read `.claude/skills/new-feature-checklist/SKILL.md` before writing code and re-check it before committing (also auto-invocable as the `new-feature-checklist` skill).
+Building or extending a feature (new view, setting, hotkey, menu entry, playback behavior)? Read `.claude/skills/new-feature-checklist/SKILL.md` before writing code and re-check it before committing (also auto-invocable as the `new-feature-checklist` skill; its `new-view.md` covers adding a slot-list view).
 
-Workflows in `.agent/workflows/` (`build-test.md`, `commit.md`, `new-view.md`, `package.md`, `sync-rules.md`) document concrete procedures.
+Procedures live as skills in `.claude/skills/`: `/commit`, `/unreleased`, `/sync-rules`, and `/package` (user-invoked only; it also holds the canonical changelog style rubric in § 1).
 
 ## Commit conventions
 

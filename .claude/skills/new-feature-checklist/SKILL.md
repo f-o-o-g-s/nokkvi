@@ -4,6 +4,8 @@ description: End-to-end wiring checklist for adding or extending any nokkvi feat
 
 # New Feature Checklist
 
+Adding a new slot-list **view**? Follow [new-view.md](new-view.md) (ordered wiring steps) alongside this checklist.
+
 ## Data Layer
 - [ ] Domain types in `data/src/types/` (iced-free)
 - [ ] API endpoints in `data/src/services/api/`
@@ -15,7 +17,7 @@ description: End-to-end wiring checklist for adding or extending any nokkvi feat
 - [ ] State / Message / Action enums (TEA pattern)
 - [ ] Update handler in `update/{name}.rs`, dispatch wired in `update/mod.rs`
 - [ ] Async work bridged through `Nokkvi::shell_task` / `shell_spawn` (defined on the root impl in `src/main.rs`)
-- [ ] Paginated loads use `PaginatedFetch::from_common()` (needs_fetch gating built in). For new paged entity types: implement `LoaderTarget` in `update/loader_target.rs` and route through `Nokkvi::load_paged::<T>`
+- [ ] Paginated loads route through `Nokkvi::load_paged::<T>` (`update/loader_target.rs`), which owns the `needs_fetch` gate and the `set_loading(true)` invariant; new paged entity types implement `LoaderTarget` there. `PaginatedFetch::from_common()` only bundles view/sort/search/filter params
 - [ ] Artwork prefetch dispatched from `update/window.rs` if the view shows art
 - [ ] Slot list wrapped in `wrap_with_scroll_indicator()`
 - [ ] Multi-selection: `handle_slot_click()` + `evaluate_context_menu()` for batch resolution. For new slot-list views, wire the optional checkbox column via `wrap_with_select_column()` / `compose_header_with_select()` and add a `{view}_show_select` toggle

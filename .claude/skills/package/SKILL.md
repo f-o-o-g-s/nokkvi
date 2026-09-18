@@ -1,12 +1,11 @@
 ---
 description: Bump version, build, commit, push, and tag a release
+disable-model-invocation: true
 ---
 
 # Release a new version
 
-// turbo-all
-
-The release workflow (`.github/workflows/release.yml`) does the binary build and tarball packaging on tag push. This workflow is what gets you to that tag.
+The release workflow (`.github/workflows/release.yml`) does the binary build and tarball packaging on tag push. This procedure is what gets you to that tag.
 
 ## 0. Bootstrap git hooks
 
