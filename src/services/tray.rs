@@ -196,7 +196,7 @@ fn load_icon_pixmap() -> Option<Icon> {
     let (width, height) = rgba.dimensions();
     let mut data = rgba.into_raw();
     // RGBA → ARGB (network byte order = big-endian = A,R,G,B in memory)
-    for px in data.chunks_exact_mut(4) {
+    for px in data.as_chunks_mut::<4>().0 {
         px.rotate_right(1);
     }
     Some(Icon {

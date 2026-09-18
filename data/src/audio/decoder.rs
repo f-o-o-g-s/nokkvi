@@ -326,8 +326,8 @@ fn leading_trim_prefix_bytes(
 
     let mut dropped_frames: u64 = 0;
     for frame in decoded_bytes.chunks_exact(bytes_per_frame) {
-        let loud = frame.chunks_exact(4).any(|s| {
-            let sample = f32::from_le_bytes([s[0], s[1], s[2], s[3]]);
+        let loud = frame.as_chunks::<4>().0.iter().any(|s| {
+            let sample = f32::from_le_bytes(*s);
             sample.abs() >= super::SOURCE_SILENCE_THRESHOLD
         });
         if loud {

@@ -26,7 +26,7 @@ use crate::{
 /// guaranteed f32-aligned) and matches Symphonia's native-endian raw output;
 /// `output_data` is always a whole number of f32 frames so no bytes are dropped.
 fn decoded_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
-    // `chunks_exact` silently drops a trailing 1–3 byte remainder. Every caller
+    // `as_chunks` silently drops a trailing 1–3 byte remainder. Every caller
     // feeds whole f32 frames today (see the module doc), so this never fires;
     // the assert pins that invariant so a future decode/silence path that ever
     // leaks a partial sample trips loudly in debug/tests instead of silently
@@ -37,8 +37,10 @@ fn decoded_bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
         "decoded byte count must be a whole number of f32 samples"
     );
     bytes
-        .chunks_exact(std::mem::size_of::<f32>())
-        .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<{ std::mem::size_of::<f32>() }>()
+        .0
+        .iter()
+        .map(|b| f32::from_ne_bytes(*b))
         .collect()
 }
 
