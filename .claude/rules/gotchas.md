@@ -32,7 +32,7 @@ paths:
 
 - **Tick handler race**: 10 Hz tick can overwrite optimistic state with stale backend state — use pending flags to prevent reversion before API response.
 - **Source generation counter**: typed `SourceGeneration` wrapper (over `AtomicU64`) — every user-driven source change goes through `bump_for_user_action()`; renderer snapshots `current()` before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
-- **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `PaginatedFetch::from_common()` handles this in update handlers.
+- **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `Nokkvi::load_paged` (`update/loader_target.rs`) owns this invariant plus the `needs_fetch` gate for paged views; `PaginatedFetch::from_common()` only bundles the request params.
 - **PagedBuffer generation**: `generation()` bumps on every mutation. Use `(query, generation)` keys when memoizing filtered results.
 - **Artwork LRU caches go through `SnapshottedLru<K, V>`**: every artwork LRU on `ArtworkState` (`src/state/artwork.rs`, incl. the `{mini, collage}` pair on each `CollageArtworkCache`) is a `SnapshottedLru` newtype that maintains the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — a fresh cache must use `SnapshottedLru`.
 
