@@ -5,9 +5,13 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       nixpkgsFor = forAllSystems (system: nixpkgs.legacyPackages.${system});
     in
@@ -18,7 +22,8 @@
         nokkvi = self.packages.${prev.stdenv.hostPlatform.system}.default;
       };
 
-      packages = forAllSystems (system:
+      packages = forAllSystems (
+        system:
         let
           pkgs = nixpkgsFor.${system};
           runtimeLibs = with pkgs; [
@@ -39,14 +44,17 @@
             dbus
           ];
         in
-        {
+        rec {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "nokkvi";
-            version = "0.18.4";
+            version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
 
             src = ./.;
 
-            cargoHash = "sha256-RjcAjOWrPDqdHlqDEu/mzEmvb76iT5E/t0rRB0iEl8g=";
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+              allowBuiltinFetchGit = true;
+            };
             doCheck = false;
 
             nativeBuildInputs = with pkgs; [
@@ -76,17 +84,20 @@
               platforms = platforms.linux;
             };
           };
+          nokkvi = default;
         }
       );
 
-      apps = forAllSystems (system: {
+      apps = forAllSystems (system: rec {
         default = {
           type = "app";
           program = "${nixpkgsFor.${system}.lib.getExe self.packages.${system}.default}";
         };
+        nokkvi = default;
       });
 
-      devShells = forAllSystems (system:
+      devShells = forAllSystems (
+        system:
         let
           pkgs = nixpkgsFor.${system};
           targetPkg = self.packages.${system}.default;
