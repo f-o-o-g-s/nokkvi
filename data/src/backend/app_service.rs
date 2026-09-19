@@ -1627,19 +1627,18 @@ impl AppService {
         // app re-cues the engine without starting playback.
         let engine_playing = self.playback.engine_is_playing().await;
 
-        // Resolve each entry_id → its song_id *before* the removal. The
-        // post-removal queue no longer holds those entries, and
-        // `decide_removal_aftermath` needs the song_ids to ask "was the
-        // currently-playing song among the removed?".
+        // Resolve the entry_ids → their song_ids *before* the removal, in one
+        // pass over the rows. The post-removal queue no longer holds those
+        // entries, and `decide_removal_aftermath` needs the song_ids to ask
+        // "was the currently-playing song among the removed?".
         let removed_song_ids: Vec<String> = {
+            let targets: HashSet<u64> = entry_ids.iter().copied().collect();
             let qm_arc = self.queue_service.queue_manager();
             let qm = qm_arc.lock().await;
-            entry_ids
+            qm.rows()
                 .iter()
-                .filter_map(|&eid| {
-                    qm.index_of_entry(eid)
-                        .and_then(|idx| qm.song_id_at(idx).map(str::to_owned))
-                })
+                .filter(|row| targets.contains(&row.entry_id))
+                .map(|row| row.song_id.clone())
                 .collect()
         };
 

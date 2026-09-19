@@ -158,6 +158,39 @@ impl PlayOrder {
         order_pos
     }
 
+    /// Batch twin of [`Self::remove_row`]: drop the entry of every row
+    /// flagged in `removed_rows` (indexed by the row vector's positions
+    /// BEFORE the removal, one flag per row) and renumber the survivors onto
+    /// the compacted row vector, in O(n) where a `remove_row` per row costs
+    /// O(k·n). The survivors keep their relative play order, so a full
+    /// permutation of `0..n` becomes one of `0..n-k`.
+    ///
+    /// Returns one flag per play-order slot as it stood BEFORE the removal,
+    /// `true` where the entry was dropped, so the caller can move the play
+    /// cursor and the gapless slot the way a `remove_row` per row would.
+    pub(crate) fn remove_rows(&mut self, removed_rows: &[bool]) -> Vec<bool> {
+        // removed_below[row]: flagged rows above it in the row vector, i.e.
+        // how far the row slides down once they are gone.
+        let mut removed_below = Vec::with_capacity(removed_rows.len());
+        let mut count = 0;
+        for &removed in removed_rows {
+            removed_below.push(count);
+            count += usize::from(removed);
+        }
+        let slot_removed: Vec<bool> = self
+            .0
+            .iter()
+            .map(|&row| removed_rows.get(row).copied().unwrap_or(false))
+            .collect();
+        let mut slots = slot_removed.iter();
+        self.0
+            .retain(|_| slots.next().is_some_and(|&removed| !removed));
+        for entry in &mut self.0 {
+            *entry -= removed_below.get(*entry).copied().unwrap_or(count);
+        }
+        slot_removed
+    }
+
     /// Append entries for freshly-pushed rows. `new_indices` must be
     /// `old_rows_len..new_rows_len`. With `shuffled_after: Some(pos)` each
     /// new index lands at a random play-order slot at or after `pos` (the
@@ -509,7 +542,7 @@ mod play_order_tests {
         /// permutation of 0..len — the structural I2 guarantee.
         #[test]
         fn play_order_ops_preserve_permutation(
-            ops in proptest::collection::vec(0u8..5, 1..40),
+            ops in proptest::collection::vec(0u8..6, 1..40),
             seed in any::<u64>(),
         ) {
             let mut rng = StdRng::seed_from_u64(seed);
@@ -548,6 +581,25 @@ mod play_order_tests {
                         let applied = po.insert_rows(pos, count, shuffled_after, &mut rng);
                         prop_assert_eq!(applied.len(), count);
                         len += count;
+                    }
+                    5 => {
+                        // Batch removal: survivors keep their play order,
+                        // renumbered onto the compacted rows, and the slot
+                        // flags name exactly the dropped entries.
+                        let removed: Vec<bool> =
+                            (0..len).map(|_| rng.random_range(0..3u8) == 0).collect();
+                        let before = po.to_vec();
+                        let slots = po.remove_rows(&removed);
+                        let expected: Vec<usize> = before
+                            .iter()
+                            .filter(|&&row| !removed[row])
+                            .map(|&row| row - removed[..row].iter().filter(|&&r| r).count())
+                            .collect();
+                        prop_assert_eq!(po.as_slice(), expected.as_slice());
+                        let expected_slots: Vec<bool> =
+                            before.iter().map(|&row| removed[row]).collect();
+                        prop_assert_eq!(slots, expected_slots);
+                        len -= removed.iter().filter(|&&r| r).count();
                     }
                     _ => {
                         if rng.random_range(0..2u8) == 0 {

@@ -11,6 +11,8 @@ mod navigation;
 mod order;
 mod write_guard;
 
+use std::collections::HashSet;
+
 use anyhow::Result;
 pub use navigation::{
     NextSongResult, PeekedQueue, PreviousOutcome, PreviousSongResult, TransitionReason,
@@ -465,17 +467,51 @@ impl QueueManager {
         Ok(NextTrackResetEffect::new())
     }
 
-    /// Remove a batch of queue rows by their `entry_id`s.
+    /// Remove a batch of queue rows by their `entry_id`s, in one pass.
     ///
-    /// Each ID is resolved freshly between removals — order of `entry_ids`
-    /// is irrelevant. Unknown IDs are skipped silently.
+    /// The order of `entry_ids` is irrelevant; unknown and repeated IDs are
+    /// skipped. One scan flags the rows, one `extract_if` drops them, one
+    /// sweep prunes the pool entries no surviving row references, one
+    /// order pass renumbers the play order, and ONE durable save commits it
+    /// all, where a row-at-a-time loop paid a scan, a `Vec::remove`, a pool
+    /// check and an fsync'd save per row under the queue lock (Remove
+    /// Duplicates makes thousands of rows one click). Rows, play order,
+    /// cursor and pool end where that loop left them (proptest-pinned
+    /// against it in `remove_entries_oracle`).
     pub fn remove_entries_by_ids(&mut self, entry_ids: &[u64]) -> Result<NextTrackResetEffect> {
-        for &eid in entry_ids {
-            if let Some(idx) = self.index_of_entry(eid) {
-                let _ = self.remove_song(idx)?;
-            }
+        let targets: HashSet<u64> = entry_ids.iter().copied().collect();
+        let removed_rows: Vec<bool> = self
+            .queue
+            .rows
+            .iter()
+            .map(|row| targets.contains(&row.entry_id))
+            .collect();
+        if !removed_rows.contains(&true) {
+            return Ok(NextTrackResetEffect::new());
         }
-        Ok(NextTrackResetEffect::new())
+
+        let mut tx = self.write();
+        let removed_song_ids: Vec<String> = tx
+            .queue
+            .rows
+            .extract_if(.., |row| targets.contains(&row.entry_id))
+            .map(|row| row.song_id)
+            .collect();
+        // A song keeps its pool entry while any surviving row still plays it.
+        let orphaned: Vec<String> = {
+            let surviving: HashSet<&str> =
+                tx.queue.rows.iter().map(|r| r.song_id.as_str()).collect();
+            removed_song_ids
+                .into_iter()
+                .filter(|id| !surviving.contains(id.as_str()))
+                .collect()
+        };
+        for id in &orphaned {
+            tx.pool.remove(id);
+        }
+        tx.remove_rows_from_order(&removed_rows);
+
+        tx.commit_save_all()
     }
 
     pub fn toggle_shuffle(&mut self) -> Result<NextTrackResetEffect> {
@@ -3357,6 +3393,194 @@ pub(crate) mod tests {
         // Pool drops "dup" only because no row references it anymore.
         assert!(qm.get_song("dup").is_none());
         assert!(qm.get_song("uniq").is_some());
+    }
+
+    /// The one-row-at-a-time loop `remove_entries_by_ids` ran before the
+    /// single pass (one scan, one `Vec::remove`, one pool check and one
+    /// durable save per row), kept as the reference the proptest below
+    /// checks the single pass against.
+    fn remove_entries_by_ids_reference(qm: &mut QueueManager, entry_ids: &[u64]) -> Result<()> {
+        for &eid in entry_ids {
+            if let Some(idx) = qm.index_of_entry(eid) {
+                let _ = qm.remove_song(idx)?;
+            }
+        }
+        Ok(())
+    }
+
+    mod remove_entries_oracle {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// Two managers holding the same queue: `songs` (ids from a small
+        /// alphabet, so duplicates are common) plus an orphan pool entry no
+        /// row references, shuffled or not, with the cursor and the queued
+        /// slot on any order slot or none.
+        fn twin_managers(
+            songs: &[u8],
+            shuffle: bool,
+            cursor: Option<usize>,
+            queued: Option<usize>,
+        ) -> [(QueueManager, tempfile::TempDir); 2] {
+            let songs: Vec<Song> = songs
+                .iter()
+                .map(|s| make_test_song(&format!("s{s}")))
+                .collect();
+            let len = songs.len();
+            let (mut first, first_temp) = make_test_manager(songs, None);
+            first.pool.insert(make_test_song("orphan"));
+            if shuffle {
+                let _ = first.toggle_shuffle().expect("toggle_shuffle");
+            }
+            first.queue.current_order = cursor.filter(|&c| c < len);
+            first.queue.queued = queued.filter(|&q| q < len);
+
+            let (mut second, second_temp) = make_test_manager(Vec::new(), None);
+            second.queue = first.queue.clone();
+            second.pool = first.pool.clone();
+            second.next_entry_id = first.next_entry_id;
+            [(first, first_temp), (second, second_temp)]
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            /// The single pass leaves rows, play order, cursor, queued slot
+            /// and pool exactly where the row-at-a-time loop does, for any
+            /// subset of rows (in any order, with repeats) plus unknown ids.
+            #[test]
+            fn single_pass_matches_the_row_loop(
+                songs in proptest::collection::vec(0u8..6, 0..24),
+                shuffle in any::<bool>(),
+                cursor in proptest::option::of(0usize..24),
+                queued in proptest::option::of(0usize..24),
+                picks in proptest::collection::vec(any::<proptest::sample::Index>(), 0..30),
+                unknown in proptest::collection::vec(1_000u64..1_010, 0..3),
+            ) {
+                let [(mut fast, _fast_temp), (mut slow, _slow_temp)] =
+                    twin_managers(&songs, shuffle, cursor, queued);
+                let mut entry_ids: Vec<u64> = if fast.queue.rows.is_empty() {
+                    Vec::new()
+                } else {
+                    picks
+                        .iter()
+                        .map(|i| fast.queue.rows[i.index(fast.queue.rows.len())].entry_id)
+                        .collect()
+                };
+                entry_ids.extend(unknown);
+
+                let _ = fast.remove_entries_by_ids(&entry_ids).expect("single pass");
+                remove_entries_by_ids_reference(&mut slow, &entry_ids).expect("row loop");
+
+                prop_assert_eq!(row_pairs(&fast), row_pairs(&slow));
+                prop_assert_eq!(fast.queue.order.as_slice(), slow.queue.order.as_slice());
+                prop_assert_eq!(fast.queue.current_order, slow.queue.current_order);
+                prop_assert_eq!(fast.queue.current_index(), slow.queue.current_index());
+                prop_assert_eq!(fast.queue.queued, slow.queue.queued);
+                for id in (0..6).map(|s| format!("s{s}")).chain(["orphan".to_string()]) {
+                    prop_assert_eq!(
+                        fast.get_song(&id).is_some(),
+                        slow.get_song(&id).is_some(),
+                        "pool membership of {}", id
+                    );
+                }
+                assert_queue_invariants(&fast, "single pass");
+            }
+        }
+    }
+
+    /// The single-pass removal is durable: a manager reopened on the same
+    /// file loads the queue it left, cursor included.
+    #[test]
+    fn remove_entries_by_ids_persists_the_result() {
+        let songs = ["a", "b", "a", "c", "b"].map(make_test_song).to_vec();
+        let (mut qm, temp) = make_test_manager(songs, Some(2));
+        let entry_ids = qm.entry_ids();
+
+        let _ = qm
+            .remove_entries_by_ids(&[entry_ids[0], entry_ids[4]])
+            .unwrap();
+        let expected_ids = qm.song_ids_snapshot();
+        let expected_index = qm.get_queue().current_index();
+        drop(qm);
+
+        let storage = StateStorage::new(temp.path().join("queue.redb")).unwrap();
+        let reopened = QueueManager::new(storage).unwrap();
+        assert_eq!(expected_ids, vec!["b", "a", "c"]);
+        assert_eq!(reopened.song_ids_snapshot(), expected_ids);
+        assert_eq!(reopened.get_queue().current_index(), expected_index);
+        assert_eq!(expected_index, Some(1), "the cursor stays on the kept a");
+        assert!(reopened.get_song("a").is_some() && reopened.get_song("b").is_some());
+    }
+
+    /// `n` probe songs carrying the id-like fields a real Navidrome song
+    /// persists, so the per-save encode costs what it does in the app.
+    fn probe_songs(n: usize) -> Vec<Song> {
+        (0..n)
+            .map(|i| {
+                let mut song =
+                    Song::test_default(&format!("0f4c2a9e7b{i:012}"), &format!("Title {i}"));
+                song.album_id = Some(format!("al-7d1e3b{i:010}"));
+                song.artist_id = Some(format!("ar-5c9a0f{i:010}"));
+                song.cover_art = Some(format!("mf-0f4c2a9e7b{i:012}_6650d0b1"));
+                song.path = format!("/music/Library/Artist {i}/Album {i}/{i:02} - Title {i}.flac");
+                song.created_at = Some("2026-07-01T12:34:56.789Z".to_string());
+                song
+            })
+            .collect()
+    }
+
+    /// Manual perf probe for a large batch removal (Remove Duplicates turns
+    /// thousands of rows into one click): 20,000 rows, every fourth one
+    /// (5,000) removed by entry_id, timed through `remove_entries_by_ids` and
+    /// through the reference loop, each on its own fresh manager. The redb
+    /// file lives under `target/` rather than the tmpfs `/tmp`, so each
+    /// durable commit pays a real fsync as it does in `~/.local/state`.
+    /// Asserts nothing about time (wall-clock thresholds stay out of CI).
+    ///
+    /// `cargo test -p nokkvi-data --release remove_entries_perf_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore = "manual perf probe"]
+    fn remove_entries_perf_probe() {
+        const ROWS: usize = 20_000;
+        const STEP: usize = 4;
+        let probe_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target");
+        let fresh_manager = || {
+            let temp = tempfile::TempDir::new_in(&probe_dir).expect("probe dir");
+            let storage = StateStorage::new(temp.path().join("queue.redb")).expect("storage");
+            let mut qm = QueueManager::new(storage).expect("queue manager");
+            let songs = probe_songs(ROWS);
+            let _ = qm.set_queue(songs, Some(ROWS / 2)).expect("set_queue");
+            let doomed: Vec<u64> = qm
+                .queue
+                .rows
+                .iter()
+                .step_by(STEP)
+                .map(|r| r.entry_id)
+                .collect();
+            (qm, doomed, temp)
+        };
+
+        let (mut qm, doomed, _temp) = fresh_manager();
+        let start = std::time::Instant::now();
+        let _ = qm.remove_entries_by_ids(&doomed).expect("remove");
+        let batch = start.elapsed();
+        assert_eq!(qm.queue.rows.len(), ROWS - doomed.len());
+        eprintln!(
+            "[remove_entries_perf_probe] remove_entries_by_ids {batch:>12.2?} ({} of {ROWS} rows)",
+            doomed.len()
+        );
+
+        let (mut qm, doomed, _temp) = fresh_manager();
+        let start = std::time::Instant::now();
+        remove_entries_by_ids_reference(&mut qm, &doomed).expect("remove");
+        let reference = start.elapsed();
+        assert_eq!(qm.queue.rows.len(), ROWS - doomed.len());
+        eprintln!(
+            "[remove_entries_perf_probe] reference loop        {reference:>12.2?} ({} of {ROWS} rows)",
+            doomed.len()
+        );
     }
 
     /// `remove_song_by_id` on a duplicate must clear *every* row of that

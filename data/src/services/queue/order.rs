@@ -195,6 +195,31 @@ impl QueueManager {
         }
     }
 
+    /// Batch twin of [`Self::remove_from_order`] for the rows flagged in
+    /// `removed_rows` (pre-removal row positions, one flag per row). The
+    /// cursor and the gapless slot land where one `remove_from_order` per
+    /// row would leave them, in any removal order: a surviving entry keeps
+    /// them; a removed cursor passes to the next surviving entry in play
+    /// order, or the last surviving entry when none follows; a removed
+    /// gapless slot clears; an emptied order clears the cursor.
+    pub(crate) fn remove_rows_from_order(&mut self, removed_rows: &[bool]) {
+        let slot_removed = self.queue.order.remove_rows(removed_rows);
+        let new_len = self.queue.order.len();
+        // Dropped entries ahead of `slot` in the pre-removal play order.
+        let removed_before = |slot: usize| slot_removed.iter().take(slot).filter(|&&r| r).count();
+
+        if let Some(cur) = self.queue.current_order {
+            // `cur - removed_before(cur)` is where the cursor's entry sits
+            // now, or, when it was dropped, where the next survivor slid in.
+            self.queue.current_order =
+                (new_len > 0).then(|| (cur - removed_before(cur)).min(new_len - 1));
+        }
+        if let Some(q) = self.queue.queued {
+            self.queue.queued =
+                (!slot_removed.get(q).copied().unwrap_or(false)).then(|| q - removed_before(q));
+        }
+    }
+
     /// Insert entries for new row indices at a specific position.
     /// Adjusts existing order entries that are >= insert_pos upward.
     pub(crate) fn insert_into_order(&mut self, insert_pos: usize, count: usize) {
