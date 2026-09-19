@@ -541,7 +541,7 @@ fn apply_queue_sort_clears_selected_indices() {
     app.queue_page.common.slot_list.selected_indices.insert(0);
     app.queue_page.common.slot_list.selected_indices.insert(1);
 
-    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+    app.apply_queue_sort(QueueSortMode::Title, true);
 
     assert!(
         app.queue_page.common.slot_list.selected_indices.is_empty(),
@@ -1203,7 +1203,7 @@ fn apply_queue_sort_marks_sorted() {
     ];
     assert!(!app.queue_page.queue_sorted, "precondition: unsorted");
 
-    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+    app.apply_queue_sort(QueueSortMode::Title, true);
 
     assert!(
         app.queue_page.queue_sorted,
@@ -1417,7 +1417,7 @@ fn reapplying_sort_after_same_length_reload_actually_resorts() {
         make_queue_song("a", "Apple", "Artist", "Album"),
         make_queue_song("b", "Bravo", "Artist", "Album"),
     ];
-    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+    app.apply_queue_sort(QueueSortMode::Title, true);
     assert_eq!(
         app.library
             .queue_songs
@@ -1446,7 +1446,7 @@ fn reapplying_sort_after_same_length_reload_actually_resorts() {
     );
 
     // 3. Re-apply the same Title sort — it must actually re-sort, not no-op.
-    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+    app.apply_queue_sort(QueueSortMode::Title, true);
     assert_eq!(
         app.library
             .queue_songs
@@ -2326,5 +2326,411 @@ fn push_queue_with_empty_queue_warns_and_blocks() {
                 && t.message.contains("nothing to push")
         }),
         "empty-queue push warns instead of clearing the server queue"
+    );
+}
+
+// ============================================================================
+// handle_queue row source (characterization)
+//
+// `handle_queue` resolves slot indices against the rows the queue view shows:
+// the search-filtered list while a search is active, the full queue otherwise.
+// These pin that contract through the root path for every arm with an
+// observable result, with a search whose filtered positions differ from the
+// full-queue positions, so a change to how the handler obtains its rows
+// (clone vs borrow) can't silently switch an arm to the other list.
+// ============================================================================
+
+/// Queue whose "beta" search keeps rows 1 and 3 (filtered positions 0 and 1).
+fn app_with_beta_queue() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("s0", "Alpha", "Artist", "Album"),
+        make_queue_song("s1", "Beta One", "Artist", "Album"),
+        make_queue_song("s2", "Gamma", "Artist", "Album"),
+        make_queue_song("s3", "Beta Two", "Artist", "Album"),
+    ];
+    app
+}
+
+#[test]
+fn focus_on_song_under_search_scrolls_to_filtered_position() {
+    use crate::views::QueueMessage;
+
+    let mut app = app_with_beta_queue();
+    app.queue_page.common.search_query = "beta".to_string();
+    let s3 = app.library.queue_songs[3].entry_id;
+    let s2 = app.library.queue_songs[2].entry_id;
+
+    let _ = app.handle_queue(QueueMessage::FocusCurrentPlaying(s3, false));
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 1,
+        "s3 sits at filtered position 1 (full position 3)"
+    );
+
+    // A row the search hides is not in the list the view shows: no scroll.
+    let _ = app.handle_queue(QueueMessage::FocusCurrentPlaying(s2, false));
+    assert_eq!(app.queue_page.common.slot_list.viewport_offset, 1);
+}
+
+#[test]
+fn search_changed_resets_offset_against_filtered_length() {
+    use crate::{views::QueueMessage, widgets::SlotListPageMessage};
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+
+    let _ = app.handle_queue(QueueMessage::SlotList(
+        SlotListPageMessage::SearchQueryChanged("T1".to_string()),
+    ));
+    assert_eq!(app.queue_page.common.slot_list.viewport_offset, 0);
+
+    // With the old AND the new search both matching nothing, neither reset
+    // applies (an offset needs a non-empty list), so a stale offset stays.
+    // Resetting against the full queue's length would move it to 0.
+    app.queue_page.common.search_query = "zzz".to_string();
+    app.queue_page.common.slot_list.viewport_offset = 5;
+    let _ = app.handle_queue(QueueMessage::SlotList(
+        SlotListPageMessage::SearchQueryChanged("zzzz".to_string()),
+    ));
+    assert_eq!(app.queue_page.common.slot_list.viewport_offset, 5);
+}
+
+/// Title order of `app_with_sortable_queue`: Alpha(s1), Bravo Beta(s3),
+/// Echo(s4), Mike Beta(s2), Zulu Beta(s0). A "beta" search keeps
+/// [Bravo Beta, Mike Beta, Zulu Beta].
+fn app_with_sortable_queue() -> crate::Nokkvi {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("s0", "Zulu Beta", "Artist", "Album"),
+        make_queue_song("s1", "Alpha", "Artist", "Album"),
+        make_queue_song("s2", "Mike Beta", "Artist", "Album"),
+        make_queue_song("s3", "Bravo Beta", "Artist", "Album"),
+        make_queue_song("s4", "Echo", "Artist", "Album"),
+    ];
+    app.queue_page.common.sort_ascending = true;
+    app.queue_page.queue_sort_mode = QueueSortMode::Album;
+    app.queue_page.common.slot_list.selected_indices.insert(0);
+    app.queue_page.common.slot_list.selected_indices.insert(1);
+    app
+}
+
+fn queue_titles(app: &crate::Nokkvi) -> Vec<&str> {
+    app.library
+        .queue_songs
+        .iter()
+        .map(|s| s.title.as_str())
+        .collect()
+}
+
+#[test]
+fn sort_mode_selected_recenters_on_playing_song_in_full_queue() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    use crate::views::QueueMessage;
+
+    let mut app = app_with_sortable_queue();
+    app.scrobble.current_song_id = Some("s2".to_string());
+
+    let _ = app.handle_queue(QueueMessage::SortModeSelected(QueueSortMode::Title));
+
+    assert_eq!(
+        queue_titles(&app),
+        vec!["Alpha", "Bravo Beta", "Echo", "Mike Beta", "Zulu Beta"]
+    );
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 3,
+        "Mike Beta sits at full position 3"
+    );
+    assert!(app.queue_page.queue_sorted);
+    assert!(app.queue_page.common.slot_list.selected_indices.is_empty());
+}
+
+#[test]
+fn sort_mode_selected_under_search_recenters_on_filtered_position() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    use crate::views::QueueMessage;
+
+    let mut app = app_with_sortable_queue();
+    app.queue_page.common.search_query = "beta".to_string();
+    app.scrobble.current_song_id = Some("s2".to_string());
+
+    let _ = app.handle_queue(QueueMessage::SortModeSelected(QueueSortMode::Title));
+
+    assert_eq!(
+        queue_titles(&app),
+        vec!["Alpha", "Bravo Beta", "Echo", "Mike Beta", "Zulu Beta"],
+        "the sort reorders the full queue, not only the filtered rows"
+    );
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 1,
+        "Mike Beta sits at filtered position 1 (full position 3)"
+    );
+    assert!(app.queue_page.queue_sorted);
+    assert!(app.queue_page.common.slot_list.selected_indices.is_empty());
+}
+
+#[test]
+fn sort_mode_selected_under_search_clamps_to_start_when_playing_song_hidden() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    use crate::views::QueueMessage;
+
+    let mut app = app_with_sortable_queue();
+    app.queue_page.common.search_query = "beta".to_string();
+    // Alpha doesn't match the search.
+    app.scrobble.current_song_id = Some("s1".to_string());
+    app.queue_page.common.slot_list.viewport_offset = 2;
+
+    let _ = app.handle_queue(QueueMessage::SortModeSelected(QueueSortMode::Title));
+
+    assert_eq!(app.queue_page.common.slot_list.viewport_offset, 0);
+}
+
+#[test]
+fn sort_order_toggle_under_search_recenters_on_filtered_position() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    use crate::{views::QueueMessage, widgets::SlotListPageMessage};
+
+    let mut app = app_with_sortable_queue();
+    app.queue_page.queue_sort_mode = QueueSortMode::Title;
+    app.queue_page.common.search_query = "beta".to_string();
+    app.scrobble.current_song_id = Some("s3".to_string());
+
+    // Ascending → descending: Zulu Beta, Mike Beta, Echo, Bravo Beta, Alpha.
+    let _ = app.handle_queue(QueueMessage::SlotList(SlotListPageMessage::ToggleSortOrder));
+
+    assert_eq!(
+        queue_titles(&app),
+        vec!["Zulu Beta", "Mike Beta", "Echo", "Bravo Beta", "Alpha"]
+    );
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 2,
+        "Bravo Beta sits at filtered position 2 (full position 3)"
+    );
+    assert!(app.queue_page.queue_sorted);
+    assert!(app.queue_page.common.slot_list.selected_indices.is_empty());
+}
+
+#[test]
+fn play_song_under_search_indexes_filtered_rows() {
+    use crate::views::{QueueMessage, queue::QueueContextEntry};
+
+    let mut app = app_with_beta_queue();
+    app.queue_page.common.search_query = "beta".to_string();
+
+    // Filtered row 2 doesn't exist (the search keeps two rows), though full
+    // row 2 does: nothing plays.
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(2, QueueContextEntry::Play));
+    assert!(!app.suppress_next_auto_center);
+
+    // Filtered row 1 exists: the play path runs (it suppresses the
+    // auto-center for the track change it starts).
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(1, QueueContextEntry::Play));
+    assert!(app.suppress_next_auto_center);
+}
+
+/// The artwork tail prefetches the rows the view shows. With a real shell and
+/// rows that carry an artwork URL, a search that matches nothing leaves the
+/// tail nothing to fetch, while the full queue (or a matching search) has
+/// uncached rows.
+#[tokio::test]
+async fn queue_artwork_tail_reads_filtered_rows_under_search() {
+    use super::library::test_app_with_shell;
+    use crate::{app_message::Message, views::QueueMessage, widgets::SlotListPageMessage};
+
+    let (mut app, db_path) = test_app_with_shell().await;
+    app.library.queue_songs = make_queue_songs_with_art(20);
+    let nav_down = || Message::Queue(QueueMessage::SlotList(SlotListPageMessage::NavigateDown));
+
+    let task = app.update(nav_down());
+    assert!(
+        task.units() >= 1,
+        "no search: the full queue has rows to fetch"
+    );
+
+    app.queue_page.common.search_query = "T1".to_string();
+    let task = app.update(nav_down());
+    assert!(task.units() >= 1, "a matching search has rows to fetch");
+
+    app.queue_page.common.search_query = "zzz".to_string();
+    let task = app.update(nav_down());
+    assert_eq!(
+        task.units(),
+        0,
+        "a search matching nothing leaves nothing to fetch"
+    );
+
+    // Switching the search on in the same message: the tail reads the NEW
+    // filter, not the rows from before it.
+    app.queue_page.common.search_query.clear();
+    let task = app.update(Message::Queue(QueueMessage::SlotList(
+        SlotListPageMessage::SearchQueryChanged("zzz".to_string()),
+    )));
+    assert_eq!(
+        task.units(),
+        0,
+        "the tail must read the list the new search produced"
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+/// After a remove, the artwork tail reads the rows the view shows next, so
+/// the removed row gets no fetch, with or without a search. With a real shell
+/// and uncached rows that carry an artwork URL, each remaining row in the
+/// prefetch window is one fetch task (`LoadLarge` is a `Task::done`, zero
+/// units).
+#[tokio::test]
+async fn remove_from_queue_tail_prefetches_only_remaining_rows() {
+    use super::library::test_app_with_shell;
+    use crate::{
+        app_message::Message,
+        views::{QueueMessage, queue::QueueContextEntry},
+    };
+
+    let (mut app, db_path) = test_app_with_shell().await;
+    let remove_row_0 = || {
+        Message::Queue(QueueMessage::ContextMenuAction(
+            0,
+            QueueContextEntry::RemoveFromQueue,
+        ))
+    };
+
+    app.library.queue_songs = make_queue_songs_with_art(3);
+    let task = app.update(remove_row_0());
+    assert_eq!(app.library.queue_songs.len(), 2);
+    assert_eq!(task.units(), 2, "no search: fetches for the two rows left");
+
+    // "T1" keeps T1, T10, T11; filtered row 0 is T1.
+    app.library.queue_songs = make_queue_songs_with_art(12);
+    app.queue_page.common.search_query = "T1".to_string();
+    let task = app.update(remove_row_0());
+    assert_eq!(app.library.queue_songs.len(), 11);
+    assert!(app.library.queue_songs.iter().all(|s| s.title != "T1"));
+    assert_eq!(
+        task.units(),
+        2,
+        "under a search: fetches for the two matches left"
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+/// Expected entry_id order after dropping `moved` (queue positions, any
+/// order) before the row at `raw_target` (`len` = append): the old
+/// remove/insert semantics, written as a filter.
+fn expected_batch_order(ids: &[u64], moved: &[usize], raw_target: usize) -> Vec<u64> {
+    let is_moved = |i: &usize| moved.contains(i);
+    let kept: Vec<usize> = (0..ids.len()).filter(|i| !is_moved(i)).collect();
+    let block: Vec<usize> = (0..ids.len()).filter(|i| is_moved(i)).collect();
+    let k = kept.iter().filter(|&&i| i < raw_target).count();
+    kept[..k]
+        .iter()
+        .chain(&block)
+        .chain(&kept[k..])
+        .map(|&i| ids[i])
+        .collect()
+}
+
+/// The queue position a drop on `target_slot` resolves to (`len` = append),
+/// against the slot count `handle_queue` resyncs before the page maps it.
+fn drop_target_item(app: &mut crate::Nokkvi, target_slot: usize) -> usize {
+    let total = app.library.queue_songs.len();
+    app.resync_slot_counts();
+    app.queue_page
+        .common
+        .slot_list
+        .slot_to_item_index_for_drop(target_slot, total)
+        .unwrap_or(total)
+}
+
+/// Drop a pick-time batch (`moved`, queue positions) through the root handler
+/// onto `target_slot`, and return (expected, actual) entry_id orders.
+fn drop_batch_through_root(
+    app: &mut crate::Nokkvi,
+    moved: &[usize],
+    target_slot: usize,
+) -> (Vec<u64>, Vec<u64>) {
+    use crate::{views::QueueMessage, widgets::drag_column::DragEvent};
+
+    let ids: Vec<u64> = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+    assert!(
+        moved.iter().all(|&i| i < ids.len()),
+        "moved rows must exist"
+    );
+    let raw_target = drop_target_item(app, target_slot);
+    // Pick-time snapshot, deliberately not in queue order.
+    app.queue_page.drag_source = Some(moved.iter().rev().map(|&i| ids[i]).collect());
+
+    let _ = app.handle_queue(QueueMessage::DragReorder(DragEvent::Dropped {
+        index: 0,
+        target_index: target_slot,
+    }));
+
+    let actual = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+    (expected_batch_order(&ids, moved, raw_target), actual)
+}
+
+#[test]
+fn batch_drop_through_root_moves_block_before_target_row() {
+    let mut app = app_with_numbered_queue(40);
+    app.queue_page.common.slot_list.set_offset(20, 40);
+    let target = drop_target_item(&mut app, 1);
+    let target_id = app.library.queue_songs[target].entry_id;
+    // Rows on both sides of the target, none of them the target itself.
+    let moved = [2, 5, 30, 31];
+    assert!(
+        target > 5 && target < 30,
+        "precondition: target at {target}"
+    );
+
+    let (expected, actual) = drop_batch_through_root(&mut app, &moved, 1);
+    assert_eq!(actual, expected);
+    let at = actual.iter().position(|&id| id == target_id);
+    assert_eq!(
+        at,
+        Some(target - 2 + 4),
+        "the block of 4 lands right above the target"
+    );
+    assert!(app.queue_page.drag_source.is_none());
+}
+
+#[test]
+fn batch_drop_through_root_onto_a_moved_row_lands_where_it_sat() {
+    let mut app = app_with_numbered_queue(40);
+    app.queue_page.common.slot_list.set_offset(20, 40);
+    let target = drop_target_item(&mut app, 1);
+    assert!(
+        target > 3 && target + 2 < 40,
+        "precondition: target at {target}"
+    );
+
+    let (expected, actual) = drop_batch_through_root(&mut app, &[3, target, target + 2], 1);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn batch_drop_through_root_past_the_end_appends() {
+    let mut app = app_with_numbered_queue(6);
+    app.queue_page.common.slot_list.set_offset(5, 6);
+    // The last slot sits past the final row of a short, end-scrolled list.
+    let last_slot = app.queue_page.common.slot_list.slot_count - 1;
+    assert_eq!(
+        drop_target_item(&mut app, last_slot),
+        6,
+        "precondition: past-end drop"
+    );
+    let ids: Vec<u64> = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+
+    let (expected, actual) = drop_batch_through_root(&mut app, &[0, 2], last_slot);
+    assert_eq!(actual, expected);
+    assert_eq!(
+        &actual[4..],
+        &[ids[0], ids[2]],
+        "the moved rows land at the end in their queue order"
     );
 }

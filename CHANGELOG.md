@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - The About modal now credits Claude Opus 5 and Fable 5.1 as the shipwrights (previously Opus 4.8).
+- Keyboard scrolling, wheel scrolling, and clicks in a very large queue now respond faster.
 
 ### Fixed
 

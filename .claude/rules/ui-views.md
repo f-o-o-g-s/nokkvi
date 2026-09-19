@@ -96,6 +96,8 @@ Physical sort via `QueueManager::sort_queue()`, persists to redb. `QueueSortMode
 Drags are blocked (and half-captured pick state dropped) while a search filter is active; a past-end / empty-area drop appends (`slot_to_item_index_for_drop(...).unwrap_or(total_items)`).
 entry_id rules: see gotchas.md "Queue & Indices".
 
+**Pointer-motion fast paths**: the queue messages published per cursor move (`ScrollSeek`, `HoverEnterSlot` / `HoverExitSlot`, `DragReorder(Dragged)`) return from `handle_queue`'s fast-path block before the row list is read, and a new per-cursor-move message joins that block. `DragColumn` publishes `Dragged` on every `CursorMoved`, so per-event work proportional to the queue backs up the event loop (a ~20k-row queue froze the window). Thumbnails for rows the edge auto-scroll brings in come from `tick_within_list_autoscroll`, which returns the viewport prefetch whenever it moved the viewport, for the queue and the playlist editor alike.
+
 ## Queue Shuffle
 
 Re-shuffles the order array when a shuffled queue with repeat-playlist wraps back to the start, instead of replaying the same shuffle sequence.

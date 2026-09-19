@@ -1,6 +1,6 @@
 //! Queue data loading and component message handlers
 
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 use iced::Task;
 use nokkvi_data::{
@@ -165,10 +165,10 @@ impl Nokkvi {
         }
         // ── Fast path for scrollbar seek ──
         // During a scrollbar drag, CursorMoved fires on_seek hundreds of times
-        // per second. The normal path clones the entire queue (O(n)) for
-        // filter_queue_songs(), builds a HashSet for artwork prefetch, and spawns
-        // timer tasks — all per event. With 12k items this starves the main
-        // thread and can lock the system.
+        // per second. The normal path re-filters the queue under a search
+        // (O(n)), builds a HashSet over the artwork cache, and spawns fetch
+        // tasks for the viewport — all per event. With 12k items and a search
+        // active this starves the main thread and can lock the system.
         //
         // The seek handler only needs to move the viewport offset, so we
         // short-circuit here: move the offset, record the scroll for the
@@ -200,14 +200,15 @@ impl Nokkvi {
         // Every message published per cursor move returns from this block,
         // before the row list below is touched; a new one joins it here.
         //
-        // Slot hover: the slot list republishes `HoverEnterSlot` on EVERY `CursorMoved`
-        // while the cursor sits inside a row (`slot_list.rs` `on_move`). Hover
-        // never moves `viewport_offset`, and `prefetch_indices` is centered
-        // solely on the offset, so the prefetch window on a hover frame is
-        // identical to the previous non-hover frame's — re-running the tail
-        // below would (a) pay an O(n) `filter_queue_songs().into_owned()` clone
-        // plus a fresh batch of `Task::perform`s per cursor pixel and (b) thrash
-        // the version-aware mini-thumbnail dedup for a single-album queue
+        // Slot hover: the slot list republishes `HoverEnterSlot` on EVERY
+        // `CursorMoved` while the cursor sits inside a row (`slot_list.rs`
+        // `on_move`). Hover never moves `viewport_offset`, and
+        // `prefetch_indices` is centered solely on the offset, so the prefetch
+        // window on a hover frame is identical to the previous non-hover
+        // frame's — re-running the tail below would (a) pay a cache-wide
+        // HashSet build plus a fresh batch of `Task::perform`s per cursor pixel
+        // (and an O(n) re-filter under a search) and (b) thrash the
+        // version-aware mini-thumbnail dedup for a single-album queue
         // (album_id-keyed cache fed per-song `updated_at`), re-`put`ting the
         // `album_art` handle with a new `Id::unique()` texture for identical
         // bytes → visible flicker. Mirror the shared `hovered_slot` bookkeeping
@@ -224,14 +225,14 @@ impl Nokkvi {
                 return Task::none();
             }
             // Drag motion: `DragColumn` publishes `Dragged` on EVERY
-            // `CursorMoved` while a row is held (`drag_column.rs`). Running the
-            // tail per event froze the window on a ~20k-row queue: the O(n)
-            // work outpaced the event rate, and the release and the close
-            // request queued behind the backlog. Record the live cursor, edge
-            // band, and drop-target slot for the ghost + edge auto-scroll (or
-            // cancel under a search), then return. Rows the auto-scroll brings
-            // into view get their artwork from the tick
-            // (`tick_within_list_autoscroll`), not from this path.
+            // `CursorMoved` while a row is held (`drag_column.rs`). When the
+            // body below still cloned the queue per message, this froze the
+            // window on a ~20k-row queue: the events outpaced the handler, and
+            // the release and the close request queued behind the backlog.
+            // Record the live cursor, edge band, and drop-target slot for the
+            // ghost + edge auto-scroll (or cancel under a search), then return.
+            // Rows the auto-scroll brings into view get their artwork from the
+            // tick (`tick_within_list_autoscroll`), not from this path.
             QueueMessage::DragReorder(DragEvent::Dragged {
                 cursor,
                 edge,
@@ -244,11 +245,21 @@ impl Nokkvi {
             _ => {}
         }
 
-        // IMPORTANT: Use filtered queue for all operations since slot list indices are relative to filtered list.
-        // `.into_owned()` is required here because this mutable handler needs to mutate `self` later.
-        // The zero-cost `Cow::Borrowed` path benefits the render loop in `app_view.rs`, not here.
-        let mut filtered_queue = self.filter_queue_songs().into_owned();
-        let (cmd, action) = self.queue_page.update(msg, &filtered_queue);
+        // Slot indices are relative to the rows the view shows: the filtered
+        // list while a search is active, the full queue otherwise. Only a
+        // search produces an owned list (`filtered_owned`); with no search,
+        // every read borrows `library.queue_songs` through the field path,
+        // which stays disjoint from `&mut self.queue_page` and the other
+        // fields the arms write, so a message costs O(viewport), not a queue
+        // clone. Derive `rows` where it is read: a `&mut self` call ends the
+        // borrow. The arms that change the search, the order, or (under a
+        // search) the rows refresh `filtered_owned` before the tail reads it;
+        // drags are blocked under a search, so the reorder arms always borrow.
+        let mut filtered_owned = self.owned_filtered_queue();
+        let rows = filtered_owned
+            .as_deref()
+            .unwrap_or(&self.library.queue_songs);
+        let (cmd, action) = self.queue_page.update(msg, rows);
 
         match action {
             QueueAction::PlaySong(index) => {
@@ -261,7 +272,10 @@ impl Nokkvi {
                 }
 
                 // Look up from FILTERED list since the slot list index is relative to filtered results
-                if let Some(song) = filtered_queue.get(index) {
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                if let Some(song) = rows.get(index) {
                     debug!(
                         "🎵 Playing song from queue: {} - {} (filtered index: {})",
                         song.title, song.artist, index
@@ -299,7 +313,8 @@ impl Nokkvi {
                     return self.dispatch_random_queue_shuffle();
                 }
                 let ascending = self.queue_page.common.sort_ascending;
-                filtered_queue = self.apply_queue_sort(sort_mode, ascending).into_owned();
+                self.apply_queue_sort(sort_mode, ascending);
+                filtered_owned = self.owned_filtered_queue();
             }
             QueueAction::SortOrderChanged(ascending) => {
                 debug!(
@@ -312,33 +327,34 @@ impl Nokkvi {
                     // mirroring how library views refresh their random sort.
                     return self.dispatch_random_queue_shuffle();
                 }
-                filtered_queue = self.apply_queue_sort(sort_mode, ascending).into_owned();
+                self.apply_queue_sort(sort_mode, ascending);
+                filtered_owned = self.owned_filtered_queue();
             }
             QueueAction::SearchChanged(_query) => {
                 // NOTE: Don't set search_input_focused or refocus here - text_input manages its own focus.
                 // Setting flag causes race conditions with Escape (text_input captures it, flag stays stale)
                 // Re-filter with updated search query for artwork prefetching
-                filtered_queue = self.filter_queue_songs().into_owned();
+                filtered_owned = self.owned_filtered_queue();
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
                 // Reset slot list offset to 0 for the new filtered count
-                self.queue_page
-                    .common
-                    .slot_list
-                    .set_offset(0, filtered_queue.len());
+                self.queue_page.common.slot_list.set_offset(0, rows.len());
             }
             QueueAction::FocusOnSong(entry_id, flash) => {
                 // Find the row in the FILTERED list by its per-row entry_id —
                 // drift-immune across the optimistic-mutation window where
                 // `track_number` would still carry stale stamps from the
                 // pre-mutation projection.
-                if let Some(idx) = filtered_queue.iter().position(|s| s.entry_id == entry_id) {
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                if let Some(idx) = rows.iter().position(|s| s.entry_id == entry_id) {
                     trace!(
                         " [FOCUS] Found entry_id {} at filtered index {}",
                         entry_id, idx
                     );
-                    self.queue_page
-                        .common
-                        .slot_list
-                        .set_offset(idx, filtered_queue.len());
+                    self.queue_page.common.slot_list.set_offset(idx, rows.len());
                     // Only flash for active user actions (track change, MPRIS).
                     // Suppress for passive callers (view switch, queue reload)
                     // and during progressive queue loading.
@@ -350,12 +366,11 @@ impl Nokkvi {
                 }
             }
             QueueAction::SetRating(song_id, new_rating) => {
-                let current = Self::find_current_rating(
-                    &filtered_queue,
-                    &song_id,
-                    |s| s.id.as_str(),
-                    |s| s.rating,
-                );
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                let current =
+                    Self::find_current_rating(rows, &song_id, |s| s.id.as_str(), |s| s.rating);
                 return self.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
             }
             QueueAction::ToggleStar(song_id, star) => {
@@ -432,7 +447,11 @@ impl Nokkvi {
 
                 // Target — either a row's entry_id, or "end of queue" if the
                 // user dropped past the last row (`target == filtered len`).
-                let target_entry_id = filtered_queue.get(target).map(|s| s.entry_id);
+                let target_entry_id = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs)
+                    .get(target)
+                    .map(|s| s.entry_id);
                 let target_for_backend =
                     target_entry_id.map_or(MoveBatchTarget::End, MoveBatchTarget::AboveEntry);
 
@@ -513,6 +532,9 @@ impl Nokkvi {
                 self.library
                     .queue_songs
                     .retain(|s| !id_set.contains(&s.entry_id));
+                // A search's owned list still holds the removed rows; refresh
+                // it so the tail reads the rows the view shows next.
+                filtered_owned = self.owned_filtered_queue();
                 self.toast_info(format!("Removed {title_text} from queue"));
 
                 // Goes through `AppService::remove_queue_entries` so the
@@ -674,17 +696,26 @@ impl Nokkvi {
             QueueAction::ShowInfo(index) => {
                 // Fresh-fetch by id (shared helper): QueueManager may hold
                 // stale Song structs persisted before newer fields existed.
-                if let Some(song_id) = filtered_queue.get(index).map(|s| s.id.clone()) {
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                if let Some(song_id) = rows.get(index).map(|s| s.id.clone()) {
                     return self.song_info_fetch_task(song_id);
                 }
             }
             QueueAction::ShowInFolder(index) => {
-                if let Some(song_id) = filtered_queue.get(index).map(|s| s.id.clone()) {
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                if let Some(song_id) = rows.get(index).map(|s| s.id.clone()) {
                     return self.show_song_in_folder_task(song_id);
                 }
             }
             QueueAction::FindSimilar(index) => {
-                if let Some(song) = filtered_queue.get(index) {
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                if let Some(song) = rows.get(index) {
                     let id = song.id.clone();
                     let title = song.title.clone();
                     return Task::done(Message::Find(FindMessage::Similar {
@@ -694,7 +725,10 @@ impl Nokkvi {
                 }
             }
             QueueAction::TopSongs(index) => {
-                if let Some(song) = filtered_queue.get(index) {
+                let rows = filtered_owned
+                    .as_deref()
+                    .unwrap_or(&self.library.queue_songs);
+                if let Some(song) = rows.get(index) {
                     let artist = song.artist.clone();
                     if !artist.is_empty() {
                         return Task::done(Message::Find(FindMessage::TopSongs {
@@ -769,47 +803,13 @@ impl Nokkvi {
             QueueAction::None => {}
         }
 
-        // Load artwork from network for visible queue slots after any slot list change
-        // Use filtered queue for artwork prefetching since that's what's displayed
-        let total = filtered_queue.len();
-        let mut tasks: Vec<Task<Message>> = Vec::new();
-
-        if total > 0
-            && let Some(shell) = &self.app_service
-        {
-            // Prefetch mini artwork using canonical helper
-            let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
-            let prefetch_tasks = prefetch_album_artwork_tasks(
-                &self.queue_page.common.slot_list,
-                &filtered_queue,
-                &cached,
-                &self.artwork.album_art_versions,
-                &self.artwork.failed_art,
-                shell.albums().clone(),
-                |song| {
-                    (
-                        song.album_id.clone(),
-                        passive_artwork_version(&song.updated_at),
-                        song.artwork_url.clone(),
-                    )
-                },
-            );
-            tasks.extend(prefetch_tasks);
-
-            // Load large artwork for center song
-            if let Some(center_idx) = self
-                .queue_page
-                .common
-                .slot_list
-                .get_center_item_index(total)
-                && let Some(song) = filtered_queue.get(center_idx)
-                && self.artwork.large_artwork.peek(&song.album_id).is_none()
-            {
-                tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                    song.album_id.clone(),
-                ))));
-            }
-        }
+        // Load artwork from network for visible queue slots after any slot list
+        // change, from the rows the view shows (re-derived: the arms above may
+        // have reordered, removed, or re-filtered them).
+        let rows = filtered_owned
+            .as_deref()
+            .unwrap_or(&self.library.queue_songs);
+        let tasks = self.queue_viewport_artwork_tasks(rows);
 
         // Execute artwork loading tasks in parallel with the command
         if !tasks.is_empty() {
@@ -819,66 +819,22 @@ impl Nokkvi {
         cmd.map(Message::Queue)
     }
 
-    /// Load artwork for the current queue viewport. Called by `SeekSettled`
-    /// after a scrollbar drag settles, avoiding the per-event O(n) clone.
-    pub(crate) fn load_queue_viewport_artwork(&mut self) -> Task<Message> {
-        let items: &[_] = if self.queue_page.common.search_query.is_empty() {
-            // Borrow directly — no clone needed
-            &self.library.queue_songs as &[_]
-        } else {
-            // Search is active: we must filter once (rare during seek)
-            // Store in a temporary to extend lifetime
-            return self.load_queue_viewport_artwork_filtered();
-        };
-
-        let total = items.len();
-        let mut tasks: Vec<Task<Message>> = Vec::new();
-
-        if total > 0
-            && let Some(shell) = &self.app_service
-        {
-            let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
-            tasks.extend(prefetch_album_artwork_tasks(
-                &self.queue_page.common.slot_list,
-                items,
-                &cached,
-                &self.artwork.album_art_versions,
-                &self.artwork.failed_art,
-                shell.albums().clone(),
-                |song: &QueueSongUIViewData| {
-                    (
-                        song.album_id.clone(),
-                        passive_artwork_version(&song.updated_at),
-                        song.artwork_url.clone(),
-                    )
-                },
-            ));
-
-            if let Some(center_idx) = self
-                .queue_page
-                .common
-                .slot_list
-                .get_center_item_index(total)
-                && let Some(song) = items.get(center_idx)
-                && self.artwork.large_artwork.peek(&song.album_id).is_none()
-            {
-                tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                    song.album_id.clone(),
-                ))));
-            }
-        }
-
-        if tasks.is_empty() {
-            Task::none()
-        } else {
-            Task::batch(tasks)
+    /// The owned row list an active search produced, or `None` when no search
+    /// is active and callers borrow `library.queue_songs` directly. Returns an
+    /// owned value so no borrow of `self` outlives the call.
+    fn owned_filtered_queue(&self) -> Option<Vec<QueueSongUIViewData>> {
+        match self.filter_queue_songs() {
+            Cow::Owned(rows) => Some(rows),
+            Cow::Borrowed(_) => None,
         }
     }
 
-    /// Filtered variant of `load_queue_viewport_artwork` for when search is active.
-    fn load_queue_viewport_artwork_filtered(&mut self) -> Task<Message> {
-        let filtered = self.filter_queue_songs();
-        let total = filtered.len();
+    /// Mini-artwork prefetch for the queue viewport plus a large-artwork load
+    /// for the centered row, over `rows` (the list the view shows: filtered
+    /// under a search). Empty without a backend or rows. The one builder
+    /// behind the `handle_queue` tail and `load_queue_viewport_artwork`.
+    fn queue_viewport_artwork_tasks(&self, rows: &[QueueSongUIViewData]) -> Vec<Task<Message>> {
+        let total = rows.len();
         let mut tasks: Vec<Task<Message>> = Vec::new();
 
         if total > 0
@@ -887,7 +843,7 @@ impl Nokkvi {
             let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
             tasks.extend(prefetch_album_artwork_tasks(
                 &self.queue_page.common.slot_list,
-                &filtered,
+                rows,
                 &cached,
                 &self.artwork.album_art_versions,
                 &self.artwork.failed_art,
@@ -901,12 +857,13 @@ impl Nokkvi {
                 },
             ));
 
+            // Load large artwork for center song
             if let Some(center_idx) = self
                 .queue_page
                 .common
                 .slot_list
                 .get_center_item_index(total)
-                && let Some(song) = filtered.get(center_idx)
+                && let Some(song) = rows.get(center_idx)
                 && self.artwork.large_artwork.peek(&song.album_id).is_none()
             {
                 tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
@@ -915,6 +872,16 @@ impl Nokkvi {
             }
         }
 
+        tasks
+    }
+
+    /// Load artwork for the current queue viewport. Called by `SeekSettled`
+    /// after a scrollbar drag settles and by the drag edge auto-scroll tick,
+    /// so the per-cursor-move paths stay free of it. Borrows the queue when
+    /// no search is active and filters once when one is.
+    pub(crate) fn load_queue_viewport_artwork(&self) -> Task<Message> {
+        let rows = self.filter_queue_songs();
+        let tasks = self.queue_viewport_artwork_tasks(&rows);
         if tasks.is_empty() {
             Task::none()
         } else {
@@ -928,11 +895,7 @@ impl Nokkvi {
     /// Callers must route `QueueSortMode::Random` to
     /// `dispatch_random_queue_shuffle` instead — this path's UI sort + backend
     /// sort would each draw their own RNG and produce diverging orders.
-    pub(crate) fn apply_queue_sort(
-        &mut self,
-        sort_mode: QueueSortMode,
-        ascending: bool,
-    ) -> std::borrow::Cow<'_, [QueueSongUIViewData]> {
+    pub(crate) fn apply_queue_sort(&mut self, sort_mode: QueueSortMode, ascending: bool) {
         // Drop any multi-selection — the in-place reorder leaves the indices
         // pointing at different songs.
         self.queue_page.common.slot_list.clear_multi_selection();
@@ -940,21 +903,22 @@ impl Nokkvi {
         // shows the applied mode instead of the "Unsorted" placeholder.
         self.queue_page.queue_sorted = true;
         self.sort_queue_songs();
-        let filtered = self.filter_queue_songs().into_owned();
-        // Re-center on the currently playing song in the new sort order
-        if let Some(song_id) = self.scrobble.current_song_id.clone()
-            && let Some(idx) = filtered.iter().position(|s| s.id == song_id)
-        {
-            self.queue_page
-                .common
-                .slot_list
-                .set_offset(idx, filtered.len());
-        } else if !filtered.is_empty() {
+        // Re-center on the currently playing song in the new sort order, in
+        // the rows the view shows (borrowed when no search is active).
+        let (playing_idx, len) = {
+            let rows = self.filter_queue_songs();
+            let playing_idx = self
+                .scrobble
+                .current_song_id
+                .as_ref()
+                .and_then(|song_id| rows.iter().position(|s| &s.id == song_id));
+            (playing_idx, rows.len())
+        };
+        if let Some(idx) = playing_idx {
+            self.queue_page.common.slot_list.set_offset(idx, len);
+        } else if len > 0 {
             // Playing song not in filtered results — clamp to start
-            self.queue_page
-                .common
-                .slot_list
-                .set_offset(0, filtered.len());
+            self.queue_page.common.slot_list.set_offset(0, len);
         }
         // Physically reorder backend queue so next/prev follows sorted order.
         // `AppService::sort_queue` bundles the mutation, the reactive refresh,
@@ -962,7 +926,6 @@ impl Nokkvi {
         self.shell_spawn("sort_backend_queue", move |shell| async move {
             shell.sort_queue(sort_mode, ascending).await
         });
-        std::borrow::Cow::Owned(filtered)
     }
 
     /// Re-shuffle the queue via the backend and reload the UI from the
