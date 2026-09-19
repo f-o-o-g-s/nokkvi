@@ -1126,6 +1126,37 @@ async fn queue_perf_probe() {
         Message::Queue(QueueMessage::SlotList(SlotListPageMessage::NavigateDown))
     });
 
+    // A multi-selection drop: every 4th row (5,000 rows) dropped above the
+    // row under slot 1. Each drop needs its pick-time snapshot re-armed, so
+    // this one times its own loop.
+    const DROPS: u32 = 3;
+    let picked: Vec<u64> = app
+        .library
+        .queue_songs
+        .iter()
+        .step_by(4)
+        .map(|s| s.entry_id)
+        .collect();
+    let mut elapsed = std::time::Duration::ZERO;
+    for _ in 0..DROPS {
+        app.queue_page.drag_source = Some(picked.clone());
+        let start = std::time::Instant::now();
+        let _ = app.update(Message::Queue(QueueMessage::DragReorder(
+            DragEvent::Dropped {
+                index: 0,
+                target_index: 1,
+            },
+        )));
+        elapsed += start.elapsed();
+    }
+    assert_eq!(app.library.queue_songs.len(), ROWS);
+    eprintln!(
+        "[queue_perf_probe] {:<14} {:>12.2?} per drop ({DROPS} drops of {} rows)",
+        "MoveBatch",
+        elapsed / DROPS,
+        picked.len()
+    );
+
     let _ = std::fs::remove_file(db_path);
 }
 

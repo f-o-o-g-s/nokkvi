@@ -6,6 +6,7 @@ use iced::Task;
 use nokkvi_data::{
     backend::queue::QueueSongUIViewData,
     types::{ItemKind, queue::MoveBatchTarget, queue_sort_mode::QueueSortMode},
+    utils::reorder::move_block_before,
 };
 use tracing::{debug, error, trace};
 
@@ -455,19 +456,24 @@ impl Nokkvi {
                 let target_for_backend =
                     target_entry_id.map_or(MoveBatchTarget::End, MoveBatchTarget::AboveEntry);
 
-                // Resolve every entry_id to its current position in
-                // `library.queue_songs` so the optimistic local reorder
-                // operates on the same rows the backend will. entry_id
-                // lookups survive the previous batch's optimistic shift,
-                // closing the rapid-drag drift window.
-                let mut raw_indices_desc: Vec<usize> = entry_ids
+                // Resolve the entry_ids to their current positions in
+                // `library.queue_songs` in ONE pass (ascending, each row once:
+                // an unknown id matches no row, a repeated id collapses in the
+                // set), so the optimistic local reorder operates on the same
+                // rows the backend will. entry_id lookups survive the previous
+                // batch's optimistic shift, closing the rapid-drag drift window.
+                let picked: HashSet<u64> = entry_ids.iter().copied().collect();
+                let indices: Vec<usize> = self
+                    .library
+                    .queue_songs
                     .iter()
-                    .filter_map(|&eid| self.queue_position_by_entry_id(eid))
+                    .enumerate()
+                    .filter(|(_, s)| picked.contains(&s.entry_id))
+                    .map(|(i, _)| i)
                     .collect();
-                if raw_indices_desc.is_empty() {
+                if indices.is_empty() {
                     return Task::none();
                 }
-                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // descending
 
                 let raw_target = target_entry_id
                     .and_then(|eid| self.queue_position_by_entry_id(eid))
@@ -475,30 +481,13 @@ impl Nokkvi {
 
                 debug!(
                     "📦 [QUEUE] Batch move: {} items → target_eid {:?} (raw {})",
-                    raw_indices_desc.len(),
+                    indices.len(),
                     target_entry_id,
                     raw_target,
                 );
 
-                // Optimistic local reorder.
-                let mut moved = Vec::new();
-                for &qi in &raw_indices_desc {
-                    if qi < self.library.queue_songs.len() {
-                        moved.push(self.library.queue_songs.remove(qi));
-                    }
-                }
-                moved.reverse(); // ascending order matches insertion
-
-                let removed_before_target = raw_indices_desc
-                    .iter()
-                    .filter(|&&qi| qi < raw_target)
-                    .count();
-                let adjusted_target = raw_target.saturating_sub(removed_before_target);
-                let insert_pos = adjusted_target.min(self.library.queue_songs.len());
-
-                for (i, song) in moved.into_iter().enumerate() {
-                    self.library.queue_songs.insert(insert_pos + i, song);
-                }
+                // Optimistic local reorder: one pass that moves each row once.
+                move_block_before(&mut self.library.queue_songs, &indices, raw_target);
 
                 self.shell_spawn("queue_move_batch", move |shell| async move {
                     shell

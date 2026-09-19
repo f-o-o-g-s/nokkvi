@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 
 - The About modal now credits Claude Opus 5 and Fable 5.1 as the shipwrights (previously Opus 4.8).
 - Keyboard scrolling, wheel scrolling, and clicks in a very large queue now respond faster.
+- Dropping thousands of selected rows in a very large queue now lands without a pause.
+- Dropping thousands of selected rows in the playlist editor now lands without a pause.
 
 ### Fixed
 

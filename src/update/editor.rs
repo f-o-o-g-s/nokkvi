@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 
 use iced::Task;
-use nokkvi_data::backend::queue::QueueSongUIViewData;
+use nokkvi_data::{backend::queue::QueueSongUIViewData, utils::reorder::move_block_before};
 
 use super::components::{passive_artwork_version, prefetch_album_artwork_tasks};
 use crate::{
@@ -239,15 +239,21 @@ impl Nokkvi {
                     // Multi-selection batch drag: resolve the batch rows by
                     // identity (same as the single-row path), so the move
                     // survives a mid-drag viewport shift AND a clean reload that
-                    // would clear `selected_indices`. `reorder_buffer_batch`
-                    // stays index-based — it takes the resolved live positions.
+                    // would clear `selected_indices`. One pass resolves them to
+                    // their live positions; the shared `move_block_before` (the
+                    // same reorder as the queue's `MoveBatch`) then moves the
+                    // block in one more.
                     Some(ids) if ids.len() > 1 => {
-                        let mut indices: Vec<usize> = ids
+                        let picked: HashSet<u64> = ids.into_iter().collect();
+                        let indices: Vec<usize> = editor
+                            .songs
                             .iter()
-                            .filter_map(|eid| editor.songs.iter().position(|s| s.entry_id == *eid))
+                            .enumerate()
+                            .filter(|(_, s)| picked.contains(&s.entry_id))
+                            .map(|(i, _)| i)
                             .collect();
                         editor.common.clear_multi_selection();
-                        Self::reorder_buffer_batch(&mut editor.songs, &mut indices, to);
+                        move_block_before(&mut editor.songs, &indices, to);
                     }
                     // Single-row drag: resolve the source by identity.
                     Some(ids) => {
@@ -268,35 +274,6 @@ impl Nokkvi {
                 }
                 Task::none()
             }
-        }
-    }
-
-    /// In-memory batch reorder mirroring the queue's `MoveBatch` optimistic
-    /// local reorder (mirrors the queue's `QueueAction::MoveBatch` optimistic
-    /// local reorder): remove the selected rows
-    /// (descending so earlier removals don't shift later indices), then insert
-    /// them as a contiguous block before `target`, adjusting the insert point
-    /// for rows removed from before the target.
-    fn reorder_buffer_batch(
-        songs: &mut Vec<QueueSongUIViewData>,
-        indices: &mut [usize],
-        target: usize,
-    ) {
-        indices.sort_unstable_by(|a, b| b.cmp(a)); // descending
-        let len = songs.len();
-        let mut moved = Vec::new();
-        for &i in indices.iter() {
-            if i < songs.len() {
-                moved.push(songs.remove(i));
-            }
-        }
-        moved.reverse(); // restore ascending order for insertion
-
-        let removed_before_target = indices.iter().filter(|&&i| i < target).count();
-        let adjusted_target = target.min(len).saturating_sub(removed_before_target);
-        let insert_pos = adjusted_target.min(songs.len());
-        for (offset, song) in moved.into_iter().enumerate() {
-            songs.insert(insert_pos + offset, song);
         }
     }
 
