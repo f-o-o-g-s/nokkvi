@@ -1172,20 +1172,32 @@ async fn queue_perf_probe() {
 // build_queue_view_data helper (app_view.rs)
 //
 // The split-pane and single-view branches share one builder; these pin the
-// two parameters that diverge between them and the non-parametrized field
-// wiring, so a future field re-order/mis-wire in the single helper is caught.
+// pane width it derives, the `elevated` parameter, and the non-parametrized
+// field wiring, so a future field re-order/mis-wire in the single helper is
+// caught.
 // ============================================================================
 
 #[test]
-fn build_queue_view_data_wires_window_width_and_elevated() {
-    let app = test_app();
+fn build_queue_view_data_wires_pane_width_and_elevated() {
+    let mut app = test_app();
+    app.window.width = 1400.0;
+    let full = app.content_pane_width();
 
-    let vd = app.build_queue_view_data(640.0, true);
-    assert_eq!(vd.window_width, 640.0);
+    let vd = app.build_queue_view_data(true);
+    assert_eq!(vd.window_width, full, "single view renders the full pane");
+    assert_eq!(vd.chrome.pane_width, vd.window_width);
     assert!(vd.elevated);
 
-    let vd2 = app.build_queue_view_data(320.0, false);
-    assert_eq!(vd2.window_width, 320.0);
+    // Browsing panel open, no editor session: the queue renders in the
+    // split view's left pane.
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new());
+    let vd2 = app.build_queue_view_data(false);
+    assert_eq!(
+        vd2.window_width,
+        full * crate::app_view::QUEUE_PANE_FRACTION,
+        "split view renders the queue pane"
+    );
+    assert_eq!(vd2.chrome.pane_width, vd2.window_width);
     assert!(!vd2.elevated);
 }
 
@@ -1199,7 +1211,7 @@ fn build_queue_view_data_matches_settings_and_counts() {
     app.settings.queue_show_default_playlist = false;
     app.library.queue_loading_target = Some(7);
 
-    let vd = app.build_queue_view_data(100.0, false);
+    let vd = app.build_queue_view_data(false);
     assert!(
         vd.stable_viewport,
         "stable_viewport must wire from settings.stable_viewport"
@@ -2771,5 +2783,148 @@ fn batch_drop_through_root_past_the_end_appends() {
         &actual[4..],
         &[ids[0], ids[2]],
         "the moved rows land at the end in their queue order"
+    );
+}
+
+// ============================================================================
+// Within-list drag maps slots through the RENDERED slot count
+//
+// The pick and drop handlers map a drag slot to a row through the stored
+// `slot_count`; the rows under the cursor come from the count the render
+// budgets. With the "Playing From" banner up, a resync that ignores the banner
+// stores a larger count, so mid-list the pick grabbed the row above the one
+// under the cursor and near the end it was off by two.
+// ============================================================================
+
+/// A 40-row queue with the banner up, at a window height where the banner
+/// changes the slot count (and at least 9 rows render). Holds the theme lock
+/// for the test's lifetime so the artwork / auto-hide atomics stay put.
+fn banner_drag_app() -> (crate::Nokkvi, parking_lot::MutexGuard<'static, ()>) {
+    use nokkvi_data::types::player_settings::ArtworkColumnMode;
+
+    let guard = crate::theme::THEME_MODE_LOCK.lock();
+    crate::theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
+    crate::theme::set_autohide_toolbar(false);
+
+    let mut app = app_with_numbered_queue(40);
+    app.window.width = 1400.0;
+    app.active_playlist_info = Some(active_ctx(None));
+    let height = (400..=2000)
+        .map(|h| h as f32)
+        .find(|&h| {
+            app.window.height = h;
+            let with_banner = rendered_slot_count(&app);
+            app.active_playlist_info = None;
+            let without_banner = rendered_slot_count(&app);
+            app.active_playlist_info = Some(active_ctx(None));
+            with_banner >= 9 && with_banner != without_banner
+        })
+        .expect("setup invariant: a height where the banner changes the slot count");
+    app.window.height = height;
+    (app, guard)
+}
+
+/// The slot count `QueuePage::view` renders for the app's current state.
+fn rendered_slot_count(app: &crate::Nokkvi) -> usize {
+    rendered_slot_config(app).slot_count
+}
+
+fn rendered_slot_config(app: &crate::Nokkvi) -> crate::widgets::slot_list::SlotListConfig {
+    use crate::{views::queue::view::queue_effective_chrome, widgets::slot_list::SlotListConfig};
+    let vd = app.build_queue_view_data(false);
+    SlotListConfig::with_dynamic_slots(vd.window_height, queue_effective_chrome(&vd.chrome))
+}
+
+/// The queue row the render shows at `slot` (`allow_end`: a drop past the
+/// last row maps to `len`).
+fn rendered_item(app: &crate::Nokkvi, slot: usize, allow_end: bool) -> Option<usize> {
+    let cfg = rendered_slot_config(app);
+    app.queue_page.common.slot_list.slot_to_item(
+        slot,
+        app.library.queue_songs.len(),
+        cfg.slot_count,
+        cfg.center_slot,
+        allow_end,
+    )
+}
+
+/// Top of the list, mid-list, and near the end.
+const DRAG_OFFSETS: [usize; 3] = [0, 20, 38];
+
+#[test]
+fn drag_pick_grabs_the_rendered_row_with_the_banner_up() {
+    use crate::{app_message::Message, views::QueueMessage, widgets::drag_column::DragEvent};
+
+    let (mut app, _guard) = banner_drag_app();
+    let total = app.library.queue_songs.len();
+    let slots = rendered_slot_count(&app);
+
+    let mut mismatches = Vec::new();
+    for offset in DRAG_OFFSETS {
+        for slot in 0..slots {
+            app.queue_page.common.slot_list.set_offset(offset, total);
+            app.queue_page.drag_source = None;
+            let expected =
+                rendered_item(&app, slot, false).map(|i| vec![app.library.queue_songs[i].entry_id]);
+
+            let _ = app.update(Message::Queue(QueueMessage::DragReorder(
+                DragEvent::Picked { index: slot },
+            )));
+
+            if app.queue_page.drag_source != expected {
+                mismatches.push((offset, slot, app.queue_page.drag_source.clone(), expected));
+            }
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "picks that grabbed a row other than the one rendered under the cursor \
+         ({slots} rendered slots), as (offset, slot, grabbed, rendered): {mismatches:?}"
+    );
+}
+
+#[test]
+fn drag_drop_lands_on_the_rendered_row_with_the_banner_up() {
+    use crate::{app_message::Message, views::QueueMessage, widgets::drag_column::DragEvent};
+
+    let (mut app, _guard) = banner_drag_app();
+    let original = app.library.queue_songs.clone();
+    let ids: Vec<u64> = original.iter().map(|s| s.entry_id).collect();
+    let total = ids.len();
+    let slots = rendered_slot_count(&app);
+
+    let mut mismatches = Vec::new();
+    for offset in DRAG_OFFSETS {
+        for slot in 0..slots {
+            app.library.queue_songs = original.clone();
+            app.queue_page.common.slot_list.set_offset(offset, total);
+            let target = rendered_item(&app, slot, true).unwrap_or(total);
+            // A source row well clear of the target, so every drop moves it.
+            let source = if target >= total / 2 { 0 } else { total - 1 };
+            app.queue_page.drag_source = Some(vec![ids[source]]);
+
+            let _ = app.update(Message::Queue(QueueMessage::DragReorder(
+                DragEvent::Dropped {
+                    index: 0,
+                    target_index: slot,
+                },
+            )));
+
+            let actual: Vec<u64> = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+            if actual != expected_batch_order(&ids, &[source], target) {
+                let landed_above = actual
+                    .iter()
+                    .position(|&id| id == ids[source])
+                    .and_then(|at| actual.get(at + 1))
+                    .and_then(|id| ids.iter().position(|i| i == id));
+                mismatches.push((offset, slot, target, landed_above));
+            }
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "drops that landed somewhere other than above the row rendered under the \
+         cursor ({slots} rendered slots), as (offset, slot, rendered row, landed above \
+         row): {mismatches:?}"
     );
 }

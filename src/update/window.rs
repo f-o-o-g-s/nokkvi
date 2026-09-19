@@ -70,12 +70,14 @@ impl Nokkvi {
         // header and therefore packs MORE slots. The stored count must reflect
         // that — a hardcoded expanded footprint desyncs every consumer that
         // reads slot_count without first revealing the toolbar: find-and-expand
-        // row landing centers on `slot_count/2` (lands the row a slot too low),
-        // and the drag mapper used to grab the wrong row (now anchored on
-        // hovered_slot, but kept honest here too). The reveal-on-read
-        // assumption holds for the keyboard scroll path but not these (nor
-        // center-on-playing, which no longer reveals the toolbar — it relies on
-        // the stored collapsed count just like find-and-expand).
+        // row landing centers on `slot_count/2` (lands the row a slot too low).
+        // Cross-pane drag resolves its drop row from `hovered_slot` instead, but
+        // the within-list drags of the queue and the playlist editor map slots
+        // to rows through the stored count (both are sized from their own view
+        // chrome below). The reveal-on-read assumption holds for the keyboard
+        // scroll path but not these (nor center-on-playing, which no longer
+        // reveals the toolbar — it relies on the stored collapsed count just
+        // like find-and-expand).
         //
         // When auto-hide is OFF, `toolbar_collapsed` is always `false`, so this
         // reduces to the previous expanded-footprint behavior exactly.
@@ -106,6 +108,19 @@ impl Nokkvi {
                 sc_expanded
             };
         }
+
+        // The queue stacks its own bars above the list (the "Playing From"
+        // banner, its hover detail and hairlines, the select-all bar), renders
+        // at the split view's pane width while the browsing panel is open, and
+        // holds its header expanded while a header menu is open. Size it from
+        // the SAME chrome helper and inputs its view() reads, so the stored
+        // count its within-list drag maps slots→rows against equals the
+        // rendered count: otherwise a pick grabs the row above the one under
+        // the cursor (two above near the end of the list).
+        let queue_chrome =
+            crate::views::queue::view::queue_effective_chrome(&self.queue_chrome_inputs());
+        self.queue_page.common.slot_list.slot_count =
+            SlotListConfig::with_dynamic_slots(window_height, queue_chrome).slot_count;
 
         // The playlist editor is NOT one of the pooled pages: it renders in
         // place of the view header (its edit bar instead) at the narrower

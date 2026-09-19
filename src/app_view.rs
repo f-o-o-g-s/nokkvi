@@ -1208,10 +1208,10 @@ impl Nokkvi {
     // tuple. Folding `column_dropdown_state(...)` into the helper keeps both
     // branches limited to a one-line call.
     //
-    // Queue is built the same way (`build_queue_view_data`); it differs only
-    // in `window_width` and `elevated` between the split-pane and single-view
-    // branches. Playlists and Similar render in only one branch and stay
-    // inline at the call site.
+    // Queue is built the same way (`build_queue_view_data`); it derives its
+    // pane width itself (`queue_chrome_inputs`), so only `elevated` differs
+    // between the split-pane and single-view branches. Playlists and Similar
+    // render in only one branch and stay inline at the call site.
     // -------------------------------------------------------------------------
 
     /// Build `AlbumsViewData` from current app state. Shared by the main pane
@@ -1421,27 +1421,74 @@ impl Nokkvi {
         (visualizer, boat)
     }
 
+    /// Whether the queue renders in the split view's left pane: the browsing
+    /// panel is open and no playlist-editor session is active (a session
+    /// suppresses the queue split, so the Queue tab renders full width). The
+    /// split-view gate in `main_content` and [`Self::queue_pane_width`] both
+    /// read this.
+    pub(crate) fn queue_in_split_pane(&self) -> bool {
+        self.browsing_panel.is_some() && self.playlist_editor.is_none()
+    }
+
+    /// Width the queue renders at: the split view's queue pane, or the full
+    /// content pane. The render and `resync_slot_counts` both read this.
+    pub(crate) fn queue_pane_width(&self) -> f32 {
+        if self.queue_in_split_pane() {
+            self.content_pane_width() * QUEUE_PANE_FRACTION
+        } else {
+            self.content_pane_width()
+        }
+    }
+
+    /// Whether one of the queue header's dropdowns (the columns cog or the
+    /// server-sync action menu) is open. An open one holds the auto-hide
+    /// toolbar expanded, so it can't collapse out from under the overlay.
+    fn queue_header_menu_open(&self) -> bool {
+        column_dropdown_state(&self.open_menu, View::Queue).0
+            || queue_sync_menu_state(&self.open_menu).0
+    }
+
+    /// The inputs of the queue's slot-list chrome, derived once here for
+    /// BOTH the render ([`Self::build_queue_view_data`]) and
+    /// `resync_slot_counts`, so the stored `slot_count` the drag mapper reads
+    /// equals the count the queue renders. See
+    /// [`queue_effective_chrome`](crate::views::queue::view::queue_effective_chrome).
+    pub(crate) fn queue_chrome_inputs(&self) -> crate::views::queue::view::QueueChromeInputs<'_> {
+        crate::views::queue::view::QueueChromeInputs {
+            pane_width: self.queue_pane_width(),
+            window_height: self.window.height,
+            toolbar_collapsed: self.queue_page.common.toolbar_collapsed(
+                crate::theme::is_autohide_toolbar(),
+                self.queue_header_menu_open(),
+            ),
+            playlist_comment: self
+                .active_playlist_info
+                .as_ref()
+                .map(|ctx| ctx.comment.as_str()),
+            strip_expanded: self.queue_page.playlist_strip_expanded,
+            select_visible: self.queue_page.column_visibility.select,
+        }
+    }
+
     /// Build `QueueViewData` from current app state. Shared by the
     /// browsing-panel split-view branch and the normal single-view branch.
-    /// The two call sites differ only in `window_width` and `elevated`, so
-    /// those are the parameters; everything else is read off `&self`.
-    pub(crate) fn build_queue_view_data(
-        &self,
-        window_width: f32,
-        elevated: bool,
-    ) -> views::QueueViewData<'_> {
+    /// The pane width comes from [`Self::queue_chrome_inputs`]; `elevated`
+    /// differs between the two call sites, so it is the parameter.
+    pub(crate) fn build_queue_view_data(&self, elevated: bool) -> views::QueueViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Queue);
         let (sync_menu_open, sync_menu_trigger_bounds) = queue_sync_menu_state(&self.open_menu);
         let lyrics = self.queue_lyrics_panel_data();
         let lyrics_blurred_cover = self.lyrics_blurred_cover_for_view();
         let (over_art_visualizer, over_art_boat) = self.over_cover_overlays();
+        let chrome = self.queue_chrome_inputs();
         views::QueueViewData {
             queue_songs: self.filter_queue_songs(),
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
-            window_width,
-            window_height: self.window.height,
+            window_width: chrome.pane_width,
+            window_height: chrome.window_height,
+            chrome,
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             current_playing_song_id: self.scrobble.current_song_id.clone(),
@@ -1455,7 +1502,6 @@ impl Nokkvi {
             elevated,
             playlist_context_info: self.active_playlist_info.clone(),
             playlist_context_is_smart: self.active_playlist_is_smart(),
-            playlist_strip_expanded: self.queue_page.playlist_strip_expanded,
             playlist_cover: self.active_playlist_strip_cover(),
             playlist_quad: self.active_playlist_strip_quad(),
             overlay: views::OverlayMenuViewData {
@@ -1682,8 +1728,8 @@ impl Nokkvi {
             return editor.rules_view(rules_data);
         }
 
-        if self.browsing_panel.is_some()
-            && (in_editor || (self.current_view == View::Queue && self.playlist_editor.is_none()))
+        if (in_editor && self.browsing_panel.is_some())
+            || (self.current_view == View::Queue && self.queue_in_split_pane())
         {
             use iced::widget::{column as col, row as r};
 
@@ -1739,10 +1785,7 @@ impl Nokkvi {
                     editor.view(editor_data).map(Message::Editor)
                 }
                 _ => {
-                    let queue_view_data = self.build_queue_view_data(
-                        self.content_pane_width() * QUEUE_PANE_FRACTION,
-                        false,
-                    );
+                    let queue_view_data = self.build_queue_view_data(false);
                     self.queue_page.view(queue_view_data).map(Message::Queue)
                 }
             };
@@ -1918,7 +1961,7 @@ impl Nokkvi {
                 self.albums_page.view(view_data).map(Message::Albums)
             }
             View::Queue => {
-                let view_data = self.build_queue_view_data(self.content_pane_width(), elevated);
+                let view_data = self.build_queue_view_data(elevated);
                 self.queue_page.view(view_data).map(Message::Queue)
             }
             View::Artists => {

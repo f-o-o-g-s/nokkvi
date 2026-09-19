@@ -149,10 +149,12 @@ impl QueuePage {
 
                         // DESTINATION: follows the live cursor against the CURRENT
                         // viewport. `slot_to_item` reads the stored slot_count,
-                        // which `handle_queue` resyncs (collapse-aware) immediately
-                        // before this update — so it matches the live render even
-                        // with the auto-hide toolbar collapsed, and computes the
-                        // boundary `effective_center` correctly. A past-end /
+                        // which `handle_queue` resyncs immediately before this
+                        // update from `queue_effective_chrome`, the helper and
+                        // inputs the view renders with — so it equals the
+                        // rendered count (banner, select bar, split pane,
+                        // collapsed toolbar) and the boundary `effective_center`
+                        // matches the rows on screen. A past-end /
                         // empty-area drop maps to `None`; treat it as "append at
                         // end", mirroring the cross-pane `HoveredSlot::Empty` drop.
                         let to = self
@@ -206,9 +208,11 @@ impl QueuePage {
                     DragEvent::Picked { index } if drag_allowed => {
                         // Snapshot the dragged source row(s) by per-row entry_id
                         // NOW. `slot_to_item_index` reads the stored slot_count,
-                        // which `handle_queue` resyncs (collapse-aware) immediately
-                        // before this update, so it matches the live render. The
-                        // entry_id snapshot then survives any later viewport shift.
+                        // which `handle_queue` resyncs immediately before this
+                        // update from the same chrome helper and inputs the view
+                        // renders with, so it maps to the row under the cursor.
+                        // The entry_id snapshot then survives any later viewport
+                        // shift.
                         if let Some(item_index) =
                             self.common.slot_list.slot_to_item_index(index, total_items)
                         {

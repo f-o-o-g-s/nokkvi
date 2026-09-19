@@ -63,8 +63,12 @@ pub struct SlotListView {
     /// `center_slot - 1` rows. Set by `pin_selected`; cleared by
     /// `set_selected`, `set_offset`, and click-to-focus paths.
     pub selected_offset_pinned: bool,
-    /// Current slot count (set during render by `build_slot_list_slots`).
-    /// Used by `slot_to_item_index` to translate drag slot indices to item indices.
+    /// Stored slot count, written only by `resync_slot_counts`
+    /// (`update/window.rs`); the render sizes itself from a fresh
+    /// `SlotListConfig` and never writes it back. Its readers (the drag
+    /// slot→item mappers, `get_center_item_index`, `prefetch_indices`, the
+    /// scrollbar thumb, find-and-expand landing) assume it equals the count
+    /// the page renders.
     pub slot_count: usize,
     /// Timestamp of the last scroll event (for transient scrollbar fade animation).
     /// `None` means the scrollbar should be fully hidden.

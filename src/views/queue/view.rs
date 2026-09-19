@@ -140,6 +140,93 @@ fn playlist_strip_detail(comment: &str, content_width: f32) -> (String, f32) {
     (display, lines * LINE_H + ROW_GAP + META_ROW_H + BOTTOM_PAD)
 }
 
+/// Width the expanded strip's comment wraps within: the band width minus the
+/// strip padding. Shared by the detail block's render and its height in
+/// [`queue_chrome_height`].
+fn playlist_strip_comment_width(window_width: f32, window_height: f32) -> f32 {
+    (playlist_strip_band_width(window_width, window_height) - 73.0).max(120.0)
+}
+
+/// Every input the queue's slot-list chrome depends on, derived once per read
+/// by `Nokkvi::queue_chrome_inputs` and handed to BOTH `QueuePage::view` (via
+/// [`QueueViewData::chrome`](super::QueueViewData::chrome)) and
+/// `resync_slot_counts`. Deriving any of these a second time is how the stored
+/// `slot_count` drifted from the render before.
+#[derive(Debug, Clone, Copy)]
+pub struct QueueChromeInputs<'a> {
+    /// Width the queue renders at: the full content pane, or the split view's
+    /// queue pane (`Nokkvi::queue_pane_width`).
+    pub pane_width: f32,
+    pub window_height: f32,
+    /// Auto-hide collapse state, with an open header menu (columns cog or
+    /// server sync) holding the toolbar expanded.
+    pub toolbar_collapsed: bool,
+    /// The active playlist's comment; `None` = no "Playing From" banner.
+    pub playlist_comment: Option<&'a str>,
+    /// Whether the banner's hover-expanded detail block is showing.
+    pub strip_expanded: bool,
+    /// Whether the multi-select column's select-all bar is showing.
+    pub select_visible: bool,
+}
+
+/// Total slot-list chrome for the queue view, before the vertical artwork:
+/// the view header (collapsed or expanded), then, while a playlist is loaded,
+/// the "Playing From" banner, its hover-expanded detail block, its 1 px bottom
+/// separator, and the 1 px top hairline it gets under a flush portrait
+/// artwork column; then the select-all bar when the multi-select column is on.
+/// A new bar stacked above the queue's slot list is counted here.
+///
+/// `QueuePage::view` feeds this to `BaseSlotListLayoutConfig.slot_list_chrome`.
+pub(crate) fn queue_chrome_height(inputs: &QueueChromeInputs<'_>) -> f32 {
+    use crate::widgets::slot_list::{SELECT_HEADER_HEIGHT, chrome_height_with_header};
+
+    let mut chrome = chrome_height_with_header(inputs.toolbar_collapsed);
+    if let Some(comment) = inputs.playlist_comment {
+        let strip = if inputs.strip_expanded {
+            let width = playlist_strip_comment_width(inputs.pane_width, inputs.window_height);
+            PLAYLIST_STRIP_COMPACT_H + playlist_strip_detail(comment, width).1
+        } else {
+            PLAYLIST_STRIP_COMPACT_H
+        };
+        let top_sep_h =
+            if playlist_strip_needs_top_separator(true, inputs.pane_width, inputs.window_height) {
+                1.0
+            } else {
+                0.0
+            };
+        chrome = chrome + strip + 1.0 + top_sep_h;
+    }
+    if inputs.select_visible {
+        chrome += SELECT_HEADER_HEIGHT;
+    }
+    chrome
+}
+
+/// The effective slot-list chrome (queue chrome + vertical artwork) the queue's
+/// [`view`](QueuePage::view) budgets for these inputs: the single input to
+/// `with_dynamic_slots`. Shared with `resync_slot_counts` so the stored
+/// `slot_count` (which the within-list drag maps slots to items against, and
+/// the scrollbar thumb and centered-row reads use) comes from the same formula
+/// and inputs as the rendered count. A drift here silently mis-lands picks and
+/// drops, so both paths MUST read this one helper.
+pub(crate) fn queue_effective_chrome(inputs: &QueueChromeInputs<'_>) -> f32 {
+    use crate::widgets::base_slot_list_layout::{
+        BaseSlotListLayoutConfig, vertical_artwork_chrome,
+    };
+
+    let chrome = queue_chrome_height(inputs);
+    // `elevated` and `slot_list_chrome` don't reach the vertical term (see
+    // `playlist_strip_artwork_layout`), so the render's elevation is moot here.
+    let layout = BaseSlotListLayoutConfig {
+        window_width: inputs.pane_width,
+        window_height: inputs.window_height,
+        show_artwork_column: true,
+        slot_list_chrome: chrome,
+        elevated: false,
+    };
+    chrome + vertical_artwork_chrome(&layout)
+}
+
 /// Whether the artwork panel is displaying the now-playing track's cover — the
 /// gate for overlaying its lyrics, keyed to what actually RENDERS, not intent.
 ///
@@ -205,15 +292,11 @@ impl QueuePage {
             .into();
 
         // Auto-hide toolbar: collapse to a hairline when enabled and not
-        // currently revealed (hover / active search / hotkey window).
+        // currently revealed (hover / active search / hotkey window). The
+        // collapse state rides in the shared chrome inputs so the render and
+        // `resync_slot_counts` read one derivation.
         let autohide = crate::theme::is_autohide_toolbar();
-        // Either header dropdown (columns cog or the server-sync action menu)
-        // holds the auto-hide toolbar revealed while open, so it can't collapse
-        // out from under the overlay.
-        let toolbar_collapsed = self.common.toolbar_collapsed(
-            autohide,
-            data.overlay.column_dropdown_open || data.sync_menu_open,
-        );
+        let toolbar_collapsed = data.chrome.toolbar_collapsed;
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.queue_sort_mode,
@@ -329,15 +412,15 @@ impl QueuePage {
         // width (the song-list column, excluding the horizontal artwork column)
         // so it can't overflow the clipped block and push the meta row out of
         // view. Returns the (possibly ellipsized) display string plus the block
-        // height; both feed the band render and the chrome math below so they
-        // stay in lockstep.
+        // height the band renders at. `queue_chrome_height` sizes the same
+        // block through the same helper and width, so the band and the
+        // slot-list chrome stay in lockstep.
         let (playlist_comment_display, playlist_detail_h) =
             data.playlist_context_info.as_ref().map_or_else(
                 || (String::new(), 0.0),
                 |ctx| {
                     let content_width =
-                        (playlist_strip_band_width(data.window_width, data.window_height) - 73.0)
-                            .max(120.0);
+                        playlist_strip_comment_width(data.window_width, data.window_height);
                     playlist_strip_detail(&ctx.comment, content_width)
                 },
             );
@@ -357,7 +440,7 @@ impl QueuePage {
             use iced::widget::svg;
 
             let accent = crate::theme::accent();
-            let expanded = data.playlist_strip_expanded;
+            let expanded = data.chrome.strip_expanded;
 
             // Icon action button — mouse_area + HoverOverlay(container) so the
             // press scale fires; the inner press is independent of the band's
@@ -678,8 +761,8 @@ impl QueuePage {
         // reads as separated. Kept as a fourth column child (zero-`Space` when
         // absent) so the `column![top_sep, extra, sep, header]` shape — and the
         // search `text_input::Id` inside `header` — stay positionally stable
-        // across the playlist / orientation toggles. Its 1 px is folded into
-        // `chrome_height` below so the vertical slot-list pinning math stays exact.
+        // across the playlist / orientation toggles. Its 1 px is counted in
+        // `queue_chrome_height` so the vertical slot-list pinning math stays exact.
         let needs_top_sep = playlist_strip_needs_top_separator(
             data.playlist_context_info.is_some(),
             data.window_width,
@@ -699,42 +782,17 @@ impl QueuePage {
         // multi-select column is on. The bar's tri-state derives from the
         // current selection set against the *filtered* (visible) row count.
         let header = crate::widgets::slot_list::compose_header_with_select(
-            self.column_visibility.select,
+            data.chrome.select_visible,
             self.common.select_all_state(data.queue_songs.len()),
             QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
             header,
         );
 
-        // Configure slot list with queue-specific chrome height (with view header now).
-        // The "Playing From" banner adds its own height; account for it so the last
-        // slot isn't shorter than the rest.
-        use crate::widgets::slot_list::{
-            chrome_height_with_header, chrome_height_with_select_header,
-        };
-        let select_header_visible = self.column_visibility.select;
-        let chrome_height = if data.playlist_context_info.is_some() {
-            // Compact "Playing From" banner + 1px bottom separator, plus the
-            // detail block height when the strip is hover-expanded
-            // (grow-in-flow), plus the 1px top hairline when a vertical artwork
-            // column sits directly above the banner. The top hairline must be
-            // counted here so the vertical layout pins the slot-list rect with
-            // the exact chrome height it renders — otherwise the column overflows
-            // by 1px and clips the last slot.
-            let strip = if data.playlist_strip_expanded {
-                PLAYLIST_STRIP_COMPACT_H + playlist_detail_h
-            } else {
-                PLAYLIST_STRIP_COMPACT_H
-            };
-            let top_sep_h = if needs_top_sep { 1.0 } else { 0.0 };
-            chrome_height_with_header(toolbar_collapsed) + strip + 1.0 + top_sep_h
-        } else {
-            chrome_height_with_select_header(toolbar_collapsed, select_header_visible)
-        };
-        let chrome_height = if select_header_visible && data.playlist_context_info.is_some() {
-            chrome_height + crate::widgets::slot_list::SELECT_HEADER_HEIGHT
-        } else {
-            chrome_height
-        };
+        // Slot-list chrome: every bar stacked above the list (view header,
+        // banner, detail block, hairlines, select-all bar), from the helper
+        // `resync_slot_counts` reads too, so the stored `slot_count` the drag
+        // mapper uses equals the count rendered here.
+        let chrome_height = queue_chrome_height(&data.chrome);
 
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
@@ -757,11 +815,10 @@ impl QueuePage {
             return widgets::base_slot_list_empty_state(header, message, &layout_config);
         }
 
-        let vertical_artwork_chrome =
-            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
+        // Both paths MUST read `queue_effective_chrome` (see its doc).
         let config = SlotListConfig::with_dynamic_slots(
             data.window_height,
-            chrome_height + vertical_artwork_chrome,
+            queue_effective_chrome(&data.chrome),
         )
         .with_modifiers(data.modifiers);
 

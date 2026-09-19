@@ -26,7 +26,7 @@ use crate::{
 };
 
 mod update;
-mod view;
+pub(crate) mod view;
 
 /// Queue page local state
 #[derive(Debug)]
@@ -111,6 +111,12 @@ pub struct QueueViewData<'a> {
     pub lyrics_blurred_cover: Option<&'a iced::widget::image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
+    /// Inputs of the queue's slot-list chrome (pane width, header collapse,
+    /// banner comment and hover expansion, select-all bar), shared with
+    /// `resync_slot_counts` so the stored `slot_count` equals the rendered one.
+    /// `window_width` / `window_height` above carry the same pane width and
+    /// height.
+    pub chrome: view::QueueChromeInputs<'a>,
     pub scale_factor: f32,
     pub modifiers: iced::keyboard::Modifiers,
     pub current_playing_song_id: Option<String>,
@@ -136,9 +142,6 @@ pub struct QueueViewData<'a> {
     /// rules-aware edit button. Resolved by `Nokkvi::active_playlist_is_smart`
     /// (freshest library signal, falling back to the play-time context flag).
     pub playlist_context_is_smart: bool,
-    /// Whether the read-only playlist context strip should render its expanded
-    /// detail block this frame (mirrors `QueuePage.playlist_strip_expanded`).
-    pub playlist_strip_expanded: bool,
     /// Resolved cover handle for the active playlist's strip thumbnail (collage
     /// first tile, falling back to the mini cover). `None` when no playlist is
     /// active or its artwork isn't cached yet — the strip omits the cover.

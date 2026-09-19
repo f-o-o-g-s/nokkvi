@@ -107,8 +107,24 @@ use crate::{Nokkvi, View, app_message::Message};
 impl Nokkvi {
     /// Central message handler
     ///
-    /// Routes messages to appropriate handlers organized by domain.
+    /// Routes the message to its domain handler, then re-sizes every page's
+    /// stored `slot_count` against the state the handler left behind.
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.dispatch_message(message);
+        // The drag mappers, the scrollbar thumb, the centered-row reads, and
+        // find-and-expand read the stored slot_count between renders, so it
+        // must equal what the next render draws. Its inputs (pane width,
+        // header collapse and open menus, the queue's banner and hover detail,
+        // select columns) change in handlers all over the app, several of
+        // them after `handle_queue`'s own resync has run, so one resync here
+        // covers every writer. It reads no rows, so the pointer-motion
+        // messages stay O(1) in the queue length.
+        self.resync_slot_counts();
+        task
+    }
+
+    /// Route a message to the handler for its domain.
+    fn dispatch_message(&mut self, message: Message) -> Task<Message> {
         match message {
             // -----------------------------------------------------------------
             // Navigation

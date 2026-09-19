@@ -262,12 +262,13 @@ fn compute_queue_drop_slot_is_unaffected_by_viewport_offset() {
 #[test]
 fn compute_queue_drop_slot_ignores_stale_stored_slot_count() {
     // Bug 2's stored-vs-inline slot_count divergence concretely: in
-    // Auto-vertical-artwork split-view, `resync_slot_counts` writes a
-    // slot_count based on the full content-pane width, but the queue
+    // Auto-vertical-artwork split-view, `resync_slot_counts` used to write a
+    // slot_count based on the full content-pane width, while the queue
     // pane renders against `content_pane_width * 0.55`. At certain
-    // aspect ratios the two diverge (live 13, stored 5 in the user-
-    // reported case). The math-fix had to sync the stored value before
-    // calling `slot_to_item_index`.
+    // aspect ratios the two diverged (live 13, stored 5 in the user-
+    // reported case). The resync now sizes the queue at its pane width
+    // (`queue_resync_parity` in `tests/window.rs`); this test pins that the
+    // cross-pane drop never depended on the stored count at all.
     //
     // Structurally, `compute_queue_drop_slot` never calls
     // `slot_to_item_index` — it reads the item index straight from a
