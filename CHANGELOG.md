@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Nix users can now build and run nokkvi straight from the repository with its new flake.
+
 ### Changed
 
 ### Fixed
