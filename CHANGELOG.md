@@ -33,6 +33,13 @@ All notable changes to this project will be documented in this file.
 - Holding a dragged playlist-editor row still at the list's edge now loads thumbnails for the rows it scrolls into view.
 - Dragging a queue row now picks up and drops the row under the cursor with the playlist banner, select column, or browsing panel showing.
 - Clicking an album, artist, or genre link now lands the found row in view when the target view's select column is on.
+- With Fade on Skip set to Crossfade, playing a list larger than one page while a song plays now keeps the track you clicked.
+- Editing the queue or toggling shuffle, repeat, or consume during a skip crossfade no longer brings the previous track back.
+- Seeking during a skip crossfade now seeks the new track instead of bringing the previous one back.
+- Stopping during a skip crossfade, then pressing Play, now starts the new track instead of the previous one.
+- With ReplayGain on, seeking a track that arrived by crossfade no longer plays it at an earlier track's level.
+- With ReplayGain on, stopping and replaying a track that arrived by crossfade no longer plays it at an earlier track's level.
+- Switching bit-perfect mode during a crossfade no longer leaves the badge claiming bit-perfect for a track that isn't.
 
 ### Removed
 

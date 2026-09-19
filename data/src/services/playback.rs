@@ -686,10 +686,11 @@ impl QueueNavigator {
         // queue mutation can't desync the removal target (drift-immune).
         //
         // M7 ordering note: on the FadePlanned path this runs BEFORE the fade
-        // fires (the caller completes the fade after we return), so the
-        // removal's `NextTrackResetEffect` — whose `reset_next_track` cancels
-        // any LIVE blend — can never kill the skip fade it precedes. The row
+        // fires (the caller completes the fade after we return), so the row
         // is consumed at skip time, exactly as on the historical hard path.
+        // The removal's `NextTrackResetEffect` lands in the build window,
+        // where it only voids the prepared slot (a reset spares a live skip
+        // blend in any case).
         if let Some(eid) = consume_entry {
             let mut qm = self.queue_manager.lock().await;
             let effect = qm.remove_entry_by_id(eid).ok();
@@ -1214,8 +1215,8 @@ mod tests {
 
     /// M7 consume ordering: under consume the outgoing's row is removed at
     /// skip time — BEFORE the fade fires (the plan is completed by the
-    /// caller afterwards), so the removal's `NextTrackResetEffect` can never
-    /// cancel the blend it precedes.
+    /// caller afterwards), exactly as on the hard path — and the skip fade
+    /// stays planned.
     #[tokio::test(flavor = "current_thread")]
     async fn play_next_crossfade_mode_with_consume_removes_row_before_fade() {
         let mut qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(0));

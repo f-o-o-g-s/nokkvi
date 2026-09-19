@@ -35,6 +35,10 @@ pub struct ActiveStream {
     pub sample_rate: u32,
     /// Channel count that this stream was created with.
     pub channels: u16,
+    /// Whether this stream was BUILT bit-perfect (DSP bypassed). Fixed at
+    /// construction, so the honest badge can stamp the promoted stream's own
+    /// fact instead of the live setting, which may have flipped since.
+    pub bit_perfect: bool,
 }
 
 impl ActiveStream {
@@ -220,6 +224,7 @@ impl RodioOutput {
                 handle,
                 sample_rate,
                 channels,
+                bit_perfect,
             };
         }
 
@@ -269,6 +274,7 @@ impl RodioOutput {
             handle,
             sample_rate,
             channels,
+            bit_perfect,
         }
     }
 }

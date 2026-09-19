@@ -595,6 +595,11 @@ impl AudioRenderer {
 
     /// Move the staged crossfade RG into the current slot. Called after a
     /// successful gapless decoder-swap that reuses the same rodio stream.
+    ///
+    /// Unlike `finalize_crossfade`, this leaves `pending_replay_gain` alone:
+    /// the decode loop calls it without re-checking its own generation, so a
+    /// superseded loop could land here after `load_track_with_rg` stashed a
+    /// newly loaded track's tags.
     pub fn adopt_pending_crossfade_replay_gain(&mut self) {
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
     }
@@ -611,6 +616,13 @@ impl AudioRenderer {
     #[cfg(test)]
     pub fn current_replay_gain_for_test(&self) -> Option<ReplayGain> {
         self.current_replay_gain.clone()
+    }
+
+    /// Test-only: the tags the next primary-stream rebuild (`init` / `seek`)
+    /// will resolve, so tests can pin whose ReplayGain a Play or a seek uses.
+    #[cfg(test)]
+    pub fn pending_replay_gain_for_test(&self) -> Option<ReplayGain> {
+        self.pending_replay_gain.clone()
     }
 
     /// Test-only: the staged next-transition ReplayGain, so engine tests can
@@ -1849,8 +1861,11 @@ impl AudioRenderer {
         // honest badge to its build-time fact (`start_crossfade` dropped it to
         // false for the blend); without this a cancelled Relaxed crossfade would
         // leave the badge stuck reading "not bit-perfect" for a bit-perfect
-        // outgoing track. Mirrors `finalize_crossfade`.
-        self.current_stream_bit_perfect = self.bit_perfect_active();
+        // outgoing track. Read from the stream, never the live mode: a
+        // bit-perfect flip cancels an auto blend AFTER the renderer took the
+        // new mode. Mirrors `finalize_crossfade`.
+        self.current_stream_bit_perfect =
+            self.primary_stream.as_ref().is_some_and(|s| s.bit_perfect);
     }
 
     /// Write decoded f32 samples to the crossfade (incoming) stream.
@@ -2013,20 +2028,22 @@ impl AudioRenderer {
             elapsed_ms, duration_ms,
         );
 
-        // Stop old primary, promote crossfade stream to primary
-        if let Some(old_primary) = self.primary_stream.take() {
-            old_primary.silence_and_stop();
-        }
-        self.primary_stream = Some(stream);
         // Restore the honest badge to the promoted stream's build-time fact.
         // Under Relaxed the incoming crossfade stream WAS built bit-perfect
         // (same-format, DSP-bypassed) and now plays alone at unity — its body is
         // bit-perfect again, so the badge should reflect that. Under Off the
         // promoted stream was built on the DSP path (false). (Strict never
-        // crossfades, so it never reaches here.) `bit_perfect_active()` equals
-        // what `start_crossfade` built the stream with — a mode change mid-fade
-        // cancels the crossfade via `reset_next_track`, so it can't drift.
-        self.current_stream_bit_perfect = self.bit_perfect_active();
+        // crossfades, so it never reaches here.) Read from the stream, never
+        // `bit_perfect_active()`: a skip blend survives a bit-perfect flip
+        // (`reset_next_track` spares it), so the live mode can differ from the
+        // one the stream was built under.
+        self.current_stream_bit_perfect = stream.bit_perfect;
+
+        // Stop old primary, promote crossfade stream to primary
+        if let Some(old_primary) = self.primary_stream.take() {
+            old_primary.silence_and_stop();
+        }
+        self.primary_stream = Some(stream);
 
         // Set new primary to full user volume, reset its fade multiplier to
         // unity (it was built with `initial_fade = 0.0` and the tick drove it
@@ -2054,8 +2071,15 @@ impl AudioRenderer {
         self.stall_recovery_signalled = false;
         self.incoming_liveness = None;
         // Promote the crossfade RG to "current" — it's now baked into the
-        // new primary stream's `amplify` factor.
+        // new primary stream's `amplify` factor — and stage the same tags
+        // for the next rebuild of this track. `seek` and `init` resolve
+        // `pending_replay_gain` first, and it still held the tags of the last
+        // HARD load (the track before this one), so a seek or a Stop-then-Play
+        // after a crossfade rebuilt the promoted track at the previous
+        // track's level. A later hard load restages it (`load_track_with_rg`,
+        // which stashes AFTER its teardown, so this can't overwrite it).
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
+        self.pending_replay_gain = self.current_replay_gain.clone();
 
         // Store for engine to read as position offset
         self.crossfade_finalized_elapsed_ms = elapsed_ms;
@@ -2122,6 +2146,7 @@ impl AudioRenderer {
             handle,
             sample_rate: 48_000,
             channels: 2,
+            bit_perfect: false,
         };
         self.crossfade_state = CrossfadeState::Active {
             stream,
@@ -2679,6 +2704,7 @@ impl AudioRenderer {
             handle: handle.clone(),
             sample_rate: 48_000,
             channels: 2,
+            bit_perfect: false,
         });
         self.playing = true;
         self.paused = false;
@@ -3495,6 +3521,7 @@ mod tests {
             handle,
             sample_rate: 48_000,
             channels: 2,
+            bit_perfect: false,
         };
         (stream, source)
     }
@@ -3760,6 +3787,10 @@ mod tests {
         let mut renderer = AudioRenderer::new();
         renderer.set_bit_perfect(BitPerfectMode::Relaxed);
         renderer.pw_volume_active = true; // makes bit_perfect_active() viable
+        // The outgoing was built bit-perfect under viable Relaxed.
+        let (mut outgoing, _osrc) = test_active_stream(0);
+        outgoing.bit_perfect = true;
+        renderer.primary_stream = Some(outgoing);
         let (incoming, _isrc) = test_active_stream(0);
         renderer.crossfade_state = completed_active_state(incoming);
         // start_crossfade had dropped the badge for the blend.
@@ -3770,6 +3801,76 @@ mod tests {
         assert!(
             renderer.current_stream_bit_perfect,
             "cancel_crossfade under viable Relaxed must restore the bit-perfect badge"
+        );
+    }
+
+    /// The badge restored by `cancel_crossfade` is the OUTGOING stream's
+    /// build-time fact, not the live mode: a bit-perfect flip mid-blend
+    /// resets (and so cancels) an auto blend AFTER the renderer took the new
+    /// mode, and the restored outgoing still plays the way it was built.
+    #[tokio::test]
+    async fn cancel_crossfade_restores_the_outgoing_streams_build_fact() {
+        let mut renderer = AudioRenderer::new();
+        // Outgoing built on the DSP path under Off…
+        let (outgoing, _osrc) = test_active_stream(0);
+        renderer.primary_stream = Some(outgoing);
+        let (incoming, _isrc) = test_active_stream(0);
+        renderer.crossfade_state = completed_active_state(incoming);
+        renderer.current_stream_bit_perfect = false;
+        // …then the user flipped to Relaxed mid-blend.
+        renderer.set_bit_perfect(BitPerfectMode::Relaxed);
+        renderer.pw_volume_active = true;
+        assert!(
+            renderer.bit_perfect_active(),
+            "precondition: live mode flipped"
+        );
+
+        renderer.cancel_crossfade();
+
+        assert!(
+            !renderer.current_stream_bit_perfect,
+            "a DSP-path outgoing must not be badged bit-perfect after a mid-blend flip"
+        );
+    }
+
+    /// `finalize_crossfade` stamps the badge from the PROMOTED stream's
+    /// build-time fact, not the live mode. A skip blend survives a
+    /// bit-perfect flip (the next-track reset spares it), so the mode can
+    /// differ from the one the incoming was built under by the time it is
+    /// promoted.
+    #[tokio::test]
+    async fn finalize_crossfade_stamps_the_promoted_streams_build_fact() {
+        // Built on the DSP path under Off, then flipped to Relaxed mid-blend:
+        // the badge must not claim BIT-PERFECT.
+        let mut renderer = AudioRenderer::new();
+        let (incoming, _isrc) = test_active_stream(4_096);
+        renderer.crossfade_state = completed_active_state(incoming);
+        renderer.set_bit_perfect(BitPerfectMode::Relaxed);
+        renderer.pw_volume_active = true;
+        assert!(
+            renderer.bit_perfect_active(),
+            "precondition: live mode flipped"
+        );
+
+        renderer.finalize_crossfade();
+
+        assert!(
+            !renderer.current_stream_bit_perfect,
+            "a DSP-path stream must not be badged bit-perfect after a mid-blend flip"
+        );
+
+        // Built bit-perfect under Relaxed, then flipped to Off mid-blend: the
+        // promoted body still plays DSP-bypassed, so the badge reads true.
+        let mut renderer = AudioRenderer::new();
+        let (mut incoming, _isrc) = test_active_stream(4_096);
+        incoming.bit_perfect = true;
+        renderer.crossfade_state = completed_active_state(incoming);
+
+        renderer.finalize_crossfade();
+
+        assert!(
+            renderer.current_stream_bit_perfect,
+            "a stream built bit-perfect keeps its badge after a mid-blend flip"
         );
     }
 
@@ -3836,6 +3937,42 @@ mod tests {
             crate::audio::load_f32(&incoming_handle.fade_coeff),
             1.0,
             "finalize must reset the promoted primary's fade_coeff to unity"
+        );
+    }
+
+    /// Distinct track gain so the RG tests can tell whose tags landed where.
+    fn track_rg(track_gain: f64) -> ReplayGain {
+        ReplayGain {
+            album_gain: None,
+            track_gain: Some(track_gain),
+            album_peak: None,
+            track_peak: None,
+        }
+    }
+
+    /// A promotion makes the promoted track's ReplayGain the one the next
+    /// primary rebuild resolves. `pending_replay_gain` still held the
+    /// OUTGOING's tags (from its hard load), and `seek` and `init` read it
+    /// first, so a seek or a Stop-then-Play after a crossfade rebuilt the
+    /// promoted track at the previous track's level.
+    #[tokio::test]
+    async fn finalize_crossfade_stages_the_promoted_rg_for_the_next_rebuild() {
+        let mut renderer = AudioRenderer::new();
+        renderer.set_pending_replay_gain(Some(track_rg(-3.0)));
+        let (incoming, _isrc) = test_active_stream(4_096);
+        renderer.crossfade_state = completed_active_state(incoming);
+        renderer.set_pending_crossfade_replay_gain(Some(track_rg(-9.0)));
+
+        renderer.finalize_crossfade();
+
+        assert_eq!(
+            renderer.current_replay_gain_for_test(),
+            Some(track_rg(-9.0))
+        );
+        assert_eq!(
+            renderer.pending_replay_gain_for_test(),
+            Some(track_rg(-9.0)),
+            "the next rebuild (seek / Play after Stop) must use the promoted track's tags"
         );
     }
 

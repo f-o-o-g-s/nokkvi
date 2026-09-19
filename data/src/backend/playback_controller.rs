@@ -1219,8 +1219,9 @@ impl PlaybackController {
     /// source early return), and any bare `seek()` would seek the OLD song.
     /// Deliberately NOT routed through `play_song_from_queue` /
     /// `load_play_and_set_current`: their `plan_click_play` fade routes would
-    /// blend into the pulled song at position 0 and the follow-up seek would
-    /// cancel the live blend, restoring the outgoing — the pre-pull song.
+    /// blend the pulled song in from position 0, so the saved position could
+    /// only land afterwards as an audible jump (a seek promotes the blend
+    /// first).
     ///
     /// - `was_playing == true`: hard-load + `play()` — the fresh-start branch
     ///   consumes the pending offset so the decoder sits at `position_ms`
@@ -1307,8 +1308,8 @@ enum ClickPlayRoute {
     /// Crossfade, viable): the caller must complete the blend via
     /// [`complete_skip_fade`] — build the incoming decoder with NO locks
     /// held, then fire `crossfade_to_next`. The effect was already
-    /// discharged at plan time (its `reset_next_track` must precede the
-    /// fire, never follow it — it would cancel the blend it belongs to).
+    /// discharged at plan time, voiding the pre-click prepared transition
+    /// before the build starts.
     FadePlanned {
         /// Boxed: `SkipFadePlan` carries a full `Song`, which would bloat
         /// the two lean hard variants (clippy `large_enum_variant`).
@@ -1328,10 +1329,11 @@ enum ClickPlayRoute {
 /// mirrors `QueueNavigator::skip_to_song`'s plan arm: stamp this click as
 /// the latest manual skip (`skip_fade_seq` — a competing skip or click
 /// during the unlocked build must win), discharge the click's queue-mutation
-/// `NextTrackResetEffect` (cancelling any live blend so nothing can finalize
-/// against the just-repositioned/replaced queue during the build, while the
-/// outgoing's decode loop keeps producing), then `plan_skip_fade` (cancel +
-/// generation bump + pending-window latch). Boundary Fade mode routes
+/// `NextTrackResetEffect` (voiding the pre-click prepared transition), then
+/// `plan_skip_fade` (cancel any live blend + generation bump + pending-window
+/// latch), so nothing can finalize against the just-repositioned/replaced
+/// queue during the build while the outgoing's decode loop keeps producing.
+/// Boundary Fade mode routes
 /// through the M7 ease-out before the hard load. Everything else — mode Off,
 /// paused/stopped, an infinite (radio) outgoing (M6's switch-fade domain),
 /// bit-perfect Strict, or a metadata-less click — takes today's hard path
@@ -1358,17 +1360,19 @@ async fn plan_click_play(
             // or click during the unlocked decoder build must win.
             let seq = skip_fade_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
             // Discharge the click's queue-mutation reset BEFORE planning:
-            // its `reset_next_track` cancels any live blend / prepared
-            // transition from the pre-click queue, so nothing can finalize
-            // against the just-repositioned (or replaced) queue during the
-            // build. The outgoing's PRIMARY decode loop keeps producing —
-            // its liveness rides `decode_loop`, not this reset.
+            // its `reset_next_track` voids the prepared transition from the
+            // pre-click queue (and cancels a live AUTO blend). It spares a
+            // live SKIP blend — a click inside a previous skip's blend —
+            // which `plan_skip_fade` below cancels. The outgoing's PRIMARY
+            // decode loop keeps producing — its liveness rides
+            // `decode_loop`, not this reset.
             effect.apply_locked(engine).await;
-            // Plan-time invalidation (M7 phase 1): cancel again
-            // (idempotent), bump the source generation, latch the
-            // generation-keyed pending window so completions dispatched
-            // during the build are deferred instead of double-advancing the
-            // already-repositioned queue.
+            // Plan-time invalidation (M7 phase 1): cancel any live blend so
+            // nothing can finalize against the just-repositioned (or
+            // replaced) queue during the build, bump the source generation,
+            // latch the generation-keyed pending window so completions
+            // dispatched during the build are deferred instead of
+            // double-advancing the already-repositioned queue.
             engine.plan_skip_fade().await;
             let generation = engine.source_generation();
             debug!(

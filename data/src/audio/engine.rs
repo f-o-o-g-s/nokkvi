@@ -202,7 +202,9 @@ pub(crate) struct CrossfadeCoordinator {
     /// the cancel clears it) by `recover_stalled_crossfade`, whose
     /// skip-aware branch hard-loads the skip target instead of routing
     /// through the end-of-track machinery (which would advance the
-    /// already-advanced cursor past the target).
+    /// already-advanced cursor past the target). `reset_next_track` reads
+    /// it to spare a live skip blend: its incoming is the queue's current
+    /// track, not a next track.
     skip_fade: bool,
     /// M8 "Gap / Overlap Trim" in seconds (−2..+2, default 0). Negative =
     /// extra overlap: the renderer's Armed trigger fires |offset| early
@@ -2159,12 +2161,16 @@ impl CustomAudioEngine {
             return;
         }
 
-        // Cancel any active crossfade
-        self.cancel_crossfade().await;
+        // End any live blend on the queue's track: a skip blend is promoted,
+        // so `self.source` names the track the queue shows and a later Play
+        // starts it (not the outgoing); an auto blend is cancelled. From
+        // `set_source` the promotion is wasted work before the teardown.
+        self.end_crossfade_on_queue_track().await;
 
         // Unconditionally disarm renderer's crossfade trigger.
-        // cancel_crossfade() skips when phase is Idle, but the renderer
-        // may still be armed from prepare_next_for_gapless().
+        // The line above skips when nothing is live, but the renderer may
+        // still be armed from prepare_next_for_gapless() (or re-armed by a
+        // promotion's finalize).
         {
             self.renderer.lock().disarm_crossfade();
         }
@@ -2214,7 +2220,18 @@ impl CustomAudioEngine {
         // If we try to acquire the lock before stopping the loop, we'll block for the entire I/O duration.
         trace!("🔍 [SEEK] Stopping decoding loop FIRST");
 
-        // Cancel any active crossfade before seeking
+        // A seek is aimed at the track the UI shows. Inside a SKIP blend that
+        // is the incoming (the queue already names it), so promote it and seek
+        // the promoted decoder; the clamp below then reads the promoted
+        // track's duration. An AUTO blend is cancelled back to its outgoing,
+        // which the UI still shows. This sits BELOW the duration guard: a
+        // refused seek must leave an auto blend running, and a skip blend
+        // never gets there (its fire refuses an unknown outgoing duration).
+        self.end_crossfade_on_queue_track().await;
+
+        // Idempotent after the line above; kept for its renderer disarm (the
+        // re-arm at the end restores a prepared transition's trigger against
+        // the new position).
         self.cancel_crossfade().await;
 
         // Clear EOF — decoder will restart from seek position
@@ -2417,18 +2434,23 @@ impl CustomAudioEngine {
         self.arm_renderer_crossfade(incoming_duration);
     }
 
-    /// Atomic three-step: stash ReplayGain → set source. The caller still
-    /// invokes `play()` afterward, but the RG-stash + source-update pair is
+    /// Atomic pair: set source → stash ReplayGain. The caller still invokes
+    /// `play()` afterward, but the source-update + RG-stash pair is
     /// uncuttable. Replaces the historical `set_pending_replay_gain` +
     /// `load_track` / `set_source` pairing in `PlaybackController`.
+    ///
+    /// The stash comes AFTER `set_source`: its teardown of the outgoing can
+    /// promote a live skip blend ([`Self::end_crossfade_on_queue_track`]),
+    /// which stages the promoted track's tags for the next rebuild. Stashing
+    /// first would let that teardown overwrite the new track's tags.
     pub async fn load_track_with_rg(
         &mut self,
         url: &str,
         rg: Option<crate::types::song::ReplayGain>,
         expected_duration_ms: Option<u64>,
     ) {
-        self.renderer.lock().set_pending_replay_gain(rg);
         self.set_source(url.to_string(), expected_duration_ms).await;
+        self.renderer.lock().set_pending_replay_gain(rg);
     }
 
     /// Apply the controller's per-transition verdicts (M4 suppress + M8
@@ -2485,11 +2507,11 @@ impl CustomAudioEngine {
         // The manual-skip fade exposes both windows for real: the cursor
         // advances at skip time, the UI's song-change re-opens its gapless
         // prep latch, and a prep for the track AFTER the skip target can
-        // complete mid-fade (the internal `reset_next_track` below would
-        // cancel the blend, restoring the outgoing while the queue already
-        // moved on) or mid-BUILD (arming would let the position trigger fire
-        // an auto blend against the already-advanced cursor before the
-        // skip's own fire). Store the slot WITHOUT the reset and WITHOUT
+        // complete mid-fade (the reset spares a skip blend, but the arm below
+        // would overwrite its Active state, and the reset would cancel a
+        // live AUTO blend) or mid-BUILD (arming would let the position
+        // trigger fire an auto blend against the already-advanced cursor
+        // before the skip's own fire). Store the slot WITHOUT the reset and WITHOUT
         // arming (`arm_crossfade` would overwrite the Active variant —
         // Armed and Active are one enum); `finalize_crossfade_engine`
         // re-arms from the slot once the incoming is promoted.
@@ -2982,10 +3004,13 @@ impl CustomAudioEngine {
     /// and the locks are released for the incoming decoder build.
     ///
     /// Three steps, in order:
-    /// 1. `reset_next_track` — the pre-skip prepared/armed/in-flight
-    ///    transition is void (the queue is about to re-sequence past it);
-    ///    a LIVE blend is cancelled here so nothing can finalize — and
-    ///    advance the queue a second time — during the unlocked build.
+    /// 1. Cancel a LIVE blend, auto or skip, so nothing can finalize — and
+    ///    advance the queue a second time — during the unlocked build
+    ///    (a second Next inside a skip blend restores the first track for
+    ///    the new build window, then blends it into the newest target).
+    ///    Then `reset_next_track` — the pre-skip prepared/armed transition
+    ///    is void (the queue is about to re-sequence past it). The reset
+    ///    alone would spare a live skip blend, hence the explicit cancel.
     /// 2. `bump_for_user_action` — the skip IS the user-driven source change
     ///    (the audible source's fate is sealed at plan time, even though the
     ///    actual `set_source`/fire happens later). Every completion dispatch
@@ -3002,6 +3027,9 @@ impl CustomAudioEngine {
     ///    exit — a superseding NO-OP skip stamps the sequence without ever
     ///    bumping the generation).
     pub async fn plan_skip_fade(&mut self) {
+        if self.crossfade.is_crossfade_live(&self.renderer) {
+            self.cancel_crossfade().await;
+        }
         self.reset_next_track().await;
         let generation = self.channels.source_generation.bump_for_user_action();
         self.channels
@@ -3193,7 +3221,36 @@ impl CustomAudioEngine {
             .await;
     }
 
-    /// Cancel an active crossfade (e.g., on skip, seek, or stop).
+    /// End a live blend on the track the queue names. Every path that ends a
+    /// blend early for its own reasons (seek, stop) goes through here.
+    ///
+    /// Invariant: once a manual skip or click has advanced the queue cursor,
+    /// every engine path ends with the engine on the track the queue names.
+    /// Only a new source change may override it.
+    ///
+    /// - A SKIP blend's incoming IS the queue's current track (the skip
+    ///   advanced the cursor, history, consume, UI, MPRIS and scrobble before
+    ///   the blend started), so it is promoted now. An early finalize is
+    ///   supported at any progress, and it suppresses the completion callback
+    ///   for a skip blend (the queue must not advance twice).
+    /// - An AUTO blend's cursor has not advanced yet (it moves when the
+    ///   finalize fires the completion callback), so its outgoing is still
+    ///   the queue's track: cancel back to it.
+    async fn end_crossfade_on_queue_track(&mut self) {
+        if self.crossfade.skip_fade {
+            debug!("🔀 [SKIP FADE] Ending the blend early — promoting the skip target");
+            self.finalize_crossfade_engine().await;
+        } else if self.crossfade.is_crossfade_live(&self.renderer) {
+            self.cancel_crossfade().await;
+        }
+    }
+
+    /// Cancel a live blend back to its OUTGOING track. Right for an
+    /// auto-advance blend (the queue cursor still names the outgoing) and
+    /// for `plan_skip_fade` (a new skip replaces the target). A path that
+    /// ends a blend early for any other reason goes through
+    /// [`Self::end_crossfade_on_queue_track`], which promotes a skip blend
+    /// instead.
     pub async fn cancel_crossfade(&mut self) {
         let phase = std::mem::replace(&mut self.crossfade.phase, CrossfadePhase::Idle);
         // A cancelled skip fade dies with its phase — a stale marker would
@@ -3652,13 +3709,25 @@ impl CustomAudioEngine {
     ///
     /// Call this whenever the play order changes (shuffle/repeat/consume toggle)
     /// to prevent a stale gapless transition to the wrong song.
+    ///
+    /// A live MANUAL-SKIP blend is left running: its incoming is the track
+    /// the queue already names (the skip advanced the cursor before the blend
+    /// started), so a next-track reset has no claim on it. Everything that
+    /// belongs to the FOLLOWING transition is still cleared.
     pub async fn reset_next_track(&mut self) {
-        // Cancel an in-flight crossfade FIRST. A mode toggle (shuffle / repeat /
-        // consume / bit-perfect) during an active fade must abandon the
-        // prepared/in-flight next track so the engine re-derives it under the new
-        // mode — otherwise finalize_crossfade_engine would still promote the
-        // now-wrong incoming track. cancel_crossfade resets crossfade_phase →
-        // Idle, clears the incoming decoder, and restores the outgoing as primary.
+        // Cancel an in-flight AUTO crossfade FIRST. A mode toggle (shuffle /
+        // repeat / consume / bit-perfect) during an auto-advance fade must
+        // abandon the prepared/in-flight next track so the engine re-derives it
+        // under the new mode — otherwise finalize_crossfade_engine would still
+        // promote the now-wrong incoming track. cancel_crossfade resets
+        // crossfade_phase → Idle, clears the incoming decoder, and restores the
+        // outgoing as primary.
+        //
+        // A SKIP blend (`skip_fade`) is spared: cancelling it would restore
+        // the outgoing while the queue, UI, MPRIS and scrobble all name the
+        // incoming, and nothing would load that track again. Playing a list
+        // larger than one page hit this every time — the progressive append
+        // lands mid-blend.
         //
         // Check the RENDERER's state too, not just the engine's: render_tick
         // swaps the renderer Armed → Active synchronously and creates the live
@@ -3667,13 +3736,15 @@ impl CustomAudioEngine {
         // would otherwise skip the cancel (engine still Idle) and orphan the
         // renderer's live incoming stream — fading the outgoing into silence with
         // no recovery. `cancel_crossfade` tolerates the engine-Idle case and
-        // tears down the renderer regardless.
+        // tears down the renderer regardless. That window is auto-only: a skip
+        // fire sets the renderer, the phase and the marker under one
+        // `&mut self` (`crossfade_to_next`), so `skip_fade` is false there.
         //
         // `is_crossfade_live` brings both checks together: it locks the renderer,
         // reads its crossfade-active flag, drops the guard, and returns a plain
         // bool BEFORE the `cancel_crossfade().await` below (which re-locks the
         // renderer) — so no `parking_lot` guard ever straddles the await.
-        if self.crossfade.is_crossfade_live(&self.renderer) {
+        if !self.crossfade.skip_fade && self.crossfade.is_crossfade_live(&self.renderer) {
             self.cancel_crossfade().await;
         }
         self.gapless.lock().await.clear();
@@ -3691,7 +3762,8 @@ impl CustomAudioEngine {
             .store(self.crossfade.duration_ms, Ordering::Relaxed);
         self.channels.gap_offset_ms.store(0, Ordering::Release);
         // Still needed for the Armed-but-not-Active case (cancel_crossfade only
-        // touches Active); harmless when cancel_crossfade already disarmed.
+        // touches Active); harmless when cancel_crossfade already disarmed, and
+        // a no-op on a spared skip blend (disarm leaves Active alone).
         self.renderer.lock().disarm_crossfade();
     }
 
@@ -5699,11 +5771,10 @@ mod tests {
         );
     }
 
-    /// M7 invariant-3 route: `reset_next_track` (every mode toggle / queue
-    /// mutation) still cancels a LIVE skip fade and clears its marker, so a
-    /// stale marker can never suppress a later auto-advance finalize.
+    /// A cancelled skip fade dies with its marker, so a stale marker can never
+    /// suppress the completion callback of a LATER auto-advance finalize.
     #[tokio::test]
-    async fn reset_next_track_cancels_skip_fade_and_clears_marker() {
+    async fn cancel_crossfade_clears_the_skip_marker() {
         let mut engine = CustomAudioEngine::new();
         engine.crossfade.phase = CrossfadePhase::Active {
             decoder: Arc::new(tokio::sync::Mutex::new(Some(fresh_decoder()))),
@@ -5711,13 +5782,317 @@ mod tests {
         };
         engine.crossfade.skip_fade = true;
 
-        engine.reset_next_track().await;
+        engine.cancel_crossfade().await;
 
         assert!(engine.crossfade.phase.is_idle());
         assert!(
             !engine.crossfade.skip_fade,
             "a cancelled skip fade must clear its marker"
         );
+    }
+
+    /// Put `engine` mid-way through a live manual-skip blend into `target`:
+    /// engine phase Active + skip marker, the renderer half Active too. The
+    /// returned source keeps the forced renderer stream's atomics alive.
+    fn force_live_skip_fade(
+        engine: &mut CustomAudioEngine,
+        target: &str,
+    ) -> crate::audio::streaming_source::StreamingSource {
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: target.to_string(),
+        };
+        engine.crossfade.skip_fade = true;
+        engine.renderer.lock().force_crossfade_active_for_test()
+    }
+
+    /// A live skip blend's incoming is the track the queue already names, so
+    /// a next-track reset (every queue mutation and mode toggle) has no claim
+    /// on it: the blend keeps running. The reset still clears everything that
+    /// belongs to the FOLLOWING transition — the slot, `next_source`,
+    /// `next_format`, the three directives and the shared-duration mirror.
+    #[tokio::test]
+    async fn reset_next_track_leaves_a_live_skip_fade_running() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.enabled = true;
+        engine.crossfade.duration_ms = 5_000;
+        let _keepalive = force_live_skip_fade(&mut engine, "http://example.test/target");
+        // A prep for the track AFTER the target lands mid-blend (the store's
+        // live-blend branch), staging a slot and all three directives.
+        engine
+            .store_prepared_decoder(
+                skip_ready_decoder(200_000),
+                "http://example.test/after-target".to_string(),
+                Some(rg(-7.0)),
+                PreparedTransitionDirectives {
+                    suppress_crossfade: true,
+                    duration_override_ms: Some(6_000),
+                    gap_offset_ms: 1_000,
+                },
+            )
+            .await;
+        assert!(engine.is_next_track_prepared().await, "precondition: slot");
+
+        engine.reset_next_track().await;
+
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "the skip blend must keep running through a next-track reset"
+        );
+        assert!(engine.crossfade.skip_fade, "the skip marker must survive");
+        assert!(
+            engine.renderer.lock().is_crossfade_active(),
+            "the renderer half of the skip blend must survive"
+        );
+        assert!(
+            !engine.is_next_track_prepared().await,
+            "the following transition's slot is cleared"
+        );
+        assert!(engine.next_source.is_empty());
+        assert!(!engine.next_format.is_valid());
+        assert!(!engine.crossfade.suppress_this_transition);
+        assert_eq!(engine.crossfade.duration_override_ms, None);
+        assert_eq!(engine.channels.gap_offset_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            engine
+                .channels
+                .crossfade_duration_shared
+                .load(Ordering::Relaxed),
+            5_000,
+            "the shared-duration mirror goes back to the global"
+        );
+    }
+
+    /// The owner's every-time bug: while a song plays, play a list larger
+    /// than one page. The click fires a skip blend, then the progressive
+    /// append lands (`add_songs` hands back a `NextTrackResetEffect`)
+    /// mid-blend. The blend must still finalize onto the clicked track —
+    /// with no completion callback, since the queue advanced at click time.
+    #[tokio::test]
+    async fn queue_mutation_mid_skip_fade_still_lands_on_the_target() {
+        let mut engine = CustomAudioEngine::new();
+        let fired = install_callback_counter(&mut engine);
+        prime_playing_engine(&mut engine);
+        let target = "http://example.test/clicked".to_string();
+        let generation = engine.source_generation();
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                target.clone(),
+                None,
+                generation,
+            )
+            .await;
+        assert_eq!(outcome, SkipFadeOutcome::Fired, "precondition: blend fired");
+
+        crate::types::next_track_reset::NextTrackResetEffect::new()
+            .apply_locked(&mut engine)
+            .await;
+        engine.finalize_crossfade_engine().await;
+
+        assert!(
+            engine.is_playing_source(&target),
+            "the engine must end on the clicked track; source is {}",
+            engine.source()
+        );
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(!engine.crossfade.skip_fade);
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "a skip-fade finalize must not advance the queue again"
+        );
+    }
+
+    /// A settings toggle routes through the same reset: a REAL Crossfade
+    /// change during a live skip blend must not cancel it (the
+    /// `set_*_change_cancels_active_crossfade` tests pin the AUTO case).
+    #[tokio::test]
+    async fn set_crossfade_enabled_change_spares_a_live_skip_fade() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.enabled = true;
+        let _keepalive = force_live_skip_fade(&mut engine, "http://example.test/target");
+
+        engine.set_crossfade_enabled(false).await;
+
+        assert!(!engine.crossfade.enabled);
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "a settings toggle must not cancel a live skip blend"
+        );
+        assert!(engine.crossfade.skip_fade);
+        assert!(engine.renderer.lock().is_crossfade_active());
+    }
+
+    /// A second Next during a skip blend still restores the first track for
+    /// the new build window (cancel-live-first): `plan_skip_fade` cancels a
+    /// live skip blend itself now that the reset spares it.
+    #[tokio::test]
+    async fn plan_skip_fade_cancels_a_live_skip_fade() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let _keepalive = force_live_skip_fade(&mut engine, "http://example.test/first-target");
+        let gen_before = engine.source_generation();
+
+        engine.plan_skip_fade().await;
+
+        assert!(engine.crossfade.phase.is_idle(), "the live blend dies");
+        assert!(!engine.crossfade.skip_fade, "its marker dies with it");
+        assert!(
+            !engine.renderer.lock().is_crossfade_active(),
+            "the renderer half is torn down too"
+        );
+        assert_eq!(engine.source_generation(), gen_before + 1);
+        assert!(engine.skip_fade_window_pending());
+    }
+
+    /// Seeking inside a live skip blend seeks the track the UI shows: the
+    /// skip target. The blend is promoted first (no completion callback —
+    /// the queue advanced at skip time), then the seek acts on the promoted
+    /// decoder. A seek never bumps the source generation (the promotion's
+    /// `accept_internal_swap` is a no-op).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn seek_during_live_skip_fade_promotes_the_target() {
+        let mut engine = CustomAudioEngine::new();
+        let fired = install_callback_counter(&mut engine);
+        prime_playing_engine(&mut engine);
+        let target = "http://example.test/target";
+        let _keepalive = force_live_skip_fade(&mut engine, target);
+        let gen_before = engine.source_generation();
+
+        engine.seek(30_000).await;
+
+        assert!(
+            engine.is_playing_source(target),
+            "the seek must land on the skip target; source is {}",
+            engine.source()
+        );
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(!engine.crossfade.skip_fade);
+        assert!(!engine.renderer.lock().is_crossfade_active());
+        assert_eq!(
+            engine.duration(),
+            180_000,
+            "the seek clamps against the promoted track's duration"
+        );
+        assert_eq!(fired.load(Ordering::SeqCst), 0, "no second queue advance");
+        assert_eq!(
+            engine.source_generation(),
+            gen_before,
+            "seek must not bump the source generation"
+        );
+    }
+
+    /// Stop inside a live skip blend leaves the engine on the skip target,
+    /// with the target's ReplayGain staged for the rebuild, so a later Play
+    /// starts the track the queue names at its own level.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stop_during_live_skip_fade_leaves_the_engine_on_the_target() {
+        let mut engine = CustomAudioEngine::new();
+        let fired = install_callback_counter(&mut engine);
+        prime_playing_engine(&mut engine);
+        // The outgoing was hard-loaded with its own tags; the skip fire
+        // staged the target's for the incoming stream.
+        engine
+            .renderer
+            .lock()
+            .set_pending_replay_gain(Some(rg(-3.0)));
+        let target = "http://example.test/target";
+        let _keepalive = force_live_skip_fade(&mut engine, target);
+        engine
+            .renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(Some(rg(-9.0)));
+
+        engine.stop().await;
+
+        assert!(
+            engine.is_playing_source(target),
+            "a later Play must start the skip target; source is {}",
+            engine.source()
+        );
+        assert_eq!(engine.state(), PlaybackState::Stopped);
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(!engine.crossfade.skip_fade);
+        assert_eq!(fired.load(Ordering::SeqCst), 0, "no second queue advance");
+        assert_eq!(
+            engine.renderer.lock().pending_replay_gain_for_test(),
+            Some(rg(-9.0)),
+            "the Play rebuild must use the target's ReplayGain, not the outgoing's"
+        );
+    }
+
+    /// A hard load made during a live skip blend (Fade on Skip switched off
+    /// mid-blend, a pulled queue, a radio start) tears the blend down inside
+    /// `set_source`, which promotes the skip target first. The promotion
+    /// stages the target's tags for the next rebuild, so the new track's own
+    /// tags must be stashed AFTER that teardown or they are overwritten.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hard_load_during_live_skip_fade_keeps_the_new_tracks_rg() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        let _keepalive = force_live_skip_fade(&mut engine, "http://example.test/target");
+        engine
+            .renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(Some(rg(-9.0)));
+
+        engine
+            .load_track_with_rg("http://example.test/other", Some(rg(-1.0)), None)
+            .await;
+
+        assert!(engine.is_playing_source("http://example.test/other"));
+        assert_eq!(
+            engine.renderer.lock().pending_replay_gain_for_test(),
+            Some(rg(-1.0)),
+            "the loaded track must be built with its own tags"
+        );
+    }
+
+    /// Guard: a seek the engine refuses (unknown duration) leaves a live AUTO
+    /// blend running, as before. Cancelling it first would restore an
+    /// outgoing that may already have drained, with its completion already
+    /// fired: silence while the engine reports playing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn refused_seek_leaves_a_live_auto_crossfade_running() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.duration = 0;
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        let _keepalive = engine.renderer.lock().force_crossfade_active_for_test();
+
+        engine.seek(30_000).await;
+
+        assert!(
+            !engine.crossfade.phase.is_idle(),
+            "the blend must keep running"
+        );
+        assert!(engine.renderer.lock().is_crossfade_active());
+    }
+
+    /// Guard: an AUTO blend keeps today's seek semantics. Its cursor has not
+    /// advanced (it moves at finalize), so the seek cancels back to the
+    /// outgoing — the track the UI still shows.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn seek_during_live_auto_crossfade_cancels_to_the_outgoing() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(skip_ready_decoder(180_000)))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        let _keepalive = engine.renderer.lock().force_crossfade_active_for_test();
+
+        engine.seek(30_000).await;
+
+        assert!(engine.is_playing_source("http://example.test/current"));
+        assert!(engine.crossfade.phase.is_idle());
+        assert!(!engine.renderer.lock().is_crossfade_active());
     }
 
     /// A distinct ReplayGain per track so the RG-lifecycle tests can tell
