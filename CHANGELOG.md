@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Expanding a genre in the Genres view now lists its albums on Navidrome 0.64.
+- Clicking a genre's song count now opens the Songs view with that genre's songs on Navidrome 0.64.
+
 ### Removed
 
 ## v0.18.4 — 2026-07-25

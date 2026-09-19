@@ -198,6 +198,19 @@ impl GenresApiService {
         params
     }
 
+    /// Build the `/api/album` params that list one genre's albums, name-sorted,
+    /// from the first row up to `end`. Shared by the collage (`_end` = 9) and
+    /// expansion (`_end` = no-limit) loaders so the two cannot drift.
+    fn build_genre_albums_params<'a>(genre_id: &'a str, end: &'a str) -> Vec<(&'a str, &'a str)> {
+        vec![
+            ("_sort", "name"),
+            ("_order", "ASC"),
+            ("_start", "0"),
+            ("_end", end),
+            ("genre_id", genre_id),
+        ]
+    }
+
     /// Fetch genres from Subsonic API (for counts)
     async fn fetch_subsonic_genres(&self) -> Result<Vec<(String, u32, u32)>> {
         let inner: GenresInner = crate::services::api::subsonic::subsonic_get_envelope(
@@ -233,23 +246,15 @@ impl GenresApiService {
     /// Load albums for a specific genre (for artwork display).
     /// Returns up to 9 album IDs for the 3x3 collage.
     ///
-    /// `genre_key` may be the genre NAME or its `/api/genre` id: Navidrome's
-    /// `genre_id` filter (`tagIDFilter` in `persistence/sql_tags.go`) runs
-    /// `json_tree` over each row's `tags` JSON and matches the given value
-    /// against EITHER leaf of `{"id": …, "value": …}`, so both identities
-    /// filter correctly. Callers in this client pass the NAME everywhere
-    /// except the Genres view's collage pipeline, whose cache is id-keyed
-    /// end-to-end — see gotchas.md "Genre identity".
-    pub async fn load_genre_albums(&self, genre_key: &str) -> Result<Vec<String>> {
-        // Use Native API to load albums filtered by genre
-        // The API endpoint is /api/album with genre_id filter
-        let params = vec![
-            ("_sort", "name"),
-            ("_order", "ASC"),
-            ("_start", "0"),
-            ("_end", "9"), // Only need 9 for collage
-            ("genre_id", genre_key),
-        ];
+    /// `genre_id` is the genre's tag id (`Genre::id` from `/api/genre`).
+    /// Since Navidrome 0.64 the `genre_id` filter is an indexed
+    /// `tag_id = ?` join (`genreFilter` in `persistence/sql_tags.go`), so a
+    /// genre NAME matches nothing and the server still answers 200 with an
+    /// empty list. Older servers matched the id too. See gotchas.md
+    /// "Genre identity".
+    pub async fn load_genre_albums(&self, genre_id: &str) -> Result<Vec<String>> {
+        // Only need 9 for the collage.
+        let params = Self::build_genre_albums_params(genre_id, "9");
 
         let result = self.client.get_with_headers("/api/album", &params).await;
 
@@ -272,7 +277,7 @@ impl GenresApiService {
             Err(e) => {
                 warn!(
                     " GenresApiService: Failed to load albums for genre '{}': {}",
-                    genre_key, e
+                    genre_id, e
                 );
                 Ok(Vec::new())
             }
@@ -280,26 +285,19 @@ impl GenresApiService {
     }
 
     /// Load full album objects for a specific genre (for expansion display).
-    /// Returns all albums in the genre as full Album structs. Takes the genre
-    /// NAME (all callers pass it; the id would also match — see
-    /// [`Self::load_genre_albums`]).
+    /// Returns all albums in the genre as full Album structs. Takes the tag
+    /// id, like [`Self::load_genre_albums`].
     pub async fn load_genre_albums_full(
         &self,
-        genre_name: &str,
+        genre_id: &str,
     ) -> Result<Vec<crate::types::album::Album>> {
-        let params = vec![
-            ("_sort", "name"),
-            ("_order", "ASC"),
-            ("_start", "0"),
-            ("_end", pagination::NO_LIMIT_END_STR),
-            ("genre_id", genre_name),
-        ];
+        let params = Self::build_genre_albums_params(genre_id, pagination::NO_LIMIT_END_STR);
 
         let (response_text, _) = self
             .client
             .get_with_headers("/api/album", &params)
             .await
-            .with_context(|| format!("Failed to fetch albums for genre '{genre_name}'"))?;
+            .with_context(|| format!("Failed to fetch albums for genre '{genre_id}'"))?;
 
         let albums: Vec<crate::types::album::Album> =
             parse::parse_json_with_preview(&response_text, "genre albums JSON")?;
@@ -307,7 +305,7 @@ impl GenresApiService {
         debug!(
             " GenresService: Loaded {} albums for genre '{}'",
             albums.len(),
-            genre_name
+            genre_id
         );
 
         Ok(albums)
@@ -334,6 +332,23 @@ mod tests {
                 ("name", "trip"),
                 ("library_id", "1"),
                 ("library_id", "2"),
+            ]
+        );
+    }
+
+    /// Pin the genre-albums wire shape: name-sorted from row 0, caller's
+    /// `_end`, and the tag id under `genre_id`.
+    #[test]
+    fn genre_albums_params_pin_wire_shape() {
+        let params = GenresApiService::build_genre_albums_params("g-1", "9");
+        assert_eq!(
+            params,
+            vec![
+                ("_sort", "name"),
+                ("_order", "ASC"),
+                ("_start", "0"),
+                ("_end", "9"),
+                ("genre_id", "g-1"),
             ]
         );
     }

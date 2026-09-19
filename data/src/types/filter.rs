@@ -4,8 +4,10 @@ pub enum LibraryFilter {
     ArtistId { id: String, name: String },
     /// Filter by album ID. Used on: Songs (`album_id=`).
     AlbumId { id: String, title: String },
-    /// Filter by genre name. Used on: Albums (`genre_id=`), Songs (`genre_id=`).
-    /// Navidrome uses genre NAME as the filter key, not UUID.
+    /// Filter by genre. Used on: Albums (`genre_id=`), Songs (`genre_id=`).
+    /// `id` is the tag id from `/api/genre` and is what goes on the wire:
+    /// since Navidrome 0.64 `genre_id` matches the tag id only. `name` is the
+    /// display text.
     GenreId { id: String, name: String },
     /// Filter by one or more library (music folder) IDs. Reserved for future
     /// "show me everything in libraries X, Y" navigation surfaces — v1 wires

@@ -179,8 +179,8 @@ impl AlbumsApiService {
                 crate::types::filter::LibraryFilter::ArtistId { id, .. } => {
                     params.push(("artist_id", id));
                 }
-                crate::types::filter::LibraryFilter::GenreId { name, .. } => {
-                    params.push(("genre_id", name));
+                crate::types::filter::LibraryFilter::GenreId { id, .. } => {
+                    params.push(("genre_id", id));
                 }
                 crate::types::filter::LibraryFilter::AlbumId { id, .. } => params.push(("id", id)),
                 // `LibraryFilter::LibraryIds` is folded into
@@ -280,7 +280,24 @@ mod tests {
             Some(&filter),
             &[],
         );
-        assert!(params.contains(&("genre_id", "Trip-Hop")));
+        assert!(params.contains(&("genre_id", "g-1")));
         assert!(!params.iter().any(|(k, _)| *k == "name"));
+    }
+
+    /// `genre_id` carries the genre's tag id, never its name: since Navidrome
+    /// 0.64 the filter is an indexed `tag_id = ?` join, so a name returns
+    /// zero rows with HTTP 200. Songs-side twin:
+    /// `songs::tests::genre_filter_sends_tag_id_not_name`.
+    #[test]
+    fn genre_filter_sends_tag_id_not_name() {
+        let r = range("0", "36");
+        let filter = LibraryFilter::GenreId {
+            id: "g-1".to_string(),
+            name: "Trip-Hop".to_string(),
+        };
+        let params =
+            AlbumsApiService::build_album_params("name", "ASC", &r, None, Some(&filter), &[]);
+        assert!(params.contains(&("genre_id", "g-1")));
+        assert!(!params.iter().any(|(_, v)| *v == "Trip-Hop"));
     }
 }

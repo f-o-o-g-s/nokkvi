@@ -275,10 +275,12 @@ impl Nokkvi {
                 );
             }
 
-            GenresAction::ExpandGenre(genre_name, genre_id) => {
-                // Load albums for the genre and send them back to the view
-                let name = genre_name.clone();
+            GenresAction::ExpandGenre(genre_id) => {
+                // Load albums for the genre and send them back to the view.
+                // `genre_id` is the tag id: the `genre_id` wire filter
+                // matches only that since Navidrome 0.64.
                 let gid = genre_id.clone();
+                let load_id = genre_id.clone();
 
                 // FocusAndExpand (link-text click in queue/songs) skips the
                 // scroll-driven `LoadArtwork` path, so the 3×3 collage
@@ -290,7 +292,7 @@ impl Nokkvi {
                     move |shell| async move {
                         let genres_service = shell.genres_api().await?;
                         let albums: Vec<nokkvi_data::types::album::Album> =
-                            genres_service.load_genre_albums_full(&name).await?;
+                            genres_service.load_genre_albums_full(&load_id).await?;
 
                         // Convert Album -> AlbumUIViewData
                         let albums_vm = shell.albums().clone();

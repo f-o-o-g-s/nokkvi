@@ -57,10 +57,7 @@ impl GenresPage {
         match super::super::impl_expansion_update!(
             self, message, genres, total_items,
             id_fn: |g| &g.id,
-            expand_center: GenresMessage::ExpandCenter => |id: String| {
-                let genre_name = genres.iter().find(|g| g.id == id).map(|g| g.name.clone()).unwrap_or_default();
-                GenresAction::ExpandGenre(genre_name, id)
-            },
+            expand_center: GenresMessage::ExpandCenter => GenresAction::ExpandGenre,
             collapse: GenresMessage::CollapseExpansion,
             children_loaded: GenresMessage::AlbumsLoaded,
             sort_selected: GenresMessage::SortModeSelected => GenresAction::SortModeChanged,
@@ -80,15 +77,7 @@ impl GenresPage {
                         self.expansion
                             .handle_expand_center(genres, |g| &g.id, &mut self.common)
                     {
-                        let genre_name = genres
-                            .iter()
-                            .find(|g| g.id == parent_id)
-                            .map(|g| g.name.clone())
-                            .unwrap_or_default();
-                        (
-                            Task::none(),
-                            GenresAction::ExpandGenre(genre_name, parent_id),
-                        )
+                        (Task::none(), GenresAction::ExpandGenre(parent_id))
                     } else {
                         (Task::none(), GenresAction::None)
                     }

@@ -136,8 +136,9 @@ pub enum GenresAction {
     PlayBatch(nokkvi_data::types::batch::BatchPayload, bool),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     PlayAlbum(String, bool), // (album_id, force_shuffle) - play child album
-    /// Expand genre inline — root should load albums (genre_name, genre_id)
-    ExpandGenre(String, String),
+    /// Expand genre inline — root should load albums (genre_id: the tag id
+    /// from `/api/genre`, which is what the `genre_id` wire filter matches)
+    ExpandGenre(String),
     /// Switch to Albums view and prime the named album for inline expansion.
     NavigateAndExpandAlbum(String),
     LoadArtwork(String), // genre_id - load artwork for centered genre on slot list scroll

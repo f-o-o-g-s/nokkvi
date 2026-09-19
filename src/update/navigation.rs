@@ -983,12 +983,10 @@ impl Nokkvi {
     /// once the load completes, the target is either in the buffer or
     /// genuinely not in the library — there are no further pages to await.
     ///
-    /// Match is by `name`, not `id`. Navidrome's `/api/genre` returns proper
-    /// internal IDs (UUIDs) that differ from the display names, but the
-    /// click sites only have access to the displayed string (`extra_value`
-    /// / `genre`) — that's the dispatched target. The convention mirrors
-    /// the existing `LibraryFilter::GenreId` which also passes the name in
-    /// both id and name fields.
+    /// Match is by `name`, not `id`. Navidrome's `/api/genre` returns tag-id
+    /// hashes that differ from the display names, but the click sites only
+    /// have access to the displayed string (`extra_value` / `genre`) — that's
+    /// the dispatched target.
     ///
     /// The resolved internal id IS what we store in the pin, though, because
     /// the downstream `GenresMessage::AlbumsLoaded(genre_id, …)` carries

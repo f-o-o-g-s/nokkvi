@@ -328,7 +328,7 @@ fn genres_page_navigate_and_filter_returns_action() {
         crate::views::GenresMessage::NavigateAndFilter(
             View::Songs,
             nokkvi_data::types::filter::LibraryFilter::GenreId {
-                id: "Black Metal".to_string(),
+                id: "tag-black-metal".to_string(),
                 name: "Black Metal".to_string(),
             },
         ),
@@ -340,8 +340,9 @@ fn genres_page_navigate_and_filter_returns_action() {
             assert_eq!(v, View::Songs);
             match f {
                 nokkvi_data::types::filter::LibraryFilter::GenreId { id, name } => {
-                    // Navidrome wire convention: genre name carried in both fields.
-                    assert_eq!(id, "Black Metal");
+                    // The tag id is the `genre_id` wire value; the name is
+                    // the search-box text. Both pass through unchanged.
+                    assert_eq!(id, "tag-black-metal");
                     assert_eq!(name, "Black Metal");
                 }
                 _ => panic!("Expected GenreId filter"),
@@ -1004,8 +1005,8 @@ fn genres_shift_enter_on_unexpanded_parent_opens_expansion() {
     );
 
     match action {
-        crate::views::GenresAction::ExpandGenre(_, id) => assert_eq!(id, "g1"),
-        other => panic!("Expected GenresAction::ExpandGenre(_, \"g1\"), got {other:?}"),
+        crate::views::GenresAction::ExpandGenre(id) => assert_eq!(id, "g1"),
+        other => panic!("Expected GenresAction::ExpandGenre(\"g1\"), got {other:?}"),
     }
 }
 

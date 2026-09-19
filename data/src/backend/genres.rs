@@ -1,6 +1,6 @@
 //! Genres — UI view data and collage artwork support
 
-use crate::types::genre::Genre;
+use crate::types::{filter::LibraryFilter, genre::Genre};
 
 /// UI-specific view data for genres
 /// UI-projected data
@@ -38,6 +38,16 @@ impl From<&Genre> for GenreUIViewData {
     /// projection) at the cost of cloning the source `Genre`.
     fn from(genre: &Genre) -> Self {
         Self::from(genre.clone())
+    }
+}
+
+impl GenreUIViewData {
+    /// The filter that scopes the Songs view to this genre.
+    pub fn songs_filter(&self) -> LibraryFilter {
+        LibraryFilter::GenreId {
+            id: self.id.clone(),
+            name: self.name.clone(),
+        }
     }
 }
 
@@ -82,5 +92,25 @@ mod tests {
         assert_eq!(by_ref.artwork_url, by_value.artwork_url);
         assert_eq!(by_ref.artwork_album_ids, by_value.artwork_album_ids);
         assert_eq!(by_ref.searchable_lower, by_value.searchable_lower);
+    }
+
+    /// The Songs-view filter carries the tag id (the `genre_id` wire value)
+    /// and the name (the search-box text) in their own fields.
+    #[test]
+    fn songs_filter_carries_tag_id_and_name() {
+        let genre = GenreUIViewData::from(Genre {
+            id: "tag-hash-1".to_owned(),
+            name: "Black Metal".to_owned(),
+            album_count: 3,
+            song_count: 30,
+        });
+
+        assert_eq!(
+            genre.songs_filter(),
+            LibraryFilter::GenreId {
+                id: "tag-hash-1".to_owned(),
+                name: "Black Metal".to_owned(),
+            }
+        );
     }
 }
