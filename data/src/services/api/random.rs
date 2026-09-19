@@ -72,9 +72,9 @@ impl RandomApiService {
     /// Fetch up to `size` songs in true random order, optionally restricted to
     /// one genre.
     ///
-    /// * `genre` — the genre NAME. Navidrome's `filterByGenre` matches it against
-    ///   the tag VALUE stored in each track's `tags` JSON; `Genre::id` from
-    ///   `/api/genre` is a separate `tag.id` hash, so pass `name`, not `id`.
+    /// * `genre` — the genre NAME. Navidrome matches it (SQL `LIKE`) against
+    ///   the genre tag's VALUE; `Genre::id` from `/api/genre` is a separate
+    ///   tag id, so pass `name`, not `id`.
     ///   `None` / empty draws from the whole library.
     /// * `library_ids` — sent as repeatable `musicFolderId` params; Navidrome's
     ///   music folders ARE its libraries, so these are the same numeric ids the

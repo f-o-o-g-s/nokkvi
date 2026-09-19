@@ -1664,8 +1664,8 @@ fn centering_the_random_genre_pick_warms_its_collage() {
 fn genre_quad_ids_land_on_the_pick_and_tally_by_name() {
     let mut app = test_app();
     app.harbour.shelves_generation = 3;
-    // The pick: real server genre (hash id). The tally twin: synthesized
-    // (id == name). One NAME-keyed reply must fill both.
+    // The pick: real server genre (hash id). The tally twin: its stamp
+    // missed (id == name). One NAME-keyed reply must fill both.
     app.harbour.random_genre = Some(make_genre("1b9a7fc06e21f14b6b1e35c22bcb0d0a", "Rock"));
     app.harbour.most_played_genres = vec![make_genre("Rock", "Rock")];
 
