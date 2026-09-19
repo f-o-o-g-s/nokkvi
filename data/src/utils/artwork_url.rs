@@ -67,8 +67,8 @@ pub fn build_cover_art_url_with_timestamp(
     let size_param = size.map(|s| format!("&size={s}")).unwrap_or_default();
 
     if !subsonic_credential.is_empty() {
-        // Include updated_at in URL for cache invalidation
-        // This becomes part of the URL hash, so changed artwork = new cache file
+        // Include updated_at as a cache-buster: a changed cover gets a new URL,
+        // which the version-aware prefetch dedup keys on (nothing is cached on disk)
         let cache_buster = updated_at.unwrap_or("");
         format!(
             "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}{size_param}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
@@ -82,10 +82,9 @@ pub fn build_cover_art_url_with_timestamp(
 ///
 /// **Invariant**: uses the song's `album_id`, NOT `song.cover_art`. The
 /// Subsonic API returns `cover_art` as `mf-{mediafile_id}` for playlist
-/// songs, but background prefetch caches thumbnails under
-/// `al-{album_id}_80`. Routing through `cover_art` would create a cache
-/// key mismatch — every playlist song would miss the disk cache,
-/// triggering a network fetch and leaving ~90% of thumbnails blank.
+/// songs, but the UI's in-memory thumbnail map (the only cover cache; nothing
+/// is stored on disk) is keyed by album id. Routing through `cover_art` would
+/// miss the thumbnail the prefetch already loaded and fetch it again per song.
 ///
 /// Always uses [`THUMBNAIL_SIZE`].
 ///

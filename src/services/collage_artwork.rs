@@ -92,13 +92,13 @@ pub(crate) struct CollageArtworkContext<'a> {
 
 /// Result of checking in-memory state for a collage item.
 ///
-/// The dedicated genre/playlist disk caches were retired with the HTTP-cache
-/// migration; sync disk hits are no longer possible (the cached client serves
-/// async). All cache misses become `NeedNetwork`, which the caller then routes
-/// through `AlbumsService::fetch_album_artwork`.
+/// The in-memory LRUs are the only cover cache (nothing is stored on disk),
+/// so every miss becomes `NeedNetwork`, which the caller then routes through
+/// `AlbumsService::fetch_album_artwork`.
 #[derive(Debug)]
 pub(crate) enum CacheCheckResult {
-    /// Both mini and collage already in memory - skip
+    /// Everything this slot renders is already in memory (the mini for any
+    /// row, plus the 3×3 collage for the centered row) - skip
     FullyCached,
     /// Need network load
     NeedNetwork,
@@ -106,8 +106,11 @@ pub(crate) enum CacheCheckResult {
     AlreadyPending,
 }
 
+/// Decide whether an item needs a fetch. Only the centered row renders the
+/// 3×3 collage panel, so a non-centered row is fully cached once its mini is.
 pub(crate) fn check_cache<T: CollageArtworkItem>(
     item: &T,
+    is_center: bool,
     ctx: &CollageArtworkContext,
 ) -> CacheCheckResult {
     let id = item.id();
@@ -115,7 +118,7 @@ pub(crate) fn check_cache<T: CollageArtworkItem>(
     if ctx.pending_ids.contains(id) {
         return CacheCheckResult::AlreadyPending;
     }
-    if ctx.memory_artwork.contains_key(id) && ctx.memory_collage.contains_key(id) {
+    if ctx.memory_artwork.contains_key(id) && (!is_center || ctx.memory_collage.contains_key(id)) {
         return CacheCheckResult::FullyCached;
     }
     CacheCheckResult::NeedNetwork
@@ -167,7 +170,8 @@ where
 
     for idx in indices_to_load {
         if let Some(item) = items.get(idx) {
-            match check_cache(item, ctx) {
+            let is_center = center_id.is_some_and(|cid| cid == item.id());
+            match check_cache(item, is_center, ctx) {
                 CacheCheckResult::FullyCached | CacheCheckResult::AlreadyPending => continue,
                 CacheCheckResult::NeedNetwork => {
                     let id = item.id().to_string();
@@ -175,7 +179,6 @@ where
 
                     let auth_vm_clone = auth_vm.clone();
                     let album_ids = item.artwork_album_ids().to_vec();
-                    let is_center = center_id.is_some_and(|cid| cid == id);
                     let create_full = create_full_message.clone();
                     let create_mini = create_mini_message.clone();
                     tasks.push(Task::perform(
@@ -421,5 +424,79 @@ mod tests {
 
         assert!(pending_inserts.is_empty(), "no new pending markers");
         assert!(tasks.is_empty(), "no tasks dispatched");
+    }
+
+    /// Run `load_visible_artwork` over one item `x` inside the default
+    /// prefetch window and return `(pending_inserts, tasks)` lengths.
+    fn load_counts(
+        mini_cached: bool,
+        collage_cached: bool,
+        pending: bool,
+        centered: bool,
+    ) -> (usize, usize) {
+        let items = vec![fake("x")];
+        let slot_list = SlotListView::new();
+        let memory_artwork = if mini_cached {
+            art_map(&["x"])
+        } else {
+            HashMap::new()
+        };
+        let mut memory_collage: HashMap<String, Vec<image::Handle>> = HashMap::new();
+        if collage_cached {
+            memory_collage.insert("x".to_string(), vec![handle()]);
+        }
+        let mut pending_ids = HashSet::new();
+        if pending {
+            pending_ids.insert("x".to_string());
+        }
+        let ctx = CollageArtworkContext {
+            slot_list: &slot_list,
+            pending_ids: &pending_ids,
+            memory_artwork: &memory_artwork,
+            memory_collage: &memory_collage,
+        };
+        let auth_vm = AuthGateway::new().expect("auth gateway");
+
+        let (pending_inserts, tasks) = load_visible_artwork(
+            &items,
+            &ctx,
+            auth_vm,
+            centered.then_some("x"),
+            |_, _, _, _| Message::NoOp,
+            |_, _, _, _| Message::NoOp,
+        );
+        (pending_inserts.len(), tasks.len())
+    }
+
+    /// A non-centered row only renders its mini, so a cached mini is all it
+    /// needs: no refetch on every scroll step.
+    #[test]
+    fn non_centered_row_with_cached_mini_skips_the_network() {
+        assert_eq!(load_counts(true, false, false, false), (0, 0));
+    }
+
+    /// The centered row still owes its 3×3 collage when only the mini is in.
+    #[test]
+    fn centered_row_with_mini_only_still_fetches_the_collage() {
+        assert_eq!(load_counts(true, false, false, true), (1, 1));
+    }
+
+    /// A cold non-centered row fetches its mini.
+    #[test]
+    fn non_centered_cold_row_fetches() {
+        assert_eq!(load_counts(false, false, false, false), (1, 1));
+    }
+
+    /// A centered row with both mini and collage cached skips the network.
+    #[test]
+    fn centered_row_fully_cached_skips_the_network() {
+        assert_eq!(load_counts(true, true, false, true), (0, 0));
+    }
+
+    /// A pending row never dispatches a second fetch, centered or not.
+    #[test]
+    fn pending_row_skips_the_network() {
+        assert_eq!(load_counts(false, false, true, false), (0, 0));
+        assert_eq!(load_counts(false, false, true, true), (0, 0));
     }
 }

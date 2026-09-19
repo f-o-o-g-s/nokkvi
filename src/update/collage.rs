@@ -194,7 +194,7 @@ impl Nokkvi {
     /// Unified collage artwork loader for both genres and playlists.
     ///
     /// # Parameters
-    /// - `target`: Genre or Playlist — determines which disk cache and message variant to use
+    /// - `target`: Genre or Playlist — determines which cache and message variant to use
     /// - `entity_id`: The genre/playlist ID to load artwork for
     /// - `server_url`, `subsonic_credential`: API auth context
     /// - `cached_album_ids`: Pre-resolved album IDs (empty → fetch via `fetch_album_ids_fn`)
@@ -244,34 +244,34 @@ impl Nokkvi {
                     return (entity_id_clone, None, Vec::new(), Vec::new());
                 }
 
-                // 1. Load mini artwork (first album) at 300px via the cached
-                //    client. Use the retry variant so a single 429 from
-                //    Navidrome's throttle (e.g. when a scrollbar-drag settle
-                //    fans out ~10× per visible item) doesn't leave the slot
-                //    permanently blank — see `fetch_album_artwork_with_retry`.
-                let first_album_id = album_ids[0].clone();
-                let mini_vm = albums_vm.clone();
-                let mini_handle_fut = async move {
-                    mini_vm
-                        .fetch_album_artwork_with_retry(&first_album_id, Some(300), None)
-                        .await
-                        .ok()
-                        .map(image::Handle::from_bytes)
-                };
-
-                // 2. Single-album special case: full-res artwork as the sole tile.
+                // Single-album special case: the 300px mini plus full-res
+                // artwork as the sole tile. Every fetch uses the retry variant
+                // so a single 429 from Navidrome's throttle (e.g. when a
+                // scrollbar-drag settle fans out ~10× per visible item) doesn't
+                // leave the slot permanently blank — see
+                // `fetch_album_artwork_with_retry`.
                 if album_ids.len() == 1 {
                     let full_size =
                         artwork_size.or(Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE));
-                    let full_vm = albums_vm.clone();
                     let only_id = album_ids[0].clone();
-                    let (mini_handle, full_res_bytes) =
-                        futures::join!(mini_handle_fut, async move {
+                    let mini_vm = albums_vm.clone();
+                    let full_vm = albums_vm.clone();
+                    let mini_id = only_id.clone();
+                    let (mini_handle, full_res_bytes) = futures::join!(
+                        async move {
+                            mini_vm
+                                .fetch_album_artwork_with_retry(&mini_id, Some(300), None)
+                                .await
+                                .ok()
+                                .map(image::Handle::from_bytes)
+                        },
+                        async move {
                             full_vm
                                 .fetch_album_artwork_with_retry(&only_id, full_size, None)
                                 .await
                                 .ok()
-                        });
+                        }
+                    );
 
                     let mut collage_handles = Vec::new();
                     if let Some(bytes) = full_res_bytes {
@@ -282,8 +282,9 @@ impl Nokkvi {
                 }
 
                 // Multiple albums: fetch up to 9 tiles at 300px in parallel.
-                // Same retry rationale as the mini fetch above — burst settle
-                // from one drag can dispatch ~117 tile requests at once.
+                // The first tile doubles as the row mini. Same retry rationale
+                // as above — burst settle from one drag can dispatch ~117 tile
+                // requests at once.
                 let collage_tiles_futs: Vec<_> = album_ids
                     .iter()
                     .take(9)
@@ -298,16 +299,8 @@ impl Nokkvi {
                     })
                     .collect();
 
-                let (mini_handle, collage_results) = futures::join!(
-                    mini_handle_fut,
-                    futures::future::join_all(collage_tiles_futs)
-                );
-
-                let collage_handles: Vec<_> = collage_results
-                    .into_iter()
-                    .flatten()
-                    .map(image::Handle::from_bytes)
-                    .collect();
+                let collage_results = futures::future::join_all(collage_tiles_futs).await;
+                let (mini_handle, collage_handles) = collage_handles_with_mini(collage_results);
 
                 (entity_id_clone, mini_handle, collage_handles, album_ids)
             },
@@ -538,5 +531,48 @@ impl Nokkvi {
         // pass, which therefore saw only empty id lists — re-dispatch the
         // viewport quad prefetch now that rows know their albums.
         Task::batch(self.quad_prefetch_tasks(target))
+    }
+}
+
+/// Turn per-tile fetch results (in album order) into the collage handles and
+/// reuse the first album's tile as the row mini, so a centered collage never
+/// downloads its first cover twice. The mini is `None` when the first tile
+/// failed; the next viewport pass then retries the item.
+fn collage_handles_with_mini(
+    tiles: Vec<Option<Vec<u8>>>,
+) -> (Option<image::Handle>, Vec<image::Handle>) {
+    let mut handles = Vec::with_capacity(tiles.len());
+    let mut mini = None;
+    for (i, bytes) in tiles.into_iter().enumerate() {
+        let Some(bytes) = bytes else { continue };
+        let handle = image::Handle::from_bytes(bytes);
+        if i == 0 {
+            mini = Some(handle.clone());
+        }
+        handles.push(handle);
+    }
+    (mini, handles)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The first tile is the row mini (same handle, so one download and one
+    /// texture); failed tiles drop out of the collage.
+    #[test]
+    fn first_collage_tile_doubles_as_the_mini() {
+        let (mini, handles) = collage_handles_with_mini(vec![Some(vec![1]), None, Some(vec![3])]);
+        assert_eq!(handles.len(), 2);
+        let mini = mini.expect("first tile loaded, so the mini is set");
+        assert_eq!(mini.id(), handles[0].id());
+    }
+
+    /// A failed first tile leaves no mini, even when later tiles loaded.
+    #[test]
+    fn failed_first_tile_leaves_no_mini() {
+        let (mini, handles) = collage_handles_with_mini(vec![None, Some(vec![2])]);
+        assert!(mini.is_none());
+        assert_eq!(handles.len(), 1);
     }
 }
