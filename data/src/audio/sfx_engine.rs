@@ -18,7 +18,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, buffer::SamplesBuffer};
-use symphonia::core::{audio::SampleBuffer, io::MediaSourceStream, probe::Hint};
+use symphonia::core::{formats::probe::Hint, io::MediaSourceStream};
 
 use super::{load_f32, store_f32};
 use crate::audio::{music_bridge::MusicOutputBridge, symphonia_registry};
@@ -196,39 +196,34 @@ impl SfxEngine {
         let mut hint = Hint::new();
         hint.with_extension("wav");
 
-        // `enable_gapless: false` matches the prior `FormatOptions::default()` —
-        // SFX files are short, single-track WAVs that don't benefit from gapless
-        // trimming. See `symphonia_registry::probe_and_make_decoder`.
+        // `gapless: false`: WAV declares no encoder delay or padding, so there
+        // is nothing to trim. See `symphonia_registry::probe_and_make_decoder`.
         let (mut format, mut decoder, track_id) =
             symphonia_registry::probe_and_make_decoder(mss, &hint, false)?;
 
-        let (sample_rate, channels) = format
-            .tracks()
-            .iter()
-            .find(|t| t.id == track_id)
-            .map(|t| {
-                (
-                    t.codec_params.sample_rate.unwrap_or(48000),
-                    t.codec_params.channels.map_or(2, |c| c.count()),
-                )
-            })
-            .ok_or_else(|| anyhow!("No audio track found"))?;
+        let (sample_rate, channels) = {
+            let params = decoder.codec_params();
+            (
+                params.sample_rate.unwrap_or(48000),
+                params.channels.as_ref().map_or(2, |c| c.count()),
+            )
+        };
 
         let mut samples = Vec::new();
+        let mut interleaved = Vec::new();
 
         loop {
             match format.next_packet() {
-                Ok(packet) => {
+                Ok(Some(packet)) => {
+                    if packet.track_id != track_id {
+                        continue;
+                    }
                     match decoder.decode(&packet) {
                         Ok(decoded) => {
-                            let spec = *decoded.spec();
-                            let duration = decoded.capacity();
-                            let mut sample_buf = SampleBuffer::<f32>::new(duration as u64, spec);
-                            sample_buf.copy_interleaved_ref(decoded);
+                            decoded.copy_to_vec_interleaved::<f32>(&mut interleaved);
 
-                            let buf = sample_buf.samples();
                             // Convert to mono by averaging channels
-                            for chunk in buf.chunks(channels) {
+                            for chunk in interleaved.chunks(channels) {
                                 let mono: f32 = chunk.iter().sum::<f32>() / channels as f32;
                                 samples.push(mono);
                             }
@@ -238,11 +233,7 @@ impl SfxEngine {
                         }
                     }
                 }
-                Err(symphonia::core::errors::Error::IoError(ref e))
-                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
-                    break;
-                }
+                Ok(None) => break,
                 Err(e) => {
                     tracing::warn!("🔊 SfxEngine: Format error: {}", e);
                     break;

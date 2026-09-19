@@ -23,10 +23,31 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 toml = { version = "1.0", features = ["parse", "display"] }
 toml_edit = "0.25"
-# Before bumping: the Symphonia#516 canary test in `audio::symphonia_registry`
-# (Xing tag rejected on CRC-protected MP3s) fails when a new version fixes the
-# bug upstream — see its doc comment for the workaround-retirement checklist.
-symphonia = { version = "0.5.5", features = ["mp3", "flac", "ogg", "wav", "aac", "isomp4", "alac", "aiff"] }
+# Default features are off only to leave out the `ape` and `id3v1` metadata
+# readers: they are the two that anchor at the END of the file, so with them
+# registered every probe of a seekable, known-length source first seeks to EOF,
+# and on `RangeHttpReader` that seek blocks on a range request for the last
+# 256 KB chunk before playback can start. nokkvi reads no metadata from
+# Symphonia (the server supplies it), and symphonia 0.5 never probed trailing
+# metadata. The list below is 0.6's default set minus those two, plus the
+# formats and codecs nokkvi plays. `id3v2` stays: it lets the probe skip a
+# leading tag (often megabytes of cover art) in one jump.
+symphonia = { version = "0.6.1", default-features = false, features = [
+    "opt-simd",
+    "id3v2",
+    "adpcm",
+    "flac",
+    "mkv",
+    "ogg",
+    "pcm",
+    "vorbis",
+    "wav",
+    "mp3",
+    "aac",
+    "isomp4",
+    "alac",
+    "aiff",
+] }
 # Opus decoder adapter for Symphonia. Workaround for pdeljanov/Symphonia#8 —
 # Symphonia ships no native Opus codec (open since 2020, no ETA). Drop this
 # dep and add `"opus"` to the symphonia features list above the day upstream
@@ -35,7 +56,7 @@ symphonia = { version = "0.5.5", features = ["mp3", "flac", "ogg", "wav", "aac",
 # Pin matrix: 0.2.x is symphonia 0.5; 0.3.x is symphonia 0.6 — bump in lockstep
 # whenever we move the symphonia pin. Default `bundled` feature vendors libopus
 # via opusic-sys so users need no runtime system package.
-symphonia-adapter-libopus = "0.2.9"
+symphonia-adapter-libopus = "0.3.0"
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7"
 tracing = "0.1.44"

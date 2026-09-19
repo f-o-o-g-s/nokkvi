@@ -1,13 +1,13 @@
 //! Nokkvi's Symphonia codec registry.
 //!
-//! Symphonia 0.5 ships no Opus decoder (upstream issue pdeljanov/Symphonia#8,
+//! Symphonia 0.6 ships no Opus decoder (upstream issue pdeljanov/Symphonia#8,
 //! open since 2020 with no ETA). We register the built-in feature-gated codecs
 //! and bolt on `symphonia-adapter-libopus` so `.opus` files decode.
 //!
 //! Every audio decoder in this crate must obtain its `CodecRegistry` through
 //! [`codecs()`] rather than `symphonia::default::get_codecs()` — otherwise Opus
 //! tracks fall back to the default registry and fail with
-//! `unsupported feature: core (codec):unsupported codec`.
+//! `unsupported feature: core (codec): unsupported audio codec`.
 //!
 //! # Removal plan
 //!
@@ -23,18 +23,21 @@ use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
 use symphonia::core::{
-    codecs::{CodecRegistry, Decoder, DecoderOptions},
-    formats::{FormatOptions, FormatReader},
+    codecs::{
+        CodecParameters,
+        audio::{AudioDecoder, AudioDecoderOptions},
+        registry::CodecRegistry,
+    },
+    formats::{FormatOptions, FormatReader, TrackType, probe::Hint},
     io::MediaSourceStream,
     meta::MetadataOptions,
-    probe::Hint,
 };
 use symphonia_adapter_libopus::OpusDecoder;
 
 static CODECS: LazyLock<CodecRegistry> = LazyLock::new(|| {
     let mut registry = CodecRegistry::new();
     symphonia::default::register_enabled_codecs(&mut registry);
-    registry.register_all::<OpusDecoder>();
+    registry.register_audio_decoder::<OpusDecoder>();
     registry
 });
 
@@ -44,72 +47,96 @@ pub fn codecs() -> &'static CodecRegistry {
 }
 
 /// Tuple produced by [`probe_and_make_decoder`]: the boxed Symphonia
-/// [`FormatReader`], the boxed [`Decoder`], and the selected track's id.
-pub type ProbedDecoder = (Box<dyn FormatReader>, Box<dyn Decoder>, u32);
+/// [`FormatReader`] (living as long as its media source, `'s`), the boxed
+/// [`AudioDecoder`], and the selected track's id.
+pub type ProbedDecoder<'s> = (Box<dyn FormatReader + 's>, Box<dyn AudioDecoder>, u32);
 
-/// Probe a `MediaSourceStream`, select the first decodable track, and construct
-/// its decoder via the project-wide codec registry.
+/// Probe a `MediaSourceStream`, select the first decodable audio track, and
+/// construct its decoder via the project-wide codec registry.
 ///
-/// The `enable_gapless` flag is load-bearing for OGG ICEcast chained-metadata
-/// handling — `AudioDecoder::open_input` passes `true` for the primary init,
-/// the `SymphoniaError::ResetRequired` reprobe inside `read_buffer` passes
-/// `false`, and `SfxEngine::decode_wav_stream` uses the default (`false`).
-/// The helper preserves each caller's value rather than collapsing them.
+/// `gapless` sets `AudioDecoderOptions::gapless`: when true the decoder drops
+/// the encoder delay and padding frames the container declares (LAME/Xing tag,
+/// Ogg pre-skip), so consecutive album tracks join without a gap. Since
+/// Symphonia 0.6 the decoder owns this trim, not the caller.
+/// `AudioDecoder::open_input` passes `true`; `SfxEngine::decode_wav_stream`
+/// passes `false` (WAV declares no delay or padding, so the flag is inert
+/// there).
 ///
-/// Returns the boxed [`FormatReader`], the boxed [`Decoder`], and the selected
-/// track's id (for downstream packet filtering / `format_reader.tracks()`
-/// re-lookup of codec parameters).
+/// Returns the boxed [`FormatReader`], the boxed [`AudioDecoder`], and the
+/// selected track's id (for downstream packet filtering / `format.tracks()`
+/// re-lookup of the track's timing and codec parameters).
 ///
 /// # Errors
 ///
 /// - Returns the underlying Symphonia error (wrapped via `anyhow::Context`)
 ///   when the probe fails to identify a container format.
-/// - Returns an error when the probed format contains no tracks with a
-///   non-NULL codec (matches the pre-extraction check in
-///   `AudioDecoder::open_input`).
-/// - Returns the underlying Symphonia error when the codec registry cannot
-///   construct a decoder for the selected track's codec parameters.
-pub fn probe_and_make_decoder(
-    mss: MediaSourceStream,
+/// - Returns an error when the probed format has no audio track with a known
+///   codec, or when the codec registry cannot construct a decoder for it (see
+///   [`make_track_decoder`]).
+pub fn probe_and_make_decoder<'s>(
+    mss: MediaSourceStream<'s>,
     hint: &Hint,
-    enable_gapless: bool,
-) -> Result<ProbedDecoder> {
-    use symphonia::core::codecs::CODEC_TYPE_NULL;
-
-    let format_opts = FormatOptions {
-        enable_gapless,
-        ..Default::default()
-    };
-    let metadata_opts = MetadataOptions::default();
-    let decoder_opts = DecoderOptions::default();
-
-    let probed = symphonia::default::get_probe()
-        .format(hint, mss, &format_opts, &metadata_opts)
+    gapless: bool,
+) -> Result<ProbedDecoder<'s>> {
+    let format = symphonia::default::get_probe()
+        .probe(
+            hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
         .context("Failed to probe media format")?;
 
-    let format = probed.format;
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .context("No supported audio tracks found")?;
-    let track_id = track.id;
-
-    let decoder = codecs()
-        .make(&track.codec_params, &decoder_opts)
-        .context("Failed to create decoder")?;
+    let (decoder, track_id) = make_track_decoder(format.as_ref(), gapless)?;
 
     Ok((format, decoder, track_id))
 }
 
+/// Select the first audio track with a known codec on an already-open format
+/// reader and build its decoder via [`codecs()`].
+///
+/// Shared by [`probe_and_make_decoder`] and the `ResetRequired` path in
+/// `AudioDecoder::read_buffer`: since Symphonia 0.6 a reader that signals
+/// `ResetRequired` (chained Ogg radio streams) has already rebuilt its track
+/// list in place, so the caller re-selects a track and rebuilds the decoder
+/// on the same reader instead of re-probing the stream.
+///
+/// # Errors
+///
+/// - Returns an error when the reader has no audio track with a known codec.
+/// - Returns the underlying Symphonia error when the codec registry cannot
+///   construct a decoder for the selected track's codec parameters.
+pub fn make_track_decoder(
+    format: &dyn FormatReader,
+    gapless: bool,
+) -> Result<(Box<dyn AudioDecoder>, u32)> {
+    let track = format
+        .first_track_known_codec(TrackType::Audio)
+        .context("No supported audio tracks found")?;
+    let params = track
+        .codec_params
+        .as_ref()
+        .and_then(CodecParameters::audio)
+        .context("Selected audio track carries no audio codec parameters")?;
+
+    let decoder = codecs()
+        .make_audio_decoder(params, &AudioDecoderOptions::default().gapless(gapless))
+        .context("Failed to create decoder")?;
+
+    Ok((decoder, track.id))
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::{
+        io::{Cursor, Read, Seek, SeekFrom},
+        sync::{Arc, Mutex},
+    };
 
     use symphonia::core::{
-        codecs::{CODEC_TYPE_FLAC, CODEC_TYPE_MP3, CODEC_TYPE_OPUS},
-        io::MediaSourceStream,
-        probe::Hint,
+        codecs::audio::well_known::{CODEC_ID_FLAC, CODEC_ID_MP3, CODEC_ID_OPUS},
+        formats::Track,
+        io::MediaSource,
     };
 
     use super::*;
@@ -118,7 +145,13 @@ mod tests {
     /// it as the probe input avoids hand-rolling a synthetic WAV header.
     const TEST_WAV: &[u8] = include_bytes!("../../../assets/sound_effects/enter.wav");
 
-    fn wav_stream() -> MediaSourceStream {
+    /// CRC-protected LAME VBR MP3 (1 s digital silence + 1 s noise,
+    /// `lame -p -V 2`) whose Xing tag declares 78 MPEG frames. Symphonia 0.5
+    /// rejected that tag (pdeljanov/Symphonia#516); see
+    /// `symphonia_516_xing_tag_on_crc_protected_mp3_is_honored`.
+    const XING_CRC_MP3: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
+
+    fn wav_stream() -> MediaSourceStream<'static> {
         MediaSourceStream::new(Box::new(Cursor::new(TEST_WAV.to_vec())), Default::default())
     }
 
@@ -128,104 +161,166 @@ mod tests {
         hint
     }
 
+    fn mp3_hint() -> Hint {
+        let mut hint = Hint::new();
+        hint.with_extension("mp3");
+        hint
+    }
+
+    fn selected_track(format: &dyn FormatReader, track_id: u32) -> &Track {
+        format
+            .tracks()
+            .iter()
+            .find(|t| t.id == track_id)
+            .expect("returned track_id must reference a real track in the format reader")
+    }
+
     #[test]
     fn opus_decoder_is_registered() {
         assert!(
-            codecs().get_codec(CODEC_TYPE_OPUS).is_some(),
+            codecs().get_audio_decoder(CODEC_ID_OPUS).is_some(),
             "OpusDecoder must be in the registry — otherwise .opus files fail to decode (GH#3)"
         );
     }
 
     #[test]
     fn default_codecs_are_still_registered() {
-        assert!(codecs().get_codec(CODEC_TYPE_MP3).is_some());
-        assert!(codecs().get_codec(CODEC_TYPE_FLAC).is_some());
+        assert!(codecs().get_audio_decoder(CODEC_ID_MP3).is_some());
+        assert!(codecs().get_audio_decoder(CODEC_ID_FLAC).is_some());
     }
 
-    /// Smoke test: the extracted helper produces a usable
-    /// `(FormatReader, Decoder, track_id)` triple from a real WAV stream.
-    /// This is the path every site (primary init, ResetRequired reprobe, SFX
-    /// decode) takes after Lane 2.
+    /// Smoke test: the helper produces a usable `(FormatReader, AudioDecoder,
+    /// track_id)` triple from a real WAV stream. This is the path the primary
+    /// init and the SFX decode both take.
     #[test]
     fn probe_and_make_decoder_returns_decoder_for_synthetic_wav() {
         let (format, _decoder, track_id) = probe_and_make_decoder(wav_stream(), &wav_hint(), false)
             .expect("probing a known-good WAV should succeed");
 
-        let track = format
-            .tracks()
-            .iter()
-            .find(|t| t.id == track_id)
-            .expect("returned track_id must reference a real track in the format reader");
+        let sample_rate = selected_track(format.as_ref(), track_id)
+            .codec_params
+            .as_ref()
+            .and_then(CodecParameters::audio)
+            .and_then(|params| params.sample_rate);
         assert!(
-            track.codec_params.sample_rate.is_some_and(|sr| sr > 0),
+            sample_rate.is_some_and(|sr| sr > 0),
             "WAV track should expose a positive sample rate"
         );
     }
 
-    /// The `enable_gapless` parameter is load-bearing — Site 1 passes `true`,
-    /// Sites 2 and 3 pass `false`. The helper must accept both values without
-    /// surfacing a probe error for a vanilla WAV input. (Symphonia hides the
-    /// gapless flag inside the format reader's private state, so the cleanest
-    /// observable assertion is that both polarities probe successfully.)
+    /// The `gapless` parameter differs per caller — the primary init passes
+    /// `true`, the SFX decode `false`. The helper must accept both values
+    /// without surfacing a probe error for a vanilla WAV input. (The flag
+    /// lives inside the decoder's private state, so the cleanest observable
+    /// assertion is that both polarities probe successfully.)
     #[test]
     fn probe_and_make_decoder_accepts_both_gapless_polarities() {
         let with_gapless = probe_and_make_decoder(wav_stream(), &wav_hint(), true);
         assert!(
             with_gapless.is_ok(),
-            "enable_gapless=true (primary init path) must probe WAV input cleanly"
+            "gapless=true (primary init path) must probe WAV input cleanly"
         );
 
         let without_gapless = probe_and_make_decoder(wav_stream(), &wav_hint(), false);
         assert!(
             without_gapless.is_ok(),
-            "enable_gapless=false (ResetRequired reprobe + SFX decode path) must \
-             probe WAV input cleanly"
+            "gapless=false (SFX decode path) must probe WAV input cleanly"
         );
     }
 
-    /// CANARY for upstream pdeljanov/Symphonia#516 — this test fails the day
-    /// the bug is FIXED in whatever symphonia version is pinned.
+    /// Regression guard for upstream pdeljanov/Symphonia#516, fixed in
+    /// Symphonia 0.6.1: the Xing tag of a CRC-protected MP3 frame used to be
+    /// rejected (the zero-side-info scan read the 16-bit frame CRC as side
+    /// info), and the probe fell back to a 17-frame bitrate extrapolation that
+    /// put this 2 s fixture at ~4 s.
     ///
-    /// The pinned symphonia rejects the Xing tag of CRC-protected MP3 frames
-    /// (`is_maybe_info_tag` scans the 16-bit frame CRC as if it were side
-    /// info) and falls back to a 17-frame bitrate extrapolation. This fixture
-    /// (1s digital silence + 1s noise, `lame -p -V 2`) carries a valid Xing
-    /// tag of 78 MPEG frames (89,856 samples = 2.038s at 44.1kHz) yet probes
-    /// at ~176k samples (~4.0s). nokkvi works around the bug with
-    /// `sanitize_probed_duration` + `seek_scale` in `decoder.rs`.
-    ///
-    /// If this assertion fails after a symphonia bump: the upstream bug is
-    /// fixed. The workarounds go dormant on their own (an in-tolerance probe
-    /// wins and `seek_scale` stays 1.0), so nothing breaks — re-verify
-    /// duration and seek on a CRC-protected VBR MP3, update the
-    /// `sanitize_probed_duration` docs, then delete this canary and the
-    /// fixture. Context: https://github.com/pdeljanov/Symphonia/issues/516
+    /// The Xing tag declares 78 frames × 1152 = 89,856 samples (2.038 s at
+    /// 44.1 kHz); minus the LAME encoder delay and padding the track lasts
+    /// 2.000 s. nokkvi's `sanitize_probed_duration` + `seek_scale` in
+    /// `decoder.rs` stay as defense in depth — MP3s with no Xing tag at all
+    /// still get the extrapolated estimate — but a failure here means the
+    /// pinned Symphonia regressed on the root fix.
     #[test]
-    fn symphonia_516_xing_crc_rejection_still_reproduces() {
-        const FIXTURE: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
-        /// Ground truth from the fixture's own Xing tag: 78 frames × 1152.
-        const XING_SAMPLES: u64 = 89_856;
+    fn symphonia_516_xing_tag_on_crc_protected_mp3_is_honored() {
+        let mss = MediaSourceStream::new(
+            Box::new(Cursor::new(XING_CRC_MP3.to_vec())),
+            Default::default(),
+        );
 
-        let mss =
-            MediaSourceStream::new(Box::new(Cursor::new(FIXTURE.to_vec())), Default::default());
-        let mut hint = Hint::new();
-        hint.with_extension("mp3");
-
-        let (format, _decoder, track_id) = probe_and_make_decoder(mss, &hint, true)
+        let (format, _decoder, track_id) = probe_and_make_decoder(mss, &mp3_hint(), true)
             .expect("the CRC-protected MP3 fixture must probe successfully");
-        let n_frames = format
-            .tracks()
-            .iter()
-            .find(|t| t.id == track_id)
-            .and_then(|t| t.codec_params.n_frames)
-            .expect("an MP3 probe with known byte length must produce n_frames");
+        let track = selected_track(format.as_ref(), track_id);
+        let probed_ms = track
+            .time_base
+            .zip(track.duration)
+            .and_then(|(time_base, duration)| time_base.calc_duration(duration))
+            .map(|time| time.as_millis())
+            .expect("an MP3 probe with known byte length must produce a duration");
 
         assert!(
-            n_frames > XING_SAMPLES * 3 / 2,
-            "Symphonia#516 no longer reproduces (probed {n_frames} samples vs Xing \
-             {XING_SAMPLES}): the pinned symphonia now honors the Xing tag of \
-             CRC-protected MP3s. See this test's doc comment for the retirement \
-             checklist."
+            (1_900..=2_100).contains(&probed_ms),
+            "Symphonia#516 regressed: the CRC-protected MP3 fixture probed at \
+             {probed_ms} ms instead of ~2000 ms from its Xing tag"
+        );
+    }
+
+    /// Wraps a seekable in-memory source and records the byte position of
+    /// every seek, so a test can see where the probe looked.
+    struct SeekRecorder {
+        inner: Cursor<Vec<u8>>,
+        seeks: Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl Read for SeekRecorder {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl Seek for SeekRecorder {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            let landed = self.inner.seek(pos)?;
+            self.seeks.lock().expect("seek log poisoned").push(landed);
+            Ok(landed)
+        }
+    }
+
+    impl MediaSource for SeekRecorder {
+        fn is_seekable(&self) -> bool {
+            true
+        }
+
+        fn byte_len(&self) -> Option<u64> {
+            Some(self.inner.get_ref().len() as u64)
+        }
+    }
+
+    /// Pins the `default-features = false` feature list in `data/Cargo.toml`:
+    /// with Symphonia's default `ape` / `id3v1` metadata readers registered,
+    /// every probe of a seekable, known-length source first seeks to the END
+    /// of the file to look for trailing tags. On `RangeHttpReader` that seek
+    /// is a blocking range request for the last 256 KB chunk before playback
+    /// can start. If this fails, a feature change re-enabled those readers.
+    #[test]
+    fn probe_never_seeks_to_trailing_metadata() {
+        let seeks = Arc::new(Mutex::new(Vec::new()));
+        let source = SeekRecorder {
+            inner: Cursor::new(XING_CRC_MP3.to_vec()),
+            seeks: Arc::clone(&seeks),
+        };
+        let mss = MediaSourceStream::new(Box::new(source), Default::default());
+
+        probe_and_make_decoder(mss, &mp3_hint(), true)
+            .expect("the MP3 fixture must probe successfully");
+
+        // The trailing readers anchor at most 32 + 128 bytes before EOF.
+        let tail_start = XING_CRC_MP3.len() as u64 - 256;
+        let seeks = seeks.lock().expect("seek log poisoned");
+        assert!(
+            seeks.iter().all(|&pos| pos < tail_start),
+            "the probe seeked into the last 256 bytes ({seeks:?} of {} bytes) — \
+             a trailing-metadata reader is registered again",
+            XING_CRC_MP3.len()
         );
     }
 

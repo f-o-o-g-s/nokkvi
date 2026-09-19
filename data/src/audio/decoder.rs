@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use symphonia::core::{
-    audio::RawSampleBuffer,
+    audio::Channels,
+    codecs::audio::AudioDecoder as SymphoniaDecoder,
     errors::Error as SymphoniaError,
-    formats::FormatReader,
-    io::{MediaSource, MediaSourceStream},
-    probe::Hint,
-    units::{Time, TimeBase},
+    formats::{FormatReader, SeekMode, SeekTo, Track, probe::Hint},
+    io::{MediaSource, MediaSourceStream, ReadOnlySource},
+    units::Time,
 };
 use tokio::sync::mpsc;
 use tokio_util::{
@@ -241,7 +241,7 @@ impl<R: std::io::Read> std::io::Read for IcyStreamReader<R> {
 /// Audio decoder using symphonia
 pub struct AudioDecoder {
     format_reader: Option<Box<dyn FormatReader>>,
-    decoder: Option<Box<dyn symphonia::core::codecs::Decoder>>,
+    decoder: Option<Box<dyn SymphoniaDecoder>>,
     track_id: Option<u32>,
     format: AudioFormat,
     duration: u64, // milliseconds
@@ -251,7 +251,7 @@ pub struct AudioDecoder {
     // Buffer for leftover samples from partially-processed frames
     frame_buffer: Vec<u8>,
     /// EMA-smoothed compressed bitrate in kbps, computed per-packet from
-    /// Symphonia's `Packet.data.len()` and `Packet.dur`.
+    /// Symphonia's `Packet.data.len()` and `Packet::block_dur()`.
     smoothed_bitrate_kbps: f64,
     /// True when stream has no Content-Length (internet radio / infinite stream).
     /// Engine uses this to skip gapless preparation, crossfade arming, and
@@ -277,11 +277,11 @@ pub struct AudioDecoder {
 }
 
 /// Leading-silence trim state (M8). The scan lives inside the registry-backed
-/// decode path (`read_buffer`'s decode-ok arm, right after Symphonia's
-/// encoder-delay `trim_start` handling) and is DISTINCT from that per-packet
-/// format field: `trim_start` removes encoder delay, this drops *musical*
-/// leading silence below [`super::SOURCE_SILENCE_THRESHOLD`], frame-aligned,
-/// until the first loud frame or the [`LEADING_TRIM_MAX_MS`] budget runs out.
+/// decode path (`read_buffer`'s decode-ok arm) and is DISTINCT from the
+/// decoder's own gapless trim: Symphonia drops the container-declared encoder
+/// delay and padding inside `decode()`, this drops *musical* leading silence
+/// below [`super::SOURCE_SILENCE_THRESHOLD`], frame-aligned, until the first
+/// loud frame or the [`LEADING_TRIM_MAX_MS`] budget runs out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LeadingTrim {
     /// Feature off for this decoder (the default).
@@ -382,21 +382,22 @@ fn fill_silence_for_error(
 /// Cross-check the probe-derived duration against the server-reported one.
 ///
 /// Symphonia's probe is sample-accurate when the container carries real frame
-/// counts, but for MP3 it can fall back to extrapolating from the first 17
-/// frames (and a Xing tag on a CRC-protected frame is rejected outright —
-/// pdeljanov/Symphonia#516), producing durations that are several times off
-/// for VBR files with quiet intros. The server value comes from a full
-/// metadata scan, so when the two disagree beyond `max(2s, 5%)` the probe is
-/// considered garbage and the server value wins. Within tolerance the probe
-/// wins: it is sample-accurate (gapless-trimmed) where the server rounds to
-/// whole seconds.
+/// counts, but an MP3 without a Xing/Info or VBRI tag falls back to
+/// extrapolating from the first 17 frames, producing durations that are
+/// several times off for VBR files with quiet intros. (Before Symphonia 0.6.1
+/// a Xing tag on a CRC-protected frame was also rejected outright —
+/// pdeljanov/Symphonia#516 — which is how this guard came about: a 4:44 track
+/// probed as 30:24.) The server value comes from a full metadata scan, so when
+/// the two disagree beyond `max(2s, 5%)` the probe is considered garbage and
+/// the server value wins. Within tolerance the probe wins: it is
+/// sample-accurate (gapless-trimmed) where the server rounds to whole seconds.
 ///
 /// Known cost of the inverse case (probe right, server stale-short by more
 /// than the tolerance — e.g. a file extended on disk before a Navidrome
 /// rescan): the displayed range, seek clamp, and crossfade trigger follow the
 /// short server value until the server rescans. Accepted: that case is rare
-/// and self-healing, while the #516 case is deterministic for every
-/// CRC-protected VBR MP3.
+/// and self-healing, while a tagless VBR MP3 misreads the same way every time
+/// it plays.
 fn sanitize_probed_duration(probed_ms: u64, expected_ms: Option<u64>) -> u64 {
     let Some(expected) = expected_ms.filter(|&e| e > 0) else {
         return probed_ms;
@@ -413,7 +414,7 @@ fn sanitize_probed_duration(probed_ms: u64, expected_ms: Option<u64>) -> u64 {
         warn!(
             " [DECODER] Probed duration {probed_ms}ms contradicts server metadata \
              ({expected}ms) — using the server value (likely a bitrate-extrapolated \
-             estimate, see Symphonia#516)"
+             MP3 estimate)"
         );
         expected
     } else {
@@ -428,15 +429,61 @@ fn sanitize_probed_duration(probed_ms: u64, expected_ms: Option<u64>) -> u64 {
 /// interpolates `target / probed_total` into the byte range. Scaling the
 /// target by `probed / real` first makes that interpolation come out at
 /// `target / real` of the bytes — the mapping a correct coarse seek would
-/// use. Without this, seeking on a #516-affected file lands far short of the
-/// target (observed: seek to 262s of a 4:44 track landed at ~41s, the
-/// position-based crossfade then fired 230s before real EOF and the
-/// completion handler wedged on "buffer starvation").
+/// use. Without this, seeking on a file whose probe was overridden lands far
+/// short of the target (observed on a Symphonia#516 file: seek to 262s of a
+/// 4:44 track landed at ~41s, the position-based crossfade then fired 230s
+/// before real EOF and the completion handler wedged on "buffer starvation").
 fn compute_seek_scale(probed_ms: u64, sanitized_ms: u64) -> f64 {
     if probed_ms == 0 || sanitized_ms == 0 || probed_ms == sanitized_ms {
         return 1.0;
     }
     probed_ms as f64 / sanitized_ms as f64
+}
+
+/// Track length in ms from the container's timing fields, or 0 when the
+/// container doesn't declare one (radio) or declares garbage.
+///
+/// Reads `Track::duration`, not `num_frames`: Symphonia 0.6 defines the frame
+/// count as unit-less and only equal to a duration when the time base is
+/// `1 / sample_rate`.
+fn probed_track_duration_ms(track: &Track) -> u64 {
+    let Some(time) = track
+        .time_base
+        .zip(track.duration)
+        .and_then(|(time_base, duration)| time_base.calc_duration(duration))
+    else {
+        return 0;
+    };
+    let calculated_ms = u64::try_from(time.as_millis()).unwrap_or_default();
+
+    // Sanity check: if duration is > 24 hours, something is wrong with the metadata
+    // Typical songs are under 20 minutes, albums under 2 hours
+    const MAX_REASONABLE_DURATION_MS: u64 = 24 * 60 * 60 * 1000; // 24 hours
+    if calculated_ms > MAX_REASONABLE_DURATION_MS {
+        warn!(
+            " [DECODER] Detected garbage duration: {}ms (duration={:?}, time_base={:?}), falling back to 0",
+            calculated_ms, track.duration, track.time_base
+        );
+        return 0;
+    }
+    calculated_ms
+}
+
+/// Output format and codec short name of a freshly built Symphonia decoder.
+///
+/// Reads the decoder's own codec parameters rather than the track's: each
+/// decoder starts from a clone of the track's and some (FLAC, AAC, ALAC) fill
+/// in fields from the stream header. Every codec decodes to interleaved f32
+/// (see `read_buffer`), which losslessly represents 16- and 24-bit integer PCM
+/// — the prerequisite for bit-perfect hi-res playback.
+fn decoder_output_format(decoder: &dyn SymphoniaDecoder) -> (AudioFormat, String) {
+    let params = decoder.codec_params();
+    let sample_rate = params.sample_rate.unwrap_or(44100);
+    let channels = params.channels.as_ref().map_or(2, Channels::count) as u32;
+    (
+        AudioFormat::new(SampleFormat::F32, sample_rate, channels),
+        decoder.codec_info().short_name.to_string(),
+    )
 }
 
 impl AudioDecoder {
@@ -754,10 +801,10 @@ impl AudioDecoder {
                             }
                         }),
                     };
-                    Box::new(symphonia::core::io::ReadOnlySource::new(icy_reader))
+                    Box::new(ReadOnlySource::new(icy_reader))
                 } else {
                     trace!(" [DECODER] No ICY Interval detected in headers!");
-                    Box::new(symphonia::core::io::ReadOnlySource::new(buffered_response))
+                    Box::new(ReadOnlySource::new(buffered_response))
                 };
 
                 MediaSourceStream::new(media_source, Default::default())
@@ -787,8 +834,8 @@ impl AudioDecoder {
         trace!(" [DECODER] Starting format probe...");
         // CRITICAL: Format probing reads from the MediaSource stream, which does blocking I/O.
         // Must wrap in block_in_place to avoid freezing the Tokio executor.
-        // `enable_gapless: true` is load-bearing for the primary init path — the
-        // ResetRequired reprobe in `read_buffer` uses `false` instead (see
+        // `gapless: true` makes the decoder drop the container-declared encoder
+        // delay and padding, so album tracks join seamlessly (see
         // `symphonia_registry::probe_and_make_decoder`).
         let (format_reader, decoder, track_id) = tokio::task::block_in_place(|| {
             symphonia_registry::probe_and_make_decoder(mss, &hint, true).inspect_err(|e| {
@@ -805,62 +852,20 @@ impl AudioDecoder {
         trace!(" [DECODER] Found audio track with ID: {}", track_id);
         trace!(" [DECODER] Codec decoder created successfully");
 
-        // Snapshot the selected track's codec parameters into owned locals so the
-        // immutable borrow of `format_reader` is released before we move it into
-        // `self.format_reader` below.
-        let codec_params = format_reader
-            .tracks()
-            .iter()
-            .find(|t| t.id == track_id)
-            .context("Selected track id missing from probed format")?
-            .codec_params
-            .clone();
-        let mut codec_name = None;
-        if let Some(desc) = symphonia_registry::codecs().get_codec(codec_params.codec) {
-            codec_name = Some(desc.short_name.to_string());
-        }
+        let (audio_format, codec_name) = decoder_output_format(decoder.as_ref());
+        let sample_rate = audio_format.sample_rate();
+        let channels = audio_format.channel_count();
 
-        let sample_rate = codec_params.sample_rate.unwrap_or(44100);
-        let channels = codec_params.channels.map_or(2, |c| c.count()) as u32;
-
-        // We decode every codec to full-precision interleaved f32 (see
-        // `read_buffer`'s `RawSampleBuffer::<f32>`). f32 losslessly represents
-        // 16- and 24-bit integer PCM, so this preserves the source's full
-        // resolution end to end — the prerequisite for bit-perfect hi-res
-        // playback. (The former S16 path truncated 24-bit/float sources.)
-        let sample_format = SampleFormat::F32;
-
-        let audio_format = AudioFormat::new(sample_format, sample_rate, channels);
-
-        // Get duration
-        let duration_ms = if let Some(time_base) = codec_params.time_base {
-            if let Some(n_frames) = codec_params.n_frames {
-                // Calculate duration using time_base
-                let time = time_base.calc_time(n_frames);
-                let calculated_ms = time.seconds * 1000 + (time.frac * 1000.0) as u64;
-
-                // Sanity check: if duration is > 24 hours, something is wrong with the metadata
-                // Typical songs are under 20 minutes, albums under 2 hours
-                const MAX_REASONABLE_DURATION_MS: u64 = 24 * 60 * 60 * 1000; // 24 hours
-                if calculated_ms > MAX_REASONABLE_DURATION_MS {
-                    warn!(
-                        " [DECODER] Detected garbage duration: {}ms (n_frames={}, time_base={:?}), falling back to 0",
-                        calculated_ms, n_frames, time_base
-                    );
-                    0
-                } else {
-                    calculated_ms
-                }
-            } else {
-                0
-            }
-        } else {
-            0
-        };
+        let probed_ms = probed_track_duration_ms(
+            format_reader
+                .tracks()
+                .iter()
+                .find(|t| t.id == track_id)
+                .context("Selected track id missing from probed format")?,
+        );
 
         // Cross-check against server metadata: Symphonia's probe can hand back
-        // a bitrate-extrapolated estimate that is several times off (#516).
-        let probed_ms = duration_ms;
+        // a bitrate-extrapolated MP3 estimate that is several times off.
         let duration_ms = sanitize_probed_duration(probed_ms, self.expected_duration_ms);
         // When the probe was overridden, the format reader still believes the
         // probed timeline — seeks must be mapped into it (see seek()).
@@ -876,7 +881,7 @@ impl AudioDecoder {
         self.track_id = Some(track_id);
         self.format = audio_format;
         self.duration = duration_ms;
-        self.live_codec = codec_name;
+        self.live_codec = Some(codec_name);
         self.initialized = true;
         self.eof = false;
         self.frame_buffer.clear();
@@ -965,75 +970,44 @@ impl AudioDecoder {
 
             // Get next packet
             let packet = match format_reader.next_packet() {
-                Ok(p) => {
+                Ok(Some(p)) => {
                     // Reset error counter on success
                     consecutive_io_errors = 0;
                     p
                 }
+                Ok(None) => {
+                    // Symphonia 0.6 reports the real end of the media as
+                    // `Ok(None)`, so no I/O error below is a clean end.
+                    trace!(" [DECODER] Symphonia reached end of stream - treating as EOF");
+                    self.eof = true;
+                    break;
+                }
                 Err(SymphoniaError::ResetRequired) => {
-                    // Track list changed (e.g., OGG ICECast metadata changed).
-                    // `enable_gapless: false` is load-bearing here — OGG chained
-                    // metadata depends on Symphonia exposing every container
-                    // segment rather than gluing them together.
-                    warn!(" [DECODER] ResetRequired error - Stream format changed, reprobing...");
-                    if let Some(reader) = self.format_reader.take() {
-                        let mss = reader.into_inner();
-
-                        let mut hint = Hint::new();
-                        // Assume OGG for internet radio if it's infinite, as that's the main codec that chains
-                        if self.infinite_stream
-                            || self.url.to_lowercase().contains("ogg")
-                            || self.url.to_lowercase().contains("vorbis")
-                        {
-                            hint.with_extension("ogg");
-                        } else if let Some(ext) = self.url.split('.').next_back()
-                            && ext.len() <= 4
-                        {
-                            hint.with_extension(ext);
+                    // The track list changed mid-stream (a chained Ogg ICEcast
+                    // stream started a new link). Since Symphonia 0.6 the reader
+                    // has already rebuilt its tracks in place, so re-select a
+                    // track and rebuild the decoder on the same reader.
+                    // `gapless: false` carries over the pre-0.6 behavior of this
+                    // path, whose reprobe disabled gapless trimming.
+                    warn!(
+                        " [DECODER] ResetRequired - stream's track list changed, rebuilding decoder..."
+                    );
+                    match symphonia_registry::make_track_decoder(format_reader.as_ref(), false) {
+                        Ok((dec, new_track_id)) => {
+                            let (format, codec_name) = decoder_output_format(dec.as_ref());
+                            self.format = format;
+                            self.live_codec = Some(codec_name);
+                            self.track_id = Some(new_track_id);
+                            self.decoder = Some(dec);
+                            // Retry reading the packet with the new decoder.
+                            continue;
                         }
-
-                        match symphonia_registry::probe_and_make_decoder(mss, &hint, false) {
-                            Ok((format_reader, dec, track_id)) => {
-                                // Snapshot codec parameters before moving the
-                                // format reader into `self.format_reader`.
-                                let codec_params = format_reader
-                                    .tracks()
-                                    .iter()
-                                    .find(|t| t.id == track_id)
-                                    .map(|t| t.codec_params.clone());
-                                self.track_id = Some(track_id);
-                                self.decoder = Some(dec);
-                                if let Some(codec_params) = codec_params {
-                                    let channels = codec_params
-                                        .channels
-                                        .unwrap_or(
-                                            symphonia::core::audio::Channels::FRONT_LEFT
-                                                | symphonia::core::audio::Channels::FRONT_RIGHT,
-                                        )
-                                        .count();
-                                    let sample_rate = codec_params.sample_rate.unwrap_or(44100);
-                                    self.format = AudioFormat::new(
-                                        SampleFormat::F32,
-                                        sample_rate,
-                                        channels as u32,
-                                    );
-                                    if let Some(desc) =
-                                        symphonia_registry::codecs().get_codec(codec_params.codec)
-                                    {
-                                        self.live_codec = Some(desc.short_name.to_string());
-                                    }
-                                }
-                                self.format_reader = Some(format_reader);
-                                // Retry reading the packet with the new decoder.
-                                continue;
-                            }
-                            Err(e) => {
-                                error!(
-                                    " [DECODER] Failed to reprobe format / build decoder after \
-                                     ResetRequired: {:#}",
-                                    e
-                                );
-                            }
+                        Err(e) => {
+                            error!(
+                                " [DECODER] Failed to rebuild the decoder after \
+                                 ResetRequired: {:#}",
+                                e
+                            );
                         }
                     }
                     self.eof = true;
@@ -1049,24 +1023,25 @@ impl AudioDecoder {
                         break;
                     }
 
-                    consecutive_io_errors += 1;
-
-                    // Check if this looks like a real EOF from Symphonia
-                    let is_unexpected_eof = io_err.kind() == std::io::ErrorKind::UnexpectedEof;
-                    let error_msg = io_err.to_string();
-
-                    // CRITICAL: Symphonia returns "end of stream" when it reaches actual EOF
-                    // This is different from network errors which would be timeouts or connection resets.
-                    // If we see "end of stream", this is the REAL end of the audio data.
-                    let is_symphonia_eof = is_unexpected_eof && error_msg.contains("end of stream");
-
-                    if is_symphonia_eof {
-                        // This is the actual end of the file - Symphonia finished decoding
-                        trace!(" [DECODER] Symphonia reached end of stream - treating as EOF");
+                    // The source ran dry mid-packet: a truncated file, or a radio
+                    // socket that closed (IcyStreamReader's `read_exact` surfaces
+                    // that as UnexpectedEof too). The source has nothing more to
+                    // give, so retrying only delays the radio reconnect that EOF
+                    // triggers. RangeHttpReader reports network failures as
+                    // `ErrorKind::Other`, which the retry path below handles.
+                    if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                        warn!(
+                            " [DECODER] Stream ended mid-packet ({}) - treating as EOF",
+                            io_err
+                        );
                         self.eof = true;
                         break;
-                    } else if consecutive_io_errors >= MAX_IO_RETRIES {
-                        // Non-EOF I/O error after retries - network issue
+                    }
+
+                    consecutive_io_errors += 1;
+
+                    if consecutive_io_errors >= MAX_IO_RETRIES {
+                        // I/O error after retries - network issue
                         error!(
                             " [DECODER] I/O error after {} retries: {:?} - treating as EOF",
                             consecutive_io_errors, io_err
@@ -1099,16 +1074,19 @@ impl AudioDecoder {
             };
 
             // Skip if not our track
-            if packet.track_id() != track_id {
+            if packet.track_id != track_id {
                 continue;
             }
 
-            // Compute instantaneous compressed bitrate from packet data
-            if packet.dur > 0 {
+            // Compute instantaneous compressed bitrate from packet data.
+            // `block_dur` counts every frame the packet codes, including any
+            // the decoder trims as encoder delay/padding — the bytes cover them.
+            let block_dur = packet.block_dur().get();
+            if block_dur > 0 {
                 let sample_rate = self.format.sample_rate() as u64;
                 if sample_rate > 0 {
                     let bits = packet.data.len() as u64 * 8;
-                    let instantaneous_kbps = (bits * sample_rate) / (packet.dur * 1000);
+                    let instantaneous_kbps = (bits * sample_rate) / (block_dur * 1000);
                     // EMA smoothing (alpha=0.1 ≈ ~10 packet window)
                     if self.smoothed_bitrate_kbps == 0.0 {
                         self.smoothed_bitrate_kbps = instantaneous_kbps as f64;
@@ -1123,41 +1101,22 @@ impl AudioDecoder {
             // Decode packet
             match decoder.decode(&packet) {
                 Ok(audio_buf) => {
-                    // Convert to interleaved bytes
-                    let spec = *audio_buf.spec();
-                    let mut raw_buf =
-                        RawSampleBuffer::<f32>::new(audio_buf.capacity() as u64, spec);
-                    raw_buf.copy_interleaved_ref(audio_buf);
+                    // Convert to interleaved f32 bytes. The decoder has already
+                    // dropped the encoder delay/padding frames (gapless trim).
+                    let channels = audio_buf.spec().channels().count();
+                    let rate = audio_buf.spec().rate();
+                    let mut interleaved = Vec::new();
+                    audio_buf.copy_bytes_to_vec_interleaved_as::<f32>(&mut interleaved);
 
-                    let mut decoded_bytes = raw_buf.as_bytes();
+                    let mut decoded_bytes = interleaved.as_slice();
+                    let bytes_per_frame = channels * std::mem::size_of::<f32>();
 
-                    // Apply gapless trimming if enabled
-                    let channels = spec.channels.count();
-                    let bytes_per_sample = std::mem::size_of::<f32>();
-                    let bytes_per_frame = channels * bytes_per_sample;
-
-                    // Trim start: remove encoder delay frames from beginning
-                    if packet.trim_start > 0 {
-                        let trim_start_bytes = (packet.trim_start as usize) * bytes_per_frame;
-                        if trim_start_bytes < decoded_bytes.len() {
-                            decoded_bytes = &decoded_bytes[trim_start_bytes..];
-                        }
-                    }
-
-                    // Trim end: remove encoder padding frames from end
-                    if packet.trim_end > 0 {
-                        let trim_end_bytes = (packet.trim_end as usize) * bytes_per_frame;
-                        if trim_end_bytes < decoded_bytes.len() {
-                            decoded_bytes = &decoded_bytes[..decoded_bytes.len() - trim_end_bytes];
-                        }
-                    }
-
-                    // M8 leading-silence trim (content-aware, AFTER the
-                    // encoder-delay trims above — those are format bookkeeping,
-                    // this drops musical silence). Resolve the frame budget on
-                    // first use, now that the decoded spec reports the rate.
+                    // M8 leading-silence trim (content-aware — the decoder's
+                    // gapless trim is format bookkeeping, this drops musical
+                    // silence). Resolve the frame budget on first use, now that
+                    // the decoded spec reports the rate.
                     if self.leading_trim == LeadingTrim::Pending {
-                        let frames_budget = LEADING_TRIM_MAX_MS * u64::from(spec.rate) / 1000;
+                        let frames_budget = LEADING_TRIM_MAX_MS * u64::from(rate) / 1000;
                         self.leading_trim = if frames_budget == 0 {
                             LeadingTrim::Done
                         } else {
@@ -1199,7 +1158,7 @@ impl AudioDecoder {
                     // Zero-fill to maintain time sync and prevent buffer starvation
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
-                        packet.dur,
+                        packet.dur.get(),
                         self.format.bytes_per_sample(),
                         bytes,
                         &mut output_data,
@@ -1214,7 +1173,7 @@ impl AudioDecoder {
                     // Zero-fill to maintain time sync and prevent buffer starvation
                     fill_silence_for_error(
                         self.format.channel_count() as usize,
-                        packet.dur,
+                        packet.dur.get(),
                         self.format.bytes_per_sample(),
                         bytes,
                         &mut output_data,
@@ -1263,14 +1222,6 @@ impl AudioDecoder {
             return false;
         };
 
-        // Convert milliseconds to time
-        let time_base = format_reader
-            .tracks()
-            .iter()
-            .find(|t| t.id == track_id)
-            .and_then(|t| t.codec_params.time_base)
-            .unwrap_or_else(|| TimeBase::new(1, 1000));
-
         // Map the real-timeline target into Symphonia's internal timeline.
         // Identity unless the probe duration was overridden in open_input —
         // then the format reader still believes its inflated total and would
@@ -1286,27 +1237,23 @@ impl AudioDecoder {
             scaled
         };
 
-        // Convert milliseconds to seconds
-        let seconds = target_ms / 1000;
-        let frac = (target_ms % 1000) as f64 / 1000.0;
-        let time = Time::new(seconds, frac);
-        let _ts = time_base.calc_timestamp(time);
+        let time = Time::from_millis_u64(target_ms);
 
         // Seek in format reader
         // Use Coarse mode for HTTP streams - Accurate mode requires decoding from start
         // for formats without seek tables (like FLAC without SEEKTABLE), causing 20s+ delays.
         // Coarse mode uses byte-level seeking which is instant with Range requests.
-        let seek_to = symphonia::core::formats::SeekTo::Time {
+        let seek_to = SeekTo::Time {
             time,
             track_id: Some(track_id),
         };
 
         trace!(
-            "🔍 [DECODER SEEK] Calling format_reader.seek(Coarse, {}s + {})",
-            seconds, frac
+            "🔍 [DECODER SEEK] Calling format_reader.seek(Coarse, {}ms)",
+            target_ms
         );
         let seek_start = std::time::Instant::now();
-        match format_reader.seek(symphonia::core::formats::SeekMode::Coarse, seek_to) {
+        match format_reader.seek(SeekMode::Coarse, seek_to) {
             Ok(seeked_to) => {
                 debug!(
                     "🔍 [DECODER SEEK] format_reader.seek() completed in {:?}, seeked to ts={}",

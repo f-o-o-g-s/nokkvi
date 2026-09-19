@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
 - Harbour's Most Played Genres rows now show their album covers on Navidrome 0.64.
 - Genres in Harbour search results now show their album covers on Navidrome 0.64.
 - Centering a genre in Harbour now shows its large collage on Navidrome 0.64.
+- CRC-protected MP3s now play gaplessly between album tracks.
+- Some CRC-protected VBR MP3s no longer stop playing before their real end.
+- MP3s carrying LAME gapless info no longer lose a few milliseconds of audio at the end.
+- Ogg Vorbis and Opus radio stations no longer cut out and reconnect at each song change.
 
 ### Removed
 
