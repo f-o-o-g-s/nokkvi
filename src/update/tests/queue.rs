@@ -1065,11 +1065,19 @@ fn probe_per_event(
 
 /// Manual perf probe for the huge-queue drag freeze: the per-event cost of
 /// `handle_queue` on a 20,000-row queue for the per-cursor-move drag message,
-/// a keyboard step, and the hover fast path as the control. Asserts nothing
-/// about time (wall-clock thresholds stay out of CI); the owner runs release
-/// builds, so the `--release` figure is the one to quote.
+/// a keyboard step, and the hover fast path as the control, plus one
+/// multi-selection drop. Asserts nothing about time (wall-clock thresholds
+/// stay out of CI); the owner runs release builds, so the optimized figure is
+/// the one to quote.
 ///
-/// `cargo test -p nokkvi --release queue_perf_probe -- --ignored --nocapture`
+/// Debug: `cargo test -p nokkvi queue_perf_probe -- --ignored --nocapture`
+///
+/// Optimized: plain `--release` can't build the test suite (iced's null
+/// renderer, which the nav_bar layout tests use, exists only with debug
+/// assertions), so use a release profile with them on, in its own target dir:
+/// `cargo test -p nokkvi --config 'profile.probe.inherits="release"'
+/// --config 'profile.probe.debug-assertions=true' --profile probe
+/// queue_perf_probe -- --ignored --nocapture`
 #[tokio::test]
 #[ignore = "manual perf probe"]
 async fn queue_perf_probe() {
