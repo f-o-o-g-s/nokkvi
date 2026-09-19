@@ -1524,9 +1524,31 @@ impl CustomAudioEngine {
         self.playing
     }
 
-    /// Get position (milliseconds)
-    /// Reads from renderer if playing, otherwise returns stored position
+    /// Position (ms) of the track the QUEUE names — what the UI, MPRIS and
+    /// queue push report alongside the queue's current song. While a manual
+    /// skip blends in, that is the skip target, not the still-audible
+    /// outgoing: the blend's elapsed time (the value finalize hands the
+    /// promoted track, so nothing jumps). Pairing the outgoing's clock with
+    /// the new title put seeks (slider, MPRIS relative seek), scrobble
+    /// timing, lyrics sync and the 80% prep trigger on the wrong track's
+    /// timeline.
+    ///
+    /// Engine-internal decisions about the AUDIBLE stream (the skip fire's
+    /// remaining-audio clamp, end-of-track detection) read
+    /// [`Self::stream_position`] instead.
     pub fn position(&self) -> u64 {
+        if self.crossfade.skip_fade
+            && let Some(played_ms) = self.renderer.lock().crossfade_played_ms()
+        {
+            return played_ms;
+        }
+        self.stream_position()
+    }
+
+    /// Position (ms) of the audible primary stream: the renderer's clock
+    /// while playing, else the stored position. Mid skip this is still the
+    /// outgoing's.
+    fn stream_position(&self) -> u64 {
         if self.playing && !self.paused {
             let renderer = self.renderer.lock();
             renderer.position()
@@ -1535,8 +1557,15 @@ impl CustomAudioEngine {
         }
     }
 
-    /// Get duration (milliseconds)
+    /// Duration (ms) of the track the queue names, or 0 when the engine does
+    /// not know it. While a manual skip blends in, the target is the queue's
+    /// track and its length is reported as 0 until the promotion, so callers
+    /// fall back to the song's metadata length (the UI tick does) instead of
+    /// showing the outgoing's. See [`Self::position`].
     pub fn duration(&self) -> u64 {
+        if self.crossfade.skip_fade {
+            return 0;
+        }
         self.duration
     }
 
@@ -3171,7 +3200,9 @@ impl CustomAudioEngine {
             u64::from(self.fade.fade_skip_ms),
             self.duration,
             decoder.duration(),
-            self.position(),
+            // The OUTGOING's audible position (the public `position()` is
+            // the target's clock by now).
+            self.stream_position(),
             u64::from(self.crossfade.min_track_secs) * 1000,
         ) else {
             debug!("🔀 [SKIP FADE] Blocked by duration gates — falling back");
@@ -3920,7 +3951,7 @@ impl CustomAudioEngine {
         let duration = decoder.duration();
         drop(decoder);
 
-        let position = self.position();
+        let position = self.stream_position();
 
         debug!(
             " [RENDERER FINISHED] EOF={}, position={}ms, duration={}ms, playing={}, paused={}",
@@ -6141,6 +6172,67 @@ mod tests {
             .await;
         assert!(armed.renderer.lock().is_crossfade_armed(), "precondition");
         assert_eq!(armed.seek(30_000).await, SeekOutcome::Settled, "armed only");
+    }
+
+    /// During the skip blend the UI clock is the incoming's: the blend's
+    /// elapsed time (the same value finalize hands the promoted track, so
+    /// nothing jumps at finalize) and duration 0 until the promotion.
+    #[tokio::test]
+    async fn skip_clock_reads_the_incoming_during_a_skip_blend() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.renderer.lock().reset_position_with_offset(100_000);
+        let _keepalive = force_live_skip_fade(&mut engine, "http://example.test/target");
+
+        assert!(
+            engine.position() < 1_000,
+            "the blend just started, so the target is near 0:00, got {}",
+            engine.position()
+        );
+        assert_eq!(engine.duration(), 0, "the UI falls back to the song length");
+
+        // The render thread finalizes its half first; until the engine's
+        // finalize takes over, the clock must hold the promoted position,
+        // not the outgoing stream's offset.
+        engine.renderer.lock().finalize_crossfade();
+        assert!(
+            engine.position() < 1_000,
+            "torn window: expected the promoted position, got {}",
+            engine.position()
+        );
+
+        engine.finalize_crossfade_engine().await;
+
+        assert_eq!(
+            engine.duration(),
+            180_000,
+            "the promoted track's own length"
+        );
+        assert!(engine.position() < 1_000, "no jump at finalize");
+    }
+
+    /// Guard: the engine's own skip fire still measures the OUTGOING's
+    /// remaining audio (a fade must never outlive the outgoing), not the
+    /// target clock the UI reads. Nothing left of the outgoing refuses the
+    /// blend.
+    #[tokio::test]
+    async fn skip_fire_measures_the_outgoings_remaining_audio() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.renderer.lock().reset_position_with_offset(240_000);
+        engine.plan_skip_fade().await;
+        let plan_generation = engine.source_generation();
+
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                "http://example.test/target".to_string(),
+                None,
+                plan_generation,
+            )
+            .await;
+
+        assert_eq!(outcome, SkipFadeOutcome::Blocked, "no outgoing audio left");
     }
 
     /// Guard: a seek the engine refuses (unknown duration) leaves a live AUTO

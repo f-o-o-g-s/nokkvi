@@ -200,6 +200,19 @@ fn crossfade_progress(elapsed_ms: u64, paused_accum_ms: u64, duration_ms: u64) -
     }
 }
 
+/// How long a crossfade's incoming stream has actually played (ms): wall-clock
+/// time since `started_at` minus the paused span, including one still in
+/// progress (`paused_at`). The promoted track's position at finalize, and the
+/// skip target's clock mid-blend ([`AudioRenderer::crossfade_played_ms`]).
+fn fade_played_ms(
+    started_at: std::time::Instant,
+    paused_accum: std::time::Duration,
+    paused_at: Option<std::time::Instant>,
+) -> u64 {
+    let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
+    started_at.elapsed().saturating_sub(live_paused).as_millis() as u64
+}
+
 /// Rebuffer resume target, in MILLISECONDS of audio: how much decoded audio to
 /// refill (output paused) before resuming after a mid-track underrun. Mirrors
 /// mpv `cache-pause-wait` / MPD `buffer_before_play` (both ~1s). Scaled by the
@@ -403,10 +416,11 @@ pub struct AudioRenderer {
     /// fall back to a gapless transition.
     crossfade_min_track_ms: u64,
     /// Elapsed crossfade time (ms) staged after `finalize_crossfade` so the
-    /// engine can read it on the next render tick as a position offset.
-    /// Lives outside `CrossfadeState` because it survives the Active→Idle
-    /// transition by exactly one tick.
-    crossfade_finalized_elapsed_ms: u64,
+    /// engine can read it on the next render tick as a position offset
+    /// (`None` when nothing is staged — 0 ms is a real value). Lives outside
+    /// `CrossfadeState` because it survives the Active→Idle transition by
+    /// exactly one tick; `crossfade_played_ms` reports it in that gap.
+    crossfade_finalized_elapsed_ms: Option<u64>,
     /// M8 negative "Gap / Overlap Trim": how much EARLIER (ms) the Armed
     /// position trigger fires than `track_dur − fade` — the blend starts
     /// early and `try_finalize_crossfade` discards the outgoing's last
@@ -702,7 +716,7 @@ impl AudioRenderer {
             crossfade_min_track_ms: u64::from(
                 crate::types::player_settings::CROSSFADE_MIN_TRACK_DEFAULT_SECS,
             ) * 1000,
-            crossfade_finalized_elapsed_ms: 0,
+            crossfade_finalized_elapsed_ms: None,
             crossfade_lead_ms: 0,
             skip_silence: false,
             trailing_silence_ticks: 0,
@@ -1816,10 +1830,9 @@ impl AudioRenderer {
             ..
         } = prior
         {
-            let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
             debug!(
                 "🔀 [RENDERER] Crossfade CANCELLED: elapsed={}ms/{}ms",
-                started_at.elapsed().saturating_sub(live_paused).as_millis(),
+                fade_played_ms(started_at, paused_accum, paused_at),
                 duration_ms,
             );
             stream.silence_and_stop();
@@ -1874,6 +1887,26 @@ impl AudioRenderer {
             stream.write_samples(samples)
         } else {
             0
+        }
+    }
+
+    /// How long the crossfade's incoming stream has played (ms,
+    /// pause-corrected): live while Active, then frozen at the renderer's own
+    /// finalize until the engine's finalize takes it (the render thread
+    /// promotes its half first). `None` when neither applies. Mid skip blend
+    /// this is the skip target's position — the same value the engine hands
+    /// the promoted track, so the clock the UI reads does not jump.
+    pub(crate) fn crossfade_played_ms(&self) -> Option<u64> {
+        match &self.crossfade_state {
+            CrossfadeState::Active {
+                started_at,
+                paused_accum,
+                paused_at,
+                ..
+            } => Some(fade_played_ms(*started_at, *paused_accum, *paused_at)),
+            CrossfadeState::Idle | CrossfadeState::Armed { .. } => {
+                self.crossfade_finalized_elapsed_ms
+            }
         }
     }
 
@@ -2020,8 +2053,7 @@ impl AudioRenderer {
 
         // Subtract paused time so the position offset reflects only the audio
         // the incoming track actually produced during the fade.
-        let live_paused = paused_at.map_or(paused_accum, |t| paused_accum + t.elapsed());
-        let elapsed_ms = started_at.elapsed().saturating_sub(live_paused).as_millis() as u64;
+        let elapsed_ms = fade_played_ms(started_at, paused_accum, paused_at);
 
         debug!(
             "🔀 [RENDERER] Crossfade FINALIZED: elapsed={}ms/{}ms",
@@ -2082,13 +2114,13 @@ impl AudioRenderer {
         self.pending_replay_gain = self.current_replay_gain.clone();
 
         // Store for engine to read as position offset
-        self.crossfade_finalized_elapsed_ms = elapsed_ms;
+        self.crossfade_finalized_elapsed_ms = Some(elapsed_ms);
         elapsed_ms
     }
 
     /// Consume the stored crossfade elapsed time.
     pub fn take_crossfade_elapsed_ms(&mut self) -> u64 {
-        std::mem::take(&mut self.crossfade_finalized_elapsed_ms)
+        self.crossfade_finalized_elapsed_ms.take().unwrap_or(0)
     }
 
     /// Check if crossfade is armed.
