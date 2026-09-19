@@ -152,6 +152,15 @@ Building or extending a feature (new view, setting, hotkey, menu entry, playback
 
 Procedures live as skills in `.claude/skills/`: `/commit`, `/unreleased`, `/sync-rules`, and `/package` (user-invoked only; it also holds the canonical changelog style rubric in § 1).
 
+## Branching
+
+Where work happens depends on its kind. This section overrides Claude Code's default of creating a branch before committing on the default branch.
+
+- **Bug fixes, docs, rules, tests and small chores: work directly on `main`** in the main checkout. It keeps the warm `target/` and lets the owner `cargo run` the fix straight away. Confirm `git branch --show-current` prints `main` right before each commit, because the owner sometimes runs parallel sessions in this tree. Stage your own files by name (`/commit` does this) and leave every other modified file as you found it.
+- **New features and large multi-commit refactors: one local feature branch in one git worktree** (`git worktree add ~/nokkvi-<slug> -b feat/<slug> main`). Every commit lands there with the four gates green, and the branch stays local. At wrap-up, fast-forward `main` to it, then remove the worktree and delete the branch.
+- **Push `main` once the owner has checked the change in the running app.** Commit, hand over what to look at, and push when they confirm.
+- A task counts as a bug fix when it restores intended behavior and adds no new user-facing surface. When the kind is unclear, ask once at the start.
+
 ## Commit conventions
 
 Conventional Commits: `type(scope): description` (lowercase, imperative, no trailing period). Types: `feat`, `fix`, `refactor`, `perf`, `style`, `chore`, `docs`, `test`, `ci`. Common scopes: `audio`, `queue`, `ui`, `api`, `settings`, `theme`, `visualizer`, `playback`, `scrobble`, `widgets`, `views`, `hotkeys`, `mpris`, `artwork`, `deps`. Breaking changes use `type(scope)!: ...`. The `.githooks/pre-commit` script auto-updates the Navidrome/PipeWire version pins in `README.md`.
