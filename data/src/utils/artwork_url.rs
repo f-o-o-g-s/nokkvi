@@ -35,8 +35,15 @@ fn build_cover_art_url(
     build_cover_art_url_with_timestamp(art_id, server_url, subsonic_credential, size, None)
 }
 
-/// Build cover art URL with optional updated_at timestamp for cache invalidation
-/// When artwork is updated on the server, the timestamp changes and triggers re-download
+/// Build a `getCoverArt` URL carrying the cover's version, which is either
+/// Navidrome's image hash (0.64+, see `types::image_info::artwork_version`)
+/// or an `updated_at` timestamp:
+/// - a valid 16-hex hash rides the id as `<id>_<hash>` (the server's own
+///   form; it ignores a stale one and serves the current image) and the
+///   `_u=` parameter is dropped. Disc art (`dc-`) takes no hash, and an id
+///   that already carries a `_` suffix is never suffixed twice;
+/// - anything else rides `_u=`, exactly as before 0.64. The server never
+///   reads `_u=`; it only makes a changed version a different URL.
 pub fn build_cover_art_url_with_timestamp(
     art_id: &str,
     server_url: &str,
@@ -66,15 +73,24 @@ pub fn build_cover_art_url_with_timestamp(
     // Build size parameter string conditionally
     let size_param = size.map(|s| format!("&size={s}")).unwrap_or_default();
 
-    if !subsonic_credential.is_empty() {
-        // Include updated_at as a cache-buster: a changed cover gets a new URL,
-        // which the version-aware prefetch dedup keys on (nothing is cached on disk)
-        let cache_buster = updated_at.unwrap_or("");
-        format!(
-            "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}{size_param}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
-        )
-    } else {
-        String::new()
+    if subsonic_credential.is_empty() {
+        return String::new();
+    }
+    let image_hash = updated_at.filter(|v| {
+        crate::types::image_info::is_valid_image_hash(v)
+            && !final_id.contains('_')
+            && !final_id.starts_with("dc-")
+    });
+    match image_hash {
+        Some(hash) => format!(
+            "{server_url}/rest/getCoverArt?id={final_id}_{hash}&{subsonic_credential}{size_param}&square=true&f=json&v=1.8.0&c=nokkvi"
+        ),
+        None => {
+            let cache_buster = updated_at.unwrap_or("");
+            format!(
+                "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}{size_param}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
+            )
+        }
     }
 }
 
@@ -128,6 +144,79 @@ pub fn build_stream_url(song_id: &str, server_url: &str, subsonic_credential: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const HASH: &str = "0123456789abcdef";
+
+    /// A valid image hash (Navidrome 0.64+) rides the id and replaces `_u=`.
+    #[test]
+    fn image_hash_rides_the_id_and_drops_the_cache_buster() {
+        assert_eq!(
+            build_cover_art_url_with_timestamp("a1", "http://srv", "u=x", Some(80), Some(HASH)),
+            "http://srv/rest/getCoverArt?id=al-a1_0123456789abcdef&u=x&size=80&square=true&f=json&v=1.8.0&c=nokkvi"
+        );
+        assert_eq!(
+            build_cover_art_url_with_timestamp("ar-9", "http://srv", "u=x", None, Some(HASH)),
+            "http://srv/rest/getCoverArt?id=ar-9_0123456789abcdef&u=x&square=true&f=json&v=1.8.0&c=nokkvi"
+        );
+    }
+
+    /// An `updated_at` (or no version) keeps today's URL byte for byte.
+    #[test]
+    fn timestamp_version_keeps_todays_url() {
+        assert_eq!(
+            build_cover_art_url_with_timestamp(
+                "a1",
+                "http://srv",
+                "u=x",
+                Some(80),
+                Some("2026-05-30T00:00:00Z")
+            ),
+            "http://srv/rest/getCoverArt?id=al-a1&u=x&size=80&square=true&f=json&v=1.8.0&c=nokkvi&_u=2026-05-30T00:00:00Z"
+        );
+        assert_eq!(
+            build_cover_art_url_with_timestamp("a1", "http://srv", "u=x", Some(80), None),
+            "http://srv/rest/getCoverArt?id=al-a1&u=x&size=80&square=true&f=json&v=1.8.0&c=nokkvi&_u="
+        );
+    }
+
+    /// Never double-suffix an id that already carries `_…` (a Subsonic
+    /// `coverArt` token), never hash disc art, never touch an http URL, and
+    /// never take a malformed hash.
+    #[test]
+    fn image_hash_is_appended_only_where_it_belongs() {
+        let url = build_cover_art_url_with_timestamp(
+            "ra-1_18f0c3aa",
+            "http://srv",
+            "u=x",
+            Some(80),
+            Some(HASH),
+        );
+        assert!(url.contains("id=ra-1_18f0c3aa&"), "{url}");
+        let url = build_cover_art_url_with_timestamp(
+            "dc-a1:2",
+            "http://srv",
+            "u=x",
+            Some(80),
+            Some(HASH),
+        );
+        assert!(url.contains("id=dc-a1:2&"), "{url}");
+        let http = "https://img.example/a.jpg";
+        assert_eq!(
+            build_cover_art_url_with_timestamp(http, "http://srv", "u=x", Some(80), Some(HASH)),
+            http
+        );
+        let url = build_cover_art_url_with_timestamp(
+            "a1",
+            "http://srv",
+            "u=x",
+            Some(80),
+            Some("0123456789ABCDEF"),
+        );
+        assert!(
+            url.contains("id=al-a1&") && url.ends_with("&_u=0123456789ABCDEF"),
+            "{url}"
+        );
+    }
 
     #[test]
     fn test_empty_id_returns_empty() {

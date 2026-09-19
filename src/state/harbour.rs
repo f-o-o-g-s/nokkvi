@@ -142,9 +142,14 @@ impl HarbourState {
         {
             // An empty URL is art the server marked absent: nothing to warm.
             if !album.artwork_url.is_empty() && seen.insert(album.id.clone()) {
+                // Same entry shape as the Albums view's prefetch
+                // (`album_prefetch_entry`): the version matches the URL's.
                 out.push((
                     album.id.clone(),
-                    album.updated_at.clone(),
+                    nokkvi_data::types::image_info::artwork_version(
+                        &album.image,
+                        album.updated_at.as_deref(),
+                    ),
                     album.artwork_url.clone(),
                 ));
             }

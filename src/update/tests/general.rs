@@ -544,6 +544,7 @@ fn picker_nav_key_passes_through_when_picker_open() {
         sync: false,
         owner_id: String::new(),
         searchable_lower: String::new(),
+        image: Default::default(),
     };
     app.default_playlist_picker =
         Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[playlist]));

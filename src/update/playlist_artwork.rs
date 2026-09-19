@@ -9,7 +9,10 @@
 //! flows. Mirrors `update/radio_artwork.rs`.
 
 use iced::{Task, widget::image};
-use nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE;
+use nokkvi_data::{
+    types::image_info::{ImageInfo, artwork_version},
+    utils::artwork_url::THUMBNAIL_SIZE,
+};
 
 use crate::{
     Nokkvi,
@@ -22,11 +25,18 @@ fn playlist_art_id(playlist_id: &str) -> String {
     format!("pl-{playlist_id}")
 }
 
+/// A playlist cover's live version: the image hash on Navidrome 0.64+, else
+/// its `updated_at` (always present on a playlist).
+fn live_version(image: &ImageInfo, updated_at: &str) -> String {
+    artwork_version(image, Some(updated_at)).unwrap_or_else(|| updated_at.to_owned())
+}
+
 impl Nokkvi {
     /// Decide which viewport playlists need a custom-cover mini fetch.
     /// Pure over state (no task construction) so the gating is unit-testable
-    /// without an `app_service`. Returns `(playlist_id, updated_at)` pairs —
-    /// the `updated_at` doubles as the fetch's `_u=` cache-buster and the
+    /// without an `app_service`. Returns `(playlist_id, version)` pairs —
+    /// the version (image hash on 0.64+, else `updated_at`) doubles as the
+    /// fetch URL's version (hash on the id, or `_u=`) and the
     /// version recorded on completion.
     ///
     /// Gates, in order: `uploaded_image` set, no fetch already in flight
@@ -63,7 +73,9 @@ impl Nokkvi {
             {
                 continue;
             }
-            let version = Some(playlist.updated_at.clone());
+            // The image hash on Navidrome 0.64+ (it changes only with the
+            // image), else `updated_at` as before.
+            let version = artwork_version(&playlist.image, Some(&playlist.updated_at));
             if !crate::update::components::should_refetch(
                 &cached,
                 &self.artwork.playlist_custom_art_versions,
@@ -110,10 +122,10 @@ impl Nokkvi {
         self.fetch_playlist_custom_mini_task(playlist_id, cache_buster)
     }
 
-    /// Single 80px custom-cover fetch for one playlist. `cache_buster` rides
-    /// the `_u=` query param (the playlist's `updated_at`, or a fresh token
-    /// right after an upload) so intermediary HTTP caches can't serve a stale
-    /// image.
+    /// Single 80px custom-cover fetch for one playlist. `cache_buster` is the
+    /// cover's version: the image hash on Navidrome 0.64+ (rides the id), the
+    /// playlist's `updated_at`, or a fresh token right after an upload (both
+    /// ride `_u=`), so intermediary HTTP caches can't serve a stale image.
     pub(crate) fn fetch_playlist_custom_mini_task(
         &self,
         playlist_id: String,
@@ -205,16 +217,26 @@ impl Nokkvi {
                     .as_ref()
                     .filter(|p| p.id == playlist_id)
             })
-            .map(|p| (p.uploaded_image.is_some(), p.updated_at.clone()))
+            .map(|p| {
+                (
+                    p.uploaded_image.is_some(),
+                    live_version(&p.image, &p.updated_at),
+                )
+            })
             .or_else(|| {
                 self.harbour
                     .search_results
                     .as_ref()
                     .and_then(|r| r.playlists.iter().find(|p| p.id == playlist_id))
-                    .map(|p| (p.custom_image().is_some(), p.updated_at.clone()))
+                    .map(|p| {
+                        (
+                            p.custom_image().is_some(),
+                            live_version(&p.image, &p.updated_at),
+                        )
+                    })
             });
         let cache_buster = match live {
-            Some((has_custom_cover, updated_at)) if has_custom_cover => updated_at,
+            Some((has_custom_cover, version)) if has_custom_cover => version,
             _ => return Task::none(),
         };
         // Serve from cache for instant back-navigation (the Loaded handler
@@ -237,14 +259,14 @@ impl Nokkvi {
     /// Whether the cached large custom cover for `playlist_id` is still
     /// current: cached AND the recorded warming version (written by the mini
     /// completion — the mini always accompanies the large through the same
-    /// viewport pass) still matches the live `updated_at`. A cover replaced
-    /// in the web UI bumps `updated_at`, so the stale cached large refetches
-    /// instead of being served forever. Pure over state so the gate is
-    /// unit-testable.
+    /// viewport pass) still matches the live version (the image hash on
+    /// Navidrome 0.64+, else `updated_at`). A cover replaced in the web UI
+    /// changes that version, so the stale cached large refetches instead of
+    /// being served forever. Pure over state so the gate is unit-testable.
     pub(crate) fn playlist_custom_large_is_current(
         &self,
         playlist_id: &str,
-        live_updated_at: &str,
+        live_version: &str,
     ) -> bool {
         self.artwork
             .playlist_custom_large_art
@@ -253,14 +275,14 @@ impl Nokkvi {
                 .artwork
                 .playlist_custom_art_versions
                 .get(playlist_id)
-                .is_some_and(|v| v.as_deref() == Some(live_updated_at))
+                .is_some_and(|v| v.as_deref() == Some(live_version))
     }
 
     /// Resolution-sized custom-cover fetch for one playlist. `cache_buster`
-    /// rides the `_u=` param — the playlist's `updated_at` on viewport-driven
-    /// loads, or a fresh token right after an upload (same convention as the
-    /// mini fetch, so neither path can be served a stale intermediary-cached
-    /// image).
+    /// is the cover's version, the same convention as the mini fetch (image
+    /// hash on the id on 0.64+, else `updated_at` or a fresh post-upload
+    /// token in `_u=`), so neither path can be served a stale
+    /// intermediary-cached image.
     fn fetch_playlist_custom_large_task(
         &self,
         playlist_id: String,

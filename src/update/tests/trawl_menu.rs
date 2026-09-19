@@ -106,6 +106,7 @@ fn playlists_menu_add_to_mix_seeds_the_crate() {
         sync: false,
         owner_id: String::new(),
         searchable_lower: "night drive".to_string(),
+        image: Default::default(),
     };
     app.library.playlists.append_page(vec![playlist], 1);
 

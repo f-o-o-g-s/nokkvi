@@ -86,11 +86,11 @@ impl AlbumUIViewData {
     /// Convert an `Album` model into UI view data, building the artwork URL.
     pub fn from_album(album: &Album, server_url: &str, subsonic_credential: &str) -> Self {
         let art_id = album.cover_art.as_deref().unwrap_or(&album.id);
-        // Carry the album's `updated_at` as a cache-buster so that when the
-        // server-side cover changes, the grid thumbnail URL changes too — the
-        // version-aware prefetch dedup then treats it as a genuine miss and
-        // re-fetches (N17). Without the timestamp the passive mini path never
-        // re-fetched a changed cover for the rest of the session.
+        // Carry the album's artwork version (its image hash on Navidrome
+        // 0.64+, else `updated_at`) so that when the server-side cover
+        // changes, the grid thumbnail URL changes too — the version-aware
+        // prefetch dedup then treats it as a genuine miss and re-fetches
+        // (N17).
         //
         // Art the server marked absent (Navidrome 0.64+) gets no URL at all:
         // every prefetch path skips an empty URL, so nothing requests the
@@ -103,7 +103,11 @@ impl AlbumUIViewData {
                 server_url,
                 subsonic_credential,
                 Some(crate::utils::artwork_url::THUMBNAIL_SIZE),
-                album.updated_at.as_deref(),
+                crate::types::image_info::artwork_version(
+                    &album.image,
+                    album.updated_at.as_deref(),
+                )
+                .as_deref(),
             )
         };
         // Build genres display string: "Black Metal • Heavy Metal • Rock"

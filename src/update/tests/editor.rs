@@ -1522,6 +1522,7 @@ fn playlist_entry(
         sync: false,
         owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
+        image: Default::default(),
     }
 }
 

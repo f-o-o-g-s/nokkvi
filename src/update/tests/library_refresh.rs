@@ -113,6 +113,7 @@ fn seed_all(app: &mut crate::Nokkvi) {
             sync: false,
             owner_id: String::new(),
             searchable_lower: String::new(),
+            image: Default::default(),
         }]);
     seed_genres(app, vec![make_genre("g0", "Genre 0")]);
 }

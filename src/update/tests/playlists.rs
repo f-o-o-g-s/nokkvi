@@ -40,6 +40,7 @@ fn playlist_row(
         sync: false,
         owner_id: "user-9".into(),
         searchable_lower: name.to_lowercase(),
+        image: Default::default(),
     }
 }
 

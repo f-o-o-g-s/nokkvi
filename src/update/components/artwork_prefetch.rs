@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use iced::Task;
 use nokkvi_data::{
     backend::albums::{AlbumUIViewData, AlbumsService},
+    types::image_info::artwork_version,
     utils::artwork_url::THUMBNAIL_SIZE,
 };
 
@@ -20,6 +21,10 @@ use crate::{
 };
 
 /// Version-aware prefetch dedup gate (N17) with a negative-cache short-circuit.
+///
+/// The version is opaque: the album-coherent surfaces pass
+/// `artwork_version` (the image hash on Navidrome 0.64+, else `updated_at`);
+/// "`updated_at`" below stands for whichever it is.
 ///
 /// Returns `true` when an album's 80px thumbnail should be (re-)fetched:
 /// - the slot is warmed but the recorded `updated_at` differs from the one the
@@ -70,8 +75,8 @@ pub(crate) fn should_refetch(
 /// sites read as "we deliberately drop the per-song timestamp here".
 ///
 /// N17 (server cover-change invalidation) is retained on the Albums view and
-/// the Artists/Genres expansion paths, which pass the album-coherent
-/// `album.updated_at` directly and do not route through this helper.
+/// the Artists/Genres expansion paths, which pass the album's artwork version
+/// ([`album_prefetch_entry`]) and do not route through this helper.
 pub(crate) fn passive_artwork_version(_per_song_updated_at: &Option<String>) -> Option<String> {
     None
 }
@@ -86,7 +91,8 @@ pub(crate) fn passive_artwork_version(_per_song_updated_at: &Option<String>) -> 
 /// server cover re-fetches even when the bare id is already cached (N17).
 ///
 /// The album-coherent surfaces (Albums view, Artists/Genres expansion) pass the
-/// album's `updated_at` here, keeping live cover invalidation. The PASSIVE
+/// album's artwork version here ([`album_prefetch_entry`]: the image hash on
+/// Navidrome 0.64+, else `updated_at`), keeping live cover invalidation. The PASSIVE
 /// surfaces (queue, playlist editor) only carry a per-song `updated_at`, which
 /// would oscillate this album_id-keyed gate; they pass
 /// [`passive_artwork_version`] (a constant `None`) instead, so they use id-only
@@ -174,12 +180,14 @@ where
         .collect()
 }
 
-/// The Albums view's `(id, version, url)` prefetch entry for one row. One
-/// definition for every Albums-view prefetch site.
+/// The `(id, version, url)` prefetch entry for one album row, shared by the
+/// Albums view, expansion children and Harbour's album shelves. The version
+/// is the album's image hash when the server sends one, else `updated_at`
+/// (`artwork_version`), matching the version in its `artwork_url`.
 pub(crate) fn album_prefetch_entry(album: &AlbumUIViewData) -> (String, Option<String>, String) {
     (
         album.id.clone(),
-        album.updated_at.clone(),
+        artwork_version(&album.image, album.updated_at.as_deref()),
         album.artwork_url.clone(),
     )
 }
@@ -402,13 +410,13 @@ where
 /// `ArtworkMessage::Loaded` so the centralized `handle_artwork_loaded`
 /// arm puts the handle into `album_art` exactly the way Albums view does.
 ///
-/// Callers pass `(album.id, album.updated_at, album.artwork_url)` triples —
+/// Callers pass [`album_prefetch_entry`] triples `(id, version, artwork_url)` —
 /// the URL is pre-built by `AlbumUIViewData::from_album` from `album.cover_art`
 /// (with `album.id` as fallback). For albums whose artwork lives on a
 /// media file (`cover_art = "mf-…"`) this matters — passing only the
 /// album id would build the wrong URL and the fetch would return empty. The
-/// `updated_at` is forwarded into the `Loaded` message so the recorded
-/// `album_art_versions` entry matches the URL's cache-buster (N17).
+/// version is forwarded into the `Loaded` message so the recorded
+/// `album_art_versions` entry matches the URL's version (N17).
 ///
 /// Each fetch goes through `fetch_artwork_by_url_with_retry` (3 attempts,
 /// 100 ms / 200 ms backoff). Without retries, large expansions (e.g. a
@@ -459,7 +467,7 @@ pub(crate) fn expansion_album_artwork_tasks(
 }
 
 /// Project newly-loaded expansion children into the
-/// `(id, updated_at, artwork_url)` triples [`expansion_album_artwork_tasks`]
+/// `(id, version, artwork_url)` triples [`expansion_album_artwork_tasks`]
 /// consumes (the doc comment above documents the triple contract). Shared by
 /// the Artists and Genres handler prologues, which capture the triples from
 /// the `AlbumsLoaded` message before the page update consumes it.
@@ -469,7 +477,7 @@ pub(crate) fn expansion_child_album_ids(
     albums
         .iter()
         .filter(|a| !a.artwork_url.is_empty())
-        .map(|a| (a.id.clone(), a.updated_at.clone(), a.artwork_url.clone()))
+        .map(album_prefetch_entry)
         .collect()
 }
 

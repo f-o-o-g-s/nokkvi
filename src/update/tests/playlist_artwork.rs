@@ -34,6 +34,7 @@ fn make_playlist(id: &str, name: &str, uploaded: bool) -> PlaylistUIViewData {
         sync: false,
         owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
+        image: Default::default(),
     }
 }
 
@@ -604,4 +605,39 @@ fn playlist_custom_reset_applied_clears_version_records() {
 
     assert!(!app.artwork.playlist_custom_art_versions.contains_key("p1"));
     assert!(!app.artwork.playlist_custom_art_failed.contains_key("p1"));
+}
+
+/// On Navidrome 0.64 a custom cover's version is its image hash: a new
+/// `updated_at` with the same hash (a rename, a track edit) keeps the cached
+/// cover current; a new hash doesn't.
+#[test]
+fn custom_cover_versions_by_image_hash() {
+    let mut app = playlist_app(true);
+    app.library.playlists.set_from_vec(vec![{
+        let mut p = make_playlist("p1", "Road Trip", true);
+        p.image.image_hash = Some("0123456789abcdef".into());
+        p
+    }]);
+    assert_eq!(
+        app.playlist_custom_minis_to_fetch(),
+        vec![("p1".to_string(), Some("0123456789abcdef".to_string()))]
+    );
+
+    seed_custom_art(&mut app);
+    app.artwork
+        .playlist_custom_art_versions
+        .insert("p1".into(), Some("0123456789abcdef".into()));
+    assert!(app.playlist_custom_minis_to_fetch().is_empty());
+    assert!(app.playlist_custom_large_is_current("p1", "0123456789abcdef"));
+
+    app.library.playlists.set_from_vec(vec![{
+        let mut p = make_playlist("p1", "Road Trip", true);
+        p.updated_at = "2026-02-02T00:00:00Z".into();
+        p.image.image_hash = Some("0123456789abcdef".into());
+        p
+    }]);
+    assert!(
+        app.playlist_custom_minis_to_fetch().is_empty(),
+        "same hash, new updated_at: still current"
+    );
 }

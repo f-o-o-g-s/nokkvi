@@ -357,64 +357,77 @@ impl Nokkvi {
         )))
     }
 
-    /// Load mini artist artwork from disk cache for all prefetch-visible slots.
-    ///
-    /// Dispatch async fetches for any uncached artist mini artwork in the
-    /// current viewport. Returns a batch of tasks producing
-    /// `ArtworkMessage::Loaded`.
-    ///
-    /// Shared by: `handle_artists_loaded`, `handle_artists` (slot list change),
-    /// and `prefetch_viewport_artwork` (window resize / view switch).
-    /// The artist ids whose `ar-{id}` mini the Artists viewport prefetch
-    /// would fetch: uncached, not known-failed, and not marked absent by the
-    /// server (Navidrome 0.64+).
-    pub(crate) fn artist_minis_to_fetch(&self) -> Vec<String> {
+    /// The `(artist_id, version)` minis the Artists viewport prefetch would
+    /// fetch. The version is the artist's image hash (Navidrome 0.64+; artists
+    /// have no `updated_at`), so a changed artist image refetches through the
+    /// shared [`should_refetch`](crate::update::components::should_refetch)
+    /// gate; on an older server it is `None`, which gates exactly like the
+    /// old id-only `contains` + failed-at-`None` check. Art the server marked
+    /// absent is never planned.
+    pub(crate) fn artist_minis_to_fetch(&self) -> Vec<(String, Option<String>)> {
         let total = self.library.artists.len();
+        let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
         self.artists_page
             .common
             .slot_list
             .prefetch_indices(total)
             .filter_map(|idx| self.library.artists.get(idx))
-            .filter(|artist| {
-                !artist.image.image_absent
-                    && !self.artwork.album_art.contains(&artist.id)
-                    && !self.artwork.art_failed_at(&artist.id, &None)
+            .filter(|artist| !artist.image.image_absent)
+            .map(|artist| {
+                (
+                    artist.id.clone(),
+                    nokkvi_data::types::image_info::artwork_version(&artist.image, None),
+                )
             })
-            .map(|artist| artist.id.clone())
+            .filter(|(id, version)| {
+                crate::update::components::should_refetch(
+                    &cached,
+                    &self.artwork.album_art_versions,
+                    &self.artwork.failed_art,
+                    id,
+                    version,
+                )
+            })
             .collect()
     }
 
+    /// Dispatch async fetches for any uncached artist mini artwork in the
+    /// current viewport ([`Self::artist_minis_to_fetch`]). Returns a batch of
+    /// tasks producing `ArtworkMessage::Loaded`.
+    ///
+    /// Shared by: `handle_artists_loaded`, `handle_artists` (slot list change),
+    /// and `prefetch_viewport_artwork` (window resize / view switch).
     pub(crate) fn prefetch_artist_mini_artwork_tasks(&self) -> Task<Message> {
-        let total = self.library.artists.len();
-        if total == 0 {
-            return Task::none();
-        }
         let albums_vm = match self.app_service.as_ref() {
             Some(svc) => svc.albums().clone(),
             None => return Task::none(),
         };
 
-        let mut tasks = Vec::new();
-        for id in self.artist_minis_to_fetch() {
-            {
+        let tasks = self
+            .artist_minis_to_fetch()
+            .into_iter()
+            .map(|(id, version)| {
                 let art_id = format!("ar-{id}");
                 let vm = albums_vm.clone();
-                tasks.push(Task::perform(
+                Task::perform(
                     async move {
                         let art = crate::app_message::MiniArt::from_fetch(
-                            vm.fetch_album_artwork(&art_id, Some(THUMBNAIL_SIZE), None)
-                                .await,
+                            vm.fetch_album_artwork(
+                                &art_id,
+                                Some(THUMBNAIL_SIZE),
+                                version.as_deref(),
+                            )
+                            .await,
                         );
-                        (id, art)
+                        (id, version, art)
                     },
-                    |(id, art)| {
-                        // Artist art has no album `updated_at`; the id-only
-                        // contains() gate above already dedups, so record None.
-                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(id, None, art))
+                    |(id, version, art)| {
+                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(
+                            id, version, art,
+                        ))
                     },
-                ));
-            }
-        }
+                )
+            });
         Task::batch(tasks)
     }
 }

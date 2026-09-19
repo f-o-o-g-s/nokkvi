@@ -43,6 +43,7 @@ fn smart_row(
         sync: false,
         owner_id: owner_id.into(),
         searchable_lower: name.to_lowercase(),
+        image: Default::default(),
     }
 }
 

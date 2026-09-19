@@ -69,11 +69,9 @@ impl ImageInfo {
     /// The image hash when it is exactly 16 lowercase hex characters (the
     /// server's XXH3-64 form); anything else is treated as no hash.
     pub fn valid_hash(&self) -> Option<&str> {
-        self.image_hash.as_deref().filter(|h| {
-            h.len() == 16
-                && h.bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        })
+        self.image_hash
+            .as_deref()
+            .filter(|h| is_valid_image_hash(h))
     }
 
     /// The dominant color as RGB when it is a strict `#rrggbb` (either hex
@@ -86,6 +84,24 @@ impl ImageInfo {
         let channel = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
         Some([channel(0)?, channel(2)?, channel(4)?])
     }
+}
+
+/// Whether `s` is Navidrome's image-hash form: exactly 16 lowercase hex
+/// characters (XXH3-64). An RFC 3339 `updated_at` can never match.
+pub fn is_valid_image_hash(s: &str) -> bool {
+    s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The artwork version for an entity's cover: its image hash when the server
+/// sent a valid one (Navidrome 0.64+; it changes exactly when the image
+/// bytes do, and not on a play-count bump), else `updated_at` as before.
+/// Feeds both the prefetch dedup gate and the cover URL, which puts a hash
+/// on the id and a timestamp in `_u=`
+/// (`utils::artwork_url::build_cover_art_url_with_timestamp`).
+pub fn artwork_version(image: &ImageInfo, updated_at: Option<&str>) -> Option<String> {
+    image.valid_hash().or(updated_at).map(str::to_owned)
 }
 
 // Serde's `skip_serializing_if` hands the field by reference.

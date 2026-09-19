@@ -154,12 +154,18 @@ fn absent_artists_plan_no_mini_fetch() {
         artist("r3", false),
         artist("r4", true),
     ]);
-    assert_eq!(app.artist_minis_to_fetch(), vec!["r1", "r3"]);
+    let ids = |app: &crate::Nokkvi| -> Vec<String> {
+        app.artist_minis_to_fetch()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    };
+    assert_eq!(ids(&app), vec!["r1", "r3"]);
 
     app.library
         .artists
         .set_from_vec(vec![artist("r2", false), artist("r4", true)]);
-    assert_eq!(app.artist_minis_to_fetch(), vec!["r2"]);
+    assert_eq!(ids(&app), vec!["r2"]);
     assert!(app.artwork.failed_art.is_empty());
 }
 
@@ -194,4 +200,144 @@ fn harbour_absent_artists_are_not_warmed() {
     app.harbour.most_played_artists = vec![raw("h1", false), raw("h2", true)];
     app.harbour.random_artist = Some(raw("h3", true));
     assert_eq!(app.harbour.shelf_artist_ids(), vec!["h1"]);
+}
+
+// --- The image hash is the version --------------------------------------------
+
+mod version {
+    use std::collections::{HashMap, HashSet};
+
+    use nokkvi_data::types::image_info::{ImageInfo, artwork_version};
+
+    use crate::update::components::{passive_artwork_version, should_refetch};
+
+    const A: &str = "aaaaaaaaaaaaaaaa";
+    const B: &str = "bbbbbbbbbbbbbbbb";
+
+    fn hashed(h: &str) -> ImageInfo {
+        ImageInfo {
+            image_hash: Some(h.to_owned()),
+            ..ImageInfo::default()
+        }
+    }
+
+    fn warm(version: Option<String>) -> (Vec<String>, HashMap<String, Option<String>>) {
+        let ids = vec!["al-1".to_owned()];
+        let mut versions = HashMap::new();
+        versions.insert("al-1".to_owned(), version);
+        (ids, versions)
+    }
+
+    fn refetch(
+        ids: &[String],
+        versions: &HashMap<String, Option<String>>,
+        failed: &HashMap<String, Option<String>>,
+        version: &Option<String>,
+    ) -> bool {
+        let cached: HashSet<&String> = ids.iter().collect();
+        should_refetch(&cached, versions, failed, &"al-1".to_owned(), version)
+    }
+
+    #[test]
+    fn a_valid_hash_wins_over_updated_at() {
+        assert_eq!(artwork_version(&hashed(A), Some("T1")), Some(A.to_owned()));
+        assert_eq!(
+            artwork_version(&ImageInfo::default(), Some("T1")),
+            Some("T1".to_owned()),
+            "no hash (old server): updated_at as before"
+        );
+        assert_eq!(
+            artwork_version(&hashed("not-a-hash"), Some("T1")),
+            Some("T1".to_owned())
+        );
+        assert_eq!(artwork_version(&ImageInfo::default(), None), None);
+    }
+
+    /// Warmed at hash A, the row now says B: the cover changed.
+    #[test]
+    fn changed_hash_refetches() {
+        let (ids, versions) = warm(artwork_version(&hashed(A), Some("T1")));
+        let now = artwork_version(&hashed(B), Some("T1"));
+        assert!(refetch(&ids, &versions, &HashMap::new(), &now));
+    }
+
+    /// Warmed at hash A; `updated_at` moved (a play-count bump) but the hash
+    /// didn't: no refetch.
+    #[test]
+    fn same_hash_with_new_updated_at_does_not_refetch() {
+        let (ids, versions) = warm(artwork_version(&hashed(A), Some("T1")));
+        let now = artwork_version(&hashed(A), Some("T2"));
+        assert!(!refetch(&ids, &versions, &HashMap::new(), &now));
+    }
+
+    /// Warmed before the hash was known: the first hash refetches once (the
+    /// first fetch may have been the server's placeholder), then settles.
+    #[test]
+    fn first_hash_refetches_once() {
+        let (ids, mut versions) = warm(artwork_version(&ImageInfo::default(), Some("T1")));
+        let now = artwork_version(&hashed(A), Some("T1"));
+        assert!(refetch(&ids, &versions, &HashMap::new(), &now));
+        versions.insert("al-1".to_owned(), now.clone());
+        assert!(!refetch(&ids, &versions, &HashMap::new(), &now));
+    }
+
+    /// Failed at hash A; the row now says B: re-attempt.
+    #[test]
+    fn failed_at_old_hash_reattempts() {
+        let mut failed = HashMap::new();
+        failed.insert("al-1".to_owned(), artwork_version(&hashed(A), None));
+        let now = artwork_version(&hashed(B), None);
+        assert!(refetch(&[], &HashMap::new(), &failed, &now));
+        let same = artwork_version(&hashed(A), None);
+        assert!(!refetch(&[], &HashMap::new(), &failed, &same));
+    }
+
+    /// Passive (song-keyed) surfaces stay id-only: `Song` carries no image
+    /// info.
+    #[test]
+    fn passive_version_stays_none() {
+        assert_eq!(passive_artwork_version(&Some("T1".to_owned())), None);
+    }
+}
+
+/// The Albums view's prefetch entry and URL carry the hash on 0.64.
+#[test]
+fn album_rows_version_and_url_carry_the_hash() {
+    let a = album("a1", serde_json::json!({ "imageHash": "0123456789abcdef" }));
+    let (_, version, url) = album_prefetch_entry(&a);
+    assert_eq!(version.as_deref(), Some("0123456789abcdef"));
+    assert!(url.contains("id=al-a1_0123456789abcdef&"), "{url}");
+    assert!(!url.contains("_u="), "{url}");
+
+    let expansion = expansion_child_album_ids(std::slice::from_ref(&a));
+    assert_eq!(expansion[0].1.as_deref(), Some("0123456789abcdef"));
+
+    let mut app = test_app();
+    app.harbour.recently_added = vec![a];
+    assert_eq!(
+        app.harbour.shelf_album_art_triples()[0].1.as_deref(),
+        Some("0123456789abcdef")
+    );
+}
+
+/// Artists gain a version: the hash, recorded through the shared gate.
+#[test]
+fn artist_minis_version_by_hash() {
+    let mut app = test_app();
+    let mut r1 = make_artist("r1", "R1");
+    r1.image.image_hash = Some("0123456789abcdef".into());
+    app.library.artists.set_from_vec(vec![r1]);
+    assert_eq!(
+        app.artist_minis_to_fetch(),
+        vec![("r1".to_owned(), Some("0123456789abcdef".to_owned()))]
+    );
+    // Warmed at that hash: nothing more to fetch.
+    app.artwork.album_art.put(
+        "r1".into(),
+        iced::widget::image::Handle::from_bytes(Vec::<u8>::new()),
+    );
+    app.artwork
+        .album_art_versions
+        .insert("r1".into(), Some("0123456789abcdef".into()));
+    assert!(app.artist_minis_to_fetch().is_empty());
 }

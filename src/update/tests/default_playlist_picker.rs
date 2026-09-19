@@ -24,6 +24,7 @@ fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::
         sync: false,
         owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
+        image: Default::default(),
     }
 }
 
@@ -649,6 +650,7 @@ fn full_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::Playl
         sync: false,
         owner_id: String::new(),
         searchable_lower: name.to_lowercase(),
+        image: Default::default(),
     }
 }
 

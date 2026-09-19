@@ -146,12 +146,12 @@ impl Nokkvi {
     /// click bypasses every scroll-driven trigger, so the expand path has to
     /// kick the fetch itself or the artwork column would stay blank until
     /// the user scrolled away and back.
-    /// Whether the server marked this artist's art absent (Navidrome 0.64+),
-    /// by the Artists view row or Harbour's raw artist lists. Unknown ids and
-    /// older servers read as not absent.
-    pub(crate) fn artist_image_absent(&self, artist_id: &str) -> bool {
+    /// The image info (Navidrome 0.64+) of an artist row nokkvi holds: the
+    /// Artists view, else Harbour's raw artist lists. `None` for an unknown
+    /// id; the default on older servers.
+    fn artist_image(&self, artist_id: &str) -> Option<&nokkvi_data::types::image_info::ImageInfo> {
         if let Some(artist) = self.library.artists.iter().find(|a| a.id == artist_id) {
-            return artist.image.image_absent;
+            return Some(&artist.image);
         }
         self.harbour
             .most_played_artists
@@ -164,7 +164,14 @@ impl Nokkvi {
                     .flat_map(|r| r.artists.iter()),
             )
             .find(|a| a.id == artist_id)
-            .is_some_and(|a| a.image.image_absent)
+            .map(|a| &a.image)
+    }
+
+    /// Whether the server marked this artist's art absent (Navidrome 0.64+).
+    /// Unknown ids and older servers read as not absent.
+    pub(crate) fn artist_image_absent(&self, artist_id: &str) -> bool {
+        self.artist_image(artist_id)
+            .is_some_and(|image| image.image_absent)
     }
 
     pub(crate) fn handle_load_artist_large_artwork(&mut self, artist_id: String) -> Task<Message> {
@@ -216,6 +223,12 @@ impl Nokkvi {
         // observable side-effect tests rely on.
         self.artwork.loading_large_artwork = Some(artist_id.clone());
 
+        // The artist's image hash rides the `ar-` id on 0.64+ (an external
+        // poster URL passes through the builder untouched).
+        let version = self
+            .artist_image(&artist_id)
+            .and_then(|image| nokkvi_data::types::image_info::artwork_version(image, None));
+
         let Some(shell) = &self.app_service else {
             return Task::none();
         };
@@ -225,7 +238,10 @@ impl Nokkvi {
         Task::perform(
             async move {
                 let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
-                match vm.fetch_album_artwork(&art_id, Some(500), None).await {
+                match vm
+                    .fetch_album_artwork(&art_id, Some(500), version.as_deref())
+                    .await
+                {
                     Ok(bytes) if bytes.len() > 100 => (id, Some(image::Handle::from_bytes(bytes))),
                     _ => (id, None),
                 }

@@ -43,6 +43,8 @@ pub struct PlaylistUIViewData {
     /// the ownership gate (`is_owned`); NEVER compare owner names
     /// (Navidrome logins are case-insensitive).
     pub owner_id: String,
+    /// Navidrome 0.64 image info (default on older servers).
+    pub image: crate::types::image_info::ImageInfo,
     /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
     pub searchable_lower: String,
 }
@@ -76,6 +78,7 @@ impl From<Playlist> for PlaylistUIViewData {
             is_file_backed,
             sync: playlist.sync,
             owner_id: playlist.owner_id,
+            image: playlist.image,
             searchable_lower,
         }
     }

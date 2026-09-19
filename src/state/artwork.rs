@@ -96,14 +96,15 @@ pub struct ArtworkState {
     /// rendered thumbnails warm. Capacity must stay above the typical viewport
     /// + scrollback or slot lists thrash.
     pub album_art: SnapshottedLru<String, image::Handle>,
-    /// Sibling map recording the `updated_at` cache-buster that warmed each
-    /// `album_art` slot. Kept in lockstep with `album_art` on every put: when
-    /// the server-side cover changes, the album's `updated_at` changes, and a
-    /// later prefetch tick sees `album_art_versions[id] != new_updated_at` and
+    /// Sibling map recording the artwork version that warmed each `album_art`
+    /// slot: the image hash on Navidrome 0.64+ (`artwork_version`), else the
+    /// `updated_at` cache-buster. Kept in lockstep with `album_art` on every
+    /// put: when the server-side cover changes, the version changes, and a
+    /// later prefetch tick sees `album_art_versions[id] != new_version` and
     /// treats the slot as a genuine miss — re-fetching the changed cover on the
-    /// album-coherent surfaces (Albums view, Artists/Genres expansion) that pass
-    /// `album.updated_at`, without re-introducing SSE auto-refresh or threading a
-    /// full `(album_id, updated_at)` key through the ~15 view read sites (N17).
+    /// album-coherent surfaces (Albums view, Artists/Genres expansion, the
+    /// Artists view's `ar-` minis) that pass it, without threading a full
+    /// `(album_id, version)` key through the ~15 view read sites (N17).
     /// The passive surfaces (queue, song-mini, similar, playlist editor) carry
     /// only a per-song `updated_at`, which would oscillate this album_id-keyed
     /// map, so they feed a constant `None` (id-only dedup,
@@ -188,9 +189,10 @@ pub struct ArtworkState {
     /// when a fetch task is built, released by the loaded-handler on success
     /// AND failure. Mirrors [`Self::album_art_pending`].
     pub playlist_custom_art_pending: HashSet<String>,
-    /// `playlist_id -> the updated_at cache-buster that warmed its custom
-    /// mini`. A cover replaced in the web UI bumps the playlist's
-    /// `updated_at`, so the version-aware prefetch gate re-fetches it this
+    /// `playlist_id -> the version that warmed its custom mini` (the image
+    /// hash on Navidrome 0.64+, else the `updated_at` cache-buster). A cover
+    /// replaced in the web UI changes it, so the version-aware prefetch gate
+    /// re-fetches it this
     /// session instead of serving the stale handle forever. Mirrors
     /// [`Self::album_art_versions`]; reset wholesale on logout via `Default`.
     pub playlist_custom_art_versions: HashMap<String, Option<String>>,

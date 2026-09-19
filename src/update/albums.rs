@@ -160,10 +160,10 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Whether the server marked this album's art absent (Navidrome 0.64+),
-    /// by any album row nokkvi holds: the Albums view or Harbour's shelves.
-    /// Unknown ids and older servers read as not absent.
-    pub(crate) fn album_image_absent(&self, album_id: &str) -> bool {
+    /// The image info (Navidrome 0.64+) of an album row nokkvi holds: the
+    /// Albums view or Harbour's shelves. `None` for an unknown id; the
+    /// default on older servers.
+    fn album_image(&self, album_id: &str) -> Option<&nokkvi_data::types::image_info::ImageInfo> {
         self.library
             .albums
             .iter()
@@ -171,7 +171,30 @@ impl Nokkvi {
             .chain(self.harbour.most_played_albums.iter())
             .chain(self.harbour.random_album.iter())
             .find(|a| a.id == album_id)
-            .is_some_and(|a| a.image.image_absent)
+            .map(|a| &a.image)
+    }
+
+    /// Whether the server marked this album's art absent (Navidrome 0.64+).
+    /// Unknown ids and older servers read as not absent.
+    pub(crate) fn album_image_absent(&self, album_id: &str) -> bool {
+        self.album_image(album_id)
+            .is_some_and(|image| image.image_absent)
+    }
+
+    /// The version for a large-art or Refresh fetch of `album_id`: its image
+    /// hash when a row carries one (Navidrome 0.64+), else the Albums view
+    /// row's `updated_at`, which is exactly what these fetches used before.
+    pub(crate) fn album_art_version(&self, album_id: &str) -> Option<String> {
+        let updated_at = self
+            .library
+            .albums
+            .iter()
+            .find(|a| a.id == album_id)
+            .and_then(|a| a.updated_at.as_deref());
+        match self.album_image(album_id) {
+            Some(image) => nokkvi_data::types::image_info::artwork_version(image, updated_at),
+            None => updated_at.map(str::to_owned),
+        }
     }
 
     pub(crate) fn handle_load_large_artwork(&mut self, album_id: String) -> Task<Message> {
@@ -192,18 +215,16 @@ impl Nokkvi {
         if let Some(shell) = &self.app_service {
             let albums_vm = shell.albums().clone();
             let artwork_size = self.settings.artwork_resolution.to_size();
-            // Resolve the art_id (and updated_at, when known) from the albums list
-            // first — falls back to the bare album_id which `fetch_album_artwork`
-            // will normalize with the `al-` prefix.
-            let (art_id, updated_at) = match self.library.albums.iter().find(|a| a.id == album_id) {
-                Some(album) => (album.id.clone(), album.updated_at.clone()),
-                None => (album_id.clone(), None),
-            };
+            // The bare album_id, which `fetch_album_artwork` normalizes with
+            // the `al-` prefix, plus its version (hash on 0.64+, else the
+            // Albums view row's `updated_at`, else none).
+            let art_id = album_id.clone();
+            let version = self.album_art_version(&album_id);
 
             return Task::perform(
                 async move {
                     let bytes = albums_vm
-                        .fetch_album_artwork(&art_id, artwork_size, updated_at.as_deref())
+                        .fetch_album_artwork(&art_id, artwork_size, version.as_deref())
                         .await
                         .ok();
                     (art_id, bytes.map(image::Handle::from_bytes))
@@ -258,12 +279,7 @@ impl Nokkvi {
         let albums_vm = shell.albums().clone();
         let id = album_id.clone();
         let artwork_size = self.settings.artwork_resolution.to_size();
-        let updated_at = self
-            .library
-            .albums
-            .iter()
-            .find(|a| a.id == album_id)
-            .and_then(|a| a.updated_at.clone());
+        let updated_at = self.album_art_version(&album_id);
 
         let refresh_task = Task::perform(
             async move {
@@ -326,19 +342,14 @@ impl Nokkvi {
             return Task::none();
         }
         if let Some(h) = thumb {
-            // Re-sync the recorded version to the album's current updated_at so
-            // a passive prefetch tick right after a manual refresh doesn't see
-            // a phantom mismatch and re-fetch (N17). Falls back to None when the
-            // album isn't in the current library window.
-            let updated_at = self
-                .library
-                .albums
-                .iter()
-                .find(|a| a.id == album_id)
-                .and_then(|a| a.updated_at.clone());
+            // Re-sync the recorded version to the album's current version (the
+            // same one the Albums view prefetch records) so a prefetch tick
+            // right after a manual refresh doesn't see a phantom mismatch and
+            // re-fetch (N17). Falls back to None when no row knows the album.
+            let version = self.album_art_version(&album_id);
             self.artwork
                 .album_art_versions
-                .insert(album_id.clone(), updated_at);
+                .insert(album_id.clone(), version);
             self.artwork.album_art.put(album_id.clone(), h);
         }
         if let Some(h) = large {

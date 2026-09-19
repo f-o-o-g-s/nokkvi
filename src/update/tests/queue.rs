@@ -149,6 +149,7 @@ fn playlist_lib_row(
         sync: false,
         owner_id: String::new(),
         searchable_lower: String::new(),
+        image: Default::default(),
     }
 }
 
@@ -794,6 +795,7 @@ fn playlists_selection_toggle_on_expansion_child_lands_in_selected_indices() {
             sync: false,
             owner_id: String::new(),
             searchable_lower: "playlist 1".to_string(),
+            image: Default::default(),
         }];
     app.library
         .playlists
