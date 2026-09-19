@@ -433,13 +433,14 @@ impl AlbumsPage {
             ));
         }
         if vis.thumbnail {
-            use crate::widgets::slot_list::slot_list_artwork_column;
-            content_row = content_row.push(slot_list_artwork_column(
+            use crate::widgets::slot_list::slot_list_artwork_column_filled;
+            content_row = content_row.push(slot_list_artwork_column_filled(
                 album_art.get(&album_id),
                 artwork_size,
                 ctx.is_center,
                 false,
                 ctx.opacity,
+                album.image.loading_fill(),
             ));
         }
         content_row = content_row.push({

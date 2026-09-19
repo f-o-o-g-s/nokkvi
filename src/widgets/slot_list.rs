@@ -1568,7 +1568,35 @@ pub(crate) fn slot_list_artwork_column<'a, Message: 'a>(
     is_highlighted: bool,
     opacity: f32,
 ) -> Element<'a, Message> {
+    slot_list_artwork_column_filled(
+        artwork_handle,
+        artwork_size,
+        is_center,
+        is_highlighted,
+        opacity,
+        None,
+    )
+}
+
+/// [`slot_list_artwork_column`] whose empty square takes `loading_fill`
+/// (the cover's dominant color, Navidrome 0.64+) instead of `bg2` while the
+/// mini is missing. A loaded image keeps the `bg2` backdrop: square covers
+/// arrive as PNGs padded with transparency, so the fill would tint their
+/// letterbox bars. Same widget tree either way.
+pub(crate) fn slot_list_artwork_column_filled<'a, Message: 'a>(
+    artwork_handle: Option<&'a iced::widget::image::Handle>,
+    artwork_size: f32,
+    is_center: bool,
+    is_highlighted: bool,
+    opacity: f32,
+    loading_fill: Option<[u8; 3]>,
+) -> Element<'a, Message> {
     use iced::widget::image;
+
+    let backdrop = match (artwork_handle, loading_fill) {
+        (None, Some([r, g, b])) => Color::from_rgb8(r, g, b),
+        _ => theme::bg2(),
+    };
 
     let effective_opacity = if is_center || is_highlighted {
         1.0
@@ -1598,7 +1626,7 @@ pub(crate) fn slot_list_artwork_column<'a, Message: 'a>(
             background: Some(
                 Color {
                     a: effective_opacity,
-                    ..theme::bg2()
+                    ..backdrop
                 }
                 .into(),
             ),

@@ -74,6 +74,16 @@ impl ImageInfo {
             .filter(|h| is_valid_image_hash(h))
     }
 
+    /// The color a row's thumbnail square takes while its mini loads: the
+    /// dominant color, unless the server marked the art absent (that row
+    /// keeps nokkvi's plain empty square).
+    pub fn loading_fill(&self) -> Option<[u8; 3]> {
+        if self.image_absent {
+            return None;
+        }
+        self.dominant_rgb()
+    }
+
     /// The dominant color as RGB when it is a strict `#rrggbb` (either hex
     /// case); anything else is treated as no color.
     pub fn dominant_rgb(&self) -> Option<[u8; 3]> {

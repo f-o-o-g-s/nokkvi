@@ -580,3 +580,30 @@ fn harbour_search_absent_album_loads_no_large_art() {
     let _ = app.handle_load_large_artwork("s1".into());
     assert_eq!(app.artwork.loading_large_artwork, None);
 }
+
+// --- Dominant-color loading fill --------------------------------------------------
+
+/// A 0.64 album row carries its cover's color for the loading square; an
+/// old-server row, and art the server marked absent, keep the plain square.
+#[test]
+fn album_rows_carry_the_loading_fill() {
+    let a = album("a1", serde_json::json!({ "dominantColor": "#12ab3f" }));
+    assert_eq!(a.image.loading_fill(), Some([0x12, 0xab, 0x3f]));
+    assert_eq!(album("a2", none()).image.loading_fill(), None);
+    let absent = album(
+        "a3",
+        serde_json::json!({ "imageAbsent": true, "dominantColor": "#12ab3f" }),
+    );
+    assert_eq!(absent.image.loading_fill(), None);
+}
+
+/// Artist rows carry it the same way.
+#[test]
+fn artist_rows_carry_the_loading_fill() {
+    let raw: Artist = serde_json::from_value(serde_json::json!({
+        "id": "r1", "name": "R", "dominantColor": "#000000"
+    }))
+    .expect("artist");
+    let row = nokkvi_data::backend::artists::ArtistUIViewData::from(raw);
+    assert_eq!(row.image.loading_fill(), Some([0, 0, 0]));
+}

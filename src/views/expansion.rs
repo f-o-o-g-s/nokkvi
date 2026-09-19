@@ -623,13 +623,14 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         ));
 
     if show_artwork {
-        use crate::widgets::slot_list::slot_list_artwork_column;
-        content = content.push(slot_list_artwork_column(
+        use crate::widgets::slot_list::slot_list_artwork_column_filled;
+        content = content.push(slot_list_artwork_column_filled(
             artwork_handle,
             artwork_size,
             ctx.is_center,
             false,
             ctx.opacity,
+            album.image.loading_fill(),
         ));
     }
 

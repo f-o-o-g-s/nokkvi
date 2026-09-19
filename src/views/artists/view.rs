@@ -433,13 +433,14 @@ impl ArtistsPage {
             ));
         }
         if vis.thumbnail {
-            use crate::widgets::slot_list::slot_list_artwork_column;
-            content_row = content_row.push(slot_list_artwork_column(
+            use crate::widgets::slot_list::slot_list_artwork_column_filled;
+            content_row = content_row.push(slot_list_artwork_column_filled(
                 artist_art.get(&artist_id),
                 artwork_size,
                 ctx.is_center,
                 false,
                 ctx.opacity,
+                artist.image.loading_fill(),
             ));
         }
         content_row = content_row.push({
