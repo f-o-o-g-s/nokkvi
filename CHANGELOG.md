@@ -45,6 +45,9 @@ All notable changes to this project will be documented in this file.
 - With Fade on Skip set to Crossfade, MPRIS clients now see the new track's position and length as soon as you skip.
 - With Fade on Skip set to Crossfade, synced lyrics now follow the new track's time as soon as you skip.
 - With Fade on Skip set to Crossfade, a seek sent right after skipping now starts the new track at that point.
+- Desktop media widgets no longer keep the last song's cover while a radio station without a logo or stream art plays.
+- Radio stations with an uploaded logo now show it in desktop media widgets.
+- Desktop media widgets now show the nokkvi icon when a song's cover fails to load.
 
 ### Removed
 

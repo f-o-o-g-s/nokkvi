@@ -174,8 +174,8 @@ impl Nokkvi {
     /// from re-writing the cleared thumbnail to disk.
     ///
     /// `maybe_capture_radio_icy_art` only fetches for logo-less stations, so a
-    /// station with an uploaded logo keeps that logo as its identity everywhere
-    /// in-app; its live track art stays on MPRIS only.
+    /// station with an uploaded logo keeps that logo as its identity
+    /// everywhere, MPRIS included (see `mpris_art_writer`).
     pub(crate) fn handle_radio_icy_art_loaded(
         &mut self,
         station_id: String,

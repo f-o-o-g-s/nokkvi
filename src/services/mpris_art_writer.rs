@@ -1,5 +1,22 @@
-//! MPRIS cover-art writer: fetches album bytes once per song change and
-//! emits a `file://` URI for `mpris:artUrl`.
+//! MPRIS art writer: decides what `mpris:artUrl` shows, and turns server
+//! cover ids into local `file://` URIs.
+//!
+//! ## What gets published
+//!
+//! While a song or a radio station is current and the cache dir is writable,
+//! `mpris:artUrl` is always present and always describes that item. Desktop shells keep the previous
+//! image when the key is absent, which used to pin the last queue song's
+//! cover over a radio station. [`art_candidates`] holds the order:
+//!
+//! - song: its cover (fetched once per song change), else the placeholder;
+//! - radio: the station's uploaded logo, else the stream's ICY `StreamUrl`
+//!   when it is http(s), published verbatim and never fetched here, else the
+//!   placeholder.
+//!
+//! The placeholder is the app icon, written once per process. "Not Playing"
+//! publishes no art. With no cache dir, or while writes to it fail, only a
+//! stream URL can be published; a failed cover or placeholder is retried
+//! after a minute, never on every tick.
 //!
 //! ## Why this module exists
 //!
@@ -26,7 +43,8 @@
 //! off the URL string, so reusing one filename across tracks pins them on the
 //! first track's art for the whole session. After each successor write the
 //! previous file is removed best-effort to keep the per-PID footprint at ~1
-//! file in steady state.
+//! file in steady state. The placeholder lives beside it as
+//! `mpris-art-<pid>-placeholder.jpg`, which no cover id can name.
 //!
 //! ## State management
 //!
@@ -41,8 +59,13 @@
 use std::{
     future::Future,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
+use nokkvi_data::{
+    types::{radio_station::RadioStation, song::Song},
+    utils::server_url::has_http_scheme,
+};
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -58,6 +81,14 @@ const SANITIZED_COVER_ID_STEM_MAX_LEN: usize = 80;
 #[cfg(test)]
 const HASH_SUFFIX_LEN: usize = 17;
 
+/// How long a failed cover or placeholder is left alone before the next try.
+/// It keeps the ~100ms tick from refetching a failing cover (re-logging its
+/// credentialed getCoverArt URL) or rewriting into an unwritable cache dir on
+/// every tick, and still heals a transient failure within a minute. A radio
+/// logo needs the timer: its cover id never changes while the station plays,
+/// so no "next track" ever retries it.
+const RETRY_FAILED_AFTER: Duration = Duration::from_secs(60);
+
 /// Tracks the most recently-written cache entry so repeat ticks for the
 /// same `(server_url, cover_id)` skip the fetch + write.
 ///
@@ -66,23 +97,28 @@ const HASH_SUFFIX_LEN: usize = 17;
 #[derive(Debug, Default)]
 pub(crate) struct ArtCacheState {
     last_written: Option<(String, String, PathBuf)>,
-    /// Last `(server_url, cover_id)` whose fetch failed (no art, non-image
-    /// body, or fetch error). `handle_tick` re-resolves the art every ~100ms
-    /// with the current track's cover_id; without this a cover the
-    /// server can't resolve would be re-fetched — and its credentialed
-    /// getCoverArt URL re-logged — on every tick. Recording the failed key
-    /// bounds it to one attempt per song, mirroring the `last_written` success
-    /// fast-path. Cleared on any success and on `clear()`.
+    /// Last `(server_url, cover_id)` that could not be published (no art,
+    /// non-image body, fetch error, or a failed cache write), and when.
+    /// `handle_tick` re-resolves the art every ~100ms with the current item's
+    /// cover id; without this a cover the server can't resolve would be
+    /// re-fetched — and its credentialed getCoverArt URL re-logged — on every
+    /// tick. The same key is skipped for [`RETRY_FAILED_AFTER`]; a different
+    /// key falls through at once. Cleared on any successful write and on
+    /// `clear()`.
     ///
     /// Unlike the UI mini-cover negative cache (which records ONLY deterministic
     /// "not found" misses and lets a transient drop retry on the next scroll),
     /// this deliberately records ANY failure — including a transient throttle.
     /// On the 100ms tick, NOT caching a transient would re-issue the 3-retry
     /// fetch every tick and re-storm an already-throttled server; the accepted
-    /// cost is a one-song blank on a transient drop, which self-heals at the next
-    /// track change (a fresh cover_id falls through). That trade favours the
-    /// server over a one-song cosmetic gap.
-    last_failed: Option<(String, String)>,
+    /// cost is up to a minute of fallback art after a transient drop.
+    last_failed: Option<(String, String, Instant)>,
+    /// The placeholder file, written once and then reused until `clear()`.
+    /// It sits apart from `last_written` / `last_failed` on purpose: falling
+    /// back to it must neither clear a failed cover's negative entry (which
+    /// would refetch that cover on the next tick) nor be deleted by the next
+    /// cover write's supersede.
+    placeholder: PlaceholderSlot,
 }
 
 impl ArtCacheState {
@@ -90,8 +126,26 @@ impl ArtCacheState {
         Self {
             last_written: None,
             last_failed: None,
+            placeholder: PlaceholderSlot::Unwritten,
         }
     }
+}
+
+impl ArtCacheState {
+    fn mark_failed(&mut self, server_url: &str, cover_id: &str) {
+        self.last_failed = Some((server_url.to_string(), cover_id.to_string(), Instant::now()));
+    }
+}
+
+/// Whether this process has written the placeholder file yet.
+#[derive(Debug, Default)]
+enum PlaceholderSlot {
+    #[default]
+    Unwritten,
+    Written(PathBuf),
+    /// The write failed at this instant. Retried after [`RETRY_FAILED_AFTER`],
+    /// so an unwritable cache dir logs one warning a minute, not ten a second.
+    Failed(Instant),
 }
 
 static STATE: Mutex<ArtCacheState> = Mutex::const_new(ArtCacheState::new());
@@ -127,9 +181,26 @@ fn resolve_cache_root() -> Option<PathBuf> {
 /// Per-track cache path: `<dir>/mpris-art-<pid>-<cover_id>_<hash>.jpg`, where
 /// the `<cover_id>_<hash>` half is produced wholesale by [`sanitize_cover_id`].
 fn cache_file_path_for(cache_dir: &Path, cover_id: &str) -> PathBuf {
+    per_pid_file_path(cache_dir, &sanitize_cover_id(cover_id))
+}
+
+/// Stem of the placeholder art file, `mpris-art-<pid>-placeholder.jpg`.
+/// Every cover file's stem ends in the `_<16 hex>` suffix from
+/// [`sanitize_cover_id`], so no cover id can name this file, and a cover
+/// write's supersede-delete can never remove it. It keeps the
+/// `mpris-art-<pid>-*.jpg` shape, so `clear()` and the dead-pid boot sweep
+/// collect it with no pattern of their own.
+const PLACEHOLDER_STEM: &str = "placeholder";
+
+/// Placeholder art path: `<dir>/mpris-art-<pid>-placeholder.jpg`.
+fn placeholder_file_path(cache_dir: &Path) -> PathBuf {
+    per_pid_file_path(cache_dir, PLACEHOLDER_STEM)
+}
+
+/// `<dir>/mpris-art-<pid>-<stem>.jpg`: the one shape both sweeps match.
+fn per_pid_file_path(cache_dir: &Path, stem: &str) -> PathBuf {
     let pid = std::process::id();
-    let safe = sanitize_cover_id(cover_id);
-    cache_dir.join(format!("mpris-art-{pid}-{safe}.jpg"))
+    cache_dir.join(format!("mpris-art-{pid}-{stem}.jpg"))
 }
 
 /// Replace anything that isn't `[A-Za-z0-9._-]` with `_`, cap the readable
@@ -197,16 +268,86 @@ pub(crate) enum MprisArtItem {
     /// A queue song and the cover id it resolves to (`cover_art`, else
     /// `album_id`).
     Song { cover_id: Option<String> },
-    /// A radio station and the stream's current ICY `StreamUrl`.
-    Radio { icy_url: Option<String> },
+    /// A radio station: its uploaded-logo token
+    /// (`RadioStation::logo_cover_art`) and the stream's current ICY
+    /// `StreamUrl`.
+    Radio {
+        logo: Option<String>,
+        icy_url: Option<String>,
+    },
 }
 
-/// Resolve `mpris:artUrl` for the current item. A song's cover goes through
-/// the authenticated fetch and is published as a `file://` cache path (see
-/// the module doc); a station publishes its ICY `StreamUrl` as-is.
+impl MprisArtItem {
+    /// A queue song: its `cover_art`, else its `album_id`.
+    pub(crate) fn for_song(song: &Song) -> Self {
+        Self::Song {
+            cover_id: song.cover_art.clone().or_else(|| song.album_id.clone()),
+        }
+    }
+
+    /// A radio station: its uploaded logo, if any, and the stream's current
+    /// ICY `StreamUrl`.
+    pub(crate) fn for_radio(station: &RadioStation, icy_url: Option<String>) -> Self {
+        Self::Radio {
+            logo: station.logo_cover_art().map(str::to_owned),
+            icy_url,
+        }
+    }
+}
+
+/// One source for `mpris:artUrl`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtCandidate<'a> {
+    /// A server cover id, fetched through the authenticated client and
+    /// published as a `file://` cache path.
+    Cover(&'a str),
+    /// A radio stream's ICY `StreamUrl`, published verbatim and only when it
+    /// is http(s). It is never fetched here: `handle_tick` awaits the art
+    /// before it sends any state update, and a slow station host would
+    /// freeze position and title for the length of the fetch.
+    StreamUrl(&'a str),
+    /// The app icon, written once into the cache dir.
+    Placeholder,
+}
+
+/// The MPRIS art precedence, in one place. The resolver publishes the first
+/// candidate that yields a URI. A current song or station always ends in the
+/// placeholder, so a desktop shell never keeps the previous item's art;
+/// "Not Playing" publishes nothing.
+fn art_candidates(item: &MprisArtItem) -> [Option<ArtCandidate<'_>>; 3] {
+    fn cover(id: &Option<String>) -> Option<ArtCandidate<'_>> {
+        id.as_deref()
+            .filter(|id| !id.is_empty())
+            .map(ArtCandidate::Cover)
+    }
+    match item {
+        MprisArtItem::Nothing => [None, None, None],
+        MprisArtItem::Song { cover_id } => [cover(cover_id), Some(ArtCandidate::Placeholder), None],
+        // Logo first: it is the station's identity in-app too, and the only
+        // radio art validated by the user's own server. Swap the first two
+        // entries to prefer the stream's per-track art.
+        MprisArtItem::Radio { logo, icy_url } => [
+            cover(logo),
+            icy_url
+                .as_deref()
+                .filter(|url| has_http_scheme(url))
+                .map(ArtCandidate::StreamUrl),
+            Some(ArtCandidate::Placeholder),
+        ],
+    }
+}
+
+/// Resolve `mpris:artUrl` for the current item, in the order
+/// [`art_candidates`] sets: a song's cover, else the placeholder; a station's
+/// logo, else its http(s) stream art, else the placeholder. Cover ids go
+/// through the authenticated fetch and come back as `file://` cache paths
+/// (see the module doc), so no credentialed URL reaches D-Bus.
 ///
-/// `fetch_cover` is called with the cover id to fetch, and only when the
-/// writer has no cached result for that id.
+/// `fetch_cover` builds the fetch for a cover id each time that cover is
+/// tried; the future it returns is awaited only when the writer has no cached
+/// result for the id, so the closure must defer its work into that future.
+/// Returns `None` for "Not Playing", or when nothing could be written (no
+/// cache dir, or the writes are failing) and no stream URL qualifies.
 pub(crate) async fn resolve_art_for_mpris<F, Fut>(
     server_url: &str,
     item: MprisArtItem,
@@ -241,16 +382,50 @@ where
     F: FnOnce(String) -> Fut,
     Fut: Future<Output = anyhow::Result<Vec<u8>>>,
 {
-    match item {
-        MprisArtItem::Nothing | MprisArtItem::Song { cover_id: None } => None,
-        MprisArtItem::Song {
-            cover_id: Some(cover_id),
-        } => {
-            let fetcher = fetch_cover(cover_id.clone());
-            write_art_inner(state, cache_dir?, server_url, &cover_id, fetcher).await
+    // Each item names at most one cover id, so the fetcher runs at most once.
+    let mut fetch_cover = Some(fetch_cover);
+    for candidate in art_candidates(&item).into_iter().flatten() {
+        let uri = match candidate {
+            ArtCandidate::Cover(cover_id) => match (cache_dir, fetch_cover.take()) {
+                (Some(dir), Some(fetch)) => {
+                    let fetcher = fetch(cover_id.to_owned());
+                    write_art_inner(state, dir, server_url, cover_id, fetcher).await
+                }
+                _ => None,
+            },
+            ArtCandidate::StreamUrl(url) => Some(url.to_owned()),
+            ArtCandidate::Placeholder => match cache_dir {
+                Some(dir) => placeholder_uri(state, dir).await,
+                None => None,
+            },
+        };
+        if uri.is_some() {
+            return uri;
         }
-        MprisArtItem::Radio { icy_url } => icy_url,
     }
+    None
+}
+
+/// The placeholder's `file://` URI, writing the app icon on first use. The
+/// PNG bytes sit under a `.jpg` name, as some covers already do; shells sniff
+/// the content.
+///
+/// The slot trusts the file to stay on disk until `clear()`, as the cover
+/// fast path does. Only an outside delete could remove it before then.
+async fn placeholder_uri(state: &mut ArtCacheState, cache_dir: &Path) -> Option<String> {
+    match &state.placeholder {
+        PlaceholderSlot::Written(path) => return Some(path_to_file_uri(path)),
+        PlaceholderSlot::Failed(at) if at.elapsed() < RETRY_FAILED_AFTER => return None,
+        PlaceholderSlot::Failed(_) | PlaceholderSlot::Unwritten => {}
+    }
+    let path = placeholder_file_path(cache_dir);
+    if !write_cache_file(&path, crate::services::APP_ICON_PNG).await {
+        state.placeholder = PlaceholderSlot::Failed(Instant::now());
+        return None;
+    }
+    let uri = path_to_file_uri(&path);
+    state.placeholder = PlaceholderSlot::Written(path);
+    Some(uri)
 }
 
 /// Reset the cache state and best-effort remove every per-PID cache file for
@@ -395,15 +570,16 @@ where
         return Some(path_to_file_uri(prev_path));
     }
 
-    // Negative fast-path: this exact key already failed for the current song
-    // (no art, non-image body, or fetch error). Skip the re-fetch — handle_tick
-    // calls us every ~100ms, so without this a server-unresolvable cover would
-    // be re-fetched (and its credentialed getCoverArt URL re-logged) on every
-    // tick for the track's whole duration. The next track change carries a new
-    // cover_id and falls through to a fresh attempt.
-    if let Some((failed_server, failed_cover)) = &state.last_failed
+    // Negative fast-path: this exact key failed within the last
+    // RETRY_FAILED_AFTER (no art, non-image body, fetch error, or a failed
+    // write). Skip the re-fetch — handle_tick calls us every ~100ms, so without
+    // this a server-unresolvable cover would be re-fetched (and its credentialed
+    // getCoverArt URL re-logged) on every tick. A different cover_id falls
+    // through at once.
+    if let Some((failed_server, failed_cover, failed_at)) = &state.last_failed
         && failed_server == server_url
         && failed_cover == cover_id
+        && failed_at.elapsed() < RETRY_FAILED_AFTER
     {
         return None;
     }
@@ -414,35 +590,24 @@ where
                 target: "nokkvi::mpris::art",
                 server_url, cover_id, "art fetch returned empty body; skipping write"
             );
-            state.last_failed = Some((server_url.to_string(), cover_id.to_string()));
+            state.mark_failed(server_url, cover_id);
             return None;
         }
         Ok(b) => b,
         Err(err) => {
             warn!(
                 target: "nokkvi::mpris::art",
-                server_url, cover_id, %err, "art fetch failed; mpris will show no art"
+                server_url, cover_id, %err, "art fetch failed; mpris falls back"
             );
-            state.last_failed = Some((server_url.to_string(), cover_id.to_string()));
+            state.mark_failed(server_url, cover_id);
             return None;
         }
     };
 
-    if let Some(parent) = new_path.parent()
-        && let Err(err) = tokio::fs::create_dir_all(parent).await
-    {
-        warn!(
-            target: "nokkvi::mpris::art",
-            path = %parent.display(), %err, "failed to create mpris art cache dir"
-        );
-        return None;
-    }
-
-    if let Err(err) = tokio::fs::write(&new_path, &bytes).await {
-        warn!(
-            target: "nokkvi::mpris::art",
-            path = %new_path.display(), %err, "failed to write mpris art cache file"
-        );
+    if !write_cache_file(&new_path, &bytes).await {
+        // Recorded like a failed fetch, so an unwritable cache dir can't turn
+        // into a full-size fetch on every tick.
+        state.mark_failed(server_url, cover_id);
         return None;
     }
 
@@ -480,12 +645,33 @@ where
     Some(path_to_file_uri(&new_path))
 }
 
+/// Create the cache dir if needed and write `bytes` to `path`. Warns and
+/// returns `false` on failure.
+async fn write_cache_file(path: &Path, bytes: &[u8]) -> bool {
+    if let Some(parent) = path.parent()
+        && let Err(err) = tokio::fs::create_dir_all(parent).await
+    {
+        warn!(
+            target: "nokkvi::mpris::art",
+            path = %parent.display(), %err, "failed to create mpris art cache dir"
+        );
+        return false;
+    }
+    if let Err(err) = tokio::fs::write(path, bytes).await {
+        warn!(
+            target: "nokkvi::mpris::art",
+            path = %path.display(), %err, "failed to write mpris art cache file"
+        );
+        return false;
+    }
+    true
+}
+
 /// Reset state and best-effort sweep every `mpris-art-<pid>-*.jpg` file in
 /// `cache_dir` for the current process. Tests can drive this with a scratch
 /// dir without touching the module-level static.
 async fn clear_inner(state: &mut ArtCacheState, cache_dir: Option<&Path>) {
-    state.last_written = None;
-    state.last_failed = None;
+    *state = ArtCacheState::new();
     let Some(dir) = cache_dir else { return };
     let pid = std::process::id();
     let prefix = format!("mpris-art-{pid}-");
@@ -1089,6 +1275,13 @@ mod tests {
                 "hashed shape must still yield its pid: {name}"
             );
         }
+        // The placeholder shares the shape, so the boot sweep collects a dead
+        // instance's placeholder too.
+        let name = format!("mpris-art-3785659-{PLACEHOLDER_STEM}.jpg");
+        assert_eq!(parse_pid_from_filename(&name), Some(3_785_659), "{name}");
+        let ours = placeholder_file_path(Path::new("/x"));
+        let ours = ours.file_name().and_then(|n| n.to_str()).unwrap();
+        assert_eq!(parse_pid_from_filename(ours), Some(std::process::id()));
     }
 
     #[test]
@@ -1185,7 +1378,28 @@ mod tests {
     const SERVER: &str = "https://server.example";
 
     /// Drive `resolve_art_inner` against `dir` with a fetcher that bumps
-    /// `calls` when awaited and answers every cover id with `reply`.
+    /// `calls` when awaited and answers every cover id with `reply`. Returns
+    /// the URI and the cover id the fetcher was built for, if any.
+    async fn resolve_with_request(
+        state: &mut ArtCacheState,
+        dir: Option<&Path>,
+        item: MprisArtItem,
+        calls: &Arc<AtomicU32>,
+        reply: Result<Vec<u8>, &'static str>,
+    ) -> (Option<String>, Option<String>) {
+        let c = Arc::clone(calls);
+        let mut requested = None;
+        let uri = resolve_art_inner(state, dir, SERVER, item, |cover_id| {
+            requested = Some(cover_id);
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                reply.map_err(anyhow::Error::msg)
+            }
+        })
+        .await;
+        (uri, requested)
+    }
+
     async fn resolve_with(
         state: &mut ArtCacheState,
         dir: Option<&Path>,
@@ -1193,12 +1407,21 @@ mod tests {
         calls: &Arc<AtomicU32>,
         reply: Result<Vec<u8>, &'static str>,
     ) -> Option<String> {
-        let c = Arc::clone(calls);
-        resolve_art_inner(state, dir, SERVER, item, |_cover_id| async move {
-            c.fetch_add(1, Ordering::SeqCst);
-            reply.map_err(anyhow::Error::msg)
-        })
-        .await
+        resolve_with_request(state, dir, item, calls, reply).await.0
+    }
+
+    /// An instant older than the retry cooldown, for aging a failure record.
+    fn past_the_cooldown() -> Instant {
+        Instant::now()
+            .checked_sub(RETRY_FAILED_AFTER + Duration::from_secs(1))
+            .expect("monotonic clock is past the cooldown")
+    }
+
+    /// A "cache dir" that is a regular file, so every write under it fails.
+    fn unwritable_dir(scratch: &ScratchDir) -> PathBuf {
+        let path = scratch.path().join("not-a-dir");
+        std::fs::write(&path, b"x").expect("create blocker file");
+        path
     }
 
     fn song(cover_id: &str) -> MprisArtItem {
@@ -1207,10 +1430,24 @@ mod tests {
         }
     }
 
-    fn radio(icy_url: Option<&str>) -> MprisArtItem {
+    fn radio(logo: Option<&str>, icy_url: Option<&str>) -> MprisArtItem {
         MprisArtItem::Radio {
+            logo: logo.map(str::to_string),
             icy_url: icy_url.map(str::to_string),
         }
+    }
+
+    fn placeholder_uri_in(dir: &Path) -> String {
+        path_to_file_uri(&placeholder_file_path(dir))
+    }
+
+    fn assert_placeholder_on_disk(dir: &Path) {
+        let bytes = std::fs::read(placeholder_file_path(dir)).expect("placeholder file exists");
+        assert_eq!(
+            bytes,
+            crate::services::APP_ICON_PNG,
+            "placeholder must hold the app icon"
+        );
     }
 
     #[tokio::test]
@@ -1219,7 +1456,7 @@ mod tests {
         let mut state = ArtCacheState::new();
         let calls = Arc::new(AtomicU32::new(0));
 
-        let uri = resolve_with(
+        let (uri, requested) = resolve_with_request(
             &mut state,
             Some(dir.path()),
             song("al-abc"),
@@ -1232,6 +1469,7 @@ mod tests {
             uri,
             Some(path_to_file_uri(&cache_file_path_for(dir.path(), "al-abc")))
         );
+        assert_eq!(requested.as_deref(), Some("al-abc"));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
@@ -1264,7 +1502,7 @@ mod tests {
             let uri = resolve_with(
                 &mut state,
                 Some(dir.path()),
-                radio(Some(url)),
+                radio(None, Some(url)),
                 &calls,
                 Ok(vec![1]),
             )
@@ -1274,10 +1512,10 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
-    /// Characterizes the reported bug: a station with no stream art publishes
-    /// no `artUrl`, so the shell keeps the previous song's cover.
+    /// The reported bug: a station with no logo and no stream art published
+    /// no `artUrl`, so the shell kept the previous song's cover.
     #[tokio::test]
-    async fn resolve_radio_without_icy_url_publishes_no_art() {
+    async fn resolve_radio_without_any_art_publishes_the_placeholder() {
         let dir = ScratchDir::new();
         let mut state = ArtCacheState::new();
         let calls = Arc::new(AtomicU32::new(0));
@@ -1285,38 +1523,105 @@ mod tests {
         let uri = resolve_with(
             &mut state,
             Some(dir.path()),
-            radio(None),
+            radio(None, None),
             &calls,
             Ok(vec![1]),
         )
         .await;
 
-        assert_eq!(uri, None);
+        assert_eq!(uri, Some(placeholder_uri_in(dir.path())));
+        assert_placeholder_on_disk(dir.path());
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no cover id to fetch");
     }
 
-    /// Characterizes today's gate: any `StreamUrl` reaches D-Bus unchecked.
     #[tokio::test]
-    async fn resolve_radio_publishes_a_non_http_icy_url() {
+    async fn resolve_radio_with_a_logo_publishes_the_logo_file_not_the_icy_url() {
         let dir = ScratchDir::new();
         let mut state = ArtCacheState::new();
         let calls = Arc::new(AtomicU32::new(0));
 
-        let uri = resolve_with(
+        let (uri, requested) = resolve_with_request(
             &mut state,
             Some(dir.path()),
-            radio(Some("ftp://example.com/a.png")),
+            radio(Some("ra-42_abc"), Some("http://cdn.example/now.jpg")),
             &calls,
-            Ok(vec![1]),
+            Ok(vec![1, 2, 3]),
         )
         .await;
 
-        assert_eq!(uri.as_deref(), Some("ftp://example.com/a.png"));
+        assert_eq!(
+            uri,
+            Some(path_to_file_uri(&cache_file_path_for(
+                dir.path(),
+                "ra-42_abc"
+            )))
+        );
+        assert_eq!(requested.as_deref(), Some("ra-42_abc"));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let on_disk = std::fs::read(cache_file_path_for(dir.path(), "ra-42_abc")).unwrap();
+        assert_eq!(on_disk, vec![1, 2, 3], "the file holds the fetched logo");
     }
 
-    /// Characterizes today's song fallback: a failed cover fetch publishes no
-    /// `artUrl`.
     #[tokio::test]
-    async fn resolve_song_whose_cover_fetch_fails_publishes_no_art() {
+    async fn resolve_radio_never_publishes_a_non_http_icy_url() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        for url in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ftp://example.com/a.png",
+            "example.com/a.png",
+            "",
+        ] {
+            let uri = resolve_with(
+                &mut state,
+                Some(dir.path()),
+                radio(None, Some(url)),
+                &calls,
+                Ok(vec![1]),
+            )
+            .await;
+            assert_eq!(
+                uri,
+                Some(placeholder_uri_in(dir.path())),
+                "{url:?} must fall to the placeholder"
+            );
+        }
+    }
+
+    /// A logo whose fetch fails falls through the chain, and its negative
+    /// entry survives the fallback, so the 100 ms tick never refetches it.
+    #[tokio::test]
+    async fn resolve_radio_whose_logo_fetch_fails_falls_back_without_refetching() {
+        for icy_url in [Some("https://cdn.example/now.jpg"), None] {
+            let dir = ScratchDir::new();
+            let mut state = ArtCacheState::new();
+            let calls = Arc::new(AtomicU32::new(0));
+            let expected = icy_url.map_or_else(|| placeholder_uri_in(dir.path()), str::to_string);
+
+            for _ in 0..5 {
+                let uri = resolve_with(
+                    &mut state,
+                    Some(dir.path()),
+                    radio(Some("ra-42_abc"), icy_url),
+                    &calls,
+                    Err("artwork response was not an image"),
+                )
+                .await;
+                assert_eq!(uri.as_deref(), Some(expected.as_str()));
+            }
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "a failed logo is fetched once per station, not every tick"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_song_whose_cover_fetch_fails_publishes_the_placeholder() {
         let dir = ScratchDir::new();
         let mut state = ArtCacheState::new();
         let calls = Arc::new(AtomicU32::new(0));
@@ -1330,7 +1635,258 @@ mod tests {
         )
         .await;
 
-        assert_eq!(uri, None);
+        assert_eq!(uri, Some(placeholder_uri_in(dir.path())));
+        assert_placeholder_on_disk(dir.path());
+    }
+
+    /// With no cache dir (`HOME` and `XDG_CACHE_HOME` unset) nothing can be
+    /// written, so only a publishable ICY URL survives.
+    #[tokio::test]
+    async fn resolve_without_a_cache_dir_publishes_only_an_http_icy_url() {
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        for item in [
+            song("al-abc"),
+            radio(Some("ra-42_abc"), None),
+            radio(None, None),
+            radio(None, Some("ftp://example.com/a.png")),
+        ] {
+            let uri = resolve_with(&mut state, None, item.clone(), &calls, Ok(vec![1])).await;
+            assert_eq!(uri, None, "{item:?} has nothing to publish");
+        }
+        let uri = resolve_with(
+            &mut state,
+            None,
+            radio(Some("ra-42_abc"), Some("https://cdn.example/now.jpg")),
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+        assert_eq!(uri.as_deref(), Some("https://cdn.example/now.jpg"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no cache dir, no fetch");
+    }
+
+    /// Covers and the placeholder alternate without either deleting the
+    /// other's file: every placeholder URI handed out names a file on disk.
+    #[tokio::test]
+    async fn placeholder_survives_cover_writes_on_either_side() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+        let logo_less = radio(None, None);
+
+        let steps = [
+            (song("al-aaa"), Ok(vec![1])),
+            (logo_less.clone(), Ok(vec![1])),
+            (song("al-bbb"), Ok(vec![2])),
+            (logo_less.clone(), Ok(vec![2])),
+            (radio(Some("ra-42_abc"), None), Ok(vec![3])),
+            (logo_less, Ok(vec![3])),
+        ];
+        for (item, reply) in steps {
+            let is_placeholder = item == radio(None, None);
+            let uri = resolve_with(&mut state, Some(dir.path()), item, &calls, reply)
+                .await
+                .expect("a current item always publishes art");
+            if is_placeholder {
+                assert_eq!(uri, placeholder_uri_in(dir.path()));
+                assert_placeholder_on_disk(dir.path());
+            }
+        }
+        assert!(
+            cache_file_path_for(dir.path(), "ra-42_abc").exists(),
+            "the placeholder must not supersede-delete the last cover"
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_inner_removes_the_placeholder_and_the_next_resolve_rewrites_it() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let first = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            radio(None, None),
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+        assert_eq!(first, Some(placeholder_uri_in(dir.path())));
+
+        clear_inner(&mut state, Some(dir.path())).await;
+        assert!(
+            !placeholder_file_path(dir.path()).exists(),
+            "clear must remove the placeholder file"
+        );
+
+        let second = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            radio(None, None),
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+        assert_eq!(second, first);
+        assert_placeholder_on_disk(dir.path());
+    }
+
+    #[test]
+    fn for_song_prefers_cover_art_then_album_id() {
+        let with_cover = Song {
+            cover_art: Some("mf-1".to_string()),
+            album_id: Some("al-1".to_string()),
+            ..Song::default()
+        };
+        assert_eq!(MprisArtItem::for_song(&with_cover), song("mf-1"));
+
+        let album_only = Song {
+            album_id: Some("al-1".to_string()),
+            ..Song::default()
+        };
+        assert_eq!(MprisArtItem::for_song(&album_only), song("al-1"));
+
+        assert_eq!(
+            MprisArtItem::for_song(&Song::default()),
+            MprisArtItem::Song { cover_id: None }
+        );
+    }
+
+    #[test]
+    fn for_radio_carries_the_logo_token_and_the_icy_url() {
+        let station = |cover_art: Option<&str>| RadioStation {
+            id: "st-1".to_string(),
+            name: "Station".to_string(),
+            stream_url: "https://stream.example/live".to_string(),
+            home_page_url: None,
+            cover_art: cover_art.map(str::to_string),
+        };
+        let icy = || Some("https://cdn.example/now.jpg".to_string());
+
+        assert_eq!(
+            MprisArtItem::for_radio(&station(Some("ra-st-1_abc")), icy()),
+            radio(Some("ra-st-1_abc"), Some("https://cdn.example/now.jpg"))
+        );
+        // Navidrome sends an empty token for a station with no logo.
+        assert_eq!(
+            MprisArtItem::for_radio(&station(Some("")), icy()),
+            radio(None, Some("https://cdn.example/now.jpg"))
+        );
+        assert_eq!(
+            MprisArtItem::for_radio(&station(None), None),
+            radio(None, None)
+        );
+    }
+
+    /// A cover that fetches but can't be written is recorded like a failed
+    /// fetch, so an unwritable cache dir can't cause a full fetch every tick.
+    #[tokio::test]
+    async fn failed_write_is_not_refetched_every_tick() {
+        let scratch = ScratchDir::new();
+        let dir = unwritable_dir(&scratch);
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        for _ in 0..5 {
+            let uri = resolve_with(
+                &mut state,
+                Some(&dir),
+                radio(Some("ra-42_abc"), Some("https://cdn.example/now.jpg")),
+                &calls,
+                Ok(vec![1, 2, 3]),
+            )
+            .await;
+            assert_eq!(uri.as_deref(), Some("https://cdn.example/now.jpg"));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A station's logo token never changes while it plays, so a transient
+    /// failure must heal on a timer, not on a track change.
+    #[tokio::test]
+    async fn failed_cover_is_retried_after_the_cooldown() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+        let logo_station = radio(Some("ra-42_abc"), None);
+
+        let first = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            logo_station.clone(),
+            &calls,
+            Err("throttled"),
+        )
+        .await;
+        assert_eq!(first, Some(placeholder_uri_in(dir.path())));
+
+        if let Some((_, _, failed_at)) = state.last_failed.as_mut() {
+            *failed_at = past_the_cooldown();
+        }
+        let second = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            logo_station,
+            &calls,
+            Ok(vec![1, 2, 3]),
+        )
+        .await;
+        assert_eq!(
+            second,
+            Some(path_to_file_uri(&cache_file_path_for(
+                dir.path(),
+                "ra-42_abc"
+            )))
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// A failed placeholder write is retried after the cooldown, not left
+    /// failed until logout: that would bring the stuck-cover bug back.
+    #[tokio::test]
+    async fn failed_placeholder_write_is_retried_after_the_cooldown() {
+        let scratch = ScratchDir::new();
+        let bad = unwritable_dir(&scratch);
+        let good = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+        let logo_less = radio(None, None);
+
+        let failed = resolve_with(
+            &mut state,
+            Some(&bad),
+            logo_less.clone(),
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+        assert_eq!(failed, None);
+
+        // Inside the cooldown, even a now-writable dir is not tried.
+        let cooling = resolve_with(
+            &mut state,
+            Some(good.path()),
+            logo_less.clone(),
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+        assert_eq!(cooling, None);
+
+        state.placeholder = PlaceholderSlot::Failed(past_the_cooldown());
+        let healed = resolve_with(
+            &mut state,
+            Some(good.path()),
+            logo_less,
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+        assert_eq!(healed, Some(placeholder_uri_in(good.path())));
+        assert_placeholder_on_disk(good.path());
     }
 
     #[tokio::test]

@@ -79,8 +79,9 @@ impl Nokkvi {
     ///
     /// If `app_service` is not yet initialised (e.g. window closed during
     /// login), the engine teardown is skipped but the MPRIS art cache is
-    /// still cleared so any in-flight `resolve_art_for_mpris` calls don't
-    /// leave a file behind for the dead-pid sweep to mop up later.
+    /// still cleared. A tick that resolves art after the clear can still
+    /// write one file before exit; the next launch's dead-pid sweep removes
+    /// it.
     fn begin_shutdown(&self) -> Task<Message> {
         let service = self.app_service.clone();
         Task::perform(

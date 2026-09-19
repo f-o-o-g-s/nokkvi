@@ -290,7 +290,7 @@ impl Nokkvi {
                             station.name.clone(),
                             String::new(), // Artist handles name sometimes? No, artist is empty
                             String::new(),
-                            MprisArtItem::Radio { icy_url },
+                            MprisArtItem::for_radio(station, icy_url),
                             Some(station.id.clone()),
                             engine_live_codec.unwrap_or_else(|| "radio".to_string()),
                             engine_live_bitrate,
@@ -313,9 +313,7 @@ impl Nokkvi {
                             s.title.clone(),
                             s.artist.clone(),
                             s.album.clone(),
-                            MprisArtItem::Song {
-                                cover_id: s.cover_art.clone().or_else(|| s.album_id.clone()),
-                            },
+                            MprisArtItem::for_song(s),
                             Some(s.id.clone()),
                             suffix,
                             br,
@@ -333,9 +331,10 @@ impl Nokkvi {
                     };
                 drop(qm);
 
-                // MPRIS art: `mpris_art_writer` owns the rules. A cover id is
-                // fetched through the authenticated client and published as a
-                // `file://` cache path, never as a credentialed getCoverArt URL.
+                // MPRIS art: `mpris_art_writer` owns the rules. A current song
+                // or station always gets an artUrl (cover or logo as a
+                // `file://` cache path, else http(s) stream art, else the app
+                // icon), and no credentialed getCoverArt URL reaches D-Bus.
                 let art_url = {
                     let (server_url, _credential) = shell.queue().get_server_config().await;
                     let albums = shell.albums().clone();
