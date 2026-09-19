@@ -851,8 +851,10 @@ pub struct SmartRules {
     pub limit: Option<u64>,
     pub limit_percent: Option<u64>,
     pub offset: Option<u64>,
-    /// Preserved, not typed-edited in v1 (per-playlist refreshDelay is
-    /// unreleased server-side anyway).
+    /// Per-playlist `refreshDelay` (Navidrome 0.64+), typed-edited as free
+    /// text in the rules form's Refresh row and checked by
+    /// [`is_valid_refresh_delay`]. `None` omits the key; the preview draft
+    /// never carries it ([`SmartRules::to_preview_value`]).
     pub refresh_delay: Option<String>,
     /// Every unrecognized top-level key, byte-preserved.
     pub extra: Map<String, Value>,
@@ -1013,6 +1015,20 @@ impl SmartRules {
             obj.insert(k.clone(), v.clone());
         }
         Value::Object(obj)
+    }
+
+    /// The body for the preview draft: [`Self::to_value`] minus any
+    /// `refreshDelay` key, matched case-insensitively the way `parse` does
+    /// (a non-string one rides `extra` under its source spelling). The delay
+    /// changes no result; on the draft it would make an unchanged re-press
+    /// serve rows as stale as the delay (`dispatch_re_evaluate` relies on
+    /// the server's refresh window). The real Save keeps `to_value`.
+    pub fn to_preview_value(&self) -> Value {
+        let mut value = self.to_value();
+        if let Some(obj) = value.as_object_mut() {
+            obj.retain(|key, _| key.to_lowercase() != "refreshdelay");
+        }
+        value
     }
 
     /// The sort keys the FORM renders: the typed keys with the legacy
@@ -1214,6 +1230,8 @@ pub enum DiagnosticLocation {
     Sort(usize),
     Limit,
     Offset,
+    /// The per-playlist refresh delay (Navidrome 0.64+).
+    RefreshDelay,
     /// The session's playlist-name input.
     Name,
 }
@@ -1331,6 +1349,77 @@ pub fn is_valid_date_literal(s: &str) -> bool {
     day <= max_day
 }
 
+/// Refresh-delay units with their length in nanoseconds, longest spelling
+/// first so `ms` wins over `m`. `w`/`d` are Navidrome's additions
+/// (`utils/time.go` `ParseDuration`); the rest are Go's `time.ParseDuration`
+/// units, both micro signs included.
+const REFRESH_DELAY_UNITS: [(&str, f64); 10] = [
+    ("ms", 1e6),
+    ("us", 1e3),
+    ("\u{b5}s", 1e3),
+    ("\u{3bc}s", 1e3),
+    ("ns", 1.0),
+    ("w", 604_800e9),
+    ("d", 86_400e9),
+    ("h", 3_600e9),
+    ("m", 60e9),
+    ("s", 1e9),
+];
+
+/// Ceiling for a refresh delay's total, just under Go's `i64` nanosecond
+/// overflow (~292 years); the margin absorbs float rounding in the sum.
+const MAX_REFRESH_DELAY_NS: f64 = 9.2e18;
+
+/// Whether `s` is a refresh delay Navidrome 0.64 is GUARANTEED to accept
+/// with the same meaning. Deliberately stricter than the server's parser
+/// (no sign, no spaces, no `.5h`, ASCII digits only): exactly `"0"`, or one
+/// or more `<digits>[.<digits>]<unit>` terms back to back whose sum stays
+/// below [`MAX_REFRESH_DELAY_NS`]. Everything the server re-emits after
+/// normalizing (`1w2d`, `36h`, `1h30m0s`, `500ms`) is inside this subset.
+pub fn is_valid_refresh_delay(s: &str) -> bool {
+    if s == "0" {
+        return true;
+    }
+    if s.is_empty() {
+        return false;
+    }
+    let mut rest = s;
+    let mut total_ns = 0.0_f64;
+    while !rest.is_empty() {
+        let int_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if int_len == 0 {
+            return false;
+        }
+        let mut num_len = int_len;
+        if rest[int_len..].starts_with('.') {
+            let frac_len = rest[int_len + 1..]
+                .bytes()
+                .take_while(u8::is_ascii_digit)
+                .count();
+            if frac_len == 0 {
+                return false;
+            }
+            num_len += 1 + frac_len;
+        }
+        let Ok(value) = rest[..num_len].parse::<f64>() else {
+            return false;
+        };
+        let after = &rest[num_len..];
+        let Some((unit, unit_ns)) = REFRESH_DELAY_UNITS
+            .iter()
+            .find(|(unit, _)| after.starts_with(unit))
+        else {
+            return false;
+        };
+        total_ns += value * unit_ns;
+        if !total_ns.is_finite() || total_ns >= MAX_REFRESH_DELAY_NS {
+            return false;
+        }
+        rest = &after[unit.len()..];
+    }
+    true
+}
+
 /// Validate a rule set. Errors block Preview/Save; warnings render dimmed.
 pub fn validate(
     rules: &SmartRules,
@@ -1400,6 +1489,23 @@ pub fn validate(
             DiagnosticLocation::Offset,
             "Offset only applies together with a limit — the server ignores it otherwise",
         ));
+    }
+    // `""` is unset server-side. Anything else that 0.64 can't parse fails
+    // the WHOLE rules decode there (`model/criteria/criteria.go`), and an
+    // older server stores the JSON verbatim, so it fails after an upgrade:
+    // an Error on every version.
+    if let Some(delay) = rules.refresh_delay.as_deref().filter(|d| !d.is_empty()) {
+        if !is_valid_refresh_delay(delay) {
+            out.push(Diagnostic::error(
+                DiagnosticLocation::RefreshDelay,
+                "Use a duration like 90m, 12h, 1d or 1w",
+            ));
+        } else if ctx.caps.version.is_some() && !ctx.caps.per_playlist_refresh_delay {
+            out.push(Diagnostic::warning(
+                DiagnosticLocation::RefreshDelay,
+                "This server ignores the refresh delay (needs Navidrome 0.64+)",
+            ));
+        }
     }
 
     // --- Name -------------------------------------------------------------
@@ -2683,6 +2789,146 @@ mod tests {
         assert!(!sort_floor_warning_at(&diags, 0), "codec on 0.62 is quiet");
     }
 
+    // --- Refresh delay -----------------------------------------------------
+
+    /// Everything the server itself re-emits, plus the owner's examples.
+    #[test]
+    fn refresh_delay_accepts_the_safe_grammar() {
+        for ok in [
+            "0",
+            "1d",
+            "1w",
+            "90m",
+            "12h",
+            "1w2d",
+            "1.5d",
+            "1h30m",
+            "1h30m0s",
+            "500ms",
+            "1.5s",
+            "10\u{b5}s",
+            "10\u{3bc}s",
+            "10us",
+            "10ns",
+            "36h",
+        ] {
+            assert!(is_valid_refresh_delay(ok), "{ok:?} must be accepted");
+        }
+    }
+
+    #[test]
+    fn refresh_delay_rejects_outside_the_safe_grammar() {
+        let long_digits = format!("{}h", "9".repeat(400));
+        for bad in [
+            "",
+            " ",
+            "3 days",
+            "1x",
+            "-1d",
+            "+1d",
+            "d",
+            "1",
+            "00",
+            "1.",
+            ".5h",
+            "1..5h",
+            "1D",
+            "1d ",
+            " 1d",
+            "\u{663}d",
+            "999999999999w",
+            "1mss",
+            "1hm",
+            long_digits.as_str(),
+        ] {
+            assert!(!is_valid_refresh_delay(bad), "{bad:?} must be rejected");
+        }
+    }
+
+    fn refresh_diags(delay: Option<&str>, caps: ServerCaps) -> Vec<Diagnostic> {
+        let registry = FieldRegistry::with_default_tags();
+        let mut rules = SmartRules::parse(&json!({ "all": [ { "is": { "loved": true } } ] }));
+        rules.refresh_delay = delay.map(str::to_owned);
+        validate(&rules, &registry, &ctx_with(caps))
+            .into_iter()
+            .filter(|d| d.location == DiagnosticLocation::RefreshDelay)
+            .collect()
+    }
+
+    /// An invalid delay fails the whole rules decode on 0.64, and a 0.63
+    /// server stores it verbatim to fail after an upgrade: an Error on every
+    /// version, known or not.
+    #[test]
+    fn refresh_delay_invalid_errors_on_every_version() {
+        for caps in [caps_064(), caps_063(), ServerCaps::default()] {
+            let diags = refresh_diags(Some("3 days"), caps);
+            assert_eq!(diags.len(), 1, "{caps:?}: {diags:?}");
+            assert_eq!(diags[0].severity, Severity::Error);
+            assert_eq!(diags[0].message, "Use a duration like 90m, 12h, 1d or 1w");
+        }
+    }
+
+    #[test]
+    fn refresh_delay_valid_warns_only_on_a_known_old_server() {
+        let diags = refresh_diags(Some("1d"), caps_063());
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Warning);
+        assert_eq!(
+            diags[0].message,
+            "This server ignores the refresh delay (needs Navidrome 0.64+)"
+        );
+        assert!(refresh_diags(Some("1d"), caps_064()).is_empty());
+        assert!(refresh_diags(Some("1d"), ServerCaps::default()).is_empty());
+        assert!(refresh_diags(None, caps_063()).is_empty());
+        assert!(refresh_diags(None, caps_064()).is_empty());
+        // The server treats "" as unset.
+        assert!(refresh_diags(Some(""), caps_064()).is_empty());
+        assert!(refresh_diags(Some(""), caps_063()).is_empty());
+    }
+
+    /// The preview body is `to_value` minus `refreshDelay` only; everything
+    /// else (offset, unknown keys) stays. `to_value` itself still carries it.
+    #[test]
+    fn preview_value_drops_only_the_refresh_delay() {
+        let v = json!({
+            "all": [
+                { "is": { "rating": 5 } },
+                { "futureOp": { "novelty": 1 } },
+                { "startsWith": { "title": "A" } }
+            ],
+            "sort": "+rating,-year",
+            "limit": 42,
+            "limitPercent": 10,
+            "offset": 5,
+            "refreshDelay": "8h",
+            "someFutureKey": { "nested": [1, 2, 3] }
+        });
+        let rules = SmartRules::parse(&v);
+        assert_eq!(rules.to_value(), v, "to_value unchanged");
+        let mut expected = v.clone();
+        expected
+            .as_object_mut()
+            .expect("object")
+            .remove("refreshDelay");
+        assert_eq!(rules.to_preview_value(), expected);
+        assert!(rules.extra.contains_key("someFutureKey"), "extra untouched");
+
+        // A non-string delay rides `extra` under its source spelling; the
+        // preview drops it the same case-insensitive way parse matched it.
+        let odd = json!({ "all": [ { "is": { "loved": true } } ], "RefreshDelay": 5 });
+        let rules = SmartRules::parse(&odd);
+        assert_eq!(rules.to_value(), odd);
+        assert_eq!(
+            rules.to_preview_value(),
+            json!({ "all": [ { "is": { "loved": true } } ] })
+        );
+
+        // Without a delay the two bodies are equal.
+        let plain = json!({ "all": [ { "is": { "loved": true } } ], "limit": 3 });
+        let rules = SmartRules::parse(&plain);
+        assert_eq!(rules.to_preview_value(), rules.to_value());
+    }
+
     // --- Registry ---------------------------------------------------------
 
     #[test]
@@ -2888,7 +3134,30 @@ mod tests {
                 })
         }
 
+        /// One `<digits>[.<digits>]<unit>` term, bounded so four of them
+        /// stay far below the i64-nanosecond ceiling.
+        fn arb_delay_term() -> impl Strategy<Value = String> {
+            let units = prop::sample::select(vec![
+                "w", "d", "h", "m", "s", "ms", "us", "\u{b5}s", "\u{3bc}s", "ns",
+            ]);
+            (0u32..1000, prop::option::of(0u32..1000), units).prop_map(|(int, frac, unit)| {
+                match frac {
+                    Some(f) => format!("{int}.{f}{unit}"),
+                    None => format!("{int}{unit}"),
+                }
+            })
+        }
+
         proptest! {
+            /// Any delay built from the grammar's terms is accepted.
+            #[test]
+            fn refresh_delay_grammar_terms_are_accepted(
+                terms in prop::collection::vec(arb_delay_term(), 1..5)
+            ) {
+                let delay = terms.concat();
+                prop_assert!(is_valid_refresh_delay(&delay), "{:?}", delay);
+            }
+
             /// to_value → parse → to_value is a fixpoint for arbitrary
             /// well-formed rule trees.
             #[test]
