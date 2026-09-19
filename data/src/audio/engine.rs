@@ -115,6 +115,17 @@ enum BlendEnding {
     CancelledAutoBlend,
 }
 
+/// A seek aimed at a planned skip's target while its decoder builds
+/// ([`CustomAudioEngine::apply_deferred_skip_seek`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DeferredSkipSeek {
+    /// The plan's generation: the `skip_fade_pending` latch value, which is
+    /// the source generation while the plan's window is open.
+    plan_generation: u64,
+    /// Where the user asked the skip target to play from.
+    position_ms: u64,
+}
+
 /// Outcome of a manual-skip crossfade attempt
 /// ([`CustomAudioEngine::crossfade_to_next`], M7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1310,9 +1321,18 @@ pub struct CustomAudioEngine {
     /// Armed when a pulled server queue is staged on a paused/stopped engine
     /// (`PlaybackController::cue_pulled_queue`) so the next Play resumes
     /// mid-song at the server-saved position — the decoder seeks BEFORE the
-    /// renderer starts, so no position-0 audio is ever rendered. Cleared by
-    /// `set_source` (any new load intent invalidates a stale offset).
+    /// renderer starts, so no position-0 audio is ever rendered. Also armed
+    /// by [`Self::apply_deferred_skip_seek`] when a skip lands its target by
+    /// a load instead of a blend. Cleared by `set_source` (any new load
+    /// intent invalidates a stale offset).
     pending_start_ms: Option<u64>,
+
+    /// A seek made while a planned skip's decoder was building (the
+    /// `skip_fade_pending` window), aimed at the skip target. Recorded by
+    /// `seek`, which leaves the outgoing untouched, and applied by
+    /// [`Self::apply_deferred_skip_seek`] once the target lands. Keyed by the
+    /// plan's generation, so a superseded or abandoned plan never applies it.
+    deferred_skip_seek: Option<DeferredSkipSeek>,
 
     // Renderer
     renderer: Arc<PlMutex<AudioRenderer>>,
@@ -1392,6 +1412,7 @@ impl CustomAudioEngine {
             next_format: AudioFormat::invalid(),
             next_source: String::new(),
             pending_start_ms: None,
+            deferred_skip_seek: None,
             renderer: Arc::new(PlMutex::new(AudioRenderer::new())),
             state: PlaybackState::Stopped,
             decode_loop: DecodeLoopHandle::new(),
@@ -1422,7 +1443,7 @@ impl CustomAudioEngine {
             " AudioEngine: set_source called with: {}",
             redact_subsonic_url(&source)
         );
-        // Any (re)load intent invalidates a staged pulled-queue start offset —
+        // Any (re)load intent invalidates a staged start offset —
         // cleared BEFORE the same-source early return so a stale offset can
         // never survive a reload of the track it was armed for.
         self.pending_start_ms = None;
@@ -1489,7 +1510,8 @@ impl CustomAudioEngine {
         self.pending_start_ms = Some(position_ms);
     }
 
-    /// The still-armed pulled-queue start offset, if any. A staged-but-
+    /// The still-armed start offset, if any (a pulled queue's saved position,
+    /// or a build-window seek on a staged skip target). A staged-but-
     /// never-played pull keeps its server position here while `position()`
     /// reads 0 — queue PUSH prefers this so a pull→push round trip without
     /// pressing Play doesn't zero the server's saved position.
@@ -1526,17 +1548,25 @@ impl CustomAudioEngine {
 
     /// Position (ms) of the track the QUEUE names — what the UI, MPRIS and
     /// queue push report alongside the queue's current song. While a manual
-    /// skip blends in, that is the skip target, not the still-audible
-    /// outgoing: the blend's elapsed time (the value finalize hands the
-    /// promoted track, so nothing jumps). Pairing the outgoing's clock with
-    /// the new title put seeks (slider, MPRIS relative seek), scrobble
-    /// timing, lyrics sync and the 80% prep trigger on the wrong track's
-    /// timeline.
+    /// skip is loading or blending in, that is the skip target, not the
+    /// still-audible outgoing: while its decoder builds, 0 (or where a seek
+    /// made in the window will start it), then the blend's elapsed time (the
+    /// value finalize hands the promoted track, so nothing jumps). Pairing
+    /// the outgoing's clock with the new title put seeks (slider, MPRIS
+    /// relative seek), scrobble timing, lyrics sync and the 80% prep trigger
+    /// on the wrong track's timeline.
     ///
     /// Engine-internal decisions about the AUDIBLE stream (the skip fire's
     /// remaining-audio clamp, end-of-track detection) read
     /// [`Self::stream_position`] instead.
     pub fn position(&self) -> u64 {
+        if self.skip_fade_window_pending() {
+            let plan_generation = self.channels.source_generation.current();
+            return self
+                .deferred_skip_seek
+                .filter(|deferred| deferred.plan_generation == plan_generation)
+                .map_or(0, |deferred| deferred.position_ms);
+        }
         if self.crossfade.skip_fade
             && let Some(played_ms) = self.renderer.lock().crossfade_played_ms()
         {
@@ -1558,12 +1588,12 @@ impl CustomAudioEngine {
     }
 
     /// Duration (ms) of the track the queue names, or 0 when the engine does
-    /// not know it. While a manual skip blends in, the target is the queue's
-    /// track and its length is reported as 0 until the promotion, so callers
-    /// fall back to the song's metadata length (the UI tick does) instead of
-    /// showing the outgoing's. See [`Self::position`].
+    /// not know it. While a manual skip is loading or blending in, the target
+    /// is the queue's track and its length is reported as 0 until the
+    /// promotion, so callers fall back to the song's metadata length (the UI
+    /// tick does) instead of showing the outgoing's. See [`Self::position`].
     pub fn duration(&self) -> u64 {
-        if self.crossfade.skip_fade {
+        if self.skip_fade_window_pending() || self.crossfade.skip_fade {
             return 0;
         }
         self.duration
@@ -1657,22 +1687,23 @@ impl CustomAudioEngine {
             trace!(" AudioEngine: duration restored: {}", self.duration);
         }
 
-        // One-shot pulled-queue start offset (see `pending_start_ms`): seek
-        // the just-initialized decoder BEFORE the renderer starts, so a
-        // paused-pull Play resumes mid-song with no position-0 audio at all.
+        // One-shot start offset (see `pending_start_ms` — a pulled queue's
+        // saved position, or a seek made during a skip's decoder build): seek
+        // the just-initialized decoder BEFORE the renderer starts, so the
+        // track starts mid-song with no position-0 audio at all.
         // Clamped to the real duration, mirroring `seek()`. The applied
         // target is carried into the renderer block below — the renderer's
         // position accounting must mirror the decoder seek.
-        let mut pulled_start_offset: Option<u64> = None;
+        let mut start_offset: Option<u64> = None;
         if let Some(pending_ms) = self.pending_start_ms.take() {
             let target = pending_ms.min(self.duration);
             if target > 0 {
                 if decoder.seek(target) {
                     self.position = target;
-                    pulled_start_offset = Some(target);
-                    debug!("🎵 AudioEngine: pulled-queue start offset applied: {target}ms");
+                    start_offset = Some(target);
+                    debug!("🎵 AudioEngine: start offset applied: {target}ms");
                 } else {
-                    warn!("Pulled-queue start offset seek to {target}ms failed; starting at 0");
+                    warn!("Start offset seek to {target}ms failed; starting at 0");
                 }
             }
         }
@@ -1707,14 +1738,14 @@ impl CustomAudioEngine {
                 );
             }
 
-            // Pulled-queue start offset: `renderer.init` zeroes
+            // Start offset: `renderer.init` zeroes
             // `position_offset`, so without this the playhead under-reports
             // by the full offset for the whole track (progress bar/MPRIS
             // wrong, a subsequent queue PUSH saves the corrupted position,
             // and the position-based crossfade/gapless triggers fire late —
             // hard EOF cut). Exact mirror of the crossfade-finalize offset
             // reset; `seek()` gets the same effect via `renderer.seek`.
-            if let Some(offset_ms) = pulled_start_offset {
+            if let Some(offset_ms) = start_offset {
                 renderer.reset_position_with_offset(offset_ms);
             }
 
@@ -2256,6 +2287,25 @@ impl CustomAudioEngine {
     /// This ensures the decoder lock is available for seeking.
     pub async fn seek(&mut self, position_ms: u64) -> SeekOutcome {
         use tracing::{debug, trace, warn};
+
+        // A planned skip's decoder is still building (the queue already
+        // names the target): the seek is aimed at the target, not the
+        // outgoing. Record it and leave the outgoing alone — seeking it would
+        // be lost at the fire, and the re-arm at the end would arm an auto
+        // blend against the already-advanced cursor. The target applies it
+        // when it lands (`apply_deferred_skip_seek`).
+        if self.skip_fade_window_pending() {
+            let plan_generation = self.channels.source_generation.current();
+            debug!(
+                "🔍 [SEEK] Skip-fade build window open — deferring {position_ms}ms to the skip \
+                 target (plan generation {plan_generation})"
+            );
+            self.deferred_skip_seek = Some(DeferredSkipSeek {
+                plan_generation,
+                position_ms,
+            });
+            return SeekOutcome::Settled;
+        }
 
         let seek_start = std::time::Instant::now();
         debug!(
@@ -3093,6 +3143,37 @@ impl CustomAudioEngine {
             .skip_fade_pending
             .store(generation, Ordering::Release);
         debug!("🔀 [SKIP FADE] Planned — window latched at generation {generation}");
+    }
+
+    /// Land a seek deferred during `plan_generation`'s build window (see
+    /// `seek`) on the skip target, now that the target is the engine's
+    /// source. The controller calls this on every `complete_skip_fade` exit
+    /// that lands the target:
+    /// - after the fire, a live skip blend runs into the target: `seek`
+    ///   promotes it, then seeks it;
+    /// - after a fallback `load_track_with_rg`, the target is loaded but not
+    ///   started: arm the start offset the next fresh `play()` consumes (the
+    ///   fallback's own `play()`, or the user's later Play).
+    ///
+    /// The record is always consumed; one made under another plan's
+    /// generation is dropped (a second skip replaced the target it was
+    /// aimed at).
+    pub(crate) async fn apply_deferred_skip_seek(&mut self, plan_generation: u64) {
+        let Some(deferred) = self.deferred_skip_seek.take() else {
+            return;
+        };
+        if deferred.plan_generation != plan_generation {
+            debug!(
+                "🔍 [SEEK] Dropping a seek deferred under plan generation {} (landing plan {})",
+                deferred.plan_generation, plan_generation
+            );
+            return;
+        }
+        if self.crossfade.skip_fade {
+            self.seek(deferred.position_ms).await;
+        } else {
+            self.set_pending_start_ms(deferred.position_ms);
+        }
     }
 
     /// Whether a planned skip-crossfade's build window is still open: the
@@ -6174,6 +6255,30 @@ mod tests {
         assert_eq!(armed.seek(30_000).await, SeekOutcome::Settled, "armed only");
     }
 
+    /// While a planned skip's decoder builds, the queue (and so the UI's title)
+    /// already names the target, so the clock the UI reads is the target's:
+    /// position 0, and duration 0 ("unknown" — the UI falls back to the
+    /// song's metadata length). The outgoing still sounds, but its clock
+    /// would pair the old track's time with the new title — and a seek
+    /// measured on it would be deferred to the target.
+    #[tokio::test]
+    async fn skip_clock_reads_the_target_while_its_decoder_builds() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.renderer.lock().reset_position_with_offset(100_000);
+        assert_eq!(engine.position(), 100_000, "precondition: outgoing clock");
+        assert_eq!(engine.duration(), 240_000, "precondition: outgoing length");
+
+        engine.plan_skip_fade().await;
+
+        assert_eq!(engine.position(), 0, "the target has not started");
+        assert_eq!(engine.duration(), 0, "the target's length is not known yet");
+
+        // A seek made in the window shows where the target will start.
+        engine.seek(30_000).await;
+        assert_eq!(engine.position(), 30_000);
+    }
+
     /// During the skip blend the UI clock is the incoming's: the blend's
     /// elapsed time (the same value finalize hands the promoted track, so
     /// nothing jumps at finalize) and duration 0 until the promotion.
@@ -6233,6 +6338,105 @@ mod tests {
             .await;
 
         assert_eq!(outcome, SkipFadeOutcome::Blocked, "no outgoing audio left");
+    }
+
+    /// A seek made while a planned skip's decoder builds (`nokkvi next;
+    /// nokkvi seek 30` — IPC `next` replies before the fire) is aimed at the
+    /// skip target. It is recorded under the plan's generation and the
+    /// outgoing is left untouched: its decode loop keeps running, and no
+    /// re-arm can fire an auto blend against the already-advanced cursor.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn seek_in_skip_window_is_deferred_and_leaves_the_outgoing_alone() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.crossfade.enabled = true;
+        engine.plan_skip_fade().await;
+        let plan_generation = engine.source_generation();
+        // A prep for the track after the target lands in the window.
+        engine
+            .store_prepared_decoder(
+                skip_ready_decoder(200_000),
+                "http://example.test/after-target".to_string(),
+                None,
+                PreparedTransitionDirectives::default(),
+            )
+            .await;
+        let decode_loop_before = engine.decode_loop.current();
+
+        engine.seek(30_000).await;
+
+        assert_eq!(
+            engine.deferred_skip_seek,
+            Some(DeferredSkipSeek {
+                plan_generation,
+                position_ms: 30_000,
+            }),
+            "the seek must be recorded for the skip target"
+        );
+        assert_eq!(
+            engine.decode_loop.current(),
+            decode_loop_before,
+            "the outgoing's decode loop must be left running"
+        );
+        assert!(engine.is_playing_source("http://example.test/current"));
+        assert!(!engine.renderer.lock().is_crossfade_armed());
+        assert!(engine.skip_fade_window_pending(), "the window stays open");
+    }
+
+    /// The Fired exit: once the blend into the target starts, the deferred
+    /// seek promotes the target and seeks it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deferred_skip_seek_lands_on_the_target_after_the_fire() {
+        let mut engine = CustomAudioEngine::new();
+        let fired = install_callback_counter(&mut engine);
+        prime_playing_engine(&mut engine);
+        engine.plan_skip_fade().await;
+        let plan_generation = engine.source_generation();
+        engine.seek(30_000).await;
+        let target = "http://example.test/target";
+        let outcome = engine
+            .crossfade_to_next(
+                skip_ready_decoder(180_000),
+                target.to_string(),
+                None,
+                plan_generation,
+            )
+            .await;
+        assert_eq!(outcome, SkipFadeOutcome::Fired, "precondition: blend fired");
+
+        engine.apply_deferred_skip_seek(plan_generation).await;
+
+        assert!(
+            engine.is_playing_source(target),
+            "the deferred seek must land on the skip target; source is {}",
+            engine.source()
+        );
+        assert!(engine.crossfade.phase.is_idle(), "the blend was promoted");
+        assert!(!engine.crossfade.skip_fade);
+        assert_eq!(engine.deferred_skip_seek, None, "the record is consumed");
+        assert_eq!(fired.load(Ordering::SeqCst), 0, "no second queue advance");
+    }
+
+    /// A record from a superseded plan never applies: a second Next replaced
+    /// the target the seek was aimed at.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deferred_skip_seek_from_a_superseded_plan_is_dropped() {
+        let mut engine = CustomAudioEngine::new();
+        prime_playing_engine(&mut engine);
+        engine.plan_skip_fade().await;
+        engine.seek(30_000).await;
+        // A second Next plans a new skip before the first one fired.
+        engine.plan_skip_fade().await;
+        let second_plan = engine.source_generation();
+        // The second plan lands its target by a load (the fallback exit).
+        engine
+            .load_track_with_rg("http://example.test/second-target", None, None)
+            .await;
+
+        engine.apply_deferred_skip_seek(second_plan).await;
+
+        assert_eq!(engine.pending_start_ms(), None, "the stale seek is dropped");
+        assert_eq!(engine.deferred_skip_seek, None);
     }
 
     /// Guard: a seek the engine refuses (unknown duration) leaves a live AUTO

@@ -41,9 +41,10 @@ All notable changes to this project will be documented in this file.
 - With ReplayGain on, stopping and replaying a track that arrived by crossfade no longer plays it at an earlier track's level.
 - Switching bit-perfect mode during a crossfade no longer leaves the badge claiming bit-perfect for a track that isn't.
 - Seeking during an automatic crossfade no longer makes the next song start without a crossfade.
-- The progress bar now shows the new track's time during a skip crossfade, not the previous track's.
-- MPRIS clients now see the new track's position and length during a skip crossfade.
-- Synced lyrics now follow the new track's time during a skip crossfade.
+- With Fade on Skip set to Crossfade, the progress bar now shows the new track's time as soon as you skip.
+- With Fade on Skip set to Crossfade, MPRIS clients now see the new track's position and length as soon as you skip.
+- With Fade on Skip set to Crossfade, synced lyrics now follow the new track's time as soon as you skip.
+- With Fade on Skip set to Crossfade, a seek sent right after skipping now starts the new track at that point.
 
 ### Removed
 

@@ -1454,6 +1454,9 @@ async fn complete_skip_fade(
                         "▶️ Now Playing: {} - {} ({}, skip fade)",
                         plan.song.title, plan.song.artist, plan.reason
                     );
+                    // A seek made during the build was aimed at the target:
+                    // promote the fresh blend and seek it.
+                    engine.apply_deferred_skip_seek(generation).await;
                     return Ok(());
                 }
                 SkipFadeOutcome::Stale => return Ok(()),
@@ -1490,6 +1493,8 @@ async fn complete_skip_fade(
                 plan.song.expected_duration_ms(),
             )
             .await;
+        // A seek made during the build arms the offset the later Play uses.
+        engine.apply_deferred_skip_seek(generation).await;
         debug!(
             "⏹️ [SKIP FADE] Engine stopped/paused during build — staged {} - {} without playing",
             plan.song.title, plan.song.artist
@@ -1504,6 +1509,10 @@ async fn complete_skip_fade(
             plan.song.expected_duration_ms(),
         )
         .await;
+    // Between the load (whose `set_source` clears any start offset) and the
+    // play that consumes it: a seek made during the build starts the target
+    // there instead of at 0:00.
+    engine.apply_deferred_skip_seek(generation).await;
     engine.play().await?;
     debug!(
         "▶️ Now Playing: {} - {} ({}, skip-fade fallback)",
@@ -1624,6 +1633,66 @@ mod tests {
         assert!(
             e.is_playing_source("http://127.0.0.1:9/rest/stream?id=b"),
             "the skip target must be staged so a later Play starts it"
+        );
+    }
+
+    /// A seek made during the build window is aimed at the skip target. When
+    /// the blend can't fire (here the build fails) and the fallback
+    /// hard-loads the target, the seek rides along as the start offset the
+    /// fallback's `play()` consumes. A failed `play()` returns before it
+    /// takes the offset, so the arm is still observable.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skip_fade_fallback_carries_a_build_window_seek_to_the_target() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let seq = std::sync::atomic::AtomicU64::new(1);
+        let generation;
+        {
+            let mut e = engine.lock().await;
+            e.force_playing_for_test();
+            e.plan_skip_fade().await;
+            generation = e.source_generation();
+            // `nokkvi next; nokkvi seek 30` — the seek lands mid-build.
+            e.seek(30_000).await;
+        }
+
+        let result = complete_skip_fade(&engine, &seq, unreachable_plan(), generation, 1).await;
+
+        let e = engine.lock().await;
+        assert!(result.is_err(), "the hard fallback attempts play()");
+        assert!(e.is_playing_source("http://127.0.0.1:9/rest/stream?id=b"));
+        assert_eq!(
+            e.pending_start_ms(),
+            Some(30_000),
+            "the target must start where the user seeked"
+        );
+    }
+
+    /// The staged-without-playing exit (a Pause landed during the build):
+    /// the seek arms the start offset, so a later Play starts the target
+    /// there.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skip_fade_staged_fallback_carries_a_build_window_seek_to_the_target() {
+        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let seq = std::sync::atomic::AtomicU64::new(1);
+        let generation;
+        {
+            let mut e = engine.lock().await;
+            e.force_playing_for_test();
+            e.plan_skip_fade().await;
+            generation = e.source_generation();
+            e.seek(30_000).await;
+            e.pause();
+        }
+
+        let result = complete_skip_fade(&engine, &seq, unreachable_plan(), generation, 1).await;
+
+        let e = engine.lock().await;
+        assert!(result.is_ok(), "the staged exit must not attempt play()");
+        assert!(e.is_playing_source("http://127.0.0.1:9/rest/stream?id=b"));
+        assert_eq!(
+            e.pending_start_ms(),
+            Some(30_000),
+            "a later Play must start the target where the user seeked"
         );
     }
 
