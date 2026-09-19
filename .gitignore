@@ -50,3 +50,6 @@ newfeatbugs.md
 
 # Local scripts and tools
 /local/
+
+# Nix
+flake.lock
