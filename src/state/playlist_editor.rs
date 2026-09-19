@@ -184,15 +184,10 @@ impl PlaylistEditorState {
         self.kind.rules_mut()
     }
 
-    /// Settle the slot list after rows left the buffer: the multi-selection,
-    /// its anchor and the click-to-focus marker are positions that now point
-    /// at shifted rows, so all three drop, and the viewport offset is clamped
-    /// into the shrunk buffer.
+    /// Settle the slot list after rows left the buffer (the editor view
+    /// renders the whole buffer).
     pub fn settle_slot_list_after_shrink(&mut self) {
-        self.common.clear_selection_for_refresh();
-        let total = self.songs.len();
-        let slot_list = &mut self.common.slot_list;
-        slot_list.viewport_offset = slot_list.viewport_offset.min(total.saturating_sub(1));
+        self.common.settle_after_shrink(self.songs.len());
     }
 
     /// Reset all in-progress within-list drag state. Called on drop; the editor's

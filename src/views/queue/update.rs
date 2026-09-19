@@ -344,8 +344,12 @@ impl QueuePage {
                         (Task::none(), QueueAction::AddToMix(seeds))
                     }
                 }
-                QueueContextEntry::Separator | QueueContextEntry::RemoveDuplicates => {
-                    (Task::none(), QueueAction::None)
+                QueueContextEntry::Separator => (Task::none(), QueueAction::None),
+                // A whole-queue action: neither the clicked row nor the
+                // selection narrows it, and the selection's indices shift.
+                QueueContextEntry::RemoveDuplicates => {
+                    self.common.clear_multi_selection();
+                    (Task::none(), QueueAction::RemoveDuplicates)
                 }
                 QueueContextEntry::SaveAsPlaylist => (Task::none(), QueueAction::SaveAsPlaylist),
                 QueueContextEntry::OpenBrowsingPanel => {

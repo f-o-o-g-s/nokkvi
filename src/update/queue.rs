@@ -10,7 +10,10 @@ use nokkvi_data::{
 };
 use tracing::{debug, error, trace};
 
-use super::components::{passive_artwork_version, prefetch_album_artwork_tasks};
+use super::components::{
+    duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
+    session_expired_message,
+};
 use crate::{
     Nokkvi, View,
     app_message::{
@@ -505,26 +508,19 @@ impl Nokkvi {
                     return Task::none();
                 }
 
-                let id_set: std::collections::HashSet<u64> = entry_ids.iter().copied().collect();
-                let title_text = if entry_ids.len() == 1 {
+                let id_set: HashSet<u64> = entry_ids.iter().copied().collect();
+                let title_text = if let [entry_id] = entry_ids[..] {
                     self.library
                         .queue_songs
                         .iter()
-                        .find(|s| id_set.contains(&s.entry_id))
+                        .find(|s| s.entry_id == entry_id)
                         .map(|s| format!("\"{}\"", s.title))
                         .unwrap_or_default()
                 } else {
                     format!("{} songs", entry_ids.len())
                 };
-
-                // Optimistic local removal by per-row entry_id — duplicate
-                // rows of the same song_id only lose the targeted row(s).
-                self.library
-                    .queue_songs
-                    .retain(|s| !id_set.contains(&s.entry_id));
-                // A search's owned list still holds the removed rows; refresh
-                // it so the tail reads the rows the view shows next.
-                filtered_owned = self.owned_filtered_queue();
+                // Optimistic: the backend removes exactly these rows.
+                filtered_owned = self.drop_queue_rows(&id_set);
                 self.toast_info(format!("Removed {title_text} from queue"));
 
                 // Goes through `AppService::remove_queue_entries` so the
@@ -535,6 +531,30 @@ impl Nokkvi {
                 self.shell_spawn("queue_remove_batch", move |shell| async move {
                     shell.remove_queue_entries(&entry_ids).await
                 });
+            }
+            QueueAction::RemoveDuplicates => {
+                // Not optimistic: which copy of the playing song stays hangs
+                // on the live play cursor, and the UI's mirror of it
+                // (`last_queue_current_entry_id`) lags a track change. The
+                // backend decides under the queue lock and reports the rows
+                // it dropped (`handle_queue_duplicates_removed`).
+                return self.shell_task(
+                    |shell| async move { shell.remove_queue_duplicates().await },
+                    |result| match result {
+                        Ok(dropped) => Message::QueueLoader(
+                            crate::app_message::QueueLoaderMessage::DuplicatesRemoved(dropped),
+                        ),
+                        Err(e) => session_expired_message(&e).unwrap_or_else(|| {
+                            error!(" Failed to remove duplicates from the queue: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to remove duplicates: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }),
+                    },
+                );
             }
             QueueAction::PlayNext(entry_ids) => {
                 if entry_ids.is_empty() {
@@ -809,6 +829,41 @@ impl Nokkvi {
         cmd.map(Message::Queue)
     }
 
+    /// Drop the rows `entry_ids` names from the queue the UI shows, by
+    /// per-row entry_id (duplicate rows of a song lose only the named ones),
+    /// then settle the slot list. Nothing reloads the queue after a
+    /// user-driven removal, and a large one could otherwise leave the
+    /// viewport, or the click-to-focus marker the next scroll snaps to, past
+    /// the end, where every slot renders empty. Returns the refreshed owned
+    /// search list for the `handle_queue` tail (`None` without a search).
+    fn drop_queue_rows(&mut self, entry_ids: &HashSet<u64>) -> Option<Vec<QueueSongUIViewData>> {
+        self.library
+            .queue_songs
+            .retain(|s| !entry_ids.contains(&s.entry_id));
+        let filtered_owned = self.owned_filtered_queue();
+        let shown = filtered_owned
+            .as_ref()
+            .map_or(self.library.queue_songs.len(), Vec::len);
+        self.queue_page.common.settle_after_shrink(shown);
+        filtered_owned
+    }
+
+    /// Mirror a finished Remove Duplicates: drop the rows the backend
+    /// dropped, toast the count (or that there were none), and fetch
+    /// thumbnails for rows a large shrink scrolled into view.
+    pub(crate) fn handle_queue_duplicates_removed(&mut self, dropped: Vec<u64>) -> Task<Message> {
+        if dropped.is_empty() {
+            self.toast_info("No duplicates found");
+            return Task::none();
+        }
+        let filtered_owned = self.drop_queue_rows(&dropped.iter().copied().collect());
+        self.toast_info(duplicates_removed_text(dropped.len()));
+        let rows = filtered_owned
+            .as_deref()
+            .unwrap_or(&self.library.queue_songs);
+        Task::batch(self.queue_viewport_artwork_tasks(rows))
+    }
+
     /// The owned row list an active search produced, or `None` when no search
     /// is active and callers borrow `library.queue_songs` directly. Returns an
     /// owned value so no borrow of `self` outlives the call.
@@ -952,11 +1007,9 @@ impl Nokkvi {
         )
     }
 
-    /// Routes `Message::QueueLoader(...)` arrivals to the existing
-    /// `handle_queue_loaded` handler. Queue is single-shot (the queue *is*
-    /// the entire dataset, not paged), so there's only one variant — but
-    /// keeping the dispatcher's match shape mirrors the paged domains' and
-    /// keeps the per-domain template uniform.
+    /// Routes `Message::QueueLoader(...)` arrivals: a queue load to
+    /// `handle_queue_loaded` (the queue *is* the entire dataset, not paged),
+    /// a finished Remove Duplicates to `handle_queue_duplicates_removed`.
     pub(crate) fn dispatch_queue_loader(
         &mut self,
         msg: crate::app_message::QueueLoaderMessage,
@@ -964,6 +1017,9 @@ impl Nokkvi {
         use crate::app_message::QueueLoaderMessage;
         match msg {
             QueueLoaderMessage::Loaded(result) => self.handle_queue_loaded(result),
+            QueueLoaderMessage::DuplicatesRemoved(dropped) => {
+                self.handle_queue_duplicates_removed(dropped)
+            }
         }
     }
 }

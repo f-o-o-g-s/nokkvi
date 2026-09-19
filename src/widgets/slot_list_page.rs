@@ -264,6 +264,18 @@ impl SlotListPageState {
         self.slot_list.clear_selection_for_refresh();
     }
 
+    /// Settle after rows left the list the view shows (`total` is its new
+    /// length): the multi-selection, its anchor and the click-to-focus
+    /// marker are positions that now point at shifted rows, so all three
+    /// drop, and the viewport offset is clamped into range. A kept marker
+    /// would snap the next scroll back to its stale position, past the end,
+    /// where every slot renders empty.
+    pub fn settle_after_shrink(&mut self, total: usize) {
+        self.clear_selection_for_refresh();
+        self.slot_list.viewport_offset =
+            self.slot_list.viewport_offset.min(total.saturating_sub(1));
+    }
+
     /// Drop only the click-to-focus marker, keeping indices + anchor.
     /// Delegates to [`SlotListView::clear_focus_cursor`].
     pub fn clear_focus_cursor(&mut self) {

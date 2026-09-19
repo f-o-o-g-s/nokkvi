@@ -1062,6 +1062,10 @@ pub enum PlaylistsLoaderMessage {
 #[derive(Debug, Clone)]
 pub enum QueueLoaderMessage {
     Loaded(Result<Vec<nokkvi_data::backend::queue::QueueSongUIViewData>, String>),
+    /// Remove Duplicates finished: the `entry_id`s the backend dropped
+    /// (decided from the live play cursor), for the UI to mirror. Empty
+    /// when the queue held no duplicates.
+    DuplicatesRemoved(Vec<u64>),
 }
 
 /// All Harbour shelves, delivered by one joined fetch. Boxed inside

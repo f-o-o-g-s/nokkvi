@@ -70,6 +70,7 @@ Each `define_view_columns!` entry has the form `Variant("Label"): field = defaul
 ## Context Menus & Toasts
 
 - Library views: `LibraryContextEntry`. Queue: `QueueContextEntry`. Strip: `StripContextEntry`. Radios: `RadioContextEntry` (Edit / Copy Stream URL / Set Custom Artwork… / Reset Artwork [gated on `logo_cover_art()`] / Refresh Artwork / Delete). Playlist parents add `PlaylistContextEntry::{SetCustomArtwork, ResetArtwork}` (Reset gated on `uploaded_image`). Large artwork panels take a `Vec<PanelMenuEntry<Message>>` (icon + label + message) built at the call site — see `widgets.md`.
+- Remove Duplicates sits under Remove from Queue / Remove from Playlist in the queue and editor row menus and acts on the whole list, never the clicked row or the selection (like Save Queue as Playlist). Toasts: `Removed N duplicate(s)` (`components::duplicates_removed_text`) / `No duplicates found`.
 - Toast helpers: `toast_info()`, `toast_success()`, `toast_warn()`, `toast_error()`.
 - Batch actions: context menu resolves targets via `evaluate_context_menu()` (or generates full-batch payloads for algorithmic views like Similar Songs), then dispatches batch operations. `clear_multi_selection()` after every batch completion.
 

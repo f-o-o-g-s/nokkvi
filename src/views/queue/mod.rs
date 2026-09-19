@@ -325,6 +325,11 @@ pub enum QueueAction {
     /// Duplicate-aware: targets specific rows rather than every row that
     /// shares a song_id.
     RemoveFromQueue(Vec<u64>),
+    /// Remove every later copy of a song from the WHOLE queue (the page only
+    /// sees the filtered rows under a search). The backend picks the rows
+    /// from the live play cursor, keeping its row as the song's copy, and
+    /// the root mirrors its answer.
+    RemoveDuplicates,
     /// Insert one or more queue rows after the currently-playing position,
     /// referenced by per-row `entry_id` so a single duplicate row can be
     /// promoted without dragging the other duplicate with it.

@@ -296,6 +296,19 @@ impl QueueService {
         Ok(effect)
     }
 
+    /// Remove Duplicates under one hold of the queue lock: decide the rows
+    /// from the live play cursor and drop them
+    /// ([`QueueManager::remove_duplicates`]). Returns the dropped `entry_id`s
+    /// plus the [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
+    pub async fn remove_duplicates(&self) -> Result<(Vec<u64>, NextTrackResetEffect)> {
+        let mut qm = self.queue_manager.lock().await;
+        let (dropped, effect) = qm.remove_duplicates()?;
+        if !dropped.is_empty() {
+            self.refresh_from_locked_manager(&qm).await?;
+        }
+        Ok((dropped, effect))
+    }
+
     /// Insert songs at a specific position in the queue (cross-pane drag drop).
     /// Returns a [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
     pub async fn insert_songs_at(

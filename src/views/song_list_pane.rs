@@ -11,7 +11,7 @@
 //! neutral [`SongListRowEvent`] vocabulary to their own `Message` via a single
 //! `on_event` closure, and supply the per-row context-menu chrome via a
 //! `build_context_menu` closure (the menu is caller-specific — the queue's
-//! 11-entry menu is not shared).
+//! full row menu is not shared).
 //!
 //! The per-mode column-visibility helpers (`rating_column_visible`,
 //! `album_column_visible`, …) live here too, beside the renderer that consumes

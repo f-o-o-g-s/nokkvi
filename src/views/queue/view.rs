@@ -838,7 +838,7 @@ impl QueuePage {
         // Render the queue's song rows through the shared `song_list_pane`.
         // The queue maps the neutral row-event vocabulary back to the exact
         // `QueueMessage` each interaction emitted before extraction, and
-        // supplies the queue-specific 11-entry context menu via the
+        // supplies the queue-specific row context menu via the
         // `build_context_menu` closure — so behavior is byte-identical.
         let overlay_open_menu = data.overlay.open_menu;
         let slot_list_content = song_list_pane(
@@ -867,13 +867,15 @@ impl QueuePage {
                 SongListRowEvent::ToggleLove(i) => QueueMessage::ClickToggleStar(i),
             },
             move |slot_button, item_idx| {
-                // Wrap in context menu — queue-specific 11-entry menu.
+                // Wrap in the queue's row context menu. Remove Duplicates and
+                // Save Queue as Playlist act on the whole queue, not the row.
                 use crate::widgets::context_menu::{context_menu, menu_button, menu_separator};
                 let entries = vec![
                     QueueContextEntry::Play,
                     QueueContextEntry::PlayNext,
                     QueueContextEntry::Separator,
                     QueueContextEntry::RemoveFromQueue,
+                    QueueContextEntry::RemoveDuplicates,
                     QueueContextEntry::Separator,
                     QueueContextEntry::AddToPlaylist,
                     QueueContextEntry::AddToMix,

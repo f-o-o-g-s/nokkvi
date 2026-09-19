@@ -514,6 +514,29 @@ impl QueueManager {
         tx.commit_save_all()
     }
 
+    /// Remove Duplicates: drop every later copy of a song from the whole
+    /// queue, keeping the row under the play cursor as its song's copy
+    /// (`nokkvi_data::utils::dedupe::duplicate_entry_ids`). Decided here,
+    /// under the caller's queue lock, from the AUTHORITATIVE cursor — a UI
+    /// mirror of it lags a track change — so the playing row can never be
+    /// among the dropped rows. Returns the dropped `entry_id`s (empty when
+    /// the queue holds no duplicates, in which case nothing was written).
+    pub fn remove_duplicates(&mut self) -> Result<(Vec<u64>, NextTrackResetEffect)> {
+        let cursor_row = self
+            .queue
+            .current_index()
+            .and_then(|idx| self.entry_id_at(idx));
+        let dropped = crate::utils::dedupe::duplicate_entry_ids(
+            self.queue
+                .rows
+                .iter()
+                .map(|row| (row.song_id.as_str(), row.entry_id)),
+            cursor_row,
+        );
+        let effect = self.remove_entries_by_ids(&dropped)?;
+        Ok((dropped, effect))
+    }
+
     pub fn toggle_shuffle(&mut self) -> Result<NextTrackResetEffect> {
         let mut tx = self.write();
         tx.queue.shuffle = !tx.queue.shuffle;
@@ -3487,7 +3510,84 @@ pub(crate) mod tests {
                 }
                 assert_queue_invariants(&fast, "single pass");
             }
+
+            /// Remove Duplicates keeps the cursor row AND the cursor on it,
+            /// wherever the cursor sits in any play order, and leaves every
+            /// song exactly once.
+            #[test]
+            fn remove_duplicates_keeps_the_cursor_row(
+                songs in proptest::collection::vec(0u8..6, 0..24),
+                shuffle in any::<bool>(),
+                cursor in proptest::option::of(0usize..24),
+            ) {
+                let [(mut qm, _temp), _] = twin_managers(&songs, shuffle, cursor, None);
+                let playing = qm
+                    .get_queue()
+                    .current_index()
+                    .and_then(|idx| qm.entry_id_at(idx));
+                let distinct: std::collections::HashSet<String> =
+                    qm.song_ids_snapshot().into_iter().collect();
+
+                let (dropped, _effect) = qm.remove_duplicates().expect("remove_duplicates");
+
+                if let Some(playing) = playing {
+                    prop_assert!(!dropped.contains(&playing));
+                    let now = qm.get_queue().current_index().and_then(|idx| qm.entry_id_at(idx));
+                    prop_assert_eq!(now, Some(playing), "the cursor stays on the playing row");
+                }
+                let after = qm.song_ids_snapshot();
+                let unique: std::collections::HashSet<String> = after.iter().cloned().collect();
+                prop_assert_eq!(unique.len(), after.len(), "every song once");
+                prop_assert_eq!(unique, distinct, "no song lost");
+                assert_queue_invariants(&qm, "remove_duplicates");
+            }
         }
+    }
+
+    #[test]
+    fn remove_duplicates_drops_an_earlier_copy_of_the_playing_song() {
+        let songs = ["a", "b", "a", "c"].map(make_test_song).to_vec();
+        let (mut qm, _temp) = make_test_manager(songs, Some(2));
+        let entry_ids = qm.entry_ids();
+
+        let (dropped, _effect) = qm.remove_duplicates().unwrap();
+
+        assert_eq!(
+            dropped,
+            [entry_ids[0]],
+            "the first a goes, the playing one stays"
+        );
+        assert_eq!(qm.song_ids_snapshot(), ["b", "a", "c"]);
+        assert_eq!(qm.get_queue().current_index(), Some(1));
+    }
+
+    #[test]
+    fn remove_duplicates_without_a_cursor_keeps_first_copies() {
+        let songs = ["a", "b", "a", "c", "b"].map(make_test_song).to_vec();
+        let (mut qm, _temp) = make_test_manager(songs, None);
+        let entry_ids = qm.entry_ids();
+
+        let (dropped, _effect) = qm.remove_duplicates().unwrap();
+
+        assert_eq!(dropped, [entry_ids[2], entry_ids[4]]);
+        assert_eq!(qm.song_ids_snapshot(), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn remove_duplicates_with_none_found_changes_nothing() {
+        let songs = ["a", "b", "c"].map(make_test_song).to_vec();
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
+        qm.queue.queued = Some(2);
+
+        let (dropped, _effect) = qm.remove_duplicates().unwrap();
+
+        assert!(dropped.is_empty());
+        assert_eq!(qm.song_ids_snapshot(), ["a", "b", "c"]);
+        assert_eq!(
+            qm.queue.queued,
+            Some(2),
+            "no write, so the gapless slot stays"
+        );
     }
 
     /// The single-pass removal is durable: a manager reopened on the same

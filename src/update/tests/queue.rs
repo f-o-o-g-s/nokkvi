@@ -2958,3 +2958,200 @@ fn drag_drop_lands_on_the_rendered_row_with_the_banner_up() {
          row): {mismatches:?}"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Remove Duplicates (queue row menu)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// A queue with one row per id in `ids` (repeats are duplicate rows with
+/// their own entry_ids); titles are `Song <id>` so a search can target one.
+fn app_with_queue(ids: &[&str]) -> crate::Nokkvi {
+    let mut app = test_app();
+    app.library.queue_songs = ids
+        .iter()
+        .map(|id| make_queue_song(id, &format!("Song {id}"), "Artist", "Album"))
+        .collect();
+    app
+}
+
+fn queue_ids(app: &crate::Nokkvi) -> Vec<&str> {
+    app.library
+        .queue_songs
+        .iter()
+        .map(|s| s.id.as_str())
+        .collect()
+}
+
+fn remove_queue_duplicates(app: &mut crate::Nokkvi) {
+    use crate::views::{QueueMessage, queue::QueueContextEntry};
+
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(
+        0,
+        QueueContextEntry::RemoveDuplicates,
+    ));
+}
+
+/// The backend's answer to Remove Duplicates: the rows it dropped.
+fn duplicates_removed(app: &mut crate::Nokkvi, dropped: Vec<u64>) {
+    let _ = app.update(crate::app_message::Message::QueueLoader(
+        crate::app_message::QueueLoaderMessage::DuplicatesRemoved(dropped),
+    ));
+}
+
+fn entry_ids_at(app: &crate::Nokkvi, rows: &[usize]) -> Vec<u64> {
+    rows.iter()
+        .map(|&i| app.library.queue_songs[i].entry_id)
+        .collect()
+}
+
+fn last_queue_toast(
+    app: &crate::Nokkvi,
+) -> Option<(nokkvi_data::types::toast::ToastLevel, String)> {
+    app.toast
+        .toasts
+        .back()
+        .map(|t| (t.level, t.message.clone()))
+}
+
+#[test]
+fn queue_remove_duplicates_waits_for_the_backend() {
+    // Which copy of the playing song stays hangs on the live play cursor,
+    // which the UI mirror lags; the menu entry asks the backend and the rows
+    // stay until its answer arrives. The selection's indices are dropped at
+    // once (they shift either way).
+    let mut app = app_with_queue(&["a", "b", "a", "c"]);
+    app.queue_page.common.slot_list.selected_indices.insert(1);
+    app.queue_page.common.slot_list.selected_indices.insert(3);
+    let before: Vec<u64> = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+
+    remove_queue_duplicates(&mut app);
+
+    let after: Vec<u64> = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+    assert_eq!(after, before, "no optimistic guess at the kept copies");
+    assert!(app.queue_page.common.slot_list.selected_indices.is_empty());
+}
+
+#[test]
+fn queue_duplicates_removed_drops_the_backend_rows() {
+    // The backend kept the playing second a and dropped the first.
+    let mut app = app_with_queue(&["a", "b", "a", "c"]);
+    let dropped = entry_ids_at(&app, &[0]);
+
+    duplicates_removed(&mut app, dropped);
+
+    assert_eq!(queue_ids(&app), ["b", "a", "c"]);
+}
+
+#[test]
+fn queue_duplicates_removed_under_a_search_shows_the_survivors() {
+    // The search shows both b; the dropped hidden a goes too, and the rows
+    // the view reads afterwards are the filtered survivors.
+    let mut app = app_with_queue(&["a", "b", "a", "b"]);
+    app.queue_page.common.search_query = "song b".to_string();
+    assert_eq!(app.filter_queue_songs().len(), 2, "the search shows both b");
+    let dropped = entry_ids_at(&app, &[2, 3]);
+
+    duplicates_removed(&mut app, dropped);
+
+    assert_eq!(queue_ids(&app), ["a", "b"]);
+    let shown: Vec<String> = app
+        .filter_queue_songs()
+        .iter()
+        .map(|s| s.id.clone())
+        .collect();
+    assert_eq!(shown, ["b"]);
+}
+
+#[test]
+fn queue_duplicates_removed_with_none_found_says_so() {
+    use nokkvi_data::types::toast::ToastLevel;
+
+    let mut app = app_with_queue(&["a", "b", "c"]);
+    let before: Vec<u64> = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+
+    duplicates_removed(&mut app, Vec::new());
+
+    let after: Vec<u64> = app.library.queue_songs.iter().map(|s| s.entry_id).collect();
+    assert_eq!(after, before, "nothing removed");
+    assert_eq!(
+        last_queue_toast(&app),
+        Some((ToastLevel::Info, "No duplicates found".to_string()))
+    );
+}
+
+#[test]
+fn queue_duplicates_removed_settles_the_slot_list() {
+    // One album queued four times, row 18 clicked (the focus marker the next
+    // scroll snaps to): after the shrink to 5 rows neither the viewport nor
+    // the marker may sit past the end.
+    let ids: Vec<String> = (0..20).map(|i| format!("s{}", i % 5)).collect();
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut app = app_with_queue(&id_refs);
+    {
+        let slot_list = &mut app.queue_page.common.slot_list;
+        slot_list.selected_indices.insert(12);
+        slot_list.anchor_index = Some(12);
+        slot_list.selected_offset = Some(18);
+        slot_list.viewport_offset = 18;
+    }
+    let dropped = entry_ids_at(&app, &(5..20).collect::<Vec<_>>());
+
+    duplicates_removed(&mut app, dropped);
+
+    assert_eq!(app.library.queue_songs.len(), 5);
+    let slot_list = &app.queue_page.common.slot_list;
+    assert!(slot_list.selected_indices.is_empty(), "selection cleared");
+    assert_eq!(slot_list.anchor_index, None, "anchor cleared");
+    assert_eq!(slot_list.selected_offset, None, "focus marker cleared");
+    assert!(
+        slot_list.viewport_offset < 5,
+        "viewport offset {} clamped into the shrunk queue",
+        slot_list.viewport_offset
+    );
+}
+
+#[test]
+fn queue_duplicates_removed_toast_counts() {
+    let mut app = app_with_queue(&["a", "b", "a"]);
+    let dropped = entry_ids_at(&app, &[2]);
+    duplicates_removed(&mut app, dropped);
+    assert_eq!(
+        last_queue_toast(&app).map(|(_, m)| m),
+        Some("Removed 1 duplicate".to_string())
+    );
+
+    let mut app = app_with_queue(&["a", "a", "a", "b", "b"]);
+    let dropped = entry_ids_at(&app, &[1, 2, 4]);
+    duplicates_removed(&mut app, dropped);
+    assert_eq!(
+        last_queue_toast(&app).map(|(_, m)| m),
+        Some("Removed 3 duplicates".to_string())
+    );
+}
+
+#[test]
+fn remove_from_queue_settles_the_slot_list_after_a_large_removal() {
+    use crate::views::{QueueMessage, queue::QueueContextEntry};
+
+    let ids: Vec<String> = (0..20).map(|i| format!("s{i}")).collect();
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut app = app_with_queue(&id_refs);
+    for i in 5..20 {
+        app.queue_page.common.slot_list.selected_indices.insert(i);
+    }
+    app.queue_page.common.slot_list.selected_offset = Some(18);
+    app.queue_page.common.slot_list.viewport_offset = 18;
+
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(
+        18,
+        QueueContextEntry::RemoveFromQueue,
+    ));
+
+    assert_eq!(app.library.queue_songs.len(), 5);
+    let slot_list = &app.queue_page.common.slot_list;
+    assert_eq!(slot_list.selected_offset, None, "focus marker cleared");
+    assert!(
+        slot_list.viewport_offset < 5,
+        "the viewport must not sit past the end, where every slot renders empty"
+    );
+}

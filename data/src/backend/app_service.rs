@@ -1668,6 +1668,30 @@ impl AppService {
         Ok(())
     }
 
+    /// Remove Duplicates from the queue: drop every later copy of a song,
+    /// keeping the row under the play cursor as its song's copy, and return
+    /// the dropped `entry_id`s for the UI to mirror (empty: none found).
+    ///
+    /// The rows are decided in the backend, under the queue lock, from the
+    /// live cursor ([`QueueService::remove_duplicates`]); a UI mirror of the
+    /// cursor lags a track change, and dropping the row that just started
+    /// would cut the song. With the cursor row kept by construction, playback
+    /// never has to follow the queue, so this skips
+    /// [`crate::services::playback::decide_removal_aftermath`] on purpose:
+    /// that plan keys on the navigator's song, which can differ from the
+    /// cursor's (a station started after Clear Queue, Play Next on the
+    /// playing row) and would then stop a station or reload the engine.
+    /// Only the gapless prep is reset, since a dropped row may be the
+    /// prepared next track.
+    pub async fn remove_queue_duplicates(&self) -> Result<Vec<u64>> {
+        let (dropped, effect) = self.queue_service.remove_duplicates().await?;
+        // Nothing written, nothing to reset: an armed crossfade stays armed.
+        if !dropped.is_empty() {
+            effect.apply_to(&self.audio_engine()).await;
+        }
+        Ok(dropped)
+    }
+
     /// Move a queue item from one position to another (drag-and-drop reorder
     /// or Shift+↑ / Shift+↓ hotkey). Mutates the queue, refreshes the
     /// reactive projection, and invalidates the audio engine's prepared
