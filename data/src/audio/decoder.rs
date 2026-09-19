@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
 use anyhow::{Context, Result};
 use symphonia::core::{
     audio::Channels,
@@ -51,6 +56,40 @@ const STREAM_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// cleanly during shutdown without waiting for TCP data.
 const READ_RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// Consumer-side wait while the format probe reads a radio stream's FIRST
+/// bytes. Icecast starts a new listener at the next Ogg page, so the first
+/// audio can lag the response headers by a page's worth of time (Radio SEGA
+/// measured 260–500 ms), and the probe reads a `TimedOut` as "no data" and
+/// fails. The probe has no generation check to keep responsive, so it gets
+/// the same 10 s budget as connecting (the radio client's `connect_timeout`);
+/// `open_input` drops back to [`READ_RECV_TIMEOUT`] once the probe returns.
+const PROBE_RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long [`AsyncNetworkBuffer`]'s `Read` waits for the next chunk. Shared
+/// between `open_input` and the buffer it builds, because the buffer is
+/// boxed inside the format reader by the time the probe returns and the wait
+/// must shrink from [`PROBE_RECV_TIMEOUT`] to [`READ_RECV_TIMEOUT`].
+#[derive(Clone)]
+struct RecvTimeout(Arc<AtomicU64>);
+
+impl RecvTimeout {
+    fn new(timeout: std::time::Duration) -> Self {
+        Self(Arc::new(AtomicU64::new(Self::to_millis(timeout))))
+    }
+
+    fn set(&self, timeout: std::time::Duration) {
+        self.0.store(Self::to_millis(timeout), Ordering::Relaxed);
+    }
+
+    fn get(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.0.load(Ordering::Relaxed))
+    }
+
+    fn to_millis(timeout: std::time::Duration) -> u64 {
+        u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)
+    }
+}
+
 /// A background async task that eagerly consumes an infinite HTTP stream and
 /// forwards chunks over a bounded channel to the sync `Read` consumer.
 ///
@@ -80,10 +119,11 @@ struct AsyncNetworkBuffer {
     leftover: Bytes,
     cancel: CancellationToken,
     task: Option<tokio::task::JoinHandle<()>>,
+    recv_timeout: RecvTimeout,
 }
 
 impl AsyncNetworkBuffer {
-    pub(crate) fn new_async(response: reqwest::Response) -> Self {
+    pub(crate) fn new_async(response: reqwest::Response, recv_timeout: RecvTimeout) -> Self {
         let (tx, rx) = mpsc::channel::<Bytes>(64);
         let cancel = CancellationToken::new();
         let child_cancel = cancel.clone();
@@ -136,6 +176,7 @@ impl AsyncNetworkBuffer {
             leftover: Bytes::new(),
             cancel,
             task: Some(task),
+            recv_timeout,
         }
     }
 }
@@ -149,15 +190,19 @@ impl std::io::Read for AsyncNetworkBuffer {
                 Ok(chunk) => self.leftover = chunk,
                 Err(mpsc::error::TryRecvError::Disconnected) => return Ok(0),
                 Err(mpsc::error::TryRecvError::Empty) => {
-                    // Slow path: wait up to READ_RECV_TIMEOUT for the next chunk.
+                    // Slow path: wait up to the current receive timeout for the next
+                    // chunk (PROBE_RECV_TIMEOUT while the probe reads the first bytes,
+                    // READ_RECV_TIMEOUT once decoding runs).
                     // SAFETY: this must be called from within block_in_place (the decode
-                    // loop at engine.rs guarantees this). Handle::block_on is legal there.
+                    // loop at engine.rs and the probe in open_input guarantee this).
+                    // Handle::block_on is legal there.
                     let handle = tokio::runtime::Handle::current();
-                    match handle.block_on(tokio::time::timeout(READ_RECV_TIMEOUT, self.rx.recv())) {
+                    let wait = self.recv_timeout.get();
+                    match handle.block_on(tokio::time::timeout(wait, self.rx.recv())) {
                         Ok(Some(chunk)) => self.leftover = chunk,
                         // Receiver got a chunk but sender was dropped simultaneously — treat as EOF.
                         Ok(None) => return Ok(0),
-                        // 500 ms elapsed without data — return TimedOut so the decode loop can
+                        // The wait elapsed without data — return TimedOut so the decode loop can
                         // check its generation counter and exit cleanly on shutdown.
                         //
                         // IMPORTANT: Do NOT use Interrupted here. std::io::Read::read_exact()
@@ -557,6 +602,10 @@ impl AudioDecoder {
 
         self.close_input();
 
+        // Set by the radio branch: its buffer waits PROBE_RECV_TIMEOUT for the
+        // stream's first bytes and drops to READ_RECV_TIMEOUT after the probe.
+        let mut radio_recv_timeout: Option<RecvTimeout> = None;
+
         // Determine if URL is HTTP/HTTPS or file path
         let (mss, hint_from_data) = if self.url.starts_with("http://")
             || self.url.starts_with("https://")
@@ -778,7 +827,9 @@ impl AudioDecoder {
                 let interval = icy_headers.metadata_interval();
 
                 // Buffer the response using a dedicated async tokio task
-                let buffered_response = AsyncNetworkBuffer::new_async(response);
+                let recv_timeout = RecvTimeout::new(PROBE_RECV_TIMEOUT);
+                radio_recv_timeout = Some(recv_timeout.clone());
+                let buffered_response = AsyncNetworkBuffer::new_async(response, recv_timeout);
 
                 let media_source: Box<dyn MediaSource> = if let Some(interval) = interval {
                     let interval_usize = interval.get();
@@ -845,6 +896,9 @@ impl AudioDecoder {
                 );
             })
         })?;
+        if let Some(recv_timeout) = &radio_recv_timeout {
+            recv_timeout.set(READ_RECV_TIMEOUT);
+        }
         trace!(
             " [DECODER] Format probe + decoder construction successful (took {:?})",
             probe_start.elapsed()
@@ -1968,6 +2022,7 @@ mod tests {
             leftover: Bytes::new(),
             cancel,
             task: Some(task),
+            recv_timeout: RecvTimeout::new(READ_RECV_TIMEOUT),
         };
 
         // Run the Drop from a spawned task so it executes on a worker thread —
@@ -2012,5 +2067,88 @@ mod tests {
             std::time::Duration::from_secs(30),
             "tcp_keepalive should be 30 s"
         );
+    }
+
+    /// How long the fake station in [`spawn_slow_start_station`] holds its
+    /// first audio bytes back after the response headers.
+    const FIRST_BYTE_DELAY: std::time::Duration = std::time::Duration::from_millis(800);
+
+    /// Local Icecast-shaped station: `icy-` header, no Content-Length, the
+    /// response headers at once, then the MP3 fixture after
+    /// [`FIRST_BYTE_DELAY`], then the socket stays open with no more data (a
+    /// stalled stream). Returns the stream URL.
+    async fn spawn_slow_start_station() -> String {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        const AUDIO: &[u8] = include_bytes!("../../testdata/xing_crc_protected.mp3");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut request = [0u8; 2048];
+                    let len = socket.read(&mut request).await.unwrap_or(0);
+                    let headers = b"HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\n\
+                        icy-name: slow start\r\nConnection: close\r\n\r\n";
+                    let _ = socket.write_all(headers).await;
+                    if request[..len].starts_with(b"GET") {
+                        tokio::time::sleep(FIRST_BYTE_DELAY).await;
+                        let _ = socket.write_all(AUDIO).await;
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    }
+                });
+            }
+        });
+        format!("http://{addr}/stream.mp3")
+    }
+
+    /// A station that answers the GET promptly but holds its first audio bytes
+    /// back for longer than `READ_RECV_TIMEOUT` must still open. Icecast starts
+    /// a new listener at the next Ogg page, so the first audio can lag the
+    /// response headers by a page's worth of time (Radio SEGA measured
+    /// 260–500 ms, so its first play attempt failed about half the time).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn radio_open_waits_for_a_slow_first_audio_byte() {
+        let url = spawn_slow_start_station().await;
+
+        let mut decoder = AudioDecoder::default();
+        let result = decoder.init(&url).await;
+
+        assert!(
+            result.is_ok(),
+            "a station whose first audio byte lags the headers by {FIRST_BYTE_DELAY:?} \
+             failed to open: {result:?}"
+        );
+        assert!(decoder.is_infinite_stream());
+    }
+
+    /// Once the probe returns, a stalled radio stream must hand control back
+    /// to the decode loop within `READ_RECV_TIMEOUT` again, not the probe's
+    /// 10 s — the loop's generation check is what makes stop/skip responsive.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn radio_read_after_probe_returns_promptly_on_a_stall() {
+        let url = spawn_slow_start_station().await;
+        let mut decoder = AudioDecoder::default();
+        decoder
+            .init(&url)
+            .await
+            .expect("the slow-start station must open");
+
+        // The fixture decodes to ~0.7 MB of f32; asking for more drains it and
+        // then blocks on the stalled socket until the receive timeout.
+        let started = std::time::Instant::now();
+        tokio::task::block_in_place(|| decoder.read_buffer(4 * 1024 * 1024));
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "read_buffer on a stalled stream took {elapsed:?}; the probe's receive \
+             timeout leaked into the decode path"
+        );
+        assert!(!decoder.is_eof(), "a stall is not the end of the stream");
     }
 }

@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Some CRC-protected VBR MP3s no longer stop playing before their real end.
 - MP3s carrying LAME gapless info no longer lose a few milliseconds of audio at the end.
 - Ogg Vorbis and Opus radio stations no longer cut out and reconnect at each song change.
+- Radio stations that are slow to send their first audio no longer fail to start on the first try.
 
 ### Removed
 
