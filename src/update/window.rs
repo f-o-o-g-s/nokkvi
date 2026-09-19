@@ -38,75 +38,30 @@ impl Nokkvi {
         self.prefetch_viewport_artwork()
     }
 
-    /// Recompute every page's `slot_count` to match what the view actually
-    /// renders given the current window dimensions AND the active artwork
-    /// column mode. Vertical artwork modes (and Auto's portrait fallback)
-    /// stack the artwork above the slot list, eating ~`layout.extent` + pad
-    /// pixels from the available height — without re-syncing here, the
-    /// stored slot_count stays at the horizontal-layout value and
-    /// `pending_expand_resolve` lands the auto-expanded row above the visible
-    /// viewport (the row only the user can rescue with a manual scroll).
+    /// Recompute every page's stored `slot_count` so it equals the count the
+    /// page's view renders. Each page's count comes from the SAME chrome
+    /// helper and inputs its view reads: `library_page_chrome` for the pooled
+    /// library pages, `queue_chrome_inputs` for the queue, and
+    /// `editor_effective_chrome` for the playlist editor. The inputs cover
+    /// the header's auto-hide collapse (held expanded by an open header menu),
+    /// the select-all bar, the queue's "Playing From" banner, and the pane the
+    /// page renders in, which sizes any artwork stacked above the list.
+    ///
+    /// The stored count is read between renders by the within-list drag
+    /// mappers (queue, editor), find-and-expand landing (`idx + slot_count /
+    /// 2`), the scrollbar thumb, `get_center_item_index`, and the prefetch
+    /// radius; a drift lands drags and found rows off by one or two.
     pub(crate) fn resync_slot_counts(&mut self) {
-        use crate::widgets::{
-            base_slot_list_layout::{BaseSlotListLayoutConfig, vertical_artwork_chrome},
-            slot_list::{SlotListConfig, chrome_height_with_header},
-        };
+        use crate::widgets::slot_list::SlotListConfig;
 
-        // The vertical artwork chrome is governed by the window + artwork
-        // column only, so it's shared across pages. Probe it with the expanded
-        // footprint — the collapse delta is far too small to flip the
-        // landscape/portrait artwork fit.
-        let probe = BaseSlotListLayoutConfig {
-            window_width: self.content_pane_width(),
-            window_height: self.window.height,
-            show_artwork_column: true,
-            slot_list_chrome: chrome_height_with_header(false),
-            elevated: false,
-        };
-        let vertical = vertical_artwork_chrome(&probe);
-
-        // Per-page collapse state: when the auto-hide toolbar is enabled, a page
-        // whose toolbar isn't currently revealed renders the SHORTER collapsed
-        // header and therefore packs MORE slots. The stored count must reflect
-        // that — a hardcoded expanded footprint desyncs every consumer that
-        // reads slot_count without first revealing the toolbar: find-and-expand
-        // row landing centers on `slot_count/2` (lands the row a slot too low).
-        // Cross-pane drag resolves its drop row from `hovered_slot` instead, but
-        // the within-list drags of the queue and the playlist editor map slots
-        // to rows through the stored count (both are sized from their own view
-        // chrome below). The reveal-on-read assumption holds for the keyboard
-        // scroll path but not these (nor center-on-playing, which no longer
-        // reveals the toolbar — it relies on the stored collapsed count just
-        // like find-and-expand).
-        //
-        // When auto-hide is OFF, `toolbar_collapsed` is always `false`, so this
-        // reduces to the previous expanded-footprint behavior exactly.
-        let autohide = crate::theme::is_autohide_toolbar();
         let window_height = self.window.height;
-        let sc = |collapsed: bool| {
-            SlotListConfig::with_dynamic_slots(
-                window_height,
-                chrome_height_with_header(collapsed) + vertical,
-            )
-            .slot_count
-        };
-        // At most two distinct footprints exist; compute each once instead of
-        // re-running the float-heavy `with_dynamic_slots` per page. With
-        // auto-hide off, every page is `expanded`, so `sc_collapsed` is never
-        // computed.
-        let sc_expanded = sc(false);
-        let sc_collapsed = if autohide { sc(true) } else { sc_expanded };
 
-        // One loop over the shared page-commons array keeps the read and write
-        // for each page on the same binding — and reusing
-        // `all_slot_list_commons_mut` (instead of a second hand-maintained
-        // list) means a page added there is sized here automatically.
-        for common in self.all_slot_list_commons_mut() {
-            common.slot_list.slot_count = if common.toolbar_collapsed(autohide, false) {
-                sc_collapsed
-            } else {
-                sc_expanded
-            };
+        // `LibraryPage::ALL` plus the queue name every page in
+        // `all_slot_list_commons_mut` (pinned by
+        // `library_pages_and_the_queue_cover_every_pooled_page`).
+        for page in crate::app_view::LibraryPage::ALL {
+            let count = self.library_page_chrome(page).slot_count();
+            self.library_page_common_mut(page).slot_list.slot_count = count;
         }
 
         // The queue stacks its own bars above the list (the "Playing From"

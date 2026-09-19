@@ -1172,6 +1172,10 @@ pub(crate) struct HarbourViewData<'a> {
     pub genre_collage: &'a HashMap<String, Vec<image::Handle>>,
     pub window_width: f32,
     pub window_height: f32,
+    /// Slot-list chrome inputs (header collapse, select-all bar, pane size),
+    /// shared with `resync_slot_counts` so the stored `slot_count` equals the
+    /// rendered one. `window_width` / `window_height` above carry its pane size.
+    pub chrome: crate::widgets::slot_list::SlotListChrome,
     pub modifiers: iced::keyboard::Modifiers,
     pub elevated: bool,
     pub stable_viewport: bool,
@@ -1239,12 +1243,10 @@ impl HarbourPage {
 
         use crate::widgets::{
             base_slot_list_layout::BaseSlotListLayoutConfig,
-            slot_list::{
-                SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
-            },
+            slot_list::{SlotListConfig, slot_list_view_with_scroll},
         };
 
-        let slot_list_chrome = chrome_height_with_select_header(false, false);
+        let slot_list_chrome = data.chrome.height();
         let layout_config = BaseSlotListLayoutConfig {
             window_width: data.window_width,
             window_height: data.window_height,
@@ -1274,13 +1276,11 @@ impl HarbourPage {
             );
         }
 
-        let vertical_artwork_chrome =
-            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
-        let config = SlotListConfig::with_dynamic_slots(
-            data.window_height,
-            slot_list_chrome + vertical_artwork_chrome,
-        )
-        .with_modifiers(data.modifiers);
+        // `effective()` adds the artwork stacked above the list at this pane
+        // size; `resync_slot_counts` sizes the stored count from the same call.
+        let config =
+            SlotListConfig::with_dynamic_slots(data.window_height, data.chrome.effective())
+                .with_modifiers(data.modifiers);
 
         // EFFECTIVE center (honors a click-to-focus `selected_offset`), not the
         // raw viewport center — the update handlers resolve the center through

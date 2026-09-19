@@ -37,14 +37,20 @@ fn resync_slot_counts_covers_radios_and_similar_pages() {
          otherwise this test would pass even with the bug present"
     );
 
-    // The fix: radios_page and similar_page must converge to the same sc.
-    assert_eq!(
-        app.radios_page.common.slot_list.slot_count, sc,
-        "radios_page.slot_count was not resynced on window resize"
-    );
-    assert_eq!(
-        app.similar_page.common.slot_list.slot_count, sc,
-        "similar_page.slot_count was not resynced on window resize"
+    // The fix: radios_page and similar_page are resynced too, each to the
+    // count its own view renders (Similar lives in the browsing pane, so its
+    // size can differ from Albums').
+    use crate::app_view::LibraryPage;
+    for page in [LibraryPage::Radios, LibraryPage::Similar] {
+        assert_eq!(
+            app.library_page_common(page).slot_list.slot_count,
+            app.library_page_chrome(page).slot_count(),
+            "{page:?}.slot_count was not resynced on window resize"
+        );
+    }
+    assert_ne!(
+        app.similar_page.common.slot_list.slot_count, 9,
+        "similar_page kept the SlotListView default"
     );
 }
 
@@ -142,13 +148,13 @@ mod queue_resync_parity {
         whatever kept coming back on repeat, then trimmed until nothing felt out of \
         place.";
 
-    fn lock_and_reset() -> parking_lot::MutexGuard<'static, ()> {
+    pub(super) fn lock_and_reset() -> parking_lot::MutexGuard<'static, ()> {
         let guard = crate::theme::THEME_MODE_LOCK.lock();
         reset_atomics();
         guard
     }
 
-    fn reset_atomics() {
+    pub(super) fn reset_atomics() {
         theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
         theme::set_artwork_auto_max_pct(0.40);
         theme::set_autohide_toolbar(false);
@@ -215,7 +221,7 @@ mod queue_resync_parity {
         );
     }
 
-    fn sweep() -> impl Iterator<Item = u32> + Clone {
+    pub(super) fn sweep() -> impl Iterator<Item = u32> + Clone {
         (400..=2000).step_by(7)
     }
 
@@ -509,5 +515,347 @@ mod queue_resync_parity {
             "Ctrl+E closes the browsing panel",
         );
         reset_atomics();
+    }
+}
+
+// ============================================================================
+// Library pages: stored slot_count == rendered slot_count
+//
+// Every pooled page other than the queue renders a view header, an optional
+// select-all bar, and (in Auto artwork) a portrait column sized to its pane.
+// Each test turns on one term the old resync ignored and asserts, across a
+// sweep of window heights, that the resync stores the count the page renders,
+// with a setup invariant proving the term changes the count at some height.
+// ============================================================================
+
+mod library_resync_parity {
+    use super::queue_resync_parity::{lock_and_reset, reset_atomics, sweep};
+    use crate::{
+        Nokkvi, app_message::OpenMenu, app_view::LibraryPage, test_helpers::test_app, theme,
+        widgets::slot_list::SlotListChrome,
+    };
+
+    fn stored(app: &Nokkvi, page: LibraryPage) -> usize {
+        app.library_page_common(page).slot_list.slot_count
+    }
+
+    /// The slot count the page renders: its view data carries this chrome.
+    fn rendered(app: &Nokkvi, page: LibraryPage) -> usize {
+        app.library_page_chrome(page).slot_count()
+    }
+
+    fn set_select(app: &mut Nokkvi, page: LibraryPage) {
+        match page {
+            LibraryPage::Albums => app.albums_page.column_visibility.select = true,
+            LibraryPage::Artists => app.artists_page.column_visibility.select = true,
+            LibraryPage::Genres => app.genres_page.column_visibility.select = true,
+            LibraryPage::Playlists => app.playlists_page.column_visibility.select = true,
+            LibraryPage::Songs => app.songs_page.column_visibility.select = true,
+            LibraryPage::Similar => app.similar_page.column_visibility.select = true,
+            LibraryPage::Radios | LibraryPage::Harbour => {
+                panic!("{page:?} has no select column")
+            }
+        }
+    }
+
+    /// Heights where the page's chrome with the term under test removed
+    /// (`without_term`) budgets a different count than the render does.
+    fn term_matters(
+        app: &mut Nokkvi,
+        page: LibraryPage,
+        without_term: impl Fn(&mut SlotListChrome),
+    ) -> Vec<u32> {
+        sweep()
+            .filter(|&h| {
+                app.window.height = h as f32;
+                let chrome = app.library_page_chrome(page);
+                let mut without = chrome;
+                without_term(&mut without);
+                without.slot_count() != chrome.slot_count()
+            })
+            .collect()
+    }
+
+    /// A window height where a page's stored count differs from the rendered
+    /// one, as (height, stored, rendered).
+    type Mismatch = (u32, usize, usize);
+
+    /// At every height, resync and compare the page's stored count to the
+    /// rendered one.
+    fn mismatches(app: &mut Nokkvi, page: LibraryPage) -> Vec<Mismatch> {
+        sweep()
+            .filter_map(|h| {
+                app.window.height = h as f32;
+                let expected = rendered(app, page);
+                app.resync_slot_counts();
+                let got = stored(app, page);
+                (got != expected).then_some((h, got, expected))
+            })
+            .collect()
+    }
+
+    fn assert_no_mismatches(failures: &[(LibraryPage, Vec<Mismatch>)]) {
+        let failing: Vec<_> = failures
+            .iter()
+            .filter(|(_, m)| !m.is_empty())
+            .map(|(page, m)| (page, m.len(), m.first().copied()))
+            .collect();
+        assert!(
+            failing.is_empty(),
+            "pages whose stored slot_count != rendered, as (page, mismatched heights, \
+             first (height, stored, rendered)): {failing:?}"
+        );
+    }
+
+    #[test]
+    fn resync_counts_each_page_select_all_bar() {
+        let _g = lock_and_reset();
+        let mut failures = Vec::new();
+        for page in [
+            LibraryPage::Albums,
+            LibraryPage::Artists,
+            LibraryPage::Genres,
+            LibraryPage::Playlists,
+            LibraryPage::Songs,
+            LibraryPage::Similar,
+        ] {
+            let mut app = test_app();
+            app.window.width = 1400.0;
+            set_select(&mut app, page);
+            assert!(
+                !term_matters(&mut app, page, |c| c.select_visible = false).is_empty(),
+                "setup invariant: {page:?}'s select-all bar must change the count"
+            );
+            failures.push((page, mismatches(&mut app, page)));
+        }
+        assert_no_mismatches(&failures);
+        reset_atomics();
+    }
+
+    /// Similar's and Harbour's views always render the expanded header, so
+    /// the resync must not hand them the collapsed count under auto-hide.
+    #[test]
+    fn resync_keeps_similar_and_harbour_headers_expanded_under_autohide() {
+        let _g = lock_and_reset();
+        theme::set_autohide_toolbar(true);
+        let mut failures = Vec::new();
+        for page in [LibraryPage::Similar, LibraryPage::Harbour] {
+            let mut app = test_app();
+            app.window.width = 1400.0;
+            assert!(
+                app.library_page_common(page).toolbar_collapsed(true, false),
+                "setup invariant: an idle {page:?} page reads as collapsed under auto-hide"
+            );
+            assert!(
+                !app.library_page_chrome(page).toolbar_collapsed,
+                "{page:?}'s view always renders the expanded header"
+            );
+            assert!(
+                !term_matters(&mut app, page, |c| c.toolbar_collapsed = true).is_empty(),
+                "setup invariant: collapsing {page:?}'s header must change the count"
+            );
+            failures.push((page, mismatches(&mut app, page)));
+        }
+        assert_no_mismatches(&failures);
+        reset_atomics();
+    }
+
+    /// A page shown in the browsing pane renders at the pane's width and at
+    /// the window height less the tab bar; the page left in the main view
+    /// keeps the full size.
+    #[test]
+    fn resync_sizes_browsing_pane_pages_at_the_pane() {
+        use crate::{
+            app_view::BROWSER_PANE_FRACTION,
+            views::{BrowsingPanel, BrowsingView},
+            widgets::slot_list::TAB_BAR_HEIGHT,
+        };
+
+        let _g = lock_and_reset();
+        let mut failures = Vec::new();
+        for (page, tab) in [
+            (LibraryPage::Albums, BrowsingView::Albums),
+            (LibraryPage::Artists, BrowsingView::Artists),
+            (LibraryPage::Genres, BrowsingView::Genres),
+            (LibraryPage::Songs, BrowsingView::Songs),
+            (LibraryPage::Similar, BrowsingView::Similar),
+        ] {
+            let mut app = test_app();
+            app.current_view = crate::View::Queue;
+            app.window.width = 1000.0;
+            app.window.height = 1200.0;
+            app.browsing_panel = Some(BrowsingPanel { active_view: tab });
+            let full = app.content_pane_width();
+            let chrome = app.library_page_chrome(page);
+            assert_eq!(
+                (chrome.pane_width, chrome.pane_height),
+                (full * BROWSER_PANE_FRACTION, 1200.0 - TAB_BAR_HEIGHT),
+                "{page:?} renders at the browsing pane's size"
+            );
+            if page != LibraryPage::Albums {
+                assert_eq!(
+                    app.library_page_chrome(LibraryPage::Albums).pane_width,
+                    full,
+                    "Albums, not shown in the pane, keeps the main view's width"
+                );
+            }
+            let pane_matters = term_matters(&mut app, page, |c| {
+                c.pane_width = full;
+                c.pane_height += TAB_BAR_HEIGHT;
+            });
+            assert!(
+                !pane_matters.is_empty(),
+                "setup invariant: the pane size must change {page:?}'s count"
+            );
+            failures.push((page, mismatches(&mut app, page)));
+        }
+        assert_no_mismatches(&failures);
+        reset_atomics();
+    }
+
+    /// An open header menu holds the auto-hide header expanded in the render:
+    /// each page's columns cog, and the Playlists create menu.
+    #[test]
+    fn resync_keeps_the_header_expanded_while_a_page_menu_is_open() {
+        let _g = lock_and_reset();
+        theme::set_autohide_toolbar(true);
+        let columns = |view| OpenMenu::CheckboxDropdown {
+            view,
+            trigger_bounds: iced::Rectangle::default(),
+        };
+        let mut failures = Vec::new();
+        for (page, menu) in [
+            (LibraryPage::Albums, columns(crate::View::Albums)),
+            (LibraryPage::Artists, columns(crate::View::Artists)),
+            (LibraryPage::Genres, columns(crate::View::Genres)),
+            (LibraryPage::Songs, columns(crate::View::Songs)),
+            (LibraryPage::Playlists, columns(crate::View::Playlists)),
+            (
+                LibraryPage::Playlists,
+                OpenMenu::PlaylistsCreate {
+                    trigger_bounds: iced::Rectangle::default(),
+                },
+            ),
+        ] {
+            let mut app = test_app();
+            app.window.width = 1400.0;
+            app.library_page_common_mut(page).set_window_focused(true);
+            app.open_menu = Some(menu);
+            assert!(
+                !app.library_page_chrome(page).toolbar_collapsed,
+                "setup invariant: the open menu holds {page:?}'s header expanded"
+            );
+            assert!(
+                !term_matters(&mut app, page, |c| c.toolbar_collapsed = true).is_empty(),
+                "setup invariant: collapsing {page:?}'s header must change the count"
+            );
+            failures.push((page, mismatches(&mut app, page)));
+        }
+        assert_no_mismatches(&failures);
+        reset_atomics();
+    }
+
+    /// Toggling a page's select column goes through the root `update`, which
+    /// resyncs after the page flips the flag.
+    #[test]
+    fn select_column_toggle_resyncs_the_albums_count() {
+        use crate::{
+            app_message::Message,
+            views::{AlbumsMessage, albums::AlbumsColumn},
+        };
+
+        let _g = lock_and_reset();
+        let mut app = test_app();
+        app.window.width = 1400.0;
+        set_select(&mut app, LibraryPage::Albums);
+        let height = *term_matters(&mut app, LibraryPage::Albums, |c| c.select_visible = false)
+            .first()
+            .expect("setup invariant: a height where the select-all bar changes the count");
+        app.window.height = height as f32;
+        app.albums_page.column_visibility.select = false;
+        app.resync_slot_counts();
+
+        let _ = app.update(Message::Albums(AlbumsMessage::ToggleColumnVisible(
+            AlbumsColumn::Select,
+        )));
+
+        assert!(
+            app.albums_page.column_visibility.select,
+            "the toggle turned it on"
+        );
+        assert_eq!(
+            stored(&app, LibraryPage::Albums),
+            rendered(&app, LibraryPage::Albums)
+        );
+        reset_atomics();
+    }
+
+    /// Find-and-expand pins the found album to the TOP rendered slot through
+    /// the stored count (`idx + slot_count / 2`). With the Albums select
+    /// column on, a stored count that left out the bar pinned the album one
+    /// row above the viewport, out of sight.
+    #[test]
+    fn find_and_expand_lands_the_album_on_the_top_slot_with_the_select_column_on() {
+        use crate::{
+            test_helpers::{albums_indexed, arm_pending_album, seed_albums},
+            widgets::slot_list::SlotListConfig,
+        };
+
+        let _g = lock_and_reset();
+        let mut app = test_app();
+        app.window.width = 1400.0;
+        set_select(&mut app, LibraryPage::Albums);
+        let height = *term_matters(&mut app, LibraryPage::Albums, |c| c.select_visible = false)
+            .last()
+            .expect("setup invariant: a height where the select-all bar changes the count");
+        app.window.height = height as f32;
+        app.resync_slot_counts();
+
+        arm_pending_album(&mut app, "a320");
+        seed_albums(&mut app, albums_indexed(1343));
+        assert!(app.try_resolve_pending_expand_album().is_some());
+
+        let chrome = app.library_page_chrome(LibraryPage::Albums);
+        let cfg = SlotListConfig::with_dynamic_slots(chrome.pane_height, chrome.effective());
+        let top = app.albums_page.common.slot_list.slot_to_item(
+            0,
+            1343,
+            cfg.slot_count,
+            cfg.center_slot,
+            false,
+        );
+        assert_eq!(
+            top,
+            Some(320),
+            "the found album must render on the top slot ({} rendered slots, window {height} px)",
+            cfg.slot_count
+        );
+        reset_atomics();
+    }
+
+    /// `resync_slot_counts` walks `LibraryPage::ALL` plus the queue; together
+    /// they must name exactly the pages `all_slot_list_commons_mut` pools, so
+    /// a page added to one list and not the other fails here.
+    #[test]
+    fn library_pages_and_the_queue_cover_every_pooled_page() {
+        use std::collections::HashSet;
+
+        let mut app = test_app();
+        let mut sized: HashSet<*const crate::widgets::SlotListPageState> = LibraryPage::ALL
+            .iter()
+            .map(|&page| std::ptr::from_ref(app.library_page_common(page)))
+            .collect();
+        sized.insert(std::ptr::from_ref(&app.queue_page.common));
+        let pooled: HashSet<*const crate::widgets::SlotListPageState> = app
+            .all_slot_list_commons_mut()
+            .into_iter()
+            .map(|common| std::ptr::from_ref(&*common))
+            .collect();
+        assert_eq!(
+            sized.len(),
+            LibraryPage::ALL.len() + 1,
+            "no page listed twice"
+        );
+        assert_eq!(sized, pooled);
     }
 }

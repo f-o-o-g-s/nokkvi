@@ -45,6 +45,10 @@ pub struct SimilarViewData<'a> {
     pub large_artwork: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
+    /// Slot-list chrome inputs (header collapse, select-all bar, pane size),
+    /// shared with `resync_slot_counts` so the stored `slot_count` equals the
+    /// rendered one. `window_width` / `window_height` above carry its pane size.
+    pub chrome: crate::widgets::slot_list::SlotListChrome,
     pub scale_factor: f32,
     pub modifiers: iced::keyboard::Modifiers,
     /// Provenance label: "Similar to: Paranoid Android" or "Top Songs: Radiohead"
@@ -345,18 +349,16 @@ impl SimilarPage {
         // multi-select column is on. Tri-state derives from the current
         // selection set against the visible row count.
         let header = crate::widgets::slot_list::compose_header_with_select(
-            self.column_visibility.select,
+            data.chrome.select_visible,
             self.common.select_all_state(data.songs.len()),
             SimilarMessage::SlotList(SlotListPageMessage::SelectAllToggle),
             header,
         );
 
-        use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
-        };
+        use crate::widgets::slot_list::{SlotListConfig, slot_list_view_with_scroll};
 
-        let select_header_visible = self.column_visibility.select;
-        let slot_list_chrome = chrome_height_with_select_header(false, select_header_visible);
+        let select_header_visible = data.chrome.select_visible;
+        let slot_list_chrome = data.chrome.height();
 
         // Layout config
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
@@ -388,13 +390,11 @@ impl SimilarPage {
             );
         }
 
-        let vertical_artwork_chrome =
-            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
-        let config = SlotListConfig::with_dynamic_slots(
-            data.window_height,
-            slot_list_chrome + vertical_artwork_chrome,
-        )
-        .with_modifiers(data.modifiers);
+        // `effective()` adds the artwork stacked above the list at this pane
+        // size; `resync_slot_counts` sizes the stored count from the same call.
+        let config =
+            SlotListConfig::with_dynamic_slots(data.window_height, data.chrome.effective())
+                .with_modifiers(data.modifiers);
 
         let songs = data.songs;
         let song_artwork = data.album_art;

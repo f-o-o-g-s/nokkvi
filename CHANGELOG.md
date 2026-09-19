@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file.
 - Holding a dragged queue row still at the list's edge now loads thumbnails for the rows it scrolls into view.
 - Holding a dragged playlist-editor row still at the list's edge now loads thumbnails for the rows it scrolls into view.
 - Dragging a queue row now picks up and drops the row under the cursor with the playlist banner, select column, or browsing panel showing.
+- Clicking an album, artist, or genre link now lands the found row in view when the target view's select column is on.
 
 ### Removed
 

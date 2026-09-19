@@ -33,6 +33,10 @@ pub struct RadiosViewData<'a> {
     pub stations: std::borrow::Cow<'a, [RadioStation]>,
     pub window_width: f32,
     pub window_height: f32,
+    /// Slot-list chrome inputs (header collapse, select-all bar, pane size),
+    /// shared with `resync_slot_counts` so the stored `slot_count` equals the
+    /// rendered one. `window_width` / `window_height` above carry its pane size.
+    pub chrome: crate::widgets::slot_list::SlotListChrome,
     pub scale_factor: f32,
     pub loading: bool,
     pub total_station_count: usize,
@@ -262,8 +266,10 @@ impl RadiosPage {
         // currently revealed (hover / active search / hotkey window).
         let autohide = crate::theme::is_autohide_toolbar();
         // Radios has no columns picker, so the sort dropdown (folded into
-        // `toolbar_revealed`) is the only reveal-lock — pass `false`.
-        let toolbar_collapsed = self.common.toolbar_collapsed(autohide, false);
+        // `toolbar_revealed`) is the only reveal-lock. The collapse state rides
+        // in the shared chrome inputs, so the render and `resync_slot_counts`
+        // read one derivation.
+        let toolbar_collapsed = data.chrome.toolbar_collapsed;
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
@@ -313,11 +319,11 @@ impl RadiosPage {
         });
 
         use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListConfig, chrome_height_with_header,
-            slot_list_text_column, slot_list_view_with_scroll,
+            SLOT_LIST_SLOT_PADDING, SlotListConfig, slot_list_text_column,
+            slot_list_view_with_scroll,
         };
 
-        let slot_list_chrome = chrome_height_with_header(toolbar_collapsed);
+        let slot_list_chrome = data.chrome.height();
 
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
         let layout_config = BaseSlotListLayoutConfig {
@@ -344,13 +350,11 @@ impl RadiosPage {
         // Auto portrait fallback) in the slot-row math, like the other artwork
         // views — otherwise rows render too tall and overflow behind it. Returns
         // 0 in horizontal modes, so landscape is unaffected.
-        let vertical_artwork_chrome =
-            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
-        let config = SlotListConfig::with_dynamic_slots(
-            data.window_height,
-            slot_list_chrome + vertical_artwork_chrome,
-        )
-        .with_modifiers(data.modifiers);
+        // `effective()` adds the artwork stacked above the list at this pane
+        // size; `resync_slot_counts` sizes the stored count from the same call.
+        let config =
+            SlotListConfig::with_dynamic_slots(data.window_height, data.chrome.effective())
+                .with_modifiers(data.modifiers);
 
         let stations = data.stations.as_ref();
         let open_menu_for_rows = data.open_menu;

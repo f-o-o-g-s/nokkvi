@@ -207,13 +207,11 @@ impl PlaylistsPage {
         // The header create dropdown (`OpenMenu::PlaylistsCreate`) is anchored
         // to the toolbar, so it must hold the toolbar open exactly like the
         // columns menu — otherwise moving the cursor off the toolbar and onto
-        // its own popup options collapses it and the menu vanishes.
+        // its own popup options collapses it and the menu vanishes. Both menus
+        // are folded into the shared chrome inputs (`library_page_chrome`), so
+        // the render and `resync_slot_counts` read one derivation.
         let autohide = crate::theme::is_autohide_toolbar();
-        let (create_dropdown_open, _) = playlists_create_dropdown_state(data.overlay.open_menu);
-        let toolbar_collapsed = self.common.toolbar_collapsed(
-            autohide,
-            data.overlay.column_dropdown_open || create_dropdown_open,
-        );
+        let toolbar_collapsed = data.chrome.toolbar_collapsed;
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
@@ -349,20 +347,17 @@ impl PlaylistsPage {
                 .build_flattened_list(data.playlists, |p| &p.id)
                 .len();
             crate::widgets::slot_list::compose_header_with_select(
-                self.column_visibility.select,
+                data.chrome.select_visible,
                 self.common.select_all_state(flattened_len),
                 PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
                 header,
             )
         };
 
-        use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
-        };
+        use crate::widgets::slot_list::{SlotListConfig, slot_list_view_with_scroll};
 
-        let select_header_visible = self.column_visibility.select;
-        let slot_list_chrome =
-            chrome_height_with_select_header(toolbar_collapsed, select_header_visible);
+        let select_header_visible = data.chrome.select_visible;
+        let slot_list_chrome = data.chrome.height();
 
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
@@ -389,13 +384,11 @@ impl PlaylistsPage {
             );
         }
 
-        let vertical_artwork_chrome =
-            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
-        let config = SlotListConfig::with_dynamic_slots(
-            data.window_height,
-            slot_list_chrome + vertical_artwork_chrome,
-        )
-        .with_modifiers(data.modifiers);
+        // `effective()` adds the artwork stacked above the list at this pane
+        // size; `resync_slot_counts` sizes the stored count from the same call.
+        let config =
+            SlotListConfig::with_dynamic_slots(data.window_height, data.chrome.effective())
+                .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let playlists = data.playlists; // Borrow slice to extend lifetime

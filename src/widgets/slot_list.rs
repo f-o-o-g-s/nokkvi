@@ -1495,6 +1495,64 @@ pub(crate) fn chrome_height_with_select_header(
         }
 }
 
+/// Every input of a library page's slot-list chrome: the view header
+/// (collapsed or expanded), the select-all bar, and the pane the page lays out
+/// in, which sizes the artwork it may stack above the list. Derived once per
+/// read by `Nokkvi::library_page_chrome` and handed to BOTH the page's
+/// `view()` (as its view data's `chrome`) and `resync_slot_counts`, so the
+/// stored `slot_count` comes from the same formula and inputs as the rendered
+/// one. The queue carries its own banner terms (`QueueChromeInputs`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SlotListChrome {
+    /// Width the page renders at: the full content pane, or the browsing pane.
+    pub pane_width: f32,
+    /// Height the page lays out against: the window, or the window less the
+    /// browsing panel's tab bar.
+    pub pane_height: f32,
+    /// Auto-hide collapse state, with an open header menu holding the header
+    /// expanded. Always `false` for pages whose header never collapses.
+    pub toolbar_collapsed: bool,
+    /// Whether the multi-select column's select-all bar is showing.
+    pub select_visible: bool,
+}
+
+impl SlotListChrome {
+    /// Chrome before the vertical artwork: the view header plus the
+    /// select-all bar. The page feeds it to
+    /// `BaseSlotListLayoutConfig.slot_list_chrome`. A new bar stacked above a
+    /// library page's list is counted here.
+    pub(crate) fn height(&self) -> f32 {
+        chrome_height_with_select_header(self.toolbar_collapsed, self.select_visible)
+    }
+
+    /// The chrome plus the artwork stacked above the list at this pane size:
+    /// the single input to `with_dynamic_slots`, for the render and the
+    /// resync alike.
+    pub(crate) fn effective(&self) -> f32 {
+        use crate::widgets::base_slot_list_layout::{
+            BaseSlotListLayoutConfig, vertical_artwork_chrome,
+        };
+
+        let chrome = self.height();
+        // `elevated` and `slot_list_chrome` don't reach the vertical term
+        // (`resolve_artwork_layout` reads only the pane size, the show flag, and
+        // the theme atomics), so the render's elevation is moot here.
+        chrome
+            + vertical_artwork_chrome(&BaseSlotListLayoutConfig {
+                window_width: self.pane_width,
+                window_height: self.pane_height,
+                show_artwork_column: true,
+                slot_list_chrome: chrome,
+                elevated: false,
+            })
+    }
+
+    /// The slot count the page renders for these inputs.
+    pub(crate) fn slot_count(&self) -> usize {
+        SlotListConfig::with_dynamic_slots(self.pane_height, self.effective()).slot_count
+    }
+}
+
 /// Render an artwork column for a slot list slot
 ///
 /// # Arguments

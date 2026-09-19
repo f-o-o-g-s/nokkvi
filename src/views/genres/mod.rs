@@ -60,6 +60,10 @@ pub struct GenresViewData<'a> {
     pub album_art: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
+    /// Slot-list chrome inputs (header collapse, select-all bar, pane size),
+    /// shared with `resync_slot_counts` so the stored `slot_count` equals the
+    /// rendered one. `window_width` / `window_height` above carry its pane size.
+    pub chrome: crate::widgets::slot_list::SlotListChrome,
     pub scale_factor: f32,
     pub modifiers: iced::keyboard::Modifiers,
     pub total_genre_count: usize,

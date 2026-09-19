@@ -223,11 +223,44 @@ const fn pane_width_fraction(portion: u16) -> f32 {
 /// stored `slot_count` to match its actual footprint.
 pub(crate) const QUEUE_PANE_FRACTION: f32 = pane_width_fraction(QUEUE_PANE_PORTION);
 /// Slot-math width fraction for the browsing (right) pane.
-const BROWSER_PANE_FRACTION: f32 = pane_width_fraction(BROWSER_PANE_PORTION);
+pub(crate) const BROWSER_PANE_FRACTION: f32 = pane_width_fraction(BROWSER_PANE_PORTION);
 
 // Rendered-value parity guard: the derived fractions must equal the literals
 // they replaced, so a portion retune cannot silently shift pixels off-ratio.
 const _: () = assert!(QUEUE_PANE_FRACTION + BROWSER_PANE_FRACTION == 1.0);
+
+/// The pooled slot-list pages other than the queue, whose chrome is a view
+/// header plus an optional select-all bar ([`SlotListChrome`]). The queue
+/// stacks more above its list and has its own inputs
+/// ([`Nokkvi::queue_chrome_inputs`]). `resync_slot_counts` sizes each of
+/// these from [`Nokkvi::library_page_chrome`], the same derivation the page's
+/// view data carries.
+///
+/// [`SlotListChrome`]: crate::widgets::slot_list::SlotListChrome
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LibraryPage {
+    Albums,
+    Artists,
+    Genres,
+    Playlists,
+    Songs,
+    Radios,
+    Similar,
+    Harbour,
+}
+
+impl LibraryPage {
+    pub(crate) const ALL: [Self; 8] = [
+        Self::Albums,
+        Self::Artists,
+        Self::Genres,
+        Self::Playlists,
+        Self::Songs,
+        Self::Radios,
+        Self::Similar,
+        Self::Harbour,
+    ];
+}
 
 impl Nokkvi {
     // =========================================================================
@@ -1218,20 +1251,20 @@ impl Nokkvi {
     /// and the browsing-panel split-view branch.
     fn build_albums_view_data(
         &self,
-        window_width: f32,
-        window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
         elevated: bool,
     ) -> views::AlbumsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Albums);
+        let chrome = self.library_page_chrome(LibraryPage::Albums);
         views::AlbumsViewData {
             albums: &self.library.albums,
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
-            window_width,
-            window_height,
+            window_width: chrome.pane_width,
+            window_height: chrome.pane_height,
+            chrome,
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_album_count: self.library.counts.albums,
@@ -1251,22 +1284,22 @@ impl Nokkvi {
     /// and the browsing-panel split-view branch.
     fn build_artists_view_data(
         &self,
-        window_width: f32,
-        window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
         elevated: bool,
     ) -> views::ArtistsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Artists);
+        let chrome = self.library_page_chrome(LibraryPage::Artists);
         views::ArtistsViewData {
             artists: &self.library.artists,
             // Reuse album art cache for artist images.
             artist_art: &self.artwork.album_art.snapshot,
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
-            window_width,
-            window_height,
+            window_width: chrome.pane_width,
+            window_height: chrome.pane_height,
+            chrome,
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_artist_count: self.library.counts.artists,
@@ -1286,20 +1319,20 @@ impl Nokkvi {
     /// and the browsing-panel split-view branch.
     fn build_songs_view_data(
         &self,
-        window_width: f32,
-        window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
         elevated: bool,
     ) -> views::SongsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Songs);
+        let chrome = self.library_page_chrome(LibraryPage::Songs);
         views::SongsViewData {
             songs: &self.library.songs,
             album_art: &self.artwork.album_art.snapshot,
             large_artwork: &self.artwork.large_artwork.snapshot,
-            window_width,
-            window_height,
+            window_width: chrome.pane_width,
+            window_height: chrome.pane_height,
+            chrome,
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_song_count: self.library.counts.songs,
@@ -1319,21 +1352,21 @@ impl Nokkvi {
     /// and the browsing-panel split-view branch.
     fn build_genres_view_data(
         &self,
-        window_width: f32,
-        window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
         elevated: bool,
     ) -> views::GenresViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Genres);
+        let chrome = self.library_page_chrome(LibraryPage::Genres);
         views::GenresViewData {
             genres: &self.library.genres,
             genre_artwork: &self.artwork.genre.mini.snapshot,
             genre_collage_artwork: &self.artwork.genre.collage.snapshot,
             album_art: &self.artwork.album_art.snapshot,
-            window_width,
-            window_height,
+            window_width: chrome.pane_width,
+            window_height: chrome.pane_height,
+            chrome,
             scale_factor: self.window.scale_factor,
             modifiers: self.window.keyboard_modifiers,
             total_genre_count: self.library.counts.genres,
@@ -1467,6 +1500,142 @@ impl Nokkvi {
                 .map(|ctx| ctx.comment.as_str()),
             strip_expanded: self.queue_page.playlist_strip_expanded,
             select_visible: self.queue_page.column_visibility.select,
+        }
+    }
+
+    /// Whether this frame renders the split view: the queue, or a Tracks
+    /// playlist-editor session, beside the browsing panel. A Rules session
+    /// renders its own two-pane layout instead. `main_content` gates its split
+    /// branch on this, and the browsing pane's page sizes derive from it.
+    pub(crate) fn split_view_active(&self) -> bool {
+        let in_editor = self.current_view == View::PlaylistEditor;
+        let rules_session = in_editor
+            && self
+                .playlist_editor
+                .as_ref()
+                .is_some_and(|editor| editor.rules_session().is_some());
+        !rules_session
+            && ((in_editor && self.browsing_panel.is_some())
+                || (self.current_view == View::Queue && self.queue_in_split_pane()))
+    }
+
+    /// Whether `page` renders in the browsing pane rather than the main view.
+    /// A page renders in one place or the other, never both: Similar lives
+    /// only in the pane, and the Albums / Artists / Genres / Songs tabs render
+    /// there while the split view shows their tab. A page shown nowhere is
+    /// sized for the main view, where navigating to it will show it.
+    fn library_page_in_browsing_pane(&self, page: LibraryPage) -> bool {
+        use views::BrowsingView;
+        let tab = match page {
+            LibraryPage::Albums => BrowsingView::Albums,
+            LibraryPage::Artists => BrowsingView::Artists,
+            LibraryPage::Genres => BrowsingView::Genres,
+            LibraryPage::Songs => BrowsingView::Songs,
+            LibraryPage::Similar => return true,
+            LibraryPage::Playlists | LibraryPage::Radios | LibraryPage::Harbour => return false,
+        };
+        self.split_view_active()
+            && self
+                .browsing_panel
+                .as_ref()
+                .is_some_and(|panel| panel.active_view == tab)
+    }
+
+    /// The shared slot-list state of a library page.
+    pub(crate) fn library_page_common(
+        &self,
+        page: LibraryPage,
+    ) -> &crate::widgets::SlotListPageState {
+        match page {
+            LibraryPage::Albums => &self.albums_page.common,
+            LibraryPage::Artists => &self.artists_page.common,
+            LibraryPage::Genres => &self.genres_page.common,
+            LibraryPage::Playlists => &self.playlists_page.common,
+            LibraryPage::Songs => &self.songs_page.common,
+            LibraryPage::Radios => &self.radios_page.common,
+            LibraryPage::Similar => &self.similar_page.common,
+            LibraryPage::Harbour => &self.harbour_page.common,
+        }
+    }
+
+    /// Mutable twin of [`Self::library_page_common`].
+    pub(crate) fn library_page_common_mut(
+        &mut self,
+        page: LibraryPage,
+    ) -> &mut crate::widgets::SlotListPageState {
+        match page {
+            LibraryPage::Albums => &mut self.albums_page.common,
+            LibraryPage::Artists => &mut self.artists_page.common,
+            LibraryPage::Genres => &mut self.genres_page.common,
+            LibraryPage::Playlists => &mut self.playlists_page.common,
+            LibraryPage::Songs => &mut self.songs_page.common,
+            LibraryPage::Radios => &mut self.radios_page.common,
+            LibraryPage::Similar => &mut self.similar_page.common,
+            LibraryPage::Harbour => &mut self.harbour_page.common,
+        }
+    }
+
+    /// The inputs of a library page's slot-list chrome, derived once here for
+    /// BOTH the page's view data and `resync_slot_counts`, so the stored
+    /// `slot_count` equals the count the page renders.
+    pub(crate) fn library_page_chrome(
+        &self,
+        page: LibraryPage,
+    ) -> crate::widgets::slot_list::SlotListChrome {
+        use crate::app_message::OpenMenu;
+
+        let columns_menu_open = |view: View| column_dropdown_state(&self.open_menu, view).0;
+        // (header can collapse, an open header menu holds it expanded,
+        // select-all bar showing). Similar's and Harbour's views always render
+        // the expanded header; Radios has no header menu and no select column.
+        let (collapsible, menu_open, select_visible) = match page {
+            LibraryPage::Albums => (
+                true,
+                columns_menu_open(View::Albums),
+                self.albums_page.column_visibility.select,
+            ),
+            LibraryPage::Artists => (
+                true,
+                columns_menu_open(View::Artists),
+                self.artists_page.column_visibility.select,
+            ),
+            LibraryPage::Genres => (
+                true,
+                columns_menu_open(View::Genres),
+                self.genres_page.column_visibility.select,
+            ),
+            LibraryPage::Playlists => (
+                true,
+                // The create menu is anchored to the toolbar too.
+                columns_menu_open(View::Playlists)
+                    || matches!(self.open_menu, Some(OpenMenu::PlaylistsCreate { .. })),
+                self.playlists_page.column_visibility.select,
+            ),
+            LibraryPage::Songs => (
+                true,
+                columns_menu_open(View::Songs),
+                self.songs_page.column_visibility.select,
+            ),
+            LibraryPage::Radios => (true, false, false),
+            LibraryPage::Similar => (false, false, self.similar_page.column_visibility.select),
+            LibraryPage::Harbour => (false, false, false),
+        };
+        let (pane_width, pane_height) = if self.library_page_in_browsing_pane(page) {
+            (
+                self.content_pane_width() * BROWSER_PANE_FRACTION,
+                self.window.height - crate::widgets::slot_list::TAB_BAR_HEIGHT,
+            )
+        } else {
+            (self.content_pane_width(), self.window.height)
+        };
+        crate::widgets::slot_list::SlotListChrome {
+            pane_width,
+            pane_height,
+            toolbar_collapsed: collapsible
+                && self
+                    .library_page_common(page)
+                    .toolbar_collapsed(crate::theme::is_autohide_toolbar(), menu_open),
+            select_visible,
         }
     }
 
@@ -1728,9 +1897,7 @@ impl Nokkvi {
             return editor.rules_view(rules_data);
         }
 
-        if (in_editor && self.browsing_panel.is_some())
-            || (self.current_view == View::Queue && self.queue_in_split_pane())
-        {
+        if self.split_view_active() {
             use iced::widget::{column as col, row as r};
 
             // LEFT pane: the editor's own buffer on the editor view, else the
@@ -1840,55 +2007,28 @@ impl Nokkvi {
                     .tab_bar(similar_label, is_editing)
                     .map(Message::BrowsingPanel);
 
-                // The tab bar eats into available height — subtract it so the
-                // slot list slot calculation doesn't overflow the last slot.
-                use crate::widgets::slot_list::TAB_BAR_HEIGHT;
-                let browser_height = self.window.height - TAB_BAR_HEIGHT;
-
-                // Delegate to the active view's existing page
+                // Delegate to the active view's existing page. Each page's
+                // pane size (the `BROWSER_PANE_FRACTION` width, the height less
+                // the tab bar) comes from `library_page_chrome`, which the
+                // slot-count resync reads too.
                 let view_content: Element<'_, Message> = match panel.active_view {
                     views::BrowsingView::Albums => {
                         // Browser pane: stable_viewport hardcoded `true`
-                        // (click to highlight, not play); `BROWSER_PANE_FRACTION`
-                        // width portion of the content pane; `in_browsing_panel = true`
-                        // suppresses the "Center on Playing" header button.
-                        let view_data = self.build_albums_view_data(
-                            self.content_pane_width() * BROWSER_PANE_FRACTION,
-                            browser_height,
-                            true,
-                            true,
-                            false,
-                        );
+                        // (click to highlight, not play); `in_browsing_panel =
+                        // true` suppresses the "Center on Playing" header button.
+                        let view_data = self.build_albums_view_data(true, true, false);
                         self.albums_page.view(view_data).map(Message::Albums)
                     }
                     views::BrowsingView::Songs => {
-                        let view_data = self.build_songs_view_data(
-                            self.content_pane_width() * BROWSER_PANE_FRACTION,
-                            browser_height,
-                            true,
-                            true,
-                            false,
-                        );
+                        let view_data = self.build_songs_view_data(true, true, false);
                         self.songs_page.view(view_data).map(Message::Songs)
                     }
                     views::BrowsingView::Artists => {
-                        let view_data = self.build_artists_view_data(
-                            self.content_pane_width() * BROWSER_PANE_FRACTION,
-                            browser_height,
-                            true,
-                            true,
-                            false,
-                        );
+                        let view_data = self.build_artists_view_data(true, true, false);
                         self.artists_page.view(view_data).map(Message::Artists)
                     }
                     views::BrowsingView::Genres => {
-                        let view_data = self.build_genres_view_data(
-                            self.content_pane_width() * BROWSER_PANE_FRACTION,
-                            browser_height,
-                            true,
-                            true,
-                            false,
-                        );
+                        let view_data = self.build_genres_view_data(true, true, false);
                         self.genres_page.view(view_data).map(Message::Genres)
                     }
                     views::BrowsingView::Similar => {
@@ -1898,12 +2038,14 @@ impl Nokkvi {
                         };
                         let (column_dropdown_open, column_dropdown_trigger_bounds) =
                             similar_column_dropdown_state(&self.open_menu);
+                        let chrome = self.library_page_chrome(LibraryPage::Similar);
                         let view_data = views::SimilarViewData {
                             songs,
                             album_art: &self.artwork.album_art.snapshot,
                             large_artwork,
-                            window_width: self.content_pane_width() * BROWSER_PANE_FRACTION,
-                            window_height: browser_height,
+                            window_width: chrome.pane_width,
+                            window_height: chrome.pane_height,
+                            chrome,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
                             label,
@@ -1951,13 +2093,8 @@ impl Nokkvi {
             )
             .into(),
             View::Albums => {
-                let view_data = self.build_albums_view_data(
-                    self.content_pane_width(),
-                    self.window.height,
-                    false,
-                    self.settings.stable_viewport,
-                    elevated,
-                );
+                let view_data =
+                    self.build_albums_view_data(false, self.settings.stable_viewport, elevated);
                 self.albums_page.view(view_data).map(Message::Albums)
             }
             View::Queue => {
@@ -1965,38 +2102,24 @@ impl Nokkvi {
                 self.queue_page.view(view_data).map(Message::Queue)
             }
             View::Artists => {
-                let view_data = self.build_artists_view_data(
-                    self.content_pane_width(),
-                    self.window.height,
-                    false,
-                    self.settings.stable_viewport,
-                    elevated,
-                );
+                let view_data =
+                    self.build_artists_view_data(false, self.settings.stable_viewport, elevated);
                 self.artists_page.view(view_data).map(Message::Artists)
             }
             View::Songs => {
-                let view_data = self.build_songs_view_data(
-                    self.content_pane_width(),
-                    self.window.height,
-                    false,
-                    self.settings.stable_viewport,
-                    elevated,
-                );
+                let view_data =
+                    self.build_songs_view_data(false, self.settings.stable_viewport, elevated);
                 self.songs_page.view(view_data).map(Message::Songs)
             }
             View::Genres => {
-                let view_data = self.build_genres_view_data(
-                    self.content_pane_width(),
-                    self.window.height,
-                    false,
-                    self.settings.stable_viewport,
-                    elevated,
-                );
+                let view_data =
+                    self.build_genres_view_data(false, self.settings.stable_viewport, elevated);
                 self.genres_page.view(view_data).map(Message::Genres)
             }
             View::Playlists => {
                 let (column_dropdown_open, column_dropdown_trigger_bounds) =
                     column_dropdown_state(&self.open_menu, View::Playlists);
+                let chrome = self.library_page_chrome(LibraryPage::Playlists);
                 let view_data = views::PlaylistsViewData {
                     playlists: &self.library.playlists,
                     playlist_artwork: &self.artwork.playlist.mini.snapshot,
@@ -2004,8 +2127,9 @@ impl Nokkvi {
                     album_art: &self.artwork.album_art.snapshot,
                     playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,
                     playlist_custom_large_art: &self.artwork.playlist_custom_large_art.snapshot,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
+                    window_width: chrome.pane_width,
+                    window_height: chrome.pane_height,
+                    chrome,
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
                     total_playlist_count: self.library.counts.playlists,
@@ -2028,37 +2152,42 @@ impl Nokkvi {
                 .settings_page
                 .view(self.window.width, self.window.height)
                 .map(Message::Settings),
-            View::Harbour => self
-                .harbour_page
-                .view(views::HarbourViewData {
-                    harbour: &self.harbour,
-                    trawl_crate: &self.trawl_crate,
-                    album_art: &self.artwork.album_art.snapshot,
-                    large_artwork: &self.artwork.large_artwork.snapshot,
-                    playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,
-                    playlist_custom_large_art: &self.artwork.playlist_custom_large_art.snapshot,
-                    playlist_collage: &self.artwork.playlist.collage.snapshot,
-                    genre_collage: &self.artwork.genre.collage.snapshot,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
-                    modifiers: self.window.keyboard_modifiers,
-                    elevated,
-                    stable_viewport: self.settings.stable_viewport,
-                    harbour_boat: &self.harbour_boat,
-                    harbour_sea_bars: &self.harbour_sea_bars,
-                    harbour_sea_phase: self.harbour_sea_phase,
-                    harbour_sea_cycle: self.harbour_sea_cycle,
-                })
-                .map(Message::Harbour),
+            View::Harbour => {
+                let chrome = self.library_page_chrome(LibraryPage::Harbour);
+                self.harbour_page
+                    .view(views::HarbourViewData {
+                        harbour: &self.harbour,
+                        trawl_crate: &self.trawl_crate,
+                        album_art: &self.artwork.album_art.snapshot,
+                        large_artwork: &self.artwork.large_artwork.snapshot,
+                        playlist_custom_art: &self.artwork.playlist_custom_art.snapshot,
+                        playlist_custom_large_art: &self.artwork.playlist_custom_large_art.snapshot,
+                        playlist_collage: &self.artwork.playlist.collage.snapshot,
+                        genre_collage: &self.artwork.genre.collage.snapshot,
+                        window_width: chrome.pane_width,
+                        window_height: chrome.pane_height,
+                        chrome,
+                        modifiers: self.window.keyboard_modifiers,
+                        elevated,
+                        stable_viewport: self.settings.stable_viewport,
+                        harbour_boat: &self.harbour_boat,
+                        harbour_sea_bars: &self.harbour_sea_bars,
+                        harbour_sea_phase: self.harbour_sea_phase,
+                        harbour_sea_cycle: self.harbour_sea_cycle,
+                    })
+                    .map(Message::Harbour)
+            }
             View::Radios => {
                 let filtered_stations = self.filter_radio_stations();
                 // Over-cover visualizer + boat over the station artwork — the
                 // same shared overlays as the Queue now-playing cover.
                 let (over_art_visualizer, over_art_boat) = self.over_cover_overlays();
+                let chrome = self.library_page_chrome(LibraryPage::Radios);
                 let view_data = views::RadiosViewData {
                     stations: filtered_stations,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
+                    window_width: chrome.pane_width,
+                    window_height: chrome.pane_height,
+                    chrome,
                     scale_factor: self.window.scale_factor,
                     loading: false, // TODO: add loading state for radio stations
                     total_station_count: self.library.radio_stations.len(),

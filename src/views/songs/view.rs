@@ -34,9 +34,10 @@ impl SongsPage {
         // Auto-hide toolbar: collapse to a hairline when enabled and not
         // currently revealed (hover / active search / hotkey window).
         let autohide = crate::theme::is_autohide_toolbar();
-        let toolbar_collapsed = self
-            .common
-            .toolbar_collapsed(autohide, data.overlay.column_dropdown_open);
+        // The collapse state (an open columns menu holds the header expanded)
+        // rides in the shared chrome inputs, so the render and
+        // `resync_slot_counts` read one derivation.
+        let toolbar_collapsed = data.chrome.toolbar_collapsed;
 
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
@@ -101,19 +102,16 @@ impl SongsPage {
         // multi-select column is on. Tri-state derives from the current
         // selection set against the *visible* (filtered) row count.
         let header = crate::widgets::slot_list::compose_header_with_select(
-            self.column_visibility.select,
+            data.chrome.select_visible,
             self.common.select_all_state(data.songs.len()),
             SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
             header,
         );
 
-        use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
-        };
+        use crate::widgets::slot_list::{SlotListConfig, slot_list_view_with_scroll};
 
-        let select_header_visible = self.column_visibility.select;
-        let slot_list_chrome =
-            chrome_height_with_select_header(toolbar_collapsed, select_header_visible);
+        let select_header_visible = data.chrome.select_visible;
+        let slot_list_chrome = data.chrome.height();
 
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
@@ -140,13 +138,11 @@ impl SongsPage {
             );
         }
 
-        let vertical_artwork_chrome =
-            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
-        let config = SlotListConfig::with_dynamic_slots(
-            data.window_height,
-            slot_list_chrome + vertical_artwork_chrome,
-        )
-        .with_modifiers(data.modifiers);
+        // `effective()` adds the artwork stacked above the list at this pane
+        // size; `resync_slot_counts` sizes the stored count from the same call.
+        let config =
+            SlotListConfig::with_dynamic_slots(data.window_height, data.chrome.effective())
+                .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let songs = data.songs;
