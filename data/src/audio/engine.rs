@@ -91,6 +91,30 @@ impl CrossfadePhase {
     }
 }
 
+/// What a [`CustomAudioEngine::seek`] did to a live blend, for the caller's
+/// follow-up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekOutcome {
+    /// Nothing for the caller to redo.
+    Settled,
+    /// The seek cancelled a live AUTO crossfade back to its outgoing. The
+    /// blend took the prepared next-track decoder out of the gapless slot and
+    /// the cancel dropped it, so the next transition has nothing prepared:
+    /// the caller re-prepares it.
+    AbandonedAutoCrossfade,
+}
+
+/// How [`CustomAudioEngine::end_crossfade_on_queue_track`] ended a blend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlendEnding {
+    /// Nothing was live.
+    NoneLive,
+    /// A skip blend's incoming (the queue's track) was promoted.
+    PromotedSkipTarget,
+    /// An auto blend was cancelled back to its outgoing.
+    CancelledAutoBlend,
+}
+
 /// Outcome of a manual-skip crossfade attempt
 /// ([`CustomAudioEngine::crossfade_to_next`], M7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2201,7 +2225,7 @@ impl CustomAudioEngine {
     ///
     /// Stops the decoding loop temporarily, performs the seek, then restarts.
     /// This ensures the decoder lock is available for seeking.
-    pub async fn seek(&mut self, position_ms: u64) {
+    pub async fn seek(&mut self, position_ms: u64) -> SeekOutcome {
         use tracing::{debug, trace, warn};
 
         let seek_start = std::time::Instant::now();
@@ -2212,7 +2236,7 @@ impl CustomAudioEngine {
 
         if self.duration == 0 {
             debug!("🔍 [SEEK] Aborting - duration is 0");
-            return;
+            return SeekOutcome::Settled;
         }
 
         // CRITICAL FIX: Stop the decoding loop FIRST, before trying to acquire decoder lock!
@@ -2227,7 +2251,10 @@ impl CustomAudioEngine {
         // which the UI still shows. This sits BELOW the duration guard: a
         // refused seek must leave an auto blend running, and a skip blend
         // never gets there (its fire refuses an unknown outgoing duration).
-        self.end_crossfade_on_queue_track().await;
+        let outcome = match self.end_crossfade_on_queue_track().await {
+            BlendEnding::CancelledAutoBlend => SeekOutcome::AbandonedAutoCrossfade,
+            BlendEnding::NoneLive | BlendEnding::PromotedSkipTarget => SeekOutcome::Settled,
+        };
 
         // Idempotent after the line above; kept for its renderer disarm (the
         // re-arm at the end restores a prepared transition's trigger against
@@ -2259,7 +2286,7 @@ impl CustomAudioEngine {
             debug!("🔍 [SEEK] Aborting - decoder not initialized");
             // Restart the decoding loop (start_decoding_loop handles generation)
             self.start_decoding_loop();
-            return;
+            return outcome;
         }
 
         // Set seeking flag to prevent EOF detection during seek
@@ -2355,6 +2382,7 @@ impl CustomAudioEngine {
             "🔍 [SEEK] Seek completed in {:?} total",
             seek_start.elapsed()
         );
+        outcome
     }
 
     /// Arm the renderer crossfade trigger from the engine's current crossfade
@@ -3236,12 +3264,16 @@ impl CustomAudioEngine {
     /// - An AUTO blend's cursor has not advanced yet (it moves when the
     ///   finalize fires the completion callback), so its outgoing is still
     ///   the queue's track: cancel back to it.
-    async fn end_crossfade_on_queue_track(&mut self) {
+    async fn end_crossfade_on_queue_track(&mut self) -> BlendEnding {
         if self.crossfade.skip_fade {
             debug!("🔀 [SKIP FADE] Ending the blend early — promoting the skip target");
             self.finalize_crossfade_engine().await;
+            BlendEnding::PromotedSkipTarget
         } else if self.crossfade.is_crossfade_live(&self.renderer) {
             self.cancel_crossfade().await;
+            BlendEnding::CancelledAutoBlend
+        } else {
+            BlendEnding::NoneLive
         }
     }
 
@@ -3676,6 +3708,27 @@ impl CustomAudioEngine {
     pub fn force_playing_for_test(&mut self) {
         self.playing = true;
         self.paused = false;
+    }
+
+    /// Test-only: put the engine mid-way through a live AUTO crossfade
+    /// (engine phase and renderer both Active) over an audibly playing
+    /// finite track, so controller tests can drive the seek-abandons-a-blend
+    /// path. The returned source keeps the forced renderer stream alive.
+    #[cfg(test)]
+    pub(crate) fn force_live_auto_crossfade_for_test(
+        &mut self,
+    ) -> crate::audio::streaming_source::StreamingSource {
+        self.playing = true;
+        self.paused = false;
+        self.duration = 240_000;
+        self.source = "http://example.test/current".to_string();
+        self.crossfade.phase = CrossfadePhase::Active {
+            decoder: Arc::new(tokio::sync::Mutex::new(Some(AudioDecoder::new(Arc::new(
+                std::sync::RwLock::new(None),
+            ))))),
+            incoming_source: "http://example.test/next".to_string(),
+        };
+        self.renderer.lock().force_crossfade_active_for_test()
     }
 
     /// Test-only: mark the current source as an infinite (radio) stream so
@@ -6049,6 +6102,45 @@ mod tests {
             Some(rg(-1.0)),
             "the loaded track must be built with its own tags"
         );
+    }
+
+    /// A seek that cancels a live AUTO blend reports it: the blend took the
+    /// prepared next track out of the slot and the cancel dropped it, so the
+    /// caller must re-prepare the next transition. A skip blend (promoted,
+    /// not cancelled), no blend, and an armed-only transition (the slot keeps
+    /// its prep and the seek re-arms it) need nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn seek_reports_only_an_abandoned_auto_crossfade() {
+        let mut auto = CustomAudioEngine::new();
+        let _auto_keepalive = auto.force_live_auto_crossfade_for_test();
+        assert_eq!(
+            auto.seek(30_000).await,
+            SeekOutcome::AbandonedAutoCrossfade,
+            "a cancelled auto blend lost the next track's prep"
+        );
+
+        let mut skip = CustomAudioEngine::new();
+        prime_playing_engine(&mut skip);
+        let _skip_keepalive = force_live_skip_fade(&mut skip, "http://example.test/target");
+        assert_eq!(skip.seek(30_000).await, SeekOutcome::Settled, "skip blend");
+
+        let mut idle = CustomAudioEngine::new();
+        prime_playing_engine(&mut idle);
+        assert_eq!(idle.seek(30_000).await, SeekOutcome::Settled, "no blend");
+
+        let mut armed = CustomAudioEngine::new();
+        prime_playing_engine(&mut armed);
+        armed.crossfade.enabled = true;
+        armed
+            .store_prepared_decoder(
+                skip_ready_decoder(200_000),
+                "http://example.test/next".to_string(),
+                None,
+                PreparedTransitionDirectives::default(),
+            )
+            .await;
+        assert!(armed.renderer.lock().is_crossfade_armed(), "precondition");
+        assert_eq!(armed.seek(30_000).await, SeekOutcome::Settled, "armed only");
     }
 
     /// Guard: a seek the engine refuses (unknown duration) leaves a live AUTO

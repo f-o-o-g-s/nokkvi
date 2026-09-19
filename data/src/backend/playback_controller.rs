@@ -487,8 +487,14 @@ impl PlaybackController {
     /// Seek to position
     pub async fn seek(&self, position_seconds: f64) -> Result<()> {
         let position_ms = (position_seconds * 1000.0) as u64;
-        let mut audio = self.audio_engine.lock().await;
-        audio.seek(position_ms).await;
+        let outcome = self.audio_engine.lock().await.seek(position_ms).await;
+        if outcome == crate::audio::engine::SeekOutcome::AbandonedAutoCrossfade {
+            // The cancelled blend dropped the prepared next track, and the
+            // UI's prep latch only reopens on a song change: re-prepare it
+            // now, with the engine lock released (a no-op when a prep
+            // already exists; the decoder builds unlocked).
+            self.prepare_next_for_gapless().await;
+        }
         Ok(())
     }
 
@@ -2056,6 +2062,7 @@ mod tests {
         _temp: tempfile::TempDir,
         queue: QueueService,
         playback: PlaybackController,
+        tasks: Arc<TaskManager>,
     }
 
     async fn click_fixture() -> Result<ClickFixture> {
@@ -2076,12 +2083,52 @@ mod tests {
         let settings = SettingsService::new(storage_s)?;
         let tm = Arc::new(TaskManager::new());
         let (playback, _loop_rx, _qc_rx) =
-            PlaybackController::new(queue.clone(), settings, tm).await?;
+            PlaybackController::new(queue.clone(), settings, tm.clone()).await?;
         Ok(ClickFixture {
             _temp: temp,
             queue,
             playback,
+            tasks: tm,
         })
+    }
+
+    /// A seek that cancels a live AUTO crossfade (back to the track the UI
+    /// still shows) dropped the prepared next track with the blend. The UI's
+    /// prep latch only reopens on a song change, so the controller must
+    /// re-prepare it — otherwise the next transition hard-loads with no
+    /// blend.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn seek_that_abandons_an_auto_crossfade_re_prepares_the_next_track() -> Result<()> {
+        let fx = click_fixture().await?;
+        let mut status = fx
+            .tasks
+            .take_status_receiver()
+            .ok_or_else(|| anyhow::anyhow!("status receiver already taken"))?;
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("a"), click_song("b")], Some(0))
+            .await?;
+        let _keepalive = {
+            let engine_arc = fx.playback.audio_engine();
+            let mut e = engine_arc.lock().await;
+            e.force_live_auto_crossfade_for_test()
+        };
+
+        fx.playback.seek(30.0).await?;
+
+        let deadline = std::time::Duration::from_secs(5);
+        let mut prep_spawned = false;
+        while let Ok(Some((handle, _))) = tokio::time::timeout(deadline, status.recv()).await {
+            if handle.name.starts_with("gapless_prep") {
+                prep_spawned = true;
+                break;
+            }
+        }
+        assert!(
+            prep_spawned,
+            "the seek must re-prepare the next track after abandoning the blend"
+        );
+        Ok(())
     }
 
     /// Queue click (play-from-here) in Crossfade mode while playing: the

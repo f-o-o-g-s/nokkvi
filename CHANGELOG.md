@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 - With ReplayGain on, seeking a track that arrived by crossfade no longer plays it at an earlier track's level.
 - With ReplayGain on, stopping and replaying a track that arrived by crossfade no longer plays it at an earlier track's level.
 - Switching bit-perfect mode during a crossfade no longer leaves the badge claiming bit-perfect for a track that isn't.
+- Seeking during an automatic crossfade no longer makes the next song start without a crossfade.
 
 ### Removed
 
