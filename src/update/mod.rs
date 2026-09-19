@@ -341,6 +341,33 @@ impl Nokkvi {
                 };
                 Task::batch([editor_reload, self.handle_load_playlists()])
             }
+            Message::PlaylistAppendConflict {
+                playlist_id,
+                playlist_name,
+                song_ids,
+                present,
+            } => {
+                // The check ran async: the session that asked may be gone.
+                if self.screen != crate::Screen::Home {
+                    return Task::none();
+                }
+                // Never swap the dialog the user is working in for this one:
+                // its primary button sits where theirs was, so a click meant
+                // for it would confirm the add. Nothing was written yet.
+                if self.text_input_dialog.visible {
+                    self.toast_warn(format!(
+                        "Nothing added to '{playlist_name}': some of the songs are already there"
+                    ));
+                    return Task::none();
+                }
+                self.text_input_dialog.open_add_conflict(
+                    playlist_id,
+                    playlist_name,
+                    song_ids,
+                    present,
+                );
+                Task::none()
+            }
             Message::PlaylistsFetchedForDialog(playlists) => {
                 self.text_input_dialog.open_save_playlist(&playlists);
                 Task::none()
@@ -363,24 +390,10 @@ impl Nokkvi {
                             self.toast_warn("Default playlist unavailable — pick a target");
                         }
                         Some((_, _, false)) => {
-                            let playlist_id = default_id.clone();
-                            let id_for_msg = playlist_id.clone();
-                            let playlist_name = self.settings.default_playlist_name.clone();
-                            let count = song_ids.len();
-                            return self.shell_action_task(
-                                move |shell| async move {
-                                    let service = shell.playlists_api().await?;
-                                    service.add_songs_to_playlist(&playlist_id, &song_ids).await
-                                },
-                                Message::PlaylistMutated(
-                                    crate::app_message::PlaylistMutation::Appended {
-                                        name: format!(
-                                            "{playlist_name}' ({count} song{})",
-                                            if count == 1 { "" } else { "s" }
-                                        ),
-                                        id: id_for_msg,
-                                    },
-                                ),
+                            return self.append_songs_to_playlist_task(
+                                default_id.clone(),
+                                self.settings.default_playlist_name.clone(),
+                                song_ids,
                                 "quick-add to default playlist",
                             );
                         }

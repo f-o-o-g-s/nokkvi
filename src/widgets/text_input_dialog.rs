@@ -4,12 +4,15 @@
 //! and keyboard handling (Enter to submit, Escape to cancel).
 //!
 //! Used for Rename Playlist, Save Queue as Playlist, and similar flows
-//! that need a single text input from the user.
+//! that need a single text input from the user, and in confirmation-only
+//! mode for deletes, resets, and the add-conflict confirm (a song the
+//! target playlist already has, with a "Skip the N already there" box).
 
 use iced::{
     Alignment, Element, Length,
     widget::{button, checkbox, column, combo_box, container, row, text, text_input},
 };
+use nokkvi_data::utils::dedupe::without_present;
 
 use crate::theme;
 
@@ -28,6 +31,15 @@ pub enum TextInputDialogAction {
     CreatePlaylistWithSongs(Vec<String>),
     /// Append song IDs to an existing playlist (playlist_id, song_ids)
     AppendToPlaylist(String, Vec<String>),
+    /// Confirm an add whose target already holds some of the batch
+    /// (`present`, each id once): with `skip_duplicates` only the missing
+    /// songs are added, without it all of them.
+    AppendToPlaylistConfirmed {
+        playlist_id: String,
+        playlist_name: String,
+        song_ids: Vec<String>,
+        present: Vec<String>,
+    },
     /// Write a free-text general setting identified by key (e.g. "general.local_music_path")
     WriteGeneralSetting { key: String },
     /// Reset all non-color visualizer settings to defaults
@@ -126,6 +138,9 @@ pub struct TextInputDialogState {
     /// the primary Submit — the .nsp-import collision dialog's "Create new"
     /// alternative. `SubmitExtra` swaps it in and submits.
     pub extra_action: Option<(String, TextInputDialogAction)>,
+    /// The add-conflict confirm's "Skip the N already there" box. Checked
+    /// by default.
+    pub skip_duplicates: bool,
 }
 
 impl Default for TextInputDialogState {
@@ -147,6 +162,7 @@ impl Default for TextInputDialogState {
             secure: false,
             note: None,
             extra_action: None,
+            skip_duplicates: true,
         }
     }
 }
@@ -171,6 +187,7 @@ impl TextInputDialogState {
         self.secure = false;
         self.note = None;
         self.extra_action = None;
+        self.skip_duplicates = true;
     }
 
     /// Attach the dimmed note line to an already-opened dialog (the `open_*`
@@ -332,10 +349,160 @@ impl TextInputDialogState {
         self.confirmation_only = true;
     }
 
+    /// Open the confirm for an add whose target already holds some of the
+    /// batch (`present`: those ids, each once).
+    pub fn open_add_conflict(
+        &mut self,
+        playlist_id: String,
+        playlist_name: String,
+        song_ids: Vec<String>,
+        present: Vec<String>,
+    ) {
+        self.reset_fields();
+        self.title = "Add to Playlist".to_string();
+        let (already_there, total) = add_conflict_counts(&song_ids, &present);
+        self.confirmation_message = if already_there < total {
+            let verb = if already_there == 1 { "is" } else { "are" };
+            format!("{already_there} of {total} songs {verb} already in \"{playlist_name}\".")
+        } else if total == 1 {
+            format!("This song is already in \"{playlist_name}\".")
+        } else {
+            format!("All {total} songs are already in \"{playlist_name}\".")
+        };
+        self.action = Some(TextInputDialogAction::AppendToPlaylistConfirmed {
+            playlist_id,
+            playlist_name,
+            song_ids,
+            present,
+        });
+        self.confirmation_only = true;
+    }
+
+    /// How many songs the add-conflict confirm's box would skip, when the
+    /// box is offered: `None` for any other dialog, and when every song is
+    /// already there (the confirm then offers "Add anyway" alone).
+    pub(crate) fn skip_duplicates_offer(&self) -> Option<usize> {
+        match &self.action {
+            Some(TextInputDialogAction::AppendToPlaylistConfirmed {
+                song_ids, present, ..
+            }) => {
+                let (already_there, total) = add_conflict_counts(song_ids, present);
+                (already_there < total).then_some(already_there)
+            }
+            _ => None,
+        }
+    }
+
     /// Close and reset the dialog.
     pub fn close(&mut self) {
         self.reset_fields();
         self.visible = false;
+    }
+
+    /// The playlist picker names an existing playlist (overwrite / append).
+    fn is_overwrite(&self) -> bool {
+        matches!(
+            self.selected_playlist,
+            Some(PlaylistOption::Existing { .. })
+        )
+    }
+
+    /// Whether the primary button is drawn in the destructive red: only a
+    /// delete confirmation. Exhaustive on purpose, like the confirmation
+    /// labels in [`Self::submit_label`]: a new action has to pick a side,
+    /// so a new confirm can't inherit the red by default.
+    pub(crate) fn is_destructive(&self) -> bool {
+        use TextInputDialogAction as A;
+        self.confirmation_only
+            && match &self.action {
+                Some(A::DeletePlaylist(..) | A::DeleteRadioStation(..)) => true,
+                Some(
+                    A::RenamePlaylist(_)
+                    | A::CreatePlaylistFromQueue
+                    | A::OverwritePlaylistFromQueue(_)
+                    | A::CreatePlaylistWithSongs(_)
+                    | A::AppendToPlaylist(..)
+                    | A::AppendToPlaylistConfirmed { .. }
+                    | A::WriteGeneralSetting { .. }
+                    | A::ResetVisualizerSettings
+                    | A::ResetAllHotkeys
+                    | A::CreateRadioStation
+                    | A::EditRadioStation(_)
+                    | A::WriteListenBrainzToken
+                    | A::WriteLastfmCredentials
+                    | A::CompleteLastfmAuth(_)
+                    | A::CreatePlaylistFromTrawl(_)
+                    | A::ImportNspCreate { .. }
+                    | A::ImportNspUpdate { .. },
+                )
+                | None => false,
+            }
+    }
+
+    /// The primary button's label.
+    pub(crate) fn submit_label(&self) -> &'static str {
+        let is_add_to_playlist = matches!(
+            self.action,
+            Some(
+                TextInputDialogAction::CreatePlaylistWithSongs(_)
+                    | TextInputDialogAction::AppendToPlaylist(_, _)
+            )
+        );
+        if self.confirmation_only {
+            // Exhaustive: "Delete" only where the action deletes.
+            use TextInputDialogAction as A;
+            match &self.action {
+                Some(A::DeletePlaylist(..) | A::DeleteRadioStation(..)) => "Delete",
+                Some(A::ResetVisualizerSettings | A::ResetAllHotkeys) => "Reset",
+                Some(A::AppendToPlaylistConfirmed { .. }) => {
+                    if self.skip_duplicates_offer().is_some() {
+                        "Add"
+                    } else {
+                        "Add anyway"
+                    }
+                }
+                Some(
+                    A::CompleteLastfmAuth(_)
+                    | A::RenamePlaylist(_)
+                    | A::CreatePlaylistFromQueue
+                    | A::OverwritePlaylistFromQueue(_)
+                    | A::CreatePlaylistWithSongs(_)
+                    | A::AppendToPlaylist(..)
+                    | A::WriteGeneralSetting { .. }
+                    | A::CreateRadioStation
+                    | A::EditRadioStation(_)
+                    | A::WriteListenBrainzToken
+                    | A::WriteLastfmCredentials
+                    | A::CreatePlaylistFromTrawl(_)
+                    | A::ImportNspCreate { .. }
+                    | A::ImportNspUpdate { .. },
+                )
+                | None => "Confirm",
+            }
+        } else if self.is_overwrite() {
+            if is_add_to_playlist {
+                "Add"
+            } else {
+                "Overwrite"
+            }
+        } else if self.save_playlist_mode {
+            if is_add_to_playlist { "Add" } else { "Create" }
+        } else if matches!(
+            self.action,
+            Some(
+                TextInputDialogAction::CreatePlaylistFromTrawl(_)
+                    | TextInputDialogAction::ImportNspCreate { .. }
+            )
+        ) {
+            "Create"
+        } else if matches!(
+            self.action,
+            Some(TextInputDialogAction::ImportNspUpdate { .. })
+        ) {
+            "Update"
+        } else {
+            "Submit"
+        }
     }
 }
 
@@ -358,6 +525,30 @@ pub enum TextInputDialogMessage {
     PlaylistSelected(PlaylistOption),
     /// User toggled the "Public" checkbox in save-as-playlist mode
     PublicToggled(bool),
+    /// User toggled the add-conflict confirm's "Skip the N already there" box
+    SkipDuplicatesToggled(bool),
+}
+
+/// The songs an add-conflict confirm writes: without the ones already
+/// there when the box is checked, all of them otherwise.
+pub(crate) fn songs_to_add(
+    song_ids: &[String],
+    present: &[String],
+    skip_duplicates: bool,
+) -> Vec<String> {
+    let missing = without_present(song_ids, present);
+    if skip_duplicates && !missing.is_empty() {
+        missing
+    } else {
+        song_ids.to_vec()
+    }
+}
+
+/// `(songs already there, songs in the batch)` for an add conflict. A
+/// repeat inside the batch counts as a song of its own.
+fn add_conflict_counts(song_ids: &[String], present: &[String]) -> (usize, usize) {
+    let total = song_ids.len();
+    (total - without_present(song_ids, present).len(), total)
 }
 
 /// Unique text_input ID for the dialog (for focus management)
@@ -383,6 +574,34 @@ fn dialog_input_style(_theme: &iced::Theme, status: text_input::Status) -> text_
     }
 }
 
+/// Shared checkbox styling for the dialog's boxes (Public, Skip duplicates).
+fn dialog_checkbox_style(_theme: &iced::Theme, status: checkbox::Status) -> checkbox::Style {
+    let is_checked = matches!(
+        status,
+        checkbox::Status::Active { is_checked: true }
+            | checkbox::Status::Hovered { is_checked: true }
+            | checkbox::Status::Disabled { is_checked: true }
+    );
+    checkbox::Style {
+        background: if is_checked {
+            theme::accent().into()
+        } else {
+            theme::bg0_soft().into()
+        },
+        icon_color: theme::fg0(),
+        border: iced::Border {
+            color: if is_checked {
+                theme::accent_bright()
+            } else {
+                theme::bg3()
+            },
+            width: 1.0,
+            radius: theme::ui_border_radius(),
+        },
+        text_color: Some(theme::fg2()),
+    }
+}
+
 /// Render the dialog overlay. Returns `None` if not visible.
 ///
 /// The returned Element should be pushed onto the Stack in `home_view`.
@@ -398,10 +617,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         .font(theme::ui_font())
         .color(theme::fg0());
 
-    let is_overwrite = matches!(
-        state.selected_playlist,
-        Some(PlaylistOption::Existing { .. })
-    );
+    let is_overwrite = state.is_overwrite();
 
     // Build dialog content elements
     let mut content = column![title_text]
@@ -462,6 +678,17 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .font(theme::ui_font())
             .color(theme::fg3());
         content = content.push(warning);
+        // The add-conflict confirm's box: skip the songs already there.
+        if let Some(already_there) = state.skip_duplicates_offer() {
+            let skip_check = checkbox(state.skip_duplicates)
+                .label(format!("Skip the {already_there} already there"))
+                .on_toggle(TextInputDialogMessage::SkipDuplicatesToggled)
+                .size(14)
+                .text_size(13)
+                .font(theme::ui_font())
+                .style(dialog_checkbox_style);
+            content = content.push(skip_check);
+        }
     } else if !is_overwrite {
         // Text input — shown when creating a new playlist (not overwriting) or for non-playlist flows
         let input = text_input(&state.placeholder, &state.value)
@@ -538,32 +765,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .size(14)
             .text_size(13)
             .font(theme::ui_font())
-            .style(|_theme, status| {
-                let is_checked = matches!(
-                    status,
-                    checkbox::Status::Active { is_checked: true }
-                        | checkbox::Status::Hovered { is_checked: true }
-                        | checkbox::Status::Disabled { is_checked: true }
-                );
-                checkbox::Style {
-                    background: if is_checked {
-                        theme::accent().into()
-                    } else {
-                        theme::bg0_soft().into()
-                    },
-                    icon_color: theme::fg0(),
-                    border: iced::Border {
-                        color: if is_checked {
-                            theme::accent_bright()
-                        } else {
-                            theme::bg3()
-                        },
-                        width: 1.0,
-                        radius: theme::ui_border_radius(),
-                    },
-                    text_color: Some(theme::fg2()),
-                }
-            });
+            .style(dialog_checkbox_style);
         // Indent to align with the input content (16px icon + 8px spacing).
         content = content.push(container(public_check).padding(iced::Padding {
             left: 24.0,
@@ -604,57 +806,9 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         content = content.push(container(note_text).width(Length::Fixed(340.0)));
     }
 
-    let is_destructive = state.confirmation_only
-        && !matches!(
-            state.action,
-            Some(
-                TextInputDialogAction::ResetVisualizerSettings
-                    | TextInputDialogAction::ResetAllHotkeys
-                    | TextInputDialogAction::CompleteLastfmAuth(_)
-            )
-        );
-
     // Submit / Cancel buttons
-    let is_add_to_playlist = matches!(
-        state.action,
-        Some(
-            TextInputDialogAction::CreatePlaylistWithSongs(_)
-                | TextInputDialogAction::AppendToPlaylist(_, _)
-        )
-    );
-    let submit_label = if state.confirmation_only {
-        match &state.action {
-            Some(
-                TextInputDialogAction::ResetVisualizerSettings
-                | TextInputDialogAction::ResetAllHotkeys,
-            ) => "Reset",
-            Some(TextInputDialogAction::CompleteLastfmAuth(_)) => "Confirm",
-            _ => "Delete",
-        }
-    } else if is_overwrite {
-        if is_add_to_playlist {
-            "Add"
-        } else {
-            "Overwrite"
-        }
-    } else if state.save_playlist_mode {
-        if is_add_to_playlist { "Add" } else { "Create" }
-    } else if matches!(
-        state.action,
-        Some(
-            TextInputDialogAction::CreatePlaylistFromTrawl(_)
-                | TextInputDialogAction::ImportNspCreate { .. }
-        )
-    ) {
-        "Create"
-    } else if matches!(
-        state.action,
-        Some(TextInputDialogAction::ImportNspUpdate { .. })
-    ) {
-        "Update"
-    } else {
-        "Submit"
-    };
+    let is_destructive = state.is_destructive();
+    let submit_label = state.submit_label();
 
     let submit_btn = button(
         container(
@@ -774,4 +928,256 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         TextInputDialogMessage::Cancel,
         theme::MODAL_BACKDROP_ALPHA,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opened(open: impl FnOnce(&mut TextInputDialogState)) -> TextInputDialogState {
+        let mut state = TextInputDialogState::default();
+        open(&mut state);
+        state
+    }
+
+    fn existing() -> PlaylistOption {
+        PlaylistOption::Existing {
+            id: "pl1".into(),
+            name: "Road Trip".into(),
+        }
+    }
+
+    /// Every confirmation the app opens today: its label, and whether it is
+    /// drawn in the destructive red.
+    #[test]
+    fn confirmation_labels_and_destructive_flags() {
+        let cases: [(TextInputDialogState, &str, bool); 5] = [
+            (
+                opened(|s| s.open_delete_confirmation("pl1".into(), "Road Trip".into(), false)),
+                "Delete",
+                true,
+            ),
+            (
+                opened(|s| s.open_delete_radio_confirmation("r1".into(), "KEXP".into())),
+                "Delete",
+                true,
+            ),
+            (
+                opened(TextInputDialogState::open_reset_visualizer_confirmation),
+                "Reset",
+                false,
+            ),
+            (
+                opened(TextInputDialogState::open_reset_hotkeys_confirmation),
+                "Reset",
+                false,
+            ),
+            (
+                opened(|s| s.open_lastfm_auth_confirmation("tok".into())),
+                "Confirm",
+                false,
+            ),
+        ];
+        for (state, label, destructive) in cases {
+            assert_eq!(state.submit_label(), label, "{}", state.title);
+            assert_eq!(state.is_destructive(), destructive, "{}", state.title);
+        }
+    }
+
+    /// Every input dialog: its label, and never the destructive red.
+    #[test]
+    fn input_dialog_labels_are_never_destructive() {
+        let mut overwrite = opened(|s| s.open_save_playlist(&[]));
+        overwrite.selected_playlist = Some(existing());
+        overwrite.action = Some(TextInputDialogAction::OverwritePlaylistFromQueue(
+            "pl1".into(),
+        ));
+        let mut append = opened(|s| s.open_add_to_playlist(&[], vec!["s1".into()]));
+        append.selected_playlist = Some(existing());
+        append.action = Some(TextInputDialogAction::AppendToPlaylist(
+            "pl1".into(),
+            vec!["s1".into()],
+        ));
+        let cases: [(TextInputDialogState, &str); 9] = [
+            (opened(|s| s.open_save_playlist(&[])), "Create"),
+            (overwrite, "Overwrite"),
+            (
+                opened(|s| s.open_add_to_playlist(&[], vec!["s1".into()])),
+                "Add",
+            ),
+            (append, "Add"),
+            (
+                opened(|s| {
+                    s.open(
+                        "Rename Playlist",
+                        "Road Trip",
+                        "Name",
+                        TextInputDialogAction::RenamePlaylist("pl1".into()),
+                    );
+                }),
+                "Submit",
+            ),
+            (
+                opened(|s| {
+                    s.open(
+                        "Save Mix",
+                        "",
+                        "Name",
+                        TextInputDialogAction::CreatePlaylistFromTrawl(vec![]),
+                    );
+                }),
+                "Create",
+            ),
+            (
+                opened(|s| {
+                    s.open(
+                        "Import",
+                        "",
+                        "Name",
+                        TextInputDialogAction::ImportNspCreate {
+                            comment: String::new(),
+                            rules: serde_json::Value::Null,
+                        },
+                    );
+                }),
+                "Create",
+            ),
+            (
+                opened(|s| {
+                    s.open(
+                        "Import",
+                        "",
+                        "Name",
+                        TextInputDialogAction::ImportNspUpdate {
+                            playlist_id: "sp1".into(),
+                            detach_sync: false,
+                            comment: String::new(),
+                            public: true,
+                            rules: serde_json::Value::Null,
+                        },
+                    );
+                }),
+                "Update",
+            ),
+            (
+                opened(|s| {
+                    s.open_two_fields(
+                        "New Radio Station",
+                        "",
+                        "Name",
+                        "",
+                        "Stream URL",
+                        TextInputDialogAction::CreateRadioStation,
+                    );
+                }),
+                "Submit",
+            ),
+        ];
+        for (state, label) in cases {
+            assert_eq!(state.submit_label(), label, "{}", state.title);
+            assert!(!state.is_destructive(), "{}", state.title);
+        }
+    }
+
+    fn ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    fn add_conflict(song_ids: &[&str], present: &[&str]) -> TextInputDialogState {
+        opened(|s| {
+            s.open_add_conflict(
+                "pl1".into(),
+                "Road Trip".into(),
+                ids(song_ids),
+                ids(present),
+            );
+        })
+    }
+
+    /// The add-conflict confirm is an add: it never reads "Delete" and is
+    /// never drawn in the destructive red.
+    #[test]
+    fn add_conflict_confirm_reads_add_and_is_not_destructive() {
+        let some = add_conflict(&["a", "b", "c", "d", "e"], &["b", "d"]);
+        assert!(some.visible && some.confirmation_only);
+        assert_eq!(some.submit_label(), "Add");
+        assert!(!some.is_destructive());
+        assert_eq!(some.skip_duplicates_offer(), Some(2));
+
+        let all = add_conflict(&["a", "b"], &["a", "b"]);
+        assert_eq!(all.submit_label(), "Add anyway");
+        assert!(!all.is_destructive());
+        assert_eq!(
+            all.skip_duplicates_offer(),
+            None,
+            "no box when all are there"
+        );
+    }
+
+    #[test]
+    fn add_conflict_confirm_messages() {
+        let cases = [
+            (
+                add_conflict(&["a", "b", "c", "d", "e"], &["b", "d"]),
+                "2 of 5 songs are already in \"Road Trip\".",
+            ),
+            (
+                add_conflict(&["a", "b", "c"], &["b"]),
+                "1 of 3 songs is already in \"Road Trip\".",
+            ),
+            (
+                add_conflict(&["a", "b", "c", "d", "e"], &["a", "b", "c", "d", "e"]),
+                "All 5 songs are already in \"Road Trip\".",
+            ),
+            (
+                add_conflict(&["a"], &["a"]),
+                "This song is already in \"Road Trip\".",
+            ),
+        ];
+        for (state, message) in cases {
+            assert_eq!(state.title, "Add to Playlist");
+            assert_eq!(state.confirmation_message, message);
+        }
+    }
+
+    /// Repeats inside the batch count as songs of the batch: two copies of a
+    /// song the playlist holds are two songs the box skips.
+    #[test]
+    fn add_conflict_counts_batch_repeats() {
+        let state = add_conflict(&["a", "a", "b"], &["a"]);
+        assert_eq!(
+            state.confirmation_message,
+            "2 of 3 songs are already in \"Road Trip\"."
+        );
+        assert_eq!(state.skip_duplicates_offer(), Some(2));
+    }
+
+    #[test]
+    fn add_conflict_starts_with_the_box_checked() {
+        let mut state = TextInputDialogState {
+            skip_duplicates: false,
+            ..Default::default()
+        };
+        state.open_add_conflict(
+            "pl1".into(),
+            "Road Trip".into(),
+            ids(&["a", "b"]),
+            ids(&["a"]),
+        );
+        assert!(state.skip_duplicates);
+        state.close();
+        assert!(state.skip_duplicates, "every opener resets the box");
+    }
+
+    #[test]
+    fn songs_to_add_follows_the_box() {
+        let batch = ids(&["a", "b", "a", "c"]);
+        let present = ids(&["a"]);
+        assert_eq!(songs_to_add(&batch, &present, true), ids(&["b", "c"]));
+        assert_eq!(songs_to_add(&batch, &present, false), batch);
+        // Every song already there: no box, so "Add anyway" adds them all
+        // whatever the (hidden) box holds.
+        let all = ids(&["a", "a"]);
+        assert_eq!(songs_to_add(&all, &present, true), all);
+    }
 }

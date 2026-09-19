@@ -95,6 +95,7 @@ Iced-free. Key types:
 - **Star**: optimistic UI + revert on failure
 - **Rating**: +/- hotkeys
 - **Playlist CRUD**: Navidrome-native REST (not Subsonic) for writes
+- **Subsonic reads**: `subsonic_get_envelope` is lenient (never looks at the HTTP status or a `status: "failed"` envelope, so a failure can read as an empty list); `subsonic_get_envelope_checked` runs `check_subsonic_response_status` first (401 → `NokkviError::Unauthorized`). Use the checked one when an empty answer would be acted on as fact, e.g. `playlist_song_ids` for the add-time duplicate check
 - **MPRIS**: D-Bus background task; full metadata for both queue songs and radio streams
 - **Tray**: ksni-based StatusNotifierItem in `src/services/tray.rs`; emits `TrayEvent` to the UI
 - **Internet Radio**: Subsonic `getInternetRadioStations` + mutative CRUD tasks

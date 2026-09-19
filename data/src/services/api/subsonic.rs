@@ -147,6 +147,56 @@ pub(crate) async fn subsonic_get_envelope<T: serde::de::DeserializeOwned>(
     extra_params: &[(&str, &str)],
     label: &str,
 ) -> Result<T> {
+    let (_status, body) = fetch_subsonic_body(
+        http_client,
+        server_url,
+        endpoint,
+        subsonic_credential,
+        extra_params,
+        label,
+    )
+    .await?;
+    let envelope: SubsonicEnvelope<T> = parse::parse_json_with_preview(&body, label)?;
+    Ok(envelope.response)
+}
+
+/// [`subsonic_get_envelope`] for a read whose empty answer would be taken as
+/// fact: it applies [`check_subsonic_response_status`] before parsing, so
+/// HTTP 401 is `NokkviError::Unauthorized` and any other non-2xx status, or
+/// a `status: "failed"` envelope (a rejected token, an unknown id), is an
+/// error rather than an empty payload. The lenient twin checks neither.
+pub(crate) async fn subsonic_get_envelope_checked<T: serde::de::DeserializeOwned>(
+    http_client: &Arc<reqwest::Client>,
+    server_url: &str,
+    endpoint: &str,
+    subsonic_credential: &str,
+    extra_params: &[(&str, &str)],
+    label: &str,
+) -> Result<T> {
+    let (status, body) = fetch_subsonic_body(
+        http_client,
+        server_url,
+        endpoint,
+        subsonic_credential,
+        extra_params,
+        label,
+    )
+    .await?;
+    check_subsonic_response_status(status, &body, label)?;
+    let envelope: SubsonicEnvelope<T> = parse::parse_json_with_preview(&body, label)?;
+    Ok(envelope.response)
+}
+
+/// POST to a Subsonic endpoint and read the status and body, with `label`
+/// in the error contexts. The shared front half of the envelope readers.
+async fn fetch_subsonic_body(
+    http_client: &Arc<reqwest::Client>,
+    server_url: &str,
+    endpoint: &str,
+    subsonic_credential: &str,
+    extra_params: &[(&str, &str)],
+    label: &str,
+) -> Result<(reqwest::StatusCode, String)> {
     let response = subsonic_post(
         http_client,
         server_url,
@@ -156,14 +206,12 @@ pub(crate) async fn subsonic_get_envelope<T: serde::de::DeserializeOwned>(
     )
     .await
     .with_context(|| format!("Failed to fetch {label}"))?;
-
+    let status = response.status();
     let body = response
         .text()
         .await
         .with_context(|| format!("Failed to read {label} response"))?;
-
-    let envelope: SubsonicEnvelope<T> = parse::parse_json_with_preview(&body, label)?;
-    Ok(envelope.response)
+    Ok((status, body))
 }
 
 /// Coerce a Subsonic JSON field that may be either a single object or an
@@ -330,5 +378,118 @@ mod tests {
             result.is_err(),
             "single-object shape mismatch must produce an error"
         );
+    }
+
+    /// Answer one HTTP request on an ephemeral port with `status_line` and
+    /// `body`, reading the whole request first so closing the socket never
+    /// resets it. Returns the base URL.
+    async fn one_shot_server(status_line: &'static str, body: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while let Ok(read) = socket.read(&mut chunk).await
+                && read > 0
+            {
+                request.extend_from_slice(&chunk[..read]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(head_end) = text.find("\r\n\r\n") {
+                    let length = text[..head_end]
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= head_end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+        format!("http://{addr}")
+    }
+
+    async fn get_playlist_envelope(base_url: &str, checked: bool) -> Result<serde_json::Value> {
+        let client = Arc::new(reqwest::Client::new());
+        let params = [("id", "pl1")];
+        if checked {
+            subsonic_get_envelope_checked(
+                &client,
+                base_url,
+                "getPlaylist",
+                "u=x",
+                &params,
+                "playlist",
+            )
+            .await
+        } else {
+            subsonic_get_envelope(&client, base_url, "getPlaylist", "u=x", &params, "playlist")
+                .await
+        }
+    }
+
+    const FAILED_ENVELOPE: &str = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong username or password"}}}"#;
+
+    /// A rejected token comes back as HTTP 200 with a failed envelope. The
+    /// lenient reader hands it on as a payload (a playlist would read as
+    /// empty); the checked one makes it an error.
+    #[tokio::test]
+    async fn checked_envelope_turns_a_failed_envelope_into_an_error() {
+        let lenient =
+            get_playlist_envelope(&one_shot_server("200 OK", FAILED_ENVELOPE).await, false)
+                .await
+                .expect("the lenient reader never looks at the status");
+        assert_eq!(lenient["status"], "failed");
+
+        let err = get_playlist_envelope(&one_shot_server("200 OK", FAILED_ENVELOPE).await, true)
+            .await
+            .expect_err("a failed envelope must be an error");
+        assert!(
+            format!("{err:#}").contains("Wrong username or password"),
+            "got: {err:#}"
+        );
+    }
+
+    /// A 401 (a reverse proxy in front of Navidrome) routes to the
+    /// session-expired path through the checked reader.
+    #[tokio::test]
+    async fn checked_envelope_routes_401_to_unauthorized() {
+        let err = get_playlist_envelope(&one_shot_server("401 Unauthorized", "").await, true)
+            .await
+            .expect_err("401 must be an error");
+        assert!(
+            matches!(
+                err.downcast_ref::<NokkviError>(),
+                Some(NokkviError::Unauthorized)
+            ),
+            "got: {err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn checked_envelope_parses_an_ok_body() {
+        let ok =
+            r#"{"subsonic-response":{"status":"ok","version":"1.16.1","playlist":{"id":"pl1"}}}"#;
+        let payload = get_playlist_envelope(&one_shot_server("200 OK", ok).await, true)
+            .await
+            .expect("an ok envelope parses");
+        assert_eq!(payload["playlist"]["id"], "pl1");
     }
 }

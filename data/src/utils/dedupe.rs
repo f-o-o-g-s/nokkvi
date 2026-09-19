@@ -1,5 +1,6 @@
 //! Remove Duplicates — the one home of the "which rows are repeats" rule
-//! behind the playlist editor's and the queue's de-dupe.
+//! behind the playlist editor's and the queue's de-dupe, plus the split
+//! behind adding songs a playlist already holds.
 //!
 //! A duplicate is a row whose song id already appeared. Two files of the same
 //! recording carry different ids, so both stay.
@@ -30,6 +31,28 @@ where
     }
     rows.filter(|&(song_id, entry_id)| Some(entry_id) != protected && !seen.insert(song_id))
         .map(|(_, entry_id)| entry_id)
+        .collect()
+}
+
+/// The ids of `song_ids` (a batch about to be added to a playlist) that the
+/// playlist already holds (`existing`), in batch order, each reported once.
+pub fn already_present(song_ids: &[String], existing: &HashSet<String>) -> Vec<String> {
+    let mut reported = HashSet::new();
+    song_ids
+        .iter()
+        .filter(|id| existing.contains(*id) && reported.insert(id.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// `song_ids` without the ids in `present`. Order is kept, and so are
+/// repeats inside the batch: those are the user's explicit selection.
+pub fn without_present(song_ids: &[String], present: &[String]) -> Vec<String> {
+    let present: HashSet<&str> = present.iter().map(String::as_str).collect();
+    song_ids
+        .iter()
+        .filter(|id| !present.contains(id.as_str()))
+        .cloned()
         .collect()
 }
 
@@ -79,6 +102,35 @@ mod tests {
     #[test]
     fn a_protected_later_copy_drops_the_first() {
         assert_eq!(dropped(&["a", "b", "a"], Some(2)), [0]);
+    }
+
+    fn ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    #[test]
+    fn already_present_lists_batch_ids_in_the_target_once_in_batch_order() {
+        let existing: HashSet<String> = ids(&["c", "a", "z"]).into_iter().collect();
+        assert_eq!(
+            already_present(&ids(&["a", "b", "c", "a"]), &existing),
+            ids(&["a", "c"])
+        );
+        assert!(already_present(&ids(&["b", "d"]), &existing).is_empty());
+        assert!(already_present(&[], &existing).is_empty());
+    }
+
+    #[test]
+    fn without_present_keeps_order_and_in_batch_repeats() {
+        assert_eq!(
+            without_present(&ids(&["a", "b", "b", "c", "a", "d"]), &ids(&["a", "c"])),
+            ids(&["b", "b", "d"])
+        );
+        assert_eq!(
+            without_present(&ids(&["a", "b"]), &[]),
+            ids(&["a", "b"]),
+            "nothing present keeps the batch"
+        );
+        assert!(without_present(&ids(&["a", "a"]), &ids(&["a"])).is_empty());
     }
 
     proptest! {

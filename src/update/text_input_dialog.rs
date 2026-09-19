@@ -5,7 +5,9 @@ use iced::Task;
 use crate::{
     Nokkvi,
     app_message::{Message, PlaylistMutation},
-    widgets::text_input_dialog::{PlaylistOption, TextInputDialogAction, TextInputDialogMessage},
+    widgets::text_input_dialog::{
+        PlaylistOption, TextInputDialogAction, TextInputDialogMessage, songs_to_add,
+    },
 };
 
 impl Nokkvi {
@@ -66,6 +68,10 @@ impl Nokkvi {
             }
             TextInputDialogMessage::PublicToggled(value) => {
                 self.text_input_dialog.public = value;
+                Task::none()
+            }
+            TextInputDialogMessage::SkipDuplicatesToggled(value) => {
+                self.text_input_dialog.skip_duplicates = value;
                 Task::none()
             }
             TextInputDialogMessage::Submit => self.handle_text_input_submit(),
@@ -265,15 +271,37 @@ impl Nokkvi {
                     })
                     .unwrap_or_default();
                 self.text_input_dialog.close();
+                self.append_songs_to_playlist_task(
+                    playlist_id,
+                    playlist_name,
+                    song_ids,
+                    "add songs to playlist",
+                )
+            }
+            // The add-conflict confirm: the check already ran, so this is the
+            // plain add of whatever the box leaves in.
+            Some(TextInputDialogAction::AppendToPlaylistConfirmed {
+                playlist_id,
+                playlist_name,
+                song_ids,
+                present,
+            }) => {
+                let to_add =
+                    songs_to_add(&song_ids, &present, self.text_input_dialog.skip_duplicates);
+                self.text_input_dialog.close();
+                let added = to_add.len();
+                let skipped = song_ids.len() - added;
                 let id_for_msg = playlist_id.clone();
                 self.shell_action_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        service.add_songs_to_playlist(&playlist_id, &song_ids).await
+                        service.add_songs_to_playlist(&playlist_id, &to_add).await
                     },
                     Message::PlaylistMutated(PlaylistMutation::Appended {
                         name: playlist_name,
                         id: id_for_msg,
+                        added,
+                        skipped,
                     }),
                     "add songs to playlist",
                 )

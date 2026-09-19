@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Album and artist thumbnails show the cover's dominant color while they load (Navidrome 0.64+).
 - The playlist editor can remove duplicate songs in one click, from the edit bar or a row's right-click menu.
 - The queue's right-click menu can remove duplicate songs without interrupting playback.
+- Adding songs a playlist already has now asks whether to skip them.
 
 ### Changed
 
@@ -21,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Dropping thousands of selected rows in a very large queue now lands without a pause.
 - Dropping thousands of selected rows in the playlist editor now lands without a pause.
 - Removing many queue rows at once no longer stalls playback.
+- The add-to-playlist confirmation now says how many songs were added.
 - On Navidrome 0.64+, albums and artists with no artwork show a plain square instead of Navidrome's placeholder picture.
 - On Navidrome 0.64+, a replaced album, artist, or playlist cover shows the next time its row comes into view.
 - On Navidrome 0.64+, the large artwork panel also switches to a replaced cover without a manual refresh.
@@ -60,6 +62,7 @@ All notable changes to this project will be documented in this file.
 - Desktop media widgets now show the nokkvi icon when a song's cover fails to load.
 - Scrolling Genres or Playlists no longer re-downloads thumbnails that are already loaded.
 - Searching the queue or radio stations after clicking a row no longer leaves the results without a highlighted row.
+- The quick-add confirmation no longer ends with a stray apostrophe.
 
 ### Removed
 

@@ -30,6 +30,10 @@ pub enum PlaylistMutation {
     Appended {
         name: String,
         id: String,
+        /// Songs written to the playlist.
+        added: usize,
+        /// Songs of the batch left out because the playlist already had them.
+        skipped: usize,
     },
     /// A smart playlist's rules were saved (created or updated).
     RulesSaved {
@@ -44,7 +48,19 @@ impl std::fmt::Display for PlaylistMutation {
             Self::Renamed(name) => write!(f, "Renamed to '{name}'"),
             Self::Created(name, _) => write!(f, "Created playlist '{name}'"),
             Self::Overwritten(name, _) => write!(f, "Overwritten playlist '{name}'"),
-            Self::Appended { name, .. } => write!(f, "Added songs to '{name}'"),
+            Self::Appended {
+                name,
+                added,
+                skipped,
+                ..
+            } => {
+                let plural = if *added == 1 { "" } else { "s" };
+                write!(f, "Added {added} song{plural} to '{name}'")?;
+                if *skipped > 0 {
+                    write!(f, " ({skipped} already there)")?;
+                }
+                Ok(())
+            }
             Self::RulesSaved { name } => write!(f, "Saved rules for '{name}'"),
         }
     }
@@ -1279,6 +1295,15 @@ pub enum Message {
     /// quick-add bypass must SEE smart rows to refuse a smart default with
     /// the right toast; the dialog rows are the filtered projection.
     PlaylistsFetchedForAddToPlaylist(Vec<(String, String, bool)>, Vec<String>),
+    /// An add to a playlist found some of the batch already there, so
+    /// nothing was written: open the confirm that asks whether to skip them.
+    /// `present` = the batch's ids the playlist already holds, each once.
+    PlaylistAppendConflict {
+        playlist_id: String,
+        playlist_name: String,
+        song_ids: Vec<String>,
+        present: Vec<String>,
+    },
     LoadSongs,
     /// Fetch one page of songs and append to queue, then chain next page if needed.
     /// Enables per-page UI refresh during progressive queue building.

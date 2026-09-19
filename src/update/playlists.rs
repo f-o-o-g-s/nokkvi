@@ -1,17 +1,95 @@
 //! Playlist data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::backend::playlists::PlaylistUIViewData;
-use tracing::{debug, info};
+use nokkvi_data::{backend::playlists::PlaylistUIViewData, utils::dedupe::already_present};
+use tracing::{debug, error, info};
 
+use super::components::session_expired_message;
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, CollageTarget, Message, NavigationMessage, SplitViewMessage},
+    app_message::{
+        ArtworkMessage, CollageTarget, Message, NavigationMessage, PlaylistMutation,
+        SplitViewMessage,
+    },
     update::PlaylistsTarget,
     views::{self, HasCommonAction, PlaylistsAction, PlaylistsMessage},
 };
 
+/// What an add to a playlist did after checking the target's tracks.
+enum AppendOutcome {
+    /// None of the batch was there: all `count` songs were added.
+    Added(usize),
+    /// Some were there (`present`, each id once): nothing was written.
+    Conflict {
+        song_ids: Vec<String>,
+        present: Vec<String>,
+    },
+}
+
 impl Nokkvi {
+    /// Add `song_ids` to a playlist, asking first when it already holds some
+    /// of them: the one path both add sites take (the picker dialog's Submit
+    /// and quick-add to the default playlist).
+    ///
+    /// Loads the target's track ids (one Subsonic `getPlaylist`, read
+    /// status-checked; there is no ids-only endpoint). With none of the batch there, the add goes
+    /// through right there and ends in `PlaylistMutated(Appended)`, as it
+    /// did before the check. Otherwise nothing is written and
+    /// `PlaylistAppendConflict` opens the confirm. Only songs already in the
+    /// target count; repeats inside the batch are the user's selection. A
+    /// failure toasts `Failed to {error_ctx}: …`, and a 401 routes to the
+    /// session-expired path.
+    pub(crate) fn append_songs_to_playlist_task(
+        &self,
+        playlist_id: String,
+        playlist_name: String,
+        song_ids: Vec<String>,
+        error_ctx: &'static str,
+    ) -> Task<Message> {
+        let target = playlist_id.clone();
+        self.shell_task(
+            move |shell| async move {
+                let service = shell.playlists_api().await?;
+                // Status-checked: a failed read must not pass as "none there".
+                let existing = service.playlist_song_ids(&target).await?;
+                let present = already_present(&song_ids, &existing);
+                if present.is_empty() {
+                    service.add_songs_to_playlist(&target, &song_ids).await?;
+                    Ok(AppendOutcome::Added(song_ids.len()))
+                } else {
+                    Ok(AppendOutcome::Conflict { song_ids, present })
+                }
+            },
+            move |result: anyhow::Result<AppendOutcome>| match result {
+                Ok(AppendOutcome::Added(added)) => {
+                    Message::PlaylistMutated(PlaylistMutation::Appended {
+                        name: playlist_name,
+                        id: playlist_id,
+                        added,
+                        skipped: 0,
+                    })
+                }
+                Ok(AppendOutcome::Conflict { song_ids, present }) => {
+                    Message::PlaylistAppendConflict {
+                        playlist_id,
+                        playlist_name,
+                        song_ids,
+                        present,
+                    }
+                }
+                Err(e) => session_expired_message(&e).unwrap_or_else(|| {
+                    error!(" Failed to {error_ctx}: {e}");
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to {error_ctx}: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }),
+            },
+        )
+    }
+
     pub(crate) fn handle_load_playlists(&mut self) -> Task<Message> {
         debug!(" LoadPlaylists message received, loading playlists...");
         let view_str = views::PlaylistsPage::sort_mode_to_api_string(

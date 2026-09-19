@@ -616,3 +616,172 @@ fn create_dialog_warns_on_duplicate_name() {
         "a fresh name clears the warning"
     );
 }
+
+// --- Ask before adding songs a playlist already has --------------------------
+
+fn conflict(song_ids: &[&str], present: &[&str]) -> Message {
+    Message::PlaylistAppendConflict {
+        playlist_id: "pl1".into(),
+        playlist_name: "Road Trip".into(),
+        song_ids: song_ids.iter().map(|id| (*id).to_string()).collect(),
+        present: present.iter().map(|id| (*id).to_string()).collect(),
+    }
+}
+
+/// A logged-in app (the add-conflict arrives from a live session).
+fn home_app() -> crate::Nokkvi {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app
+}
+
+#[test]
+fn append_conflict_opens_the_confirm_with_the_box_checked() {
+    let mut app = home_app();
+
+    let _ = app.update(conflict(&["a", "b", "c", "d", "e"], &["b", "d"]));
+
+    let dialog = &app.text_input_dialog;
+    assert!(dialog.visible && dialog.confirmation_only);
+    assert_eq!(dialog.title, "Add to Playlist");
+    assert_eq!(
+        dialog.confirmation_message,
+        "2 of 5 songs are already in \"Road Trip\"."
+    );
+    assert!(dialog.skip_duplicates, "the box starts checked");
+    assert_eq!(dialog.skip_duplicates_offer(), Some(2));
+    assert_eq!(dialog.submit_label(), "Add");
+    assert!(!dialog.is_destructive());
+}
+
+#[test]
+fn append_conflict_with_every_song_there_offers_add_anyway() {
+    let mut app = home_app();
+    let _ = app.update(conflict(
+        &["a", "b", "c", "d", "e"],
+        &["a", "b", "c", "d", "e"],
+    ));
+    assert_eq!(
+        app.text_input_dialog.confirmation_message,
+        "All 5 songs are already in \"Road Trip\"."
+    );
+    assert_eq!(app.text_input_dialog.skip_duplicates_offer(), None);
+    assert_eq!(app.text_input_dialog.submit_label(), "Add anyway");
+
+    let mut app = home_app();
+    let _ = app.update(conflict(&["a"], &["a"]));
+    assert_eq!(
+        app.text_input_dialog.confirmation_message,
+        "This song is already in \"Road Trip\"."
+    );
+    assert_eq!(app.text_input_dialog.submit_label(), "Add anyway");
+}
+
+#[test]
+fn append_conflict_box_toggles() {
+    use crate::widgets::text_input_dialog::TextInputDialogMessage;
+
+    let mut app = home_app();
+    let _ = app.update(conflict(&["a", "b"], &["a"]));
+
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::SkipDuplicatesToggled(false),
+    ));
+    assert!(!app.text_input_dialog.skip_duplicates);
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::SkipDuplicatesToggled(true),
+    ));
+    assert!(app.text_input_dialog.skip_duplicates);
+}
+
+#[test]
+fn append_conflict_cancel_adds_nothing() {
+    use crate::widgets::text_input_dialog::TextInputDialogMessage;
+
+    let mut app = home_app();
+    let _ = app.update(conflict(&["a", "b"], &["a"]));
+    assert!(app.text_input_dialog.visible, "the confirm opened");
+
+    let _ = app.update(Message::TextInputDialog(TextInputDialogMessage::Cancel));
+
+    assert!(!app.text_input_dialog.visible);
+    assert!(app.text_input_dialog.action.is_none(), "no add left behind");
+}
+
+/// A conflict that arrives while the user works in another dialog never
+/// replaces it: a click meant for that dialog would confirm the add.
+#[test]
+fn append_conflict_leaves_an_open_dialog_alone() {
+    let mut app = home_app();
+    app.text_input_dialog
+        .open_delete_confirmation("pl9".into(), "Old Mix".into(), false);
+
+    let _ = app.update(conflict(&["a", "b"], &["a"]));
+
+    assert_eq!(app.text_input_dialog.title, "Delete Playlist");
+    assert!(matches!(
+        app.text_input_dialog.action,
+        Some(crate::widgets::text_input_dialog::TextInputDialogAction::DeletePlaylist(..))
+    ));
+    let (level, message) = last_toast(&app).expect("a toast says nothing was added");
+    assert_eq!(level, ToastLevel::Warning);
+    assert_eq!(
+        message,
+        "Nothing added to 'Road Trip': some of the songs are already there"
+    );
+}
+
+/// A conflict that lands after a logout opens nothing on the login screen.
+#[test]
+fn append_conflict_after_logout_is_dropped() {
+    let mut app = test_app();
+    assert_eq!(app.screen, crate::Screen::Login);
+
+    let _ = app.update(conflict(&["a", "b"], &["a"]));
+
+    assert!(!app.text_input_dialog.visible);
+}
+
+/// A regular default playlist takes the quick-add path with no dialog: the
+/// duplicate check runs in the add task and only a conflict opens one.
+#[test]
+fn quick_add_to_a_regular_default_opens_no_dialog() {
+    let mut app = test_app();
+    app.settings.quick_add_to_playlist = true;
+    app.settings.default_playlist_id = Some("pl1".into());
+    app.settings.default_playlist_name = "Road Trip".into();
+
+    let triples = vec![("pl1".to_owned(), "Road Trip".to_owned(), false)];
+    let _ = app.update(Message::PlaylistsFetchedForAddToPlaylist(
+        triples,
+        vec!["song1".into()],
+    ));
+
+    assert!(!app.text_input_dialog.visible);
+    assert!(last_toast(&app).is_none(), "no warning on the happy path");
+}
+
+#[test]
+fn appended_toast_counts_songs_and_skips() {
+    use crate::app_message::PlaylistMutation;
+
+    let appended = |added, skipped| {
+        PlaylistMutation::Appended {
+            name: "Road Trip".into(),
+            id: "pl1".into(),
+            added,
+            skipped,
+        }
+        .to_string()
+    };
+    assert_eq!(appended(3, 0), "Added 3 songs to 'Road Trip'");
+    assert_eq!(appended(1, 0), "Added 1 song to 'Road Trip'");
+    assert_eq!(
+        appended(3, 2),
+        "Added 3 songs to 'Road Trip' (2 already there)"
+    );
+    assert_eq!(
+        appended(1, 1),
+        "Added 1 song to 'Road Trip' (1 already there)"
+    );
+}

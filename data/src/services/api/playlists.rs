@@ -2,6 +2,8 @@
 //!
 //! Handles playlist-related API calls to Navidrome server.
 
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
 
@@ -203,26 +205,7 @@ impl PlaylistsApiService {
             "Subsonic playlist",
         )
         .await?;
-
-        let mut songs = Vec::new();
-        let mut attrs = SubsonicPlaylistAttrs::default();
-
-        // Missing playlist/entry keys yield Ok(empty) — a playlist with
-        // zero entries must not error.
-        if let Some(playlist) = inner.playlist {
-            attrs.readonly = playlist.readonly;
-            if let Some(entry_value) = playlist.entry {
-                // Subsonic returns a single object instead of a one-element
-                // array; `deserialize_one_or_many` absorbs that quirk.
-                let entries: Vec<serde_json::Value> =
-                    subsonic::deserialize_one_or_many(entry_value)?;
-
-                for entry in entries {
-                    let song = parse_subsonic_song_entry(entry)?;
-                    songs.push(song);
-                }
-            }
-        }
+        let (songs, attrs) = playlist_songs_from(inner)?;
 
         debug!(
             " PlaylistsService: Loaded {} songs from playlist {}",
@@ -231,6 +214,25 @@ impl PlaylistsApiService {
         );
 
         Ok((songs, attrs))
+    }
+
+    /// The ids of the songs a playlist holds, for the check before songs are
+    /// added to it. Unlike [`Self::load_playlist_songs`], a failed response
+    /// is an error (HTTP 401 → `NokkviError::Unauthorized`), never an empty
+    /// playlist: the check must not read a failure as "none of these are
+    /// there yet" and add without asking.
+    pub async fn playlist_song_ids(&self, playlist_id: &str) -> Result<HashSet<String>> {
+        let inner: PlaylistInner = subsonic::subsonic_get_envelope_checked(
+            &self.client.http_client(),
+            &self.server_url,
+            "getPlaylist",
+            &self.subsonic_credential,
+            &[("id", playlist_id)],
+            "Subsonic playlist",
+        )
+        .await?;
+        let (songs, _) = playlist_songs_from(inner)?;
+        Ok(songs.into_iter().map(|song| song.id).collect())
     }
 
     /// Load album IDs from a playlist (for artwork collage)
@@ -808,6 +810,28 @@ fn build_update_playlist_body(
 /// vs `sampleRate`, `userRating` vs `rating`). The canonical `Song` struct
 /// declares `#[serde(alias = ...)]` for the Subsonic spellings, so a single
 /// `serde_json::from_value` call deserializes both shapes.
+/// The songs and playlist-level attributes of a `getPlaylist` payload.
+/// Missing playlist/entry keys yield an empty list: a playlist with zero
+/// entries must not error.
+fn playlist_songs_from(
+    inner: PlaylistInner,
+) -> Result<(Vec<crate::types::song::Song>, SubsonicPlaylistAttrs)> {
+    let mut songs = Vec::new();
+    let mut attrs = SubsonicPlaylistAttrs::default();
+    if let Some(playlist) = inner.playlist {
+        attrs.readonly = playlist.readonly;
+        if let Some(entry_value) = playlist.entry {
+            // Subsonic returns a single object instead of a one-element
+            // array; `deserialize_one_or_many` absorbs that quirk.
+            let entries: Vec<serde_json::Value> = subsonic::deserialize_one_or_many(entry_value)?;
+            for entry in entries {
+                songs.push(parse_subsonic_song_entry(entry)?);
+            }
+        }
+    }
+    Ok((songs, attrs))
+}
+
 fn parse_subsonic_song_entry(entry: serde_json::Value) -> Result<crate::types::song::Song> {
     serde_json::from_value::<crate::types::song::Song>(entry)
         .context("Failed to deserialize Subsonic playlist song entry")
