@@ -353,6 +353,38 @@ pub const STATIC_FIELDS: &[FieldDef] = &[
     col("albumlastplayed", "Album last played", FieldClass::Date),
     col("albumdateloved", "Album date loved", FieldClass::Date),
     col("albumdaterated", "Album date rated", FieldClass::Date),
+    // Album-level columns #5899 added in 0.64.0 (`album.created_at`,
+    // `album.updated_at`, `album.duration`, `album.song_count`, `album.size`).
+    col_since(
+        "albumdateadded",
+        "Album date added",
+        FieldClass::Date,
+        (0, 64, 0),
+    ),
+    col_since(
+        "albumdatemodified",
+        "Album date modified",
+        FieldClass::Date,
+        (0, 64, 0),
+    ),
+    col_since(
+        "albumduration",
+        "Album duration (seconds)",
+        FieldClass::Number,
+        (0, 64, 0),
+    ),
+    col_since(
+        "albumsongcount",
+        "Album song count",
+        FieldClass::Number,
+        (0, 64, 0),
+    ),
+    col_since(
+        "albumsize",
+        "Album size (bytes)",
+        FieldClass::Number,
+        (0, 64, 0),
+    ),
     col("artistrating", "Artist rating", FieldClass::Number),
     col("artistloved", "Artist loved", FieldClass::Bool),
     col("artistplaycount", "Artist play count", FieldClass::Number),
@@ -622,13 +654,11 @@ pub struct ServerCaps {
     /// version).
     pub nullable_column_presence_ops: bool,
     /// PUT with changed rules nils EvaluatedAt (rest_adapter.go:138).
-    /// UNRELEASED as of 2026-07-18 — commit 85132240 is in NO tag
-    /// (verified absent from v0.62.0 AND v0.63.2; only the CREATE-path nil
-    /// is released). Pinned to a ≥0.64 floor; FALSE for every released
-    /// version including the owner's 0.63.2.
+    /// Shipped in v0.64.0 (commit 85132240; absent from v0.62.0 and
+    /// v0.63.2, where only the CREATE-path nil exists). ≥0.64.0.
     pub put_nils_evaluated_at: bool,
-    /// Per-playlist refreshDelay — same unreleased commit, same ≥0.64 pin.
-    /// Substrate-preserved only until then.
+    /// Per-playlist `refreshDelay` (`model/criteria/criteria.go`). Shipped
+    /// in v0.64.0 with the same commit; older servers drop the key. ≥0.64.0.
     pub per_playlist_refresh_delay: bool,
 }
 
@@ -1335,7 +1365,17 @@ pub fn validate(
                 DiagnosticLocation::Sort(i),
                 "Random sort is known to spam server logs on SQLite — consider a limit and a different sort",
             ));
-        } else if registry.lookup(&key.field).is_none() {
+        } else if let Some(kind) = registry.lookup(&key.field) {
+            if let Some((floor, _)) = below_field_floor(kind, &ctx.caps) {
+                out.push(Diagnostic::warning(
+                    DiagnosticLocation::Sort(i),
+                    format!(
+                        "'{}' needs Navidrome {}.{}.{}+ to sort by; this server will fall back to title",
+                        key.field, floor.0, floor.1, floor.2
+                    ),
+                ));
+            }
+        } else {
             out.push(Diagnostic::warning(
                 DiagnosticLocation::Sort(i),
                 format!(
@@ -1414,6 +1454,22 @@ fn validate_nodes(
     }
 }
 
+/// A `major.minor.patch` triple.
+type Semver = (u32, u32, u32);
+
+/// The field's `(floor, server version)` when it is a column added to
+/// Navidrome after this server's KNOWN version. An unknown version is never
+/// below a floor (validation stays quiet rather than guess).
+fn below_field_floor(kind: FieldKind, caps: &ServerCaps) -> Option<(Semver, Semver)> {
+    match kind {
+        FieldKind::Column(def) => {
+            let (floor, v) = (def.min_server?, caps.version?);
+            (v < floor).then_some((floor, v))
+        }
+        FieldKind::Role | FieldKind::Tag => None,
+    }
+}
+
 fn validate_leaf(
     leaf: &RuleLeaf,
     path: &[usize],
@@ -1485,10 +1541,7 @@ fn validate_leaf(
     // this server's version — the server persists the rule and then matches
     // nothing (D5). Only fires when the version is KNOWN and below the floor;
     // an unknown version stays quiet (the unknown-field arm above hedges).
-    if let FieldKind::Column(def) = kind
-        && let (Some(floor), Some(v)) = (def.min_server, ctx.caps.version)
-        && v < floor
-    {
+    if let Some((floor, v)) = below_field_floor(kind, &ctx.caps) {
         out.push(Diagnostic::error(
             location(),
             format!(
@@ -2510,8 +2563,8 @@ mod tests {
         let c = ServerCaps::from_version_str("0.63.2 (49c5cc98)");
         assert_eq!(c.version, Some((0, 63, 2)));
         assert!(c.nullable_column_presence_ops);
-        // Pin-documented: the PUT-path EvaluatedAt nil is UNRELEASED — must
-        // stay false for every 0.63.x including the owner's live server.
+        // The PUT-path EvaluatedAt nil and per-playlist refreshDelay both
+        // shipped in v0.64.0 — false for every 0.63.x.
         assert!(!c.put_nils_evaluated_at);
         assert!(!c.per_playlist_refresh_delay);
 
@@ -2524,6 +2577,110 @@ mod tests {
             !c.rules_via_rest,
             "unparseable ⇒ all-false (feature-hidden)"
         );
+    }
+
+    /// Both 0.64-floored capabilities shipped in v0.64.0.
+    #[test]
+    fn server_caps_064_enables_refresh_delay_and_evaluated_at_nil() {
+        let c = ServerCaps::from_version_str("0.64.0");
+        assert_eq!(c.version, Some((0, 64, 0)));
+        assert!(c.put_nils_evaluated_at);
+        assert!(c.per_playlist_refresh_delay);
+    }
+
+    fn caps_064() -> ServerCaps {
+        ServerCaps::from_version_str("0.64.0")
+    }
+
+    /// The five album-level fields #5899 added in 0.64: plain non-nullable
+    /// columns (two dates, three numbers), floored at 0.64.0.
+    #[test]
+    fn album_level_064_fields_resolve_with_floor() {
+        let registry = FieldRegistry::with_default_tags();
+        for (name, class) in [
+            ("albumdateadded", FieldClass::Date),
+            ("albumdatemodified", FieldClass::Date),
+            ("albumduration", FieldClass::Number),
+            ("albumsongcount", FieldClass::Number),
+            ("albumsize", FieldClass::Number),
+        ] {
+            let Some(FieldKind::Column(def)) = registry.lookup(name) else {
+                panic!("{name} must resolve to a static column");
+            };
+            assert_eq!(def.class, class, "{name} class");
+            assert!(!def.nullable, "{name} is not nullable");
+            assert_eq!(def.min_server, Some((0, 64, 0)), "{name} floor");
+        }
+    }
+
+    /// A rule leaf on a 0.64 album field is the existing floor Error on
+    /// 0.63.2 and clean on 0.64.0.
+    #[test]
+    fn album_level_064_leaf_errors_below_floor() {
+        let registry = FieldRegistry::with_default_tags();
+        let rules = SmartRules::parse(&json!({ "all": [ { "gt": { "albumsongcount": 10 } } ] }));
+        let diags = validate(&rules, &registry, &ctx_with(caps_063()));
+        assert!(
+            errors(&diags)
+                .iter()
+                .any(|m| m.contains("albumsongcount") && m.contains("0.64.0+")),
+            "floor error on 0.63.2: {diags:?}"
+        );
+        let diags = validate(&rules, &registry, &ctx_with(caps_064()));
+        assert!(errors(&diags).is_empty(), "clean on 0.64.0: {diags:?}");
+    }
+
+    fn sort_floor_warning_at(diags: &[Diagnostic], i: usize) -> bool {
+        diags.iter().any(|d| {
+            d.severity == Severity::Warning
+                && d.location == DiagnosticLocation::Sort(i)
+                && d.message.contains("to sort by")
+        })
+    }
+
+    /// A sort key on a field newer than a KNOWN server version warns (the
+    /// server falls back to title); a new-enough or unknown version stays
+    /// quiet.
+    #[test]
+    fn sort_key_below_field_floor_warns() {
+        let registry = FieldRegistry::with_default_tags();
+        let rules = SmartRules::parse(&json!({
+            "all": [ { "is": { "loved": true } } ],
+            "sort": "-albumdateadded,tracknumber"
+        }));
+        let diags = validate(&rules, &registry, &ctx_with(caps_063()));
+        assert!(sort_floor_warning_at(&diags, 0), "0.63.2 warns: {diags:?}");
+        assert!(
+            !sort_floor_warning_at(&diags, 1),
+            "tracknumber has no floor"
+        );
+        assert!(errors(&diags).is_empty(), "a sort floor never blocks");
+
+        let diags = validate(&rules, &registry, &ctx_with(caps_064()));
+        assert!(!sort_floor_warning_at(&diags, 0), "0.64.0 is quiet");
+
+        let diags = validate(&rules, &registry, &ctx_with(ServerCaps::default()));
+        assert!(
+            !sort_floor_warning_at(&diags, 0),
+            "unknown version is quiet"
+        );
+
+        // The same gap predates 0.64: `codec` arrived in 0.62.0.
+        let rules = SmartRules::parse(&json!({
+            "all": [ { "is": { "loved": true } } ],
+            "sort": "codec"
+        }));
+        let diags = validate(
+            &rules,
+            &registry,
+            &ctx_with(ServerCaps::from_version_str("0.61.0")),
+        );
+        assert!(
+            sort_floor_warning_at(&diags, 0),
+            "codec on 0.61 warns: {diags:?}"
+        );
+        let diags = validate(&rules, &registry, &ctx_with(caps_062()));
+        assert!(!sort_floor_warning_at(&diags, 0), "codec on 0.62 is quiet");
     }
 
     // --- Registry ---------------------------------------------------------
