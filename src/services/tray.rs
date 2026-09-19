@@ -30,8 +30,6 @@ use ksni::{
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, error, warn};
 
-const TRAY_ICON_PNG: &[u8] = include_bytes!("../../assets/org.nokkvi.nokkvi.png");
-
 /// Tray event channel is shallow — menu activations are user-paced.
 const TRAY_EVENT_CHANNEL_DEPTH: usize = 32;
 
@@ -184,7 +182,7 @@ impl Tray for NokkviTray {
 
 /// Decode the embedded PNG into ksni's ARGB32 (network byte order) layout.
 fn load_icon_pixmap() -> Option<Icon> {
-    let img = match image::load_from_memory(TRAY_ICON_PNG) {
+    let img = match image::load_from_memory(super::APP_ICON_PNG) {
         Ok(img) => img,
         Err(e) => {
             warn!(" Tray icon decode failed: {e}");

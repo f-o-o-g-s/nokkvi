@@ -32,7 +32,8 @@
 //!
 //! Production calls go through the module-level static `STATE` (a
 //! `tokio::sync::Mutex` so the hot path is `await`-friendly). The actual
-//! cache logic lives in [`write_art_inner`], which takes the state by
+//! logic lives in [`resolve_art_inner`] (which art to publish) and
+//! [`write_art_inner`] (the cache), which take the state by
 //! `&mut ArtCacheState` so unit tests can construct their own without
 //! racing the global — keeping `cargo test` parallel-safe without a
 //! `#[serial]` gate.
@@ -66,8 +67,8 @@ const HASH_SUFFIX_LEN: usize = 17;
 pub(crate) struct ArtCacheState {
     last_written: Option<(String, String, PathBuf)>,
     /// Last `(server_url, cover_id)` whose fetch failed (no art, non-image
-    /// body, or fetch error). `handle_tick` re-runs `write_art_for_mpris` every
-    /// ~100ms with the current track's cover_id; without this a cover the
+    /// body, or fetch error). `handle_tick` re-resolves the art every ~100ms
+    /// with the current track's cover_id; without this a cover the
     /// server can't resolve would be re-fetched — and its credentialed
     /// getCoverArt URL re-logged — on every tick. Recording the failed key
     /// bounds it to one attempt per song, mirroring the `last_written` success
@@ -188,24 +189,68 @@ fn sanitize_cover_id(cover_id: &str) -> String {
     format!("{out}_{hash:016x}")
 }
 
-/// Cache the album art bytes for `(server_url, cover_id)` to a local file and
-/// return a `file://` URI suitable for `mpris:artUrl`. The fetcher is only
-/// awaited on a cache miss.
+/// The item `handle_tick` publishes `mpris:artUrl` for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MprisArtItem {
+    /// Nothing is loaded ("Not Playing").
+    Nothing,
+    /// A queue song and the cover id it resolves to (`cover_art`, else
+    /// `album_id`).
+    Song { cover_id: Option<String> },
+    /// A radio station and the stream's current ICY `StreamUrl`.
+    Radio { icy_url: Option<String> },
+}
+
+/// Resolve `mpris:artUrl` for the current item. A song's cover goes through
+/// the authenticated fetch and is published as a `file://` cache path (see
+/// the module doc); a station publishes its ICY `StreamUrl` as-is.
 ///
-/// Returns `None` on any failure (path resolution, fetch, write); in that
-/// case the caller should pass `None` to MPRIS so the desktop shell simply
-/// shows no art instead of crashing or leaking a credentialed URL.
-pub(crate) async fn write_art_for_mpris<F>(
+/// `fetch_cover` is called with the cover id to fetch, and only when the
+/// writer has no cached result for that id.
+pub(crate) async fn resolve_art_for_mpris<F, Fut>(
     server_url: &str,
-    cover_id: &str,
-    fetcher: F,
+    item: MprisArtItem,
+    fetch_cover: F,
 ) -> Option<String>
 where
-    F: Future<Output = anyhow::Result<Vec<u8>>>,
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = anyhow::Result<Vec<u8>>>,
 {
-    let cache_dir = cache_dir_path()?;
+    let cache_dir = cache_dir_path();
     let mut state = STATE.lock().await;
-    write_art_inner(&mut state, &cache_dir, server_url, cover_id, fetcher).await
+    resolve_art_inner(
+        &mut state,
+        cache_dir.as_deref(),
+        server_url,
+        item,
+        fetch_cover,
+    )
+    .await
+}
+
+/// Pure-ish core of [`resolve_art_for_mpris`]: tests pass their own state,
+/// cache dir and fetcher.
+async fn resolve_art_inner<F, Fut>(
+    state: &mut ArtCacheState,
+    cache_dir: Option<&Path>,
+    server_url: &str,
+    item: MprisArtItem,
+    fetch_cover: F,
+) -> Option<String>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = anyhow::Result<Vec<u8>>>,
+{
+    match item {
+        MprisArtItem::Nothing | MprisArtItem::Song { cover_id: None } => None,
+        MprisArtItem::Song {
+            cover_id: Some(cover_id),
+        } => {
+            let fetcher = fetch_cover(cover_id.clone());
+            write_art_inner(state, cache_dir?, server_url, &cover_id, fetcher).await
+        }
+        MprisArtItem::Radio { icy_url } => icy_url,
+    }
 }
 
 /// Reset the cache state and best-effort remove every per-PID cache file for
@@ -963,7 +1008,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_cover_is_negative_cached_to_avoid_per_tick_refetch() {
-        // handle_tick calls write_art_for_mpris every ~100ms with the current
+        // handle_tick resolves the art every ~100ms with the current
         // track's cover_id. A cover the server can't resolve must be attempted
         // at most once per song, not re-fetched (and re-logged) on every tick.
         let dir = ScratchDir::new();
@@ -1133,6 +1178,159 @@ mod tests {
         ));
         // Should return cleanly without panicking or logging an error path.
         sweep_dead_pid_files_in(&nonexistent).await;
+    }
+
+    // ── resolve_art_inner: what handle_tick publishes ──────────────────
+
+    const SERVER: &str = "https://server.example";
+
+    /// Drive `resolve_art_inner` against `dir` with a fetcher that bumps
+    /// `calls` when awaited and answers every cover id with `reply`.
+    async fn resolve_with(
+        state: &mut ArtCacheState,
+        dir: Option<&Path>,
+        item: MprisArtItem,
+        calls: &Arc<AtomicU32>,
+        reply: Result<Vec<u8>, &'static str>,
+    ) -> Option<String> {
+        let c = Arc::clone(calls);
+        resolve_art_inner(state, dir, SERVER, item, |_cover_id| async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            reply.map_err(anyhow::Error::msg)
+        })
+        .await
+    }
+
+    fn song(cover_id: &str) -> MprisArtItem {
+        MprisArtItem::Song {
+            cover_id: Some(cover_id.to_string()),
+        }
+    }
+
+    fn radio(icy_url: Option<&str>) -> MprisArtItem {
+        MprisArtItem::Radio {
+            icy_url: icy_url.map(str::to_string),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_song_publishes_its_cover_as_a_file_uri() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            song("al-abc"),
+            &calls,
+            Ok(vec![1, 2, 3]),
+        )
+        .await;
+
+        assert_eq!(
+            uri,
+            Some(path_to_file_uri(&cache_file_path_for(dir.path(), "al-abc")))
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn resolve_nothing_publishes_no_art() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            MprisArtItem::Nothing,
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+
+        assert_eq!(uri, None, "'Not Playing' publishes no artUrl");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn resolve_radio_publishes_its_http_icy_url_verbatim() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        for url in ["https://cdn.example/now.jpg", "HTTP://cdn.example/now.jpg"] {
+            let uri = resolve_with(
+                &mut state,
+                Some(dir.path()),
+                radio(Some(url)),
+                &calls,
+                Ok(vec![1]),
+            )
+            .await;
+            assert_eq!(uri.as_deref(), Some(url));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Characterizes the reported bug: a station with no stream art publishes
+    /// no `artUrl`, so the shell keeps the previous song's cover.
+    #[tokio::test]
+    async fn resolve_radio_without_icy_url_publishes_no_art() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            radio(None),
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+
+        assert_eq!(uri, None);
+    }
+
+    /// Characterizes today's gate: any `StreamUrl` reaches D-Bus unchecked.
+    #[tokio::test]
+    async fn resolve_radio_publishes_a_non_http_icy_url() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            radio(Some("ftp://example.com/a.png")),
+            &calls,
+            Ok(vec![1]),
+        )
+        .await;
+
+        assert_eq!(uri.as_deref(), Some("ftp://example.com/a.png"));
+    }
+
+    /// Characterizes today's song fallback: a failed cover fetch publishes no
+    /// `artUrl`.
+    #[tokio::test]
+    async fn resolve_song_whose_cover_fetch_fails_publishes_no_art() {
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let uri = resolve_with(
+            &mut state,
+            Some(dir.path()),
+            song("al-missing"),
+            &calls,
+            Err("artwork response was not an image"),
+        )
+        .await;
+
+        assert_eq!(uri, None);
     }
 
     #[tokio::test]

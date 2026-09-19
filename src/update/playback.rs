@@ -6,6 +6,7 @@ use tracing::{debug, trace};
 use crate::{
     Nokkvi, View,
     app_message::{Message, PlaybackMessage, ScrobbleMessage, ToastMessage},
+    services::mpris_art_writer::{self, MprisArtItem},
     views,
 };
 
@@ -283,14 +284,13 @@ impl Nokkvi {
                 let song = qm.get_current_song();
                 let current_index = qm.current_index();
                 let current_entry_id = current_index.and_then(|i| qm.entry_id_at(i));
-                let (title, artist, album, cover_art, album_id, song_id, format_suffix, bitrate) =
+                let (title, artist, album, art_item, song_id, format_suffix, bitrate) =
                     if let Some(station) = &radio_station {
                         (
                             station.name.clone(),
                             String::new(), // Artist handles name sometimes? No, artist is empty
                             String::new(),
-                            None,
-                            None,
+                            MprisArtItem::Radio { icy_url },
                             Some(station.id.clone()),
                             engine_live_codec.unwrap_or_else(|| "radio".to_string()),
                             engine_live_bitrate,
@@ -313,8 +313,9 @@ impl Nokkvi {
                             s.title.clone(),
                             s.artist.clone(),
                             s.album.clone(),
-                            s.cover_art.clone(),
-                            s.album_id.clone(),
+                            MprisArtItem::Song {
+                                cover_id: s.cover_art.clone().or_else(|| s.album_id.clone()),
+                            },
                             Some(s.id.clone()),
                             suffix,
                             br,
@@ -324,8 +325,7 @@ impl Nokkvi {
                             "Not Playing".to_string(),
                             String::new(),
                             String::new(),
-                            None,
-                            None,
+                            MprisArtItem::Nothing,
                             None,
                             String::new(),
                             0,
@@ -333,32 +333,22 @@ impl Nokkvi {
                     };
                 drop(qm);
 
-                // Build artwork URL for MPRIS. Historically this inlined the
-                // Subsonic credential triple (`u=...&s=...&t=...`) into the
-                // URL, which then went onto the public D-Bus session bus via
-                // `mpris:artUrl` — any same-user process could `dbus-monitor`
-                // and harvest the credential. Now we route through
-                // `mpris_art_writer`: fetch the bytes via the authenticated
-                // client once per song change, write them to a per-pid cache
-                // file, and emit `file://...` to MPRIS instead.
-                let art_url = if let Some(cover_id) = cover_art.as_ref().or(album_id.as_ref()) {
+                // MPRIS art: `mpris_art_writer` owns the rules. A cover id is
+                // fetched through the authenticated client and published as a
+                // `file://` cache path, never as a credentialed getCoverArt URL.
+                let art_url = {
                     let (server_url, _credential) = shell.queue().get_server_config().await;
                     let albums = shell.albums().clone();
-                    let cover_id_owned = cover_id.clone();
-                    crate::services::mpris_art_writer::write_art_for_mpris(
+                    mpris_art_writer::resolve_art_for_mpris(
                         &server_url,
-                        cover_id,
-                        async move {
+                        art_item,
+                        |cover_id| async move {
                             albums
-                                .fetch_album_artwork_with_retry(&cover_id_owned, None, None)
+                                .fetch_album_artwork_with_retry(&cover_id, None, None)
                                 .await
                         },
                     )
                     .await
-                } else if radio_station.is_some() {
-                    icy_url
-                } else {
-                    None
                 };
 
                 let (random, repeat, repeat_queue, consume) = shell.get_modes().await;

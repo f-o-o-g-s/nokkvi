@@ -266,10 +266,8 @@ impl Nokkvi {
         // Only real http(s) image URLs — stations often put a homepage or junk
         // in StreamUrl, and fetching arbitrary schemes is not worth the risk.
         // (Private/loopback hosts are refused deeper, in fetch_external_image_capped.)
-        // URL schemes are case-insensitive (RFC 3986 §3.1), so compare lowercased
-        // — a spec-valid `HTTP://…` must not be silently dropped.
-        let scheme = url.split_once("://").map(|(s, _)| s.to_ascii_lowercase());
-        if !matches!(scheme.as_deref(), Some("http" | "https")) {
+        // The scheme check is case-insensitive, so a spec-valid `HTTP://…` passes.
+        if !nokkvi_data::utils::server_url::has_http_scheme(&url) {
             return None;
         }
         let station_id = {

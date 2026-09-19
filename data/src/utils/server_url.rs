@@ -14,16 +14,29 @@
 //!   at a non-local host, so the login view can warn that credentials would
 //!   travel unencrypted. Bare-host input (no scheme) never warns — the
 //!   candidate list prefers HTTPS, so cleartext is not decided at type time.
+//!
+//! [`has_http_scheme`] is the shared scheme check behind the candidate list,
+//! and the UI crate's radio stream-art gates call it too.
 
 /// Trim surrounding whitespace and strip trailing slashes.
 fn trimmed(raw: &str) -> &str {
     raw.trim().trim_end_matches('/')
 }
 
-/// True when `s` (case-insensitive) already begins with an http(s) scheme.
-fn has_http_scheme(s: &str) -> bool {
-    let lower = s.trim_start().to_ascii_lowercase();
-    lower.starts_with("http://") || lower.starts_with("https://")
+/// True when `s` begins with an `http://` or `https://` scheme. Schemes are
+/// case-insensitive (RFC 3986 §3.1), so `HTTP://…` passes. Nothing is trimmed:
+/// a leading space fails, so a caller that publishes the string verbatim gets
+/// exactly the string it checked.
+///
+/// The one scheme rule for both URL gates: the login candidates here, and the
+/// radio ICY `StreamUrl` that nokkvi fetches for stream art and publishes to
+/// MPRIS.
+pub fn has_http_scheme(s: &str) -> bool {
+    let starts_with = |prefix: &str| {
+        s.get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+    };
+    starts_with("http://") || starts_with("https://")
 }
 
 /// Ordered list of full URLs to attempt for the given user input.
@@ -205,6 +218,39 @@ mod tests {
             normalize_server_url_candidates("navidrome.mydomain.org"),
             vec!["https://navidrome.mydomain.org".to_string()]
         );
+    }
+
+    #[test]
+    fn has_http_scheme_accepts_http_and_https_in_any_case() {
+        for url in [
+            "http://example.com/a.png",
+            "https://example.com/a.png",
+            "HTTP://EXAMPLE.COM",
+            "hTtPs://example.com",
+            "https://",
+        ] {
+            assert!(has_http_scheme(url), "{url} must pass");
+        }
+    }
+
+    #[test]
+    fn has_http_scheme_rejects_other_schemes_and_schemeless_input() {
+        for url in [
+            "",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ftp://example.com/a.png",
+            "example.com/a.png",
+            "http:/example.com",
+            "https:example.com",
+            "httpx://example.com",
+            // No trimming: the string a caller checks is the string it publishes.
+            " https://example.com",
+            // A multi-byte char straddling the prefix length must not panic.
+            "httpé://x",
+        ] {
+            assert!(!has_http_scheme(url), "{url:?} must fail");
+        }
     }
 
     #[test]
