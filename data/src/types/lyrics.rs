@@ -565,6 +565,18 @@ mod normalize {
 // Two-tier matcher over the store
 // ---------------------------------------------------------------------------
 
+/// Where an indexed `.lrc` came from. The user's own files always outrank
+/// LRCLIB downloads, which `cache_to_store` writes into the store's ROOT-level
+/// `.cache/` directory — so a user who drops a hand-made sheet next to a
+/// cached one gets theirs, whatever `[length:]` either file carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LyricsOrigin {
+    /// Anything the user put in the lyrics dir outside the root `.cache/`.
+    User,
+    /// An LRCLIB download written by `cache_to_store`.
+    Cache,
+}
+
 /// One indexed `.lrc` file: its path, header metadata, and Tier-1 identity.
 #[derive(Debug, Clone)]
 pub struct IndexEntry {
@@ -573,18 +585,19 @@ pub struct IndexEntry {
     tier1: (String, String),
 }
 
-/// In-memory two-tier index of the lyrics store. Tier 1 is strict
-/// (casefold-only); Tier 2 is the self-guarding loose recovery tier.
+/// The two matching tiers for ONE origin. Tier 1 is strict (casefold-only);
+/// Tier 2 is the self-guarding loose recovery tier.
 #[derive(Debug, Default)]
-pub struct LyricsIndex {
+struct TierMaps {
     tier1: HashMap<(String, String), Vec<IndexEntry>>,
     tier2: HashMap<(String, String), Vec<IndexEntry>>,
 }
 
-impl LyricsIndex {
-    /// Find the best `.lrc` for a track. Returns `None` rather than guess when
-    /// a match is ambiguous — a wrong synced sheet is worse than none.
-    pub fn find(
+impl TierMaps {
+    /// Find the best `.lrc` for a track within this origin. Returns `None`
+    /// rather than guess when a match is ambiguous — a wrong sheet is worse
+    /// than none.
+    fn find(
         &self,
         artist: &str,
         title: &str,
@@ -611,15 +624,7 @@ impl LyricsIndex {
         None
     }
 
-    /// Insert a parsed entry (both tiers). Skips entries with an empty
-    /// artist/title header.
-    fn insert(&mut self, path: PathBuf, meta: LrcMetadata) {
-        let (Some(artist), Some(title)) = (meta.artist.as_deref(), meta.title.as_deref()) else {
-            return;
-        };
-        if artist.is_empty() || title.is_empty() {
-            return;
-        }
+    fn insert(&mut self, path: PathBuf, meta: LrcMetadata, artist: &str, title: &str) {
         let tier1 = normalize::tier1_key(artist, title);
         let key2 = normalize::tier2_key(artist, title);
         let entry = IndexEntry {
@@ -631,13 +636,70 @@ impl LyricsIndex {
         self.tier2.entry(key2).or_default().push(entry);
     }
 
-    /// Number of indexed files (counted once, via Tier 1).
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.tier1.values().map(Vec::len).sum()
+    }
+}
+
+/// In-memory index of the lyrics store, split by [`LyricsOrigin`]. The two
+/// origins keep SEPARATE tier maps, because Tier-1's "a present strict key
+/// commits here" rule is absolute: one shared bucket let a cached LRCLIB file
+/// answer a lookup the user's own file should have won (the `[length:]` rule
+/// in `resolve` drops every entry without the tag, and only cache files carry
+/// one). Separate maps make that miss impossible by construction.
+#[derive(Debug, Default)]
+pub struct LyricsIndex {
+    user: TierMaps,
+    cache: TierMaps,
+}
+
+impl LyricsIndex {
+    /// Find the best `.lrc` the USER placed in the store (anything outside the
+    /// root-level `.cache/`).
+    pub fn find_user(
+        &self,
+        artist: &str,
+        title: &str,
+        album: Option<&str>,
+        length_ms: Option<u32>,
+    ) -> Option<&IndexEntry> {
+        self.user.find(artist, title, album, length_ms)
+    }
+
+    /// Find the best previously-downloaded LRCLIB sheet (root `.cache/` only).
+    pub fn find_cached(
+        &self,
+        artist: &str,
+        title: &str,
+        album: Option<&str>,
+        length_ms: Option<u32>,
+    ) -> Option<&IndexEntry> {
+        self.cache.find(artist, title, album, length_ms)
+    }
+
+    /// Insert a parsed entry into its origin's tiers. Skips entries with an
+    /// empty artist/title header.
+    fn insert(&mut self, path: PathBuf, meta: LrcMetadata, origin: LyricsOrigin) {
+        let (Some(artist), Some(title)) = (meta.artist.as_deref(), meta.title.as_deref()) else {
+            return;
+        };
+        if artist.is_empty() || title.is_empty() {
+            return;
+        }
+        let (artist, title) = (artist.to_string(), title.to_string());
+        match origin {
+            LyricsOrigin::User => self.user.insert(path, meta, &artist, &title),
+            LyricsOrigin::Cache => self.cache.insert(path, meta, &artist, &title),
+        }
+    }
+
+    /// Number of indexed files across both origins (counted once, via Tier 1).
+    pub fn len(&self) -> usize {
+        self.user.len() + self.cache.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.tier1.is_empty()
+        self.len() == 0
     }
 }
 
@@ -700,14 +762,22 @@ fn resolve<'a>(
     }
 }
 
-/// Walk `dir` recursively, index every readable `*.lrc` by its internal tags,
-/// and log the count. Bad files (unreadable, non-UTF-8, header-empty) are
-/// skipped so one broken file can't abort the scan.
+/// The directory name `cache_to_store` writes LRCLIB downloads into. Only the
+/// store root's own child by this name is the cache — a user folder deeper in
+/// the tree that happens to be called `.cache` holds the user's own files.
+const CACHE_DIR_NAME: &str = ".cache";
+
+/// Walk `dir` recursively, index every readable `*.lrc` by its internal tags
+/// AND its [`LyricsOrigin`], and log the count. Bad files (unreadable,
+/// non-UTF-8, header-empty) are skipped so one broken file can't abort the
+/// scan. The origin is decided while walking: the root's direct child named
+/// `.cache` flips to [`LyricsOrigin::Cache`], and everything below it inherits.
 pub async fn build_index(dir: PathBuf) -> LyricsIndex {
     let mut index = LyricsIndex::default();
-    let mut stack = vec![dir];
+    // (dir, origin of its files, whether this dir IS the store root)
+    let mut stack = vec![(dir, LyricsOrigin::User, true)];
 
-    while let Some(current) = stack.pop() {
+    while let Some((current, origin, is_root)) = stack.pop() {
         let mut read_dir = match tokio::fs::read_dir(&current).await {
             Ok(read_dir) => read_dir,
             Err(e) => {
@@ -732,12 +802,19 @@ pub async fn build_index(dir: PathBuf) -> LyricsIndex {
             };
 
             if file_type.is_dir() {
-                stack.push(path);
+                let is_cache_root =
+                    is_root && path.file_name().and_then(|n| n.to_str()) == Some(CACHE_DIR_NAME);
+                let child_origin = if is_cache_root {
+                    LyricsOrigin::Cache
+                } else {
+                    origin
+                };
+                stack.push((path, child_origin, false));
             } else if path.extension().and_then(|e| e.to_str()) == Some("lrc") {
                 let Ok(content) = tokio::fs::read_to_string(&path).await else {
                     continue;
                 };
-                index.insert(path, read_metadata(&content));
+                index.insert(path, read_metadata(&content), origin);
             }
         }
     }
@@ -993,7 +1070,7 @@ mod tests {
     fn index_of(entries: Vec<(PathBuf, LrcMetadata)>) -> LyricsIndex {
         let mut index = LyricsIndex::default();
         for (path, meta) in entries {
-            index.insert(path, meta);
+            index.insert(path, meta, LyricsOrigin::User);
         }
         index
     }
@@ -1001,7 +1078,7 @@ mod tests {
     #[test]
     fn tier1_exact_artist_title_matches() {
         let index = index_of(vec![entry("a.lrc", "Beach House", "Myth", Some("Bloom"))]);
-        let hit = index.find("beach house", "MYTH", Some("bloom"), None);
+        let hit = index.find_user("beach house", "MYTH", Some("bloom"), None);
         assert_eq!(
             hit.map(|e| e.path.as_path()),
             Some(PathBuf::from("a.lrc").as_path())
@@ -1028,7 +1105,7 @@ mod tests {
         ]);
         assert_eq!(
             index
-                .find(
+                .find_user(
                     "Emperor",
                     "The Loss and Curse of Reverence",
                     Some("Anthems"),
@@ -1045,7 +1122,7 @@ mod tests {
         let index = index_of(vec![entry("a.lrc", "Air", "La Femme d'Argent", None)]);
         assert!(
             index
-                .find("Air", "La Femme d'Argent", Some("Moon Safari"), None)
+                .find_user("Air", "La Femme d'Argent", Some("Moon Safari"), None)
                 .is_some()
         );
     }
@@ -1058,7 +1135,7 @@ mod tests {
         ]);
         assert_eq!(
             index
-                .find("X", "Song", Some("second album"), None)
+                .find_user("X", "Song", Some("second album"), None)
                 .map(|e| e.path.as_path()),
             Some(PathBuf::from("two.lrc").as_path())
         );
@@ -1068,7 +1145,11 @@ mod tests {
     fn tier2_recovers_mr_dot_drift() {
         let index = index_of(vec![entry("a.lrc", "Artist", "Mr.", Some("Album"))]);
         // Library sends "Mr" (no dot). Tier-1 misses; Tier-2 reduce folds them.
-        assert!(index.find("Artist", "Mr", Some("Album"), None).is_some());
+        assert!(
+            index
+                .find_user("Artist", "Mr", Some("Album"), None)
+                .is_some()
+        );
     }
 
     #[test]
@@ -1079,7 +1160,7 @@ mod tests {
             entry("b.lrc", "X", "Go?", Some("B")),
         ]);
         // "Go." reduces to "go" like both; distinct Tier-1 identities → refuse.
-        assert!(index.find("X", "Go.", Some("C"), None).is_none());
+        assert!(index.find_user("X", "Go.", Some("C"), None).is_none());
     }
 
     #[test]
@@ -1098,7 +1179,7 @@ mod tests {
                 Some("Ofte jeg drømmer"),
             ),
         ]);
-        let first = index.find("Afsky", "Altid Veltilfreds", Some("Ofte jeg drømmer"), None);
+        let first = index.find_user("Afsky", "Altid Veltilfreds", Some("Ofte jeg drømmer"), None);
         // Lexicographically-first path, stable across calls.
         assert_eq!(
             first.map(|e| e.path.as_path()),
@@ -1205,6 +1286,80 @@ mod tests {
     // --- build_index round-trip ---
 
     #[tokio::test]
+    async fn build_index_splits_user_files_from_the_cache() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let artist_dir = dir.path().join("Artist");
+        std::fs::create_dir_all(&artist_dir).expect("mkdir");
+        std::fs::write(
+            artist_dir.join("song.lrc"),
+            "[ar:A]\n[ti:Mine]\n[00:01.00]hand made",
+        )
+        .expect("write");
+        let cache_dir = dir.path().join(".cache");
+        std::fs::create_dir_all(&cache_dir).expect("mkdir");
+        std::fs::write(
+            cache_dir.join("other.lrc"),
+            "[ar:B]\n[ti:Downloaded]\n[00:01.00]from lrclib",
+        )
+        .expect("write");
+
+        let index = build_index(dir.path().to_path_buf()).await;
+        assert_eq!(index.len(), 2, "both files are indexed");
+        // Each lookup sees only its own origin.
+        assert!(index.find_user("A", "Mine", None, None).is_some());
+        assert!(index.find_cached("A", "Mine", None, None).is_none());
+        assert!(index.find_cached("B", "Downloaded", None, None).is_some());
+        assert!(index.find_user("B", "Downloaded", None, None).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_user_file_beats_a_cached_copy_carrying_length() {
+        // The bug this split fixes: one shared bucket put both files under the
+        // same Tier-1 key, and `resolve`'s `[length:]` rule dropped every entry
+        // WITHOUT the tag — which only hand-made files lack. The user's own
+        // sheet lost to the LRCLIB download it was meant to replace.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("mine.lrc"),
+            "[ar:Beach House]\n[ti:Myth]\n[al:Bloom]\n[00:45.47]my own words",
+        )
+        .expect("write");
+        let cache_dir = dir.path().join(".cache");
+        std::fs::create_dir_all(&cache_dir).expect("mkdir");
+        std::fs::write(
+            cache_dir.join("downloaded.lrc"),
+            "[ar:Beach House]\n[ti:Myth]\n[al:Bloom]\n[length:04:35]\n[00:45.47]lrclib words",
+        )
+        .expect("write");
+
+        let index = build_index(dir.path().to_path_buf()).await;
+        let hit = index
+            .find_user("Beach House", "Myth", Some("Bloom"), Some(275_000))
+            .expect("the user's own file must answer the user lookup");
+        assert_eq!(
+            hit.path.file_name().and_then(|n| n.to_str()),
+            Some("mine.lrc")
+        );
+    }
+
+    #[tokio::test]
+    async fn only_the_root_cache_dir_is_cache() {
+        // A user folder that happens to be named `.cache` deeper in the tree
+        // holds the user's own files.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let nested = dir.path().join("Artist").join(".cache");
+        std::fs::create_dir_all(&nested).expect("mkdir");
+        std::fs::write(nested.join("x.lrc"), "[ar:A]\n[ti:T]\n[00:01.00]x").expect("write");
+
+        let index = build_index(dir.path().to_path_buf()).await;
+        assert!(
+            index.find_user("A", "T", None, None).is_some(),
+            "a nested .cache folder is still the user's"
+        );
+        assert!(index.find_cached("A", "T", None, None).is_none());
+    }
+
+    #[tokio::test]
     async fn build_index_finds_by_tags() {
         let dir = tempfile::tempdir().expect("tempdir");
         let artist_dir = dir.path().join("Beach_House").join("Bloom");
@@ -1221,9 +1376,9 @@ mod tests {
         assert_eq!(index.len(), 1);
         assert!(
             index
-                .find("Beach House", "Myth", Some("Bloom"), None)
+                .find_user("Beach House", "Myth", Some("Bloom"), None)
                 .is_some()
         );
-        assert!(index.find("Nonexistent", "Song", None, None).is_none());
+        assert!(index.find_user("Nonexistent", "Song", None, None).is_none());
     }
 }

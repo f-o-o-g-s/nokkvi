@@ -310,6 +310,54 @@ fn index_ready_redrives_a_pre_index_no_match() {
 }
 
 #[test]
+fn library_change_redrives_an_unresolved_track() {
+    use crate::services::navidrome_sse::LibraryChange;
+
+    fn wildcard() -> LibraryChange {
+        LibraryChange {
+            album_ids: vec![],
+            artist_ids: vec![],
+            song_ids: vec![],
+            playlist_ids: vec![],
+            genre_ids: vec![],
+            is_wildcard: true,
+        }
+    }
+
+    // A rescan reaches nokkvi ONLY as a wildcard event (per-song ids come from
+    // annotation writes). A track showing the no-match state gets a second
+    // look, so lyrics embedded by the rescan appear without a restart.
+    let mut app = test_app();
+    app.lyrics.enabled = true;
+    app.current_view = crate::View::Queue;
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.lyrics.matched_song_id = Some("song_1".to_string());
+    app.lyrics.doc = LrcDocument::default();
+    let before = app.lyrics.load_epoch;
+
+    let _ = app.handle_library_changed(wildcard());
+    assert_eq!(
+        app.lyrics.load_epoch,
+        before.wrapping_add(1),
+        "a wildcard change must re-drive a resolved no-match"
+    );
+
+    // A sheet already showing is left alone — no flicker, no refetch.
+    let mut app2 = test_app();
+    app2.lyrics.enabled = true;
+    app2.current_view = crate::View::Queue;
+    app2.scrobble.current_song_id = Some("song_1".to_string());
+    app2.lyrics.matched_song_id = Some("song_1".to_string());
+    app2.lyrics.doc = timed_doc(&[1_000]);
+    let before2 = app2.lyrics.load_epoch;
+    let _ = app2.handle_library_changed(wildcard());
+    assert_eq!(
+        app2.lyrics.load_epoch, before2,
+        "a rendered sheet must not be re-driven"
+    );
+}
+
+#[test]
 fn extensions_probe_landing_redrives_an_unresolved_track() {
     use crate::app_message::Message;
     let mut app = test_app();

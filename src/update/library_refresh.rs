@@ -129,6 +129,27 @@ impl Nokkvi {
             ));
         }
 
+        // 7. Lyrics follow the library. A rescan is announced ONLY as a
+        //    wildcard event (per-song ids come from annotation writes — play
+        //    count, star, rating), so a wildcard drops the whole session cache
+        //    and a scoped one drops just those songs. The clear is synchronous
+        //    on the UI thread (a `parking_lot` mutex, uncontended here), which
+        //    is what lets the re-drive below run in the same pass: its resolve
+        //    would otherwise read the stale verdict it was sent to replace.
+        if let Some(shell) = &self.app_service {
+            if is_wildcard {
+                shell.lyrics_cache().drop_all();
+            } else if !song_ids.is_empty() {
+                shell.lyrics_cache().drop_ids(&song_ids);
+            }
+        }
+        // A no-op unless the current track is showing no lyrics on the Queue
+        // view — so freshly embedded lyrics appear without a restart, and a
+        // rendered sheet is never disturbed.
+        if is_wildcard || !song_ids.is_empty() {
+            tasks.push(self.lyrics_kick_if_unresolved());
+        }
+
         // Notify the user gently (skipped when the user has opted to suppress
         // these notifications via Settings → General → Application).
         if !self.settings.suppress_library_refresh_toasts {

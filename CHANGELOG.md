@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - On Navidrome 0.64+, albums and artists with no artwork show a plain square instead of Navidrome's placeholder picture.
 - On Navidrome 0.64+, a replaced album, artist, or playlist cover shows the next time its row comes into view.
 - On Navidrome 0.64+, the large artwork panel also switches to a replaced cover without a manual refresh.
+- Your Navidrome server's lyrics now win over LRCLIB downloads, including ones already cached.
 
 ### Fixed
 
@@ -63,6 +64,8 @@ All notable changes to this project will be documented in this file.
 - Scrolling Genres or Playlists no longer re-downloads thumbnails that are already loaded.
 - Searching the queue or radio stations after clicking a row no longer leaves the results without a highlighted row.
 - The quick-add confirmation no longer ends with a stray apostrophe.
+- A `.lrc` you add to the lyrics folder now beats a cached LRCLIB copy of the same song.
+- Lyrics added by a library rescan now show up without restarting nokkvi.
 
 ### Removed
 

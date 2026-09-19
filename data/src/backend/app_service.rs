@@ -84,12 +84,12 @@ pub struct AppService {
     /// and Last.fm). Separate from the Navidrome `ApiClient` and the artwork
     /// client — radio scrobbling does not go through Navidrome.
     radio_scrobble_http: Arc<reqwest::Client>,
-    /// Session cache for `resolve_lyrics`, keyed by song id. Caches negatives
-    /// (a `None` value) too, so a repeated skip past an unmatched track doesn't
-    /// re-hit the network. `Arc<Mutex<...>>` so it survives the per-`shell_task`
-    /// `AppService` clone (a plain field would be cloned independently).
-    lyrics_cache:
-        Arc<parking_lot::Mutex<lru::LruCache<String, Option<crate::types::lyrics::LrcDocument>>>>,
+    /// Session cache for `resolve_lyrics`, keyed by song id. `Arc` so it
+    /// survives the per-`shell_task` `AppService` clone (a plain field would be
+    /// cloned independently) — see [`LyricsSessionCache`] for the semantics.
+    ///
+    /// [`LyricsSessionCache`]: crate::services::lyrics_source::LyricsSessionCache
+    lyrics_cache: Arc<crate::services::lyrics_source::LyricsSessionCache>,
 }
 
 impl std::fmt::Debug for AppService {
@@ -187,9 +187,7 @@ impl AppService {
             active_library_ids: Arc::new(RwLock::new(active_library_ids)),
             all_libraries: Arc::new(RwLock::new(Vec::new())),
             radio_scrobble_http,
-            lyrics_cache: Arc::new(parking_lot::Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN),
-            ))),
+            lyrics_cache: Arc::new(crate::services::lyrics_source::LyricsSessionCache::default()),
         })
     }
 
@@ -995,11 +993,21 @@ impl AppService {
 
 // === Lyrics resolution ===
 impl AppService {
-    /// Resolve synced lyrics for a song through the store -> `getLyricsBySongId`
-    /// -> LRCLIB chain (the "Feishin or better" precedence), caching the result
-    /// including a negative. Iced-free; the UI's `shell_task` drives it with the
-    /// current index and the gating opts. Probes are lazy — a store hit never
-    /// touches the network.
+    /// Shared session cache for `resolve_lyrics`. The UI drops entries from it
+    /// when the server announces a library change, so lyrics added by a rescan
+    /// show up without a restart.
+    pub fn lyrics_cache(&self) -> &crate::services::lyrics_source::LyricsSessionCache {
+        &self.lyrics_cache
+    }
+
+    /// Resolve lyrics for a song through the four-channel chain — the user's own
+    /// `.lrc` files, then `getLyricsBySongId`, then LRCLIB downloads already
+    /// cached on disk, then the LRCLIB network fetch — caching the result
+    /// including a negative. The server outranks both LRCLIB channels: its
+    /// answer is the user's own library (a sidecar file or the lyrics embedded
+    /// in the track's tags), and it wins even when it is plain untimed text.
+    /// Iced-free; the UI's `shell_task` drives it with the current index and the
+    /// gating opts. Probes are lazy — a store hit never touches the network.
     pub async fn resolve_lyrics(
         &self,
         song: &crate::types::song::Song,
@@ -1008,25 +1016,35 @@ impl AppService {
     ) -> Option<crate::types::lyrics::LrcDocument> {
         use crate::types::lyrics::{LrcDocument, parse};
 
-        if let Some(cached) = self.lyrics_cache.lock().get(&song.id).cloned() {
+        if let Some(cached) = self.lyrics_cache.get(&song.id) {
             return cached;
         }
 
-        let store = || async {
-            let index = index.as_ref()?;
-            let album = (!song.album.is_empty()).then_some(song.album.as_str());
-            let path = index
-                .find(
-                    &song.artist,
-                    &song.title,
-                    album,
-                    Some(song.duration.saturating_mul(1000)),
-                )?
-                .path
-                .clone();
+        let album = (!song.album.is_empty()).then_some(song.album.as_str());
+        let length_ms = Some(song.duration.saturating_mul(1000));
+        // Both disk channels read a real `.lrc`, so both keep the timestamp
+        // requirement spelled out: plain lyrics come from the server only.
+        let read_lrc = async |path: std::path::PathBuf| -> Option<LrcDocument> {
             let text = tokio::fs::read_to_string(&path).await.ok()?;
             let doc = parse(&text);
-            doc.is_renderable().then_some(doc)
+            (doc.synced && doc.is_renderable()).then_some(doc)
+        };
+
+        let store = || async {
+            let path = index
+                .as_ref()?
+                .find_user(&song.artist, &song.title, album, length_ms)?
+                .path
+                .clone();
+            read_lrc(path).await
+        };
+        let cached = || async {
+            let path = index
+                .as_ref()?
+                .find_cached(&song.artist, &song.title, album, length_ms)?
+                .path
+                .clone();
+            read_lrc(path).await
         };
         let api = || async {
             let service = self.lyrics_api().await.ok()?;
@@ -1052,7 +1070,19 @@ impl AppService {
             Some(doc)
         };
 
-        let result = crate::services::lyrics_source::resolve_from(store, api, lrclib, opts).await;
+        let won =
+            crate::services::lyrics_source::resolve_from(store, api, cached, lrclib, opts).await;
+        // The boundary that finally handles: one line naming the winning
+        // channel, so a live order question is answered from the log rather
+        // than by re-reading this chain.
+        tracing::debug!(
+            song_id = %song.id,
+            channel = won.as_ref().map_or("none", |(c, _)| c.as_str()),
+            synced = won.as_ref().is_some_and(|(_, d)| d.synced),
+            lines = won.as_ref().map_or(0, |(_, d)| d.lines.len()),
+            "lyrics resolved"
+        );
+        let result = won.map(|(_, doc)| doc);
         // Cache a hit always; cache a MISS only when the resolution was
         // complete — the store index was present, online fetch was allowed,
         // AND the server-extension probe had responded (before it lands the
@@ -1065,9 +1095,7 @@ impl AppService {
         let complete =
             index.is_some() && opts.fetch_online && (opts.songlyrics_ext || opts.ext_probe_landed);
         if result.is_some() || complete {
-            self.lyrics_cache
-                .lock()
-                .put(song.id.clone(), result.clone());
+            self.lyrics_cache.put(song.id.clone(), result.clone());
         }
         result
     }

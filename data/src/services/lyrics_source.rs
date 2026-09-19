@@ -1,6 +1,8 @@
-//! Lyrics source helpers: the direct LRCLIB fetch, the disk cache writer, and
-//! the pure store->server->LRCLIB precedence helper. The `resolve_lyrics` chain
-//! that wires these to the real channels lives on `AppService`.
+//! Lyrics source helpers: the direct LRCLIB fetch, the disk cache writer, the
+//! session cache, and the pure precedence helper (the user's own `.lrc` files
+//! -> the server -> cached LRCLIB downloads -> the LRCLIB network fetch). The
+//! `resolve_lyrics` chain that wires these to the real channels lives on
+//! `AppService`.
 
 use std::{sync::OnceLock, time::Duration};
 
@@ -226,34 +228,124 @@ fn sanitize_filename(s: &str) -> String {
     format!("{stem}_{hash:016x}")
 }
 
-/// Pure precedence helper — the "Feishin or better" ordering, testable without a
-/// live `AppService`: local store, then the server (`songLyrics` ext), then the
-/// direct LRCLIB fetch. Probes are lazy so a store hit never touches the network.
-pub async fn resolve_from<StoreFut, ApiFut, LrclibFut>(
+/// Which channel answered a resolve. Carried out of [`resolve_from`] so the
+/// boundary log can name the winner without re-deriving it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LyricsChannel {
+    /// A `.lrc` the user placed in the lyrics dir themselves.
+    Store,
+    /// The Navidrome server's `getLyricsBySongId` (sidecar files AND the
+    /// lyrics embedded in the file's tags).
+    Server,
+    /// An LRCLIB download cached under the store's root `.cache/`.
+    Cache,
+    /// A fresh LRCLIB network fetch.
+    Lrclib,
+}
+
+impl LyricsChannel {
+    /// Stable log token.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LyricsChannel::Store => "store",
+            LyricsChannel::Server => "server",
+            LyricsChannel::Cache => "cache",
+            LyricsChannel::Lrclib => "lrclib",
+        }
+    }
+}
+
+/// Pure precedence helper, testable without a live `AppService`: the user's own
+/// `.lrc` files, then the server (`songLyrics` ext), then LRCLIB downloads
+/// already cached on disk, then the LRCLIB network fetch. The server outranks
+/// both LRCLIB channels deliberately — a Navidrome answer (a sidecar file or
+/// the lyrics embedded in the track's tags) is the user's own library talking,
+/// and it wins even when it is plain untimed text. Probes are lazy, so a store
+/// hit never touches the disk cache or the network.
+pub async fn resolve_from<StoreFut, ApiFut, CacheFut, LrclibFut>(
     store: impl FnOnce() -> StoreFut,
     api: impl FnOnce() -> ApiFut,
+    cached: impl FnOnce() -> CacheFut,
     lrclib: impl FnOnce() -> LrclibFut,
     opts: ResolveOpts,
-) -> Option<LrcDocument>
+) -> Option<(LyricsChannel, LrcDocument)>
 where
     StoreFut: std::future::Future<Output = Option<LrcDocument>>,
     ApiFut: std::future::Future<Output = Option<LrcDocument>>,
+    CacheFut: std::future::Future<Output = Option<LrcDocument>>,
     LrclibFut: std::future::Future<Output = Option<LrcDocument>>,
 {
     if let Some(doc) = store().await {
-        return Some(doc);
+        return Some((LyricsChannel::Store, doc));
     }
     if opts.songlyrics_ext
         && let Some(doc) = api().await
     {
-        return Some(doc);
+        return Some((LyricsChannel::Server, doc));
+    }
+    // The disk cache is local: it answers even with the direct third-party
+    // fetch switched off (the download already happened, under consent).
+    if let Some(doc) = cached().await {
+        return Some((LyricsChannel::Cache, doc));
     }
     if opts.fetch_online
         && let Some(doc) = lrclib().await
     {
-        return Some(doc);
+        return Some((LyricsChannel::Lrclib, doc));
     }
     None
+}
+
+/// Session cache for resolved lyrics, keyed by song id. Holds negatives (a
+/// `None` value) too, so a repeated skip past an unmatched track doesn't re-hit
+/// the network. Owns its mutex so `AppService` can hand out shared access
+/// through one `Arc` and the UI can drop entries when the library changes.
+#[derive(Debug)]
+pub struct LyricsSessionCache {
+    inner: parking_lot::Mutex<lru::LruCache<String, Option<LrcDocument>>>,
+}
+
+impl LyricsSessionCache {
+    /// Build a cache holding at most `capacity` songs (a zero capacity is
+    /// raised to one rather than panicking).
+    pub fn new(capacity: usize) -> Self {
+        let capacity = std::num::NonZeroUsize::new(capacity).unwrap_or(std::num::NonZeroUsize::MIN);
+        Self {
+            inner: parking_lot::Mutex::new(lru::LruCache::new(capacity)),
+        }
+    }
+
+    /// The cached verdict for `song_id`: `Some(Some(doc))` = a hit,
+    /// `Some(None)` = a cached miss, `None` = never resolved.
+    pub fn get(&self, song_id: &str) -> Option<Option<LrcDocument>> {
+        self.inner.lock().get(song_id).cloned()
+    }
+
+    /// Record a verdict (a hit or a complete miss).
+    pub fn put(&self, song_id: String, doc: Option<LrcDocument>) {
+        self.inner.lock().put(song_id, doc);
+    }
+
+    /// Forget specific songs — the server may have different lyrics for them
+    /// now (a rescan, a tag edit).
+    pub fn drop_ids(&self, song_ids: &[String]) {
+        let mut cache = self.inner.lock();
+        for id in song_ids {
+            cache.pop(id);
+        }
+    }
+
+    /// Forget everything (a full library rescan announces itself as a wildcard
+    /// event with no ids, so every song is suspect).
+    pub fn drop_all(&self) {
+        self.inner.lock().clear();
+    }
+}
+
+impl Default for LyricsSessionCache {
+    fn default() -> Self {
+        Self::new(128)
+    }
 }
 
 #[cfg(test)]
@@ -351,40 +443,66 @@ mod tests {
         }
     }
 
+    /// `(channel token, first line's text)` — the two things every precedence
+    /// test asserts.
+    fn won(result: Option<(LyricsChannel, LrcDocument)>) -> (&'static str, String) {
+        let (channel, doc) = result.expect("a channel must answer");
+        (channel.as_str(), doc.lines[0].text.clone())
+    }
+
     #[tokio::test]
     async fn store_hit_wins() {
+        // The user's own file ends the chain: nothing later even runs.
         let result = resolve_from(
             || async { Some(doc("store")) },
-            || async { Some(doc("api")) },
-            || async { Some(doc("lrclib")) },
+            || async { panic!("the server must not run after a store hit") },
+            || async { panic!("the cache must not run after a store hit") },
+            || async { panic!("lrclib must not run after a store hit") },
             BOTH_ON,
         )
         .await;
-        assert_eq!(result.unwrap().lines[0].text, "store");
+        assert_eq!(won(result), ("store", "store".to_string()));
     }
 
     #[tokio::test]
-    async fn api_wins_when_store_empty() {
+    async fn server_beats_the_cached_download() {
+        // The owner's rule: a Navidrome answer outranks LRCLIB, including a
+        // copy already sitting in `.cache/`. A server hit runs neither.
         let result = resolve_from(
             || async { None },
             || async { Some(doc("api")) },
-            || async { Some(doc("lrclib")) },
+            || async { panic!("the cache must not run after a server hit") },
+            || async { panic!("lrclib must not run after a server hit") },
             BOTH_ON,
         )
         .await;
-        assert_eq!(result.unwrap().lines[0].text, "api");
+        assert_eq!(won(result), ("server", "api".to_string()));
     }
 
     #[tokio::test]
-    async fn lrclib_wins_when_store_and_api_empty() {
+    async fn cached_download_beats_the_network() {
         let result = resolve_from(
+            || async { None },
+            || async { None },
+            || async { Some(doc("cache")) },
+            || async { panic!("lrclib must not run after a cache hit") },
+            BOTH_ON,
+        )
+        .await;
+        assert_eq!(won(result), ("cache", "cache".to_string()));
+    }
+
+    #[tokio::test]
+    async fn lrclib_runs_last() {
+        let result = resolve_from(
+            || async { None },
             || async { None },
             || async { None },
             || async { Some(doc("lrclib")) },
             BOTH_ON,
         )
         .await;
-        assert_eq!(result.unwrap().lines[0].text, "lrclib");
+        assert_eq!(won(result), ("lrclib", "lrclib".to_string()));
     }
 
     #[tokio::test]
@@ -397,15 +515,18 @@ mod tests {
         let result = resolve_from(
             || async { None },
             || async { panic!("api must not run without the songLyrics ext") },
-            || async { Some(doc("lrclib")) },
+            || async { Some(doc("cache")) },
+            || async { panic!("lrclib must not run after a cache hit") },
             opts,
         )
         .await;
-        assert_eq!(result.unwrap().lines[0].text, "lrclib");
+        assert_eq!(won(result), ("cache", "cache".to_string()));
     }
 
     #[tokio::test]
-    async fn lrclib_skipped_without_fetch_online() {
+    async fn cached_channel_runs_offline_but_the_network_one_does_not() {
+        // Online Fetch off gates the third-party REQUEST, not the download the
+        // user already consented to and that now sits on their disk.
         let opts = ResolveOpts {
             songlyrics_ext: true,
             ext_probe_landed: true,
@@ -414,11 +535,46 @@ mod tests {
         let result = resolve_from(
             || async { None },
             || async { None },
+            || async { Some(doc("cache")) },
             || async { panic!("lrclib must not run when fetch_online is off") },
             opts,
         )
         .await;
-        assert!(result.is_none());
+        assert_eq!(won(result), ("cache", "cache".to_string()));
+
+        let miss = resolve_from(
+            || async { None },
+            || async { None },
+            || async { None },
+            || async { panic!("lrclib must not run when fetch_online is off") },
+            opts,
+        )
+        .await;
+        assert!(miss.is_none());
+    }
+
+    #[test]
+    fn session_cache_gets_puts_and_drops() {
+        let cache = LyricsSessionCache::new(4);
+        assert!(cache.get("s1").is_none(), "never resolved");
+
+        cache.put("s1".to_string(), Some(doc("hit")));
+        cache.put("s2".to_string(), None);
+        assert_eq!(
+            cache.get("s1").flatten().map(|d| d.lines[0].text.clone()),
+            Some("hit".to_string())
+        );
+        assert!(
+            matches!(cache.get("s2"), Some(None)),
+            "a cached miss is distinguishable from never-resolved"
+        );
+
+        cache.drop_ids(&["s1".to_string(), "absent".to_string()]);
+        assert!(cache.get("s1").is_none(), "dropped id forgotten");
+        assert!(cache.get("s2").is_some(), "other ids untouched");
+
+        cache.drop_all();
+        assert!(cache.get("s2").is_none(), "wildcard drop clears everything");
     }
 
     #[tokio::test]
@@ -461,9 +617,15 @@ mod tests {
         let index = crate::types::lyrics::build_index(tmp.path().to_path_buf()).await;
         assert!(
             index
-                .find(&song.artist, &song.title, Some(&song.album), None)
+                .find_cached(&song.artist, &song.title, Some(&song.album), None)
                 .is_some(),
             "synthetic headers must make the cache tag-matchable"
+        );
+        assert!(
+            index
+                .find_user(&song.artist, &song.title, Some(&song.album), None)
+                .is_none(),
+            "a `.cache/` download is never the user's own file"
         );
     }
 }

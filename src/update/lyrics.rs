@@ -1,7 +1,8 @@
 //! Synced-lyrics resolve pipeline: debounced dispatch on song change, the
 //! stale-guarded application of async results, and the next-track prefetch.
 //!
-//! The chain itself (store → `getLyricsBySongId` → LRCLIB) lives on
+//! The chain itself (the user's own `.lrc` files → `getLyricsBySongId` →
+//! cached LRCLIB downloads → the LRCLIB network fetch) lives on
 //! `AppService::resolve_lyrics`; these handlers only decide *when* to run it
 //! and land its results. Two hot-path guards keep the network honest:
 //! a ~450 ms debounce (a skip storm never sends per-skip requests — the
