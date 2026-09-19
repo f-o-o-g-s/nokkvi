@@ -135,14 +135,17 @@ impl Nokkvi {
             self.toast_info("Library refreshed automatically");
         }
 
-        // Artwork refresh is NOT triggered from SSE library-changed events.
-        // Navidrome fires `library_changed` on every play-count bump, so an
+        // The event itself triggers no artwork refresh. Navidrome fires
+        // `library_changed` on every play-count bump, so a blanket
         // auto-refresh produced a one-frame GPU-upload flicker on the large
         // artwork panel after every scrobble — see `update/albums.rs` for the
         // `Handle::from_bytes` cache-busting mechanic. Cover-art replacements
         // propagate via:
-        //   - the parallel paged reload above (mini thumbnails refetch from
-        //     fresh `AlbumUIViewData` rows);
+        //   - the parallel paged reload above: its post-load viewport
+        //     prefetch refetches only rows whose version changed (the image
+        //     hash on Navidrome 0.64+, so a play-count bump refetches
+        //     nothing), and a hash change also drops the stale large art
+        //     (`handle_artwork_loaded`);
         //   - the user-initiated right-click "Refresh Artwork" path
         //     (`ArtworkMessage::RefreshAlbumArtwork`).
 

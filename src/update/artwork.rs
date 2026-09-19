@@ -81,11 +81,8 @@ impl Nokkvi {
             ArtworkMessage::RefreshAlbumArtwork(album_id) => {
                 self.handle_refresh_album_artwork(album_id)
             }
-            ArtworkMessage::RefreshAlbumArtworkSilent(album_id) => {
-                self.handle_refresh_album_artwork_silent(album_id)
-            }
-            ArtworkMessage::RefreshComplete(album_id, thumb, large, silent) => {
-                self.handle_refresh_complete(album_id, thumb, large, silent)
+            ArtworkMessage::RefreshComplete(album_id, thumb, large) => {
+                self.handle_refresh_complete(album_id, thumb, large)
             }
             // Collage artwork pipeline (genre / playlist)
             ArtworkMessage::LoadCollage(target, id, server_url, cred, album_ids) => match target {

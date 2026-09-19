@@ -137,8 +137,17 @@ impl Nokkvi {
                 self.artwork.failed_art.remove(&id);
                 self.artwork
                     .album_art_versions
-                    .insert(id.clone(), updated_at);
-                self.artwork.album_art.put(id, h);
+                    .insert(id.clone(), updated_at.clone());
+                self.artwork.album_art.put(id.clone(), h);
+                // Navidrome 0.64+: the cover changed under the cached large
+                // art. Drop it and reload the centered row's.
+                if self.large_art_is_stale(&id, updated_at.as_deref()) {
+                    self.artwork.large_artwork.pop(&id);
+                    self.artwork.large_artwork_hashes.remove(&id);
+                    return self
+                        .center_large_artwork_load_task(self.current_view)
+                        .unwrap_or_else(Task::none);
+                }
             }
             MiniArt::Missing => {
                 // Deterministic: the server has no art for this id. Negatively
@@ -172,6 +181,59 @@ impl Nokkvi {
             .chain(self.harbour.random_album.iter())
             .find(|a| a.id == album_id)
             .map(|a| &a.image)
+            .or_else(|| {
+                // Harbour's search rows are raw `Album`s.
+                self.harbour
+                    .search_results
+                    .iter()
+                    .flat_map(|r| r.albums.iter())
+                    .find(|a| a.id == album_id)
+                    .map(|a| &a.image)
+            })
+    }
+
+    /// The valid image hash the rows nokkvi holds currently give `id`, an
+    /// album or an artist (Navidrome 0.64+). `None` on older servers.
+    fn current_art_hash(&self, id: &str) -> Option<&str> {
+        self.album_image(id)
+            .or_else(|| self.artist_image(id))
+            .and_then(|image| image.valid_hash())
+    }
+
+    /// Whether a mini arriving at `arriving` shows the cached large art for
+    /// `id` is stale: the large art was requested at a different hash, and
+    /// the arriving hash is the one the rows give now. Comparing with the
+    /// large art's own recorded hash (not the mini's previous version) keeps
+    /// the passive surfaces' `None` versions from hiding a change, and the
+    /// current-row check keeps a surface refetching an OLD hash (Harbour's
+    /// previous-visit shelves) from dropping the correct large art. Never
+    /// true on an older server, which sends no hashes.
+    fn large_art_is_stale(&self, id: &str, arriving: Option<&str>) -> bool {
+        let Some(arriving) = arriving else {
+            return false;
+        };
+        self.artwork.large_artwork.contains(&id.to_owned())
+            && self
+                .artwork
+                .large_artwork_hashes
+                .get(id)
+                .is_some_and(|large| large != arriving)
+            && self.current_art_hash(id) == Some(arriving)
+    }
+
+    /// Record the hash a large-art request for `id` carries, or clear a
+    /// stale record when it carries none.
+    pub(crate) fn record_large_art_hash(&mut self, id: &str, version: Option<&str>) {
+        match version.filter(|v| nokkvi_data::types::image_info::is_valid_image_hash(v)) {
+            Some(hash) => {
+                self.artwork
+                    .large_artwork_hashes
+                    .insert(id.to_owned(), hash.to_owned());
+            }
+            None => {
+                self.artwork.large_artwork_hashes.remove(id);
+            }
+        }
     }
 
     /// Whether the server marked this album's art absent (Navidrome 0.64+).
@@ -211,6 +273,8 @@ impl Nokkvi {
         }
 
         self.artwork.loading_large_artwork = Some(album_id.clone());
+        let version = self.album_art_version(&album_id);
+        self.record_large_art_hash(&album_id, version.as_deref());
 
         if let Some(shell) = &self.app_service {
             let albums_vm = shell.albums().clone();
@@ -219,7 +283,6 @@ impl Nokkvi {
             // the `al-` prefix, plus its version (hash on 0.64+, else the
             // Albums view row's `updated_at`, else none).
             let art_id = album_id.clone();
-            let version = self.album_art_version(&album_id);
 
             return Task::perform(
                 async move {
@@ -236,34 +299,18 @@ impl Nokkvi {
     }
 
     /// Force-refresh a specific album's artwork (user-initiated, with toasts).
+    /// A changed cover also refreshes on its own on Navidrome 0.64+: the
+    /// image hash is the prefetch version, and `handle_artwork_loaded` drops
+    /// the stale large art when the hash changes.
     pub(crate) fn handle_refresh_album_artwork(&mut self, album_id: String) -> Task<Message> {
-        self.refresh_album_artwork_inner(album_id, false)
-    }
-
-    /// Same as `handle_refresh_album_artwork` but suppresses progress/success
-    /// toasts. Used by the SSE-driven invalidation path so background updates
-    /// don't spam the user with notifications.
-    pub(crate) fn handle_refresh_album_artwork_silent(
-        &mut self,
-        album_id: String,
-    ) -> Task<Message> {
-        self.refresh_album_artwork_inner(album_id, true)
-    }
-
-    fn refresh_album_artwork_inner(&mut self, album_id: String, silent: bool) -> Task<Message> {
         use tracing::info;
 
-        info!(
-            " [REFRESH] Refreshing artwork for album {} (silent={silent})",
-            album_id
-        );
+        info!(" [REFRESH] Refreshing artwork for album {}", album_id);
 
         // The server marked this album's art absent: a refetch would only
         // cache its placeholder picture.
         if self.album_image_absent(&album_id) {
-            if !silent {
-                self.toast_warn("No artwork found on server for this album");
-            }
+            self.toast_warn("No artwork found on server for this album");
             return Task::none();
         }
 
@@ -306,21 +353,17 @@ impl Nokkvi {
                 (id, thumb_handle, large_handle)
             },
             move |(id, thumb, large)| {
-                Message::Artwork(ArtworkMessage::RefreshComplete(id, thumb, large, silent))
+                Message::Artwork(ArtworkMessage::RefreshComplete(id, thumb, large))
             },
         );
 
-        if silent {
-            refresh_task
-        } else {
-            let toast_task = Task::done(Message::Toast(crate::app_message::ToastMessage::Push(
-                nokkvi_data::types::toast::Toast::new(
-                    "Refreshing artwork…".to_string(),
-                    nokkvi_data::types::toast::ToastLevel::Info,
-                ),
-            )));
-            Task::batch([toast_task, refresh_task])
-        }
+        let toast_task = Task::done(Message::Toast(crate::app_message::ToastMessage::Push(
+            nokkvi_data::types::toast::Toast::new(
+                "Refreshing artwork…".to_string(),
+                nokkvi_data::types::toast::ToastLevel::Info,
+            ),
+        )));
+        Task::batch([toast_task, refresh_task])
     }
 
     /// Handle the result of an artwork refresh — cache both mini and large atomically.
@@ -329,16 +372,13 @@ impl Nokkvi {
         album_id: String,
         thumb: Option<image::Handle>,
         large: Option<image::Handle>,
-        silent: bool,
     ) -> Task<Message> {
         // A refresh is an explicit re-attempt signal: drop any negative-cache
         // entry so the next prefetch re-fetches even if the recorded failed
         // version still matches (the user may have fixed the cover server-side).
         self.artwork.failed_art.remove(&album_id);
         if thumb.is_none() && large.is_none() {
-            if !silent {
-                self.toast_warn("No artwork found on server for this album");
-            }
+            self.toast_warn("No artwork found on server for this album");
             return Task::none();
         }
         if let Some(h) = thumb {
@@ -353,11 +393,11 @@ impl Nokkvi {
             self.artwork.album_art.put(album_id.clone(), h);
         }
         if let Some(h) = large {
+            let version = self.album_art_version(&album_id);
+            self.record_large_art_hash(&album_id, version.as_deref());
             self.artwork.large_artwork.put(album_id, h);
         }
-        if !silent {
-            self.toast_success("Artwork refreshed");
-        }
+        self.toast_success("Artwork refreshed");
         Task::none()
     }
 

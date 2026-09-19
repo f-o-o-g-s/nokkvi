@@ -426,6 +426,12 @@ impl Nokkvi {
                     |p| {
                         p.uploaded_image = Some("uploaded".to_string());
                         p.updated_at = fresh_updated_at.clone();
+                        // The pre-upload image hash describes the old image;
+                        // left in place it would win the version and
+                        // re-request the old `pl-<id>_<hash>` URL, which 0.64
+                        // marks immutable for intermediary caches. The next
+                        // list reload brings the new hash.
+                        p.image = Default::default();
                     },
                 );
                 Task::batch([

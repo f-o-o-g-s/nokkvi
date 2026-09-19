@@ -394,12 +394,8 @@ pub enum ArtworkMessage {
     /// Force-refresh a specific album's artwork (evict all cached sizes, re-fetch).
     /// User-initiated: shows "Refreshing artwork…" / "Artwork refreshed" toasts.
     RefreshAlbumArtwork(String),
-    /// Same as `RefreshAlbumArtwork` but suppresses progress/success toasts.
-    /// Dispatched by SSE-driven invalidation so background updates are quiet.
-    RefreshAlbumArtworkSilent(String),
-    /// Result of a refresh: (album_id, thumb_handle, large_handle, silent).
-    /// `silent = true` suppresses the success toast in the completion handler.
-    RefreshComplete(String, Option<image::Handle>, Option<image::Handle>, bool),
+    /// Result of a refresh: (album_id, thumb_handle, large_handle).
+    RefreshComplete(String, Option<image::Handle>, Option<image::Handle>),
 
     /// Result of the lyrics cover-blur job: `(album_id, level, source_id,
     /// blurred)`. `blurred = None` records a decode failure so the tick's

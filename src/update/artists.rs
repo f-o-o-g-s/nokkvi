@@ -149,7 +149,10 @@ impl Nokkvi {
     /// The image info (Navidrome 0.64+) of an artist row nokkvi holds: the
     /// Artists view, else Harbour's raw artist lists. `None` for an unknown
     /// id; the default on older servers.
-    fn artist_image(&self, artist_id: &str) -> Option<&nokkvi_data::types::image_info::ImageInfo> {
+    pub(crate) fn artist_image(
+        &self,
+        artist_id: &str,
+    ) -> Option<&nokkvi_data::types::image_info::ImageInfo> {
         if let Some(artist) = self.library.artists.iter().find(|a| a.id == artist_id) {
             return Some(&artist.image);
         }
@@ -228,6 +231,7 @@ impl Nokkvi {
         let version = self
             .artist_image(&artist_id)
             .and_then(|image| nokkvi_data::types::image_info::artwork_version(image, None));
+        self.record_large_art_hash(&artist_id, version.as_deref());
 
         let Some(shell) = &self.app_service else {
             return Task::none();

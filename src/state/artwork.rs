@@ -140,6 +140,14 @@ pub struct ArtworkState {
     pub failed_art: HashMap<String, Option<String>>,
     /// Large artwork cache for detail views (LRU-bounded).
     pub large_artwork: SnapshottedLru<String, image::Handle>,
+    /// The Navidrome 0.64 image hash each large-art request carried
+    /// (album/artist id -> hash), recorded when the load is dispatched and
+    /// removed when a load carries no hash. A mini that later arrives at the
+    /// rows' current, different hash marks the cached large art stale
+    /// (`handle_artwork_loaded`). Its own map because the passive surfaces
+    /// write `None` into `album_art_versions`. Unbounded like the version
+    /// map; reset on logout via `Default`.
+    pub large_artwork_hashes: HashMap<String, String>,
     /// Mini radio-station artwork (`station_id -> Handle`) for the Radios slot
     /// list. Holds either an admin-uploaded station logo (fetched via
     /// `getCoverArt?id=ra-…` when [`RadioStation::logo_cover_art`] is present)
@@ -237,6 +245,7 @@ impl Default for ArtworkState {
             album_art_pending: HashSet::new(),
             failed_art: HashMap::new(),
             large_artwork: SnapshottedLru::new(LARGE_ARTWORK_CACHE_CAPACITY),
+            large_artwork_hashes: HashMap::new(),
             radio_art: SnapshottedLru::new(RADIO_ART_CACHE_CAPACITY),
             radio_large_art: SnapshottedLru::new(RADIO_LARGE_ART_CACHE_CAPACITY),
             radio_icy_captured: HashMap::new(),

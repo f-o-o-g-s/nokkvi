@@ -641,3 +641,28 @@ fn custom_cover_versions_by_image_hash() {
         "same hash, new updated_at: still current"
     );
 }
+
+/// An upload replaces the image, so the row's pre-upload hash must not keep
+/// winning the version (it would re-request the old `pl-<id>_<hash>` URL,
+/// which 0.64 marked immutable for intermediary caches).
+#[test]
+fn custom_cover_upload_drops_the_stale_hash() {
+    let mut app = playlist_app(true);
+    app.library.playlists.set_from_vec(vec![{
+        let mut p = make_playlist("p1", "Road Trip", true);
+        p.image.image_hash = Some("0123456789abcdef".into());
+        p
+    }]);
+    let _ = app.handle_playlist_custom_artwork_set(
+        "p1".into(),
+        "Road Trip".into(),
+        crate::app_message::CustomArtworkOutcome::Applied,
+    );
+    let row = app
+        .library
+        .playlists
+        .iter()
+        .find(|p| p.id == "p1")
+        .expect("row");
+    assert_eq!(row.image.valid_hash(), None);
+}
