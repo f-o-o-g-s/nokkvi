@@ -447,7 +447,7 @@ impl Nokkvi {
         if let Some(state) = &self.trawl_modal
             && let Some(r) = &state.search_results
         {
-            for a in &r.albums {
+            for a in r.albums.iter().filter(|a| !a.image.image_absent) {
                 id_slices.push(vec![a.id.clone()]);
             }
             for s in &r.songs {
@@ -455,7 +455,12 @@ impl Nokkvi {
                     id_slices.push(vec![id.clone()]);
                 }
             }
-            artist_ids = r.artists.iter().map(|a| a.id.clone()).collect();
+            artist_ids = r
+                .artists
+                .iter()
+                .filter(|a| !a.image.image_absent)
+                .map(|a| a.id.clone())
+                .collect();
         }
 
         let mut tasks: Vec<Task<Message>> = Vec::new();

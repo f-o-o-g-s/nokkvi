@@ -119,6 +119,18 @@ impl HarbourState {
     /// whose 80px covers the shelf renderer needs warmed. The song shelves
     /// warm their covers by `album_id` through the quad-id warmer instead
     /// (see `warm_harbour_artwork`).
+    /// The shelf artists whose `ar-{id}` mini needs warming: every Most
+    /// Played artist plus the Random Artist pick, minus art the server marked
+    /// absent.
+    pub fn shelf_artist_ids(&self) -> Vec<String> {
+        self.most_played_artists
+            .iter()
+            .chain(self.random_artist.iter())
+            .filter(|a| !a.image.image_absent)
+            .map(|a| a.id.clone())
+            .collect()
+    }
+
     pub fn shelf_album_art_triples(&self) -> Vec<(String, Option<String>, String)> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
@@ -128,7 +140,8 @@ impl HarbourState {
             .chain(self.most_played_albums.iter())
             .chain(self.random_album.iter())
         {
-            if seen.insert(album.id.clone()) {
+            // An empty URL is art the server marked absent: nothing to warm.
+            if !album.artwork_url.is_empty() && seen.insert(album.id.clone()) {
                 out.push((
                     album.id.clone(),
                     album.updated_at.clone(),

@@ -705,6 +705,7 @@ fn artists_rating_sort_some_before_none_then_desc_by_value() {
             mbz_artist_id: None,
             biography: None,
             external_url: None,
+            image: Default::default(),
             searchable_lower: String::new(),
         }
     }

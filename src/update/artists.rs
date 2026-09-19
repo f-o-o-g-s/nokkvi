@@ -146,6 +146,27 @@ impl Nokkvi {
     /// click bypasses every scroll-driven trigger, so the expand path has to
     /// kick the fetch itself or the artwork column would stay blank until
     /// the user scrolled away and back.
+    /// Whether the server marked this artist's art absent (Navidrome 0.64+),
+    /// by the Artists view row or Harbour's raw artist lists. Unknown ids and
+    /// older servers read as not absent.
+    pub(crate) fn artist_image_absent(&self, artist_id: &str) -> bool {
+        if let Some(artist) = self.library.artists.iter().find(|a| a.id == artist_id) {
+            return artist.image.image_absent;
+        }
+        self.harbour
+            .most_played_artists
+            .iter()
+            .chain(self.harbour.random_artist.iter())
+            .chain(
+                self.harbour
+                    .search_results
+                    .iter()
+                    .flat_map(|r| r.artists.iter()),
+            )
+            .find(|a| a.id == artist_id)
+            .is_some_and(|a| a.image.image_absent)
+    }
+
     pub(crate) fn handle_load_artist_large_artwork(&mut self, artist_id: String) -> Task<Message> {
         if self.artwork.large_artwork.peek(&artist_id).is_some() {
             return Task::none();
@@ -182,6 +203,13 @@ impl Nokkvi {
                             .or_else(|| a.medium_image_url.clone())
                     })
             });
+
+        // The server marked the artist's art absent (Navidrome 0.64+) and no
+        // external poster is known: no request, the panel stays blank. An
+        // external poster is still fetched as before.
+        if external_url.is_none() && self.artist_image_absent(&artist_id) {
+            return Task::none();
+        }
 
         // Set the in-flight marker before the `app_service` check so it
         // matches the Albums helper's ordering — the marker is the

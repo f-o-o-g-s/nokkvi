@@ -48,10 +48,14 @@ pub(crate) use artwork_prefetch::should_refetch;
 pub(crate) fn unfocus_all<M: Send + 'static>() -> Task<M> {
     iced::widget::operation::focus("__unfocus_all__")
 }
+// The pure planning half of `prefetch_album_artwork_tasks`, for the handler
+// tests (production calls go through the task builder).
+#[cfg(test)]
+pub(super) use artwork_prefetch::plan_album_artwork_fetches;
 pub(super) use artwork_prefetch::{
-    expansion_album_artwork_tasks, expansion_child_album_ids, passive_artwork_version,
-    prefetch_album_artwork_tasks, prefetch_quad_album_artwork_tasks, prefetch_song_artwork_tasks,
-    quad_album_artwork_tasks_for_ids,
+    album_prefetch_entry, expansion_album_artwork_tasks, expansion_child_album_ids,
+    passive_artwork_version, prefetch_album_artwork_tasks, prefetch_quad_album_artwork_tasks,
+    prefetch_song_artwork_tasks, quad_album_artwork_tasks_for_ids,
 };
 
 /// Map an `anyhow::Error` chain to [`Message::SessionExpired`] when its

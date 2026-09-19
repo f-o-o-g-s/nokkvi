@@ -133,13 +133,7 @@ impl Nokkvi {
                     &self.artwork.album_art_versions,
                     &self.artwork.failed_art,
                     albums_vm,
-                    |album| {
-                        (
-                            album.id.clone(),
-                            album.updated_at.clone(),
-                            album.artwork_url.clone(),
-                        )
-                    },
+                    crate::update::components::album_prefetch_entry,
                 );
                 if let Some(task) = self.center_large_artwork_load_task(View::Albums) {
                     tasks.push(task);
@@ -371,6 +365,25 @@ impl Nokkvi {
     ///
     /// Shared by: `handle_artists_loaded`, `handle_artists` (slot list change),
     /// and `prefetch_viewport_artwork` (window resize / view switch).
+    /// The artist ids whose `ar-{id}` mini the Artists viewport prefetch
+    /// would fetch: uncached, not known-failed, and not marked absent by the
+    /// server (Navidrome 0.64+).
+    pub(crate) fn artist_minis_to_fetch(&self) -> Vec<String> {
+        let total = self.library.artists.len();
+        self.artists_page
+            .common
+            .slot_list
+            .prefetch_indices(total)
+            .filter_map(|idx| self.library.artists.get(idx))
+            .filter(|artist| {
+                !artist.image.image_absent
+                    && !self.artwork.album_art.contains(&artist.id)
+                    && !self.artwork.art_failed_at(&artist.id, &None)
+            })
+            .map(|artist| artist.id.clone())
+            .collect()
+    }
+
     pub(crate) fn prefetch_artist_mini_artwork_tasks(&self) -> Task<Message> {
         let total = self.library.artists.len();
         if total == 0 {
@@ -382,12 +395,8 @@ impl Nokkvi {
         };
 
         let mut tasks = Vec::new();
-        for idx in self.artists_page.common.slot_list.prefetch_indices(total) {
-            if let Some(artist) = self.library.artists.get(idx)
-                && !self.artwork.album_art.contains(&artist.id)
-                && !self.artwork.art_failed_at(&artist.id, &None)
+        for id in self.artist_minis_to_fetch() {
             {
-                let id = artist.id.clone();
                 let art_id = format!("ar-{id}");
                 let vm = albums_vm.clone();
                 tasks.push(Task::perform(

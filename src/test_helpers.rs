@@ -174,6 +174,7 @@ pub(crate) fn make_album(id: &str, name: &str, artist: &str) -> AlbumUIViewData 
         release_date: None,
         original_date: None,
         original_year: None,
+        image: Default::default(),
         searchable_lower: build_searchable_lower(&[name, artist]),
     }
 }
@@ -195,6 +196,7 @@ pub(crate) fn make_artist(id: &str, name: &str) -> ArtistUIViewData {
         mbz_artist_id: None,
         biography: None,
         external_url: None,
+        image: Default::default(),
         searchable_lower: build_searchable_lower(&[name]),
     }
 }

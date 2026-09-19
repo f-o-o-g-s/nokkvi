@@ -103,6 +103,42 @@ pub(crate) fn prefetch_album_artwork_tasks<F, T>(
 where
     F: Fn(&T) -> (String, Option<String>, String),
 {
+    plan_album_artwork_fetches(
+        slot_list,
+        items,
+        cached_ids,
+        versions,
+        failed,
+        extract_id_url,
+    )
+    .into_iter()
+    .map(|(id, updated_at, url)| {
+        let vm = albums_vm.clone();
+        Task::perform(
+            async move {
+                let art = MiniArt::from_fetch(vm.fetch_artwork_by_url(&url).await);
+                (id, updated_at, art)
+            },
+            |(id, updated_at, art)| Message::Artwork(ArtworkMessage::Loaded(id, updated_at, art)),
+        )
+    })
+    .collect()
+}
+
+/// The `(id, version, url)` fetches [`prefetch_album_artwork_tasks`] would
+/// dispatch for this viewport, in prefetch order: the pure planning half,
+/// so the gate is testable without an `AlbumsService`.
+pub(crate) fn plan_album_artwork_fetches<F, T>(
+    slot_list: &SlotListView,
+    items: &[T],
+    cached_ids: &HashSet<&String>,
+    versions: &HashMap<String, Option<String>>,
+    failed: &HashMap<String, Option<String>>,
+    extract_id_url: F,
+) -> Vec<(String, Option<String>, String)>
+where
+    F: Fn(&T) -> (String, Option<String>, String),
+{
     let total = items.len();
     if total == 0 {
         return Vec::new();
@@ -135,19 +171,17 @@ where
                 Some((id, updated_at, url))
             }
         })
-        .map(|(id, updated_at, url)| {
-            let vm = albums_vm.clone();
-            Task::perform(
-                async move {
-                    let art = MiniArt::from_fetch(vm.fetch_artwork_by_url(&url).await);
-                    (id, updated_at, art)
-                },
-                |(id, updated_at, art)| {
-                    Message::Artwork(ArtworkMessage::Loaded(id, updated_at, art))
-                },
-            )
-        })
         .collect()
+}
+
+/// The Albums view's `(id, version, url)` prefetch entry for one row. One
+/// definition for every Albums-view prefetch site.
+pub(crate) fn album_prefetch_entry(album: &AlbumUIViewData) -> (String, Option<String>, String) {
+    (
+        album.id.clone(),
+        album.updated_at.clone(),
+        album.artwork_url.clone(),
+    )
 }
 
 /// Generate song artwork prefetch tasks for a slot list viewport.
@@ -400,8 +434,13 @@ pub(crate) fn expansion_album_artwork_tasks(
 ) -> Vec<Task<Message>> {
     album_ids_urls
         .into_iter()
-        .filter(|(id, updated_at, _)| {
-            should_refetch(cached_ids, versions, failed, id, updated_at)
+        .filter(|(id, updated_at, url)| {
+            // An empty URL (no id, or art the server marked absent) has
+            // nothing to fetch; fetching it would error Transient and
+            // re-queue on every pass.
+            !id.is_empty()
+                && !url.is_empty()
+                && should_refetch(cached_ids, versions, failed, id, updated_at)
                 && !pending_ids.contains(id)
         })
         .map(|(id, updated_at, url)| {
@@ -429,6 +468,7 @@ pub(crate) fn expansion_child_album_ids(
 ) -> Vec<(String, Option<String>, String)> {
     albums
         .iter()
+        .filter(|a| !a.artwork_url.is_empty())
         .map(|a| (a.id.clone(), a.updated_at.clone(), a.artwork_url.clone()))
         .collect()
 }

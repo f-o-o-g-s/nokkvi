@@ -822,6 +822,7 @@ mod tests {
             release_date: Some("1999-05-05".to_string()),
             original_date: Some("1999-01-01".to_string()),
             original_year: Some(1999),
+            image: Default::default(),
             searchable_lower: "distinctive name the artist".to_string(),
         };
 

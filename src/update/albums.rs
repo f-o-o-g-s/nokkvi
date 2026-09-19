@@ -160,6 +160,20 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Whether the server marked this album's art absent (Navidrome 0.64+),
+    /// by any album row nokkvi holds: the Albums view or Harbour's shelves.
+    /// Unknown ids and older servers read as not absent.
+    pub(crate) fn album_image_absent(&self, album_id: &str) -> bool {
+        self.library
+            .albums
+            .iter()
+            .chain(self.harbour.recently_added.iter())
+            .chain(self.harbour.most_played_albums.iter())
+            .chain(self.harbour.random_album.iter())
+            .find(|a| a.id == album_id)
+            .is_some_and(|a| a.image.image_absent)
+    }
+
     pub(crate) fn handle_load_large_artwork(&mut self, album_id: String) -> Task<Message> {
         // Skip fetching if already cached - makes back-navigation instant
         if self.artwork.large_artwork.peek(&album_id).is_some() {
@@ -167,6 +181,10 @@ impl Nokkvi {
             return Task::done(Message::Artwork(ArtworkMessage::LargeLoaded(
                 album_id, handle,
             )));
+        }
+        // Absent art: no request, and the panel keeps its blank placeholder.
+        if self.album_image_absent(&album_id) {
+            return Task::none();
         }
 
         self.artwork.loading_large_artwork = Some(album_id.clone());
@@ -218,6 +236,15 @@ impl Nokkvi {
             " [REFRESH] Refreshing artwork for album {} (silent={silent})",
             album_id
         );
+
+        // The server marked this album's art absent: a refetch would only
+        // cache its placeholder picture.
+        if self.album_image_absent(&album_id) {
+            if !silent {
+                self.toast_warn("No artwork found on server for this album");
+            }
+            return Task::none();
+        }
 
         // Only evict large artwork so the panel shows a placeholder during refresh.
         // Do NOT evict from album_art — that would gray out every slot list row

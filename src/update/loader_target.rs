@@ -20,7 +20,7 @@ use nokkvi_data::{backend::app_service::AppService, types::paged_buffer::PagedBu
 use tracing::{debug, error};
 
 use super::components::{
-    PaginatedFetch, passive_artwork_version, prefetch_album_artwork_tasks,
+    PaginatedFetch, album_prefetch_entry, passive_artwork_version, prefetch_album_artwork_tasks,
     prefetch_song_artwork_tasks,
 };
 use crate::{
@@ -178,13 +178,7 @@ impl LoaderTarget for AlbumsTarget {
             &app.artwork.album_art_versions,
             &app.artwork.failed_art,
             shell.albums().clone(),
-            |album| {
-                (
-                    album.id.clone(),
-                    album.updated_at.clone(),
-                    album.artwork_url.clone(),
-                )
-            },
+            album_prefetch_entry,
         )
     }
 

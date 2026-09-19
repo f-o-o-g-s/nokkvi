@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Keyboard scrolling, wheel scrolling, and clicks in a very large queue now respond faster.
 - Dropping thousands of selected rows in a very large queue now lands without a pause.
 - Dropping thousands of selected rows in the playlist editor now lands without a pause.
+- On Navidrome 0.64+, albums and artists with no artwork show a plain square instead of Navidrome's placeholder picture.
 
 ### Fixed
 

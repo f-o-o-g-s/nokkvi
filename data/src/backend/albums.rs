@@ -74,6 +74,8 @@ pub struct AlbumUIViewData {
     pub original_date: Option<String>,
     /// Original release year (Feishin uses max_original_year)
     pub original_year: Option<u32>,
+    /// Navidrome 0.64 image info (default on older servers).
+    pub image: crate::types::image_info::ImageInfo,
     /// Pre-lowercased search index — built once at construction so the filter
     /// loop avoids per-keystroke `to_lowercase()` allocations. See
     /// `crate::utils::search::Searchable`.
@@ -89,13 +91,21 @@ impl AlbumUIViewData {
         // version-aware prefetch dedup then treats it as a genuine miss and
         // re-fetches (N17). Without the timestamp the passive mini path never
         // re-fetched a changed cover for the rest of the session.
-        let artwork_url = crate::utils::artwork_url::build_cover_art_url_with_timestamp(
-            art_id,
-            server_url,
-            subsonic_credential,
-            Some(crate::utils::artwork_url::THUMBNAIL_SIZE),
-            album.updated_at.as_deref(),
-        );
+        //
+        // Art the server marked absent (Navidrome 0.64+) gets no URL at all:
+        // every prefetch path skips an empty URL, so nothing requests the
+        // server's placeholder and the row keeps nokkvi's own empty state.
+        let artwork_url = if album.image.image_absent {
+            String::new()
+        } else {
+            crate::utils::artwork_url::build_cover_art_url_with_timestamp(
+                art_id,
+                server_url,
+                subsonic_credential,
+                Some(crate::utils::artwork_url::THUMBNAIL_SIZE),
+                album.updated_at.as_deref(),
+            )
+        };
         // Build genres display string: "Black Metal • Heavy Metal • Rock"
         let genres = album.genres.as_ref().map(|g| {
             g.iter()
@@ -145,6 +155,7 @@ impl AlbumUIViewData {
             release_date: album.release_date.clone(),
             original_date: album.original_date.clone(),
             original_year: album.max_original_year,
+            image: album.image.clone(),
             searchable_lower,
         }
     }

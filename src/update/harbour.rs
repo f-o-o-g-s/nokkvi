@@ -181,6 +181,7 @@ pub(crate) fn search_warm_album_ids(
     results
         .albums
         .iter()
+        .filter(|a| !a.image.image_absent)
         .map(|a| a.id.clone())
         .chain(results.songs.iter().filter_map(|s| s.album_id.clone()))
         .collect()
@@ -1504,13 +1505,7 @@ impl Nokkvi {
         // The artist rows (Most Played Artists shelf + the Random Artist pick):
         // warm each artist's `ar-{id}` 80px mini into album_art (the rows' only
         // cover source — the album/song warmers don't cover artist ids).
-        let artist_ids: Vec<String> = self
-            .harbour
-            .most_played_artists
-            .iter()
-            .chain(self.harbour.random_artist.iter())
-            .map(|a| a.id.clone())
-            .collect();
+        let artist_ids = self.harbour.shelf_artist_ids();
         let artist_tasks = self.artist_mini_warm_tasks(artist_ids, &albums_vm);
         tasks.extend(artist_tasks);
 
@@ -1696,7 +1691,12 @@ impl Nokkvi {
                     id_slices.push(ids.clone());
                 }
             }
-            artist_ids = r.artists.iter().map(|a| a.id.clone()).collect();
+            artist_ids = r
+                .artists
+                .iter()
+                .filter(|a| !a.image.image_absent)
+                .map(|a| a.id.clone())
+                .collect();
         }
 
         let mut tasks: Vec<Task<Message>> = Vec::new();

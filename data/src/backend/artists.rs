@@ -30,6 +30,8 @@ pub struct ArtistUIViewData {
     pub mbz_artist_id: Option<String>,
     pub biography: Option<String>,
     pub external_url: Option<String>,
+    /// Navidrome 0.64 image info (default on older servers).
+    pub image: crate::types::image_info::ImageInfo,
     /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
     pub searchable_lower: String,
 }
@@ -87,6 +89,7 @@ impl From<Artist> for ArtistUIViewData {
             mbz_artist_id: a.mbz_artist_id,
             biography: a.biography,
             external_url: a.external_url,
+            image: a.image,
             searchable_lower,
         }
     }
