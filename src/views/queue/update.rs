@@ -344,7 +344,9 @@ impl QueuePage {
                         (Task::none(), QueueAction::AddToMix(seeds))
                     }
                 }
-                QueueContextEntry::Separator => (Task::none(), QueueAction::None),
+                QueueContextEntry::Separator | QueueContextEntry::RemoveDuplicates => {
+                    (Task::none(), QueueAction::None)
+                }
                 QueueContextEntry::SaveAsPlaylist => (Task::none(), QueueAction::SaveAsPlaylist),
                 QueueContextEntry::OpenBrowsingPanel => {
                     (Task::none(), QueueAction::OpenBrowsingPanel)

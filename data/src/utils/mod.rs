@@ -1,9 +1,10 @@
 //! Utilities — artwork URLs, formatters, fuzzy search, scaling, paths, URL redaction,
-//! block reorder
+//! block reorder, duplicate detection
 
 pub mod artwork_url;
 pub mod calendar;
 pub mod cycle;
+pub mod dedupe;
 pub mod formatters;
 pub mod fuzzy;
 pub mod paths;

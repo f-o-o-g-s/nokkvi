@@ -184,6 +184,10 @@ const NAME_MAP: &[(&str, &str)] = &[
         "assets/icons-phosphor/faders-regular.svg",
     ),
     ("sparkles", "assets/icons-phosphor/sparkle-regular.svg"),
+    (
+        "squares-unite",
+        "assets/icons-phosphor/unite-square-regular.svg",
+    ),
     ("star", "assets/icons-phosphor/star-regular.svg"),
     ("star-filled", "assets/icons-phosphor/star-fill.svg"),
     ("sun-moon", "assets/icons-phosphor/circle-half-regular.svg"),

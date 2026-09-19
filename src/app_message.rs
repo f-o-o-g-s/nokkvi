@@ -878,6 +878,9 @@ pub enum EditorMessage {
     DragReorder(widgets::drag_column::DragEvent),
     /// Remove a single row at the given buffer index.
     RemoveAt(usize),
+    /// Drop every later copy of a song from the WHOLE buffer (an active
+    /// search does not narrow it). Staged until Save, like every edit.
+    RemoveDuplicates,
     /// Context-menu action against the row at the given index.
     ContextMenuAction(usize, views::queue::QueueContextEntry),
     /// Edit-bar: playlist name changed (per keystroke).

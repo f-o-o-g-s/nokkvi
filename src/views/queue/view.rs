@@ -913,6 +913,14 @@ impl QueuePage {
                                 QueueContextEntry::RemoveFromQueue,
                             ),
                         ),
+                        QueueContextEntry::RemoveDuplicates => menu_button(
+                            Some("assets/icons/squares-unite.svg"),
+                            "Remove Duplicates",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::RemoveDuplicates,
+                            ),
+                        ),
                         QueueContextEntry::Separator => menu_separator(),
                         QueueContextEntry::AddToPlaylist => menu_button(
                             Some("assets/icons/list-music.svg"),

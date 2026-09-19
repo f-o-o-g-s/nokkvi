@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - The smart-playlist editor now warns when a sort field needs a newer Navidrome than the server runs.
 - Smart playlists can set their own refresh delay (`1d`, `12h`, `1w`) in the rules editor on Navidrome 0.64+.
 - Album and artist thumbnails show the cover's dominant color while they load (Navidrome 0.64+).
+- The playlist editor can remove duplicate songs in one click, from the edit bar or a row's right-click menu.
 
 ### Changed
 

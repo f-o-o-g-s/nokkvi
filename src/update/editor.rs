@@ -10,9 +10,14 @@
 use std::collections::HashSet;
 
 use iced::Task;
-use nokkvi_data::{backend::queue::QueueSongUIViewData, utils::reorder::move_block_before};
+use nokkvi_data::{
+    backend::queue::QueueSongUIViewData,
+    utils::{dedupe::duplicate_entry_ids, reorder::move_block_before},
+};
 
-use super::components::{passive_artwork_version, prefetch_album_artwork_tasks};
+use super::components::{
+    duplicates_removed_text, passive_artwork_version, prefetch_album_artwork_tasks,
+};
 use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, EditorMessage, Message},
@@ -109,6 +114,7 @@ impl Nokkvi {
             // render time from the buffer, so these need no explicit dirty flag.
             EditorMessage::DragReorder(event) => self.handle_editor_drag_reorder(event),
             EditorMessage::RemoveAt(idx) => self.handle_editor_remove_at(idx),
+            EditorMessage::RemoveDuplicates => self.handle_editor_remove_duplicates(),
             EditorMessage::ContextMenuAction(idx, entry) => {
                 self.handle_editor_context_menu_action(idx, entry)
             }
@@ -331,22 +337,52 @@ impl Nokkvi {
             return Task::none();
         }
 
-        let id_set: std::collections::HashSet<u64> = target_entry_ids.into_iter().collect();
+        let id_set: HashSet<u64> = target_entry_ids.into_iter().collect();
         editor.songs.retain(|s| !id_set.contains(&s.entry_id));
-
-        // Clean up the slot-list cursor/selection so nothing dangles past the
-        // shrunk buffer (mirrors `handle_queue_loaded`'s selected-offset/viewport
-        // cleanup in `update/queue.rs`): drop the click-to-focus marker and clamp
-        // the viewport offset into range. `evaluate_context_menu` +
-        // `clear_multi_selection` above already cleared the multi-selection.
-        let new_total = editor.songs.len();
-        editor.common.slot_list.clear_focus_cursor();
-        if new_total > 0 && editor.common.slot_list.viewport_offset >= new_total {
-            editor.common.slot_list.viewport_offset = new_total.saturating_sub(1);
-        } else if new_total == 0 {
-            editor.common.slot_list.viewport_offset = 0;
-        }
+        // Nothing may dangle past the shrunk buffer (mirrors
+        // `handle_queue_loaded`'s selected-offset/viewport cleanup).
+        editor.settle_slot_list_after_shrink();
         Task::none()
+    }
+
+    /// Remove Duplicates: drop every later copy of a song from the WHOLE
+    /// buffer. An active search does not narrow it (Save ignores the search
+    /// too), and neither does the clicked row or the multi-selection. Staged
+    /// like every other edit: the buffer diverges from the snapshot, the
+    /// eyebrow flips to UNSAVED, and Save overwrites the tracks.
+    fn handle_editor_remove_duplicates(&mut self) -> Task<Message> {
+        if !self.editor_is_loaded() {
+            return Task::none();
+        }
+        let removed = {
+            let Some(editor) = self.playlist_editor.as_mut() else {
+                return Task::none();
+            };
+            // Rules kind: the results pane is a preview, not a track list.
+            if editor.rules_session().is_some() {
+                return Task::none();
+            }
+            let dropped: HashSet<u64> = duplicate_entry_ids(
+                editor.songs.iter().map(|s| (s.id.as_str(), s.entry_id)),
+                None,
+            )
+            .into_iter()
+            .collect();
+            if !dropped.is_empty() {
+                editor.songs.retain(|s| !dropped.contains(&s.entry_id));
+                // A picked row may be gone; a later drop must not replay it.
+                editor.clear_drag();
+                editor.settle_slot_list_after_shrink();
+            }
+            dropped.len()
+        };
+        if removed == 0 {
+            self.toast_info("No duplicates found");
+            return Task::none();
+        }
+        self.toast_info(duplicates_removed_text(removed));
+        // A large shrink scrolls rows into view that have no thumbnail yet.
+        self.editor_artwork_prefetch_tasks()
     }
 
     /// Handle an editor row's context-menu entry.

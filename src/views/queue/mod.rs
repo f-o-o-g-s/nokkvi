@@ -220,6 +220,9 @@ pub enum QueueContextEntry {
     PlayNext,
     Separator,
     RemoveFromQueue,
+    /// Remove every later copy of a song from the whole queue (or, in the
+    /// playlist editor, the whole buffer), whatever row was clicked.
+    RemoveDuplicates,
     AddToPlaylist,
     /// Add the selection to the Trawl crate as song seeds.
     AddToMix,

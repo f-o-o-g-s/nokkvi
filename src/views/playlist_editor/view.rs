@@ -5,14 +5,16 @@
 //! song-list composition (columns, drag, search) is delegated to the shared
 //! [`crate::views::song_list_pane`] renderer — the same implementation the
 //! queue uses — but with the now-playing highlight switched OFF (the editor has
-//! no "now playing" concept) and an editor-specific 2-entry context menu
-//! (Get Info / Remove from playlist) instead of the queue's 11-entry menu.
+//! no "now playing" concept) and an editor-specific 3-entry context menu
+//! (Get Info / Remove from Playlist / Remove Duplicates) instead of the
+//! queue's full menu.
 //!
 //! The edit-bar header (eyebrow + name input + comment input + public toggle +
-//! save/discard) mirrors the queue's read-only "Playing From" banner chrome so
-//! the two surfaces look cohesive. The metadata-edit messages route to
-//! [`EditorMessage`] variants; the discard control reuses the existing
-//! [`SplitViewMessage::ExitEditMode`] path mapped to the root [`Message`].
+//! remove-duplicates + save/discard) mirrors the queue's read-only "Playing
+//! From" banner chrome so the two surfaces look cohesive. The metadata-edit
+//! messages route to [`EditorMessage`] variants; the discard control reuses
+//! the existing [`SplitViewMessage::ExitEditMode`] path mapped to the root
+//! [`Message`].
 //!
 //! Root-widget stability: every branch returns a `Column` (via
 //! `base_slot_list_*`) so the edit-bar `text_input` focus survives re-renders.
@@ -34,7 +36,7 @@ use crate::{
 };
 
 /// Height of the editor's edit-bar header (eyebrow over the name + comment
-/// inputs, with the public/save/discard actions). Sized to sit comfortably
+/// inputs, with the public/de-dupe/save/discard actions). Sized to sit comfortably
 /// above the shared `song_list_pane` rows.
 const EDIT_BAR_H: f32 = 60.0;
 
@@ -228,19 +230,21 @@ impl PlaylistEditorState {
                     EditorMessage::ContextMenuAction(i, QueueContextEntry::GetInfo)
                 }
             },
-            // Editor-specific context menu: Get Info + Remove from playlist.
+            // Editor-specific context menu: Get Info, Remove from Playlist,
+            // Remove Duplicates.
             move |slot_button, item_idx| {
                 use crate::widgets::context_menu::{
                     context_menu, menu_button, menu_separator, open_state_for,
                 };
-                // Reuse `QueueContextEntry` variants for the two editor actions
-                // (GetInfo / RemoveFromQueue) so the shared menu chrome applies;
-                // the editor's handler interprets RemoveFromQueue as "remove
-                // from playlist" (Phase 4).
+                // Reuse `QueueContextEntry` variants for the three editor
+                // actions (GetInfo / RemoveFromQueue / RemoveDuplicates) so the
+                // shared menu chrome applies; the editor's handler interprets
+                // RemoveFromQueue as "remove from playlist" (Phase 4).
                 let entries = vec![
                     QueueContextEntry::GetInfo,
                     QueueContextEntry::Separator,
                     QueueContextEntry::RemoveFromQueue,
+                    QueueContextEntry::RemoveDuplicates,
                 ];
                 let cm_id = crate::app_message::ContextMenuId::EditorRow(item_idx);
                 let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
@@ -259,8 +263,13 @@ impl PlaylistEditorState {
                             "Remove from Playlist",
                             EditorMessage::RemoveAt(item_idx),
                         ),
+                        QueueContextEntry::RemoveDuplicates => menu_button(
+                            Some("assets/icons/squares-unite.svg"),
+                            "Remove Duplicates",
+                            EditorMessage::RemoveDuplicates,
+                        ),
                         QueueContextEntry::Separator => menu_separator(),
-                        // The editor menu only uses the three entries above.
+                        // The editor menu only uses the four entries above.
                         _ => menu_separator(),
                     },
                     cm_open,
@@ -314,8 +323,9 @@ impl PlaylistEditorState {
     }
 
     /// Build the edit-bar header — reproduces the queue view's edit bar:
-    /// eyebrow + name input + comment input (left), public toggle + save +
-    /// discard (right), accent stripe + faint wash, over a fixed-height band.
+    /// eyebrow + name input + comment input (left), public toggle + remove
+    /// duplicates + save + discard (right), accent stripe + faint wash, over a
+    /// fixed-height band.
     fn edit_bar<'a>(&'a self, data: &EditorViewData<'a>) -> Element<'a, EditorMessage> {
         let accent = crate::theme::accent();
 
@@ -404,6 +414,26 @@ impl PlaylistEditorState {
                 .into()
             };
 
+        // Hover label under an edit-bar action.
+        fn with_tooltip<'a>(
+            trigger: Element<'a, EditorMessage>,
+            label: &'static str,
+        ) -> Element<'a, EditorMessage> {
+            iced::widget::tooltip(
+                trigger,
+                container(
+                    iced::widget::text(label)
+                        .size(11.0)
+                        .font(crate::theme::ui_font()),
+                )
+                .padding(4),
+                iced::widget::tooltip::Position::Bottom,
+            )
+            .gap(4)
+            .style(crate::theme::container_tooltip)
+            .into()
+        }
+
         // Public/private toggle — accent when public, muted when private.
         let is_public = data.public;
         let public_toggle: Element<'a, EditorMessage> = {
@@ -445,21 +475,16 @@ impl PlaylistEditorState {
             )
             .on_press(EditorMessage::PublicToggled(!is_public))
             .interaction(iced::mouse::Interaction::Pointer);
-            iced::widget::tooltip(
-                trigger,
-                container(
-                    iced::widget::text(tooltip_label)
-                        .size(11.0)
-                        .font(crate::theme::ui_font()),
-                )
-                .padding(4),
-                iced::widget::tooltip::Position::Bottom,
-            )
-            .gap(4)
-            .style(crate::theme::container_tooltip)
-            .into()
+            with_tooltip(trigger.into(), tooltip_label)
         };
 
+        let dedupe_btn = with_tooltip(
+            icon_btn(
+                "assets/icons/squares-unite.svg",
+                EditorMessage::RemoveDuplicates,
+            ),
+            "Remove duplicate songs",
+        );
         let save_btn = icon_btn("assets/icons/save.svg", EditorMessage::Save);
         // Discard reuses the existing exit path via `EditorMessage::ExitEditMode`,
         // which the editor handler forwards to `SplitViewMessage::ExitEditMode`.
@@ -476,7 +501,7 @@ impl PlaylistEditorState {
         let left = column![eyebrow, name_input, comment_input]
             .spacing(2)
             .width(Length::Fill);
-        let actions = row![public_toggle, save_btn, discard_btn]
+        let actions = row![public_toggle, dedupe_btn, save_btn, discard_btn]
             .spacing(2)
             .align_y(Alignment::Center);
 

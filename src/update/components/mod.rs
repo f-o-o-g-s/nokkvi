@@ -48,6 +48,13 @@ pub(crate) use artwork_prefetch::should_refetch;
 pub(crate) fn unfocus_all<M: Send + 'static>() -> Task<M> {
     iced::widget::operation::focus("__unfocus_all__")
 }
+
+/// The Remove Duplicates toast, shared by the playlist editor and the queue:
+/// `Removed 1 duplicate` / `Removed 3 duplicates`.
+pub(super) fn duplicates_removed_text(count: usize) -> String {
+    let plural = if count == 1 { "" } else { "s" };
+    format!("Removed {count} duplicate{plural}")
+}
 // The pure planning half of `prefetch_album_artwork_tasks`, for the handler
 // tests (production calls go through the task builder).
 #[cfg(test)]

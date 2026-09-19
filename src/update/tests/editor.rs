@@ -2105,3 +2105,238 @@ fn entering_edit_mode_resyncs_editor_slot_count_off_the_default() {
         editor.common.slot_list.slot_count
     );
 }
+
+// --- Remove Duplicates -----------------------------------------------------
+
+/// Seed a clean, loaded editor whose buffer holds one row per id in `ids`
+/// (repeats become duplicate rows with their own entry_ids). Titles are
+/// `Song <id>` so a search can target one song.
+fn seeded_editor_with(app: &mut crate::Nokkvi, ids: &[&str]) {
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        String::new(),
+        false,
+        Vec::new(),
+    )));
+    let rows = ids
+        .iter()
+        .map(|id| make_queue_song(id, &format!("Song {id}"), "Artist", "Album"))
+        .collect();
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(rows)));
+}
+
+fn editor_entry_ids(app: &crate::Nokkvi) -> Vec<u64> {
+    app.playlist_editor
+        .as_ref()
+        .expect("editor session present")
+        .songs
+        .iter()
+        .map(|s| s.entry_id)
+        .collect()
+}
+
+fn last_toast_text(app: &crate::Nokkvi) -> Option<(nokkvi_data::types::toast::ToastLevel, String)> {
+    app.toast
+        .toasts
+        .back()
+        .map(|t| (t.level, t.message.clone()))
+}
+
+#[test]
+fn editor_remove_duplicates_keeps_first_copies() {
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &["a", "b", "a", "c", "b"]);
+    let entry_ids = editor_entry_ids(&app);
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+    assert_eq!(editor_ids(&app), vec!["a", "b", "c"]);
+    assert_eq!(
+        editor_entry_ids(&app),
+        vec![entry_ids[0], entry_ids[1], entry_ids[3]],
+        "the first copy of each song stays"
+    );
+}
+
+#[test]
+fn editor_remove_duplicates_marks_the_session_dirty() {
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &["a", "b", "a"]);
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "a freshly-loaded editor starts clean"
+    );
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+    assert!(
+        app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "a de-dupe stages a track change, so Save overwrites the tracks"
+    );
+}
+
+#[test]
+fn editor_remove_duplicates_ignores_the_search() {
+    // The search shows only b; the hidden second a still goes.
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &["a", "b", "a"]);
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        editor.common.search_query = "song b".to_string();
+    }
+    assert_eq!(
+        app.filter_editor_songs().len(),
+        1,
+        "the search shows one row"
+    );
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+    assert_eq!(editor_ids(&app), vec!["a", "b"]);
+}
+
+#[test]
+fn editor_remove_duplicates_with_none_found_says_so() {
+    use nokkvi_data::types::toast::ToastLevel;
+
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &["a", "b", "c"]);
+    let before = editor_entry_ids(&app);
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+    assert_eq!(editor_entry_ids(&app), before, "nothing removed");
+    assert_eq!(
+        last_toast_text(&app),
+        Some((ToastLevel::Info, "No duplicates found".to_string()))
+    );
+    assert!(
+        !app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .edit
+            .is_dirty(&app.editor_song_ids()),
+        "a no-op de-dupe leaves the session clean"
+    );
+}
+
+#[test]
+fn editor_remove_duplicates_clears_selection_and_clamps_viewport() {
+    let ids: Vec<String> = (0..10).map(|i| format!("s{}", i % 5)).collect();
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &id_refs);
+    if let Some(editor) = app.playlist_editor.as_mut() {
+        let slot_list = &mut editor.common.slot_list;
+        slot_list.selected_indices.insert(7);
+        slot_list.selected_indices.insert(8);
+        slot_list.anchor_index = Some(7);
+        slot_list.selected_offset = Some(9);
+        slot_list.viewport_offset = 9;
+    }
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+    let editor = app.playlist_editor.as_ref().unwrap();
+    assert_eq!(editor.songs.len(), 5);
+    let slot_list = &editor.common.slot_list;
+    assert!(slot_list.selected_indices.is_empty(), "selection cleared");
+    assert_eq!(slot_list.anchor_index, None, "anchor cleared");
+    assert_eq!(slot_list.selected_offset, None, "focus cursor cleared");
+    assert!(
+        slot_list.viewport_offset < editor.songs.len(),
+        "viewport offset {} clamped into the shrunk buffer",
+        slot_list.viewport_offset
+    );
+}
+
+#[test]
+fn editor_remove_duplicates_is_inert_while_loading_or_failed() {
+    use crate::state::EditorLoadState;
+
+    for state in [EditorLoadState::Loading, EditorLoadState::Failed] {
+        let mut app = test_app();
+        seeded_editor_with(&mut app, &["a", "b", "a"]);
+        if let Some(editor) = app.playlist_editor.as_mut() {
+            editor.load_state = state;
+        }
+
+        let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+        assert_eq!(
+            editor_ids(&app),
+            vec!["a", "b", "a"],
+            "a {state:?} session's buffer is unreliable; the de-dupe must not touch it"
+        );
+    }
+}
+
+#[test]
+fn editor_remove_duplicates_is_inert_in_a_rules_session() {
+    use nokkvi_data::types::smart_criteria::ServerCaps;
+
+    let mut app = test_app();
+    app.caps_state = crate::state::CapsState::Fetched(ServerCaps::from_version_str("0.63.2"));
+    app.session_user_id = "user-9".into();
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterRulesMode {
+        target: crate::app_message::RulesEntryTarget::Create,
+    }));
+    let editor = app.playlist_editor.as_mut().expect("rules session mounted");
+    assert!(editor.rules_session().is_some());
+    editor.songs = vec![
+        make_queue_song("a", "Song a", "Artist", "Album"),
+        make_queue_song("a", "Song a", "Artist", "Album"),
+    ];
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+    assert_eq!(
+        editor_ids(&app),
+        vec!["a", "a"],
+        "rules sessions have no track buffer"
+    );
+}
+
+#[test]
+fn editor_remove_duplicates_clears_a_drag_in_progress() {
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &["a", "b", "a"]);
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 2 },
+    )));
+    assert!(app.playlist_editor.as_ref().unwrap().drag_source.is_some());
+
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+
+    assert!(
+        app.playlist_editor.as_ref().unwrap().drag_source.is_none(),
+        "the picked row may be gone; a later drop must not replay it"
+    );
+}
+
+#[test]
+fn editor_remove_duplicates_toast_counts() {
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &["a", "b", "a"]);
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+    assert_eq!(
+        last_toast_text(&app).map(|(_, m)| m),
+        Some("Removed 1 duplicate".to_string())
+    );
+
+    let mut app = test_app();
+    seeded_editor_with(&mut app, &["a", "a", "a", "b", "b"]);
+    let _ = app.update(Message::Editor(EditorMessage::RemoveDuplicates));
+    assert_eq!(
+        last_toast_text(&app).map(|(_, m)| m),
+        Some("Removed 3 duplicates".to_string())
+    );
+}
