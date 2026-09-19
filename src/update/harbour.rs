@@ -96,12 +96,77 @@ pub(crate) fn tally_genres_by_play(
         .into_iter()
         .map(|(name, _plays, track_count)| {
             GenreUIViewData::from(nokkvi_data::types::genre::Genre {
+                // Placeholder until `stamp_tally_genre_ids` sets the tag id.
                 id: name.clone(),
                 name,
                 album_count: 0,
                 song_count: track_count,
             })
         })
+        .collect()
+}
+
+/// Stamp each tally genre with its tag id from the server's `/api/genre` list,
+/// so its quad lookup can filter on `genre_id` (which matches only the tag id
+/// since Navidrome 0.64). An exact name match wins; otherwise the names are
+/// compared lowercased, because Navidrome derives one tag id from the
+/// lowercased value while a song's `genre` string can differ in case from the
+/// listed name. Only `id` changes: the name stays Harbour's key.
+///
+/// A miss leaves `id == name`. On 0.64+ that genre's quad stays blank; older
+/// servers still match the name.
+pub(crate) fn stamp_tally_genre_ids(
+    tally: &mut [GenreUIViewData],
+    server_genres: &[nokkvi_data::types::genre::Genre],
+) {
+    for genre in tally {
+        let exact = server_genres.iter().find(|g| g.name == genre.name);
+        let matched = exact.or_else(|| {
+            let lower = genre.name.to_lowercase();
+            server_genres
+                .iter()
+                .find(|g| g.name.to_lowercase() == lower)
+        });
+        if let Some(server) = matched {
+            genre.id.clone_from(&server.id);
+        }
+    }
+}
+
+/// The Random Genre draw from a client-shuffled genre list: the first genre
+/// with songs, else the first genre. The playability filter is a PREFERENCE,
+/// not a gate: `song_count` rides the opportunistic Subsonic `getGenres`
+/// enrichment, which `load_genres_with_libraries` degrades to an empty counts
+/// map on failure — gating on it would zero every candidate and deaden the row
+/// on any server that only exposes `/api/`. Falling back to the first genre
+/// keeps the one-press play working (Navidrome only lists tagged genres, so a
+/// genre in the list has songs regardless of the count).
+pub(crate) fn pick_random_genre(
+    genres: &[nokkvi_data::types::genre::Genre],
+) -> Option<nokkvi_data::types::genre::Genre> {
+    genres
+        .iter()
+        .find(|g| g.song_count > 0)
+        .or_else(|| genres.first())
+        .cloned()
+}
+
+/// The `(name, tag id)` pairs the shelf quad fan-out still has to resolve: the
+/// Random Genre pick and the Most Played genres whose `artwork_album_ids` are
+/// empty, deduped by NAME (Harbour's genre key). The pick is chained first so
+/// its `/api/genre` id wins over a same-name tally entry whose stamp may have
+/// missed.
+pub(crate) fn genres_needing_quad_ids(
+    harbour: &crate::state::HarbourState,
+) -> Vec<(String, String)> {
+    let mut seen_genre_names = HashSet::new();
+    harbour
+        .random_genre
+        .iter()
+        .chain(harbour.most_played_genres.iter())
+        .filter(|g| g.artwork_album_ids.is_empty())
+        .filter(|g| seen_genre_names.insert(g.name.clone()))
+        .map(|g| (g.name.clone(), g.id.clone()))
         .collect()
 }
 
@@ -126,29 +191,28 @@ pub(crate) fn search_warm_album_ids(
 /// degrades to an empty tile set (`unwrap_or_default`) rather than dropping the
 /// whole fan-out.
 ///
-/// Takes genre NAMES — Harbour's genre identity throughout (fan-out keys, the
-/// quad/collage side-maps, `PlayTarget::GenreRandom`), NOT `GenreUIViewData::id`,
-/// which for server genres is a `tag.id` hash that only equals the name on the
-/// synthesized tally genres. Shared by the shelf warm (`warm_harbour_artwork`)
+/// Takes `(name, tag id)` pairs. The request filters on the tag id (the only
+/// value `genre_id` matches since Navidrome 0.64); the result is keyed by the
+/// NAME, Harbour's genre identity throughout (the quad/collage side-maps,
+/// `PlayTarget::GenreRandom`). Shared by the shelf warm (`warm_harbour_artwork`)
 /// and the search warm (`fan_out_search_collage_ids`) so both resolve genres
-/// identically. (See gotchas.md "Genre identity" for why either would work on
-/// the wire — and why this module still standardizes on the name.)
+/// identically. See gotchas.md "Genre identity".
 async fn resolve_genre_album_ids(
     shell: &AppService,
-    genre_names: Vec<String>,
+    genres: Vec<(String, String)>,
 ) -> Vec<(String, Vec<String>)> {
     let (server_url, cred) = shell.auth().server_config().await;
     let Some(client) = shell.auth().get_client().await else {
         return Vec::new();
     };
-    let futures = genre_names.into_iter().map(|name| {
+    let futures = genres.into_iter().map(|(name, genre_id)| {
         let client = client.clone();
         let server_url = server_url.clone();
         let cred = cred.clone();
         async move {
             let svc =
                 nokkvi_data::services::api::genres::GenresApiService::new(client, server_url, cred);
-            let ids = svc.load_genre_albums(&name).await.unwrap_or_default();
+            let ids = svc.load_genre_albums(&genre_id).await.unwrap_or_default();
             (name, ids)
         }
     });
@@ -1140,26 +1204,15 @@ impl Nokkvi {
                     api.get_random_songs(crate::views::harbour::RANDOM_SONGS_DRAW, None, &ids)
                         .await
                 };
-                // The list arrives client-shuffled, so the first PLAYABLE genre is
-                // the draw. The playability filter is a PREFERENCE, not a gate:
-                // `song_count` rides the opportunistic Subsonic `getGenres`
-                // enrichment, which `load_genres_with_libraries` degrades to an
-                // empty counts map on failure — gating on it would zero every
-                // candidate and deaden the row on any server that only exposes
-                // `/api/`. Falling back to the first shuffled genre keeps the
-                // one-press play working (Navidrome only lists tagged genres, so
-                // a genre in the list has songs regardless of the count).
-                let random_genre_fut = async {
+                // The full genre list, client-shuffled: `pick_random_genre` draws
+                // the Random Genre pick from it, and `stamp_tally_genre_ids`
+                // gives the Most Played genres their tag ids, with no extra
+                // request.
+                let genre_list_fut = async {
                     let svc = shell.genres_api().await?;
                     svc.load_genres_with_libraries("random", "ASC", None, &ids)
                         .await
-                        .map(|(genres, _total)| {
-                            genres
-                                .iter()
-                                .find(|g| g.song_count > 0)
-                                .cloned()
-                                .or_else(|| genres.into_iter().next())
-                        })
+                        .map(|(genres, _total)| genres)
                 };
                 // Playlists keep a hard playability gate: `song_count` comes from
                 // the native `/api/playlist` (always sent), and an empty playlist
@@ -1181,7 +1234,7 @@ impl Nokkvi {
                     random_album,
                     random_artist,
                     random_songs,
-                    random_genre,
+                    genre_list,
                     random_playlist,
                 ) = futures::join!(
                     recently_played_fut,
@@ -1192,7 +1245,7 @@ impl Nokkvi {
                     random_album_fut,
                     random_artist_fut,
                     random_songs_fut,
-                    random_genre_fut,
+                    genre_list_fut,
                     random_playlist_fut
                 );
 
@@ -1216,7 +1269,9 @@ impl Nokkvi {
                 // Tally the full tracks pool by genre BEFORE truncating it to the
                 // Most Played Tracks shelf's top picks.
                 let mut most_played_songs = recover_shelf("most-played-tracks", most_played_songs);
-                let most_played_genres = tally_genres_by_play(&most_played_songs);
+                let genre_list = recover_shelf("genre-list", genre_list);
+                let mut most_played_genres = tally_genres_by_play(&most_played_songs);
+                stamp_tally_genre_ids(&mut most_played_genres, &genre_list);
                 most_played_songs.truncate(HOT_PICKS_PER_SECTION);
 
                 let most_played_albums =
@@ -1229,8 +1284,7 @@ impl Nokkvi {
                     .map(|a| AlbumUIViewData::from_album(&a, &url, &cred));
                 let random_playlist = recover_pick("random-playlist", random_playlist)
                     .map(nokkvi_data::backend::playlists::PlaylistUIViewData::from);
-                let random_genre = recover_pick("random-genre", random_genre)
-                    .map(nokkvi_data::backend::genres::GenreUIViewData::from);
+                let random_genre = pick_random_genre(&genre_list).map(GenreUIViewData::from);
 
                 Ok(Box::new(HarbourShelvesData {
                     recently_played: recover_shelf("recently-played", recently_played),
@@ -1482,20 +1536,11 @@ impl Nokkvi {
         }
 
         // Per-genre album-id fan-out feeding GenreQuadIdsLoaded (the Most
-        // Played Genres shelf + the Random Genre pick). Keyed by NAME, like
-        // every genre key in Harbour — the pick's `id` is a `tag.id` hash, and
-        // keying by name also dedups a genre that appears both as the pick and
-        // in the tally (whose synthesized ids ARE names).
-        let mut seen_genre_names = HashSet::new();
-        let genres_needing_ids: Vec<String> = self
-            .harbour
-            .most_played_genres
-            .iter()
-            .chain(self.harbour.random_genre.iter())
-            .filter(|g| g.artwork_album_ids.is_empty())
-            .map(|g| g.name.clone())
-            .filter(|name| seen_genre_names.insert(name.clone()))
-            .collect();
+        // Played Genres shelf + the Random Genre pick). Each request filters on
+        // the tag id; the reply is keyed by NAME, like every genre key in
+        // Harbour, which also dedups a genre that is both the pick and a tally
+        // row.
+        let genres_needing_ids = genres_needing_quad_ids(&self.harbour);
         if !genres_needing_ids.is_empty() {
             tasks.push(
                 self.shell_task(
@@ -1676,12 +1721,12 @@ impl Nokkvi {
     /// `build_harbour_rows` reads. Skips ids already in a side-map so a re-search
     /// never re-resolves a known entity.
     fn fan_out_search_collage_ids(&mut self, generation: u64) -> Task<Message> {
-        let (genre_ids, playlist_ids) = match &self.harbour.search_results {
+        let (genre_pairs, playlist_ids) = match &self.harbour.search_results {
             Some(r) => (
                 r.genres
                     .iter()
-                    .map(|g| g.name.clone())
-                    .filter(|name| !self.harbour.search_genre_album_ids.contains_key(name))
+                    .filter(|g| !self.harbour.search_genre_album_ids.contains_key(&g.name))
+                    .map(|g| (g.name.clone(), g.id.clone()))
                     .collect::<Vec<_>>(),
                 r.playlists
                     .iter()
@@ -1693,9 +1738,9 @@ impl Nokkvi {
         };
 
         let mut tasks: Vec<Task<Message>> = Vec::new();
-        if !genre_ids.is_empty() {
+        if !genre_pairs.is_empty() {
             tasks.push(self.shell_task(
-                move |shell| async move { resolve_genre_album_ids(&shell, genre_ids).await },
+                move |shell| async move { resolve_genre_album_ids(&shell, genre_pairs).await },
                 move |results| {
                     Message::HarbourLoader(HarbourLoaderMessage::SearchCollageIdsLoaded {
                         generation,

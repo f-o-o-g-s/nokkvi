@@ -2046,8 +2046,8 @@ pub(crate) fn section_collage_source(
     use crate::app_message::CollageTarget;
     match id {
         HarbourSectionId::MostPlayedGenres => harbour.most_played_genres.first().map(|g| {
-            // NAME, like every genre-collage key in Harbour. (Tally genres
-            // synthesize `id == name`, so this is identity-only hygiene.)
+            // NAME, like every genre-collage key in Harbour. (A tally genre's
+            // `id` is its stamped tag id, or the name when the stamp missed.)
             (
                 CollageTarget::Genre,
                 g.name.as_str(),

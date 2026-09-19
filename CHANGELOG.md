@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
 
 - Expanding a genre in the Genres view now lists its albums on Navidrome 0.64.
 - Clicking a genre's song count now opens the Songs view with that genre's songs on Navidrome 0.64.
+- Harbour's Random Genre row now shows its album covers on Navidrome 0.64.
+- Harbour's Most Played Genres rows now show their album covers on Navidrome 0.64.
+- Genres in Harbour search results now show their album covers on Navidrome 0.64.
+- Centering a genre in Harbour now shows its large collage on Navidrome 0.64.
 
 ### Removed
 

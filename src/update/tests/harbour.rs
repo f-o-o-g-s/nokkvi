@@ -1880,9 +1880,9 @@ fn centering_playlist_item_warms_its_collage() {
 #[test]
 fn centering_genre_item_warms_its_collage() {
     let mut app = test_app();
-    // Production genres have id == name (the LibraryFilter::GenreId convention
-    // play_harbour_genre relies on), and a genre item plays via
-    // GenreRandom(name), so its collage keys on that name.
+    // Harbour keys genre collages by NAME: a genre item plays via
+    // GenreRandom(name), and a tally genre's id is its stamped tag id (or the
+    // name when the stamp missed), so only the name is stable.
     seed_most_played_genre(&mut app, vec!["al1".into(), "al2".into()]);
     app.harbour_page
         .collapsed
@@ -2249,6 +2249,125 @@ fn tally_genres_skips_songs_without_a_genre_and_caps_at_hot_picks() {
     assert!(
         genres.iter().all(|g| !g.name.is_empty()),
         "the high-play genreless song contributes no empty-name genre"
+    );
+}
+
+fn server_genre(id: &str, name: &str, song_count: u32) -> nokkvi_data::types::genre::Genre {
+    nokkvi_data::types::genre::Genre {
+        id: id.to_string(),
+        name: name.to_string(),
+        album_count: 1,
+        song_count,
+    }
+}
+
+#[test]
+fn stamp_tally_genre_ids_takes_the_exact_name_match() {
+    use crate::update::harbour::stamp_tally_genre_ids;
+
+    let mut tally = vec![make_genre("Rock", "Rock"), make_genre("rock", "rock")];
+    // Both spellings listed, to pin that an exact match wins over the
+    // case-insensitive fallback.
+    let server = vec![
+        server_genre("h-jazz", "Jazz", 4),
+        server_genre("h-rock-upper", "Rock", 9),
+        server_genre("h-rock-lower", "rock", 2),
+    ];
+
+    stamp_tally_genre_ids(&mut tally, &server);
+
+    assert_eq!(tally[0].id, "h-rock-upper");
+    assert_eq!(tally[1].id, "h-rock-lower");
+}
+
+#[test]
+fn stamp_tally_genre_ids_falls_back_to_a_case_insensitive_match() {
+    use crate::update::harbour::stamp_tally_genre_ids;
+
+    // A song's genre string can differ in case from the `/api/genre` name
+    // (Navidrome derives one tag id from the lowercased value).
+    let mut tally = vec![
+        make_genre("hip-hop", "hip-hop"),
+        make_genre("música latina", "música latina"),
+    ];
+    let server = vec![
+        server_genre("h-hiphop", "Hip-Hop", 5),
+        server_genre("h-latina", "Música Latina", 3),
+    ];
+
+    stamp_tally_genre_ids(&mut tally, &server);
+
+    assert_eq!(tally[0].id, "h-hiphop");
+    assert_eq!(tally[1].id, "h-latina", "lowercasing is Unicode-aware");
+    assert_eq!(
+        tally[0].name, "hip-hop",
+        "only the id is stamped; the name stays Harbour's key"
+    );
+}
+
+#[test]
+fn stamp_tally_genre_ids_leaves_a_miss_keyed_by_name() {
+    use crate::update::harbour::stamp_tally_genre_ids;
+
+    let mut tally = vec![make_genre("Shoegaze", "Shoegaze")];
+    let server = vec![server_genre("h-jazz", "Jazz", 4)];
+
+    stamp_tally_genre_ids(&mut tally, &server);
+
+    assert_eq!(
+        tally[0].id, "Shoegaze",
+        "an unmatched genre keeps id == name"
+    );
+
+    // An empty server list (the genre fetch failed) stamps nothing either.
+    stamp_tally_genre_ids(&mut tally, &[]);
+    assert_eq!(tally[0].id, "Shoegaze");
+}
+
+#[test]
+fn pick_random_genre_prefers_the_first_genre_with_songs() {
+    use crate::update::harbour::pick_random_genre;
+
+    let genres = vec![
+        server_genre("h-a", "A", 0),
+        server_genre("h-b", "B", 5),
+        server_genre("h-c", "C", 3),
+    ];
+    assert_eq!(pick_random_genre(&genres).map(|g| g.id), Some("h-b".into()));
+
+    // No counts (the Subsonic enrichment failed): fall back to the first.
+    let uncounted = vec![server_genre("h-a", "A", 0), server_genre("h-b", "B", 0)];
+    assert_eq!(
+        pick_random_genre(&uncounted).map(|g| g.id),
+        Some("h-a".into())
+    );
+
+    assert!(pick_random_genre(&[]).is_none());
+}
+
+#[test]
+fn genres_needing_quad_ids_dedups_by_name_and_prefers_the_picks_tag_id() {
+    use crate::update::harbour::genres_needing_quad_ids;
+
+    let mut app = test_app();
+    // The pick carries a real tag id; its tally twin missed the stamp
+    // (id == name). One request per name, and it must use the real id.
+    app.harbour.random_genre = Some(make_genre("h-rock", "Rock"));
+    let mut resolved = make_genre("h-jazz", "Jazz");
+    resolved.artwork_album_ids = vec!["al1".into()];
+    app.harbour.most_played_genres = vec![
+        make_genre("Rock", "Rock"),
+        resolved,
+        make_genre("h-ambient", "Ambient"),
+    ];
+
+    assert_eq!(
+        genres_needing_quad_ids(&app.harbour),
+        vec![
+            ("Rock".to_string(), "h-rock".to_string()),
+            ("Ambient".to_string(), "h-ambient".to_string()),
+        ],
+        "deduped by name, the pick's id wins, already-resolved Jazz is skipped"
     );
 }
 
