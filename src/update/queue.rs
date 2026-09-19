@@ -16,7 +16,7 @@ use crate::{
         ArtworkMessage, FindMessage, Message, NavigationMessage, PlaybackMessage, SplitViewMessage,
     },
     views::{self, QueueAction, QueueMessage},
-    widgets::SlotListPageMessage,
+    widgets::{SlotListPageMessage, drag_column::DragEvent},
 };
 
 impl Nokkvi {
@@ -196,8 +196,11 @@ impl Nokkvi {
         // actual rendered count even when artwork is stacked above the list.
         self.resync_slot_counts();
 
-        // ── Fast path for slot hover ──
-        // The slot list republishes `HoverEnterSlot` on EVERY `CursorMoved`
+        // ── Fast paths for pointer motion ──
+        // Every message published per cursor move returns from this block,
+        // before the row list below is touched; a new one joins it here.
+        //
+        // Slot hover: the slot list republishes `HoverEnterSlot` on EVERY `CursorMoved`
         // while the cursor sits inside a row (`slot_list.rs` `on_move`). Hover
         // never moves `viewport_offset`, and `prefetch_indices` is centered
         // solely on the offset, so the prefetch window on a hover frame is
@@ -218,6 +221,24 @@ impl Nokkvi {
                 if self.queue_page.common.slot_list.hovered_slot == Some(*h) {
                     self.queue_page.common.slot_list.hovered_slot = None;
                 }
+                return Task::none();
+            }
+            // Drag motion: `DragColumn` publishes `Dragged` on EVERY
+            // `CursorMoved` while a row is held (`drag_column.rs`). Running the
+            // tail per event froze the window on a ~20k-row queue: the O(n)
+            // work outpaced the event rate, and the release and the close
+            // request queued behind the backlog. Record the live cursor, edge
+            // band, and drop-target slot for the ghost + edge auto-scroll (or
+            // cancel under a search), then return. Rows the auto-scroll brings
+            // into view get their artwork from the tick
+            // (`tick_within_list_autoscroll`), not from this path.
+            QueueMessage::DragReorder(DragEvent::Dragged {
+                cursor,
+                edge,
+                target_slot,
+            }) => {
+                self.queue_page
+                    .track_drag_motion(*cursor, *edge, *target_slot);
                 return Task::none();
             }
             _ => {}

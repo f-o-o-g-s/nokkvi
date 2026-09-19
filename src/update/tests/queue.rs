@@ -910,9 +910,11 @@ fn genres_selection_toggle_on_album_child_lands_in_selected_indices() {
 /// fast path must short-circuit before the prefetch dispatch while still
 /// keeping `hovered_slot` current for cross-pane drag.
 ///
-/// Discriminator: with a real shell and an uncached queue the pre-fix
-/// fall-through batches prefetch + `LoadLarge` tasks (`Task::units() >= 1`); the
-/// fast path returns `Task::none()` (`units() == 0`). `units()` cannot
+/// Discriminator: with a real shell and an uncached queue whose rows carry an
+/// artwork URL, the pre-fix fall-through batches one fetch task per uncached
+/// row (`Task::units() >= 1`); the fast path returns `Task::none()`
+/// (`units() == 0`). The center row's `LoadLarge` is a `Task::done`, which
+/// counts zero units, so the fetches are the whole signal. `units()` cannot
 /// discriminate without a shell because the prefetch tail short-circuits when
 /// `app_service` is `None`.
 #[tokio::test]
@@ -927,11 +929,9 @@ async fn queue_slot_hover_does_not_dispatch_artwork_prefetch() {
     let (mut app, db_path) = test_app_with_shell().await;
 
     // Seed a non-empty queue + viewport so the (pre-fix) prefetch tail has
-    // uncached slots to dispatch fetches for.
-    app.library.queue_songs = vec![
-        make_queue_song("s1", "Track 1", "Artist", "Album"),
-        make_queue_song("s2", "Track 2", "Artist", "Album"),
-    ];
+    // uncached slots to dispatch fetches for (rows need an artwork URL, or the
+    // prefetch skips them and the tail is invisible to `units()`).
+    app.library.queue_songs = make_queue_songs_with_art(2);
     app.queue_page.common.slot_list.slot_count = 8;
     app.queue_page.common.slot_list.viewport_offset = 0;
 
@@ -954,6 +954,177 @@ async fn queue_slot_hover_does_not_dispatch_artwork_prefetch() {
         Some(hovered),
         "the hover fast path must still record hovered_slot for cross-pane drag",
     );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+/// Regression guard for the huge-queue drag freeze. `DragColumn` publishes
+/// `DragEvent::Dragged` on every `CursorMoved` during a drag
+/// (`drag_column.rs`), and the root handler used to clone the whole filtered
+/// queue and re-run the artwork-prefetch tail for each one. On a ~20k-row queue
+/// the events arrived faster than they drained and the window stopped
+/// responding. The motion must return before the row list is touched while
+/// still recording the live cursor / edge / target slot for the ghost and the
+/// tick auto-scroll.
+///
+/// Discriminator: same as the hover guard above — with a real shell and
+/// uncached rows that carry an artwork URL, the tail batches fetch tasks
+/// (`units() >= 1`); the fast path returns `Task::none()` (`units() == 0`).
+#[tokio::test]
+async fn queue_drag_motion_does_not_dispatch_artwork_prefetch() {
+    use super::library::test_app_with_shell;
+    use crate::{
+        app_message::Message,
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let (mut app, db_path) = test_app_with_shell().await;
+    app.library.queue_songs = make_queue_songs_with_art(20);
+    app.queue_page.common.slot_list.set_offset(5, 20);
+    // An accepted pick, armed directly: `handle_queue` resyncs `slot_count`
+    // from the window, so a `Picked` through the root path would map against
+    // whatever the test window height yields.
+    app.queue_page.drag_source = Some(vec![app.library.queue_songs[5].entry_id]);
+
+    let cursor = iced::Point::new(120.0, 456.0);
+    let task = app.update(Message::Queue(QueueMessage::DragReorder(
+        DragEvent::Dragged {
+            cursor,
+            edge: EdgeZone::Bottom,
+            target_slot: 7,
+        },
+    )));
+
+    assert_eq!(
+        task.units(),
+        0,
+        "drag motion must not spawn artwork prefetch / large-artwork tasks",
+    );
+    assert_eq!(app.queue_page.drag_cursor, Some(cursor));
+    assert_eq!(app.queue_page.drag_edge, EdgeZone::Bottom);
+    assert_eq!(app.queue_page.drag_target_slot, Some(7));
+
+    let _ = std::fs::remove_file(db_path);
+}
+
+#[test]
+fn queue_drag_motion_under_search_cancels_drag_through_root() {
+    // A search that activates mid-drag must cancel the gesture on the next
+    // cursor move, so it can't resume when the search clears. Pins that branch
+    // through the root path, which the drag-motion fast path must keep.
+    use crate::{
+        app_message::Message,
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    let mut app = app_with_numbered_queue(20);
+    app.queue_page.drag_source = Some(vec![app.library.queue_songs[5].entry_id]);
+    app.queue_page.drag_cursor = Some(iced::Point::new(1.0, 2.0));
+    app.queue_page.drag_edge = EdgeZone::Top;
+    app.queue_page.drag_target_slot = Some(3);
+    app.queue_page.common.search_query = "T1".to_string();
+
+    let _ = app.update(Message::Queue(QueueMessage::DragReorder(
+        DragEvent::Dragged {
+            cursor: iced::Point::new(5.0, 6.0),
+            edge: EdgeZone::Bottom,
+            target_slot: 4,
+        },
+    )));
+
+    assert!(app.queue_page.drag_source.is_none());
+    assert_eq!(app.queue_page.drag_cursor, None);
+    assert_eq!(app.queue_page.drag_edge, EdgeZone::None);
+    assert_eq!(app.queue_page.drag_target_slot, None);
+}
+
+// ============================================================================
+// Manual perf probe: per-event handle_queue cost on a huge queue
+// ============================================================================
+
+/// Dispatch `events` messages built by `make` through the root `update` and
+/// print the mean wall-clock cost per event. Returned tasks are dropped inside
+/// the timed loop, as the runtime would drop a finished one.
+fn probe_per_event(
+    app: &mut crate::Nokkvi,
+    label: &str,
+    events: u32,
+    make: impl Fn(u32) -> crate::app_message::Message,
+) {
+    // One untimed warm-up so a first-call allocation doesn't skew the mean.
+    let _ = app.update(make(0));
+    let start = std::time::Instant::now();
+    for i in 1..=events {
+        let _ = app.update(make(i));
+    }
+    let per_event = start.elapsed() / events;
+    eprintln!("[queue_perf_probe] {label:<14} {per_event:>12.2?} per event ({events} events)");
+}
+
+/// Manual perf probe for the huge-queue drag freeze: the per-event cost of
+/// `handle_queue` on a 20,000-row queue for the per-cursor-move drag message,
+/// a keyboard step, and the hover fast path as the control. Asserts nothing
+/// about time (wall-clock thresholds stay out of CI); the owner runs release
+/// builds, so the `--release` figure is the one to quote.
+///
+/// `cargo test -p nokkvi --release queue_perf_probe -- --ignored --nocapture`
+#[tokio::test]
+#[ignore = "manual perf probe"]
+async fn queue_perf_probe() {
+    use super::library::test_app_with_shell;
+    use crate::{
+        app_message::Message,
+        views::QueueMessage,
+        widgets::{
+            HoveredSlot, SlotListPageMessage,
+            drag_column::{DragEvent, EdgeZone},
+        },
+    };
+
+    const ROWS: usize = 20_000;
+    const EVENTS: u32 = 200;
+
+    // A real shell, so the artwork-prefetch tail runs as it does in the app.
+    let (mut app, db_path) = test_app_with_shell().await;
+    // Fill the two strings `make_queue_song` leaves empty (an empty `String`
+    // clones without allocating), so each row costs what a real one does.
+    app.library.queue_songs = (0..ROWS)
+        .map(|i| {
+            let mut row =
+                make_queue_song(&format!("s{i}"), &format!("Title {i}"), "Artist", "Album");
+            row.updated_at = Some("2026-07-01T12:34:56.789Z".to_string());
+            row.artwork_url = format!(
+                "https://music.example.com/rest/getCoverArt?id=al-{i}&u=user&t=0123456789abcdef\
+                 &s=salt01&size=80&square=true&f=json&v=1.8.0&c=nokkvi&_u=2026-07-01T12:34:56Z"
+            );
+            row
+        })
+        .collect();
+    app.queue_page.common.slot_list.set_offset(ROWS / 2, ROWS);
+    // An accepted pick, so `Dragged` records live state like a real drag.
+    app.queue_page.drag_source = Some(vec![app.library.queue_songs[ROWS / 2].entry_id]);
+
+    probe_per_event(&mut app, "HoverEnterSlot", EVENTS, |i| {
+        Message::Queue(QueueMessage::SlotList(SlotListPageMessage::HoverEnterSlot(
+            HoveredSlot::Item {
+                slot_index: (i % 5) as usize,
+                item_index: ROWS / 2,
+                items_len: ROWS,
+            },
+        )))
+    });
+    probe_per_event(&mut app, "Dragged", EVENTS, |i| {
+        Message::Queue(QueueMessage::DragReorder(DragEvent::Dragged {
+            cursor: iced::Point::new(200.0, 300.0 + (i % 50) as f32),
+            edge: EdgeZone::None,
+            target_slot: 4,
+        }))
+    });
+    probe_per_event(&mut app, "NavigateDown", EVENTS, |_| {
+        Message::Queue(QueueMessage::SlotList(SlotListPageMessage::NavigateDown))
+    });
 
     let _ = std::fs::remove_file(db_path);
 }
@@ -1813,6 +1984,73 @@ fn tick_without_drag_does_not_autoscroll() {
         app.queue_page.common.slot_list.viewport_offset, 5,
         "no auto-scroll without an accepted pick (drag_source is None)"
     );
+}
+
+/// Edge auto-scroll moves the viewport from the tick and dispatches nothing
+/// else, so the rows it scrolls in need their artwork from the tick itself.
+/// (Drag motion no longer runs the prefetch tail, which used to cover them.)
+/// With a real shell and uncached rows that carry an artwork URL, a tick that
+/// moved the viewport returns fetch tasks; a tick that left it in place
+/// returns none.
+#[tokio::test]
+async fn tick_edge_autoscroll_prefetches_queue_artwork_for_scrolled_rows() {
+    use super::library::test_app_with_shell;
+    use crate::{
+        views::QueueMessage,
+        widgets::drag_column::{DragEvent, EdgeZone},
+    };
+
+    const N: usize = 200;
+    let (mut app, db_path) = test_app_with_shell().await;
+    app.library.queue_songs = make_queue_songs_with_art(N);
+    app.queue_page.common.slot_list.slot_count = 9;
+    app.queue_page.common.slot_list.set_offset(5, N);
+    let songs = app.library.queue_songs.clone();
+    let _ = app.queue_page.update(
+        QueueMessage::DragReorder(DragEvent::Picked { index: 3 }),
+        &songs,
+    );
+    assert!(app.queue_page.drag_source.is_some());
+    app.queue_page.drag_edge = EdgeZone::Bottom;
+
+    // The pick's focus-marker snap can absorb the first tick, so tick until
+    // the viewport moves. A tick that leaves it in place dispatches nothing.
+    let mut moved = false;
+    for _ in 0..3 {
+        let before = app.queue_page.common.slot_list.viewport_offset;
+        let task = app.tick_within_list_autoscroll();
+        if app.queue_page.common.slot_list.viewport_offset == before {
+            assert_eq!(task.units(), 0, "an unmoved tick must not dispatch artwork");
+        } else {
+            assert!(
+                task.units() >= 1,
+                "a tick that scrolled rows in must dispatch their artwork"
+            );
+            moved = true;
+            break;
+        }
+    }
+    assert!(moved, "holding the bottom edge must advance the viewport");
+
+    // Cursor back in the middle: no scroll, nothing dispatched.
+    app.queue_page.drag_edge = EdgeZone::None;
+    let before = app.queue_page.common.slot_list.viewport_offset;
+    let task = app.tick_within_list_autoscroll();
+    assert_eq!(app.queue_page.common.slot_list.viewport_offset, before);
+    assert_eq!(task.units(), 0, "edge None must not dispatch artwork");
+
+    // Already at the end: the clamp leaves the offset in place.
+    app.queue_page.common.slot_list.set_offset(N - 1, N);
+    app.queue_page.drag_edge = EdgeZone::Bottom;
+    let task = app.tick_within_list_autoscroll();
+    assert_eq!(app.queue_page.common.slot_list.viewport_offset, N - 1);
+    assert_eq!(
+        task.units(),
+        0,
+        "a clamped tick at the end must not dispatch"
+    );
+
+    let _ = std::fs::remove_file(db_path);
 }
 
 #[test]

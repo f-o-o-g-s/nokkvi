@@ -25,6 +25,9 @@ All notable changes to this project will be documented in this file.
 - MP3s carrying LAME gapless info no longer lose a few milliseconds of audio at the end.
 - Ogg Vorbis and Opus radio stations no longer cut out and reconnect at each song change.
 - Radio stations that are slow to send their first audio no longer fail to start on the first try.
+- Dragging a row in a very large queue no longer freezes the window.
+- Holding a dragged queue row still at the list's edge now loads thumbnails for the rows it scrolls into view.
+- Holding a dragged playlist-editor row still at the list's edge now loads thumbnails for the rows it scrolls into view.
 
 ### Removed
 

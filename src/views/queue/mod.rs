@@ -384,6 +384,31 @@ impl QueuePage {
         self.drag_edge = crate::widgets::drag_column::EdgeZone::None;
         self.drag_target_slot = None;
     }
+
+    /// One cursor move of an in-progress within-list drag: record the live
+    /// cursor, edge band, and drop-target slot for the floating ghost + tick
+    /// auto-scroll, but ONLY once a pick was accepted (`drag_source` set). A
+    /// search-swallowed pick leaves it None, so this stays inert; the consumers
+    /// (ghost render, tick auto-scroll) additionally gate on search being empty.
+    /// Reads no rows, so the root handler can call it per `CursorMoved` without
+    /// touching the queue.
+    pub fn track_drag_motion(
+        &mut self,
+        cursor: iced::Point,
+        edge: crate::widgets::drag_column::EdgeZone,
+        target_slot: usize,
+    ) {
+        if !self.common.search_query.is_empty() {
+            // A search activated mid-drag — cancel the gesture so it can't
+            // resume when the search clears, matching the editor (whose
+            // top-level guard clears on every event during a search).
+            self.clear_drag();
+        } else if self.drag_source.is_some() {
+            self.drag_cursor = Some(cursor);
+            self.drag_edge = edge;
+            self.drag_target_slot = Some(target_slot);
+        }
+    }
 }
 
 // ============================================================================

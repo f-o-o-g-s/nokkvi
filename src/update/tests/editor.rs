@@ -922,6 +922,91 @@ fn tick_edge_bottom_autoscrolls_editor_viewport() {
     );
 }
 
+/// Editor twin of the queue's `tick_edge_autoscroll_prefetches_queue_artwork_for_scrolled_rows`:
+/// the editor's drag motion dispatches nothing, so rows scrolled in by an
+/// edge-hold get their thumbnails from the tick. With a real shell and
+/// uncached rows that carry an artwork URL, a tick that moved the viewport
+/// returns fetch tasks; a tick that left it in place returns none.
+#[tokio::test]
+async fn tick_edge_autoscroll_prefetches_editor_artwork_for_scrolled_rows() {
+    use super::library::test_app_with_shell;
+    use crate::widgets::drag_column::EdgeZone;
+
+    const N: usize = 200;
+    let (mut app, db_path) = test_app_with_shell().await;
+    app.playlist_editor = Some(PlaylistEditorState::new(PlaylistEditState::new(
+        "pl_1".into(),
+        "Test Playlist".into(),
+        "Original comment".into(),
+        true,
+        Vec::new(),
+    )));
+    let _ = app.update(Message::Editor(EditorMessage::SongsLoaded(
+        make_queue_songs_with_art(N),
+    )));
+    {
+        let editor = app.playlist_editor.as_mut().unwrap();
+        editor.common.slot_list.slot_count = 9;
+        editor.common.slot_list.set_offset(5, N);
+    }
+    let _ = app.update(Message::Editor(EditorMessage::DragReorder(
+        DragEvent::Picked { index: 3 },
+    )));
+    assert!(app.playlist_editor.as_ref().unwrap().drag_source.is_some());
+    app.playlist_editor.as_mut().unwrap().drag_edge = EdgeZone::Bottom;
+
+    let offset = |app: &crate::Nokkvi| {
+        app.playlist_editor
+            .as_ref()
+            .unwrap()
+            .common
+            .slot_list
+            .viewport_offset
+    };
+
+    // The pick's focus-marker snap can absorb the first tick, so tick until
+    // the viewport moves. A tick that leaves it in place dispatches nothing.
+    let mut moved = false;
+    for _ in 0..3 {
+        let before = offset(&app);
+        let task = app.tick_within_list_autoscroll();
+        if offset(&app) == before {
+            assert_eq!(task.units(), 0, "an unmoved tick must not dispatch artwork");
+        } else {
+            assert!(
+                task.units() >= 1,
+                "a tick that scrolled rows in must dispatch their artwork"
+            );
+            moved = true;
+            break;
+        }
+    }
+    assert!(moved, "holding the bottom edge must advance the viewport");
+
+    // Cursor back in the middle: no scroll, nothing dispatched.
+    app.playlist_editor.as_mut().unwrap().drag_edge = EdgeZone::None;
+    let before = offset(&app);
+    let task = app.tick_within_list_autoscroll();
+    assert_eq!(offset(&app), before);
+    assert_eq!(task.units(), 0, "edge None must not dispatch artwork");
+
+    // Already at the end: the clamp leaves the offset in place.
+    {
+        let editor = app.playlist_editor.as_mut().unwrap();
+        editor.common.slot_list.set_offset(N - 1, N);
+        editor.drag_edge = EdgeZone::Bottom;
+    }
+    let task = app.tick_within_list_autoscroll();
+    assert_eq!(offset(&app), N - 1);
+    assert_eq!(
+        task.units(),
+        0,
+        "a clamped tick at the end must not dispatch"
+    );
+
+    let _ = std::fs::remove_file(db_path);
+}
+
 #[test]
 fn editor_remove_under_active_search_maps_filtered_index() {
     // With a search active that filters the buffer down, RemoveAt receives an

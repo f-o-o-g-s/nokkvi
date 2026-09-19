@@ -166,19 +166,27 @@ impl Nokkvi {
     /// owns the gesture; editor precedence; an accepted pick; no active search).
     /// Bounded by the slot list's `move_up`/`move_down` end clamps, so it stops
     /// at the list ends rather than running away.
-    fn tick_within_list_autoscroll(&mut self) {
+    ///
+    /// Returns the artwork prefetch for the rows a moved viewport brings in.
+    /// Drag motion returns before any prefetch (it fires per `CursorMoved`),
+    /// so on both surfaces this tick is the only source of thumbnails for
+    /// auto-scrolled rows. A tick that leaves the viewport in place returns
+    /// `Task::none()`.
+    pub(crate) fn tick_within_list_autoscroll(&mut self) -> Task<Message> {
         use crate::widgets::drag_column::EdgeZone;
 
         // A cross-pane drag owns the gesture — never auto-scroll under it.
         if self.cross_pane_drag.active.is_some() {
-            return;
+            return Task::none();
         }
 
         // Editor precedence: while mounted it owns the left pane, so a queue drag
         // can't be active. Gate on an accepted pick + no active search.
         if let Some(editor) = self.playlist_editor.as_mut() {
+            let mut moved = false;
             if editor.drag_source.is_some() && editor.common.search_query.is_empty() {
                 let total = editor.songs.len();
+                let before = editor.common.slot_list.viewport_offset;
                 match editor.drag_edge {
                     EdgeZone::Top => {
                         for _ in 0..AUTOSCROLL_ROWS_PER_TICK {
@@ -192,12 +200,18 @@ impl Nokkvi {
                     }
                     EdgeZone::None => {}
                 }
+                moved = editor.common.slot_list.viewport_offset != before;
             }
-            return;
+            return if moved {
+                self.editor_artwork_prefetch_tasks()
+            } else {
+                Task::none()
+            };
         }
 
         if self.queue_page.drag_source.is_some() && self.queue_page.common.search_query.is_empty() {
             let total = self.library.queue_songs.len();
+            let before = self.queue_page.common.slot_list.viewport_offset;
             match self.queue_page.drag_edge {
                 EdgeZone::Top => {
                     for _ in 0..AUTOSCROLL_ROWS_PER_TICK {
@@ -211,7 +225,12 @@ impl Nokkvi {
                 }
                 EdgeZone::None => {}
             }
+            // A drag implies no search, so this borrows the queue (no clone).
+            if self.queue_page.common.slot_list.viewport_offset != before {
+                return self.load_queue_viewport_artwork();
+            }
         }
+        Task::none()
     }
 
     pub(crate) fn handle_tick(&mut self) -> Task<Message> {
@@ -2449,10 +2468,11 @@ impl Nokkvi {
                 // which early-returns without an app_service) so it runs in
                 // tests and without a live session, and as a direct viewport
                 // mutation (NOT a dispatched Navigate message) so it never
-                // fires the navigation SFX at 10 Hz.
-                self.tick_within_list_autoscroll();
+                // fires the navigation SFX at 10 Hz. Returns the artwork
+                // prefetch for rows it scrolls in.
+                let autoscroll = self.tick_within_list_autoscroll();
 
-                self.handle_tick()
+                Task::batch([autoscroll, self.handle_tick()])
             }
             PlaybackMessage::PlaybackStateUpdated(update) => {
                 self.handle_playback_state_updated(*update)

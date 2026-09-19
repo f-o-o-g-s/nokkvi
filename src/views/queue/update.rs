@@ -240,28 +240,17 @@ impl QueuePage {
                     }
                     // Cursor moved during an active drag: track the live cursor,
                     // edge band, and drop-target slot for the floating ghost +
-                    // tick auto-scroll, but ONLY once a pick was accepted
-                    // (`drag_source` set). A search-swallowed pick leaves it
-                    // None, so this stays inert; the consumers (ghost render, tick
-                    // auto-scroll) additionally gate on search being empty. This
-                    // explicit arm MUST precede the `_` catch-all, which would
-                    // otherwise clear the captured source on every cursor move.
+                    // tick auto-scroll (`track_drag_motion`). The root handler
+                    // calls the same method from its pointer-motion fast path, so
+                    // this arm serves page-level callers. This explicit arm MUST
+                    // precede the `_` catch-all, which would otherwise clear the
+                    // captured source on every cursor move.
                     DragEvent::Dragged {
                         cursor,
                         edge,
                         target_slot,
                     } => {
-                        if !drag_allowed {
-                            // A search activated mid-drag — cancel the gesture so
-                            // it can't resume when the search clears, matching the
-                            // editor (whose top-level guard clears on every event
-                            // during a search).
-                            self.clear_drag();
-                        } else if self.drag_source.is_some() {
-                            self.drag_cursor = Some(cursor);
-                            self.drag_edge = edge;
-                            self.drag_target_slot = Some(target_slot);
-                        }
+                        self.track_drag_motion(cursor, edge, target_slot);
                         (Task::none(), QueueAction::None)
                     }
                     // Dropped while a search is active: swallow it and clear all

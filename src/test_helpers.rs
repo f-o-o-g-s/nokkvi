@@ -59,6 +59,23 @@ pub(crate) fn make_queue_song(
     }
 }
 
+/// `n` queue rows (ids `s0..`, one album each) carrying an artwork URL.
+///
+/// `make_queue_song` leaves `artwork_url` empty, and the mini-artwork prefetch
+/// skips an empty URL, so rows from it never produce a fetch task. Tests that
+/// tell "the prefetch tail ran" from "it didn't" by `Task::units()` (with a
+/// real shell) need these instead. `Task::done` counts zero units, so the
+/// center row's `LoadLarge` alone can't be the signal.
+pub(crate) fn make_queue_songs_with_art(n: usize) -> Vec<QueueSongUIViewData> {
+    (0..n)
+        .map(|i| {
+            let mut row = make_queue_song(&format!("s{i}"), &format!("T{i}"), "Artist", "Album");
+            row.artwork_url = format!("https://art.test/cover/album_s{i}?size=80");
+            row
+        })
+        .collect()
+}
+
 /// Extended queue song with explicit duration and genre.
 pub(crate) fn make_queue_song_full(
     id: &str,
