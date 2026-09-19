@@ -56,6 +56,7 @@ All notable changes to this project will be documented in this file.
 - Radio stations with an uploaded logo now show it in desktop media widgets.
 - Desktop media widgets now show the nokkvi icon when a song's cover fails to load.
 - Scrolling Genres or Playlists no longer re-downloads thumbnails that are already loaded.
+- Searching the queue or radio stations after clicking a row no longer leaves the results without a highlighted row.
 
 ### Removed
 

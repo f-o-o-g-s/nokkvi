@@ -29,6 +29,7 @@ paths:
 - **Always `clear_multi_selection()` after batch ops** — prevents stale selections.
 - **Cross-pane drag batch**: `cross_pane_drag.selection_count` (on the `CrossPaneDragUi` cluster) is snapshotted at press time; decoupled from subsequent selection changes.
 - **Keyboard scroll clears selection**: `handle_navigate_up/down` clears `selected_offset` to prevent stale highlights.
+- **Search clears the whole selection**: `handle_search_query_changed` (every slot-list view's search, Harbour's mirror included) drops indices + anchor + focus marker, because indices are relative to the filtered list and a non-empty set suppresses the center ring. A kept click left the filtered rows with no highlight.
 
 ## Optimistic UI & Race Conditions
 

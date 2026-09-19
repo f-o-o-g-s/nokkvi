@@ -375,7 +375,12 @@ impl SlotListPageState {
         SlotListPageAction::SortOrderChanged(self.sort_ascending)
     }
 
-    /// Handle search query change
+    /// Handle search query change.
+    ///
+    /// Drops the whole selection: every index is relative to the filtered
+    /// list, so a kept one names a different row, and a non-empty set also
+    /// suppresses the center-slot ring. Unconditional because `set_offset`
+    /// is a no-op when the search matches nothing.
     pub fn handle_search_query_changed(
         &mut self,
         query: String,
@@ -383,6 +388,7 @@ impl SlotListPageState {
     ) -> SlotListPageAction {
         self.active_filter = None;
         self.search_query = query.clone();
+        self.slot_list.clear_selection_for_refresh();
         self.slot_list.set_offset(0, total_items); // Reset to top on search
         SlotListPageAction::SearchChanged(query)
     }
@@ -645,6 +651,37 @@ mod tests {
         assert_eq!(state.search_query, "test");
         assert_eq!(state.slot_list.viewport_offset, 0); // Should reset to top
         assert!(matches!(action, SlotListPageAction::SearchChanged(_)));
+    }
+
+    #[test]
+    fn search_clears_click_selection() {
+        // A click leaves `selected_indices = {3}`. The search re-bases every
+        // index on the filtered list, so row 3 now names a different item
+        // (or none), and a non-empty set suppresses the center ring: the one
+        // remaining result drew no highlight at all.
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(3, 10, iced::keyboard::Modifiers::empty());
+
+        let _ = state.handle_search_query_changed("soma".to_string(), 1);
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+        assert_eq!(state.slot_list.selected_offset, None);
+        assert_eq!(state.slot_list.get_effective_center_index(1), Some(0));
+    }
+
+    #[test]
+    fn search_with_no_results_clears_multi_selection() {
+        // `set_offset` is a no-op on an empty list, so the clear can't ride it.
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(2, 10, ctrl());
+        state.handle_slot_click(6, 10, ctrl());
+
+        let _ = state.handle_search_query_changed("zzz".to_string(), 0);
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+        assert_eq!(state.slot_list.selected_offset, None);
     }
 
     #[test]

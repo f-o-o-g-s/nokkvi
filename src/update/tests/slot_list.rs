@@ -251,3 +251,88 @@ fn similar_slot_list_message_wraps_in_similar_variant() {
 }
 
 // ============================================================================
+// Search clears a stale selection (TODO #6)
+// ============================================================================
+//
+// A click leaves `selected_indices = {k}`. A search re-bases every index on
+// the filtered list, and a non-empty selection turns off the center-slot ring,
+// so the stale `k` left the filtered rows with no highlight at all.
+
+fn radio_station(id: &str, name: &str) -> nokkvi_data::types::radio_station::RadioStation {
+    nokkvi_data::types::radio_station::RadioStation {
+        id: id.into(),
+        name: name.into(),
+        stream_url: format!("http://example.invalid/{id}"),
+        home_page_url: None,
+        cover_art: None,
+    }
+}
+
+#[test]
+fn radios_search_clears_selection_left_by_a_click() {
+    use crate::views::RadiosMessage;
+    let mut app = test_app();
+    app.current_view = View::Radios;
+    app.library.radio_stations = vec![
+        radio_station("r1", "BBC Radio"),
+        radio_station("r2", "FIP"),
+        radio_station("r3", "KEXP"),
+        radio_station("r4", "SomaFM"),
+    ];
+
+    let _ = app.handle_radios(RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
+        2,
+        iced::keyboard::Modifiers::empty(),
+    )));
+    assert!(
+        app.radios_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&2)
+    );
+
+    let _ = app.handle_radios(RadiosMessage::SlotList(
+        SlotListPageMessage::SearchQueryChanged("soma".to_string()),
+    ));
+
+    let sl = &app.radios_page.common.slot_list;
+    assert!(
+        sl.selected_indices.is_empty(),
+        "stale click selection suppresses the ring on the one result"
+    );
+    assert_eq!(sl.anchor_index, None);
+    assert_eq!(sl.selected_offset, None);
+}
+
+#[test]
+fn albums_search_clears_selection_left_by_a_click() {
+    use crate::views::AlbumsMessage;
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let albums = (0..6)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_first_page(albums, 6);
+
+    let _ = app.handle_albums(AlbumsMessage::SlotList(SlotListPageMessage::SetOffset(
+        3,
+        iced::keyboard::Modifiers::empty(),
+    )));
+    assert!(
+        app.albums_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&3)
+    );
+
+    // The reload the search dispatches is a Task (not run here); the
+    // selection must already be gone before it lands.
+    let _ = app.handle_albums(AlbumsMessage::SearchQueryChanged("album".to_string()));
+
+    let sl = &app.albums_page.common.slot_list;
+    assert!(sl.selected_indices.is_empty());
+    assert_eq!(sl.anchor_index, None);
+    assert_eq!(sl.selected_offset, None);
+}

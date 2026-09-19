@@ -2448,6 +2448,34 @@ fn search_changed_resets_offset_against_filtered_length() {
     assert_eq!(app.queue_page.common.slot_list.viewport_offset, 5);
 }
 
+#[test]
+fn search_changed_clears_selection_left_by_a_click() {
+    use crate::{views::QueueMessage, widgets::SlotListPageMessage};
+
+    let mut app = app_with_numbered_queue(20);
+    let _ = app.handle_queue(QueueMessage::SlotList(SlotListPageMessage::SetOffset(
+        7,
+        iced::keyboard::Modifiers::empty(),
+    )));
+    assert!(
+        app.queue_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&7)
+    );
+
+    // "T1" keeps T1 and T10..T19; filtered row 7 is T16, not the clicked T7.
+    let _ = app.handle_queue(QueueMessage::SlotList(
+        SlotListPageMessage::SearchQueryChanged("T1".to_string()),
+    ));
+
+    let sl = &app.queue_page.common.slot_list;
+    assert!(sl.selected_indices.is_empty());
+    assert_eq!(sl.anchor_index, None);
+    assert_eq!(sl.selected_offset, None);
+}
+
 /// Title order of `app_with_sortable_queue`: Alpha(s1), Bravo Beta(s3),
 /// Echo(s4), Mike Beta(s2), Zulu Beta(s0). A "beta" search keeps
 /// [Bravo Beta, Mike Beta, Zulu Beta].
