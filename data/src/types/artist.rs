@@ -42,6 +42,10 @@ pub struct Artist {
     pub external_info_updated_at: Option<String>,
     #[serde(rename = "rating")]
     pub rating: Option<u32>,
+
+    /// Navidrome 0.64 image info (six flat keys; default on older servers).
+    #[serde(flatten)]
+    pub image: crate::types::image_info::ImageInfo,
 }
 
 /// Similar artist reference

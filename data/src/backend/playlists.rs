@@ -132,6 +132,7 @@ mod tests {
             evaluated_at: Some("2026-07-01T10:00:00Z".to_owned()),
             path: "/music/Library/road_trip.nsp".to_owned(),
             sync: true,
+            image: Default::default(),
         };
 
         let by_ref = PlaylistUIViewData::from(&playlist);

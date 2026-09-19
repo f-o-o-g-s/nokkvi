@@ -2021,6 +2021,7 @@ fn search_artist(id: &str, name: &str) -> nokkvi_data::types::artist::Artist {
         external_url: None,
         external_info_updated_at: None,
         rating: None,
+        image: Default::default(),
     }
 }
 

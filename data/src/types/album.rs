@@ -105,6 +105,10 @@ pub struct Album {
     /// This eliminates the memory leak from calling .display_artist().to_string() on every scroll
     #[serde(skip)]
     pub display_artist_cached: String,
+
+    /// Navidrome 0.64 image info (six flat keys; default on older servers).
+    #[serde(flatten)]
+    pub image: crate::types::image_info::ImageInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -65,6 +65,10 @@ pub struct Playlist {
     /// [`Self::is_file_backed`]).
     #[serde(rename = "sync", default)]
     pub sync: bool,
+
+    /// Navidrome 0.64 image info (six flat keys; default on older servers).
+    #[serde(flatten)]
+    pub image: crate::types::image_info::ImageInfo,
 }
 
 /// The reserved comment prefix that marks a nokkvi draft workspace playlist

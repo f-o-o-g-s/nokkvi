@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::Semaphore;
-use tracing::trace;
+use tracing::{debug, trace};
 
 use crate::{
     backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
@@ -498,6 +498,16 @@ impl AlbumsService {
             .into());
         }
 
+        // What covers cost, for the `square=true` (always PNG) decision. The
+        // size label is parsed out of the URL; the URL itself carries the
+        // Subsonic credential and must never reach the log.
+        debug!(
+            "artwork fetched: size={} bytes={} type={}",
+            artwork_size_label(url),
+            bytes.len(),
+            content_type.as_deref().unwrap_or("<none>")
+        );
+
         Ok(bytes.to_vec())
     }
 
@@ -800,9 +810,63 @@ impl AlbumsService {
     }
 }
 
+/// The requested cover size for the byte-count log line: the digits of the
+/// `&size=` parameter that `build_cover_art_url_with_timestamp` places
+/// directly before `&square=`, `orig` when there is none, `external` for a
+/// URL that isn't `getCoverArt`. It reads that one parameter only: the rest
+/// of the URL carries the Subsonic credential and is never logged.
+fn artwork_size_label(url: &str) -> String {
+    if !url.contains("/rest/getCoverArt?") {
+        return "external".to_owned();
+    }
+    let head = url.rfind("&square=").map_or(url, |i| &url[..i]);
+    match head.rfind("&size=").map(|i| &head[i + "&size=".len()..]) {
+        Some(digits) if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) => {
+            digits.to_owned()
+        }
+        _ => "orig".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The size label reads only the builder's own `&size=` parameter (the
+    /// one directly before `&square=`), never a look-alike inside the
+    /// credential, which sits earlier in the URL.
+    #[test]
+    fn artwork_size_label_reads_only_the_size_parameter() {
+        use crate::utils::artwork_url::build_cover_art_url_with_timestamp as build;
+        let cred = "u=a&size=77x&s=size=1&t=deadbeef";
+        assert_eq!(
+            artwork_size_label(&build("al-1", "http://srv", cred, Some(80), None)),
+            "80"
+        );
+        assert_eq!(
+            artwork_size_label(&build("al-1", "http://srv", cred, Some(1500), Some("T"))),
+            "1500"
+        );
+        assert_eq!(
+            artwork_size_label(&build("al-1", "http://srv", cred, None, None)),
+            "orig",
+            "no size parameter even though the credential has look-alikes"
+        );
+        assert_eq!(
+            artwork_size_label(&build(
+                "al-1",
+                "http://srv",
+                "u=me&s=x&t=size=9",
+                None,
+                None
+            )),
+            "orig"
+        );
+        assert_eq!(
+            artwork_size_label("https://images.example/artist.jpg?size=300"),
+            "external"
+        );
+    }
 
     fn album_from_json(value: serde_json::Value) -> Album {
         serde_json::from_value(value).expect("valid album json")

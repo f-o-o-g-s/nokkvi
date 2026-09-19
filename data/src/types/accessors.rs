@@ -154,6 +154,7 @@ mod tests {
             tags: None,
             participants: None,
             display_artist_cached: String::new(),
+            image: Default::default(),
         };
         assert_eq!(<Album as Named>::display_name(&album), "My Album");
         assert_eq!(<Album as HasId>::id(&album), "a1");
@@ -180,6 +181,7 @@ mod tests {
             external_url: None,
             external_info_updated_at: None,
             rating: None,
+            image: Default::default(),
         };
         assert_eq!(<Artist as Named>::display_name(&artist), "My Artist");
         assert_eq!(<Artist as HasId>::id(&artist), "ar1");
@@ -205,6 +207,7 @@ mod tests {
             evaluated_at: None,
             path: String::new(),
             sync: false,
+            image: Default::default(),
         };
         assert_eq!(<Playlist as Named>::display_name(&playlist), "My Playlist");
         assert_eq!(<Playlist as HasId>::id(&playlist), "p1");
@@ -289,6 +292,7 @@ mod tests {
             tags: None,
             participants: None,
             display_artist_cached: String::new(),
+            image: Default::default(),
         };
         assert!(!album.is_starred()); // None → false
         album.starred = Some(false);
@@ -315,6 +319,7 @@ mod tests {
             external_url: None,
             external_info_updated_at: None,
             rating: None,
+            image: Default::default(),
         };
         assert!(!artist.is_starred()); // None → false
         artist.starred = Some(false);

@@ -1299,6 +1299,7 @@ mod tests {
             external_url: None,
             external_info_updated_at: None,
             rating: None,
+            image: Default::default(),
         }
     }
 

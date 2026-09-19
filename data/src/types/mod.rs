@@ -12,6 +12,7 @@ pub mod error;
 pub mod filter;
 pub mod genre;
 pub mod hotkey_config;
+pub mod image_info;
 pub mod info_modal;
 pub mod item_kind;
 pub mod labeled_enum;
