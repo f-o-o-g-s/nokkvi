@@ -989,7 +989,8 @@ impl AudioDecoder {
                     // track and rebuild the decoder on the same reader.
                     // `gapless: false` carries over the pre-0.6 behavior of this
                     // path, whose reprobe disabled gapless trimming.
-                    warn!(
+                    // Routine on chained Ogg radio (every song change), so debug.
+                    debug!(
                         " [DECODER] ResetRequired - stream's track list changed, rebuilding decoder..."
                     );
                     match symphonia_registry::make_track_decoder(format_reader.as_ref(), false) {
