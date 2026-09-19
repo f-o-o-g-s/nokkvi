@@ -1461,6 +1461,16 @@ impl Nokkvi {
                 (FormRow::Limit, FormCell::LimitMode) => {
                     // Same flip as Left/Right (shared write path).
                 }
+                (FormRow::Refresh, FormCell::RefreshValue) => {
+                    let current = s.rules.refresh_delay.clone().unwrap_or_default();
+                    s.mode = FormMode::Editing;
+                    s.editing = Some(EditingCell {
+                        row: row.clone(),
+                        cell: s.cell,
+                        buffer: current.clone(),
+                        revert: current,
+                    });
+                }
                 (FormRow::JsonToggle, _) => {
                     // Enter JSON mode with the editor focused + snapshot
                     // taken (the round-3 pinned transition).
@@ -1537,6 +1547,16 @@ impl Nokkvi {
                 (FormRow::Limit, FormCell::OffsetValue) => {
                     s.rules.offset = editing.buffer.trim().parse::<u64>().ok();
                     s.dirty = true;
+                }
+                (FormRow::Refresh, FormCell::RefreshValue) => {
+                    // Stored as typed (trimmed); the server normalizes it.
+                    // Empty clears the key: the server default applies.
+                    let delay = editing.buffer.trim();
+                    s.rules
+                        .set_refresh_delay((!delay.is_empty()).then(|| delay.to_owned()));
+                    s.dirty = true;
+                    // Clearing it on a pre-0.64 server drops the row.
+                    s.rebuild_rows();
                 }
                 // Edit-bar cells: nothing to write — EditorMessage already
                 // committed each keystroke.
@@ -1887,8 +1907,7 @@ impl Nokkvi {
         // Structural guarantee: the serializer is unreachable for an empty
         // root (the validation gate above) — no POST/PUT body can carry an
         // empty conjunction.
-        let rules_value = session.rules.to_value();
-        let unchanged = session.last_written_rules.as_ref() == Some(&rules_value);
+        let (rules_value, unchanged) = session.draft_preview_body();
         let draft = session.draft.clone();
         let caps = session.caps;
 

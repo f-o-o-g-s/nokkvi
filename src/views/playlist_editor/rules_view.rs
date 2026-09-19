@@ -765,6 +765,9 @@ fn form_pane<'a>(session: &'a RulesSessionUi, _window_height: f32) -> Element<'a
                 col = col.push(form_hint("Offset applies only when a limit is set"));
             }
         }
+        if matches!(form_row, FormRow::Refresh) {
+            col = col.push(diag_line(session, &DiagnosticLocation::RefreshDelay));
+        }
     }
     col = col.push(diag_line(session, &DiagnosticLocation::Root));
 
@@ -949,6 +952,34 @@ fn render_form_row<'a>(
                         cursor_here,
                     ),
                 ),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
+        }
+        FormRow::Refresh => {
+            let delay_text = session.rules.refresh_delay.clone().unwrap_or_default();
+            row![
+                text("Refresh")
+                    .size(12)
+                    .font(theme::ui_font())
+                    .color(theme::fg2())
+                    .width(Length::Fixed(52.0)),
+                ring_wrap(
+                    cell_ring(FormCell::RefreshValue),
+                    value_cell(
+                        session,
+                        FormCell::RefreshValue,
+                        row_idx,
+                        &delay_text,
+                        "default",
+                        cursor_here,
+                    ),
+                ),
+                text("empty = server default")
+                    .size(11)
+                    .font(theme::ui_font())
+                    .color(theme::fg3()),
             ]
             .spacing(8)
             .align_y(Alignment::Center)
@@ -1574,7 +1605,7 @@ fn form_section(row: &FormRow) -> u8 {
         | FormRow::AddRule(_)
         | FormRow::AddGroup => 0,
         FormRow::SortKey(_) | FormRow::AddSortKey => 1,
-        FormRow::Limit => 2,
+        FormRow::Limit | FormRow::Refresh => 2,
         FormRow::JsonToggle => 3,
     }
 }

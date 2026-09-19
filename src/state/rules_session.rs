@@ -119,6 +119,8 @@ pub enum FormRow {
     AddSortKey,
     /// `Limit [n] [#/%]` + offset.
     Limit,
+    /// `Refresh [delay]` — the per-playlist refresh delay (free text).
+    Refresh,
     /// The two-way raw JSON toggle row.
     JsonToggle,
 }
@@ -149,6 +151,8 @@ pub enum FormCell {
     LimitValue,
     LimitMode,
     OffsetValue,
+    // Refresh row.
+    RefreshValue,
     /// Single-cell rows (add-rows, JSON toggle).
     RowAction,
 }
@@ -444,6 +448,12 @@ impl RulesSessionUi {
         }
         rows.push(FormRow::AddSortKey);
         rows.push(FormRow::Limit);
+        // Shown where the server honors the delay, or wherever the rules
+        // already carry one (an `.nsp` import or raw JSON on an older
+        // server), so its diagnostics always have a row to render under.
+        if self.caps.per_playlist_refresh_delay || self.rules.carries_refresh_delay() {
+            rows.push(FormRow::Refresh);
+        }
         rows.push(FormRow::JsonToggle);
         self.rows = rows;
         if self.cursor >= self.rows.len() {
@@ -490,6 +500,7 @@ impl RulesSessionUi {
                 FormCell::LimitMode,
                 FormCell::OffsetValue,
             ],
+            FormRow::Refresh => vec![FormCell::RefreshValue],
             FormRow::AddRule(_) | FormRow::AddGroup | FormRow::AddSortKey | FormRow::JsonToggle => {
                 vec![FormCell::RowAction]
             }
@@ -818,6 +829,16 @@ impl RulesSessionUi {
         self.diagnostics = validate(&self.rules, &self.registry, &ctx);
     }
 
+    /// The rules body a Preview writes to the draft, and whether it equals
+    /// the last one written (an unchanged press only re-reads). Always the
+    /// preview value, never `to_value`: the draft never carries the refresh
+    /// delay, so a delay-only edit leaves the draft unchanged.
+    pub fn draft_preview_body(&self) -> (serde_json::Value, bool) {
+        let body = self.rules.to_preview_value();
+        let unchanged = self.last_written_rules.as_ref() == Some(&body);
+        (body, unchanged)
+    }
+
     /// Any Error-severity diagnostic — blocks Preview AND Save.
     pub fn has_blocking_errors(&self) -> bool {
         self.diagnostics
@@ -1089,6 +1110,98 @@ mod tests {
 
         let flat = RulesSessionUi::open(edit_target(), tiered_rules(), ServerCaps::default());
         assert!(flat.form_editable(), "flat-plus-one stays editable");
+    }
+
+    fn caps_064() -> ServerCaps {
+        ServerCaps::from_version_str("0.64.0")
+    }
+
+    fn position_of(session: &RulesSessionUi, row: &FormRow) -> Option<usize> {
+        session.rows.iter().position(|r| r == row)
+    }
+
+    /// On 0.64 the Refresh row sits directly under Limit, above the JSON
+    /// toggle.
+    #[test]
+    fn refresh_row_follows_limit_on_064() {
+        let session = RulesSessionUi::open(edit_target(), tiered_rules(), caps_064());
+        let limit = position_of(&session, &FormRow::Limit).expect("limit row");
+        assert_eq!(session.rows.get(limit + 1), Some(&FormRow::Refresh));
+        assert_eq!(session.rows.get(limit + 2), Some(&FormRow::JsonToggle));
+    }
+
+    /// Absent on a server without the capability, unless the rules already
+    /// carry a delay (the only anchor its warning has).
+    #[test]
+    fn refresh_row_visibility_follows_caps_or_existing_delay() {
+        let session = RulesSessionUi::open(edit_target(), tiered_rules(), ServerCaps::default());
+        assert_eq!(position_of(&session, &FormRow::Refresh), None);
+
+        let mut rules = tiered_rules();
+        rules.refresh_delay = Some("1d".into());
+        let session = RulesSessionUi::open(edit_target(), rules, ServerCaps::default());
+        let limit = position_of(&session, &FormRow::Limit).expect("limit row");
+        assert_eq!(session.rows.get(limit + 1), Some(&FormRow::Refresh));
+    }
+
+    /// A raw (non-string) delay also shows the row, so its diagnostic has
+    /// an anchor.
+    #[test]
+    fn refresh_row_shows_for_a_raw_delay() {
+        let rules = SmartRules::parse(&json!({
+            "all": [ { "is": { "loved": true } } ],
+            "refreshDelay": 5
+        }));
+        let session = RulesSessionUi::open(edit_target(), rules, ServerCaps::default());
+        assert!(position_of(&session, &FormRow::Refresh).is_some());
+    }
+
+    #[test]
+    fn refresh_row_has_one_value_cell() {
+        let session = RulesSessionUi::open(edit_target(), tiered_rules(), caps_064());
+        assert_eq!(
+            session.cells_of_row(&FormRow::Refresh),
+            vec![FormCell::RefreshValue]
+        );
+    }
+
+    /// Clearing the delay on an old server drops the row; a cursor that sat
+    /// on it lands on a real row, never on a row that is no longer rendered.
+    #[test]
+    fn cursor_on_vanishing_refresh_row_is_clamped() {
+        let mut rules = tiered_rules();
+        rules.refresh_delay = Some("1d".into());
+        let mut session = RulesSessionUi::open(edit_target(), rules, ServerCaps::default());
+        session.cursor = position_of(&session, &FormRow::Refresh).expect("refresh row");
+        session.cell = FormCell::RefreshValue;
+
+        session.rules.refresh_delay = None;
+        session.rebuild_rows();
+        assert_eq!(position_of(&session, &FormRow::Refresh), None);
+        assert!(session.cursor < session.rows.len());
+        assert_eq!(session.rows[session.cursor], FormRow::JsonToggle);
+        assert_eq!(session.cell, FormCell::RowAction);
+    }
+
+    /// The draft body never carries the delay, and the unchanged-compare
+    /// uses the same body: a delay-only edit leaves the draft unchanged.
+    #[test]
+    fn draft_preview_body_ignores_the_refresh_delay() {
+        let mut rules = tiered_rules();
+        rules.refresh_delay = Some("1d".into());
+        let mut session = RulesSessionUi::open(edit_target(), rules, caps_064());
+        let (body, unchanged) = session.draft_preview_body();
+        assert!(!unchanged, "nothing written yet");
+        assert!(body.get("refreshDelay").is_none(), "{body}");
+        session.last_written_rules = Some(body);
+
+        session.rules.refresh_delay = Some("1w".into());
+        let (_, unchanged) = session.draft_preview_body();
+        assert!(unchanged, "a delay-only edit doesn't rewrite the draft");
+
+        session.rules.limit = Some(5);
+        let (_, unchanged) = session.draft_preview_body();
+        assert!(!unchanged, "a real rules edit does");
     }
 
     /// revalidate + list-loaded gating: the duplicate-name warning fires

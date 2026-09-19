@@ -1017,6 +1017,29 @@ impl SmartRules {
         Value::Object(obj)
     }
 
+    /// A raw `refreshDelay` riding [`Self::extra`] under any spelling
+    /// `parse` matches; only a non-string value lands there.
+    fn raw_refresh_delay(&self) -> Option<&Value> {
+        self.extra
+            .iter()
+            .find(|(key, _)| is_refresh_delay_key(key))
+            .map(|(_, value)| value)
+    }
+
+    /// Whether the rules carry a refresh delay in any form: the typed value
+    /// or a raw key riding `extra`.
+    pub fn carries_refresh_delay(&self) -> bool {
+        self.refresh_delay.is_some() || self.raw_refresh_delay().is_some()
+    }
+
+    /// Set or clear the delay. Drops every raw spelling of the key from
+    /// `extra` too, since `to_value` writes `extra` last and a raw `null` or
+    /// number there would override the typed value.
+    pub fn set_refresh_delay(&mut self, delay: Option<String>) {
+        self.extra.retain(|key, _| !is_refresh_delay_key(key));
+        self.refresh_delay = delay;
+    }
+
     /// The body for the preview draft: [`Self::to_value`] minus any
     /// `refreshDelay` key, matched case-insensitively the way `parse` does
     /// (a non-string one rides `extra` under its source spelling). The delay
@@ -1026,7 +1049,7 @@ impl SmartRules {
     pub fn to_preview_value(&self) -> Value {
         let mut value = self.to_value();
         if let Some(obj) = value.as_object_mut() {
-            obj.retain(|key, _| key.to_lowercase() != "refreshdelay");
+            obj.retain(|key, _| !is_refresh_delay_key(key));
         }
         value
     }
@@ -1082,6 +1105,12 @@ impl SmartRules {
         }
         self.root.as_ref().map_or(0, |r| depth(&r.nodes))
     }
+}
+
+/// Whether a top-level rules key is `refreshDelay` under the case-insensitive
+/// match `parse` applies.
+fn is_refresh_delay_key(key: &str) -> bool {
+    key.to_lowercase() == "refreshdelay"
 }
 
 /// Sentinel `extra` key holding a non-object source value verbatim.
@@ -1374,8 +1403,9 @@ const MAX_REFRESH_DELAY_NS: f64 = 9.2e18;
 /// with the same meaning. Deliberately stricter than the server's parser
 /// (no sign, no spaces, no `.5h`, ASCII digits only): exactly `"0"`, or one
 /// or more `<digits>[.<digits>]<unit>` terms back to back whose sum stays
-/// below [`MAX_REFRESH_DELAY_NS`]. Everything the server re-emits after
-/// normalizing (`1w2d`, `36h`, `1h30m0s`, `500ms`) is inside this subset.
+/// below [`MAX_REFRESH_DELAY_NS`]. Every delay under ~290 years that the
+/// server re-emits after normalizing (`1w2d`, `36h`, `1h30m0s`, `500ms`)
+/// stays inside this subset.
 pub fn is_valid_refresh_delay(s: &str) -> bool {
     if s == "0" {
         return true;
@@ -1459,7 +1489,7 @@ pub fn validate(
                 out.push(Diagnostic::warning(
                     DiagnosticLocation::Sort(i),
                     format!(
-                        "'{}' needs Navidrome {}.{}.{}+ to sort by; this server will fall back to title",
+                        "'{}' needs Navidrome {}.{}.{}+ to sort by; this server skips it (title if no sort key is left)",
                         key.field, floor.0, floor.1, floor.2
                     ),
                 ));
@@ -1468,7 +1498,7 @@ pub fn validate(
             out.push(Diagnostic::warning(
                 DiagnosticLocation::Sort(i),
                 format!(
-                    "'{}' is not a sortable field on this server — the server will fall back to title",
+                    "'{}' is not a sortable field on this server — the server skips it (title if no sort key is left)",
                     key.field
                 ),
             ));
@@ -1490,20 +1520,25 @@ pub fn validate(
             "Offset only applies together with a limit — the server ignores it otherwise",
         ));
     }
-    // `""` is unset server-side. Anything else that 0.64 can't parse fails
-    // the WHOLE rules decode there (`model/criteria/criteria.go`), and an
-    // older server stores the JSON verbatim, so it fails after an upgrade:
-    // an Error on every version.
-    if let Some(delay) = rules.refresh_delay.as_deref().filter(|d| !d.is_empty()) {
-        if !is_valid_refresh_delay(delay) {
-            out.push(Diagnostic::error(
-                DiagnosticLocation::RefreshDelay,
-                "Use a duration like 90m, 12h, 1d or 1w",
-            ));
-        } else if ctx.caps.version.is_some() && !ctx.caps.per_playlist_refresh_delay {
+    // `""` is unset server-side, and so is a raw JSON `null` (Go leaves the
+    // string empty). Anything else 0.64 can't parse, a non-string included,
+    // fails the WHOLE rules decode there (`model/criteria/criteria.go`): an
+    // Error, also on an unknown version that may be 0.64. A server KNOWN to
+    // predate 0.64 re-marshals the rules through a struct without the key
+    // and drops it, so there any delay only warns.
+    let typed = rules.refresh_delay.as_deref().filter(|d| !d.is_empty());
+    let raw = rules.raw_refresh_delay().filter(|v| !v.is_null());
+    if typed.is_some() || raw.is_some() {
+        let valid = raw.is_none() && typed.is_some_and(is_valid_refresh_delay);
+        if ctx.caps.version.is_some() && !ctx.caps.per_playlist_refresh_delay {
             out.push(Diagnostic::warning(
                 DiagnosticLocation::RefreshDelay,
                 "This server ignores the refresh delay (needs Navidrome 0.64+)",
+            ));
+        } else if !valid {
+            out.push(Diagnostic::error(
+                DiagnosticLocation::RefreshDelay,
+                "Use a duration like 90m, 12h, 1d or 1w",
             ));
         }
     }
@@ -2602,7 +2637,7 @@ mod tests {
         let diags = validate(&rules, &registry, &ctx_with(caps_063()));
         let warns = warnings(&diags);
         assert!(warns.iter().any(|m| m.contains("Random sort")));
-        assert!(warns.iter().any(|m| m.contains("fall back to title")));
+        assert!(warns.iter().any(|m| m.contains("skips it")));
         assert!(warns.iter().any(|m| m.contains("Offset")));
 
         let v = json!({ "all": [ { "is": { "loved": true } } ], "limitPercent": 250 });
@@ -2855,17 +2890,70 @@ mod tests {
             .collect()
     }
 
-    /// An invalid delay fails the whole rules decode on 0.64, and a 0.63
-    /// server stores it verbatim to fail after an upgrade: an Error on every
-    /// version, known or not.
+    /// An invalid delay fails the whole rules decode on 0.64 (and on an
+    /// unknown version, which may be 0.64): an Error. A known pre-0.64 server
+    /// re-marshals the rules without the key, so there it only warns.
     #[test]
-    fn refresh_delay_invalid_errors_on_every_version() {
-        for caps in [caps_064(), caps_063(), ServerCaps::default()] {
+    fn refresh_delay_invalid_errors_unless_the_server_drops_it() {
+        for caps in [caps_064(), ServerCaps::default()] {
             let diags = refresh_diags(Some("3 days"), caps);
             assert_eq!(diags.len(), 1, "{caps:?}: {diags:?}");
             assert_eq!(diags[0].severity, Severity::Error);
             assert_eq!(diags[0].message, "Use a duration like 90m, 12h, 1d or 1w");
         }
+        let diags = refresh_diags(Some("3 days"), caps_063());
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Warning);
+    }
+
+    fn raw_refresh_diags(raw: Value, caps: ServerCaps) -> Vec<Diagnostic> {
+        let registry = FieldRegistry::with_default_tags();
+        let rules = SmartRules::parse(&json!({
+            "all": [ { "is": { "loved": true } } ],
+            "refreshDelay": raw
+        }));
+        validate(&rules, &registry, &ctx_with(caps))
+            .into_iter()
+            .filter(|d| d.location == DiagnosticLocation::RefreshDelay)
+            .collect()
+    }
+
+    /// A non-string delay rides `extra`; 0.64 rejects the whole decode on
+    /// it, so it is validated like an invalid string. JSON `null` leaves
+    /// Go's string empty (unset) and stays quiet.
+    #[test]
+    fn refresh_delay_non_string_is_validated() {
+        for caps in [caps_064(), ServerCaps::default()] {
+            let diags = raw_refresh_diags(json!(5), caps);
+            assert_eq!(diags.len(), 1, "{caps:?}: {diags:?}");
+            assert_eq!(diags[0].severity, Severity::Error);
+        }
+        let diags = raw_refresh_diags(json!(5), caps_063());
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Warning);
+        assert!(raw_refresh_diags(Value::Null, caps_064()).is_empty());
+    }
+
+    /// Setting the delay replaces every spelling of the key, so a raw
+    /// `null`/number riding `extra` can't override the typed value.
+    #[test]
+    fn set_refresh_delay_replaces_any_raw_spelling() {
+        let mut rules = SmartRules::parse(&json!({
+            "all": [ { "is": { "loved": true } } ],
+            "RefreshDelay": null
+        }));
+        assert!(rules.carries_refresh_delay(), "a raw key still counts");
+        rules.set_refresh_delay(Some("1d".to_owned()));
+        assert_eq!(
+            rules.to_value(),
+            json!({ "all": [ { "is": { "loved": true } } ], "refreshDelay": "1d" })
+        );
+        rules.set_refresh_delay(None);
+        assert_eq!(
+            rules.to_value(),
+            json!({ "all": [ { "is": { "loved": true } } ] })
+        );
+        assert!(!rules.carries_refresh_delay());
     }
 
     #[test]

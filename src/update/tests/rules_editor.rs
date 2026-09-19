@@ -247,6 +247,157 @@ fn editing_mode_commit_and_revert() {
     );
 }
 
+// --- Refresh delay row (Navidrome 0.64) --------------------------------------
+
+/// `capable_app` on a 0.64 server, where the Refresh row renders.
+fn capable_app_064() -> crate::Nokkvi {
+    let mut app = capable_app();
+    app.caps_state = CapsState::Fetched(ServerCaps::from_version_str("0.64.0"));
+    app
+}
+
+fn cursor_to_refresh(app: &mut crate::Nokkvi) -> usize {
+    let mut idx = 0;
+    app.with_rules_session(|s| {
+        s.mode = FormMode::Cursor;
+        s.editing = None;
+        idx = s
+            .rows
+            .iter()
+            .position(|r| matches!(r, FormRow::Refresh))
+            .expect("refresh row on 0.64");
+        s.cursor = idx;
+        s.cell = FormCell::RefreshValue;
+    });
+    idx
+}
+
+/// Enter edits the delay seeded from its current value; commit trims and
+/// stores it, an empty commit clears the key, Escape reverts the cell.
+#[test]
+fn refresh_delay_edit_commit_clear_and_revert() {
+    let mut app = capable_app_064();
+    open_edit(&mut app);
+    app.with_rules_session(|s| s.rules.refresh_delay = Some("12h".into()));
+    cursor_to_refresh(&mut app);
+
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+    let s = session(&app);
+    assert_eq!(s.mode, FormMode::Editing, "the Refresh cell edits as text");
+    assert_eq!(
+        s.editing.as_ref().map(|e| e.buffer.as_str()),
+        Some("12h"),
+        "buffer seeded from the current delay"
+    );
+
+    let _ = app.update(Message::RulesEditor(R::EditingInput(" 1d ".into())));
+    let _ = app.update(Message::RulesEditor(R::CommitEditing));
+    let s = session(&app);
+    assert_eq!(s.mode, FormMode::Cursor);
+    assert_eq!(s.rules.refresh_delay.as_deref(), Some("1d"), "trimmed");
+    assert!(s.dirty);
+
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+    let _ = app.update(Message::RulesEditor(R::EditingInput("7d".into())));
+    let _ = app.update(Message::RulesEditor(R::RevertEditing));
+    assert_eq!(
+        session(&app).rules.refresh_delay.as_deref(),
+        Some("1d"),
+        "Escape reverts the cell"
+    );
+
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+    let _ = app.update(Message::RulesEditor(R::EditingInput("   ".into())));
+    let _ = app.update(Message::RulesEditor(R::CommitEditing));
+    assert_eq!(
+        session(&app).rules.refresh_delay,
+        None,
+        "an empty commit clears the key (server default)"
+    );
+}
+
+/// A typed delay replaces a raw one riding the rules' extra keys, so the
+/// Save body carries what the row shows.
+#[test]
+fn refresh_delay_commit_replaces_a_raw_key() {
+    let mut app = capable_app_064();
+    open_edit(&mut app);
+    app.with_rules_session(|s| {
+        s.rules = nokkvi_data::types::smart_criteria::SmartRules::parse(&serde_json::json!({
+            "all": [ { "is": { "loved": true } } ],
+            "refreshDelay": null
+        }));
+        s.rebuild_rows();
+    });
+    cursor_to_refresh(&mut app);
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+    let _ = app.update(Message::RulesEditor(R::EditingInput("1d".into())));
+    let _ = app.update(Message::RulesEditor(R::CommitEditing));
+    let body = session(&app).rules.to_value();
+    assert_eq!(body.get("refreshDelay"), Some(&serde_json::json!("1d")));
+}
+
+/// An invalid delay is an Error at the Refresh anchor and trips the same
+/// Preview/Save gate every blocking diagnostic does.
+#[test]
+fn invalid_refresh_delay_blocks_preview_and_save() {
+    use nokkvi_data::types::smart_criteria::{DiagnosticLocation, Severity};
+
+    let mut app = capable_app_064();
+    open_edit(&mut app);
+    cursor_to_refresh(&mut app);
+    let _ = app.update(Message::RulesEditor(R::EnterOnCursor));
+    let _ = app.update(Message::RulesEditor(R::EditingInput("3 days".into())));
+    let _ = app.update(Message::RulesEditor(R::CommitEditing));
+    assert!(
+        session(&app).diagnostics.iter().any(
+            |d| d.location == DiagnosticLocation::RefreshDelay && d.severity == Severity::Error
+        ),
+        "{:?}",
+        session(&app).diagnostics
+    );
+
+    app.toast.toasts.clear();
+    let _ = app.update(Message::RulesEditor(R::Preview));
+    let toast = app.toast.toasts.back().expect("preview refusal");
+    assert_eq!(toast.level, ToastLevel::Warning);
+    assert!(toast.message.contains("to preview"), "{}", toast.message);
+
+    app.toast.toasts.clear();
+    let _ = app.update(Message::RulesEditor(R::Save));
+    let toast = app.toast.toasts.back().expect("save refusal");
+    assert_eq!(toast.level, ToastLevel::Warning);
+    assert!(toast.message.contains("to save"), "{}", toast.message);
+    assert!(!session(&app).saving, "the save never started");
+}
+
+/// A click on the Refresh cell enters Editing like the Offset cell, and a
+/// mouse Save flushes the uncommitted buffer before it reads the rules.
+#[test]
+fn refresh_delay_click_edits_and_save_flushes_the_buffer() {
+    let mut app = capable_app_064();
+    open_edit(&mut app);
+    let row = cursor_to_refresh(&mut app);
+    app.with_rules_session(|s| s.cursor = 0);
+
+    let _ = app.update(Message::RulesEditor(R::ClickCell {
+        row,
+        cell: FormCell::RefreshValue,
+    }));
+    assert_eq!(session(&app).mode, FormMode::Editing, "click → Editing");
+
+    let _ = app.update(Message::RulesEditor(R::EditingInput("nope".into())));
+    app.toast.toasts.clear();
+    let _ = app.update(Message::RulesEditor(R::Save));
+    let s = session(&app);
+    assert_eq!(
+        s.rules.refresh_delay.as_deref(),
+        Some("nope"),
+        "Save committed the pending edit first"
+    );
+    assert!(!s.saving, "…and its Error blocked the save");
+}
+
 /// Escape in cursor mode with a dirty form surfaces the discard confirm;
 /// CancelDiscard keeps the session; ConfirmDiscard exits.
 #[test]

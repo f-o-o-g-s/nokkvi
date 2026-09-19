@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Nix users can now build and run nokkvi straight from the repository with its new flake.
 - Smart playlist rules and sorting gain five album-level fields (date added, date modified, duration, song count, size) on Navidrome 0.64+.
 - The smart-playlist editor now warns when a sort field needs a newer Navidrome than the server runs.
+- Smart playlists can set their own refresh delay (`1d`, `12h`, `1w`) in the rules editor on Navidrome 0.64+.
 
 ### Changed
 
