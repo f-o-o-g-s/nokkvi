@@ -1049,12 +1049,9 @@ impl AppService {
         let api = || async {
             let service = self.lyrics_api().await.ok()?;
             let list = service.get_lyrics_by_song_id(&song.id, true).await.ok()?;
-            // Kind-selection lives here (the converter takes one entry): prefer
-            // the main synced layer, else the first synced.
-            let chosen = list
-                .iter()
-                .find(|s| s.kind.as_deref() == Some("main") && s.synced)
-                .or_else(|| list.iter().find(|s| s.synced))?;
+            // Kind-selection is a pure function beside the converter (which
+            // takes one entry) — the server's list is never de-duplicated.
+            let chosen = crate::types::lyrics::pick_structured(&list)?;
             let doc = LrcDocument::from_structured(chosen);
             doc.is_renderable().then_some(doc)
         };

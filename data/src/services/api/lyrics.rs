@@ -229,6 +229,46 @@ mod tests {
     }
 
     #[test]
+    fn parses_plain_untimed_lyrics() {
+        // What Navidrome sends for a `USLT` frame (or a Vorbis/FLAC/MP4
+        // `unsyncedlyrics` property): `synced: false` and lines carrying only
+        // `value`. `WireLine.start` is already optional, so each line must
+        // arrive with `start_ms: None` rather than a fabricated 0.
+        let json = r#"{
+            "subsonic-response": {
+                "status": "ok",
+                "lyricsList": {
+                    "structuredLyrics": [{
+                        "displayArtist": "Beach House",
+                        "displayTitle": "Myth",
+                        "lang": "eng",
+                        "synced": false,
+                        "kind": "main",
+                        "line": [
+                            { "value": "Drifting in and out" },
+                            { "value": "You see the road" }
+                        ]
+                    }]
+                }
+            }
+        }"#;
+
+        let parsed: SubsonicEnvelope<LyricsListInner> = serde_json::from_str(json).expect("parse");
+        let list: Vec<StructuredLyrics> = parsed
+            .response
+            .lyrics_list
+            .map(|b| b.structured_lyrics.into_iter().map(Into::into).collect())
+            .unwrap_or_default();
+
+        assert_eq!(list.len(), 1);
+        assert!(!list[0].synced);
+        assert_eq!(list[0].kind.as_deref(), Some("main"));
+        assert_eq!(list[0].lines.len(), 2);
+        assert!(list[0].lines.iter().all(|l| l.start_ms.is_none()));
+        assert_eq!(list[0].lines[1].value, "You see the road");
+    }
+
+    #[test]
     fn empty_lyrics_list_is_empty() {
         let json = r#"{"subsonic-response":{"status":"ok","lyricsList":{}}}"#;
         let parsed: SubsonicEnvelope<LyricsListInner> = serde_json::from_str(json).expect("parse");

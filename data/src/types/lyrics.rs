@@ -29,9 +29,13 @@ pub struct LrcLine {
     pub words: Vec<WordSpan>,
 }
 
-/// A parsed lyrics document. `synced` is false only when the source carried no
-/// timestamps at all (plain lyrics) — the render surface treats an unsynced doc
-/// as a no-match, so nothing is faked.
+/// A parsed lyrics document. `synced` is false when the source carried no
+/// timestamps at all (plain lyrics) — every `time_ms` is then 0 and the sheet
+/// drifts with playback progress instead of following a line cursor. A plain
+/// doc must never reach `active_line_at`, which would name its LAST line.
+///
+/// Plain docs come from the SERVER only: `parse()` still keeps timed lines
+/// alone, so the store and cached-LRCLIB channels stay synced-only.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LrcDocument {
     pub lines: Vec<LrcLine>,
@@ -39,13 +43,16 @@ pub struct LrcDocument {
 }
 
 impl LrcDocument {
-    /// Whether this document is worth rendering as synced lyrics: timestamped
-    /// AND non-empty. The single definition of "success" shared by the resolve
-    /// chain's channel predicates and the UI's apply path — a synced-but-empty
-    /// doc (e.g. a header-only file) is a no-match, not a hit, so it neither
-    /// ends the chain early nor renders as a blank sheet.
+    /// Whether this document is worth rendering: it has at least one line.
+    /// The single definition of "success" shared by the resolve chain's channel
+    /// predicates and the UI's apply path — an empty doc (a header-only file, a
+    /// line-less server entry) is a no-match whatever `synced` says, so it
+    /// neither ends the chain early nor renders as a blank sheet.
+    ///
+    /// Timing is a SEPARATE requirement, spelled out by the channels that need
+    /// it (`doc.synced && doc.is_renderable()`) rather than folded in here.
     pub fn is_renderable(&self) -> bool {
-        self.synced && !self.lines.is_empty()
+        !self.lines.is_empty()
     }
 }
 
@@ -390,6 +397,35 @@ pub struct StructuredCue {
     pub value: String,
 }
 
+/// Choose one entry from the server's `structuredLyrics` list.
+///
+/// Navidrome never de-duplicates: its own end-to-end test asserts that a
+/// single MP3 yields FOUR entries (a `USLT` and a `SYLT` frame, each under two
+/// language tags). So this ranks rather than takes the first.
+/// Rank rather than take the first: main+synced, then any synced, then
+/// main+unsynced, then any unsynced. Entries with no lines are skipped at every
+/// tier (picking one would end the resolve chain on a blank sheet), and list
+/// order breaks ties within a tier.
+pub fn pick_structured(list: &[StructuredLyrics]) -> Option<&StructuredLyrics> {
+    let has_lines = |s: &&StructuredLyrics| !s.lines.is_empty();
+    let main = |s: &&StructuredLyrics| is_main_kind(s.kind.as_deref());
+    list.iter()
+        .find(|s| has_lines(s) && s.synced && main(s))
+        .or_else(|| list.iter().find(|s| has_lines(s) && s.synced))
+        .or_else(|| list.iter().find(|s| has_lines(s) && main(s)))
+        .or_else(|| list.iter().find(has_lines))
+}
+
+/// Whether an entry's `kind` names the MAIN lyric layer. Blank or missing
+/// counts as main: `kind` is only populated with `enhanced=true`, and the other
+/// values (`translation`, `pronunciation`) come only from TTML sources.
+fn is_main_kind(kind: Option<&str>) -> bool {
+    kind.is_none_or(|k| {
+        let k = k.trim();
+        k.is_empty() || k.eq_ignore_ascii_case("main")
+    })
+}
+
 impl LrcDocument {
     /// Convert one structured entry into the internal document. Word timings
     /// come from the matching `cueLine` (joined by `.index`); each word's text
@@ -402,21 +438,28 @@ impl LrcDocument {
             .iter()
             .enumerate()
             .map(|(i, line)| {
-                let time_ms = apply_offset(line.start_ms.unwrap_or(0), offset);
-                let words = s
-                    .cue_lines
-                    .iter()
-                    .find(|cl| cl.index == i)
-                    .map(|cl| {
-                        cl.cues
-                            .iter()
-                            .map(|cue| WordSpan {
-                                start_ms: apply_offset(cue.start_ms, offset),
-                                text: cue.value.clone(),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                // A plain entry has no timing at all: pin every stamp to 0 (a
+                // stray `start` on one line is noise, not a cue) and drop the
+                // word layer, which would have nothing to time against.
+                let (time_ms, words) = if s.synced {
+                    let words = s
+                        .cue_lines
+                        .iter()
+                        .find(|cl| cl.index == i)
+                        .map(|cl| {
+                            cl.cues
+                                .iter()
+                                .map(|cue| WordSpan {
+                                    start_ms: apply_offset(cue.start_ms, offset),
+                                    text: cue.value.clone(),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    (apply_offset(line.start_ms.unwrap_or(0), offset), words)
+                } else {
+                    (0, Vec::new())
+                };
                 LrcLine {
                     time_ms,
                     text: line.value.clone(),
@@ -425,11 +468,15 @@ impl LrcDocument {
             })
             .collect();
 
-        // The server's line order isn't guaranteed monotonic, and a line with
-        // no `start` (optional in the OpenSubsonic schema) defaults to time 0
-        // mid-document — either breaks the sorted invariant `active_line_at`'s
-        // binary search relies on. Stable-sort by time, exactly as `parse()`.
-        lines.sort_by_key(|l| l.time_ms);
+        // A SYNCED entry's line order isn't guaranteed monotonic, and a line
+        // with no `start` (optional in the OpenSubsonic schema) defaults to
+        // time 0 mid-document — either breaks the sorted invariant
+        // `active_line_at`'s binary search relies on. Stable-sort by time,
+        // exactly as `parse()`. A plain entry is left alone: the server's order
+        // IS the reading order, and every stamp is 0 anyway.
+        if s.synced {
+            lines.sort_by_key(|l| l.time_ms);
+        }
         LrcDocument {
             lines,
             synced: s.synced,
@@ -847,7 +894,10 @@ mod tests {
 
     #[test]
     fn parses_unsynced_text() {
-        // No timestamps anywhere → not synced, no lines.
+        // No timestamps anywhere → not synced, no lines. This pins the rule
+        // that plain lyrics come from the SERVER only: the `.lrc` parser (and
+        // so the store and cached-LRCLIB channels) still keeps timed lines
+        // alone, so an untimed file in the lyrics dir stays a no-match.
         let doc = parse("just some plain text\nmore plain text");
         assert!(!doc.synced);
         assert!(doc.lines.is_empty());
@@ -892,14 +942,15 @@ mod tests {
     }
 
     #[test]
-    fn is_renderable_rejects_empty_and_unsynced() {
+    fn is_renderable_means_has_lines() {
         let line = || LrcLine {
             time_ms: 0,
             text: "x".into(),
             words: vec![],
         };
-        // Synced-but-empty (a timestamp-shaped but unparseable stamp yields
-        // this): NOT a hit — it must not end the resolve chain.
+        // Empty is a no-match whatever `synced` says — a synced-but-empty doc
+        // (a timestamp-shaped but unparseable stamp yields one) must not end
+        // the resolve chain, and neither must a plain doc with nothing in it.
         assert!(
             !LrcDocument {
                 lines: vec![],
@@ -907,9 +958,17 @@ mod tests {
             }
             .is_renderable()
         );
-        // Unsynced with text (plain lyrics) is a no-match, not a hit.
         assert!(
             !LrcDocument {
+                lines: vec![],
+                synced: false,
+            }
+            .is_renderable()
+        );
+        // Plain lyrics with text ARE renderable: they drift with playback
+        // rather than following a line cursor.
+        assert!(
+            LrcDocument {
                 lines: vec![line()],
                 synced: false,
             }
@@ -1257,6 +1316,187 @@ mod tests {
         let times: Vec<u32> = doc.lines.iter().map(|l| l.time_ms).collect();
         assert_eq!(times, [1_000, 2_000, 3_000]);
         assert!(times.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    #[test]
+    fn from_structured_keeps_plain_lyrics_in_server_order() {
+        // Navidrome hands plain (USLT / `unsyncedlyrics`) text over as
+        // `synced: false` with no `start` on any line. The server's order IS
+        // the reading order, and every stamp stays 0 so nothing can mistake a
+        // plain sheet for a timed one.
+        let s = StructuredLyrics {
+            synced: false,
+            offset_ms: 0,
+            kind: Some("main".into()),
+            lines: vec![
+                StructuredLine {
+                    start_ms: None,
+                    value: "[Verse 1]".into(),
+                },
+                StructuredLine {
+                    start_ms: None,
+                    value: "first".into(),
+                },
+                StructuredLine {
+                    start_ms: None,
+                    value: "second".into(),
+                },
+            ],
+            cue_lines: vec![],
+        };
+        let doc = LrcDocument::from_structured(&s);
+        assert!(!doc.synced);
+        let texts: Vec<&str> = doc.lines.iter().map(|l| l.text.as_str()).collect();
+        // Bracketed lines are lyrics here ([Chorus], [Verse 1]) — rendered
+        // verbatim, never stripped.
+        assert_eq!(texts, ["[Verse 1]", "first", "second"]);
+        assert!(doc.lines.iter().all(|l| l.time_ms == 0));
+        assert!(doc.lines.iter().all(|l| l.words.is_empty()));
+    }
+
+    #[test]
+    fn from_structured_does_not_sort_a_plain_entry() {
+        // Stray `start` values on an unsynced entry must not reorder it — a
+        // sort would scramble the reading order for no gain (the sheet never
+        // reaches `active_line_at`).
+        let s = StructuredLyrics {
+            synced: false,
+            lines: vec![
+                StructuredLine {
+                    start_ms: Some(9_000),
+                    value: "first".into(),
+                },
+                StructuredLine {
+                    start_ms: None,
+                    value: "second".into(),
+                },
+                StructuredLine {
+                    start_ms: Some(1_000),
+                    value: "third".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        let doc = LrcDocument::from_structured(&s);
+        let texts: Vec<&str> = doc.lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["first", "second", "third"]);
+        assert!(doc.lines.iter().all(|l| l.time_ms == 0));
+    }
+
+    // --- pick_structured ---
+
+    fn entry_of(synced: bool, kind: Option<&str>, lines: &[&str]) -> StructuredLyrics {
+        StructuredLyrics {
+            synced,
+            offset_ms: 0,
+            kind: kind.map(Into::into),
+            lines: lines
+                .iter()
+                .map(|v| StructuredLine {
+                    start_ms: synced.then_some(1_000),
+                    value: (*v).to_string(),
+                })
+                .collect(),
+            cue_lines: vec![],
+        }
+    }
+
+    #[test]
+    fn pick_prefers_synced_over_plain() {
+        // The USLT + SYLT case: one MP3, two frames, both `main`. The timed
+        // one wins whichever order the server lists them in.
+        let list = vec![
+            entry_of(false, Some("main"), &["plain"]),
+            entry_of(true, Some("main"), &["synced"]),
+        ];
+        assert_eq!(
+            pick_structured(&list).map(|s| s.lines[0].value.as_str()),
+            Some("synced")
+        );
+    }
+
+    #[test]
+    fn pick_takes_any_synced_over_a_main_plain() {
+        // A synced translation layer still beats plain text: timing is the
+        // stronger signal, and the plain tier is the fallback.
+        let list = vec![
+            entry_of(false, Some("main"), &["plain main"]),
+            entry_of(true, Some("translation"), &["synced translation"]),
+        ];
+        assert_eq!(
+            pick_structured(&list).map(|s| s.lines[0].value.as_str()),
+            Some("synced translation")
+        );
+    }
+
+    #[test]
+    fn pick_falls_back_to_plain_in_list_order() {
+        // Two plain entries under different language tags: list order breaks
+        // the tie (Navidrome emits them `eng`, `xxx`, in mapping order).
+        let list = vec![
+            entry_of(false, None, &["xxx"]),
+            entry_of(false, None, &["eng"]),
+        ];
+        assert_eq!(
+            pick_structured(&list).map(|s| s.lines[0].value.as_str()),
+            Some("xxx")
+        );
+    }
+
+    #[test]
+    fn pick_prefers_a_main_plain_over_a_non_main_plain() {
+        let list = vec![
+            entry_of(false, Some("translation"), &["translated"]),
+            entry_of(false, Some("main"), &["main"]),
+        ];
+        assert_eq!(
+            pick_structured(&list).map(|s| s.lines[0].value.as_str()),
+            Some("main")
+        );
+    }
+
+    #[test]
+    fn pick_skips_entries_with_no_lines_at_every_tier() {
+        // A line-less entry is not a hit: picking it would end the resolve
+        // chain on a blank sheet.
+        let list = vec![
+            entry_of(true, Some("main"), &[]),
+            entry_of(true, None, &[]),
+            entry_of(false, Some("main"), &[]),
+            entry_of(false, None, &["the only real one"]),
+        ];
+        assert_eq!(
+            pick_structured(&list).map(|s| s.lines[0].value.as_str()),
+            Some("the only real one")
+        );
+
+        assert!(
+            pick_structured(&[]).is_none(),
+            "an empty list picks nothing"
+        );
+        let all_empty = vec![
+            entry_of(true, Some("main"), &[]),
+            entry_of(false, None, &[]),
+        ];
+        assert!(
+            pick_structured(&all_empty).is_none(),
+            "an all-empty list picks nothing"
+        );
+    }
+
+    #[test]
+    fn pick_treats_a_blank_or_missing_kind_as_main() {
+        for kind in [None, Some(""), Some("  "), Some("MAIN")] {
+            let list = vec![
+                entry_of(true, Some("translation"), &["translation"]),
+                entry_of(true, kind, &["main"]),
+            ];
+            assert_eq!(
+                pick_structured(&list).map(|s| s.lines[0].value.as_str()),
+                Some("main"),
+                "kind {kind:?} must count as main"
+            );
+        }
     }
 
     #[test]
