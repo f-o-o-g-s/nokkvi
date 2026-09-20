@@ -97,15 +97,23 @@ Physical sort via `QueueManager::sort_queue()`, persists to redb. `QueueSortMode
 Drags are blocked (and half-captured pick state dropped) while a search filter is active; a past-end / empty-area drop appends (`slot_to_item_index_for_drop(...).unwrap_or(total_items)`).
 entry_id rules: see gotchas.md "Queue & Indices".
 
-**Pointer-motion fast paths**: the queue messages published per cursor move (`ScrollSeek`, `HoverEnterSlot` / `HoverExitSlot`, `DragReorder(Dragged)`) return from `handle_queue`'s fast-path block before the row list is read, and a new per-cursor-move message joins that block. `DragColumn` publishes `Dragged` on every `CursorMoved`, so per-event work proportional to the queue backs up the event loop (a ~20k-row queue froze the window). Thumbnails for rows the edge auto-scroll brings in come from `tick_within_list_autoscroll`, which returns the viewport prefetch whenever it moved the viewport, for the queue and the playlist editor alike.
+**Pointer-motion fast paths**: the queue messages published per cursor move (`ScrollSeek`, `HoverEnterSlot` / `HoverExitSlot`, `DragReorder(Dragged)`, `LyricsWheel`) return from `handle_queue`'s fast-path block before the row list is read, and a new per-cursor-move message joins that block. `DragColumn` publishes `Dragged` on every `CursorMoved`, so per-event work proportional to the queue backs up the event loop (a ~20k-row queue froze the window). Thumbnails for rows the edge auto-scroll brings in come from `tick_within_list_autoscroll`, which returns the viewport prefetch whenever it moved the viewport, for the queue and the playlist editor alike.
 
 ## Queue Shuffle
 
 Re-shuffles the order array when a shuffled queue with repeat-playlist wraps back to the start, instead of replaying the same shuffle sequence.
 
-## Synced Lyrics Overlay
+## Lyrics Overlay
 
-A synced-lyrics layer overlays the now-playing Queue cover (handler `update/lyrics.rs`, state `src/state/lyrics.rs`; resolve pipeline via `Message::LyricsLoader`, `LyricsIndexReady` / `LyricsBlurReady`). It is an **overlay, not a modal** — it renders only when the cover panel actually shows the now-playing track (the `cover_shows_now_playing` gate in `views/queue/view.rs`), behind a frosted-cover backdrop. Identity gates (transport-gate the layer; key it to the shown cover, not the playing track): see gotchas.md.
+A lyrics layer overlays the now-playing Queue cover (handler `update/lyrics.rs`, state `src/state/lyrics.rs`; resolve pipeline via `Message::LyricsLoader`, `LyricsIndexReady` / `LyricsBlurReady`). It is an **overlay, not a modal** — it renders only when the cover panel actually shows the now-playing track (the `cover_shows_now_playing` gate in `views/queue/view.rs`), behind a frosted-cover backdrop. Identity gates (transport-gate the layer; key it to the shown cover, not the playing track): see gotchas.md.
+
+**Two kinds of sheet**, told apart by `LrcDocument.synced` and carried to the view as `LyricsPanelData.synced`:
+- **Synced** — the active line is accented and the column glides between lines (`eased_center`), snapping on seek-sized jumps (`LYRICS_SNAP_INDEX_DELTA`).
+- **Plain** — untimed lyrics from the server (a sidecar file or the lyrics embedded in the track's tags). **No line is ever accented**, and its `active_index` stays `None` for its whole life: every stamp is 0, so `active_line_at` would name the LAST line (see gotchas.md). A flat `PLAIN_BAND_LINES` band carries the eye instead, then the same falloff curve. Its center is `drift_center(position, duration, line_count, drift_offset)` — a pure function, so a seek and a wheel notch both jump.
+
+The per-frame boat tick (`update/boat.rs`) is the SINGLE publisher of the column center for both kinds; `clear()` / `promote_next()` park the glide so a new sheet's pre-roll can't keep republishing the previous track's line into the next dissolve.
+
+**The wheel** is the one event the viewport captures, and only over a non-empty plain sheet with a non-zero converted delta; it publishes a LINE delta (`QueueMessage::LyricsWheel`) that returns from `handle_queue`'s pointer-motion fast-path block. Everything else stays event-transparent — see widgets.md.
 
 ## Queue Server Sync
 

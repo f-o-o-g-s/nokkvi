@@ -124,7 +124,8 @@ pub async fn fetch_lrclib(
 }
 
 /// Persist a fetched LRCLIB result into the store so the next play resolves it
-/// offline via the store channel. LRCLIB's `syncedLyrics` is header-less, and
+/// offline via the CACHED channel (the third of the four, after the user's own
+/// files and the server — see `resolve_from`). LRCLIB's `syncedLyrics` is header-less, and
 /// the index matches on `[ar:]/[ti:]/[al:]` headers (not paths) — so synthesize
 /// authoritative headers from the Song's own tags (which drove the exact match)
 /// before the raw text. Best-effort: a write failure is logged, not surfaced.
