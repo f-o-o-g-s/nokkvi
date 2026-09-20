@@ -38,6 +38,18 @@ use crate::{
 
 /// Fixed band height for form rows (the settings detail-pane vocabulary).
 const ROW_H: f32 = 40.0;
+
+/// Hint under the smart-playlist refresh-delay field.
+///
+/// Navidrome treats a zero delay as "use the server default": `Playlist
+/// .RefreshDelay()` (`model/playlist.go` in v0.64.0) falls back to the global
+/// `SmartPlaylistRefreshDelay` unless the playlist's own value is `> 0`, and
+/// `Criteria.MarshalJSON` (`model/criteria/criteria.go`) writes the key only
+/// when it is `> 0`. So `0`, `0s` and `0d` are all accepted, all mean the
+/// default, and all read back as an empty field — which the old
+/// "empty = server default" wording made look like the value was lost.
+const REFRESH_DELAY_HINT: &str = "empty or 0 = server default";
+
 /// Preview row height (compact — the pane is a preview, not a queue).
 const PREVIEW_ROW_H: f32 = 44.0;
 
@@ -976,7 +988,7 @@ fn render_form_row<'a>(
                         cursor_here,
                     ),
                 ),
-                text("empty = server default")
+                text(REFRESH_DELAY_HINT)
                     .size(11)
                     .font(theme::ui_font())
                     .color(theme::fg3()),
@@ -1999,5 +2011,22 @@ fn json_editor_style(
         placeholder: theme::fg4(),
         value: theme::fg0(),
         selection: theme::selection_color(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::REFRESH_DELAY_HINT;
+
+    /// The server accepts a literal `0` and treats it as its own default, but
+    /// omits the key on re-marshal — so a user who types `0` sees the field
+    /// come back empty. The hint has to say `0` means the default, or that
+    /// round trip reads as the value being dropped.
+    #[test]
+    fn refresh_delay_hint_says_zero_means_the_server_default() {
+        assert!(
+            REFRESH_DELAY_HINT.contains('0'),
+            "got {REFRESH_DELAY_HINT:?}",
+        );
     }
 }

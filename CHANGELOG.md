@@ -86,6 +86,7 @@ All notable changes to this project will be documented in this file.
 - Settings > Hotkeys now marks a row whose key another action wins, and names that action.
 - Rebinding a row onto the key it already shares now moves the other action to its own default instead of doing nothing.
 - A rebind that cannot be settled by moving one action now says so instead of reporting a swap that never happened.
+- The smart-playlist refresh-delay hint now says a `0` delay also means the server default.
 
 ### Removed
 
