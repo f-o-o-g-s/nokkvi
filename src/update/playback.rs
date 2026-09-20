@@ -720,7 +720,7 @@ impl Nokkvi {
                     ));
                 }
 
-                // Synced lyrics: promote the prefetched next-track doc into
+                // Lyrics: promote the prefetched next-track doc into
                 // place synchronously (no blank gap on sequential/gapless
                 // transitions), else clear and — only while the Queue view is
                 // showing (no off-surface network) — schedule the debounced
@@ -755,7 +755,8 @@ impl Nokkvi {
                 }
             }
 
-            // Synced lyrics: advance the active-line cursor from the
+            // Lyrics: advance the clock a sheet reads from — the active-line
+            // cursor for a synced sheet, the drift for a plain one — off the
             // authoritative ms position (the whole-second `position` is too
             // coarse for line sync). Runs AFTER the song-change block so a
             // just-cleared doc can't be scanned against the new track's clock;
@@ -775,32 +776,44 @@ impl Nokkvi {
 
             if self.lyrics.enabled
                 && self.lyrics.matched_song_id == song_id
-                && self.lyrics.doc.synced
+                && !self.lyrics.doc.lines.is_empty()
             {
+                // BOTH kinds of sheet follow the clock. A synced one needs it
+                // to find its current line; a plain one because the per-frame
+                // boat tick reads it back through `drift_center`. This block
+                // is the only writer of `position_ms`.
                 self.lyrics.position_ms = position_ms;
-                let new_active = crate::state::active_line_at(&self.lyrics.doc.lines, position_ms);
-                if new_active != self.lyrics.active_index {
-                    // Retarget the glide: snap on seek-sized jumps (or when
-                    // entering/leaving pre-roll), else ease over an adaptive
-                    // duration capped below the gap to the next line.
-                    let snap = match (self.lyrics.active_index, new_active) {
-                        (Some(prev), Some(next)) => {
-                            prev.abs_diff(next) > crate::update::lyrics::LYRICS_SNAP_INDEX_DELTA
-                        }
-                        _ => true,
-                    };
-                    self.lyrics.active_index = new_active;
-                    if let Some(next) = new_active {
-                        let duration = if snap {
-                            0
-                        } else {
-                            crate::update::lyrics::lyrics_glide_duration(
-                                &self.lyrics.doc.lines,
-                                next,
-                            )
+
+                // The line cursor belongs to SYNCED sheets alone. Every line of
+                // a plain sheet carries `time_ms == 0`, so `active_line_at`
+                // would name its LAST line from the first tick and highlight it
+                // for the whole track — its `active_index` stays `None`.
+                if self.lyrics.doc.synced {
+                    let new_active =
+                        crate::state::active_line_at(&self.lyrics.doc.lines, position_ms);
+                    if new_active != self.lyrics.active_index {
+                        // Retarget the glide: snap on seek-sized jumps (or when
+                        // entering/leaving pre-roll), else ease over an adaptive
+                        // duration capped below the gap to the next line.
+                        let snap = match (self.lyrics.active_index, new_active) {
+                            (Some(prev), Some(next)) => {
+                                prev.abs_diff(next) > crate::update::lyrics::LYRICS_SNAP_INDEX_DELTA
+                            }
+                            _ => true,
                         };
-                        let current = crate::widgets::lyrics_viewport::lyrics_center_pos();
-                        self.lyrics.retarget_scroll(next, current, duration);
+                        self.lyrics.active_index = new_active;
+                        if let Some(next) = new_active {
+                            let duration = if snap {
+                                0
+                            } else {
+                                crate::update::lyrics::lyrics_glide_duration(
+                                    &self.lyrics.doc.lines,
+                                    next,
+                                )
+                            };
+                            let current = crate::widgets::lyrics_viewport::lyrics_center_pos();
+                            self.lyrics.retarget_scroll(next, current, duration);
+                        }
                     }
                 }
             }

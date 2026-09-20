@@ -1,6 +1,12 @@
-//! Over-cover synced-lyrics viewport: a non-interactive `advanced::Widget`
-//! that draws the lyric column centered on the active line, plus the scrim
-//! layer that keeps it legible over arbitrary album art.
+//! Over-cover lyrics viewport: an `advanced::Widget` that draws the lyric
+//! column centered on the live center position, plus the scrim layer that
+//! keeps it legible over arbitrary album art.
+//!
+//! Two kinds of sheet share it. A SYNCED sheet centers on its active line,
+//! which glows in `lyrics_accent()` and glides between lines. A PLAIN sheet
+//! (untimed lyrics from the server) has no line known to be current, so
+//! nothing is accented: a flat `PLAIN_BAND_LINES` band carries the eye, and
+//! the column drifts with playback progress (`drift_center`).
 //!
 //! C1 = the static look (owner sign-off gate): per-doc uniform slot heights,
 //! active line in `accent_bright()`, neighbors on an alpha falloff, a vertical
@@ -106,6 +112,36 @@ pub(crate) fn lyrics_center_pos() -> f32 {
     f32::from_bits(LYRICS_CENTER_POS.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// How far either side of the center a PLAIN sheet stays at full brightness,
+/// in slots. A plain sheet has no current line to accent, so a flat band
+/// carries the eye instead of a point. Tuning knob: widen for a calmer sheet,
+/// narrow to focus.
+pub(crate) const PLAIN_BAND_LINES: f32 = 2.0;
+
+/// The column center for a PLAIN sheet (pure): playback progress walks it from
+/// the first line to the last, `offset` carries the user's wheel scrolling, and
+/// the result is clamped to the sheet. No easing — a seek and a wheel notch
+/// both jump, because the center is a pure function of the last tick.
+///
+/// A zero or unknown duration parks the sheet at `offset` rather than dividing
+/// by zero; a sheet with one line (or none) has nowhere to drift.
+pub(crate) fn drift_center(
+    position_ms: u32,
+    duration_ms: u32,
+    line_count: usize,
+    offset: f32,
+) -> f32 {
+    let max = line_count.saturating_sub(1) as f32;
+    if max <= 0.0 {
+        return 0.0;
+    }
+    if duration_ms == 0 {
+        return offset.clamp(0.0, max);
+    }
+    let progress = position_ms as f32 / duration_ms as f32;
+    (progress * max + offset).clamp(0.0, max)
+}
+
 /// Compute the eased center for a glide (pure — the boat tick feeds it the
 /// state fields + `now`, then publishes the result).
 pub(crate) fn eased_center(
@@ -131,6 +167,9 @@ pub(crate) fn eased_center(
 #[derive(Clone, Copy)]
 pub(crate) struct LyricsPanelData<'a> {
     pub lines: &'a [LrcLine],
+    /// `false` for a plain (untimed) sheet: nothing is accented and the column
+    /// center comes from the drift rather than a line cursor.
+    pub synced: bool,
     pub active_index: Option<usize>,
     /// Shown centered when `lines` is empty (no match for this track).
     pub empty_message: Option<&'static str>,
@@ -143,6 +182,9 @@ pub(crate) struct LyricsPanelData<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct DissolveView<'a> {
     pub lines: &'a [LrcLine],
+    /// The parked sheet's own kind — it keeps its own falloff while it fades,
+    /// whatever kind of sheet replaced it.
+    pub synced: bool,
     /// The column center frozen at the transition.
     pub center: f32,
     /// `0.0..1.0` — outgoing alpha is `1 - progress`, incoming is `progress`.
@@ -248,9 +290,28 @@ fn fill_haloed_paragraph(
     renderer.fill_paragraph(paragraph, pos, color, clip);
 }
 
+/// Continuous alpha falloff by distance (in slots) from the column center, so
+/// brightness glides with the column instead of stepping.
+fn falloff_at(distance: f32) -> f32 {
+    if distance <= 1.0 {
+        NEAR_ALPHA + (1.0 - distance) * (ACTIVE_ALPHA - NEAR_ALPHA)
+    } else if distance <= 2.0 {
+        MID_ALPHA + (2.0 - distance) * (NEAR_ALPHA - MID_ALPHA)
+    } else if distance <= 3.0 {
+        FAR_ALPHA + (3.0 - distance) * (MID_ALPHA - FAR_ALPHA)
+    } else {
+        FAR_ALPHA
+    }
+}
+
 /// Draw one lyric column (paragraphs at a uniform slot height) centered on
 /// `center_pos`, with the continuous alpha falloff scaled by `alpha_factor`
 /// (the dissolve cross-blend: outgoing fades out as incoming fades in).
+///
+/// `synced` picks the falloff shape: a synced sheet peaks on its active line,
+/// a plain one holds a flat full-brightness band `PLAIN_BAND_LINES` wide either
+/// side of the center before the same curve takes over — no line of an untimed
+/// sheet is current, so none may look it.
 #[allow(clippy::too_many_arguments)]
 fn draw_column(
     renderer: &mut iced::Renderer,
@@ -260,6 +321,7 @@ fn draw_column(
     center_pos: f32,
     alpha_factor: f32,
     active_index: Option<usize>,
+    synced: bool,
     accent: Color,
     base: Color,
 ) {
@@ -273,17 +335,11 @@ fn draw_column(
             continue;
         }
 
-        // Continuous alpha falloff by distance from the eased center, so
-        // brightness glides with the column instead of stepping.
         let distance = offset_slots.abs();
-        let falloff = if distance <= 1.0 {
-            NEAR_ALPHA + (1.0 - distance) * (ACTIVE_ALPHA - NEAR_ALPHA)
-        } else if distance <= 2.0 {
-            MID_ALPHA + (2.0 - distance) * (NEAR_ALPHA - MID_ALPHA)
-        } else if distance <= 3.0 {
-            FAR_ALPHA + (3.0 - distance) * (MID_ALPHA - FAR_ALPHA)
+        let falloff = if synced {
+            falloff_at(distance)
         } else {
-            FAR_ALPHA
+            falloff_at((distance - PLAIN_BAND_LINES).max(0.0))
         };
         let alpha = falloff * alpha_factor.clamp(0.0, 1.0);
         // The active line's accent fades in as the center arrives.
@@ -442,12 +498,15 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_> {
         }
 
         let slot_h = state.slot_height.max(LINE_HEIGHT);
-        // The column's center in slot-index space: the live eased position
-        // while a glide is in flight (published by the boat tick), clamped to
-        // the doc so a stale value from a previous doc can't fling the column.
-        // Pre-roll (no active line) parks on line 0, dimmed.
+        // The column's center in slot-index space, published by the boat tick
+        // and clamped to THIS doc so a stale value from a previous one (a long
+        // plain sheet before a short synced one) can't fling the column.
+        //
+        // A synced sheet parks on line 0 through pre-roll, dimmed — its center
+        // is only meaningful once a line is active. A plain sheet has no active
+        // line ever, so it always reads the published drift.
         let max_idx = (self.data.lines.len().saturating_sub(1)) as f32;
-        let center_pos = if self.data.active_index.is_some() {
+        let center_pos = if !self.data.synced || self.data.active_index.is_some() {
             lyrics_center_pos().clamp(0.0, max_idx)
         } else {
             0.0
@@ -471,6 +530,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_> {
                     dissolve.center,
                     1.0 - dissolve.progress,
                     None,
+                    dissolve.synced,
                     accent,
                     base,
                 );
@@ -482,7 +542,10 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_> {
                 slot_h,
                 center_pos,
                 incoming_factor,
-                self.data.active_index,
+                // A plain sheet never accents a line — belt and braces beside
+                // the state-side guarantee that its `active_index` is `None`.
+                self.data.active_index.filter(|_| self.data.synced),
+                self.data.synced,
                 accent,
                 base,
             );
@@ -612,6 +675,49 @@ mod tests {
                 rim(a)
             );
         }
+    }
+
+    #[test]
+    fn drift_center_walks_the_sheet_with_playback() {
+        // 11 lines → indices 0..=10, a 200 s track.
+        let at = |pos_ms| drift_center(pos_ms, 200_000, 11, 0.0);
+        assert_eq!(at(0), 0.0, "starts on the first line");
+        assert_eq!(at(100_000), 5.0, "halfway through sits on the middle line");
+        assert_eq!(at(200_000), 10.0, "ends on the last line");
+    }
+
+    #[test]
+    fn drift_center_clamps_at_both_ends() {
+        // A huge offset either way can never push the column off the sheet —
+        // the clamp is applied to the RESULT, so no hidden overshoot survives.
+        assert_eq!(drift_center(0, 200_000, 11, -500.0), 0.0);
+        assert_eq!(drift_center(200_000, 200_000, 11, 500.0), 10.0);
+        assert_eq!(drift_center(100_000, 200_000, 11, 500.0), 10.0);
+        assert_eq!(drift_center(100_000, 200_000, 11, -500.0), 0.0);
+        // A position past the end (a rounding overshoot at the last tick)
+        // clamps too rather than running off.
+        assert_eq!(drift_center(400_000, 200_000, 11, 0.0), 10.0);
+    }
+
+    #[test]
+    fn drift_center_offset_moves_the_column() {
+        // The wheel adds to the drift; the drift carries on from there.
+        assert_eq!(drift_center(0, 200_000, 11, 2.0), 2.0);
+        assert_eq!(drift_center(100_000, 200_000, 11, 2.0), 7.0);
+        assert_eq!(drift_center(100_000, 200_000, 11, -2.0), 3.0);
+    }
+
+    #[test]
+    fn drift_center_survives_a_zero_duration_and_tiny_sheets() {
+        // Duration 0 = unknown (the tick reports whole seconds, and a stream
+        // or a just-started track can report none): park at the offset rather
+        // than divide by zero.
+        assert_eq!(drift_center(50_000, 0, 11, 0.0), 0.0);
+        assert_eq!(drift_center(50_000, 0, 11, 3.0), 3.0);
+        assert_eq!(drift_center(50_000, 0, 11, 99.0), 10.0, "still clamped");
+        // One line, and none at all: nowhere to drift, no panic.
+        assert_eq!(drift_center(50_000, 200_000, 1, 4.0), 0.0);
+        assert_eq!(drift_center(50_000, 200_000, 0, 4.0), 0.0);
     }
 
     #[test]

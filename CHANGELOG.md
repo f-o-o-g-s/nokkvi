@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 - The playlist editor can remove duplicate songs in one click, from the edit bar or a row's right-click menu.
 - The queue's right-click menu can remove duplicate songs without interrupting playback.
 - Adding songs a playlist already has now asks whether to skip them.
+- Plain (untimed) lyrics from your Navidrome server, including lyrics embedded in a file's tags, now show over the Queue cover.
+- Plain lyrics drift with playback so the sheet keeps pace with the song.
 
 ### Changed
 

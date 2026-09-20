@@ -114,7 +114,15 @@ keyword_table! {
         "hotkey.toggle_eq_modal" => &["eq", "bands", "tone", "treble", "bass"],
         "hotkey.open_trawl" => &["mix", "trawl", "crate", "builder", "blend", "anchor"],
         "hotkey.toggle_crossfade" => &["fade", "blend", "gapless"],
-        "hotkey.toggle_lyrics" => &["karaoke", "synced", "words", "subtitles"],
+        "hotkey.toggle_lyrics" => &[
+            "karaoke",
+            "synced",
+            "plain",
+            "unsynced",
+            "embedded",
+            "words",
+            "subtitles",
+        ],
         "hotkey.toggle_bit_perfect" => &["lossless", "audiophile", "hi-res", "passthrough"],
 
         // ── Hotkeys · Navigation ─────────────────────────────────────────────
@@ -230,7 +238,16 @@ keyword_table! {
 
         // ── Playback · Transitions ───────────────────────────────────────────
         "general.crossfade_enabled" => &["fade", "blend", "gapless"],
-        "general.lyrics_enabled" => &["lyrics", "karaoke", "synced", "subtitles", "words"],
+        "general.lyrics_enabled" => &[
+            "lyrics",
+            "karaoke",
+            "synced",
+            "plain",
+            "unsynced",
+            "embedded",
+            "subtitles",
+            "words",
+        ],
         "general.lyrics_fetch_online" => &["lrclib", "lyrics download", "internet", "fetch"],
         "general.lyrics_backdrop_blur" => &["blur", "frost", "frosted", "backdrop", "cover blur"],
         "general.crossfade_duration" => &["fade time", "fade length"],

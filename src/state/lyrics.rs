@@ -1,6 +1,12 @@
 //! Lyrics UI state: the resolved document, the active-line cursor, the store
-//! index handle, and the stale-load guard. Scroll-animation fields and the
-//! word-level dissolve land later (C2 / E1) with their readers.
+//! index handle, the stale-load guard, and the plain sheet's manual scroll
+//! offset.
+//!
+//! Two kinds of sheet share these fields. A SYNCED doc drives `active_index`
+//! and glides between lines. A PLAIN doc (untimed lyrics from the server) has
+//! every `time_ms == 0`, so it must never reach `active_line_at` — which would
+//! name its LAST line from the first tick. Its `active_index` stays `None` for
+//! its whole life and its column center comes from `drift_center` instead.
 
 use std::sync::Arc;
 
@@ -13,6 +19,9 @@ use nokkvi_data::types::lyrics::{LrcDocument, LrcLine, LyricsIndex};
 #[derive(Debug)]
 pub struct OutgoingLyrics {
     pub doc: LrcDocument,
+    /// Whether the parked sheet was synced — it keeps drawing with its own
+    /// falloff while it fades, whatever kind of sheet replaced it.
+    pub synced: bool,
     /// The column center (slot-index space) frozen at the transition, so the
     /// outgoing sheet fades in place instead of re-centering.
     pub center: f32,
@@ -49,7 +58,9 @@ pub struct LyricsState {
     pub pending_next: Option<(String, LrcDocument)>,
     /// Identity of the track `doc` belongs to — half of the stale-load guard.
     pub matched_song_id: Option<String>,
-    /// Index of the active line, or `None` before the first timestamp (pre-roll).
+    /// Index of the active line, or `None` before the first timestamp
+    /// (pre-roll). Stays `None` for a plain sheet's whole life — no line of an
+    /// untimed sheet is known to be current, so none is accented.
     pub active_index: Option<usize>,
     /// Bumped on every clear / promote / resolve-dispatch. An async resolve
     /// result is applied only if the epoch still matches — so a newer resolve
@@ -71,6 +82,10 @@ pub struct LyricsState {
     /// The previous track's sheet dissolving across a crossfaded transition.
     /// `None` when no dissolve is in flight (incl. crossfade disabled).
     pub outgoing: Option<OutgoingLyrics>,
+    /// A PLAIN sheet's manual scroll, in slot units, added to the drift.
+    /// Written already clamped (no hidden overshoot past either end) and reset
+    /// on every song change, so a scroll never carries into the next track.
+    pub drift_offset: f32,
 }
 
 impl LyricsState {
@@ -86,6 +101,7 @@ impl LyricsState {
         // scans against the new track (the tick only refreshes position_ms once
         // a match lands, so a stale value would snap-highlight the wrong line).
         self.position_ms = 0;
+        self.drift_offset = 0.0;
         self.load_epoch = self.load_epoch.wrapping_add(1);
     }
 
@@ -93,8 +109,9 @@ impl LyricsState {
     /// coupled transitions). Call BEFORE `promote_next`/`clear` at the
     /// song-change edge; a no-op when there is nothing worth fading.
     pub fn park_outgoing(&mut self, center: f32, duration_ms: u32) {
-        if self.doc.synced && !self.doc.lines.is_empty() && duration_ms > 0 {
+        if !self.doc.lines.is_empty() && duration_ms > 0 {
             self.outgoing = Some(OutgoingLyrics {
+                synced: self.doc.synced,
                 doc: std::mem::take(&mut self.doc),
                 center,
                 started: std::time::Instant::now(),
@@ -140,6 +157,9 @@ impl LyricsState {
                 self.doc = doc;
                 self.matched_song_id = Some(id);
                 self.active_index = None;
+                // The incoming sheet starts unscrolled, whatever the user did
+                // to the one it replaces.
+                self.drift_offset = 0.0;
                 self.load_epoch = self.load_epoch.wrapping_add(1);
                 true
             }
@@ -156,6 +176,10 @@ impl LyricsState {
 /// Index of the last line whose timestamp is `<= position_ms`, or `None` before
 /// the first timestamp (pre-roll — no line is active yet). O(log n); relies on
 /// `parse()` having sorted the lines by time.
+///
+/// SYNCED sheets only. Every line of a plain sheet carries `time_ms == 0`, so
+/// every line passes the partition and this would name the LAST one from the
+/// first tick — a plain sheet must never reach here.
 pub(crate) fn active_line_at(lines: &[LrcLine], position_ms: u32) -> Option<usize> {
     let reached = lines.partition_point(|l| l.time_ms <= position_ms);
     (reached > 0).then(|| reached - 1)

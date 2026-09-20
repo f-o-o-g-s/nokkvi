@@ -1700,7 +1700,9 @@ impl Nokkvi {
     /// lyrics toggle is on and queue playback is active (including the empty
     /// no-match state — the scrim + message still render, with the visualizer
     /// co-rendering beneath the text), `None` otherwise. Borrows the resolved
-    /// doc; an unmatched track shows the faded no-match message.
+    /// doc; an unmatched track shows the faded no-match message. `synced`
+    /// carries whether the sheet is timed, which picks the falloff and decides
+    /// whether any line is accented.
     pub(crate) fn queue_lyrics_panel_data(
         &self,
     ) -> Option<crate::widgets::lyrics_viewport::LyricsPanelData<'_>> {
@@ -1722,11 +1724,12 @@ impl Nokkvi {
                 let progress = outgoing.progress(std::time::Instant::now());
                 (progress < 1.0).then(|| crate::widgets::lyrics_viewport::DissolveView {
                     lines: &outgoing.doc.lines,
+                    synced: outgoing.synced,
                     center: outgoing.center,
                     progress,
                 })
             });
-            // The "no synced lyrics" message is a RESOLVED verdict, shown only
+            // The "no lyrics" message is a RESOLVED verdict, shown only
             // once this track's resolve has landed (matched_song_id == current).
             // While a resolve is still in flight matched_song_id is None, so the
             // panel stays blank rather than flashing a false negative on every
@@ -1738,8 +1741,9 @@ impl Nokkvi {
                     == self.scrobble.current_song_id.as_deref();
             crate::widgets::lyrics_viewport::LyricsPanelData {
                 lines: &self.lyrics.doc.lines,
+                synced: self.lyrics.doc.synced,
                 active_index: self.lyrics.active_index,
-                empty_message: resolved_no_match.then_some("No synced lyrics for this track"),
+                empty_message: resolved_no_match.then_some("No lyrics for this track"),
                 dissolve,
             }
         })

@@ -43,20 +43,37 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // player is paused or stopped.
     step_harbour_scene(app, now);
 
-    // Synced-lyrics glide: ease the column center toward the active line at
-    // display refresh, smoothing the 100 ms position ticks into crossfade-tier
-    // motion. Runs BEFORE the boat's early-outs (lyrics must animate whatever
-    // the visualizer mode) and with NO pause gate — an in-flight glide settles
-    // to its target even while paused (the retarget only fires on real line
-    // changes, which don't happen while paused).
+    // Lyrics column center — the SINGLE publisher, for both kinds of sheet.
+    // Runs BEFORE the boat's early-outs (lyrics must animate whatever the
+    // visualizer mode) and with NO pause gate.
+    //
+    // Synced: ease toward the active line at display refresh, smoothing the
+    // 100 ms position ticks into crossfade-tier motion. An in-flight glide
+    // settles to its target even while paused (the retarget only fires on real
+    // line changes, which don't happen while paused).
+    //
+    // Plain: a pure function of the last tick's position, the track duration,
+    // the line count and the user's wheel offset — so it holds still while
+    // paused and jumps whole on a seek or a wheel notch.
     if app.lyrics.enabled && app.lyrics.matched_song_id.is_some() {
-        let pos = crate::widgets::lyrics_viewport::eased_center(
-            app.lyrics.scroll_from,
-            app.lyrics.scroll_to,
-            app.lyrics.anim_start,
-            app.lyrics.anim_duration_ms,
-            now,
-        );
+        let pos = if app.lyrics.doc.synced {
+            crate::widgets::lyrics_viewport::eased_center(
+                app.lyrics.scroll_from,
+                app.lyrics.scroll_to,
+                app.lyrics.anim_start,
+                app.lyrics.anim_duration_ms,
+                now,
+            )
+        } else {
+            crate::widgets::lyrics_viewport::drift_center(
+                app.lyrics.position_ms,
+                // The tick reports whole seconds; 0 means unknown, which
+                // `drift_center` parks on rather than dividing by.
+                app.playback.duration.saturating_mul(1000),
+                app.lyrics.doc.lines.len(),
+                app.lyrics.drift_offset,
+            )
+        };
         crate::widgets::lyrics_viewport::set_lyrics_center(pos);
     }
 

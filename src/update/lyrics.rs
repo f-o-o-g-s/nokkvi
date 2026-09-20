@@ -1,5 +1,7 @@
-//! Synced-lyrics resolve pipeline: debounced dispatch on song change, the
+//! Lyrics resolve pipeline: debounced dispatch on song change, the
 //! stale-guarded application of async results, and the next-track prefetch.
+//! Handles both kinds of sheet — synced (a line cursor plus a glide) and
+//! plain (untimed server lyrics that drift with playback).
 //!
 //! The chain itself (the user's own `.lrc` files → `getLyricsBySongId` →
 //! cached LRCLIB downloads → the LRCLIB network fetch) lives on
@@ -225,19 +227,30 @@ impl Nokkvi {
                 if epoch == self.lyrics.load_epoch
                     && self.scrobble.current_song_id.as_deref() == Some(song_id.as_str())
                 {
-                    // An unsynced/empty doc is a no-match: record the identity
-                    // (so nothing re-fires for this track) with an empty doc,
-                    // which renders as the empty state. Nothing is faked.
-                    self.lyrics.doc = if doc.synced && !doc.lines.is_empty() {
+                    // An EMPTY doc is the no-match: record the identity (so
+                    // nothing re-fires for this track) with an empty doc, which
+                    // renders as the empty state. Nothing is faked. A plain
+                    // doc with lines is a real sheet and is kept.
+                    self.lyrics.doc = if doc.is_renderable() {
                         *doc
                     } else {
                         Default::default()
                     };
                     self.lyrics.matched_song_id = Some(song_id);
-                    self.lyrics.active_index = crate::state::active_line_at(
-                        &self.lyrics.doc.lines,
-                        self.lyrics.position_ms,
-                    );
+                    // Only a synced sheet has a current line. Over a plain
+                    // sheet's all-zero stamps `active_line_at` would name the
+                    // LAST line, so it never runs.
+                    self.lyrics.active_index = self
+                        .lyrics
+                        .doc
+                        .synced
+                        .then(|| {
+                            crate::state::active_line_at(
+                                &self.lyrics.doc.lines,
+                                self.lyrics.position_ms,
+                            )
+                        })
+                        .flatten();
                     // A doc landing mid-track snaps straight to its line — the
                     // user hasn't watched the column move yet, so there is
                     // nothing to glide from.
@@ -248,11 +261,11 @@ impl Nokkvi {
                 Task::none()
             }
             LyricsLoaderMessage::PrefetchLoaded { song_id, doc } => {
-                // Park only a real synced doc, and only for a track that isn't
-                // already current (a late prefetch for the now-playing track is
-                // useless — the cold path already handled it).
-                if doc.synced
-                    && !doc.lines.is_empty()
+                // Park any real sheet (synced or plain), and only for a track
+                // that isn't already current (a late prefetch for the
+                // now-playing track is useless — the cold path already handled
+                // it). An empty doc is a no-match and never parks.
+                if doc.is_renderable()
                     && self.scrobble.current_song_id.as_deref() != Some(song_id.as_str())
                 {
                     self.lyrics.pending_next = Some((song_id, *doc));

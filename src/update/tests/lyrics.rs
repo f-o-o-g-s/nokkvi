@@ -27,6 +27,21 @@ fn timed_doc(times_ms: &[u32]) -> LrcDocument {
     }
 }
 
+/// A plain (untimed) sheet as the server hands it over: `synced: false`, every
+/// stamp 0, the server's line order.
+fn plain_doc(line_count: usize) -> LrcDocument {
+    LrcDocument {
+        lines: (0..line_count)
+            .map(|i| LrcLine {
+                time_ms: 0,
+                text: format!("plain line {i}"),
+                words: vec![],
+            })
+            .collect(),
+        synced: false,
+    }
+}
+
 fn update_for(song_id: &str, position_ms: u32) -> PlaybackStateUpdate {
     PlaybackStateUpdate {
         position: position_ms / 1000,
@@ -169,21 +184,34 @@ fn stale_load_rejected_wrong_epoch() {
 }
 
 #[test]
-fn unsynced_doc_is_no_match() {
+fn plain_doc_is_kept_with_no_active_line() {
+    let mut app = test_app();
+    app.lyrics.enabled = true;
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.lyrics.position_ms = 50_000;
+
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: "song_1".to_string(),
+        doc: Box::new(plain_doc(3)),
+        epoch: app.lyrics.load_epoch,
+    });
+    assert_eq!(app.lyrics.matched_song_id.as_deref(), Some("song_1"));
+    assert_eq!(app.lyrics.doc.lines.len(), 3, "plain lyrics are kept");
+    assert!(!app.lyrics.doc.synced);
+    // No line of an untimed sheet is known to be current. Running
+    // `active_line_at` over all-zero stamps would name the LAST line.
+    assert_eq!(app.lyrics.active_index, None);
+}
+
+#[test]
+fn empty_doc_is_still_the_no_match() {
     let mut app = test_app();
     app.lyrics.enabled = true;
     app.scrobble.current_song_id = Some("song_1".to_string());
 
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
         song_id: "song_1".to_string(),
-        doc: Box::new(LrcDocument {
-            lines: vec![LrcLine {
-                time_ms: 0,
-                text: "plain".into(),
-                words: vec![],
-            }],
-            synced: false,
-        }),
+        doc: Box::new(LrcDocument::default()),
         epoch: app.lyrics.load_epoch,
     });
     // Identity recorded (no re-fire loop), doc honestly empty.
@@ -193,7 +221,27 @@ fn unsynced_doc_is_no_match() {
 }
 
 #[test]
-fn prefetch_parks_only_non_current_synced() {
+fn a_plain_sheet_never_gains_an_active_line_on_a_tick() {
+    // The trap: every stamp is 0, so `active_line_at` would return the LAST
+    // line from the first tick and highlight it for the whole track.
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(5));
+
+    for position_ms in [0, 100_000, 199_000] {
+        let _ = app.handle_playback_state_updated(update_for("song_1", position_ms));
+        assert_eq!(
+            app.lyrics.active_index, None,
+            "no active line at {position_ms} ms"
+        );
+        assert_eq!(
+            app.lyrics.position_ms, position_ms,
+            "the plain sheet still follows the clock"
+        );
+    }
+}
+
+#[test]
+fn prefetch_parks_any_non_current_sheet() {
     let mut app = test_app();
     app.lyrics.enabled = true;
     app.scrobble.current_song_id = Some("song_1".to_string());
@@ -204,6 +252,14 @@ fn prefetch_parks_only_non_current_synced() {
         doc: Box::new(timed_doc(&[0])),
     });
     assert!(app.lyrics.pending_next.is_none());
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::PrefetchLoaded {
+        song_id: "song_1".to_string(),
+        doc: Box::new(plain_doc(3)),
+    });
+    assert!(
+        app.lyrics.pending_next.is_none(),
+        "a plain prefetch for the current track is dropped too"
+    );
 
     // A synced doc for the NEXT track parks.
     let _ = app.handle_lyrics_loader(LyricsLoaderMessage::PrefetchLoaded {
@@ -214,6 +270,25 @@ fn prefetch_parks_only_non_current_synced() {
         app.lyrics.pending_next.as_ref().map(|(id, _)| id.as_str()),
         Some("song_2")
     );
+
+    // So does a plain one — it is a real sheet now, not a no-match.
+    app.lyrics.pending_next = None;
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::PrefetchLoaded {
+        song_id: "song_3".to_string(),
+        doc: Box::new(plain_doc(4)),
+    });
+    assert_eq!(
+        app.lyrics.pending_next.as_ref().map(|(id, _)| id.as_str()),
+        Some("song_3")
+    );
+
+    // An EMPTY doc is still a no-match and never parks.
+    app.lyrics.pending_next = None;
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::PrefetchLoaded {
+        song_id: "song_4".to_string(),
+        doc: Box::new(LrcDocument::default()),
+    });
+    assert!(app.lyrics.pending_next.is_none());
 }
 
 #[test]
@@ -467,11 +542,9 @@ fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     // A landed no-match for the current track (matched == current, empty doc):
     // now the message is the resolved verdict.
     app.lyrics.matched_song_id = Some("song_1".to_string());
-    assert!(
-        app.queue_lyrics_panel_data()
-            .expect("loaded")
-            .empty_message
-            .is_some(),
+    assert_eq!(
+        app.queue_lyrics_panel_data().expect("loaded").empty_message,
+        Some("No lyrics for this track"),
         "resolved no-match shows the message"
     );
 
@@ -481,6 +554,17 @@ fn queue_lyrics_panel_data_gated_on_enabled_and_loaded_track() {
     assert_eq!(data.lines.len(), 1);
     assert!(data.empty_message.is_none());
     assert_eq!(data.active_index, Some(0));
+    assert!(data.synced, "a timed sheet renders as synced");
+
+    // A plain sheet renders with `synced == false`: no accent line, the flat
+    // band falloff, and the drift center instead of the glide.
+    app.lyrics.doc = plain_doc(4);
+    app.lyrics.active_index = None;
+    let data = app.queue_lyrics_panel_data().expect("plain sheet renders");
+    assert_eq!(data.lines.len(), 4);
+    assert!(!data.synced);
+    assert_eq!(data.active_index, None);
+    assert!(data.empty_message.is_none());
 
     // Paused keeps the layer; a stop (both transport flags false) drops it
     // even though current_song_id survives.
@@ -616,6 +700,125 @@ fn fast_line_gap_caps_glide_duration() {
 }
 
 #[test]
+fn plain_sheet_drifts_with_playback() {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(11));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+
+    // `update_for` reports a 200 s track, so the 11-line sheet walks 0 -> 10.
+    let tick_to = |app: &mut crate::Nokkvi, position_ms| {
+        let _ = app.handle_playback_state_updated(update_for("song_1", position_ms));
+        let _ = crate::update::boat::handle_boat_tick(app, std::time::Instant::now());
+        crate::widgets::lyrics_viewport::lyrics_center_pos()
+    };
+
+    assert_eq!(tick_to(&mut app, 0), 0.0, "starts on the first line");
+    assert_eq!(tick_to(&mut app, 100_000), 5.0, "halfway sits mid-sheet");
+    assert_eq!(tick_to(&mut app, 200_000), 10.0, "ends on the last line");
+}
+
+#[test]
+fn plain_sheet_jumps_in_one_step_on_a_seek() {
+    // The center is a pure function of the last tick, so a seek arrives whole
+    // rather than gliding — no easing in v1.
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(11));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+
+    let _ = app.handle_playback_state_updated(update_for("song_1", 10_000));
+    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 0.5);
+
+    let _ = app.handle_playback_state_updated(update_for("song_1", 150_000));
+    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 7.5);
+}
+
+#[test]
+fn plain_sheet_parks_when_the_duration_is_unknown() {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(11));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+
+    let mut update = update_for("song_1", 100_000);
+    update.duration = 0;
+    let _ = app.handle_playback_state_updated(update);
+    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    assert_eq!(
+        crate::widgets::lyrics_viewport::lyrics_center_pos(),
+        0.0,
+        "a zero duration parks at the offset instead of dividing by zero"
+    );
+}
+
+#[test]
+fn a_synced_sheet_after_a_plain_one_follows_its_own_glide() {
+    // The published center is a process-global atomic. A stale drift value
+    // from the previous plain sheet must not fling the synced column.
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(60));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+    let _ = app.handle_playback_state_updated(update_for("song_1", 200_000));
+    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    assert_eq!(crate::widgets::lyrics_viewport::lyrics_center_pos(), 59.0);
+
+    // A synced track follows. Its own tick retargets and its own boat tick
+    // republishes, so the drift value is gone by the first rendered frame.
+    seed_matched(&mut app, "song_2", timed_doc(&[1_000, 2_000, 3_000]));
+    app.lyrics.active_index = None;
+    let _ = app.handle_playback_state_updated(update_for("song_2", 1_000));
+    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    assert_eq!(
+        crate::widgets::lyrics_viewport::lyrics_center_pos(),
+        0.0,
+        "the synced glide owns the center again"
+    );
+}
+
+#[test]
+fn drift_offset_resets_on_clear_and_promote() {
+    let mut state = crate::state::LyricsState {
+        drift_offset: 4.0,
+        ..Default::default()
+    };
+    state.clear();
+    assert_eq!(state.drift_offset, 0.0, "a song change unscrolls the sheet");
+
+    state.drift_offset = 4.0;
+    state.pending_next = Some(("song_2".to_string(), plain_doc(3)));
+    assert!(state.promote_next("song_2"));
+    assert_eq!(
+        state.drift_offset, 0.0,
+        "the promoted sheet starts unscrolled"
+    );
+}
+
+#[test]
+fn crossfade_transition_parks_a_plain_sheet_too() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(6));
+    app.engine.crossfade_enabled = true;
+    app.engine.crossfade_duration_secs = 7;
+
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    let outgoing = app
+        .lyrics
+        .outgoing
+        .as_ref()
+        .expect("a plain sheet dissolves out like a synced one");
+    assert_eq!(outgoing.doc.lines.len(), 6);
+    assert!(
+        !outgoing.synced,
+        "the parked sheet remembers its kind so it keeps its own falloff"
+    );
+    assert_eq!(outgoing.duration_ms, 7_000);
+}
+
+#[test]
 fn crossfade_transition_parks_outgoing_sheet() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
@@ -653,6 +856,7 @@ fn finished_dissolve_expires_on_tick() {
     app.lyrics.enabled = true;
     app.lyrics.outgoing = Some(crate::state::OutgoingLyrics {
         doc: timed_doc(&[1_000]),
+        synced: true,
         center: 0.0,
         started: std::time::Instant::now() - std::time::Duration::from_secs(30),
         duration_ms: 5_000,

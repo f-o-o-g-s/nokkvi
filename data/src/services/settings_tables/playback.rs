@@ -75,9 +75,9 @@ define_settings! {
                 label: "Lyrics",
                 category: "Playback",
                 subtitle: Some(
-                    "Show synced lyrics over the Queue cover art, following the playing track \
-                     line by line. Off leaves the cover (and any over-cover visualizer) \
-                     untouched.",
+                    "Show lyrics over the Queue cover art. Synced lyrics follow the track line \
+                     by line; plain lyrics drift with playback and scroll with the mouse wheel. \
+                     Off leaves the cover (and any over-cover visualizer) untouched.",
                 ),
                 default: false,
                 read_field: |d| d.lyrics_enabled,
