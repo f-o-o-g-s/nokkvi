@@ -131,6 +131,12 @@ pub struct PlaybackStateUpdate {
     /// Optional because not all music has BPM metadata; the boat
     /// physics falls back to the spectral-flux envelope when absent.
     pub bpm: Option<u32>,
+    /// `Nokkvi.seek.epoch` as it stood when `handle_tick` read the engine.
+    /// `handle_playback_state_updated` drops an update whose epoch no longer
+    /// matches: that update was built before a seek (or while one was in
+    /// flight), so its clock, its listening-time delta and its MPRIS push all
+    /// describe a position the user has already moved away from.
+    pub seek_epoch: u64,
 }
 
 /// Async lyrics-resolve pipeline messages, carried by `Message::LyricsLoader`.
@@ -197,6 +203,26 @@ pub enum PlaybackMessage {
         holder: Option<String>,
     },
     Seek(f32),
+    /// Move the playhead by this many seconds from wherever the ENGINE is
+    /// (negative rewinds). The arithmetic happens in the backend under one
+    /// engine-lock acquisition — see `PlaybackController::seek_relative` — so
+    /// repeats from a held key accumulate rather than all landing on one
+    /// frozen UI clock.
+    SeekRelative(f32),
+    /// A dispatched seek landed at `landed` seconds; `None` when the backend
+    /// errored. Clears the in-flight flag and dispatches whatever merged
+    /// behind it.
+    ///
+    /// `epoch` is `Nokkvi.seek.epoch` as it stood when the seek was
+    /// dispatched. A result carrying any other epoch belongs to a seek the app
+    /// has moved on from — a logout or session expiry cleared the cluster
+    /// while the task was in flight — and is ignored outright, so it can
+    /// neither write a dead session's position onto the clock (nor onto D-Bus)
+    /// nor clear the in-flight flag a LATER seek is relying on.
+    SeekApplied {
+        epoch: u64,
+        landed: Option<f32>,
+    },
     VolumeChanged(f32),
     /// Discrete user-committed volume value — always persists to disk
     /// regardless of the in-flight 500ms `VolumeChanged` throttle. Covers

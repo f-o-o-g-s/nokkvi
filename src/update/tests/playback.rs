@@ -77,6 +77,7 @@ fn make_playback_update() -> PlaybackStateUpdate {
         bitrate: 1411,
         live_icy_metadata: None,
         bpm: None,
+        seek_epoch: 0,
     }
 }
 
@@ -1571,5 +1572,265 @@ fn prev_track_radio_ignores_restart_when_enabled() {
     assert_eq!(
         app.scrobble.last_position, 99.0,
         "radio Previous must cycle stations, not restart-seek, regardless of position"
+    );
+}
+
+// ============================================================================
+// Seek arbitration: one in flight, the rest merged; stale ticks dropped
+// ============================================================================
+//
+// `test_app()` has no `app_service`, so `dispatch_seek` returns before touching
+// the cluster (`shell_task` would drop the task and nothing would ever clear
+// the in-flight flag). These tests therefore drive the cluster and the
+// `SeekApplied` / tick-gate handlers directly, which is where every observable
+// state mutation lives.
+
+#[test]
+fn seek_applied_publishes_the_landed_position() {
+    let mut app = test_app();
+    app.playback.position = 10;
+    app.scrobble.last_position = 10.0;
+    let epoch = app.seek.epoch;
+
+    let _ = app.handle_seek_applied(app.seek.epoch, Some(42.5));
+
+    assert_eq!(
+        app.playback.position, 42,
+        "the bar jumps to the landed position without waiting for a tick"
+    );
+    assert_eq!(
+        app.scrobble.last_position, 42.5,
+        "the anti-seek-fraud base moves to where the seek actually landed"
+    );
+    assert!(
+        !app.seek.in_flight(),
+        "the landed seek is no longer in flight"
+    );
+    assert_eq!(
+        app.seek.epoch,
+        epoch.wrapping_add(1),
+        "a landed seek bumps the epoch so a mid-seek tick can't overwrite it"
+    );
+}
+
+#[test]
+fn seek_applied_error_clears_the_flag_without_moving_the_clock() {
+    let mut app = test_app();
+    app.playback.position = 10;
+    app.scrobble.last_position = 10.0;
+
+    let _ = app.handle_seek_applied(app.seek.epoch, None);
+
+    assert_eq!(app.playback.position, 10, "a failed seek moves no clock");
+    assert_eq!(app.scrobble.last_position, 10.0);
+    assert!(
+        !app.seek.in_flight(),
+        "a backend error must not wedge the in-flight flag"
+    );
+}
+
+#[test]
+fn a_tick_from_an_older_seek_epoch_keeps_its_position_to_itself() {
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.scrobble.last_position = 42.0;
+    app.scrobble.listening_time = 5.0;
+    app.playback.position = 42;
+    app.playback.title = "Old Song".to_string();
+    app.playback.duration = 100;
+
+    // This update was built before the seek that bumped the epoch.
+    let mut update = make_playback_update();
+    update.position = 90;
+    update.song_id = Some("song_1".to_string());
+    update.seek_epoch = app.seek.epoch;
+    app.seek.epoch = app.seek.epoch.wrapping_add(1);
+
+    let _ = app.handle_playback_state_updated(update);
+
+    assert_eq!(
+        app.playback.position, 42,
+        "a pre-seek tick must not drag the clock back"
+    );
+    assert_eq!(
+        app.scrobble.listening_time, 5.0,
+        "a pre-seek tick credits no listening time"
+    );
+    // A held seek key bumps the epoch faster than ticks arrive, so a gate on
+    // the WHOLE update would freeze every one of these on the old track.
+    assert_eq!(
+        app.playback.title, "Test Song",
+        "everything that isn't position-derived still applies"
+    );
+    assert_eq!(app.playback.duration, 200, "the duration still applies");
+    assert!(app.playback.playing, "the play state still applies");
+}
+
+#[test]
+fn a_tick_from_the_current_seek_epoch_applies() {
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.playback.position = 42;
+    app.seek.epoch = 7;
+
+    let mut update = make_playback_update();
+    update.position = 90;
+    update.song_id = Some("song_1".to_string());
+    update.seek_epoch = 7;
+
+    let _ = app.handle_playback_state_updated(update);
+
+    assert_eq!(app.playback.position, 90, "a current-epoch tick applies");
+}
+
+#[test]
+fn a_small_backward_seek_credits_no_listening_time() {
+    // The hole the seek epoch closes: a tick computed BEFORE a backward seek
+    // and delivered after it reads `old_pos - target` — a positive delta under
+    // the 10 s backstop — and used to credit it.
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.scrobble.listening_time = 5.0;
+    app.playback.position = 100;
+
+    // A 5 s rewind from 1:40. `handle_seek` writes the target to the base.
+    let _ = app.handle_seek(95.0);
+    let stale_epoch = app.seek.epoch;
+    app.seek.epoch = app.seek.epoch.wrapping_add(1);
+
+    // The pre-seek tick, still reporting 1:40, lands after the seek.
+    let mut update = make_playback_update();
+    update.position = 100;
+    update.song_id = Some("song_1".to_string());
+    update.seek_epoch = stale_epoch;
+
+    let _ = app.handle_playback_state_updated(update);
+
+    assert_eq!(
+        app.scrobble.listening_time, 5.0,
+        "the 5 s a backward seek skipped over must not be credited as listened"
+    );
+}
+
+#[test]
+fn no_listening_time_is_credited_while_a_seek_is_in_flight() {
+    // A tick can land between the engine finishing a seek and `SeekApplied`
+    // arriving — same epoch, but the base is still the pre-seek one.
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.scrobble.last_position = 42.0;
+    app.scrobble.listening_time = 5.0;
+    assert_eq!(
+        app.seek.request(crate::state::SeekRequest::Relative(5.0)),
+        Some(crate::state::SeekRequest::Relative(5.0))
+    );
+    assert!(app.seek.in_flight());
+
+    let mut update = make_playback_update();
+    update.position = 47;
+    update.song_id = Some("song_1".to_string());
+    update.seek_epoch = app.seek.epoch;
+
+    let _ = app.handle_playback_state_updated(update);
+
+    assert_eq!(
+        app.scrobble.listening_time, 5.0,
+        "a tick delivered while a seek is outstanding credits nothing"
+    );
+    assert_eq!(
+        app.scrobble.last_position, 47.0,
+        "it still resyncs the base so the next tick's delta is honest"
+    );
+}
+
+#[test]
+fn seek_relative_does_nothing_during_radio_playback() {
+    let mut app = test_app();
+    app.active_playback = radio_playing("station_1");
+    app.playback.position = 30;
+    app.scrobble.last_position = 30.0;
+
+    let _ = app.handle_seek_relative(5.0);
+
+    assert!(
+        !app.seek.in_flight(),
+        "a seek key during radio is a silent no-op, not a queued request"
+    );
+    assert_eq!(app.playback.position, 30);
+    assert_eq!(app.scrobble.last_position, 30.0);
+}
+
+#[test]
+fn reset_session_state_clears_an_outstanding_seek() {
+    let mut app = test_app();
+    assert_eq!(
+        app.seek.request(crate::state::SeekRequest::Relative(5.0)),
+        Some(crate::state::SeekRequest::Relative(5.0))
+    );
+    assert_eq!(
+        app.seek.request(crate::state::SeekRequest::Relative(5.0)),
+        None
+    );
+    let epoch = app.seek.epoch;
+
+    let _ = app.reset_session_state();
+
+    assert!(!app.seek.in_flight());
+    assert_eq!(app.seek.queued(), None);
+    assert_eq!(
+        app.seek.epoch,
+        epoch.wrapping_add(1),
+        "the epoch bump is what strands a logout-crossing SeekApplied"
+    );
+}
+
+#[test]
+fn a_seek_result_from_a_cleared_session_is_ignored() {
+    // Logout bumps the epoch and clears the cluster while the task is still in
+    // flight; the shell it captured outlives the logout, so the result lands.
+    let mut app = test_app();
+    app.playback.position = 10;
+    app.playback.playing = true;
+    app.scrobble.last_position = 10.0;
+    let stale_epoch = app.seek.epoch;
+    app.seek.reset_for_session();
+
+    // A later session puts a real seek in flight.
+    assert_eq!(
+        app.seek.request(crate::state::SeekRequest::Relative(5.0)),
+        Some(crate::state::SeekRequest::Relative(5.0))
+    );
+
+    let _ = app.handle_seek_applied(stale_epoch, Some(180.0));
+
+    assert_eq!(
+        app.playback.position, 10,
+        "a dead session's seek writes no clock"
+    );
+    assert_eq!(app.scrobble.last_position, 10.0);
+    assert!(
+        app.seek.in_flight(),
+        "it must not clear the in-flight flag the LIVE seek is holding"
+    );
+}
+
+#[test]
+fn a_landed_seek_stores_the_whole_second_floor_for_the_tick_heuristic() {
+    // `push_mpris_state` infers `Seeked` from the jump against this value, so
+    // storing the floor the clock write landed on is what keeps the next tick
+    // from announcing the same seek a second time.
+    //
+    // NOTE: the D-Bus emit itself is not observable here — `test_app()` has no
+    // `mpris_connection` — so the "don't re-announce the same second" half of
+    // `handle_seek_applied` is read-verified only.
+    let mut app = test_app();
+    app.playback.playing = true;
+    app.last_mpris_position_us = 0;
+
+    let _ = app.handle_seek_applied(app.seek.epoch, Some(42.5));
+
+    assert_eq!(
+        app.last_mpris_position_us, 42_000_000,
+        "the whole-second floor, not the exact microseconds, is what the tick compares"
     );
 }

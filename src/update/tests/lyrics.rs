@@ -66,6 +66,7 @@ fn update_for(song_id: &str, position_ms: u32) -> PlaybackStateUpdate {
         bitrate: 1411,
         live_icy_metadata: None,
         bpm: None,
+        seek_epoch: 0,
     }
 }
 

@@ -484,18 +484,65 @@ impl PlaybackController {
         .await
     }
 
-    /// Seek to position
-    pub async fn seek(&self, position_seconds: f64) -> Result<()> {
+    /// Seek to an absolute position, in seconds. Returns where the engine
+    /// actually landed, in milliseconds — which is the position BEFORE the
+    /// seek when the engine refused it (stopped, radio, an uninitialized
+    /// decoder), so the caller's clock never claims a jump that did not
+    /// happen.
+    pub async fn seek(&self, position_seconds: f64) -> Result<u64> {
         let position_ms = (position_seconds * 1000.0) as u64;
-        let outcome = self.audio_engine.lock().await.seek(position_ms).await;
+        let mut engine = self.audio_engine.lock().await;
+        let outcome = engine.seek(position_ms).await;
+        let landed = engine.position();
+        drop(engine);
+        self.after_seek(outcome).await;
+        Ok(landed)
+    }
+
+    /// Move the playhead by `delta_seconds` from wherever the engine is now.
+    /// Returns the landed position in milliseconds.
+    ///
+    /// The base is read from the engine's own millisecond clock under the SAME
+    /// lock acquisition as the seek, never from the UI's whole-second
+    /// `playback.position`. Two consequences the held-key path depends on:
+    ///
+    /// - the base names the track the seek will apply to, even mid-skip;
+    /// - calls queued behind one another each read the previous one's result,
+    ///   so a burst of repeats accumulates instead of all landing on one
+    ///   frozen base (the UI clock cannot move while a seek holds this lock).
+    ///
+    /// The low clamp is [`offset_position_ms`]; the high clamp is the engine's
+    /// own `min(duration)`, so a jump past the end ends the track exactly as
+    /// dragging the slider there does.
+    pub async fn seek_relative(&self, delta_seconds: f64) -> Result<u64> {
+        let mut engine = self.audio_engine.lock().await;
+        let base = engine.position();
+        let Some(target) = relative_seek_target(base, delta_seconds) else {
+            // Already parked where this would land — at 0:00, every further
+            // rewind computes the same target. Seeking anyway would supersede
+            // the decode loop, sleep 20 ms, re-seek the decoder and TEAR DOWN
+            // AND REBUILD the PipeWire stream, ~25 times a second under a held
+            // key: the first fraction of the track machine-guns.
+            return Ok(base);
+        };
+        let outcome = engine.seek(target).await;
+        let landed = engine.position();
+        drop(engine);
+        self.after_seek(outcome).await;
+        Ok(landed)
+    }
+
+    /// Shared tail of both seek paths: re-prepare the gapless next track when
+    /// the seek cancelled a live automatic crossfade.
+    ///
+    /// The cancelled blend dropped the prepared next track, and the UI's prep
+    /// latch only reopens on a song change. MUST run with the engine lock
+    /// released — the decoder builds unlocked (a no-op when a prep already
+    /// exists).
+    async fn after_seek(&self, outcome: crate::audio::engine::SeekOutcome) {
         if outcome == crate::audio::engine::SeekOutcome::AbandonedAutoCrossfade {
-            // The cancelled blend dropped the prepared next track, and the
-            // UI's prep latch only reopens on a song change: re-prepare it
-            // now, with the engine lock released (a no-op when a prep
-            // already exists; the decoder builds unlocked).
             self.prepare_next_for_gapless().await;
         }
-        Ok(())
     }
 
     // =========================================================================
@@ -1521,10 +1568,72 @@ async fn complete_skip_fade(
     Ok(())
 }
 
+/// Apply a signed second offset to a millisecond clock position, flooring at 0.
+///
+/// The high end is deliberately NOT clamped here: the engine applies its own
+/// `min(duration)`, so a huge forward jump saturating to `u64::MAX` lands at
+/// the end of the track and ends it the normal way. A non-finite delta casts
+/// to 0 (NaN) or a saturated bound (infinities) rather than wrapping.
+fn offset_position_ms(base_ms: u64, delta_seconds: f64) -> u64 {
+    base_ms.saturating_add_signed((delta_seconds * 1000.0) as i64)
+}
+
+/// Where a relative seek from `base_ms` should land, or `None` when it would
+/// not move at all.
+///
+/// The floor is the only place this happens in practice: at position 0 every
+/// further rewind resolves to 0 again, and a seek to where the playhead
+/// already is is not free — it rebuilds the output stream.
+fn relative_seek_target(base_ms: u64, delta_seconds: f64) -> Option<u64> {
+    let target = offset_position_ms(base_ms, delta_seconds);
+    (target != base_ms).then_some(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::audio::engine::{CustomAudioEngine, PlaybackState};
+
+    /// The relative-seek arithmetic, which is all of `seek_relative` that can
+    /// be exercised without a server: a rewind past the start parks at 0, a
+    /// zero delta stands still, and an absurd jump saturates rather than
+    /// wrapping (the engine's own `min(duration)` is the high clamp).
+    #[test]
+    fn offset_position_floors_at_zero_and_saturates_high() {
+        assert_eq!(offset_position_ms(30_000, 5.0), 35_000);
+        assert_eq!(offset_position_ms(30_000, -5.0), 25_000);
+        assert_eq!(offset_position_ms(2_000, -5.0), 0, "a rewind parks at 0");
+        assert_eq!(offset_position_ms(0, -600.0), 0);
+        assert_eq!(offset_position_ms(30_000, 0.0), 30_000);
+        assert_eq!(offset_position_ms(30_000, 0.25), 30_250);
+        assert_eq!(
+            offset_position_ms(30_000, f64::MAX),
+            30_000 + i64::MAX as u64,
+            "an absurd forward jump saturates the cast instead of wrapping; the engine \
+             then clamps it to the duration"
+        );
+        assert_eq!(offset_position_ms(30_000, f64::NEG_INFINITY), 0);
+    }
+
+    /// A rewind held at 0:00 must stop issuing engine seeks: each one rebuilds
+    /// the PipeWire stream, and a held key repeats ~25 times a second.
+    #[test]
+    fn a_relative_seek_that_would_not_move_is_skipped() {
+        assert_eq!(relative_seek_target(0, -5.0), None, "parked at 0:00");
+        assert_eq!(relative_seek_target(30_000, 0.0), None);
+        assert_eq!(relative_seek_target(0, 5.0), Some(5_000));
+        assert_eq!(relative_seek_target(30_000, -5.0), Some(25_000));
+        assert_eq!(
+            relative_seek_target(2_000, -5.0),
+            Some(0),
+            "the first rewind to 0 still runs"
+        );
+        assert_eq!(
+            offset_position_ms(30_000, f64::NAN),
+            30_000,
+            "NaN moves nothing"
+        );
+    }
 
     /// Locks the play-from-here re-anchor gate contract across every engine
     /// state: a stopped OR paused engine starts a fresh shuffle; only an

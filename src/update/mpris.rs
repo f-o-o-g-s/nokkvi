@@ -66,12 +66,14 @@ impl Nokkvi {
             }
 
             MprisEvent::Seek(offset_us) => {
-                // Convert offset to new absolute position
-                let current_pos_s = self.playback.position as f32;
+                // Relative by definition. Hand the offset straight down rather
+                // than adding it to `playback.position` here: that clock is
+                // whole seconds and freezes while a seek holds the engine
+                // lock, so `playerctl position 5+` three times fast used to
+                // read one frozen base and land as a single 5 s jump.
                 let offset_s = (offset_us as f64 / 1_000_000.0) as f32;
-                let new_pos_s = (current_pos_s + offset_s).max(0.0);
-                debug!(" MPRIS: Seek offset={offset_us}µs → new_pos={new_pos_s}s");
-                Task::done(Message::Playback(PlaybackMessage::Seek(new_pos_s)))
+                debug!(" MPRIS: Seek offset={offset_us}µs → {offset_s}s relative");
+                Task::done(Message::Playback(PlaybackMessage::SeekRelative(offset_s)))
             }
 
             MprisEvent::SetPosition(position_us) => {

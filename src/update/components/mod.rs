@@ -1679,6 +1679,10 @@ impl Nokkvi {
         self.start_view_applied = false;
         self.suppress_next_auto_center = false;
         self.pending_mode_commits = 0;
+        // Drop any outstanding / queued seek. The dispatched task isn't
+        // cancelled by logout, so the epoch bump is what stops its late
+        // `SeekApplied` writing a dead session's position onto the clock.
+        self.seek.reset_for_session();
 
         // Drop the visualizer so its background FFT thread joins now,
         // not at next login's `self.visualizer = Some(new)` overwrite.

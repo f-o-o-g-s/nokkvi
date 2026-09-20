@@ -323,8 +323,11 @@ impl AppService {
     pub async fn previous(&self) -> Result<crate::services::queue::PreviousOutcome> {
         self.playback.previous().await
     }
-    pub async fn seek(&self, position_seconds: f64) -> Result<()> {
+    pub async fn seek(&self, position_seconds: f64) -> Result<u64> {
         self.playback.seek(position_seconds).await
+    }
+    pub async fn seek_relative(&self, delta_seconds: f64) -> Result<u64> {
+        self.playback.seek_relative(delta_seconds).await
     }
     pub async fn set_volume(&self, volume: f32) -> Result<()> {
         self.playback.set_volume(volume).await

@@ -22,6 +22,22 @@ const PREV_RESTART_THRESHOLD_SECS: u32 = 5;
 /// correct; the move is bounded by the slot list's own end clamps.
 const AUTOSCROLL_ROWS_PER_TICK: usize = 1;
 
+/// Map a backend seek result to [`PlaybackMessage::SeekApplied`].
+///
+/// This is where a failed seek is finally handled, so the `warn!` belongs here
+/// rather than at the controller (the old call site swallowed the `Result`
+/// with `let _ =` and reported nothing at all).
+fn seek_applied_message(epoch: u64, result: anyhow::Result<u64>) -> Message {
+    let landed = match result {
+        Ok(position_ms) => Some(position_ms as f32 / 1000.0),
+        Err(e) => {
+            tracing::warn!("Seek failed: {e}");
+            None
+        }
+    };
+    Message::Playback(PlaybackMessage::SeekApplied { epoch, landed })
+}
+
 /// Resolve which of the open ALSA playback rates is the OUTPUT DEVICE's — for
 /// the honest bit-perfect indicator — given the track's rate. The device-rate
 /// READ lives in the data crate ([`nokkvi_data::audio::active_alsa_playback_rates`]);
@@ -153,7 +169,10 @@ struct MprisUpdate<'a> {
     paused: bool,
     album: &'a str,
     duration: u32,
-    position: u32,
+    /// `None` when this tick's position is stale (a seek moved the playhead
+    /// after the tick read the engine). Everything else in the push still
+    /// applies; only the position and the `Seeked` signal stand down.
+    position: Option<u32>,
     art_url: Option<&'a str>,
     repeat: bool,
     repeat_queue: bool,
@@ -242,6 +261,10 @@ impl Nokkvi {
             return Task::none();
         }
 
+        // Snapshot the seek epoch SYNCHRONOUSLY, before the async body reads
+        // the engine. Whatever this tick is about to observe belongs to this
+        // epoch; a seek landing in the gap bumps it and the update is dropped.
+        let seek_epoch = self.seek.epoch;
         let radio_station = self.active_playback.radio_station().cloned();
         let icy_url = if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
             state.icy_url.clone()
@@ -402,6 +425,7 @@ impl Nokkvi {
                     bitrate,
                     live_icy_metadata: engine_live_icy_metadata,
                     bpm,
+                    seek_epoch,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -436,7 +460,26 @@ impl Nokkvi {
             bitrate,
             live_icy_metadata,
             bpm,
+            seek_epoch,
         } = update;
+
+        // Whether this update's POSITION is still current. A different seek
+        // epoch means a seek was requested or landed between the tick's engine
+        // read and now, so `pos` names a place the playhead has already left.
+        //
+        // Only the three position-derived effects are gated on it — the clock
+        // write, the listening-time delta and the MPRIS position push. The
+        // rest of the update MUST still apply: a held seek key bumps the epoch
+        // ~25 times a second while ticks arrive 10 times a second, so a gate
+        // on the whole update would starve it completely. Every effect here is
+        // level-triggered, but "the next tick repeats it" is only true if some
+        // tick gets through, and under a sustained hold none would: the title,
+        // duration, artwork, queue highlight, lyrics and MPRIS metadata would
+        // freeze on the old track while the audio ran on, and — worse — the
+        // 80% gapless-prep trigger and the `gapless_preparing` latch reset
+        // would never fire, turning every boundary crossed during the hold
+        // into a hard cut.
+        let position_is_current = seek_epoch == self.seek.epoch;
 
         // Detect transition from playing to stopped (not paused)
         // This happens when the last track in the queue finishes naturally
@@ -502,7 +545,9 @@ impl Nokkvi {
         // Update playback and mode fields
         let prev_rate = self.playback.sample_rate;
         let prev_playing = self.playback.playing;
-        self.playback.position = pos;
+        if position_is_current {
+            self.playback.position = pos;
+        }
         self.playback.duration = dur;
         self.playback.playing = playing;
         self.playback.paused = paused;
@@ -818,8 +863,13 @@ impl Nokkvi {
                 }
             }
 
-            // Scrobble: track listening time (anti-seek-fraud)
-            self.track_listening_time(playing, paused, &song_id, pos, dur, &mut tasks);
+            // Scrobble: track listening time (anti-seek-fraud). Skipped
+            // outright on a stale position — its delta would be measured from
+            // a base the playhead has left, which on a small BACKWARD seek
+            // reads as honest forward progress under the 10 s backstop.
+            if position_is_current {
+                self.track_listening_time(playing, paused, &song_id, pos, dur, &mut tasks);
+            }
 
             // Queue focus tracking + gapless preparation
             self.handle_queue_focus_change(current_index, current_entry_id, &mut tasks);
@@ -862,7 +912,7 @@ impl Nokkvi {
             paused,
             album: &album,
             duration: dur,
-            position: pos,
+            position: position_is_current.then_some(pos),
             art_url: art_url.as_deref(),
             repeat,
             repeat_queue,
@@ -963,11 +1013,18 @@ impl Nokkvi {
 
         // Only count forward progress in a reasonable range (0-10 seconds);
         // this excludes backward seeks (delta < 0) and large discontinuities
-        // from late MPRIS sync. handle_seek now writes the seek target to
+        // from late MPRIS sync. handle_seek writes the seek target to
         // last_position so the post-seek tick computes ~0 delta — both small
         // and large seeks credit nothing — making this magnitude clamp only a
         // defensive backstop rather than the primary anti-seek-fraud guard.
-        if delta > 0.0 && delta < 10.0 {
+        // A RELATIVE seek cannot write the target ahead of time, so the
+        // in-flight gate below covers it.
+        // A seek is outstanding: this tick read the engine before it landed
+        // (or between the engine finishing it and `SeekApplied` arriving), so
+        // its delta is measured against a base the playhead has left. Resync
+        // the base, credit nothing. `SeekApplied` writes the real landing
+        // point when it comes back.
+        if !self.seek.in_flight() && delta > 0.0 && delta < 10.0 {
             self.scrobble.listening_time += delta;
         }
         self.scrobble.last_position = current_pos;
@@ -1084,16 +1141,6 @@ impl Nokkvi {
         };
 
         let duration_us = i64::from(u.duration) * 1_000_000;
-        let position_us = i64::from(u.position) * 1_000_000;
-
-        // Detect position discontinuities (seeks, song changes).
-        // The tick interval is 100ms, so normal forward progress at 1x speed
-        // produces ~100ms deltas. A jump of > 2 seconds indicates a seek or
-        // song change — emit the Seeked D-Bus signal so desktop shells
-        // immediately re-sync their progress bars.
-        let delta_us = position_us - self.last_mpris_position_us;
-        let discontinuity = delta_us.abs() > 2_000_000 || delta_us < -100_000;
-        self.last_mpris_position_us = position_us;
 
         // For radio streams, override title/artist with ICY metadata so MPRIS
         // consumers see the actual artist/track instead of the station name.
@@ -1111,13 +1158,26 @@ impl Nokkvi {
         // Push state via channel (synchronous, non-blocking)
         conn.set_playback_status(status);
         conn.set_metadata(mpris_title, mpris_artist, u.album, duration_us, u.art_url);
-        conn.set_position(position_us);
         conn.set_loop_status(loop_status);
         conn.set_shuffle(u.random);
 
-        // Emit Seeked signal on discontinuity so shells re-sync immediately
-        if discontinuity && (u.playing || u.paused) {
-            conn.seeked(position_us);
+        // The position half stands down on a stale tick — `handle_seek_applied`
+        // owns the clock while a seek is outstanding and pushes the exact
+        // landing point itself.
+        if let Some(position) = u.position {
+            let position_us = i64::from(position) * 1_000_000;
+            // Detect position discontinuities (seeks, song changes).
+            // The tick interval is 100ms, so normal forward progress at 1x
+            // speed produces ~100ms deltas. A jump of > 2 seconds indicates a
+            // seek or song change — emit the Seeked D-Bus signal so desktop
+            // shells immediately re-sync their progress bars.
+            let delta_us = position_us - self.last_mpris_position_us;
+            let discontinuity = delta_us.abs() > 2_000_000 || delta_us < -100_000;
+            self.last_mpris_position_us = position_us;
+            conn.set_position(position_us);
+            if discontinuity && (u.playing || u.paused) {
+                conn.seeked(position_us);
+            }
         }
 
         // Mirror Play/Pause label + tooltip title to the system tray.
@@ -1826,15 +1886,127 @@ impl Nokkvi {
         // time for the jump (forward OR backward, any magnitude). This is the
         // real anti-seek-fraud guard; the 10s clamp in track_listening_time is
         // only a backstop now. (Queue-only: this handler is radio-gated above.)
+        //
+        // Stays AHEAD of the dispatch, and of the no-shell early return inside
+        // it, because the target is known here and this write is the guard —
+        // it must land whether or not the seek itself can be sent.
         self.scrobble.last_position = val;
-        // Slider sends position in seconds, shell.seek expects seconds
-        let pos_secs = f64::from(val);
-        self.shell_task(
-            move |shell| async move {
-                let _ = shell.seek(pos_secs).await;
-            },
-            |_| Message::Playback(PlaybackMessage::Tick),
-        )
+        self.dispatch_seek(crate::state::SeekRequest::Absolute(val))
+    }
+
+    /// Move the playhead by `delta` seconds (negative rewinds).
+    ///
+    /// Unlike [`Self::handle_seek`] this cannot write `scrobble.last_position`
+    /// ahead of time — the target is not known until the engine answers. The
+    /// in-flight flag carries the anti-seek-fraud guard instead (see
+    /// [`Self::track_listening_time`]), and `SeekApplied` writes the landed
+    /// position when it comes back.
+    ///
+    /// Radio is a silent no-op: these are the arrow keys, which a held finger
+    /// repeats ~25 times a second, so a toast would be a flood.
+    pub(crate) fn handle_seek_relative(&mut self, delta: f32) -> Task<Message> {
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
+        self.dispatch_seek(crate::state::SeekRequest::Relative(delta))
+    }
+
+    /// The single funnel every seek producer goes through — slider, capsule,
+    /// MPRIS, the IPC verb, the seek keys and Previous's rewind.
+    fn dispatch_seek(&mut self, req: crate::state::SeekRequest) -> Task<Message> {
+        // Without a shell `shell_task` drops the task, so no `SeekApplied`
+        // would ever come back to clear the flag. Return before touching the
+        // cluster rather than wedging it for the rest of the session.
+        if self.app_service.is_none() {
+            return Task::none();
+        }
+        let Some(req) = self.seek.request(req) else {
+            return Task::none();
+        };
+        self.seek.epoch = self.seek.epoch.wrapping_add(1);
+        self.send_seek(req)
+    }
+
+    /// Hand one already-arbitrated request to the backend. Every exit maps to
+    /// `SeekApplied`, which is what clears the in-flight flag.
+    ///
+    /// Callers MUST bump `seek.epoch` before calling: the result is stamped
+    /// with the epoch read here, and `handle_seek_applied` drops a result
+    /// whose stamp no longer matches.
+    fn send_seek(&self, req: crate::state::SeekRequest) -> Task<Message> {
+        let epoch = self.seek.epoch;
+        match req {
+            crate::state::SeekRequest::Absolute(pos) => {
+                let pos = f64::from(pos);
+                self.shell_task(
+                    move |shell| async move { shell.seek(pos).await },
+                    move |result| seek_applied_message(epoch, result),
+                )
+            }
+            crate::state::SeekRequest::Relative(delta) => {
+                let delta = f64::from(delta);
+                self.shell_task(
+                    move |shell| async move { shell.seek_relative(delta).await },
+                    move |result| seek_applied_message(epoch, result),
+                )
+            }
+        }
+    }
+
+    /// A seek landed. Publish the landed position to every surface that reads
+    /// a clock, then dispatch whatever merged behind it.
+    pub(crate) fn handle_seek_applied(&mut self, epoch: u64, landed: Option<f32>) -> Task<Message> {
+        // A result from a seek the app has moved on from — the only producer
+        // is a logout / session expiry clearing the cluster mid-flight. It
+        // must touch nothing: clearing `in_flight` here would release a gate a
+        // LATER seek is holding (two concurrent seek tasks, and
+        // `track_listening_time` crediting the ground that later seek skips).
+        if epoch != self.seek.epoch {
+            tracing::debug!("Dropping a seek result from a cleared session (epoch {epoch})");
+            return Task::none();
+        }
+
+        let next = self.seek.applied();
+        // Bump before the writes below so a tick still in flight — one that
+        // read the engine mid-seek — cannot overwrite them, and so the queued
+        // request `send_seek` dispatches carries the new stamp.
+        self.seek.epoch = self.seek.epoch.wrapping_add(1);
+
+        if let Some(landed) = landed {
+            let landed = landed.max(0.0);
+            // The anti-seek-fraud base: the next tick's delta is measured from
+            // where the seek actually put us.
+            self.scrobble.last_position = landed;
+            // Jump the bar at once rather than waiting up to 100 ms for a
+            // tick; its interpolation restarts from this value.
+            self.playback.position = landed as u32;
+            // MPRIS infers `Seeked` from whole-second tick jumps over 2 s, so
+            // a 1 s or 5 s step would emit nothing. Emit it here with the
+            // exact microseconds instead — but only when the second hand
+            // actually moved. A seek that landed where MPRIS already thinks we
+            // are is every repeat of a rewind held at 0:00, and every repeat
+            // after the last queue track has stopped; announcing those would
+            // put ~25 `Seeked` signals a second on the bus.
+            let floor_us = i64::from(self.playback.position) * 1_000_000;
+            if floor_us != self.last_mpris_position_us {
+                let exact_us = (f64::from(landed) * 1_000_000.0) as i64;
+                if let Some(ref conn) = self.mpris_connection
+                    && (self.playback.playing || self.playback.paused)
+                {
+                    conn.set_position(exact_us);
+                    conn.seeked(exact_us);
+                }
+                // Store the whole-second floor the tick heuristic compares
+                // against, so the next tick sees no jump and stays quiet.
+                self.last_mpris_position_us = floor_us;
+            }
+        }
+
+        match next {
+            Some(req) => self.send_seek(req),
+            // Nothing merged behind it: resync the clock from the engine.
+            None => Task::done(Message::Playback(PlaybackMessage::Tick)),
+        }
     }
 
     /// Sync the immediate-feedback surfaces for a volume change (UI state,
@@ -2511,6 +2683,10 @@ impl Nokkvi {
                 holder,
             ),
             PlaybackMessage::Seek(val) => self.handle_seek(val),
+            PlaybackMessage::SeekRelative(delta) => self.handle_seek_relative(delta),
+            PlaybackMessage::SeekApplied { epoch, landed } => {
+                self.handle_seek_applied(epoch, landed)
+            }
             PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
             PlaybackMessage::VolumeCommitted(val) => self.handle_volume_committed(val),
             PlaybackMessage::PrepareNextForGapless => self.handle_prepare_next_for_gapless(),

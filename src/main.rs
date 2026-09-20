@@ -225,6 +225,10 @@ pub struct Nokkvi {
     /// `phase = (now - glow_epoch) / GLOW_PERIOD_SECS` from it while playing.
     pub glow_epoch: std::time::Instant,
     pub scrobble: crate::state::ScrobbleState,
+    /// One-seek-in-flight arbitration plus the live Seek Step setting.
+    /// See [`crate::state::SeekState`] for why every seek producer goes
+    /// through it.
+    pub seek: crate::state::SeekState,
     /// Timing + dedup state for scrobbling internet radio directly to the
     /// configured service (ListenBrainz). Separate from `scrobble` because radio
     /// has no duration and no song id — see [`crate::state::RadioScrobbleState`].
@@ -491,6 +495,7 @@ impl Default for Nokkvi {
             lyrics: crate::state::LyricsState::default(),
             glow_epoch: std::time::Instant::now(),
             scrobble: crate::state::ScrobbleState::default(),
+            seek: crate::state::SeekState::default(),
             radio_scrobble: crate::state::RadioScrobbleState::default(),
             modes: crate::state::PlaybackModes::default(),
             sfx: crate::state::SfxState::default(),

@@ -71,6 +71,8 @@ All notable changes to this project will be documented in this file.
 - Lyrics added by a library rescan now show up without restarting nokkvi.
 - With crossfade on, skipping during a track's intro now fades the sheet you were reading.
 - Two actions sharing one key now resolve the same way on every launch.
+- Rapid relative seeks from media keys and `playerctl` add up instead of landing as one.
+- A seek no longer credits listening time for the part of a track it skipped over.
 - Turning lyrics off mid-crossfade no longer brings the previous track's sheet back when you turn them on.
 
 ### Removed
