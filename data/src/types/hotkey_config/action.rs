@@ -287,6 +287,22 @@ define_hotkey_actions! {
             settings_key: "hotkey.toggle_bit_perfect",
             default: KeyCombo::key(KeyCode::Char('b')),
         },
+        SeekBackward {
+            display: "Seek Backward",
+            description: "Jump back by the seek step · previous value in Settings and on the picked Trawl filter",
+            category: "Playback",
+            toml_key: "seek_backward",
+            settings_key: "hotkey.seek_backward",
+            default: KeyCombo::key(KeyCode::ArrowLeft),
+        },
+        SeekForward {
+            display: "Seek Forward",
+            description: "Jump ahead by the seek step · next value in Settings and on the picked Trawl filter",
+            category: "Playback",
+            toml_key: "seek_forward",
+            settings_key: "hotkey.seek_forward",
+            default: KeyCombo::key(KeyCode::ArrowRight),
+        },
 
         // --- Slot list navigation (category: "Navigation") ---
         SlotListUp {
@@ -485,7 +501,7 @@ define_hotkey_actions! {
             category: "Sort & View",
             toml_key: "prev_sort_mode",
             settings_key: "hotkey.cycle_view_left",
-            default: KeyCombo::key(KeyCode::ArrowLeft),
+            default: KeyCombo::shift(KeyCode::ArrowLeft),
         },
         NextSortMode {
             display: "Next Sort Mode",
@@ -493,7 +509,7 @@ define_hotkey_actions! {
             category: "Sort & View",
             toml_key: "next_sort_mode",
             settings_key: "hotkey.cycle_view_right",
-            default: KeyCombo::key(KeyCode::ArrowRight),
+            default: KeyCombo::shift(KeyCode::ArrowRight),
         },
         ToggleSortOrder {
             display: "Sort Asc / Desc",

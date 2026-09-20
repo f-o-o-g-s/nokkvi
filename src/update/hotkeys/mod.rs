@@ -5,7 +5,7 @@
 //! - `queue`: Queue management (add, remove, clear, shuffle, save, move)
 //! - `navigation`: Search, sort, and center-on-playing
 
-mod navigation;
+pub(crate) mod navigation;
 mod queue;
 mod star_rating;
 
@@ -364,6 +364,7 @@ impl Nokkvi {
                 self.handle_clear_search()
             }
             HotkeyMessage::CycleSortMode(forward) => self.handle_cycle_sort_mode(forward),
+            HotkeyMessage::SeekStep(forward) => self.handle_seek_step(forward),
             HotkeyMessage::CenterOnPlaying => self.handle_center_on_playing(),
             HotkeyMessage::ToggleStar => self.handle_toggle_star(),
             HotkeyMessage::SongStarredStatusUpdated(song_id, new_starred_status) => {
@@ -925,6 +926,7 @@ impl Nokkvi {
                         ) | Message::Hotkey(
                             crate::app_message::HotkeyMessage::FocusSearch
                                 | crate::app_message::HotkeyMessage::CycleSortMode(_)
+                                | crate::app_message::HotkeyMessage::SeekStep(_)
                                 | crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
                                 | crate::app_message::HotkeyMessage::AddToQueue
                                 | crate::app_message::HotkeyMessage::TrawlSaveAsPlaylist
@@ -953,6 +955,7 @@ impl Nokkvi {
                     Some(Message::Hotkey(
                         crate::app_message::HotkeyMessage::SettingsCategoryMotion(_)
                             | crate::app_message::HotkeyMessage::CycleSortMode(_)
+                            | crate::app_message::HotkeyMessage::SeekStep(_)
                             | crate::app_message::HotkeyMessage::AddToQueue
                             | crate::app_message::HotkeyMessage::TrawlSaveAsPlaylist
                     ))

@@ -720,3 +720,199 @@ fn find_conflict_sees_an_action_still_on_its_default() {
         Some(HotkeyAction::ToggleStar)
     );
 }
+
+// ====================================================================
+// Seek keys, the moved sort defaults, and the retired-default rule
+// ====================================================================
+
+/// Build a `[hotkeys]` map from `(toml_key, combo)` pairs.
+fn toml_map(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect()
+}
+
+/// Assert the shipped layout: bare arrows seek, Shift+arrows cycle the sort.
+fn assert_new_arrow_layout(config: &HotkeyConfig, context: &str) {
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowLeft, false, false, false),
+        Some(HotkeyAction::SeekBackward),
+        "{context}: bare Left must seek backward"
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowRight, false, false, false),
+        Some(HotkeyAction::SeekForward),
+        "{context}: bare Right must seek forward"
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowLeft, true, false, false),
+        Some(HotkeyAction::PrevSortMode),
+        "{context}: Shift+Left must cycle the sort mode backward"
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowRight, true, false, false),
+        Some(HotkeyAction::NextSortMode),
+        "{context}: Shift+Right must cycle the sort mode forward"
+    );
+}
+
+#[test]
+fn default_bindings_put_seek_on_the_bare_arrows() {
+    assert_new_arrow_layout(&HotkeyConfig::default(), "defaults");
+}
+
+#[test]
+fn a_verbose_file_from_before_the_move_normalizes_to_the_new_layout() {
+    // What `verbose_config = "on"` wrote before the seek actions existed: the
+    // sort cycle explicitly on the bare arrows, and no seek lines at all.
+    let mut map = HotkeyConfig::default().to_toml_map(true);
+    map.insert("prev_sort_mode".to_string(), "Left".to_string());
+    map.insert("next_sort_mode".to_string(), "Right".to_string());
+    map.remove("seek_backward");
+    map.remove("seek_forward");
+
+    let (config, changed) = HotkeyConfig::from_toml_map_reporting(&map);
+    assert_new_arrow_layout(&config, "a verbose file from before the move");
+    assert!(
+        changed,
+        "the file still claims the old defaults, so it must be rewritten once"
+    );
+}
+
+#[test]
+fn a_sparse_file_naming_only_the_old_sort_defaults_normalizes_the_same_way() {
+    let map = toml_map(&[("prev_sort_mode", "Left"), ("next_sort_mode", "Right")]);
+    let (config, changed) = HotkeyConfig::from_toml_map_reporting(&map);
+    assert_new_arrow_layout(&config, "a sparse file naming the old defaults");
+    assert!(changed);
+}
+
+#[test]
+fn an_empty_hotkeys_table_needs_no_rewrite() {
+    let (config, changed) = HotkeyConfig::from_toml_map_reporting(&toml_map(&[]));
+    assert_new_arrow_layout(&config, "an empty table");
+    assert!(
+        !changed,
+        "nothing claimed a retired default, so nothing may be rewritten"
+    );
+}
+
+#[test]
+fn a_deliberate_swap_back_onto_the_bare_arrows_survives_a_restart() {
+    // What the capture UI writes when the user takes bare Left for Previous
+    // Sort Mode: the steal SWAPS, so seek lands on the sort cycle's old combo.
+    // Nothing collides, so the retired-default rule must leave this alone.
+    let map = toml_map(&[
+        ("prev_sort_mode", "Left"),
+        ("next_sort_mode", "Right"),
+        ("seek_backward", "Shift + Left"),
+        ("seek_forward", "Shift + Right"),
+    ]);
+    let (config, changed) = HotkeyConfig::from_toml_map_reporting(&map);
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowLeft, false, false, false),
+        Some(HotkeyAction::PrevSortMode),
+        "a user who put the sort cycle back on bare Left keeps it"
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowLeft, true, false, false),
+        Some(HotkeyAction::SeekBackward)
+    );
+    assert!(!changed, "a config that already agrees needs no rewrite");
+}
+
+#[test]
+fn both_actions_explicitly_on_bare_left_resolve_to_seek() {
+    // A genuine conflict — the user named both. The retired-default rule
+    // breaks the tie toward the action whose default has NOT moved.
+    let map = toml_map(&[("prev_sort_mode", "Left"), ("seek_backward", "Left")]);
+    let (config, changed) = HotkeyConfig::from_toml_map_reporting(&map);
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowLeft, false, false, false),
+        Some(HotkeyAction::SeekBackward)
+    );
+    assert_eq!(
+        config.get_binding(&HotkeyAction::PrevSortMode),
+        KeyCombo::shift(KeyCode::ArrowLeft),
+        "the action still sitting on its RETIRED default is the one that yields"
+    );
+    assert!(changed);
+}
+
+#[test]
+fn a_redb_config_missing_the_seek_actions_normalizes_the_same_way() {
+    // The shape a pre-upgrade redb blob deserializes into: the seek variants
+    // did not exist, so their keys are simply absent from the map.
+    let mut config = HotkeyConfig::default();
+    config.bindings.remove(&HotkeyAction::SeekBackward);
+    config.bindings.remove(&HotkeyAction::SeekForward);
+    config.set_binding(
+        HotkeyAction::PrevSortMode,
+        KeyCombo::key(KeyCode::ArrowLeft),
+    );
+    config.set_binding(
+        HotkeyAction::NextSortMode,
+        KeyCombo::key(KeyCode::ArrowRight),
+    );
+
+    assert!(config.normalize(), "the stale layout must report a change");
+    assert_new_arrow_layout(&config, "a pre-upgrade redb config");
+}
+
+#[test]
+fn a_user_binding_that_merely_equals_a_retired_default_is_left_alone() {
+    // Nothing else claims Left, so there is no conflict to resolve — the rule
+    // must not "correct" a binding the user is happily using.
+    let mut config = HotkeyConfig::default();
+    config.set_binding(
+        HotkeyAction::PrevSortMode,
+        KeyCombo::key(KeyCode::ArrowLeft),
+    );
+    config.set_binding(HotkeyAction::SeekBackward, KeyCombo::key(KeyCode::F7));
+
+    assert!(!config.normalize());
+    assert_eq!(
+        config.get_binding(&HotkeyAction::PrevSortMode),
+        KeyCombo::key(KeyCode::ArrowLeft)
+    );
+}
+
+#[test]
+fn a_retired_default_stands_pat_when_its_new_default_is_taken() {
+    // A 0.18.x `verbose_config = "on"` file that also moved Move Track Up onto
+    // Shift+Left. Migrating Previous Sort Mode there would hand Shift+Left to
+    // Move Track Up (a user binding beats one on its default) and leave
+    // Previous Sort Mode with no working key at all.
+    let mut config = HotkeyConfig::default();
+    config.set_binding(
+        HotkeyAction::MoveTrackUp,
+        KeyCombo::shift(KeyCode::ArrowLeft),
+    );
+    config.set_binding(
+        HotkeyAction::PrevSortMode,
+        KeyCombo::key(KeyCode::ArrowLeft),
+    );
+
+    let changed = config.normalize();
+
+    assert_eq!(
+        config.get_binding(&HotkeyAction::PrevSortMode),
+        KeyCombo::key(KeyCode::ArrowLeft),
+        "it must stay where it still works rather than move onto a taken combo"
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowLeft, false, false, false),
+        Some(HotkeyAction::PrevSortMode),
+        "the pre-upgrade layout keeps working; the NEWLY-shipped action is the one shadowed"
+    );
+    assert_eq!(
+        config.lookup(&KeyCode::ArrowLeft, true, false, false),
+        Some(HotkeyAction::MoveTrackUp),
+        "the user's own binding is untouched"
+    );
+    assert!(
+        !changed,
+        "nothing moved, so nothing may be rewritten to the user's config.toml"
+    );
+}

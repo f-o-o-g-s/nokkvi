@@ -729,18 +729,23 @@ fn shift_backspace(app: &mut crate::Nokkvi) {
     );
 }
 
-/// Bare Left/Right — the PrevSortMode/NextSortMode bindings.
+/// Bare Left/Right — the SeekBackward/SeekForward bindings.
 fn arrow(app: &mut crate::Nokkvi, right: bool) {
+    arrow_with(app, right, iced::keyboard::Modifiers::empty());
+}
+
+/// Shift+Left/Right — the PrevSortMode/NextSortMode bindings.
+fn shift_arrow(app: &mut crate::Nokkvi, right: bool) {
+    arrow_with(app, right, iced::keyboard::Modifiers::SHIFT);
+}
+
+fn arrow_with(app: &mut crate::Nokkvi, right: bool, modifiers: iced::keyboard::Modifiers) {
     let named = if right {
         iced::keyboard::key::Named::ArrowRight
     } else {
         iced::keyboard::key::Named::ArrowLeft
     };
-    let _ = send_raw_key(
-        app,
-        iced::keyboard::Key::Named(named),
-        iced::keyboard::Modifiers::empty(),
-    );
+    let _ = send_raw_key(app, iced::keyboard::Key::Named(named), modifiers);
 }
 
 fn tray_cursor(app: &crate::Nokkvi) -> Option<TrawlTrayControl> {
@@ -1163,17 +1168,40 @@ fn shift_tab_while_modal_open_does_not_move_settings_sidebar() {
 
 #[test]
 fn cycle_sort_without_modal_still_reveals_toolbar() {
-    // Over-match guard: the new trawl-first branch must not swallow the
-    // regular sort-cycle path when no modal is open.
+    // Over-match guard: the trawl-first branch must not swallow the regular
+    // sort-cycle path when no modal is open. The sort cycle moved to
+    // Shift+arrow when seek took the bare arrows.
     let mut app = test_app();
     app.current_view = crate::View::Songs;
     app.screen = crate::Screen::Home;
 
-    arrow(&mut app, true);
+    shift_arrow(&mut app, true);
 
     assert!(
         app.songs_page.common.toolbar_reveal_until.is_some(),
-        "without the modal, Left/Right still drive the view's sort cycle"
+        "without the modal, Shift+Left/Right still drive the view's sort cycle"
+    );
+}
+
+#[test]
+fn a_bare_arrow_without_a_modal_seeks_instead_of_sorting() {
+    // The other half of the guard: the bare arrows now belong to the seek
+    // actions, which deliberately fire no SFX and no toolbar reveal (a held
+    // key repeats ~25 times a second).
+    let mut app = test_app();
+    app.current_view = crate::View::Songs;
+    app.screen = crate::Screen::Home;
+    let sort_before = app.songs_page.common.current_sort_mode;
+
+    arrow(&mut app, true);
+
+    assert_eq!(
+        app.songs_page.common.current_sort_mode, sort_before,
+        "a bare arrow must not touch the sort mode"
+    );
+    assert!(
+        app.songs_page.common.toolbar_reveal_until.is_none(),
+        "a seek must not strand a toolbar reveal-lock"
     );
 }
 
@@ -1571,5 +1599,85 @@ fn captured_shift_p_mid_typing_does_not_double_fire() {
     assert!(
         app.toast.toasts.is_empty(),
         "captured Shift+P already typed; it must not also fire the save"
+    );
+}
+
+// ============================================================================
+// Both horizontal-arrow pairs reach the tray
+// ============================================================================
+//
+// The seek actions and the sort-cycle actions share one context helper, so
+// whichever pair a user presses, the Trawl tray keeps the arrows. These are
+// the Shift+arrow twins of the bare-arrow tests above.
+
+#[test]
+fn shift_left_right_cycle_the_focused_value_with_wrap() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Queue);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::Blend);
+    }
+    assert_eq!(app.trawl_crate.blend, TrawlBlend::ALL[0]);
+
+    shift_arrow(&mut app, true);
+    assert_eq!(
+        app.trawl_crate.blend,
+        TrawlBlend::ALL[1],
+        "Shift+Right steps the focused control forward"
+    );
+
+    shift_arrow(&mut app, false);
+    shift_arrow(&mut app, false);
+    assert_eq!(
+        app.trawl_crate.blend,
+        TrawlBlend::ALL[TrawlBlend::ALL.len() - 1],
+        "Shift+Left from the first value wraps to the last"
+    );
+}
+
+#[test]
+fn shift_tray_keys_do_not_touch_the_background_view() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Songs);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::Blend);
+    }
+    app.songs_page.common.search_input_focused = true;
+    let sort_before = app.songs_page.common.current_sort_mode;
+
+    shift_arrow(&mut app, true);
+    shift_tab(&mut app);
+
+    assert_eq!(
+        app.songs_page.common.current_sort_mode, sort_before,
+        "the obscured view's sort mode must not cycle"
+    );
+    assert!(
+        app.songs_page.common.toolbar_reveal_until.is_none(),
+        "no stray auto-hide toolbar reveal-lock may be stranded on the obscured view"
+    );
+    assert!(
+        app.songs_page.common.search_input_focused,
+        "the obscured view's search-focus flag must not be cleared"
+    );
+}
+
+#[test]
+fn a_bare_arrow_over_the_trawl_modal_cycles_the_tray_and_never_seeks() {
+    let mut app = test_app();
+    open_modal_over(&mut app, crate::View::Songs);
+    if let Some(state) = app.trawl_modal.as_mut() {
+        state.search_input_focused = false;
+        state.tray_cursor = Some(TrawlTrayControl::Blend);
+    }
+
+    arrow(&mut app, true);
+
+    assert_eq!(
+        app.trawl_crate.blend,
+        TrawlBlend::ALL[1],
+        "the seek key yields to the tray while the modal is open"
     );
 }

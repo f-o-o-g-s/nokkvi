@@ -124,6 +124,8 @@ keyword_table! {
             "subtitles",
         ],
         "hotkey.toggle_bit_perfect" => &["lossless", "audiophile", "hi-res", "passthrough"],
+        "hotkey.seek_forward" => &["scrub", "skip ahead", "fast forward", "jump"],
+        "hotkey.seek_backward" => &["scrub", "rewind", "skip back", "jump"],
 
         // ── Hotkeys · Navigation ─────────────────────────────────────────────
         "hotkey.slot_list_up" | "hotkey.slot_list_down" => {

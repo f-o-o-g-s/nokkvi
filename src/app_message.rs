@@ -301,6 +301,13 @@ pub enum ScrobbleMessage {
 pub enum HotkeyMessage {
     ClearSearch,
     CycleSortMode(bool),
+    /// Seek by the Seek Step setting: `true` = forward, `false` = backward.
+    ///
+    /// Shares the horizontal-arrow context helper with `CycleSortMode`, so
+    /// wherever the arrows already EDIT something — the Trawl tray, a Settings
+    /// value — these keys do that instead of seeking, and a user rebinding
+    /// either pair keeps both behaviours.
+    SeekStep(bool),
     CenterOnPlaying,
     ToggleStar,
     /// Update starred status locally (song_id, new_starred_status)

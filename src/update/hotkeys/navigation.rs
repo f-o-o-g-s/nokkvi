@@ -10,6 +10,32 @@ use crate::{
     views, widgets,
 };
 
+/// The signed second offset one Seek key press asks for.
+///
+/// Pulled out of [`Nokkvi::handle_seek_step`] because the handler itself is
+/// unobservable in tests — `test_app()` has no `AppService`, so the seek is
+/// dropped before it touches any state, and a flipped sign would otherwise
+/// pass every test in the suite.
+pub(crate) fn seek_step_delta(step_secs: u32, forward: bool) -> f32 {
+    let step = step_secs as f32;
+    if forward { step } else { -step }
+}
+
+/// Which context owns Left/Right at this moment.
+///
+/// Both horizontal-arrow actions — the sort-mode cycle and the seek step —
+/// consult this FIRST, so an arrow does the same thing whichever of the two
+/// pairs the user pressed it on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HorizontalArrowOwner {
+    /// The Trawl modal is open: the arrows step the focused tray control.
+    TrawlTray,
+    /// The Settings view: the arrows adjust the focused setting's value.
+    SettingsEdit,
+    /// Nobody: the action does its own thing (cycle the sort, or seek).
+    View,
+}
+
 impl Nokkvi {
     pub(crate) fn handle_clear_search(&mut self) -> Task<Message> {
         trace!(" ClearSearch (Escape) hotkey pressed - unfocusing search");
@@ -138,13 +164,58 @@ impl Nokkvi {
         }
     }
 
-    pub(crate) fn handle_cycle_sort_mode(&mut self, forward: bool) -> Task<Message> {
-        // Trawl modal open: Left/Right cycle the focused tray control's value.
-        // This branch MUST stay the first statement — one line lower and the
-        // OBSCURED background view gets a stray Backspace SFX plus a stranded
-        // auto-hide toolbar reveal-lock from the two calls below.
+    /// Where a context already OWNS the horizontal arrows, hand them over.
+    ///
+    /// Both horizontal-arrow actions — the sort-mode cycle and the seek step —
+    /// call this as their FIRST statement, so wherever the arrows edit
+    /// something they keep editing it, whichever of the two pairs the user
+    /// pressed. That is what lets the seek keys take the bare arrows without
+    /// putting a modifier on Settings value editing or on the Trawl tray, and
+    /// what keeps a user's rebinding of EITHER pair working in both places.
+    ///
+    /// INVARIANT: first statement, in every caller. One line lower and the
+    /// OBSCURED background view behind the Trawl modal gets a stray Backspace
+    /// SFX plus a stranded auto-hide toolbar reveal-lock. Hoisting the
+    /// Settings branch up here is behaviour-preserving because the SFX line
+    /// below already skips Settings and `reveal_current_toolbar` finds no
+    /// slot-list page there (`view_page_mut` returns `None` for Settings).
+    fn horizontal_arrow_context(&mut self, forward: bool) -> Option<Task<Message>> {
+        match self.horizontal_arrow_owner() {
+            HorizontalArrowOwner::TrawlTray => Some(self.handle_trawl_tray_cycle_value(forward)),
+            HorizontalArrowOwner::SettingsEdit => Some(Task::done(Message::Settings(if forward {
+                views::SettingsMessage::EditRight
+            } else {
+                views::SettingsMessage::EditLeft
+            }))),
+            HorizontalArrowOwner::View => None,
+        }
+    }
+
+    /// Which context owns the horizontal arrows right now. Pure, so the rule
+    /// both actions obey is assertable without an `AppService`.
+    pub(crate) fn horizontal_arrow_owner(&self) -> HorizontalArrowOwner {
         if self.trawl_modal.is_some() {
-            return self.handle_trawl_tray_cycle_value(forward);
+            HorizontalArrowOwner::TrawlTray
+        } else if self.current_view == View::Settings {
+            HorizontalArrowOwner::SettingsEdit
+        } else {
+            HorizontalArrowOwner::View
+        }
+    }
+
+    /// Seek by the Seek Step setting. No SFX and no toolbar reveal: a held key
+    /// repeats ~25 times a second, and neither the sound nor the reveal-lock
+    /// would survive that.
+    pub(crate) fn handle_seek_step(&mut self, forward: bool) -> Task<Message> {
+        if let Some(task) = self.horizontal_arrow_context(forward) {
+            return task;
+        }
+        self.handle_seek_relative(seek_step_delta(self.seek.step_secs, forward))
+    }
+
+    pub(crate) fn handle_cycle_sort_mode(&mut self, forward: bool) -> Task<Message> {
+        if let Some(task) = self.horizontal_arrow_context(forward) {
+            return task;
         }
         // Play backspace navigation sound for combobox cycling (settings handles its own SFX)
         if self.current_view != View::Settings {
@@ -154,15 +225,6 @@ impl Nokkvi {
         self.reveal_current_toolbar();
 
         use widgets::view_header::SortMode;
-
-        // Settings routes Left/Right to its edit mode
-        if self.current_view == View::Settings {
-            return if forward {
-                Task::done(Message::Settings(views::SettingsMessage::EditRight))
-            } else {
-                Task::done(Message::Settings(views::SettingsMessage::EditLeft))
-            };
-        }
 
         // Queue uses QueueSortMode (separate enum), handle it explicitly
         if self.current_view == View::Queue {

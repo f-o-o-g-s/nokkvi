@@ -1317,3 +1317,110 @@ fn cancel_pending_expand_also_clears_center_only_flag() {
 }
 
 // ============================================================================
+
+// ============================================================================
+// Horizontal arrows: seek on bare, sort cycle on Shift, edit where arrows edit
+// ============================================================================
+
+/// Send a raw arrow key through the real hotkey path, exactly as the keyboard
+/// subscription does.
+fn press_arrow(app: &mut crate::Nokkvi, right: bool, shift: bool) {
+    let named = if right {
+        iced::keyboard::key::Named::ArrowRight
+    } else {
+        iced::keyboard::key::Named::ArrowLeft
+    };
+    let modifiers = if shift {
+        iced::keyboard::Modifiers::SHIFT
+    } else {
+        iced::keyboard::Modifiers::empty()
+    };
+    let _ = app.update(crate::Message::RawKeyEvent(
+        iced::keyboard::Key::Named(named),
+        modifiers,
+        iced::event::Status::Ignored,
+    ));
+}
+
+#[test]
+fn a_bare_arrow_in_a_library_view_leaves_the_sort_and_toolbar_alone() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.screen = crate::Screen::Home;
+    let sort_before = app.albums_page.common.current_sort_mode;
+
+    press_arrow(&mut app, true, false);
+
+    assert_eq!(
+        app.albums_page.common.current_sort_mode, sort_before,
+        "bare Right seeks; it must not cycle the sort mode"
+    );
+    assert!(
+        app.albums_page.common.toolbar_reveal_until.is_none(),
+        "a seek reveals no toolbar — a held key would strand the reveal-lock"
+    );
+}
+
+#[test]
+fn a_shift_arrow_in_a_library_view_cycles_the_sort_and_reveals_the_toolbar() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.screen = crate::Screen::Home;
+
+    press_arrow(&mut app, true, true);
+
+    assert!(
+        app.albums_page.common.toolbar_reveal_until.is_some(),
+        "Shift+Right drives the sort cycle, which surfaces the auto-hide toolbar"
+    );
+}
+
+#[test]
+fn settings_owns_the_horizontal_arrows_so_a_seek_key_edits_instead() {
+    // Seek yields wherever the arrows already EDIT something, so Settings
+    // value editing keeps the bare arrows it has always had — and a user who
+    // rebinds either pair keeps the edit on whatever they chose.
+    use crate::update::hotkeys::navigation::HorizontalArrowOwner;
+
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    assert_eq!(
+        app.horizontal_arrow_owner(),
+        HorizontalArrowOwner::SettingsEdit
+    );
+
+    app.current_view = View::Albums;
+    assert_eq!(app.horizontal_arrow_owner(), HorizontalArrowOwner::View);
+}
+
+#[test]
+fn a_root_modal_swallows_the_horizontal_arrows() {
+    // The Info modal owns the keyboard. Asserted on the SORT half because its
+    // toolbar reveal is synchronous and therefore falsifiable; the seek half
+    // rides the same allowlist in `handle_raw_key_event`.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.screen = crate::Screen::Home;
+    app.info_modal.visible = true;
+
+    press_arrow(&mut app, true, true);
+
+    assert!(
+        app.albums_page.common.toolbar_reveal_until.is_none(),
+        "nothing behind a root-level modal may act on an arrow"
+    );
+}
+
+#[test]
+fn a_seek_key_press_asks_for_the_step_in_the_direction_pressed() {
+    use crate::update::hotkeys::navigation::seek_step_delta;
+
+    assert_eq!(seek_step_delta(5, true), 5.0, "Seek Forward moves forward");
+    assert_eq!(
+        seek_step_delta(5, false),
+        -5.0,
+        "Seek Backward rewinds — a flipped sign here is invisible to every other test"
+    );
+    assert_eq!(seek_step_delta(60, true), 60.0);
+    assert_eq!(seek_step_delta(1, false), -1.0);
+}

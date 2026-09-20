@@ -43,7 +43,10 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
         }
     }
 
-    // Category order (must match ALL_SECTION_LABELS)
+    // Display order for the hotkey sections. This list is the ONLY thing that
+    // decides which categories render, so a `category:` string in
+    // `define_hotkey_actions!` that is missing here silently drops its rows.
+
     let categories = [
         "Views",
         "Playback",

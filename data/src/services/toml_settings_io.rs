@@ -85,6 +85,12 @@ pub fn read_toml_visualizer() -> Result<Option<VisualizerConfig>> {
 pub struct TomlSections {
     pub settings: Option<TomlSettings>,
     pub hotkeys: Option<HotkeyConfig>,
+    /// Whether loading `[hotkeys]` had to bring the file's layout up to date
+    /// (see `HotkeyConfig::normalize`). Startup rewrites the section once when
+    /// this is true so the file stops naming a default that has moved; the
+    /// hot-reload path ignores it — writing from there would re-trigger the
+    /// config watcher.
+    pub hotkeys_normalized: bool,
     pub views: Option<TomlViewPreferences>,
     /// Validated (range-clamped), same contract as [`read_toml_visualizer`].
     pub visualizer: Option<VisualizerConfig>,
@@ -119,10 +125,13 @@ fn sections_from_value(doc: &toml::Value) -> TomlSections {
         }
     }
 
+    let hotkeys = extract::<std::collections::BTreeMap<String, String>>(doc, "hotkeys")
+        .map(|map| HotkeyConfig::from_toml_map_reporting(&map));
+    let hotkeys_normalized = hotkeys.as_ref().is_some_and(|(_, changed)| *changed);
     TomlSections {
         settings: extract::<TomlSettings>(doc, "settings"),
-        hotkeys: extract::<std::collections::BTreeMap<String, String>>(doc, "hotkeys")
-            .map(|map| HotkeyConfig::from_toml_map(&map)),
+        hotkeys: hotkeys.map(|(config, _)| config),
+        hotkeys_normalized,
         views: extract::<TomlViewPreferences>(doc, "views"),
         visualizer: extract::<VisualizerConfig>(doc, "visualizer").map(|mut v| {
             v.validate();

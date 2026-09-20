@@ -70,6 +70,7 @@ impl SettingsManager {
             });
         let toml_settings = sections.settings;
         let toml_hotkeys = sections.hotkeys;
+        let hotkeys_normalized = sections.hotkeys_normalized;
         let toml_views = sections.views;
         let toml_visualizer = sections.visualizer;
 
@@ -103,6 +104,13 @@ impl SettingsManager {
         }
         if let Some(hk) = toml_hotkeys {
             settings.hotkeys = hk;
+        } else {
+            // No `[hotkeys]` table: the redb copy is authoritative, and a
+            // pre-upgrade blob has no key at all for an action added since it
+            // was written. Bring it up to date in memory — the next settings
+            // write persists it. Deliberately NOT written here: creating the
+            // table would undo a user who deleted it on purpose.
+            settings.hotkeys.normalize();
         }
         if let Some(tv) = toml_views {
             settings.views = tv.to_all_view_prefs().into();
@@ -114,6 +122,18 @@ impl SettingsManager {
             storage,
             skip_toml_writes: false,
         };
+
+        // Phase 4a: the `[hotkeys]` table still names a default that has moved
+        // (every `verbose_config = "on"` file written before the move does).
+        // `normalize` already fixed it in memory; rewrite the section ONCE so
+        // the file stops claiming something untrue. `write_atomic` registers
+        // the write, so the config watcher recognises it as ours.
+        if hotkeys_normalized {
+            tracing::info!("[hotkeys] in config.toml named a moved default — rewriting it once");
+            if let Err(e) = manager.write_hotkeys_toml() {
+                tracing::warn!("Failed to rewrite [hotkeys] after normalizing: {e}");
+            }
+        }
 
         // Phase 4: Migration — if config.toml had no [settings], export redb values
         if !has_toml {

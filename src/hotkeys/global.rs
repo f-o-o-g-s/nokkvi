@@ -179,6 +179,8 @@ fn action_to_message(action: HotkeyAction) -> Message {
         // Queue actions
         HotkeyAction::SaveQueueAsPlaylist => Message::Hotkey(HotkeyMessage::SaveQueueAsPlaylist),
         // Sort & view
+        HotkeyAction::SeekBackward => Message::Hotkey(HotkeyMessage::SeekStep(false)),
+        HotkeyAction::SeekForward => Message::Hotkey(HotkeyMessage::SeekStep(true)),
         HotkeyAction::PrevSortMode => Message::Hotkey(HotkeyMessage::CycleSortMode(false)),
         HotkeyAction::NextSortMode => Message::Hotkey(HotkeyMessage::CycleSortMode(true)),
         HotkeyAction::ToggleSortOrder => Message::SlotList(SlotListMessage::ToggleSortOrder),
@@ -226,6 +228,47 @@ mod tests {
     use nokkvi_data::types::hotkey_config::KeyCombo;
 
     use super::*;
+
+    #[test]
+    fn bare_arrows_seek_and_shift_arrows_cycle_the_sort_mode() {
+        let config = HotkeyConfig::default();
+
+        let seek_right = config
+            .lookup(&KeyCode::ArrowRight, false, false, false)
+            .expect("bare Right must be bound");
+        assert_eq!(seek_right, HotkeyAction::SeekForward);
+        assert!(matches!(
+            action_to_message(seek_right),
+            Message::Hotkey(HotkeyMessage::SeekStep(true))
+        ));
+
+        let seek_left = config
+            .lookup(&KeyCode::ArrowLeft, false, false, false)
+            .expect("bare Left must be bound");
+        assert_eq!(seek_left, HotkeyAction::SeekBackward);
+        assert!(matches!(
+            action_to_message(seek_left),
+            Message::Hotkey(HotkeyMessage::SeekStep(false))
+        ));
+
+        let sort_right = config
+            .lookup(&KeyCode::ArrowRight, true, false, false)
+            .expect("Shift+Right must be bound");
+        assert_eq!(sort_right, HotkeyAction::NextSortMode);
+        assert!(matches!(
+            action_to_message(sort_right),
+            Message::Hotkey(HotkeyMessage::CycleSortMode(true))
+        ));
+
+        let sort_left = config
+            .lookup(&KeyCode::ArrowLeft, true, false, false)
+            .expect("Shift+Left must be bound");
+        assert_eq!(sort_left, HotkeyAction::PrevSortMode);
+        assert!(matches!(
+            action_to_message(sort_left),
+            Message::Hotkey(HotkeyMessage::CycleSortMode(false))
+        ));
+    }
 
     #[test]
     fn test_refresh_view_hotkey() {

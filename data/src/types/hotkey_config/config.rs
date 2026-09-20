@@ -6,6 +6,35 @@ use serde::{Deserialize, Serialize};
 
 use super::{HotkeyAction, KeyCode, KeyCombo};
 
+/// Defaults that have MOVED since a release, paired with the combo they used
+/// to hold.
+///
+/// Moving a default is otherwise a silent trap: a user whose config names the
+/// old default (every `verbose_config = "on"` file does) would end up with two
+/// actions on one combo, and only one of them would ever fire. The rule in
+/// [`HotkeyConfig::normalize`] carries those files forward — but ONLY when the
+/// retired binding actually collides.
+///
+/// A hand-written `prev_sort_mode = "Left"` is byte-identical to what a
+/// verbose dump wrote, so the rule cannot tell them apart and normalizes both.
+/// To put the old action back on that key for good, the NEW owner has to move
+/// off it as well — which is exactly what the capture UI's steal does, and why
+/// a swap made there survives a restart.
+///
+/// Add a row here in the same commit that changes a `default:` in
+/// `define_hotkey_actions!`.
+const RETIRED_DEFAULTS: &[(HotkeyAction, KeyCombo)] = &[
+    // 0.18.x → bare Left/Right became Seek Backward / Seek Forward.
+    (
+        HotkeyAction::PrevSortMode,
+        KeyCombo::key(KeyCode::ArrowLeft),
+    ),
+    (
+        HotkeyAction::NextSortMode,
+        KeyCombo::key(KeyCode::ArrowRight),
+    ),
+];
+
 /// The full set of hotkey bindings, mapping actions to key combinations.
 /// Serialized into redb via `SettingsManager`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +183,19 @@ impl HotkeyConfig {
     /// Starts with defaults, then overrides any entries found in the map.
     /// Unknown action keys or unparseable combos are warned and skipped.
     pub fn from_toml_map(map: &std::collections::BTreeMap<String, String>) -> Self {
+        Self::from_toml_map_reporting(map).0
+    }
+
+    /// [`Self::from_toml_map`], plus whether [`Self::normalize`] had to change
+    /// anything.
+    ///
+    /// `true` means the file on disk still describes a layout this version no
+    /// longer ships — startup rewrites `[hotkeys]` once so the file stops
+    /// claiming something untrue. The hot-reload path deliberately discards
+    /// the flag: writing from there would re-trigger the config watcher.
+    pub fn from_toml_map_reporting(
+        map: &std::collections::BTreeMap<String, String>,
+    ) -> (Self, bool) {
         let mut config = Self::default();
         for (action_key, combo_str) in map {
             if let Some(action) = HotkeyAction::from_toml_key(action_key) {
@@ -174,8 +216,88 @@ impl HotkeyConfig {
                 tracing::warn!("Unknown hotkey action in config.toml: {}", action_key);
             }
         }
-        config.warn_on_shared_combos();
-        config
+        let changed = config.normalize();
+        (config, changed)
+    }
+
+    /// Bring a loaded config up to date with this version's defaults. Returns
+    /// whether anything changed.
+    ///
+    /// Two steps:
+    ///
+    /// 1. fill in any action the config does not mention — a new action added
+    ///    since the config was written, which a pre-upgrade redb blob simply
+    ///    has no key for;
+    /// 2. for each entry in [`RETIRED_DEFAULTS`] still sitting on its retired
+    ///    combo, hand that combo over to whoever else now claims it and move
+    ///    the retired action to its CURRENT default.
+    ///
+    /// Step 2 is conditional on the collision on purpose. A user who moved the
+    /// new owner elsewhere — exactly what the capture UI's swap does when they
+    /// take the key back — has no conflict, so their choice stands.
+    pub fn normalize(&mut self) -> bool {
+        let mut changed = false;
+        for action in HotkeyAction::ALL
+            .iter()
+            .chain(HotkeyAction::RESERVED.iter())
+        {
+            if !self.bindings.contains_key(action) {
+                self.bindings.insert(*action, action.default_binding());
+                changed = true;
+            }
+        }
+        for (action, retired) in RETIRED_DEFAULTS {
+            if self.get_binding(action) != *retired {
+                continue;
+            }
+            if !self.is_claimed_by_another(retired, action) {
+                continue;
+            }
+            let current = action.default_binding();
+            // Never move an action onto a combo someone ELSE already holds:
+            // `resolve` would hand that combo to the other action (a user's
+            // binding beats one sitting on its default), leaving this action
+            // with no working key at all. Standing pat instead keeps the
+            // PRE-UPGRADE layout working — the retired binding differs from
+            // the current default, so `resolve` reads it as the user's choice
+            // and it keeps the contested key, shadowing the newly-shipped
+            // action rather than an action they have been using for releases.
+            if self.is_claimed_by_another(&current, action) {
+                tracing::warn!(
+                    "Hotkey '{}' moved to another action in this version, but '{}' cannot follow \
+                     it to '{}' — that combo is taken. Leaving it on '{}'; rebind in \
+                     Settings > Hotkeys to get the new layout.",
+                    retired,
+                    action.display_name(),
+                    current,
+                    retired
+                );
+                continue;
+            }
+            tracing::info!(
+                "Hotkey '{}' moved to another action in this version: '{}' follows its new \
+                 default '{}'",
+                retired,
+                action.display_name(),
+                current
+            );
+            self.bindings.insert(*action, current);
+            changed = true;
+        }
+        // Runs here rather than at the TOML reader so the redb-only load path
+        // (no `[hotkeys]` table) gets the same diagnostic — that path is the
+        // one most likely to CREATE a collision, since a pre-upgrade blob has
+        // no key for an action added since it was written.
+        self.warn_on_shared_combos();
+        changed
+    }
+
+    /// Whether some action other than `owner` is bound to `combo`.
+    fn is_claimed_by_another(&self, combo: &KeyCombo, owner: &HotkeyAction) -> bool {
+        HotkeyAction::ALL
+            .iter()
+            .chain(HotkeyAction::RESERVED.iter())
+            .any(|other| other != owner && self.get_binding(other) == *combo)
     }
 
     /// Log one `warn!` per key combo that two or more actions now share,
