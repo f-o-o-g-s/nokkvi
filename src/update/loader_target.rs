@@ -80,7 +80,13 @@ pub(crate) trait LoaderTarget {
         if !background {
             let sl = Self::slot_list_mut(app);
             sl.viewport_offset = 0;
-            sl.clear_multi_selection();
+            // The whole buffer is replaced and the viewport goes back to 0, so
+            // the click-to-focus marker goes with the indices and the anchor:
+            // it is an absolute index into the OLD rows, and
+            // `get_effective_center_index` prefers it, so Enter / Shift+Q would
+            // act on an off-screen row after a sort change. Same reset as the
+            // background branch below.
+            sl.clear_selection_for_refresh();
         } else {
             let current = Self::slot_list_mut(app).viewport_offset;
             let anchor_idx = anchor_id.and_then(|id| {

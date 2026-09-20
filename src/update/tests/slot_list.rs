@@ -336,3 +336,109 @@ fn albums_search_clears_selection_left_by_a_click() {
     assert_eq!(sl.anchor_index, None);
     assert_eq!(sl.selected_offset, None);
 }
+
+// ============================================================================
+// Stale selection: a reorder / buffer replace the click outlived
+// ============================================================================
+//
+// Same class as the search case above: `selected_indices` and `selected_offset`
+// are ABSOLUTE positions, so any path that reorders or replaces the rows must
+// drop all three fields. `set_offset` alone clears only `selected_offset`, and
+// `clear_multi_selection` alone keeps it — neither is enough on its own.
+
+#[test]
+fn radios_sort_order_flip_clears_selection_left_by_a_click() {
+    use crate::views::RadiosMessage;
+    let mut app = test_app();
+    app.current_view = View::Radios;
+    app.library.radio_stations = vec![
+        radio_station("r1", "BBC Radio"),
+        radio_station("r2", "FIP"),
+        radio_station("r3", "KEXP"),
+        radio_station("r4", "SomaFM"),
+    ];
+
+    let _ = app.handle_radios(RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
+        2,
+        iced::keyboard::Modifiers::empty(),
+    )));
+    assert!(
+        app.radios_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&2),
+        "precondition: the click left index 2 selected"
+    );
+
+    // The real toolbar toggle: flips `sort_ascending`, then `sort_radio_stations`
+    // reverses the list in place.
+    let _ = app.handle_radios(RadiosMessage::SlotList(
+        SlotListPageMessage::ToggleSortOrder,
+    ));
+
+    let sl = &app.radios_page.common.slot_list;
+    assert!(
+        sl.selected_indices.is_empty(),
+        "index 2 names a different station after the reverse — the ring would be \
+         on the wrong row, or missing"
+    );
+    assert_eq!(sl.anchor_index, None);
+    assert_eq!(sl.selected_offset, None);
+}
+
+#[test]
+fn albums_foreground_reload_clears_the_click_marker() {
+    use crate::views::AlbumsMessage;
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    seed_albums(&mut app, albums_indexed(40));
+
+    let _ = app.handle_albums(AlbumsMessage::SlotList(SlotListPageMessage::SetOffset(
+        30,
+        iced::keyboard::Modifiers::empty(),
+    )));
+    assert_eq!(
+        app.albums_page.common.slot_list.selected_offset,
+        Some(30),
+        "precondition: the click left a focus marker at 30"
+    );
+
+    // A foreground load — what a sort-mode change dispatches. The viewport goes
+    // back to 0, so a kept marker at 30 would put the ring off-screen, and
+    // `get_effective_center_index` prefers the marker, so Enter / Shift+Q would
+    // act on row 30 instead of the centered row.
+    let _ = app.handle_albums_loaded(Ok(albums_indexed(40)), 40, false, None);
+
+    let sl = &app.albums_page.common.slot_list;
+    assert_eq!(sl.viewport_offset, 0, "a foreground load starts at the top");
+    assert_eq!(
+        sl.selected_offset, None,
+        "the marker names an absolute index into a replaced buffer"
+    );
+    assert!(sl.selected_indices.is_empty());
+    assert_eq!(sl.anchor_index, None);
+}
+
+/// The clear above runs inside `apply_viewport_on_load`, which
+/// `handle_loaded_with` calls BEFORE `try_resolve_pending_expand` — so a
+/// find-and-expand chain still gets its top-pin. Locks that ordering.
+#[test]
+fn albums_foreground_reload_still_pins_a_pending_find_and_expand() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    arm_pending_album(&mut app, "a12");
+
+    let _ = app.handle_albums_loaded(Ok(albums_indexed(40)), 40, false, None);
+
+    let sl = &app.albums_page.common.slot_list;
+    assert_eq!(
+        sl.selected_offset,
+        Some(12),
+        "the pending find-and-expand pin lands after the load's selection clear"
+    );
+    assert!(
+        sl.selected_offset_pinned,
+        "and it lands as a top-pin, not a click marker"
+    );
+}

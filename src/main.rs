@@ -1156,6 +1156,12 @@ impl Nokkvi {
 
         self.radios_page.last_sort_signature = Some(signature);
 
+        // The reverse (or a reload that changed the count) moves every station
+        // to a new index, so the click's absolute positions name other stations
+        // now. `handle_set_offset` below clears only the focus marker — the
+        // selection set and its anchor have to go too, or the ring lands on the
+        // wrong station, or nowhere (a non-empty set suppresses the center ring).
+        self.radios_page.common.clear_selection_for_refresh();
         self.radios_page
             .common
             .handle_set_offset(0, self.library.radio_stations.len());
