@@ -129,24 +129,30 @@ impl Nokkvi {
             ));
         }
 
-        // 7. Lyrics follow the library. A rescan is announced ONLY as a
-        //    wildcard event (per-song ids come from annotation writes — play
-        //    count, star, rating), so a wildcard drops the whole session cache
-        //    and a scoped one drops just those songs. The clear is synchronous
-        //    on the UI thread (a `parking_lot` mutex, uncontended here), which
-        //    is what lets the re-drive below run in the same pass: its resolve
-        //    would otherwise read the stale verdict it was sent to replace.
-        if let Some(shell) = &self.app_service {
-            if is_wildcard {
+        // 7. Lyrics follow the library — on a WILDCARD event only. A rescan
+        //    (the one thing that can change a song's lyrics on the server) is
+        //    announced with no ids at all; every song-scoped `refreshResource`
+        //    comes from an annotation write, which cannot touch lyrics:
+        //    `core/scrobbler/play_tracker.go` on a scrobble submission,
+        //    `server/subsonic/media_annotation.go` on setRating / setStar.
+        //    Dropping those ids would evict the verdict for the track playing
+        //    right now on every scrobble and every rating keypress, and the
+        //    next kick would re-run the whole chain — including a third-party
+        //    LRCLIB request — which is exactly what the negative cache exists
+        //    to prevent.
+        //
+        //    The clear is synchronous on the UI thread (a `parking_lot` mutex,
+        //    uncontended here), which is what lets the re-drive below run in
+        //    the same pass: its resolve would otherwise read the stale verdict
+        //    it was sent to replace. A resolve already in flight is handled by
+        //    the cache's own generation guard, not by ordering.
+        if is_wildcard {
+            if let Some(shell) = &self.app_service {
                 shell.lyrics_cache().drop_all();
-            } else if !song_ids.is_empty() {
-                shell.lyrics_cache().drop_ids(&song_ids);
             }
-        }
-        // A no-op unless the current track is showing no lyrics on the Queue
-        // view — so freshly embedded lyrics appear without a restart, and a
-        // rendered sheet is never disturbed.
-        if is_wildcard || !song_ids.is_empty() {
+            // A no-op unless the current track is showing no lyrics on the
+            // Queue view — so lyrics added by the rescan appear without a
+            // restart, and a rendered sheet is never disturbed.
             tasks.push(self.lyrics_kick_if_unresolved());
         }
 

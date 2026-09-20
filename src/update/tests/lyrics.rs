@@ -342,6 +342,27 @@ fn library_change_redrives_an_unresolved_track() {
         "a wildcard change must re-drive a resolved no-match"
     );
 
+    // A song-scoped change is an ANNOTATION write (scrobble, star, rating) —
+    // it cannot change lyrics, so it must not re-drive. Re-driving would run
+    // the whole chain, third-party LRCLIB request included, on every scrobble
+    // point and every rating keypress for the track being watched.
+    let mut annotated = test_app();
+    annotated.lyrics.enabled = true;
+    annotated.current_view = crate::View::Queue;
+    annotated.scrobble.current_song_id = Some("song_1".to_string());
+    annotated.lyrics.matched_song_id = Some("song_1".to_string());
+    annotated.lyrics.doc = LrcDocument::default();
+    let before_annotated = annotated.lyrics.load_epoch;
+    let _ = annotated.handle_library_changed(LibraryChange {
+        song_ids: vec!["song_1".to_string()],
+        is_wildcard: false,
+        ..wildcard()
+    });
+    assert_eq!(
+        annotated.lyrics.load_epoch, before_annotated,
+        "an annotation write must not re-drive the lyrics chain"
+    );
+
     // A sheet already showing is left alone — no flicker, no refetch.
     let mut app2 = test_app();
     app2.lyrics.enabled = true;

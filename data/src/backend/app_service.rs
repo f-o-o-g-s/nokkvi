@@ -1019,6 +1019,10 @@ impl AppService {
         if let Some(cached) = self.lyrics_cache.get(&song.id) {
             return cached;
         }
+        // Snapshot BEFORE the chain runs: a library change mid-resolve bumps
+        // the generation, and this resolve's verdict is then stale by
+        // definition — it consulted the server the change was announcing.
+        let generation = self.lyrics_cache.generation();
 
         let album = (!song.album.is_empty()).then_some(song.album.as_str());
         let length_ms = Some(song.duration.saturating_mul(1000));
@@ -1092,7 +1096,8 @@ impl AppService {
         let complete =
             index.is_some() && opts.fetch_online && (opts.songlyrics_ext || opts.ext_probe_landed);
         if result.is_some() || complete {
-            self.lyrics_cache.put(song.id.clone(), result.clone());
+            self.lyrics_cache
+                .put_if_current(generation, song.id.clone(), result.clone());
         }
         result
     }

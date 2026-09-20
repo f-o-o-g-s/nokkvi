@@ -296,13 +296,29 @@ where
     None
 }
 
+/// Mutex-protected half of [`LyricsSessionCache`]: the entries and the
+/// generation they belong to, so a compare-and-put is atomic against a drop.
+#[derive(Debug)]
+struct SessionCacheInner {
+    entries: lru::LruCache<String, Option<LrcDocument>>,
+    generation: u64,
+}
+
 /// Session cache for resolved lyrics, keyed by song id. Holds negatives (a
 /// `None` value) too, so a repeated skip past an unmatched track doesn't re-hit
 /// the network. Owns its mutex so `AppService` can hand out shared access
 /// through one `Arc` and the UI can drop entries when the library changes.
+///
+/// Every drop bumps a generation. A resolve snapshots it on entry and writes
+/// back only if it still matches, so a resolve already in flight when the
+/// library changed cannot overwrite the verdict of the resolve sent to replace
+/// it. The slow channel is the one that loses that race in practice: a fresh
+/// resolve short-circuits at the server while the older one is still waiting
+/// out the 5 s LRCLIB timeout, so without the guard the stale miss lands last
+/// and the song reads "no lyrics" until restart.
 #[derive(Debug)]
 pub struct LyricsSessionCache {
-    inner: parking_lot::Mutex<lru::LruCache<String, Option<LrcDocument>>>,
+    inner: parking_lot::Mutex<SessionCacheInner>,
 }
 
 impl LyricsSessionCache {
@@ -311,34 +327,47 @@ impl LyricsSessionCache {
     pub fn new(capacity: usize) -> Self {
         let capacity = std::num::NonZeroUsize::new(capacity).unwrap_or(std::num::NonZeroUsize::MIN);
         Self {
-            inner: parking_lot::Mutex::new(lru::LruCache::new(capacity)),
+            inner: parking_lot::Mutex::new(SessionCacheInner {
+                entries: lru::LruCache::new(capacity),
+                generation: 0,
+            }),
         }
     }
 
     /// The cached verdict for `song_id`: `Some(Some(doc))` = a hit,
     /// `Some(None)` = a cached miss, `None` = never resolved.
     pub fn get(&self, song_id: &str) -> Option<Option<LrcDocument>> {
-        self.inner.lock().get(song_id).cloned()
+        self.inner.lock().entries.get(song_id).cloned()
     }
 
-    /// Record a verdict (a hit or a complete miss).
-    pub fn put(&self, song_id: String, doc: Option<LrcDocument>) {
-        self.inner.lock().put(song_id, doc);
+    /// The live generation, snapshotted by a resolve before it starts.
+    pub fn generation(&self) -> u64 {
+        self.inner.lock().generation
     }
 
-    /// Forget specific songs — the server may have different lyrics for them
-    /// now (a rescan, a tag edit).
-    pub fn drop_ids(&self, song_ids: &[String]) {
+    /// Record a verdict (a hit or a complete miss) iff no drop has happened
+    /// since `generation` was taken. Returns whether it was stored.
+    pub fn put_if_current(
+        &self,
+        generation: u64,
+        song_id: String,
+        doc: Option<LrcDocument>,
+    ) -> bool {
         let mut cache = self.inner.lock();
-        for id in song_ids {
-            cache.pop(id);
+        if cache.generation != generation {
+            return false;
         }
+        cache.entries.put(song_id, doc);
+        true
     }
 
-    /// Forget everything (a full library rescan announces itself as a wildcard
-    /// event with no ids, so every song is suspect).
+    /// Forget everything AND invalidate every resolve in flight (a full
+    /// library rescan announces itself as a wildcard event with no ids, so
+    /// every song is suspect).
     pub fn drop_all(&self) {
-        self.inner.lock().clear();
+        let mut cache = self.inner.lock();
+        cache.entries.clear();
+        cache.generation = cache.generation.wrapping_add(1);
     }
 }
 
@@ -558,8 +587,9 @@ mod tests {
         let cache = LyricsSessionCache::new(4);
         assert!(cache.get("s1").is_none(), "never resolved");
 
-        cache.put("s1".to_string(), Some(doc("hit")));
-        cache.put("s2".to_string(), None);
+        let generation = cache.generation();
+        assert!(cache.put_if_current(generation, "s1".to_string(), Some(doc("hit"))));
+        assert!(cache.put_if_current(generation, "s2".to_string(), None));
         assert_eq!(
             cache.get("s1").flatten().map(|d| d.lines[0].text.clone()),
             Some("hit".to_string())
@@ -569,12 +599,34 @@ mod tests {
             "a cached miss is distinguishable from never-resolved"
         );
 
-        cache.drop_ids(&["s1".to_string(), "absent".to_string()]);
-        assert!(cache.get("s1").is_none(), "dropped id forgotten");
-        assert!(cache.get("s2").is_some(), "other ids untouched");
+        cache.drop_all();
+        assert!(cache.get("s1").is_none(), "a drop clears everything");
+        assert!(cache.get("s2").is_none());
+    }
+
+    #[test]
+    fn a_resolve_from_before_a_drop_cannot_write_back() {
+        // The rescan race: a slow resolve (waiting out the 5 s LRCLIB timeout)
+        // started before the wildcard event; the fresh one sent to replace it
+        // short-circuits at the server and stores the new lyrics. The stale one
+        // lands last and must be refused, or the song reads "no lyrics" for the
+        // rest of the session — the very failure the drop was added to fix.
+        let cache = LyricsSessionCache::new(4);
+        let stale = cache.generation();
 
         cache.drop_all();
-        assert!(cache.get("s2").is_none(), "wildcard drop clears everything");
+        let fresh = cache.generation();
+        assert!(cache.put_if_current(fresh, "s1".to_string(), Some(doc("fresh"))));
+
+        assert!(
+            !cache.put_if_current(stale, "s1".to_string(), None),
+            "a pre-drop resolve must not write back"
+        );
+        assert_eq!(
+            cache.get("s1").flatten().map(|d| d.lines[0].text.clone()),
+            Some("fresh".to_string()),
+            "the post-drop verdict survives"
+        );
     }
 
     #[tokio::test]

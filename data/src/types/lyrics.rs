@@ -641,34 +641,41 @@ struct TierMaps {
 }
 
 impl TierMaps {
-    /// Find the best `.lrc` for a track within this origin. Returns `None`
-    /// rather than guess when a match is ambiguous — a wrong sheet is worse
-    /// than none.
-    fn find(
+    /// Tier 1: strict. Resolve among the entries under the exact casefolded
+    /// key, or `None` when this origin doesn't hold it.
+    fn find_strict(
+        &self,
+        key1: &(String, String),
+        album: Option<&str>,
+        length_ms: Option<u32>,
+    ) -> Option<&IndexEntry> {
+        resolve(self.tier1.get(key1)?, album, length_ms)
+    }
+
+    /// Whether this origin holds the strict key at all, regardless of whether
+    /// `resolve` can pick a winner among its entries.
+    fn has_strict(&self, key1: &(String, String)) -> bool {
+        self.tier1.contains_key(key1)
+    }
+
+    /// Tier 2: the self-guarding loose recovery tier. Accepts iff every entry
+    /// under the loose key shares one strict identity; >= 2 distinct
+    /// identities refuse rather than guess — a wrong sheet is worse than none.
+    fn find_loose(
         &self,
         artist: &str,
         title: &str,
         album: Option<&str>,
         length_ms: Option<u32>,
     ) -> Option<&IndexEntry> {
-        // Tier 1: strict. If the key is present, resolve here and commit to the
-        // result (an ambiguous strict collision refuses rather than loosening).
-        let key1 = normalize::tier1_key(artist, title);
-        if let Some(entries) = self.tier1.get(&key1) {
-            return resolve(entries, album, length_ms);
-        }
-
-        // Tier 2 (only on a Tier-1 key miss): accept iff every entry under the
-        // loose key shares one strict identity; >= 2 distinct identities refuse.
         let key2 = normalize::tier2_key(artist, title);
-        if let Some(entries) = self.tier2.get(&key2) {
-            let first = &entries.first()?.tier1;
-            if entries.iter().all(|e| &e.tier1 == first) {
-                return resolve(entries, album, length_ms);
-            }
-        }
-
-        None
+        let entries = self.tier2.get(&key2)?;
+        let first = &entries.first()?.tier1;
+        entries
+            .iter()
+            .all(|e| &e.tier1 == first)
+            .then(|| resolve(entries, album, length_ms))
+            .flatten()
     }
 
     fn insert(&mut self, path: PathBuf, meta: LrcMetadata, artist: &str, title: &str) {
@@ -710,7 +717,7 @@ impl LyricsIndex {
         album: Option<&str>,
         length_ms: Option<u32>,
     ) -> Option<&IndexEntry> {
-        self.user.find(artist, title, album, length_ms)
+        self.find_in(&self.user, &self.cache, artist, title, album, length_ms)
     }
 
     /// Find the best previously-downloaded LRCLIB sheet (root `.cache/` only).
@@ -721,7 +728,39 @@ impl LyricsIndex {
         album: Option<&str>,
         length_ms: Option<u32>,
     ) -> Option<&IndexEntry> {
-        self.cache.find(artist, title, album, length_ms)
+        self.find_in(&self.cache, &self.user, artist, title, album, length_ms)
+    }
+
+    /// Look the track up in `own`, with `other` consulted for ONE thing: does
+    /// the exact strict key exist anywhere?
+    ///
+    /// Tier-1 supremacy is corpus-wide, not per-origin. Splitting the index
+    /// halved Tier-2's field of view, and a loose match is only safe while no
+    /// exact one exists: with `Song (Live).lrc` in the user's folder and the
+    /// studio sheet in `.cache/`, playing the studio track misses the user's
+    /// Tier-1 key, and Tier-2 — which strips the `(Live)` qualifier — would
+    /// hand back the live sheet for the studio recording. So a strict key held
+    /// by the OTHER origin ends this lookup at `None`, exactly as a strict key
+    /// held by this one commits it to Tier 1. The channel order then lets the
+    /// origin that actually owns the key answer.
+    fn find_in<'a>(
+        &self,
+        own: &'a TierMaps,
+        other: &TierMaps,
+        artist: &str,
+        title: &str,
+        album: Option<&str>,
+        length_ms: Option<u32>,
+    ) -> Option<&'a IndexEntry> {
+        let key1 = normalize::tier1_key(artist, title);
+        if own.has_strict(&key1) {
+            // An ambiguous strict collision refuses rather than loosening.
+            return own.find_strict(&key1, album, length_ms);
+        }
+        if other.has_strict(&key1) {
+            return None;
+        }
+        own.find_loose(artist, title, album, length_ms)
     }
 
     /// Insert a parsed entry into its origin's tiers. Skips entries with an
@@ -1579,6 +1618,67 @@ mod tests {
         assert_eq!(
             hit.path.file_name().and_then(|n| n.to_str()),
             Some("mine.lrc")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_strict_key_in_the_cache_blocks_a_loose_user_match() {
+        // Splitting the index by origin halved Tier-2's field of view. The
+        // user owns a LIVE sheet; the studio sheet is an LRCLIB download. The
+        // studio track misses the user's Tier-1 key, and Tier-2 strips the
+        // `(live)` qualifier — so without the cross-origin strict check the
+        // user lookup would hand back the live sheet for the studio take.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("live.lrc"),
+            "[ar:Emperor]\n[ti:The Loss and Curse of Reverence (live)]\n[00:10.00]live take",
+        )
+        .expect("write");
+        let cache_dir = dir.path().join(".cache");
+        std::fs::create_dir_all(&cache_dir).expect("mkdir");
+        std::fs::write(
+            cache_dir.join("studio.lrc"),
+            "[ar:Emperor]\n[ti:The Loss and Curse of Reverence]\n[al:Anthems]\n[length:06:26]\n[00:10.00]studio take",
+        )
+        .expect("write");
+
+        let index = build_index(dir.path().to_path_buf()).await;
+        assert!(
+            index
+                .find_user(
+                    "Emperor",
+                    "The Loss and Curse of Reverence",
+                    Some("Anthems"),
+                    None
+                )
+                .is_none(),
+            "a loose user match must not outrank an exact sheet the cache holds"
+        );
+        // The cached channel, next in the chain, owns the strict key and answers.
+        let hit = index
+            .find_cached(
+                "Emperor",
+                "The Loss and Curse of Reverence",
+                Some("Anthems"),
+                None,
+            )
+            .expect("the cache holds the exact sheet");
+        assert_eq!(
+            hit.path.file_name().and_then(|n| n.to_str()),
+            Some("studio.lrc")
+        );
+
+        // The live track still resolves to the user's own sheet: its strict
+        // key lives in the user index, so Tier 1 commits there.
+        assert!(
+            index
+                .find_user(
+                    "Emperor",
+                    "The Loss and Curse of Reverence (live)",
+                    Some("Anthems"),
+                    None
+                )
+                .is_some()
         );
     }
 
