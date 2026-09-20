@@ -575,12 +575,19 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
 
         renderer.with_layer(bounds, |renderer| {
             if let Some(dissolve) = self.data.dissolve {
+                // Clamp the frozen center to the OUTGOING doc, exactly as the
+                // live column is clamped above. It was snapshotted from the
+                // process-global atomic at the transition, and a synced sheet
+                // parked during the next track's pre-roll can carry the
+                // PREVIOUS track's line index — far past a short sheet's end,
+                // where every line culls and the dissolve shows nothing.
+                let out_max = (dissolve.lines.len().saturating_sub(1)) as f32;
                 draw_column(
                     renderer,
                     &state.out_paragraphs,
                     bounds,
                     state.out_slot_height.max(LINE_HEIGHT),
-                    dissolve.center,
+                    dissolve.center.clamp(0.0, out_max),
                     1.0 - dissolve.progress,
                     None,
                     dissolve.synced,

@@ -914,6 +914,111 @@ fn wheel_leaves_the_queue_untouched() {
 }
 
 #[test]
+fn a_song_change_parks_the_column_so_the_next_dissolve_is_honest() {
+    // The pre-roll trap. A new sheet fires no retarget while `active_index` is
+    // None on both sides of the compare, so a surviving glide target would have
+    // the boat tick keep publishing the PREVIOUS track's last line through the
+    // new sheet's pre-roll. `park_outgoing` snapshots that atomic at the next
+    // transition, and `draw` places the parked sheet at it — a short sheet
+    // parked at line 40 culls every line and the dissolve shows nothing.
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    app.engine.crossfade_enabled = true;
+    app.engine.crossfade_duration_secs = 7;
+
+    // Track A runs deep into a long sheet.
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000, 3_000]));
+    app.lyrics.scroll_from = 40.0;
+    app.lyrics.scroll_to = 40.0;
+    crate::widgets::lyrics_viewport::set_lyrics_center(40.0);
+
+    // Skip to track B, whose short sheet is all pre-roll for now.
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    assert_eq!(app.lyrics.scroll_to, 0.0, "the glide target is parked");
+    assert!(app.lyrics.anim_start.is_none());
+
+    app.scrobble.current_song_id = Some("song_2".to_string());
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: "song_2".to_string(),
+        doc: Box::new(timed_doc(&[12_000, 14_000])),
+        epoch: app.lyrics.load_epoch,
+    });
+    assert_eq!(app.lyrics.active_index, None, "still pre-roll");
+    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    assert_eq!(
+        crate::widgets::lyrics_viewport::lyrics_center_pos(),
+        0.0,
+        "pre-roll must publish line 0, not the previous track's line"
+    );
+
+    // Skip again inside B's pre-roll: its sheet parks where it was SHOWN.
+    let _ = app.handle_playback_state_updated(update_for("song_3", 0));
+    let outgoing = app.lyrics.outgoing.as_ref().expect("B parked");
+    assert_eq!(
+        outgoing.center, 0.0,
+        "the dissolve starts where the user was looking"
+    );
+}
+
+#[test]
+fn a_sheet_resolved_mid_track_renders_in_place_on_its_first_frame() {
+    // Toggling Lyrics on at 2:00 (or the enter-Queue kick): `clear()` zeroed
+    // the playhead and only the tick refreshes it, one tick from now. Without
+    // a seed the plain sheet draws at line 0 for a few frames, then jumps.
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    app.lyrics.enabled = true;
+    app.scrobble.current_song_id = Some("song_1".to_string());
+    app.playback.position = 100;
+    app.playback.duration = 200;
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: "song_1".to_string(),
+        doc: Box::new(plain_doc(11)),
+        epoch: app.lyrics.load_epoch,
+    });
+    assert_eq!(app.lyrics.position_ms, 100_000, "seeded from the transport");
+    let _ = crate::update::boat::handle_boat_tick(&mut app, std::time::Instant::now());
+    assert_eq!(
+        crate::widgets::lyrics_viewport::lyrics_center_pos(),
+        5.0,
+        "the first frame already sits mid-sheet"
+    );
+
+    // The tick's exact milliseconds are never coarsened back to whole seconds.
+    let _ = app.handle_playback_state_updated(update_for("song_1", 100_500));
+    let _ = app.handle_lyrics_loader(LyricsLoaderMessage::Loaded {
+        song_id: "song_1".to_string(),
+        doc: Box::new(plain_doc(11)),
+        epoch: app.lyrics.load_epoch,
+    });
+    assert_eq!(app.lyrics.position_ms, 100_500);
+}
+
+#[test]
+fn toggling_lyrics_off_drops_a_dissolve_in_flight() {
+    // Otherwise toggling back on inside the crossfade window re-renders the
+    // PREVIOUS track's sheet fading out over the current one.
+    let mut app = test_app();
+    app.lyrics.enabled = true;
+    app.lyrics.outgoing = Some(crate::state::OutgoingLyrics {
+        doc: timed_doc(&[1_000]),
+        synced: true,
+        center: 0.0,
+        started: std::time::Instant::now(),
+        duration_ms: 12_000,
+    });
+
+    let _ = app.handle_player_bar(crate::widgets::PlayerBarMessage::ToggleLyrics);
+    assert!(!app.lyrics.enabled);
+    assert!(
+        app.lyrics.outgoing.is_none(),
+        "switching lyrics off takes the dissolve with it"
+    );
+}
+
+#[test]
 fn crossfade_transition_parks_a_plain_sheet_too() {
     let mut app = test_app();
     seed_matched(&mut app, "song_1", plain_doc(6));

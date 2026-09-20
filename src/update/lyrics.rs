@@ -272,6 +272,17 @@ impl Nokkvi {
                         Default::default()
                     };
                     self.lyrics.matched_song_id = Some(song_id);
+                    // The song change zeroed the playhead and only the tick
+                    // refreshes it — which cannot happen until this doc is
+                    // matched, one tick from now. Seed it from the transport
+                    // so a sheet resolved MID-track (a Lyrics toggle-on, an
+                    // enter-Queue kick) renders in the right place on its
+                    // first frame instead of starting at line 0 and jumping.
+                    // Only when still zero: once the tick has run it carries
+                    // exact milliseconds, and this is whole seconds.
+                    if self.lyrics.position_ms == 0 {
+                        self.lyrics.position_ms = self.playback.position.saturating_mul(1000);
+                    }
                     // Only a synced sheet has a current line. Over a plain
                     // sheet's all-zero stamps `active_line_at` would name the
                     // LAST line, so it never runs.

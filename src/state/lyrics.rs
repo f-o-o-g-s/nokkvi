@@ -102,7 +102,22 @@ impl LyricsState {
         // a match lands, so a stale value would snap-highlight the wrong line).
         self.position_ms = 0;
         self.drift_offset = 0.0;
+        self.reset_scroll();
         self.load_epoch = self.load_epoch.wrapping_add(1);
+    }
+
+    /// Park the column at line 0 with no glide in flight.
+    ///
+    /// Load-bearing at every song change. A new sheet's pre-roll fires no
+    /// retarget (`active_index` is `None` on both sides of the compare), so a
+    /// surviving `scroll_to` would have the boat tick keep publishing the
+    /// PREVIOUS track's last line — which `draw` ignores for the live column
+    /// but `park_outgoing` would snapshot into the next dissolve.
+    fn reset_scroll(&mut self) {
+        self.scroll_from = 0.0;
+        self.scroll_to = 0.0;
+        self.anim_start = None;
+        self.anim_duration_ms = 0;
     }
 
     /// Park the current sheet as the dissolving outgoing layer (crossfade-
@@ -157,9 +172,10 @@ impl LyricsState {
                 self.doc = doc;
                 self.matched_song_id = Some(id);
                 self.active_index = None;
-                // The incoming sheet starts unscrolled, whatever the user did
-                // to the one it replaces.
+                // The incoming sheet starts unscrolled and unglided, whatever
+                // the user did to the one it replaces.
                 self.drift_offset = 0.0;
+                self.reset_scroll();
                 self.load_epoch = self.load_epoch.wrapping_add(1);
                 true
             }
