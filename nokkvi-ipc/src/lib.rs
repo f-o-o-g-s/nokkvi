@@ -46,8 +46,10 @@
 //!
 //! - **Phase 0:** `ping`.
 //! - **Phase 1:** `next`, `previous`, `play`, `pause`, `play-pause`, `stop`,
-//!   `seek` (arg `position: f32` seconds), `volume` (arg `value: f32` 0–1),
-//!   `shuffle` (toggle), `repeat` (cycle).
+//!   `seek` (arg `position: string` — `"+N"`/`"-N"` seconds relative to the
+//!   current position, or `"N"` absolute), `volume` (arg `value: string` —
+//!   `"+N"`/`"-N"` delta or `"N"` absolute 0–1), `shuffle` (toggle),
+//!   `repeat` (cycle).
 //! - **Phase 2:** `consume` (toggle), `clear-queue`, `switch-view` (arg
 //!   `view: string` — one of albums/queue/songs/artists/genres/playlists/
 //!   radios/settings), `love` (toggle star on playing track), `rate` (arg

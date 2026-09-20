@@ -32,12 +32,6 @@
 //!   result is genuinely async at dispatch time (e.g. `next`/`previous` — the
 //!   new track lands later) and whose side-effects belong on the regular
 //!   pipeline.
-//! - `act_f32 (<arg_name>, <closure>)` — `act` with a single named `f32`
-//!   argument extracted from `incoming.request.args`. Closure receives
-//!   `&mut Nokkvi` and the `f32` and returns the same `(Task, data)` result,
-//!   so it can echo the resulting value (and gate on app state — e.g. `seek`
-//!   rejects radio playback). Missing or non-numeric args return an
-//!   `invalid_args` error response before the closure runs.
 //! - `act (<closure>)` — closure receives `&mut Nokkvi`, returns
 //!   `Result<(Task<Message>, serde_json::Value), (&'static str, String)>`. On
 //!   `Ok((task, data))` the responder gets `data` and the task is returned; on
@@ -47,13 +41,16 @@
 //!   real handler and then read the resulting state back into `data` (the
 //!   `PlaybackMessage` arms are 1:1 handler wrappers, so calling the handler
 //!   directly loses no side-effects).
-//! - `act_str (<arg_name>, <closure>)` — `act` with an auto-extracted string
-//!   arg. Closure receives `&mut Nokkvi` and `&str` (the already-extracted arg
-//!   value) and returns the same `(Task, data)` result. Missing-arg returns
-//!   `invalid_args` before the closure runs. **Use this** whenever a verb
-//!   takes a single named string arg — it (a) keeps the closure focused and
-//!   (b) lets the macro publish the CLI arg name, which prevents the
-//!   macro/CLI-parser drift class that plagued earlier designs.
+//! - `act_str (<arg_name>, <closure>)` — `act` with an auto-extracted text
+//!   arg. Closure receives `&mut Nokkvi` and `&str` and returns the same
+//!   `(Task, data)` result, so it can echo the resulting value and gate on
+//!   app state (e.g. `seek` rejects radio playback). Missing-arg returns
+//!   `invalid_args` before the closure runs; a JSON number is read by its
+//!   decimal text, so raw-socket clients and older CLIs keep working.
+//!   **Use this** whenever a verb takes a single named arg — it (a) keeps the
+//!   closure focused, (b) lets the macro publish the CLI arg name, which
+//!   prevents the macro/CLI-parser drift class that plagued earlier designs,
+//!   and (c) leaves the `+`/`-` prefix intact for relative values.
 //!
 //! ## Decision rule (which arm shape to pick)
 //!
@@ -61,11 +58,12 @@
 //!    (acks `{"ok": true}`).
 //! 2. **No args, const compute-and-return payload (no app access)** →
 //!    `respond`.
-//! 3. **Single `f32` arg, needs `&mut Nokkvi`** → `act_f32`.
-//! 4. **Single string arg, needs `&mut Nokkvi`** → `act_str`.
-//! 5. **No args but needs `&mut Nokkvi` (gate-bypass / app-state read /
+//! 3. **Single arg, needs `&mut Nokkvi`** → `act_str`. The closure gets the
+//!    arg's text and owns parsing, which is what lets a verb accept a
+//!    `+`/`-` prefix for a relative value.
+//! 4. **No args but needs `&mut Nokkvi` (gate-bypass / app-state read /
 //!    resulting-state echo)** → `act` with `|app|`.
-//! 6. **Multiple args or a complex arg shape** → `act` with manual extraction
+//! 5. **Multiple args or a complex arg shape** → `act` with manual extraction
 //!    from `incoming.request.args`. Document the arg names in the verb's
 //!    catalog entry; the CLI side will need a matching `build_ipc_cli_args`
 //!    arm (drift risk — minimize this case).
@@ -104,8 +102,10 @@
 //! | `pause`       | act       | `{"state":"paused"}`; calls `handle_pause`.    |
 //! | `play-pause`  | act       | `{"state":…}`; calls `handle_toggle_play`.     |
 //! | `stop`        | act       | `{"state":"stopped"}`; calls `handle_stop`.    |
-//! | `seek`        | act_f32   | `{"position":N}`; arg `position` (seconds).     |
-//! |               |           | `unavailable` error during radio playback.      |
+//! | `seek`        | act_str   | `{"position":N}` absolute, or `{"offset":±N}`  |
+//! |               |           | relative; arg `position` (seconds). `"+N"`/    |
+//! |               |           | `"-N"` seeks relative to the current position, |
+//! |               |           | `"N"` is absolute. `unavailable` during radio. |
 //! | `volume`      | act_str   | `{"volume":N}`; arg `value`. `"+N"`/`"-N"`     |
 //! |               |           | (delta, clamped 0.0..=1.0) or `"N"` absolute  |
 //! |               |           | (0.0..=1.0, rejected if out of range). Routes |
@@ -151,28 +151,15 @@ use crate::{
     services::ipc::IpcIncoming,
 };
 
-/// CLI-side JSON wrapping shape for a verb's positional arg. The macro
-/// emits one of these per arg-taking verb in `CLI_ARGS`;
-/// [`crate::build_ipc_cli_args`] reads them to construct the `args` object
-/// without per-verb match arms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CliArgType {
-    /// CLI string is parsed as a JSON number first; unparseable inputs
-    /// fall back to forwarding as a raw string (lets the server emit the
-    /// precise "must be a number" error rather than "missing required arg").
-    Number,
-    /// CLI string forwarded verbatim as a JSON string. The server-side
-    /// closure owns parsing.
-    String,
-}
-
 /// Generate the IPC dispatcher plus three companion consts that
 /// `main.rs`'s argv parser reads to stay drift-free:
 ///
 /// - `KNOWN_COMMANDS: &[&str]` — every declared verb name.
-/// - `CLI_ARGS: &[(&'static str, Option<(&'static str, CliArgType)>)]` —
-///   per verb, the CLI arg-name and forwarding type (or `None` for no-arg
-///   verbs).
+/// - `CLI_ARGS: &[(&'static str, Option<&'static str>)]` — per verb, the CLI
+///   arg-name (or `None` for no-arg verbs). Every arg-taking verb forwards
+///   its positional verbatim as a JSON string; the server-side closure owns
+///   parsing, which is what lets `seek`, `volume` and `rate` take a leading
+///   `+`/`-`.
 ///
 /// See the module-level docs for the five arm shapes and the decision rule.
 macro_rules! define_commands {
@@ -181,10 +168,7 @@ macro_rules! define_commands {
     ) => {
         pub(crate) const KNOWN_COMMANDS: &[&str] = &[ $( $verb ),+ ];
 
-        pub(crate) const CLI_ARGS: &[(
-            &'static str,
-            Option<(&'static str, CliArgType)>,
-        )] = &[
+        pub(crate) const CLI_ARGS: &[(&'static str, Option<&'static str>)] = &[
             $( ($verb, define_commands!(@cli_arg $kind $arg)) ),+
         ];
 
@@ -211,12 +195,7 @@ macro_rules! define_commands {
     (@cli_arg respond ($payload:expr))                              => { None };
     (@cli_arg dispatch ($msg:expr))                                 => { None };
     (@cli_arg act ($closure:expr))                                  => { None };
-    (@cli_arg act_f32 ($arg_name:literal, $closure:expr))           => {
-        Some(($arg_name, CliArgType::Number))
-    };
-    (@cli_arg act_str ($arg_name:literal, $closure:expr))           => {
-        Some(($arg_name, CliArgType::String))
-    };
+    (@cli_arg act_str ($arg_name:literal, $closure:expr))           => { Some($arg_name) };
 
     // ----- Per-arm dispatch bodies -----
 
@@ -238,39 +217,6 @@ macro_rules! define_commands {
             .responder
             .send(IpcResponse::ok($request_id, Some(json!({ "ok": true }))));
         Task::done($msg)
-    }};
-
-    (@arm act_f32 ($arg_name:literal, $closure:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
-        match extract_f32_arg(&$incoming.request.args, $arg_name) {
-            Ok(value) => {
-                let result: Result<(Task<Message>, serde_json::Value), (&'static str, String)> =
-                    ($closure)($app, value);
-                match result {
-                    Ok((task, data)) => {
-                        $incoming
-                            .responder
-                            .send(IpcResponse::ok($request_id, Some(data)));
-                        task
-                    }
-                    Err((code, message)) => {
-                        $incoming.responder.send(IpcResponse::err(
-                            $request_id,
-                            code,
-                            message,
-                        ));
-                        Task::none()
-                    }
-                }
-            }
-            Err(message) => {
-                $incoming.responder.send(IpcResponse::err(
-                    $request_id,
-                    "invalid_args",
-                    message,
-                ));
-                Task::none()
-            }
-        }
     }};
 
     (@arm act ($closure:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
@@ -295,11 +241,7 @@ macro_rules! define_commands {
     }};
 
     (@arm act_str ($arg_name:literal, $closure:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
-        let raw = $incoming
-            .request
-            .args
-            .get($arg_name)
-            .and_then(|v| v.as_str());
+        let raw = $incoming.request.args.get($arg_name).and_then(arg_as_text);
         let Some(raw) = raw else {
             $incoming.responder.send(IpcResponse::err(
                 $request_id,
@@ -309,7 +251,7 @@ macro_rules! define_commands {
             return Task::none();
         };
         let result: Result<(Task<Message>, serde_json::Value), (&'static str, String)> =
-            ($closure)($app, raw);
+            ($closure)($app, raw.as_ref());
         match result {
             Ok((task, data)) => {
                 $incoming
@@ -329,16 +271,20 @@ macro_rules! define_commands {
     }};
 }
 
-/// Extract a named `f32` arg from an `IpcRequest::args` JSON value. Accepts
-/// JSON numbers (integer or float); rejects strings, nulls, and missing
-/// keys with a precise error message the client can show to a user.
-fn extract_f32_arg(args: &serde_json::Value, name: &str) -> Result<f32, String> {
-    match args.get(name) {
-        Some(v) => v
-            .as_f64()
-            .map(|n| n as f32)
-            .ok_or_else(|| format!("arg `{name}` must be a number, got {v}")),
-        None => Err(format!("missing required arg: {name}")),
+/// Read an `act_str` arg as text: a JSON string verbatim, a JSON number by
+/// its decimal text.
+///
+/// The number case is a compatibility shim, not a convenience. The CLI
+/// forwards every positional as a string, but a raw-socket client or an older
+/// `nokkvi` binary still sends `{"position": 30}` / `{"value": 0.6}`, and
+/// those should keep working rather than reading as "missing required arg".
+/// Booleans, nulls, arrays and objects are `None` — there is no honest text
+/// for them.
+fn arg_as_text(value: &serde_json::Value) -> Option<std::borrow::Cow<'_, str>> {
+    match value {
+        serde_json::Value::String(s) => Some(std::borrow::Cow::Borrowed(s)),
+        serde_json::Value::Number(n) => Some(std::borrow::Cow::Owned(n.to_string())),
+        _ => None,
     }
 }
 
@@ -459,14 +405,27 @@ define_commands! {
         let task = app.handle_stop();
         Ok((task, json!({ "state": play_state_str(&app.playback) })))
     });
-    // handle_seek no-ops on radio (no seekable position), so guard here and
-    // return an error rather than echoing a false `{"position": …}` success.
-    "seek"        => act_f32 ("position", |app: &mut Nokkvi, value: f32| {
+    // The seek handlers no-op on radio (no seekable position), so guard here
+    // and return an error rather than echoing a false success.
+    //
+    // Absolute answers `{"position": N}`; relative answers `{"offset": ±N}`,
+    // the honest "what was dispatched" shape — the landing point is not known
+    // synchronously (ask `status` for it).
+    "seek"        => act_str ("position", |app: &mut Nokkvi, raw: &str| {
         if app.active_playback.is_radio() {
             return Err(("unavailable", "seek is not available during radio playback".to_string()));
         }
-        let task = app.handle_seek(value);
-        Ok((task, json!({ "position": round_f32(value) })))
+        let request = parse_seek_arg(raw).map_err(|message| ("invalid_args", message))?;
+        match request {
+            crate::state::SeekRequest::Absolute(position) => {
+                let task = app.handle_seek(position);
+                Ok((task, json!({ "position": round_f32(position) })))
+            }
+            crate::state::SeekRequest::Relative(offset) => {
+                let task = app.handle_seek_relative(offset);
+                Ok((task, json!({ "offset": round_f32(offset) })))
+            }
+        }
     });
     "volume"      => act_str ("value", |app: &mut Nokkvi, raw: &str| {
         let current = app.playback.volume;
@@ -729,6 +688,41 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "random": app.modes.random,
         "repeat": repeat_str(&app.modes),
         "consume": app.modes.consume,
+    })
+}
+
+/// Parse a seek-arg string into a [`SeekRequest`](crate::state::SeekRequest).
+/// Two accepted shapes, matching `volume` and `rate`:
+///
+/// - **Relative**: `"+N"` / `"-N"` — move N seconds from wherever the engine
+///   is. `"+0"` / `"-0"` are no-ops by construction. Past the end ends the
+///   track (the engine clamps), past the start parks at 0:00.
+/// - **Absolute**: `"N"` — seek to N seconds from the start.
+///
+/// Non-finite values are rejected rather than clamped: `nan` and `inf` are
+/// typos, not intents, and the engine would silently turn them into 0 or the
+/// end of the track.
+fn parse_seek_arg(raw: &str) -> Result<crate::state::SeekRequest, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("seek arg `position` must not be empty".into());
+    }
+    let parsed = raw.parse::<f32>().map_err(|_| {
+        format!(
+            "seek arg `position` `{raw}` must be a number of seconds, optionally \
+             ±-prefixed for a relative offset"
+        )
+    })?;
+    if !parsed.is_finite() {
+        return Err(format!(
+            "seek arg `position` `{raw}` must be a finite number"
+        ));
+    }
+    let first = raw.as_bytes()[0];
+    Ok(if first == b'+' || first == b'-' {
+        crate::state::SeekRequest::Relative(parsed)
+    } else {
+        crate::state::SeekRequest::Absolute(parsed)
     })
 }
 

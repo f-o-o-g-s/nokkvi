@@ -19,11 +19,13 @@ All notable changes to this project will be documented in this file.
 - The mouse wheel over the Queue cover scrolls a plain lyrics sheet by hand.
 - Seek Backward and Seek Forward hotkeys, on Left and Right by default. Hold to scrub.
 - A Seek Step setting, 1 to 60 seconds, in General > Behavior.
+- `nokkvi seek +10` and `seek -10` seek relative to the current position.
 
 ### Changed
 
 - The About modal now credits Claude Opus 5 and Fable 5.1 as the shipwrights (previously Opus 4.8).
 - The sort-mode cycle moved from Left and Right to Shift+Left and Shift+Right.
+- `nokkvi --help` now lists `queue-push` and `queue-pull` and shows `volume`'s relative form.
 - Keyboard scrolling, wheel scrolling, and clicks in a very large queue now respond faster.
 - Dropping thousands of selected rows in a very large queue now lands without a pause.
 - Dropping thousands of selected rows in the playlist editor now lands without a pause.

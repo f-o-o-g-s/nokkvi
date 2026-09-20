@@ -319,18 +319,21 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
 }
 
 /// CLI arg routing is macro-driven via `IPC_CLI_ARGS`. Adding a verb that
-/// takes an arg without using `with_f32` / `act_str` would silently
-/// land it in `IPC_CLI_ARGS` as `None`, so the CLI would forward
-/// `Value::Null` and the server would always return `invalid_args`. This
-/// pins the exact set of verbs the CLI knows how to wrap and which arg
-/// name it forwards, so a future macro-row drift trips a test.
+/// takes an arg without using `act_str` would silently land it in
+/// `IPC_CLI_ARGS` as `None`, so the CLI would forward `Value::Null` and the
+/// server would always return `invalid_args`. This pins the exact set of
+/// verbs the CLI knows how to wrap and which arg name it forwards, so a
+/// future macro-row drift trips a test. Every arg-taking verb now forwards
+/// its positional verbatim as a string — the server-side closure owns
+/// parsing, which is what lets `seek`, `volume` and `rate` all take a
+/// leading `+`/`-`.
 #[test]
 fn cli_args_const_lists_every_arg_taking_verb() {
     use std::collections::BTreeMap;
 
     let actual: BTreeMap<&str, &str> = crate::update::IPC_CLI_ARGS
         .iter()
-        .filter_map(|(verb, spec)| spec.map(|(arg, _)| (*verb, arg)))
+        .filter_map(|(verb, spec)| spec.map(|arg| (*verb, arg)))
         .collect();
 
     let expected: BTreeMap<&str, &str> = [
@@ -349,19 +352,58 @@ fn cli_args_const_lists_every_arg_taking_verb() {
 }
 
 #[test]
-fn seek_accepts_f32_position_arg_and_echoes_it() {
-    let resp = drive_with_args("seek", json!({"position": 42.5}));
+fn seek_accepts_an_absolute_position_and_echoes_it() {
+    let resp = drive_with_args("seek", json!({"position": "42.5"}));
     assert_eq!(resp.request_id, 7);
     assert_eq!(resp.data, Some(json!({ "position": 42.5 })));
     assert!(resp.error.is_none());
 }
 
 #[test]
-fn seek_accepts_integer_arg_via_json_number_coercion() {
-    // JSON `30` (integer) should still parse as f32 — covers the common case
-    // where a CLI user types `nokkvi seek 30` without a decimal.
+fn seek_reads_a_json_number_by_its_decimal_text() {
+    // A raw-socket client or an older CLI still sends `{"position": 30}`.
+    // The act_str arm reads a JSON number by its decimal text so those keep
+    // working, as an absolute seek.
     let resp = drive_with_args("seek", json!({"position": 30}));
     assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "position": 30.0 })));
+}
+
+#[test]
+fn seek_accepts_relative_offsets_and_echoes_the_offset() {
+    // Relative answers `{"offset": ±N}` — the honest "what was dispatched"
+    // shape, because the landing point is not known synchronously (`status`
+    // has it).
+    let resp = drive_with_args("seek", json!({"position": "+10"}));
+    assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "offset": 10.0 })));
+
+    let resp = drive_with_args("seek", json!({"position": "-5"}));
+    assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "offset": -5.0 })));
+}
+
+#[test]
+fn seek_accepts_a_zero_offset_and_dispatches_nothing() {
+    for raw in ["+0", "-0"] {
+        let resp = drive_with_args("seek", json!({ "position": raw }));
+        assert!(
+            resp.error.is_none(),
+            "{raw}: a zero offset is a no-op, not an error"
+        );
+        assert_eq!(resp.data, Some(json!({ "offset": 0.0 })));
+    }
+}
+
+#[test]
+fn seek_rejects_values_that_are_not_a_finite_number() {
+    for raw in ["", "+", "-", "abc", "1:30", "nan", "inf", "-inf"] {
+        let resp = drive_with_args("seek", json!({ "position": raw }));
+        let err = resp
+            .error
+            .unwrap_or_else(|| panic!("{raw}: must be rejected"));
+        assert_eq!(err.code, "invalid_args", "{raw}");
+    }
 }
 
 #[test]
@@ -409,6 +451,14 @@ fn seek_wrong_arg_type_returns_invalid_args_error() {
 }
 
 #[test]
+fn seek_arg_that_is_neither_string_nor_number_returns_invalid_args_error() {
+    let resp = drive_with_args("seek", json!({"position": true}));
+    let err = resp.error.expect("a bool must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("position"));
+}
+
+#[test]
 fn volume_accepts_absolute_string_arg_and_echoes_committed_value() {
     let resp = drive_with_args("volume", json!({"value": "0.6"}));
     assert!(resp.error.is_none());
@@ -442,14 +492,13 @@ fn volume_missing_arg_returns_invalid_args_error() {
 }
 
 #[test]
-fn volume_numeric_arg_returns_invalid_args_error() {
-    // act_str arm requires the arg as a JSON string; legacy CLIs sending
-    // `{"value": 0.6}` (number) get the macro's "missing required string arg"
-    // error rather than silently mis-parsing.
+fn volume_reads_a_json_number_by_its_decimal_text() {
+    // Changed on purpose alongside the seek verb: the act_str arm now reads a
+    // JSON number by its decimal text, so a raw-socket client sending
+    // `{"value": 0.6}` is honoured instead of getting "missing required arg".
     let resp = drive_with_args("volume", json!({"value": 0.6}));
-    let err = resp.error.expect("numeric volume must error post act_str");
-    assert_eq!(err.code, "invalid_args");
-    assert!(err.message.contains("value"));
+    assert!(resp.error.is_none(), "a JSON number is read as its text");
+    assert_eq!(resp.data, Some(json!({ "volume": 0.6 })));
 }
 
 #[test]

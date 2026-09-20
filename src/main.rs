@@ -1406,12 +1406,14 @@ fn print_cli_help() {
     println!("  pause            Pause playback");
     println!("  play-pause       Toggle between play and pause");
     println!("  stop             Stop playback");
-    println!("  seek <seconds>   Seek to absolute position in seconds (float)");
-    println!("  volume <0..1>    Set playback volume (clamped to [0.0, 1.0])");
+    println!("  seek <±N | N>    Seek: ±N seconds relative, N absolute (float seconds)");
+    println!("  volume <±N | N>  Volume: ±N relative (clamped), N absolute in [0.0, 1.0]");
     println!("  shuffle          Toggle shuffle (random) mode");
     println!("  repeat           Cycle repeat mode (off → one → queue)");
     println!("  consume          Toggle consume mode (drop played tracks)");
     println!("  clear-queue      Empty the queue and stop playback");
+    println!("  queue-push       Push the local queue to the server");
+    println!("  queue-pull       Replace the local queue with the server's");
     println!("  add-to-queue     Add the focused list item to the queue");
     println!("  remove-from-queue  Remove the centered song from the queue (queue view only)");
     println!("  switch-view <v>  Switch the top pane to <v> (albums/queue/songs/");
@@ -1456,14 +1458,9 @@ fn print_cli_help() {
 /// single positional CLI string. Returns `Value::Null` for verbs that don't
 /// take args.
 ///
-/// On parse failure the raw string is forwarded under the expected arg name
-/// so the server's `with_f32` arm returns the precise "must be a number"
-/// error rather than the misleading "missing required arg" path. Only a
-/// truly omitted positional yields an empty args object.
-///
-/// Per-verb arg mapping is hand-rolled in Phase 1; once the §14D macro grows
-/// to also generate this CLI-side parser, the match collapses to a single
-/// macro invocation.
+/// The positional is forwarded verbatim under the expected arg name, so the
+/// server-side parser owns absolute-vs-relative dispatch and emits the precise
+/// error. Only a truly omitted positional yields an empty args object.
 fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value {
     let Some(arg_spec) = update::IPC_CLI_ARGS
         .iter()
@@ -1474,23 +1471,18 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
         // dispatcher arm decides whether that's an error.
         return serde_json::Value::Null;
     };
-    let (arg_name, arg_type) = arg_spec;
-
     let Some(raw) = positional else {
         // Verb expected an arg but the CLI user gave none — forward an
         // empty object so the server's "missing required arg" error fires.
         return serde_json::json!({});
     };
 
-    match arg_type {
-        update::CliArgType::Number => match raw.parse::<f64>() {
-            Ok(n) => serde_json::json!({ *arg_name: n }),
-            // Unparseable input goes through as a raw string so the
-            // server's `must be a number` path emits the precise error.
-            Err(_) => serde_json::json!({ *arg_name: raw }),
-        },
-        update::CliArgType::String => serde_json::json!({ *arg_name: raw }),
-    }
+    // Every arg-taking verb forwards its positional VERBATIM as a JSON
+    // string. Coercing to a number here would drop the leading `+`/`-` that
+    // makes `seek +10`, `volume +0.05` and `rate +1` relative, and it would
+    // turn a typo into "missing required arg" instead of the server's precise
+    // "must be a number".
+    serde_json::json!({ *arg_spec: raw })
 }
 
 /// Forward a single IPC verb (with optional structured args) to the running
@@ -1654,14 +1646,22 @@ mod build_ipc_cli_args_tests {
     use super::build_ipc_cli_args;
 
     #[test]
-    fn seek_numeric_arg_round_trips_as_json_number() {
+    fn seek_arg_forwards_as_string() {
+        // `seek` joined `volume` / `rate` on `CliArgType::String` so the
+        // server-side parser owns absolute-vs-relative dispatch. Coercing to
+        // a JSON number here would silently drop the leading `+`/`-` that
+        // makes an offset an offset.
         assert_eq!(
             build_ipc_cli_args("seek", Some("30")),
-            json!({"position": 30.0}),
+            json!({"position": "30"}),
         );
         assert_eq!(
-            build_ipc_cli_args("seek", Some("42.5")),
-            json!({"position": 42.5}),
+            build_ipc_cli_args("seek", Some("+10")),
+            json!({"position": "+10"}),
+        );
+        assert_eq!(
+            build_ipc_cli_args("seek", Some("-5")),
+            json!({"position": "-5"}),
         );
     }
 
@@ -1686,9 +1686,8 @@ mod build_ipc_cli_args_tests {
 
     #[test]
     fn unparseable_arg_forwards_raw_string_under_expected_key() {
-        // Sends the server a wrong-type value so its `with_f32` arm returns
-        // the precise "must be a number" error rather than the misleading
-        // "missing required arg" path.
+        // The server's parser returns the precise "must be a number" error
+        // rather than the misleading "missing required arg" path.
         assert_eq!(
             build_ipc_cli_args("seek", Some("not-a-number")),
             json!({"position": "not-a-number"}),
