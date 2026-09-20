@@ -1103,9 +1103,13 @@ impl QueuePage {
             center_artwork_handle,
             over_art_overlay,
             over_art_boat,
-            // Synced-lyrics layer: haloed text topmost, its scrim slotted
-            // BELOW the over-cover visualizer (both hero surfaces co-render).
+            // Lyrics layer: haloed text topmost, its scrim slotted BELOW the
+            // over-cover visualizer (both hero surfaces co-render).
             lyrics_layer,
+            // The wheel scrolls a PLAIN sheet by hand; the viewport ignores it
+            // over a synced sheet and over the empty state, so right-click and
+            // left-click keep reaching the panel beneath either way.
+            Some(QueueMessage::LyricsWheel),
             crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Blank,
             panel_menu_entries,
             artwork_menu_open,

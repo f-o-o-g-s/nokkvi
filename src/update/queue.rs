@@ -247,6 +247,14 @@ impl Nokkvi {
                     .track_drag_motion(*cursor, *edge, *target_slot);
                 return Task::none();
             }
+            // Wheel over a plain lyrics sheet: a touchpad sends a burst of
+            // pixel deltas, so this belongs here rather than in the tail. It
+            // writes only `lyrics.drift_offset` — the queue's selection and
+            // viewport are untouched.
+            QueueMessage::LyricsWheel(delta_lines) => {
+                self.handle_lyrics_wheel(*delta_lines);
+                return Task::none();
+            }
             _ => {}
         }
 

@@ -377,6 +377,11 @@ impl QueuePage {
                 self.playlist_strip_expanded = false;
                 (Task::none(), QueueAction::None)
             }
+            // Intercepted by `handle_queue`'s pointer-motion fast path, which
+            // returns before the page's `update` runs — the wheel touches only
+            // the lyrics overlay, never the queue's selection or viewport. The
+            // arm exists so the match stays exhaustive (no `_ =>` wildcard).
+            QueueMessage::LyricsWheel(_) => (Task::none(), QueueAction::None),
         }
     }
 }

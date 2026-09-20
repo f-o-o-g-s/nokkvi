@@ -377,7 +377,14 @@ impl ArtworkPlaceholder {
 pub(crate) fn single_artwork_panel<'a, Message: 'a + 'static>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
 ) -> Element<'a, Message> {
-    single_artwork_panel_inner(artwork_handle, None, None, None, ArtworkPlaceholder::Blank)
+    single_artwork_panel_inner(
+        artwork_handle,
+        None,
+        None,
+        None,
+        None,
+        ArtworkPlaceholder::Blank,
+    )
 }
 
 /// Surfing-boat overlay for the over-cover Lines visualizer. Carries a borrow of
@@ -430,6 +437,7 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
     )>,
     boat: Option<OverCoverBoat<'a>>,
     lyrics: Option<crate::widgets::lyrics_viewport::LyricsPanelData<'a>>,
+    lyrics_on_wheel: Option<fn(f32) -> Message>,
     placeholder: ArtworkPlaceholder,
 ) -> Element<'a, Message> {
     if theme::artwork_column_mode().is_stretched() {
@@ -551,7 +559,12 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
             if let Some(ly) = lyrics {
                 stack![
                     panel,
-                    crate::widgets::lyrics_viewport::lyrics_text_layer(ly, size.width, size.height)
+                    crate::widgets::lyrics_viewport::lyrics_text_layer(
+                        ly,
+                        lyrics_on_wheel,
+                        size.width,
+                        size.height
+                    )
                 ]
                 .into()
             } else {
@@ -666,7 +679,12 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
         if let Some(ly) = lyrics {
             stack![
                 panel,
-                crate::widgets::lyrics_viewport::lyrics_text_layer(ly, square_size, square_size)
+                crate::widgets::lyrics_viewport::lyrics_text_layer(
+                    ly,
+                    lyrics_on_wheel,
+                    square_size,
+                    square_size
+                )
             ]
             .into()
         } else {
@@ -729,13 +747,25 @@ pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone +
     )>,
     boat: Option<OverCoverBoat<'a>>,
     lyrics: Option<crate::widgets::lyrics_viewport::LyricsPanelData<'a>>,
+    // `lyrics_on_wheel`: wheel callback for a PLAIN lyric sheet — a plain `fn`
+    // pointer beside the panel data, because `LyricsPanelData` carries no
+    // message type and must stay `Copy`. `None` on every panel but the Queue's
+    // now-playing cover.
+    lyrics_on_wheel: Option<fn(f32) -> Message>,
     placeholder: ArtworkPlaceholder,
     menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
     is_open: bool,
     open_position: Option<iced::Point>,
     on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let panel = single_artwork_panel_inner(artwork_handle, over_art, boat, lyrics, placeholder);
+    let panel = single_artwork_panel_inner(
+        artwork_handle,
+        over_art,
+        boat,
+        lyrics,
+        lyrics_on_wheel,
+        placeholder,
+    );
     wrap_with_panel_menu(panel, menu_entries, is_open, open_position, on_open_change)
 }
 

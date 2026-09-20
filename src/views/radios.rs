@@ -607,7 +607,9 @@ impl RadiosPage {
                 panel_handle,
                 over_art_visualizer,
                 over_art_boat,
-                // Lyrics are Queue-only (ICY stream titles starve the matcher).
+                // Lyrics are Queue-only (ICY stream titles starve the matcher),
+                // so there is no plain sheet here and no wheel to capture.
+                None,
                 None,
                 crate::widgets::base_slot_list_layout::ArtworkPlaceholder::RadioTower,
                 panel_menu_entries,

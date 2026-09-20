@@ -204,6 +204,41 @@ impl Nokkvi {
         )
     }
 
+    /// One mouse-wheel step over a plain lyrics sheet, as a LINE delta
+    /// (positive = forward through the sheet).
+    ///
+    /// Stores the offset that produces the WANTED center rather than
+    /// accumulating the raw delta: clamping at read time would let a long
+    /// shove bank hidden overshoot past the end, so the next notch back would
+    /// do nothing. Recomputed from the same inputs the boat tick uses, so the
+    /// sheet lands exactly where the next frame draws it.
+    pub(crate) fn handle_lyrics_wheel(&mut self, delta_lines: f32) {
+        use crate::widgets::lyrics_viewport::{drift_center, drift_offset_for};
+
+        // Only a plain sheet scrolls: a synced one follows its line cursor,
+        // and an empty one has nothing to move. A non-finite delta (a driver
+        // sending NaN) would poison the offset for the rest of the track.
+        if self.lyrics.doc.synced || self.lyrics.doc.lines.is_empty() || !delta_lines.is_finite() {
+            return;
+        }
+
+        let line_count = self.lyrics.doc.lines.len();
+        let duration_ms = self.playback.duration.saturating_mul(1000);
+        let max = line_count.saturating_sub(1) as f32;
+        let position_ms = self.lyrics.position_ms;
+
+        let current = drift_center(
+            position_ms,
+            duration_ms,
+            line_count,
+            self.lyrics.drift_offset,
+        );
+        let wanted = (current + delta_lines).clamp(0.0, max);
+        // The exact inverse, so the next frame draws the sheet where the notch
+        // asked — not the clamped drift, which falls short past the end.
+        self.lyrics.drift_offset = drift_offset_for(position_ms, duration_ms, line_count, wanted);
+    }
+
     /// Land pipeline results under the stale-load guard.
     pub(crate) fn handle_lyrics_loader(&mut self, msg: LyricsLoaderMessage) -> Task<Message> {
         match msg {

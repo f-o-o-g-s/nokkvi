@@ -295,6 +295,13 @@ pub enum QueueMessage {
     PlaylistStripHoverEnter,
     /// Pointer left the playlist context strip — collapse the detail block.
     PlaylistStripHoverExit,
+    /// Mouse wheel over a PLAIN lyrics sheet on the now-playing cover, carrying
+    /// the scroll as a LINE delta (positive = forward through the sheet). A
+    /// delta, never an absolute: two notches between renders would otherwise
+    /// both read the same stale base and one would be lost. Handled in
+    /// `handle_queue`'s pointer-motion fast-path block — a touchpad sends
+    /// bursts of these, and that block returns before the row list is read.
+    LyricsWheel(f32),
 }
 
 /// Actions that bubble up to root for global state mutation

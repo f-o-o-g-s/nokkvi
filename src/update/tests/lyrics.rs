@@ -797,6 +797,122 @@ fn drift_offset_resets_on_clear_and_promote() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// The mouse wheel over a plain sheet
+// ---------------------------------------------------------------------------
+
+/// Send one wheel step as the widget would, through the root handler.
+fn wheel(app: &mut crate::Nokkvi, delta_lines: f32) {
+    let _ = app.handle_queue(crate::views::QueueMessage::LyricsWheel(delta_lines));
+}
+
+/// The center the next rendered frame would show.
+fn published_center(app: &mut crate::Nokkvi) -> f32 {
+    let _ = crate::update::boat::handle_boat_tick(app, std::time::Instant::now());
+    crate::widgets::lyrics_viewport::lyrics_center_pos()
+}
+
+#[test]
+fn wheel_scrolls_a_plain_sheet_and_the_drift_carries_on() {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(11));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+    let _ = app.handle_playback_state_updated(update_for("song_1", 0));
+    assert_eq!(published_center(&mut app), 0.0);
+
+    wheel(&mut app, 2.0);
+    assert_eq!(app.lyrics.drift_offset, 2.0);
+    assert_eq!(published_center(&mut app), 2.0, "the sheet moved");
+
+    // The drift carries on from where the user left it.
+    let _ = app.handle_playback_state_updated(update_for("song_1", 100_000));
+    assert_eq!(published_center(&mut app), 7.0, "drift + offset");
+}
+
+#[test]
+fn wheel_is_clamped_when_written_with_no_hidden_overshoot() {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(11));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+
+    // At the start, a huge backward shove stores no hidden debt: ONE forward
+    // notch then moves the sheet immediately.
+    let _ = app.handle_playback_state_updated(update_for("song_1", 0));
+    wheel(&mut app, -1_000.0);
+    assert_eq!(published_center(&mut app), 0.0);
+    wheel(&mut app, 2.0);
+    assert_eq!(published_center(&mut app), 2.0, "no backward debt to repay");
+
+    // Same at the end.
+    let _ = app.handle_playback_state_updated(update_for("song_1", 200_000));
+    wheel(&mut app, 1_000.0);
+    assert_eq!(published_center(&mut app), 10.0);
+    wheel(&mut app, -2.0);
+    assert_eq!(published_center(&mut app), 8.0, "no forward debt to repay");
+}
+
+#[test]
+fn wheel_is_ignored_for_a_synced_or_empty_sheet() {
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", timed_doc(&[1_000, 2_000]));
+    wheel(&mut app, 3.0);
+    assert_eq!(
+        app.lyrics.drift_offset, 0.0,
+        "a synced sheet follows its own line cursor"
+    );
+
+    app.lyrics.doc = LrcDocument::default();
+    wheel(&mut app, 3.0);
+    assert_eq!(app.lyrics.drift_offset, 0.0, "nothing to scroll");
+}
+
+#[test]
+fn wheel_offset_survives_ticks_and_seeks_but_not_a_song_change() {
+    let _guard = LYRICS_MOTION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut app = test_app();
+    seed_matched(&mut app, "song_1", plain_doc(11));
+    crate::widgets::lyrics_viewport::set_lyrics_center(0.0);
+    let _ = app.handle_playback_state_updated(update_for("song_1", 0));
+    wheel(&mut app, 2.0);
+
+    // Ordinary ticks and a seek leave the manual scroll alone.
+    let _ = app.handle_playback_state_updated(update_for("song_1", 20_000));
+    assert_eq!(app.lyrics.drift_offset, 2.0);
+    let _ = app.handle_playback_state_updated(update_for("song_1", 150_000));
+    assert_eq!(app.lyrics.drift_offset, 2.0, "a seek keeps the scroll");
+
+    // A song change does not.
+    let _ = app.handle_playback_state_updated(update_for("song_2", 0));
+    assert_eq!(app.lyrics.drift_offset, 0.0);
+}
+
+#[test]
+fn wheel_leaves_the_queue_untouched() {
+    let mut app = test_app();
+    app.library.queue_songs = (0..20)
+        .map(|i| make_queue_song(&format!("s{i}"), "T", "A", "Al"))
+        .collect();
+    seed_matched(&mut app, "s0", plain_doc(11));
+    app.queue_page.common.slot_list.viewport_offset = 5;
+    app.queue_page.common.slot_list.selected_indices.insert(3);
+
+    wheel(&mut app, 2.0);
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 5,
+        "the wheel scrolls the lyric sheet, not the queue"
+    );
+    assert!(
+        app.queue_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&3),
+        "the selection is untouched"
+    );
+}
+
 #[test]
 fn crossfade_transition_parks_a_plain_sheet_too() {
     let mut app = test_app();

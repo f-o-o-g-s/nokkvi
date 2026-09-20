@@ -13,14 +13,17 @@
 //! scrim gradient. Motion (eased scroll off the frame clock) lands in C2 —
 //! `ease_out_expo` is defined here now so the math is test-pinned early.
 //!
-//! Event-transparency is load-bearing: `mouse_interaction` returns the default
-//! and `update` never captures, so the artwork right-click context menu (and
-//! left-click/scroll) pass through to the panel beneath.
+//! Event-transparency is load-bearing, with ONE exception: `mouse_interaction`
+//! always returns the default, and `update` captures nothing but a
+//! `WheelScrolled` over a non-empty PLAIN sheet with a callback wired. Every
+//! other event — the right-click that opens the artwork context menu, every
+//! click, every wheel over a synced sheet or the empty state — passes straight
+//! through to the panel beneath.
 
 use iced::{
-    Color, Element, Length, Pixels, Rectangle, Size, Theme, Vector,
+    Color, Element, Event, Length, Pixels, Rectangle, Size, Theme, Vector,
     advanced::{
-        Renderer as _, layout, renderer,
+        Renderer as _, Shell, layout, renderer,
         text::{
             self as advanced_text, Paragraph as ParagraphTrait, Renderer as TextRenderer, Text,
             paragraph::Plain,
@@ -112,6 +115,28 @@ pub(crate) fn lyrics_center_pos() -> f32 {
     f32::from_bits(LYRICS_CENTER_POS.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// Lines one wheel notch moves a plain sheet. Tuning knob: raise for coarser
+/// paging, lower for a finer crawl.
+pub(crate) const WHEEL_LINES_PER_NOTCH: f32 = 2.0;
+
+/// Convert one wheel event into a LINE delta, positive = forward through the
+/// sheet. Wheel DOWN (negative `y`) moves the sheet forward, matching every
+/// other scroll surface. A pixel delta (touchpads, high-resolution wheels)
+/// converts through the sheet's own slot height so a given finger travel moves
+/// the same visual distance whatever the line height.
+fn wheel_lines(delta: mouse::ScrollDelta, slot_height: f32) -> f32 {
+    match delta {
+        mouse::ScrollDelta::Lines { y, .. } => -y * WHEEL_LINES_PER_NOTCH,
+        mouse::ScrollDelta::Pixels { y, .. } => {
+            if slot_height > 0.0 {
+                -y / slot_height
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
 /// How far either side of the center a PLAIN sheet stays at full brightness,
 /// in slots. A plain sheet has no current line to accent, so a flat band
 /// carries the eye instead of a point. Tuning knob: widen for a calmer sheet,
@@ -135,11 +160,34 @@ pub(crate) fn drift_center(
     if max <= 0.0 {
         return 0.0;
     }
-    if duration_ms == 0 {
-        return offset.clamp(0.0, max);
+    (raw_drift(position_ms, duration_ms, line_count) + offset).clamp(0.0, max)
+}
+
+/// Where playback ALONE would put the center, unclamped. Separate from
+/// [`drift_center`] so [`drift_offset_for`] can invert exactly the same term.
+fn raw_drift(position_ms: u32, duration_ms: u32, line_count: usize) -> f32 {
+    let max = line_count.saturating_sub(1) as f32;
+    if max <= 0.0 || duration_ms == 0 {
+        return 0.0;
     }
-    let progress = position_ms as f32 / duration_ms as f32;
-    (progress * max + offset).clamp(0.0, max)
+    position_ms as f32 / duration_ms as f32 * max
+}
+
+/// The offset that puts the column at `wanted` — the exact inverse of
+/// [`drift_center`], so a wheel notch lands where it asked to the pixel.
+///
+/// It subtracts the UNCLAMPED drift deliberately. The playback tick reports
+/// duration in whole seconds while the position is exact, so `progress`
+/// exceeds 1.0 through a track's final second on any track whose length isn't
+/// a round number; subtracting a clamped term there would leave the sheet
+/// short of the notch by `(progress - 1) * (n - 1)` slots.
+pub(crate) fn drift_offset_for(
+    position_ms: u32,
+    duration_ms: u32,
+    line_count: usize,
+    wanted: f32,
+) -> f32 {
+    wanted - raw_drift(position_ms, duration_ms, line_count)
 }
 
 /// Compute the eased center for a glide (pure — the boat tick feeds it the
@@ -387,17 +435,22 @@ fn doc_hash(lines: &[LrcLine]) -> u64 {
     h
 }
 
-pub(crate) struct LyricViewport<'a> {
+pub(crate) struct LyricViewport<'a, M> {
     data: LyricsPanelData<'a>,
+    /// Wheel callback for a plain sheet. A plain `fn` pointer, not a boxed
+    /// closure and not a field of `LyricsPanelData` — that struct is built on
+    /// `Nokkvi` with no message type in scope and must stay `Copy` (the
+    /// artwork panel rebuilds it inside `responsive` `Fn` closures).
+    on_wheel: Option<fn(f32) -> M>,
 }
 
-impl<'a> LyricViewport<'a> {
-    pub(crate) fn new(data: LyricsPanelData<'a>) -> Self {
-        Self { data }
+impl<'a, M> LyricViewport<'a, M> {
+    pub(crate) fn new(data: LyricsPanelData<'a>, on_wheel: Option<fn(f32) -> M>) -> Self {
+        Self { data, on_wheel }
     }
 }
 
-impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_> {
+impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
     fn tag(&self) -> widget::tree::Tag {
         widget::tree::Tag::of::<State>()
     }
@@ -552,6 +605,50 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_> {
         });
     }
 
+    fn update(
+        &mut self,
+        tree: &mut widget::Tree,
+        event: &Event,
+        layout: layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &iced::Renderer,
+        shell: &mut Shell<'_, M>,
+        _viewport: &Rectangle,
+    ) {
+        // The ONE event this layer claims. Everything else falls through
+        // untouched so the artwork right-click menu and clicks keep reaching
+        // the panel beneath — see the module header.
+        let Event::Mouse(mouse::Event::WheelScrolled { delta }) = event else {
+            return;
+        };
+        let (Some(on_wheel), false, false) =
+            (self.on_wheel, self.data.synced, self.data.lines.is_empty())
+        else {
+            return;
+        };
+        if !cursor.is_over(layout.bounds()) {
+            return;
+        }
+
+        // Publish the DELTA, never an absolute: two notches arriving between
+        // renders would both read the same constructor-captured base and one
+        // would be silently lost (the rule `volume_slider` spells out).
+        let slot_h = tree
+            .state
+            .downcast_ref::<State>()
+            .slot_height
+            .max(LINE_HEIGHT);
+        let lines = wheel_lines(*delta, slot_h);
+        // A purely horizontal scroll (shift-wheel, a sideways swipe) converts
+        // to zero lines and moves nothing, so it is left for whatever else
+        // might want it rather than swallowed.
+        if lines != 0.0 {
+            shell.publish(on_wheel(lines));
+            shell.capture_event();
+            shell.request_redraw();
+        }
+    }
+
     fn mouse_interaction(
         &self,
         _tree: &widget::Tree,
@@ -560,14 +657,15 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_> {
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        // Event-transparent: never claim the cursor — the artwork context menu
-        // and clicks live on the panel beneath this layer.
+        // Never claim the cursor, even over a scrollable plain sheet — the
+        // artwork context menu and clicks live on the panel beneath, and a
+        // changed cursor would advertise an interaction this layer doesn't own.
         mouse::Interaction::default()
     }
 }
 
-impl<'a, M: 'static> From<LyricViewport<'a>> for Element<'a, M> {
-    fn from(viewport: LyricViewport<'a>) -> Self {
+impl<'a, M: 'static> From<LyricViewport<'a, M>> for Element<'a, M> {
+    fn from(viewport: LyricViewport<'a, M>) -> Self {
         Element::new(viewport)
     }
 }
@@ -619,12 +717,13 @@ pub(crate) fn lyrics_scrim<'a, Message: 'a>(width: f32, height: f32) -> Element<
 /// caller to the visible art rect.
 pub(crate) fn lyrics_text_layer<'a, Message: 'a + 'static>(
     data: LyricsPanelData<'a>,
+    on_wheel: Option<fn(f32) -> Message>,
     width: f32,
     height: f32,
 ) -> Element<'a, Message> {
     use iced::widget::container;
 
-    container(Element::<Message>::from(LyricViewport::new(data)))
+    container(Element::<Message>::from(LyricViewport::new(data, on_wheel)))
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
         .into()
@@ -718,6 +817,64 @@ mod tests {
         // One line, and none at all: nowhere to drift, no panic.
         assert_eq!(drift_center(50_000, 200_000, 1, 4.0), 0.0);
         assert_eq!(drift_center(50_000, 200_000, 0, 4.0), 0.0);
+    }
+
+    #[test]
+    fn drift_offset_for_inverts_drift_center_exactly() {
+        // Round-trip: the offset this returns must put the column exactly
+        // where it was asked, at any position in the track.
+        for position_ms in [0, 1, 55_555, 199_999, 200_000] {
+            for wanted in [0.0, 3.5, 10.0] {
+                let offset = drift_offset_for(position_ms, 200_000, 11, wanted);
+                let landed = drift_center(position_ms, 200_000, 11, offset);
+                assert!(
+                    (landed - wanted).abs() < 1e-4,
+                    "asked {wanted} at {position_ms} ms, landed {landed}"
+                );
+            }
+        }
+
+        // The tick truncates duration to whole seconds while the position is
+        // exact, so `progress` exceeds 1.0 in a track's final second. The
+        // inverse must still be exact there — a clamped one would fall short.
+        let past_end = drift_offset_for(200_900, 200_000, 101, 98.0);
+        let landed = drift_center(200_900, 200_000, 101, past_end);
+        assert!(
+            (landed - 98.0).abs() < 1e-3,
+            "overshooting position must still land the notch, got {landed}"
+        );
+
+        // A zero duration and a one-line sheet have no drift term to invert.
+        assert_eq!(drift_offset_for(50_000, 0, 11, 4.0), 4.0);
+        assert_eq!(drift_offset_for(50_000, 200_000, 1, 4.0), 4.0);
+    }
+
+    #[test]
+    fn wheel_lines_converts_notches_and_pixels() {
+        use iced::mouse::ScrollDelta;
+        // Wheel DOWN (negative y) moves the sheet FORWARD.
+        assert_eq!(
+            wheel_lines(ScrollDelta::Lines { x: 0.0, y: -1.0 }, 34.0),
+            WHEEL_LINES_PER_NOTCH
+        );
+        assert_eq!(
+            wheel_lines(ScrollDelta::Lines { x: 0.0, y: 1.0 }, 34.0),
+            -WHEEL_LINES_PER_NOTCH
+        );
+        // A pixel delta converts through the sheet's own slot height.
+        assert_eq!(
+            wheel_lines(ScrollDelta::Pixels { x: 0.0, y: -34.0 }, 34.0),
+            1.0
+        );
+        assert_eq!(
+            wheel_lines(ScrollDelta::Pixels { x: 0.0, y: -17.0 }, 34.0),
+            0.5
+        );
+        // A zero slot height (never shaped yet) must not divide by zero.
+        assert_eq!(
+            wheel_lines(ScrollDelta::Pixels { x: 0.0, y: -34.0 }, 0.0),
+            0.0
+        );
     }
 
     #[test]
