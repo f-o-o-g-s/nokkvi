@@ -1834,3 +1834,24 @@ fn a_landed_seek_stores_the_whole_second_floor_for_the_tick_heuristic() {
         "the whole-second floor, not the exact microseconds, is what the tick compares"
     );
 }
+
+#[test]
+fn loaded_settings_carry_the_seek_step_into_the_cluster() {
+    let mut app = test_app();
+    assert_eq!(
+        app.seek.step_secs, 5,
+        "the keys jump 5 s until the persisted settings land"
+    );
+
+    let _ = app.handle_player_settings_loaded(
+        nokkvi_data::types::player_settings::LivePlayerSettings {
+            seek_step_secs: 12,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(
+        app.seek.step_secs, 12,
+        "the Seek Step setting must reach the cluster the seek keys read"
+    );
+}

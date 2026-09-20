@@ -425,6 +425,16 @@ impl SettingsManager {
         self.save()
     }
 
+    /// Seconds the Seek Backward / Seek Forward keys jump. Clamped to the
+    /// shared bounds so a hand-edited config can't hand the keys a 0 (which
+    /// would make them do nothing) or an hour.
+    pub fn set_seek_step(&mut self, step_secs: u32) -> Result<()> {
+        use crate::types::player_settings::{SEEK_STEP_MAX_SECS, SEEK_STEP_MIN_SECS};
+        self.settings.player.seek_step_secs =
+            step_secs.clamp(SEEK_STEP_MIN_SECS, SEEK_STEP_MAX_SECS);
+        self.save()
+    }
+
     pub fn set_crossfade_duration(&mut self, duration_secs: u32) -> Result<()> {
         use crate::types::player_settings::{
             CROSSFADE_DURATION_MAX_SECS, CROSSFADE_DURATION_MIN_SECS,
@@ -1409,6 +1419,7 @@ mod sentinel_roundtrip_tests {
             lyrics_fetch_online: false,                      // default true
             lyrics_backdrop_blur: LyricsBackdropBlur::Light, // default Off
             bit_perfect: BitPerfectMode::Strict,             // default Off
+            seek_step_secs: 17,                              // default 5
             crossfade_duration_secs: 9,                      // default 5
             crossfade_curve: CrossfadeCurve::Linear,         // default EqualPower
             crossfade_min_track_secs: 25,                    // default 10

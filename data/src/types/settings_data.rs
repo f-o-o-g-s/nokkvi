@@ -30,6 +30,8 @@ pub struct GeneralSettingsData {
     pub auto_follow_playing: bool,
     pub enter_behavior: Cow<'static, str>,
     pub enter_shuffle: bool,
+    /// Seconds the Seek Backward / Seek Forward keys jump.
+    pub seek_step_secs: i64,
     pub local_music_path: Cow<'static, str>,
     /// Verbose-config mode label ("On" / "Off" / "Clean").
     pub verbose_config: Cow<'static, str>,
@@ -51,6 +53,7 @@ impl Default for GeneralSettingsData {
             auto_follow_playing: false,
             enter_behavior: Cow::Borrowed("test-default"),
             enter_shuffle: false,
+            seek_step_secs: 0,
             local_music_path: Cow::Borrowed("test-default"),
             verbose_config: Cow::Borrowed("test-default"),
             library_page_size: Cow::Borrowed("test-default"),

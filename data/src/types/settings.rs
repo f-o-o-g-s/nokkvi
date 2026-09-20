@@ -134,6 +134,9 @@ crate::player_settings_schema! {
     /// Legacy bool records load via the compat shim (true → Strict, false → Off).
     #[serde(default, deserialize_with = "deserialize_bit_perfect_with_bool_compat")]
     same bit_perfect: BitPerfectMode = BitPerfectMode::default(),
+    /// Seconds the Seek Backward / Seek Forward keys jump (1–60, default 5).
+    #[serde(default = "default_seek_step_secs")]
+    same seek_step_secs: u32 = default_seek_step_secs(),
     /// Crossfade duration in seconds (1–12, default 7)
     #[serde(default = "default_crossfade_duration_secs")]
     same crossfade_duration_secs: u32 = default_crossfade_duration_secs(),
@@ -465,6 +468,9 @@ fn default_auto_follow_playing() -> bool {
 }
 fn default_opacity_gradient() -> bool {
     false
+}
+fn default_seek_step_secs() -> u32 {
+    crate::types::player_settings::SEEK_STEP_DEFAULT_SECS
 }
 fn default_crossfade_duration_secs() -> u32 {
     7

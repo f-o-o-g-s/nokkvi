@@ -211,6 +211,7 @@ impl SettingsService {
     delegate_setter!(set_lyrics_enabled, bool);
     delegate_setter!(set_lyrics_fetch_online, bool);
     delegate_setter!(set_bit_perfect, BitPerfectMode);
+    delegate_setter!(set_seek_step, u32);
     delegate_setter!(set_crossfade_duration, u32);
     delegate_setter!(set_crossfade_curve, CrossfadeCurve);
     delegate_setter!(set_crossfade_min_track, u32);

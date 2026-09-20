@@ -546,6 +546,7 @@ mod tests {
                 "general.enter_shuffle",
                 "general.stable_viewport",
                 "general.auto_follow_playing",
+                "general.seek_step",
                 "general.show_tray_icon",
                 "general.close_to_tray",
                 "general.local_music_path",

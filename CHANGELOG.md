@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Plain (untimed) lyrics from your Navidrome server, including lyrics embedded in a file's tags, now show over the Queue cover.
 - Plain lyrics drift with playback so the sheet keeps pace with the song.
 - The mouse wheel over the Queue cover scrolls a plain lyrics sheet by hand.
+- A Seek Step setting, 1 to 60 seconds, in General > Behavior.
 
 ### Changed
 

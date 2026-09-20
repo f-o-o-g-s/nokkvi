@@ -16,7 +16,10 @@
 use crate::{
     define_settings,
     types::{
-        player_settings::{ArtworkResolution, EnterBehavior, LibraryPageSize, VerboseConfig},
+        player_settings::{
+            ArtworkResolution, EnterBehavior, LibraryPageSize, SEEK_STEP_DEFAULT_SECS,
+            SEEK_STEP_MAX_SECS, SEEK_STEP_MIN_SECS, VerboseConfig,
+        },
         setting_def::Tab,
         settings_data::GeneralSettingsData,
         settings_side_effect::SettingsSideEffect,
@@ -108,6 +111,27 @@ define_settings! {
                 ),
                 default: false,
                 read_field: |d| d.enter_shuffle,
+            },
+        },
+        SeekStep {
+            key: "general.seek_step",
+            value_type: Int,
+            setter: |mgr, v: i64| mgr.set_seek_step(v as u32),
+            toml_apply: |ts, p| p.seek_step_secs = ts.seek_step_secs,
+            read: |src, out| out.seek_step_secs = src.seek_step_secs,
+            write: |ps, ts| ts.seek_step_secs = ps.seek_step_secs,
+            ui_meta: {
+                label: "Seek Step",
+                category: "Behavior",
+                subtitle: Some(
+                    "Seconds the Seek Backward / Seek Forward keys jump. 1s = fine nudge, 60s = leap through a long mix.",
+                ),
+                default: i64::from(SEEK_STEP_DEFAULT_SECS),
+                min: i64::from(SEEK_STEP_MIN_SECS),
+                max: i64::from(SEEK_STEP_MAX_SECS),
+                step: 1_i64,
+                unit: "s",
+                read_field: |d| d.seek_step_secs,
             },
         },
         LibraryPageSize {
@@ -736,6 +760,7 @@ mod tests {
             auto_follow_playing: true,
             enter_behavior: "Play All".into(),
             enter_shuffle: false,
+            seek_step_secs: 5,
             local_music_path: "".into(),
             verbose_config: "Clean".into(),
             library_page_size: "Default (500)".into(),
@@ -754,7 +779,7 @@ mod tests {
     fn build_general_tab_settings_items_emits_one_row_per_ui_meta_entry() {
         let data = default_general_data();
         let entries = build_general_tab_settings_items(&data);
-        assert_eq!(entries.len(), 13);
+        assert_eq!(entries.len(), 14);
         // Every emitted entry is a Item, never a Header — section headers
         // live in the UI crate's hand-written builder.
         for e in &entries {
@@ -864,6 +889,7 @@ mod tests {
             auto_follow_playing: live.auto_follow_playing,
             enter_behavior: live.enter_behavior.as_label().into(),
             enter_shuffle: live.enter_shuffle,
+            seek_step_secs: i64::from(live.seek_step_secs),
             local_music_path: live.local_music_path.clone().into(),
             verbose_config: live.verbose_config.as_label().into(),
             library_page_size: live.library_page_size.as_label().into(),

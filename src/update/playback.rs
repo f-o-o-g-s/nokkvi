@@ -2171,6 +2171,11 @@ impl Nokkvi {
         self.engine.crossfade_enabled = settings.crossfade_enabled;
         self.engine.bit_perfect_mode = settings.bit_perfect;
         self.engine.crossfade_duration_secs = settings.crossfade_duration_secs;
+        // The seek keys read the step from the seek cluster, not from
+        // `self.settings`, so mirror it here — this runs on the initial load
+        // AND after every settings edit (`handle_settings_general` feeds the
+        // fresh snapshot straight back through this handler).
+        self.seek.step_secs = settings.seek_step_secs;
         // Seed the live lyrics mirror — the ONE place persisted values reach
         // live mirrors (the ctor cannot: settings arrive async). The player-bar
         // toggle flips this mirror synchronously and persists behind it, so a

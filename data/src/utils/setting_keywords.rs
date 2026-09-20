@@ -250,6 +250,7 @@ keyword_table! {
         ],
         "general.lyrics_fetch_online" => &["lrclib", "lyrics download", "internet", "fetch"],
         "general.lyrics_backdrop_blur" => &["blur", "frost", "frosted", "backdrop", "cover blur"],
+        "general.seek_step" => &["scrub", "jump", "skip ahead", "arrow keys", "seconds"],
         "general.crossfade_duration" => &["fade time", "fade length"],
         "general.crossfade_curve" => &["equal power", "constant gain", "fade shape", "fade curve"],
         "general.crossfade_min_track" => &["short tracks", "interlude", "skit", "minimum length"],

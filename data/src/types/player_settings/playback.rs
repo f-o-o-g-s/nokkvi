@@ -4,6 +4,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::define_labeled_enum;
 
+/// Seek-step bounds and default, in seconds — how far the Seek Backward /
+/// Seek Forward keys jump per press. Single source of truth shared by the
+/// enforcement clamp in `SettingsManager::set_seek_step`, the slider's
+/// declared `min`/`max` in the general settings table, and the UI-side
+/// `SeekState` default used until the settings load. 1 s is a fine nudge;
+/// 60 s leaps through a long mix.
+pub const SEEK_STEP_MIN_SECS: u32 = 1;
+pub const SEEK_STEP_MAX_SECS: u32 = 60;
+pub const SEEK_STEP_DEFAULT_SECS: u32 = 5;
+
 /// Crossfade duration bounds, in seconds. Single source of truth shared by the
 /// enforcement clamp in `SettingsManager::set_crossfade_duration` and the
 /// slider's declared `min`/`max` in the playback settings table, so the slider

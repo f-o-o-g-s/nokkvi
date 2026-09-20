@@ -83,6 +83,11 @@ pub struct TomlSettings {
     // -- Behavior --
     pub stable_viewport: bool,
     pub auto_follow_playing: bool,
+    /// Seconds the Seek Backward / Seek Forward keys jump (1–60, default 5).
+    /// Missing keys fill from the container `#[serde(default)]` ->
+    /// `TomlSettings::default()`.
+    #[serde(default = "default_seek_step_secs")]
+    pub seek_step_secs: u32,
 
     // -- Interface --
     pub light_mode: bool,
@@ -265,6 +270,9 @@ fn default_rating_reminder_percent() -> u32 {
     75
 }
 
+fn default_seek_step_secs() -> u32 {
+    crate::types::player_settings::SEEK_STEP_DEFAULT_SECS
+}
 fn default_true() -> bool {
     true
 }
@@ -323,6 +331,7 @@ impl Default for TomlSettings {
             artwork_vertical_height_pct: default_artwork_vertical_height_pct(),
             stable_viewport: true,
             auto_follow_playing: true,
+            seek_step_secs: default_seek_step_secs(),
             light_mode: false,
             rounded_mode: RoundedMode::On,
             nav_layout: NavLayout::default(),

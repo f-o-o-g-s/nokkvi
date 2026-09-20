@@ -29,6 +29,7 @@
   "lyrics_fetch_online": false,
   "lyrics_backdrop_blur": "light",
   "bit_perfect": "strict",
+  "seek_step_secs": 17,
   "crossfade_duration_secs": 9,
   "crossfade_curve": "linear",
   "crossfade_min_track_secs": 25,
