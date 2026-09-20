@@ -916,3 +916,213 @@ fn a_retired_default_stands_pat_when_its_new_default_is_taken() {
         "nothing moved, so nothing may be rewritten to the user's config.toml"
     );
 }
+
+// ============================================================================
+// Shared combos: shadowed_by + plan_capture
+// ============================================================================
+//
+// 0.18.x moved a shipped default (bare Left/Right became Seek Backward /
+// Seek Forward, the sort cycle went to Shift+Left/Right). `normalize` carries
+// forward the user who is still sitting on the retired combo — it does nothing
+// for the other direction, a newly-shipped default landing on a key the user
+// already claimed. Those users end up with two actions on one combo: the old
+// layout keeps working, the new rows show a key they never get, and only a
+// `warn!` in the log says so.
+
+/// Build a config from TOML overrides, exactly as a `config.toml` load does
+/// (so `normalize` runs and the fixtures describe real files).
+fn config_with(overrides: &[(&str, &str)]) -> HotkeyConfig {
+    let map: std::collections::BTreeMap<String, String> = overrides
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect();
+    HotkeyConfig::from_toml_map(&map)
+}
+
+/// Doubles as "no shipped default is shared": if this fails, two actions
+/// collide out of the box.
+#[test]
+fn shipped_defaults_shadow_nothing() {
+    let config = HotkeyConfig::default();
+    for action in HotkeyAction::ALL.iter().chain(HotkeyAction::RESERVED) {
+        assert_eq!(
+            config.shadowed_by(action),
+            None,
+            "{action:?} is shadowed on a default config — a shipped default collides",
+        );
+    }
+}
+
+/// Case A: a 0.18.x verbose dump with the old sort binding, plus the user's own
+/// action already on the new default. `normalize` cannot move Previous Sort
+/// Mode to Shift+Left (taken), so it stands pat on Left and shadows Seek
+/// Backward. Nothing can be written: the other row has nowhere to go.
+#[test]
+fn case_a_retired_default_that_could_not_move_blocks_capture() {
+    let config = config_with(&[
+        ("prev_sort_mode", "Left"),
+        ("move_track_up", "Shift + Left"),
+    ]);
+
+    assert_eq!(
+        config.get_binding(&HotkeyAction::PrevSortMode),
+        KeyCombo::key(KeyCode::ArrowLeft),
+        "precondition: normalize left the retired binding in place",
+    );
+    assert_eq!(
+        config.shadowed_by(&HotkeyAction::SeekBackward),
+        Some(HotkeyAction::PrevSortMode),
+        "Seek Backward shows Left in Settings but never fires",
+    );
+    assert_eq!(
+        config.plan_capture(
+            &HotkeyAction::SeekBackward,
+            &KeyCombo::key(KeyCode::ArrowLeft)
+        ),
+        CapturePlan::Blocked {
+            by: HotkeyAction::PrevSortMode
+        },
+        "a swap here would write Previous Sort Mode back onto Left — a no-op with a lying badge",
+    );
+}
+
+/// Case B: the user's own action sits on a bare arrow, so `resolve` hands it
+/// the key (a binding that differs from its default beats one on its default).
+/// Its own default is free, so capture can send it home.
+#[test]
+fn case_b_user_action_on_a_bare_arrow_evicts_to_its_default() {
+    let config = config_with(&[("move_track_up", "Left")]);
+
+    assert_eq!(
+        config.shadowed_by(&HotkeyAction::SeekBackward),
+        Some(HotkeyAction::MoveTrackUp),
+    );
+    assert_eq!(
+        config.plan_capture(
+            &HotkeyAction::SeekBackward,
+            &KeyCombo::key(KeyCode::ArrowLeft)
+        ),
+        CapturePlan::Evict {
+            from: HotkeyAction::MoveTrackUp,
+            to: KeyCombo::shift(KeyCode::ArrowUp),
+        },
+        "Move Track Up goes back to its own default and Seek Backward keeps Left",
+    );
+}
+
+/// Three actions on one combo: no single move fixes it, so nothing is written.
+#[test]
+fn three_actions_on_one_combo_block_capture() {
+    let config = config_with(&[("move_track_up", "Left"), ("move_track_down", "Left")]);
+
+    let plan = config.plan_capture(
+        &HotkeyAction::SeekBackward,
+        &KeyCombo::key(KeyCode::ArrowLeft),
+    );
+    assert!(
+        matches!(plan, CapturePlan::Blocked { .. }),
+        "expected Blocked with more than one other claimant, got {plan:?}",
+    );
+}
+
+/// The other action's own default IS the contested combo (it never moved; the
+/// capturing action came to it). Sending it "home" would change nothing.
+#[test]
+fn other_action_already_on_its_default_blocks_capture() {
+    // Seek Backward's default IS Left. Park Previous Sort Mode on Left too,
+    // then capture Left onto Previous Sort Mode: evicting Seek Backward would
+    // send it to Left, the very combo in dispute.
+    let config = config_with(&[
+        ("prev_sort_mode", "Left"),
+        ("move_track_up", "Shift + Left"),
+    ]);
+
+    assert_eq!(
+        config.plan_capture(
+            &HotkeyAction::PrevSortMode,
+            &KeyCombo::key(KeyCode::ArrowLeft)
+        ),
+        CapturePlan::Blocked {
+            by: HotkeyAction::SeekBackward
+        },
+    );
+}
+
+/// A reserved action is never moved.
+#[test]
+fn a_reserved_claimant_blocks_capture() {
+    let config = config_with(&[("toggle_play", "Escape")]);
+
+    assert_eq!(
+        config.plan_capture(&HotkeyAction::TogglePlay, &KeyCombo::key(KeyCode::Escape)),
+        CapturePlan::Blocked {
+            by: HotkeyAction::Escape
+        },
+        "Escape is reserved — capture must never rebind it",
+    );
+}
+
+/// A free combo still writes straight through.
+#[test]
+fn plan_capture_on_a_free_combo_writes() {
+    let config = HotkeyConfig::default();
+    assert_eq!(
+        config.plan_capture(&HotkeyAction::TogglePlay, &KeyCombo::ctrl(KeyCode::F12)),
+        CapturePlan::Write,
+    );
+}
+
+/// Two differently-bound actions still swap, exactly as before.
+#[test]
+fn plan_capture_swaps_two_differently_bound_actions() {
+    let config = HotkeyConfig::default();
+    let target = config.get_binding(&HotkeyAction::SeekBackward);
+    let own = config.get_binding(&HotkeyAction::TogglePlay);
+
+    assert_eq!(
+        config.plan_capture(&HotkeyAction::TogglePlay, &target),
+        CapturePlan::Swap {
+            with: HotkeyAction::SeekBackward,
+            old_combo: own,
+        },
+    );
+}
+
+/// A reserved action can win a combo through `resolve`'s RESERVED-first pass,
+/// so the swap branch has to refuse it too — not just the already-shared one.
+/// Reachable once `escape` / `reset_to_default` has been hand-edited off its
+/// key in `config.toml` (a verbose dump writes both rows).
+#[test]
+fn a_swap_never_moves_a_reserved_action() {
+    let config = config_with(&[("escape", "F5")]);
+
+    assert_eq!(
+        config.plan_capture(&HotkeyAction::TogglePlay, &KeyCombo::key(KeyCode::F12)),
+        CapturePlan::Write,
+        "precondition: an unrelated free combo still writes",
+    );
+    assert_eq!(
+        config.plan_capture(&HotkeyAction::TogglePlay, &KeyCombo::key(KeyCode::F5)),
+        CapturePlan::Blocked {
+            by: HotkeyAction::Escape
+        },
+        "swapping would move Escape onto Space, and Escape has no Settings row to undo it from",
+    );
+}
+
+/// A swap moves exactly one action off the combo, so it only works when there
+/// is exactly one other claimant. With two, the captured action lands on a key
+/// a third action still wins — the very failure this decision exists to stop.
+#[test]
+fn a_swap_is_blocked_when_more_than_one_other_action_claims_the_combo() {
+    let config = config_with(&[("move_track_up", "Left"), ("move_track_down", "Left")]);
+
+    let plan = config.plan_capture(
+        &HotkeyAction::RefreshView,
+        &KeyCombo::key(KeyCode::ArrowLeft),
+    );
+    assert!(
+        matches!(plan, CapturePlan::Blocked { .. }),
+        "a swap would leave Refresh View on a key Move Track Down still wins, got {plan:?}",
+    );
+}

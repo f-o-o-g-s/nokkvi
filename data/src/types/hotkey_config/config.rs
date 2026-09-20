@@ -35,6 +35,46 @@ const RETIRED_DEFAULTS: &[(HotkeyAction, KeyCombo)] = &[
     ),
 ];
 
+/// What a hotkey capture would actually write, decided by
+/// [`HotkeyConfig::plan_capture`].
+///
+/// The capture UI used to run one rule — "conflict? swap" — which is wrong when
+/// the captured combo is the one the action ALREADY sits on: the swap writes the
+/// other action back onto the same key, nothing moves, and the badge still says
+/// it swapped. The shared state stays, and the row still never fires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CapturePlan {
+    /// Nobody else holds the combo — write the binding and stop.
+    Write,
+    /// Exactly one other action holds the combo and this action is on a
+    /// different key: the two trade places, as they always have.
+    Swap {
+        /// The action giving up `combo`.
+        with: HotkeyAction,
+        /// Where it goes — the capturing action's current binding.
+        old_combo: KeyCombo,
+    },
+    /// The capturing action is ALREADY on the combo, sharing it with exactly
+    /// one other action that can move: send that one home to its own default
+    /// and leave the capturing action where it is.
+    Evict {
+        /// The action being moved off the shared combo.
+        from: HotkeyAction,
+        /// Its own default, which is free and is not the shared combo.
+        to: KeyCombo,
+    },
+    /// Nothing can be written. Either the combo has more than one other
+    /// claimant (one move cannot settle it), or the one claimant is reserved,
+    /// or — when the action is already sharing the combo — that claimant's
+    /// default is the combo itself or is taken. The user has to rebind the
+    /// other row first.
+    Blocked {
+        /// The action the combo currently fires — what to tell the user to
+        /// rebind.
+        by: HotkeyAction,
+    },
+}
+
 /// The full set of hotkey bindings, mapping actions to key combinations.
 /// Serialized into redb via `SettingsManager`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +191,80 @@ impl HotkeyConfig {
     /// as the conflict is exactly the one the key would actually fire.
     pub fn find_conflict(&self, combo: &KeyCombo, exclude: &HotkeyAction) -> Option<HotkeyAction> {
         self.resolve(combo, Some(exclude))
+    }
+
+    /// The action that fires this action's own binding, when it is a different
+    /// action — i.e. the row shows a key it never gets.
+    ///
+    /// Two actions end up on one combo when a user rebinds onto an occupied key
+    /// or when a newly-shipped default lands on a combo they already claimed
+    /// ([`Self::normalize`] only carries the first direction forward). Until
+    /// now the only notice was a `warn!` in the log.
+    pub fn shadowed_by(&self, action: &HotkeyAction) -> Option<HotkeyAction> {
+        let combo = self.get_binding(action);
+        match self.resolve(&combo, None) {
+            Some(winner) if winner != *action => Some(winner),
+            Some(_) | None => None,
+        }
+    }
+
+    /// Every action other than `owner` bound to `combo`, in declaration order
+    /// (reserved first, matching [`Self::resolve`]'s precedence).
+    fn claimants_besides(&self, combo: &KeyCombo, owner: &HotkeyAction) -> Vec<HotkeyAction> {
+        HotkeyAction::RESERVED
+            .iter()
+            .chain(HotkeyAction::ALL.iter())
+            .filter(|other| *other != owner && self.get_binding(other) == *combo)
+            .copied()
+            .collect()
+    }
+
+    /// Decide what a capture of `combo` onto `action` should write.
+    ///
+    /// Pure. See [`CapturePlan`] for the four outcomes; the view maps them to a
+    /// write plus the badge text, and `Blocked` writes nothing.
+    pub fn plan_capture(&self, action: &HotkeyAction, combo: &KeyCombo) -> CapturePlan {
+        // `find_conflict` shares `resolve`, so `by` is the action the key
+        // actually fires — the one worth naming to the user.
+        let Some(by) = self.find_conflict(combo, action) else {
+            return CapturePlan::Write;
+        };
+        // Whatever the plan, it moves at most ONE action off the combo, so it
+        // can only hand the key to `action` when exactly one other holds it.
+        // With two or more, the captured action would land on a key a third
+        // action still wins — the failure this decision exists to stop.
+        let claimants = self.claimants_besides(combo, action);
+        let [only] = claimants[..] else {
+            return CapturePlan::Blocked { by };
+        };
+        // Reserved actions are never user-configurable and have no Settings row
+        // to undo a move from, so NEITHER branch below may touch one. `resolve`
+        // scans RESERVED first, so `only` really can be Escape / Delete once a
+        // hand-edited config has moved it off its key.
+        if HotkeyAction::RESERVED.contains(&only) {
+            return CapturePlan::Blocked { by };
+        }
+        let old_combo = self.get_binding(action);
+        if old_combo != *combo {
+            // The action is elsewhere, so the two can trade places: the swap
+            // moves `only` onto the key this action is giving up, leaving
+            // `combo` with exactly one holder.
+            return CapturePlan::Swap {
+                with: only,
+                old_combo,
+            };
+        }
+        // Already sharing the captured combo. A swap would write `only` back
+        // onto the same key and change nothing, so the only repair is to send
+        // it home — and only when home is free and is not the combo in dispute.
+        let home = only.default_binding();
+        if home == *combo || self.is_claimed_by_another(&home, &only) {
+            return CapturePlan::Blocked { by };
+        }
+        CapturePlan::Evict {
+            from: only,
+            to: home,
+        }
     }
 
     /// Get all bindings as an iterator.

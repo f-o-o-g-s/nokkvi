@@ -11,7 +11,7 @@ mod key_code;
 mod key_combo;
 
 pub use action::HotkeyAction;
-pub use config::HotkeyConfig;
+pub use config::{CapturePlan, HotkeyConfig};
 pub use key_code::KeyCode;
 pub use key_combo::KeyCombo;
 

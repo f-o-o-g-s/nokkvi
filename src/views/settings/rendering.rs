@@ -723,10 +723,12 @@ fn render_color_array_swatches<'a>(
 //             names the colliding action).
 //
 // The design also lists a "disabled" state (`bg2()` border, `fg3()` text).
-// That state has no data-level producer today — `HotkeyConfig::get_binding()`
-// always returns a `KeyCombo`, never `None` — so it's intentionally not
-// rendered. Add it here when an "unbound" representation lands in the data
-// layer.
+// It is still not rendered: `HotkeyConfig::get_binding()` always returns a
+// `KeyCombo`, never `None`, so no row is literally unbound. The nearest thing
+// is a row whose combo another action wins, which never fires —
+// `HotkeyConfig::shadowed_by()` is the producer for that, and today it drives
+// the row's SUBTITLE (`items_hotkeys::hotkey_subtitle`) rather than the badge.
+// Drive the disabled state from it here when the badge should say it too.
 
 /// Render the hotkey value badge in its current state.
 fn render_hotkey_badge<'a>(

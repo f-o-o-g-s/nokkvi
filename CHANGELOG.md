@@ -83,6 +83,9 @@ All notable changes to this project will be documented in this file.
 - Removing every queue row while a radio station plays no longer stops the station.
 - Flipping the radio sort order after clicking a station no longer leaves the highlight on the wrong station.
 - Changing the sort mode in Albums, Artists, or Songs no longer leaves the highlight on an off-screen row.
+- Settings > Hotkeys now marks a row whose key another action wins, and names that action.
+- Rebinding a row onto the key it already shares now moves the other action to its own default instead of doing nothing.
+- A rebind that cannot be settled by moving one action now says so instead of reporting a swap that never happened.
 
 ### Removed
 

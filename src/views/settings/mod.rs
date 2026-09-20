@@ -9,7 +9,7 @@
 use std::time::Instant;
 
 use nokkvi_data::types::{
-    hotkey_config::{HotkeyAction, KeyCombo},
+    hotkey_config::{CapturePlan, HotkeyAction, KeyCombo},
     theme_file::ThemeFile,
 };
 
@@ -691,32 +691,96 @@ impl SettingsPage {
                         ctrl: modifiers.control(),
                         alt: modifiers.alt(),
                     };
-                    // Check for conflicts
-                    if let Some(conflicting) = data.hotkey_config.find_conflict(&combo, &action) {
-                        let old_combo = data.hotkey_config.get_binding(&action);
-                        tracing::info!(
-                            " [HOTKEY CAPTURE] Swapping {:?} <-> {:?}",
-                            action,
-                            conflicting
-                        );
-                        self.conflict_label = Some((
-                            format!("Swapped with {}", conflicting.display_name()),
-                            Instant::now(),
-                        ));
-                        return SettingsAction::StealHotkeyBinding {
-                            action,
-                            combo,
-                            conflicting_action: conflicting,
-                            old_combo,
-                        };
+                    // What the capture can actually write — decided in the
+                    // data crate so every outcome is pure and tested. The badge
+                    // text below describes what was written, never more.
+                    match data.hotkey_config.plan_capture(&action, &combo) {
+                        CapturePlan::Write => {
+                            tracing::info!(
+                                " [HOTKEY CAPTURE] No conflict, writing binding: {:?} -> {:?}",
+                                action,
+                                combo
+                            );
+                            self.conflict_label = None;
+                            return SettingsAction::WriteHotkeyBinding { action, combo };
+                        }
+                        CapturePlan::Swap { with, old_combo } => {
+                            tracing::info!(
+                                " [HOTKEY CAPTURE] Swapping {:?} <-> {:?}",
+                                action,
+                                with
+                            );
+                            self.conflict_label = Some((
+                                format!("Swapped with {}", with.display_name()),
+                                Instant::now(),
+                            ));
+                            return SettingsAction::StealHotkeyBinding {
+                                action,
+                                combo,
+                                conflicting_action: with,
+                                old_combo,
+                            };
+                        }
+                        CapturePlan::Evict { from, to } => {
+                            // The action is already on this key and shares it.
+                            // Send the other one home to its own default; this
+                            // action keeps the key it already shows.
+                            tracing::info!(
+                                " [HOTKEY CAPTURE] Evicting {:?} to its default {:?}, {:?} keeps \
+                                 {:?}",
+                                from,
+                                to,
+                                action,
+                                combo
+                            );
+                            // Set for the same reason the Swap branch sets it,
+                            // and just as invisible today: `render_hotkey_badge`
+                            // draws `conflict_label` only while the row is
+                            // capturing, and capture ended above. What the user
+                            // actually sees is the row's subtitle dropping its
+                            // "Does nothing right now" lead on the next rebuild.
+                            self.conflict_label = Some((
+                                format!("Moved {} to {}", from.display_name(), to.display()),
+                                Instant::now(),
+                            ));
+                            return SettingsAction::StealHotkeyBinding {
+                                action,
+                                combo,
+                                conflicting_action: from,
+                                old_combo: to,
+                            };
+                        }
+                        CapturePlan::Blocked { by } => {
+                            // Nothing is written. Stay in capture mode on
+                            // purpose: `render_hotkey_badge` draws the conflict
+                            // label only while this row is capturing, so
+                            // leaving capture here would hide the reason. Esc
+                            // still cancels, and another key still works.
+                            tracing::info!(
+                                " [HOTKEY CAPTURE] Blocked — {:?} also holds {:?} and cannot move",
+                                by,
+                                combo
+                            );
+                            // A reserved claimant has no Settings > Hotkeys row
+                            // (the list iterates `HotkeyAction::ALL`), so
+                            // "rebind it" would be advice the user cannot take.
+                            let remedy = if HotkeyAction::RESERVED.contains(&by) {
+                                "it is reserved, pick another key"
+                            } else {
+                                "rebind it first"
+                            };
+                            self.conflict_label = Some((
+                                format!(
+                                    "{} also uses {} — {remedy}",
+                                    by.display_name(),
+                                    combo.display()
+                                ),
+                                Instant::now(),
+                            ));
+                            self.capturing_hotkey = Some(action);
+                            return SettingsAction::None;
+                        }
                     }
-                    tracing::info!(
-                        " [HOTKEY CAPTURE] No conflict, writing binding: {:?} -> {:?}",
-                        action,
-                        combo
-                    );
-                    self.conflict_label = None;
-                    return SettingsAction::WriteHotkeyBinding { action, combo };
                 }
                 tracing::info!(" [HOTKEY CAPTURE] Unsupported key, re-entering capture");
                 // Unsupported key — re-enter capture mode
