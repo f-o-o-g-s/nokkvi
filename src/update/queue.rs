@@ -536,8 +536,20 @@ impl Nokkvi {
                 // removed — a bare `QueueService` call would leave the
                 // engine streaming the deleted track while the UI advertises
                 // a different one.
+                // The UI owns the radio/queue mode (`guard_play_action` is what
+                // switches back) and the engine's own radio flag lags a station
+                // start, so the station is named here. The URL rather than a
+                // bare bool because the mode outlives the stream: a cold-start
+                // Play leaves the app in radio mode while a queue song plays,
+                // and the backend has to tell those apart.
+                let radio_stream_url = self
+                    .active_playback
+                    .radio_station()
+                    .map(|s| s.stream_url.clone());
                 self.shell_spawn("queue_remove_batch", move |shell| async move {
-                    shell.remove_queue_entries(&entry_ids).await
+                    shell
+                        .remove_queue_entries(&entry_ids, radio_stream_url.as_deref())
+                        .await
                 });
             }
             QueueAction::RemoveDuplicates => {

@@ -100,6 +100,63 @@ pub enum RemovalAftermath {
     /// The playing song was removed and the queue is now empty. The engine
     /// must stop and the navigator's `current_song_id` must clear.
     StopEmpty,
+    /// A radio station is the live audio source, so the queue removal must not
+    /// reach the engine at all: point the navigator at whatever the play cursor
+    /// now names (`None` when the removal emptied the queue) and touch nothing
+    /// else. Keeps the navigator from naming a song the queue no longer holds
+    /// while leaving the stream playing.
+    RetargetNavigator { new_song_id: Option<String> },
+}
+
+/// What the audio engine was doing when a queue removal started — the
+/// three-state replacement for the old `engine_playing: bool`.
+///
+/// The radio case cannot be read off the engine: `stream_is_infinite` follows
+/// the decoder, so it lags a station start by however long the probe takes.
+/// The UI owns the radio/queue mode everywhere else (`guard_play_action`, the
+/// `supports_index_based_queue` gate), so it passes the mode down here too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovalTransport {
+    /// Stopped or paused — including a freshly-reopened app whose navigator
+    /// merely names a persisted `current_index`.
+    Idle,
+    /// Genuinely producing audio from a queue song.
+    PlayingQueue,
+    /// An internet radio station is the live source. The queue is a separate
+    /// thing the user is editing; nothing here may load, play, pause or stop
+    /// the stream.
+    StreamingRadio,
+}
+
+impl RemovalTransport {
+    /// Classify the engine from the UI's radio mode plus the engine's own
+    /// snapshot.
+    ///
+    /// `radio_stream_url` is `Some` when the app is in radio mode
+    /// (`ActivePlayback::Radio`). That alone is NOT enough: the mode is only
+    /// ever cleared by `guard_play_action`, so a cold-start Play, or a dead
+    /// station whose completion auto-advances into the queue, leaves the app in
+    /// radio mode while a QUEUE song is what the engine is producing. Treating
+    /// that as [`Self::StreamingRadio`] would leave the engine decoding a row
+    /// the user just deleted. So the station only owns the engine when the
+    /// engine's source IS its stream — which also keeps a paused or stopped
+    /// station (neither clears `source`) on the radio path.
+    pub fn from_engine(
+        radio_stream_url: Option<&str>,
+        engine_source: &str,
+        engine_playing: bool,
+    ) -> Self {
+        if let Some(url) = radio_stream_url
+            && engine_source == url
+        {
+            return Self::StreamingRadio;
+        }
+        if engine_playing {
+            Self::PlayingQueue
+        } else {
+            Self::Idle
+        }
+    }
 }
 
 /// Decide what the audio engine must do after a queue-removal mutation has
@@ -114,20 +171,20 @@ pub enum RemovalAftermath {
 /// the caller must snapshot it because the navigator's stored
 /// `current_song_id` is stale by the time this decision runs.
 ///
-/// `engine_playing` is the engine's *real* transport state, snapshotted by
-/// the caller (`true` only when `engine.state() == PlaybackState::Playing`).
-/// It is distinct from "the navigator names a current song": the navigator's
+/// `transport` is what the engine was doing, snapshotted by the caller. It is
+/// distinct from "the navigator names a current song": the navigator's
 /// `current_song_id` is populated from the persisted `current_index` at
 /// startup, so it is `Some` even on a freshly-reopened, never-played queue.
-/// `engine_playing` flows through to [`RemovalAftermath::LoadNewCurrent::resume`]
-/// so the executor swaps the engine source to the new current either way, but
-/// only resumes playback when the engine was actually playing — a stopped or
-/// paused app must not start playing just because its current row was removed.
+/// [`RemovalTransport::PlayingQueue`] flows through to
+/// [`RemovalAftermath::LoadNewCurrent::resume`] so the executor swaps the engine
+/// source to the new current either way, but only resumes playback when the
+/// engine was actually playing — a stopped or paused app must not start playing
+/// just because its current row was removed.
 pub fn decide_removal_aftermath(
     qm: &QueueManager,
     was_playing_id: Option<&str>,
     removed_ids: &[String],
-    engine_playing: bool,
+    transport: RemovalTransport,
 ) -> RemovalAftermath {
     let was_playing = match was_playing_id {
         Some(id) => id,
@@ -136,6 +193,19 @@ pub fn decide_removal_aftermath(
     if !removed_ids.iter().any(|id| id == was_playing) {
         return RemovalAftermath::NoCurrentChange;
     }
+    // A station is the live source: the removed row was never what the engine
+    // was producing, so nothing here may load, play or stop it. Keep the
+    // navigator honest (it must not name a song the queue no longer holds) and
+    // stop there — the gapless-prep reset the caller discharges afterwards is
+    // the only other thing a removal owes the engine.
+    if matches!(transport, RemovalTransport::StreamingRadio) {
+        return RemovalAftermath::RetargetNavigator {
+            new_song_id: qm
+                .current_index()
+                .and_then(|idx| qm.song_id_at(idx).map(str::to_owned)),
+        };
+    }
+    let engine_playing = matches!(transport, RemovalTransport::PlayingQueue);
     match qm
         .current_index()
         .and_then(|idx| qm.song_id_at(idx).map(|id| (id.to_owned(), idx)))
@@ -1304,7 +1374,7 @@ mod tests {
     #[test]
     fn removal_aftermath_no_playing_song_returns_no_change() {
         let qm = manager_with_songs(vec![make_song("a"), make_song("b")], None);
-        let plan = decide_removal_aftermath(&qm, None, &["a".to_string()], false);
+        let plan = decide_removal_aftermath(&qm, None, &["a".to_string()], RemovalTransport::Idle);
         assert_eq!(plan, RemovalAftermath::NoCurrentChange);
     }
 
@@ -1318,7 +1388,12 @@ mod tests {
         );
         let _ = qm.remove_song_by_id("b").expect("remove b");
 
-        let plan = decide_removal_aftermath(&qm, Some("a"), &["b".to_string()], true);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("a"),
+            &["b".to_string()],
+            RemovalTransport::PlayingQueue,
+        );
 
         assert_eq!(
             plan,
@@ -1341,7 +1416,12 @@ mod tests {
         );
         let _ = qm.remove_song_by_id("b").expect("remove b");
 
-        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], true);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("b"),
+            &["b".to_string()],
+            RemovalTransport::PlayingQueue,
+        );
 
         assert_eq!(
             plan,
@@ -1373,8 +1453,12 @@ mod tests {
             .remove_songs_by_ids(&["b".to_string(), "d".to_string()])
             .expect("remove batch");
 
-        let plan =
-            decide_removal_aftermath(&qm, Some("b"), &["b".to_string(), "d".to_string()], true);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("b"),
+            &["b".to_string(), "d".to_string()],
+            RemovalTransport::PlayingQueue,
+        );
 
         assert_eq!(
             plan,
@@ -1394,7 +1478,12 @@ mod tests {
         let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
         let _ = qm.remove_song_by_id("only").expect("remove only");
 
-        let plan = decide_removal_aftermath(&qm, Some("only"), &["only".to_string()], true);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("only"),
+            &["only".to_string()],
+            RemovalTransport::PlayingQueue,
+        );
 
         assert_eq!(
             plan,
@@ -1456,7 +1545,12 @@ mod tests {
 
         // And the aftermath plan, fed the pre-mutation resolution, correctly
         // routes the engine to "c" (queue's clamp landed there).
-        let plan = decide_removal_aftermath(&qm, Some("b"), &removed_song_ids, true);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("b"),
+            &removed_song_ids,
+            RemovalTransport::PlayingQueue,
+        );
         assert_eq!(
             plan,
             RemovalAftermath::LoadNewCurrent {
@@ -1486,7 +1580,12 @@ mod tests {
         assert_eq!(qm.song_ids_snapshot(), vec!["dup", "b"]);
         assert_eq!(qm.current_index(), Some(0));
 
-        let plan = decide_removal_aftermath(&qm, Some("dup"), &["dup".to_string()], true);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("dup"),
+            &["dup".to_string()],
+            RemovalTransport::PlayingQueue,
+        );
 
         assert_eq!(
             plan,
@@ -1505,8 +1604,12 @@ mod tests {
             .remove_songs_by_ids(&["a".to_string(), "b".to_string()])
             .expect("remove all");
 
-        let plan =
-            decide_removal_aftermath(&qm, Some("a"), &["a".to_string(), "b".to_string()], true);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("a"),
+            &["a".to_string(), "b".to_string()],
+            RemovalTransport::PlayingQueue,
+        );
 
         assert_eq!(plan, RemovalAftermath::StopEmpty);
     }
@@ -1534,7 +1637,8 @@ mod tests {
         );
         let _ = qm.remove_song_by_id("b").expect("remove b");
 
-        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], false);
+        let plan =
+            decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], RemovalTransport::Idle);
 
         assert_eq!(
             plan,
@@ -1558,7 +1662,8 @@ mod tests {
         );
         let _ = qm.remove_song_by_id("b").expect("remove b");
 
-        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], false);
+        let plan =
+            decide_removal_aftermath(&qm, Some("b"), &["b".to_string()], RemovalTransport::Idle);
 
         assert_eq!(
             plan,
@@ -1579,7 +1684,12 @@ mod tests {
         let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
         let _ = qm.remove_song_by_id("only").expect("remove only");
 
-        let plan = decide_removal_aftermath(&qm, Some("only"), &["only".to_string()], false);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("only"),
+            &["only".to_string()],
+            RemovalTransport::Idle,
+        );
 
         assert_eq!(
             plan,
@@ -1600,12 +1710,209 @@ mod tests {
         );
         let _ = qm.remove_song(0).expect("remove duplicate row");
 
-        let plan = decide_removal_aftermath(&qm, Some("dup"), &["dup".to_string()], false);
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("dup"),
+            &["dup".to_string()],
+            RemovalTransport::Idle,
+        );
 
         assert_eq!(
             plan,
             RemovalAftermath::NoCurrentChange,
             "a surviving duplicate keeps the engine untouched regardless of play-state",
         );
+    }
+
+    // ── Regression: a queue removal must not disturb a live radio stream ──
+    //
+    // The navigator names a QUEUE song even while a station plays (only
+    // `guard_play_action` moves the app back to queue mode), and the engine
+    // reads as "playing" for a stream. Fed as `PlayingQueue`, removing the
+    // navigator's row therefore planned `LoadNewCurrent` and a queue song
+    // replaced the station under its own name; emptying the queue planned
+    // `StopEmpty` and killed the stream. Under `StreamingRadio` the plan must
+    // never name the engine at all.
+
+    /// THE REPORTED BUG. Station playing, the navigator's queue row is removed
+    /// by hand: the plan must retarget the navigator only, never load.
+    #[test]
+    fn removal_aftermath_radio_stream_retargets_instead_of_loading() {
+        // Queue: [a, b, c], current = b (idx 1). Remove b. After: [a, c],
+        // current_index clamps to 1 (c).
+        let mut qm = manager_with_songs(
+            vec![make_song("a"), make_song("b"), make_song("c")],
+            Some(1),
+        );
+        let _ = qm.remove_song_by_id("b").expect("remove b");
+
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("b"),
+            &["b".to_string()],
+            RemovalTransport::StreamingRadio,
+        );
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::RetargetNavigator {
+                new_song_id: Some("c".to_string()),
+            },
+            "a live station must keep playing — the plan may only move the navigator",
+        );
+    }
+
+    /// Removing every row while a station plays must not stop the stream.
+    #[test]
+    fn removal_aftermath_radio_stream_emptied_queue_does_not_stop() {
+        let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
+        let _ = qm.remove_song_by_id("only").expect("remove only");
+
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("only"),
+            &["only".to_string()],
+            RemovalTransport::StreamingRadio,
+        );
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::RetargetNavigator { new_song_id: None },
+            "emptying the queue must clear the navigator, not stop the station",
+        );
+    }
+
+    /// Removing some other row while a station plays is the same no-op it is
+    /// for queue playback.
+    #[test]
+    fn removal_aftermath_radio_stream_other_row_is_no_change() {
+        let mut qm = manager_with_songs(
+            vec![make_song("a"), make_song("b"), make_song("c")],
+            Some(0),
+        );
+        let _ = qm.remove_song_by_id("b").expect("remove b");
+
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("a"),
+            &["b".to_string()],
+            RemovalTransport::StreamingRadio,
+        );
+
+        assert_eq!(plan, RemovalAftermath::NoCurrentChange);
+    }
+
+    /// Duplicate row removed under a station: the surviving copy keeps the
+    /// navigator's song valid, so the retarget names it again (a no-op write)
+    /// and the engine is still never named.
+    #[test]
+    fn removal_aftermath_radio_stream_duplicate_retargets_to_survivor() {
+        let mut qm = manager_with_songs(
+            vec![make_song("dup"), make_song("dup"), make_song("b")],
+            Some(0),
+        );
+        let _ = qm.remove_song(0).expect("remove duplicate row");
+
+        let plan = decide_removal_aftermath(
+            &qm,
+            Some("dup"),
+            &["dup".to_string()],
+            RemovalTransport::StreamingRadio,
+        );
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::RetargetNavigator {
+                new_song_id: Some("dup".to_string()),
+            },
+        );
+    }
+
+    // ── RemovalTransport::from_engine ──
+    //
+    // `ActivePlayback::Radio` is written when a station starts and cleared ONLY
+    // by `guard_play_action`. Two ordinary routes therefore leave the app in
+    // radio mode while the engine produces a QUEUE song: the player-bar Play
+    // button's cold start (`handle_play` never calls `guard_play_action`), and
+    // a station that drops out, whose completion callback auto-advances the
+    // queue. Trusting the mode alone there would leave the engine decoding the
+    // row the user just deleted — worse than the bug this fix is for.
+
+    const STATION: &str = "http://example.invalid/stream.mp3";
+    const QUEUE_TRACK: &str = "http://server.invalid/rest/stream?id=b";
+
+    /// THE REVIEWER'S CASE. Radio mode, but the engine is on a queue song
+    /// (stop → Play cold-start, or a dead station that auto-advanced): this is
+    /// queue playback and the removal must follow the queue as it always did.
+    #[test]
+    fn removal_transport_radio_mode_over_a_queue_song_is_playing_queue() {
+        assert_eq!(
+            RemovalTransport::from_engine(Some(STATION), QUEUE_TRACK, true),
+            RemovalTransport::PlayingQueue,
+            "the app's radio MODE must not shield a queue song the engine is really playing",
+        );
+    }
+
+    /// The station is loaded but not yet playing (the app was in radio mode and
+    /// the engine has not started, or the user paused): still the radio path.
+    #[test]
+    fn removal_transport_station_source_not_playing_is_still_radio() {
+        assert_eq!(
+            RemovalTransport::from_engine(Some(STATION), STATION, false),
+            RemovalTransport::StreamingRadio,
+            "neither pause nor stop clears the engine's source — the station still owns it",
+        );
+    }
+
+    /// The engine really is on the station: the radio path.
+    #[test]
+    fn removal_transport_station_source_playing_is_radio() {
+        assert_eq!(
+            RemovalTransport::from_engine(Some(STATION), STATION, true),
+            RemovalTransport::StreamingRadio,
+        );
+    }
+
+    /// Radio mode armed but the station's load has not reached the engine yet:
+    /// classified from the transport, exactly as before this fix existed.
+    #[test]
+    fn removal_transport_radio_mode_before_the_station_loads_reads_the_transport() {
+        assert_eq!(
+            RemovalTransport::from_engine(Some(STATION), "", false),
+            RemovalTransport::Idle,
+        );
+        assert_eq!(
+            RemovalTransport::from_engine(Some(STATION), QUEUE_TRACK, false),
+            RemovalTransport::Idle,
+        );
+    }
+
+    /// No radio mode at all: the plain two-state classification.
+    #[test]
+    fn removal_transport_queue_mode_maps_the_old_bool() {
+        assert_eq!(
+            RemovalTransport::from_engine(None, QUEUE_TRACK, true),
+            RemovalTransport::PlayingQueue,
+        );
+        assert_eq!(
+            RemovalTransport::from_engine(None, QUEUE_TRACK, false),
+            RemovalTransport::Idle,
+        );
+    }
+
+    /// Nothing named as playing: the station case short-circuits exactly like
+    /// the others, before the transport is consulted.
+    #[test]
+    fn removal_aftermath_radio_stream_no_playing_song_is_no_change() {
+        let qm = manager_with_songs(vec![make_song("a"), make_song("b")], None);
+
+        let plan = decide_removal_aftermath(
+            &qm,
+            None,
+            &["a".to_string()],
+            RemovalTransport::StreamingRadio,
+        );
+
+        assert_eq!(plan, RemovalAftermath::NoCurrentChange);
     }
 }

@@ -1175,6 +1175,21 @@ impl PlaybackController {
         )
     }
 
+    /// Snapshot the engine's live source URL together with whether it is
+    /// genuinely producing audio, under ONE lock so the pair cannot disagree.
+    ///
+    /// [`crate::services::playback::RemovalTransport::from_engine`] needs both
+    /// to tell "a station owns the engine" from "the app is merely still in
+    /// radio mode while a queue song plays"; reading them under two locks would
+    /// let a source change land between them.
+    pub async fn engine_source_snapshot(&self) -> (String, bool) {
+        let engine = self.audio_engine.lock().await;
+        (
+            engine.source().to_string(),
+            matches!(engine.state(), crate::audio::engine::PlaybackState::Playing),
+        )
+    }
+
     /// Apply a [`RemovalAftermath`] plan to the engine + navigator.
     ///
     /// Called from [`super::app_service::AppService::remove_queue_entries`]
@@ -1258,6 +1273,18 @@ impl PlaybackController {
                         new_song_id
                     );
                 }
+                Ok(())
+            }
+            RemovalAftermath::RetargetNavigator { new_song_id } => {
+                self.queue_navigator
+                    .lock()
+                    .await
+                    .set_current_song_id(new_song_id.clone())
+                    .await;
+                debug!(
+                    "📻 Removal under a live radio stream — navigator retargeted to {:?}, engine untouched",
+                    new_song_id
+                );
                 Ok(())
             }
         }
@@ -2409,6 +2436,48 @@ mod tests {
             None,
             "the hard path must not run any plan-time naming"
         );
+        Ok(())
+    }
+
+    /// A queue removal decided under a live radio stream applies as
+    /// `RetargetNavigator`: the navigator follows the queue cursor while the
+    /// engine keeps the station's source and its transport state.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retarget_navigator_leaves_the_engine_source_and_transport_alone() -> Result<()> {
+        let fx = click_fixture().await?;
+        let _ = fx
+            .queue
+            .set_queue(vec![click_song("a"), click_song("b")], Some(0))
+            .await?;
+        const STATION: &str = "http://127.0.0.1:9/stream.mp3";
+        {
+            let engine_arc = fx.playback.audio_engine();
+            let mut e = engine_arc.lock().await;
+            // Stage a station as the live source, then mark the engine playing
+            // — `load_track_with_rg` does no network I/O on a stopped engine.
+            e.load_track_with_rg(STATION, None, None).await;
+            e.force_playing_for_test();
+        }
+
+        fx.playback
+            .apply_removal_aftermath(RemovalAftermath::RetargetNavigator {
+                new_song_id: Some("b".to_string()),
+            })
+            .await?;
+
+        assert_eq!(
+            fx.playback.current_song_id().await.as_deref(),
+            Some("b"),
+            "the navigator must follow the queue cursor"
+        );
+        let engine_arc = fx.playback.audio_engine();
+        let e = engine_arc.lock().await;
+        assert_eq!(
+            e.source(),
+            STATION,
+            "the station must still be the engine's source"
+        );
+        assert!(e.playing(), "the station must still be playing");
         Ok(())
     }
 

@@ -79,6 +79,8 @@ All notable changes to this project will be documented in this file.
 - Rapid relative seeks from media keys and `playerctl` add up instead of landing as one.
 - A seek no longer credits listening time for the part of a track it skipped over.
 - Turning lyrics off mid-crossfade no longer brings the previous track's sheet back when you turn them on.
+- Removing the playing queue row while a radio station plays no longer replaces the station with a queue song.
+- Removing every queue row while a radio station plays no longer stops the station.
 
 ### Removed
 

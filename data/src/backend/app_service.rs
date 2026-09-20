@@ -1647,7 +1647,18 @@ impl AppService {
     /// projection happens atomically inside `remove_entries_by_ids`; the
     /// aftermath step does engine/navigator work only and never mutates the
     /// queue, so no trailing refresh is needed.
-    pub async fn remove_queue_entries(&self, entry_ids: &[u64]) -> Result<()> {
+    ///
+    /// `radio_stream_url` is the station the UI is in radio mode for, if any.
+    /// When that stream is what the engine is producing, the queue is just a
+    /// list the user is editing, so the aftermath only retargets the navigator
+    /// and the engine is never named — otherwise removing the navigator's row
+    /// swapped a queue song in under the station's name, and emptying the queue
+    /// stopped the stream.
+    pub async fn remove_queue_entries(
+        &self,
+        entry_ids: &[u64],
+        radio_stream_url: Option<&str>,
+    ) -> Result<()> {
         if entry_ids.is_empty() {
             return Ok(());
         }
@@ -1658,7 +1669,17 @@ impl AppService {
         // queue). Snapshotted here, before the mutation, as an independent
         // one-shot engine lock so removing the current row of a stopped/paused
         // app re-cues the engine without starting playback.
-        let engine_playing = self.playback.engine_is_playing().await;
+        //
+        // The radio mode comes from the UI (`ActivePlayback`) rather than the
+        // engine, whose `stream_is_infinite` follows the decoder and so lags a
+        // station start. The engine's own source decides whether that station
+        // is actually what it is producing — see `RemovalTransport::from_engine`.
+        let (engine_source, engine_playing) = self.playback.engine_source_snapshot().await;
+        let transport = crate::services::playback::RemovalTransport::from_engine(
+            radio_stream_url,
+            &engine_source,
+            engine_playing,
+        );
 
         // Resolve the entry_ids → their song_ids *before* the removal, in one
         // pass over the rows. The post-removal queue no longer holds those
@@ -1684,7 +1705,7 @@ impl AppService {
                 &qm,
                 was_playing_id.as_deref(),
                 &removed_song_ids,
-                engine_playing,
+                transport,
             )
         };
 
