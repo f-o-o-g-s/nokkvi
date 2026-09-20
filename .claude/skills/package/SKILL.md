@@ -15,7 +15,7 @@ Run this once per clone or worktree. It is idempotent — safe to re-run every r
 git config --local core.hooksPath .githooks
 ```
 
-The pre-commit hook (`.githooks/pre-commit`) auto-updates Navidrome/PipeWire pins in `README.md` and refuses a minor/major `Cargo.toml` bump if the previous minor's entries are still in `CHANGELOG.md`. Without `core.hooksPath` set, both checks silently no-op and the bump can land unchecked — the CI gate in step 6 is the backstop, but it fails late (after the tag push). Bootstrap once and the hook catches the mistake locally instead.
+The pre-commit hook (`.githooks/pre-commit`) scans the staged changes for secrets with `gitleaks` (when installed), auto-updates Navidrome/PipeWire pins in `README.md`, and refuses a minor/major `Cargo.toml` bump if the previous minor's entries are still in `CHANGELOG.md`. Without `core.hooksPath` set, all three checks silently no-op and the bump can land unchecked — the CI gate in step 6 is the backstop, but it fails late (after the tag push). Bootstrap once and the hook catches the mistake locally instead.
 
 ## 1. Generate changelog from git history
 

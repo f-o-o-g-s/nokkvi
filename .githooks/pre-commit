@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
-# Updates README.md with the currently tested versions before commit,
-# and refuses minor/major Cargo.toml bumps that leave the previous minor's
-# entries unarchived in CHANGELOG.md (see .claude/skills/package/SKILL.md step 1).
+# Scans the staged changes for secrets (gitleaks, when installed), updates
+# README.md with the currently tested versions before commit, and refuses
+# minor/major Cargo.toml bumps that leave the previous minor's entries
+# unarchived in CHANGELOG.md (see .claude/skills/package/SKILL.md step 1).
 
 set -e
+
+# ── Secret scan ─────────────────────────────────────────────────────────────
+# nokkvi is a PUBLIC repo. Block commits that introduce credentials. Optional
+# dev tool: no gitleaks installed means no scan, so contributors are unaffected.
+# Bypass deliberately with: git commit --no-verify
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks git --pre-commit --staged --redact -v || {
+        echo "ERROR: gitleaks found a secret in the staged changes. Not committing."
+        exit 1
+    }
+fi
 
 # ── Archive-completeness check for minor/major version bumps ────────────────
 # Only fires when Cargo.toml is staged AND the [package] version is changing
