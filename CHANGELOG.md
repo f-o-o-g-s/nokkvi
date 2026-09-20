@@ -70,6 +70,7 @@ All notable changes to this project will be documented in this file.
 - A `.lrc` you add to the lyrics folder now beats a cached LRCLIB copy of the same song.
 - Lyrics added by a library rescan now show up without restarting nokkvi.
 - With crossfade on, skipping during a track's intro now fades the sheet you were reading.
+- Two actions sharing one key now resolve the same way on every launch.
 - Turning lyrics off mid-crossfade no longer brings the previous track's sheet back when you turn them on.
 
 ### Removed

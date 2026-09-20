@@ -628,3 +628,95 @@ fn reserved_actions_not_in_all() {
         );
     }
 }
+
+// ====================================================================
+// Shared-combo resolution — deterministic across launches
+// ====================================================================
+
+/// How many freshly built configs a determinism assertion walks. Each
+/// `HashMap` gets its own iteration order, so a resolution rule that leaned on
+/// map order would pass once and fail on a later launch.
+const SHARED_COMBO_TRIALS: usize = 64;
+
+#[test]
+fn shared_combo_prefers_the_action_the_user_moved() {
+    // ToggleStar (Shift+L by default) is declared BEFORE AddToQueue in
+    // HotkeyAction::ALL, so declaration order alone would pick ToggleStar.
+    // AddToQueue sitting on Shift+L is the user's explicit choice and wins.
+    for _ in 0..SHARED_COMBO_TRIALS {
+        let mut config = HotkeyConfig::default();
+        config.set_binding(
+            HotkeyAction::AddToQueue,
+            KeyCombo::shift(KeyCode::Char('l')),
+        );
+        assert_eq!(
+            config.lookup(&KeyCode::Char('l'), true, false, false),
+            Some(HotkeyAction::AddToQueue),
+            "a user-chosen binding must beat another action still sitting on its default"
+        );
+    }
+}
+
+#[test]
+fn shared_combo_between_two_moved_actions_falls_back_to_declaration_order() {
+    // Neither binding is a default, so the tie breaks on HotkeyAction::ALL
+    // order: ToggleStar is declared before AddToQueue.
+    for _ in 0..SHARED_COMBO_TRIALS {
+        let mut config = HotkeyConfig::default();
+        config.set_binding(HotkeyAction::ToggleStar, KeyCombo::key(KeyCode::F5));
+        config.set_binding(HotkeyAction::AddToQueue, KeyCombo::key(KeyCode::F5));
+        assert_eq!(
+            config.lookup(&KeyCode::F5, false, false, false),
+            Some(HotkeyAction::ToggleStar),
+            "two moved actions on one combo resolve in declaration order"
+        );
+    }
+}
+
+#[test]
+fn reserved_action_wins_a_shared_combo() {
+    // A configurable action parked on Escape must not shadow the reserved one.
+    for _ in 0..SHARED_COMBO_TRIALS {
+        let mut config = HotkeyConfig::default();
+        config.set_binding(HotkeyAction::ToggleStar, KeyCombo::key(KeyCode::Escape));
+        assert_eq!(
+            config.lookup(&KeyCode::Escape, false, false, false),
+            Some(HotkeyAction::Escape),
+            "reserved actions resolve ahead of every configurable one"
+        );
+    }
+}
+
+#[test]
+fn find_conflict_names_the_action_lookup_would_fire() {
+    for _ in 0..SHARED_COMBO_TRIALS {
+        let mut config = HotkeyConfig::default();
+        // AddToQueue takes ToggleStar's default combo.
+        config.set_binding(
+            HotkeyAction::AddToQueue,
+            KeyCombo::shift(KeyCode::Char('l')),
+        );
+        let combo = KeyCombo::shift(KeyCode::Char('l'));
+        let winner = config.lookup(&combo.key, combo.shift, combo.ctrl, combo.alt);
+        assert_eq!(winner, Some(HotkeyAction::AddToQueue));
+        // Rebinding a third action onto that combo must report the same winner.
+        assert_eq!(
+            config.find_conflict(&combo, &HotkeyAction::TogglePlay),
+            winner,
+            "find_conflict must name the action lookup() would fire"
+        );
+    }
+}
+
+#[test]
+fn find_conflict_sees_an_action_still_on_its_default() {
+    // Nothing was customized: the conflict is ToggleStar's own default.
+    let config = HotkeyConfig::default();
+    assert_eq!(
+        config.find_conflict(
+            &KeyCombo::shift(KeyCode::Char('l')),
+            &HotkeyAction::TogglePlay
+        ),
+        Some(HotkeyAction::ToggleStar)
+    );
+}

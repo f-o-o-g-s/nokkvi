@@ -52,8 +52,10 @@ impl HotkeyConfig {
     /// Look up which action a key+modifiers combination is bound to.
     /// Returns `None` if no action matches.
     ///
-    /// Searches both explicitly persisted bindings **and** default bindings
-    /// for any actions not yet in the user's config (e.g. newly added actions).
+    /// Two actions CAN share one combo — a user rebinding onto an occupied
+    /// key, or a new default landing on a combo a user already claimed. The
+    /// winner is picked by [`Self::resolve`], never by map order, so the same
+    /// key fires the same action on every launch.
     pub fn lookup(
         &self,
         key: &KeyCode,
@@ -67,35 +69,59 @@ impl HotkeyConfig {
             ctrl,
             alt,
         };
-        // 1. Check explicitly persisted bindings first
-        if let Some(found) = self
-            .bindings
-            .iter()
-            .find(|(_, bound_combo)| **bound_combo == combo)
-            .map(|(action, _)| *action)
-        {
-            return Some(found);
-        }
-        // 2. Fall back to default bindings for any actions not in the map
-        //    (e.g. newly added actions that the user hasn't configured yet)
-        for action in HotkeyAction::ALL
-            .iter()
-            .chain(HotkeyAction::RESERVED.iter())
-        {
-            if !self.bindings.contains_key(action) && action.default_binding() == combo {
+        self.resolve(&combo, None)
+    }
+
+    /// Decide which action owns `combo`, in a fixed order that does not depend
+    /// on `HashMap` iteration:
+    ///
+    /// 1. a **reserved** action (Escape / Delete are never user-configurable,
+    ///    so a configurable action parked on one must not shadow it);
+    /// 2. a configurable action whose binding **differs from its default** —
+    ///    the user put it there on purpose, so it beats an action merely
+    ///    sitting where it was shipped;
+    /// 3. otherwise the earliest match in [`HotkeyAction::ALL`] (declaration
+    ///    order).
+    ///
+    /// `exclude` skips one action, which is what makes [`Self::find_conflict`]
+    /// share this ordering instead of running its own scan. Reads
+    /// [`Self::get_binding`], so an action missing from the map is compared by
+    /// its default — the old two-pass persisted-then-defaults walk folds in.
+    fn resolve(&self, combo: &KeyCombo, exclude: Option<&HotkeyAction>) -> Option<HotkeyAction> {
+        for action in HotkeyAction::RESERVED {
+            if exclude == Some(action) {
+                continue;
+            }
+            if self.get_binding(action) == *combo {
                 return Some(*action);
             }
         }
-        None
+        let mut on_default: Option<HotkeyAction> = None;
+        for action in HotkeyAction::ALL {
+            if exclude == Some(action) {
+                continue;
+            }
+            let bound = self.get_binding(action);
+            if bound != *combo {
+                continue;
+            }
+            if bound != action.default_binding() {
+                return Some(*action);
+            }
+            if on_default.is_none() {
+                on_default = Some(*action);
+            }
+        }
+        on_default
     }
 
     /// Check if a key combo conflicts with an existing binding (excluding a given action).
     /// Returns the conflicting action, if any.
+    ///
+    /// Shares [`Self::resolve`] with [`Self::lookup`], so the action named here
+    /// as the conflict is exactly the one the key would actually fire.
     pub fn find_conflict(&self, combo: &KeyCombo, exclude: &HotkeyAction) -> Option<HotkeyAction> {
-        self.bindings
-            .iter()
-            .find(|(action, bound_combo)| *action != exclude && *bound_combo == combo)
-            .map(|(action, _)| *action)
+        self.resolve(combo, Some(exclude))
     }
 
     /// Get all bindings as an iterator.
@@ -148,6 +174,44 @@ impl HotkeyConfig {
                 tracing::warn!("Unknown hotkey action in config.toml: {}", action_key);
             }
         }
+        config.warn_on_shared_combos();
         config
+    }
+
+    /// Log one `warn!` per key combo that two or more actions now share,
+    /// naming every claimant and the one [`Self::resolve`] will fire.
+    ///
+    /// Called after the overrides land, so it reports the file the user
+    /// actually has. Runs on hot-reload too — the file log is the right place
+    /// for a "your config says two things" notice, and there is no user-facing
+    /// surface for an unbound action yet.
+    fn warn_on_shared_combos(&self) {
+        let mut claims: HashMap<KeyCombo, Vec<HotkeyAction>> = HashMap::new();
+        for action in HotkeyAction::ALL
+            .iter()
+            .chain(HotkeyAction::RESERVED.iter())
+        {
+            claims
+                .entry(self.get_binding(action))
+                .or_default()
+                .push(*action);
+        }
+        for (combo, actions) in claims {
+            if actions.len() < 2 {
+                continue;
+            }
+            let names: Vec<&str> = actions.iter().map(|a| a.display_name()).collect();
+            let winner = self
+                .resolve(&combo, None)
+                .map_or("nothing", |a| a.display_name());
+            tracing::warn!(
+                "Hotkey '{}' is claimed by {} actions ({}) — '{}' wins; rebind the others in \
+                 Settings > Hotkeys",
+                combo,
+                actions.len(),
+                names.join(", "),
+                winner
+            );
+        }
     }
 }
