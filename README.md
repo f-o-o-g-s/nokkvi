@@ -47,7 +47,7 @@ Things that shaped this project:
 - Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull).
 - **23 built-in themes** (default **Svalbard**), drop-in `.toml` with instant hot-reload, a searchable picker that paints each row in its own palette, and two icon sets (Phosphor, Lucide).
 - Built for tiling WMs: a width-adaptive player bar and a **slot-paginated list** that fits a whole number of rows to the window (up to 29) and scales their contents to match.
-- Plus the essentials: browse albums, artists, songs, genres, playlists, radio, and similar songs; a **Harbour** home with whole-library search and one-press random plays; persistent queue, multi-select, drag-and-drop, star ratings; lyrics, synced when available; custom cover art; server queue sync (Navidrome 0.58.5+); scrobbling (library and radio); MPRIS; an optional tray icon; and full keyboard control.
+- Plus the essentials: browse albums, artists, songs, genres, playlists, radio, and similar songs; a **Harbour** home with whole-library search and one-press random plays; persistent queue, multi-select, drag-and-drop, star ratings; lyrics, synced or plain; custom cover art; server queue sync (Navidrome 0.58.5+); scrobbling (library and radio); MPRIS; an optional tray icon; and full keyboard control.
 
 Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).
 
