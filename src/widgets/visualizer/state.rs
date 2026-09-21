@@ -154,7 +154,7 @@ pub(crate) type SharedVisualizerConfig = Arc<RwLock<VisualizerConfig>>;
 
 /// Visualizer timing constants derived from the 60 Hz tick rate.
 ///
-/// All four constants are const-fn-arithmeticked from `TICK_RATE_HZ` so a
+/// All three constants are const-fn-arithmeticked from `TICK_RATE_HZ` so a
 /// future agent re-tunes the family by changing a single value. Replaces
 /// scattered 16667 / 16670 / 16.67 / 0.01667 literals that had each been
 /// transcribed by hand and drifted by ≤ 0.5 µs/frame coincidentally.
@@ -176,9 +176,6 @@ impl VisualizerTiming {
     /// One tick in milliseconds as `f64` — used by the peak-fade math
     /// (`tick_ms / peak_fade_time_ms` per frame).
     pub(crate) const TICK_INTERVAL_MS_F64: f64 = 1000.0 / Self::TICK_RATE_HZ as f64;
-    /// One tick in seconds as `f32` — used by the flash-effect elapsed
-    /// clock that drives the LCG seed.
-    pub(crate) const TICK_INTERVAL_SECS_F32: f32 = 1.0 / Self::TICK_RATE_HZ as f32;
 }
 
 // ========================================
@@ -299,21 +296,18 @@ impl PeakState {
     }
 }
 
-/// Shimmer/flash effect state (internal to tick)
+/// Flash effect state (internal to tick)
 /// Groups effect processing state
 #[derive(Clone)]
 struct EffectState {
     /// Previous bar values for detecting rapid increases
     prev_bars: Vec<f64>,
-    /// Elapsed time tracker for flash effect timing
-    elapsed_time: f32,
 }
 
 impl EffectState {
     fn new(bar_count: usize) -> Self {
         let s = Self {
             prev_bars: vec![0.0; bar_count],
-            elapsed_time: 0.0,
         };
         // EffectState currently has only one per-bar Vec; assert included for
         // consistency so a future addition triggers the same pattern.
@@ -328,7 +322,6 @@ impl EffectState {
 
     fn clear(&mut self, bar_count: usize) {
         self.prev_bars = vec![0.0; bar_count];
-        // Note: don't reset elapsed_time - it should continue monotonically
     }
 }
 
@@ -1149,7 +1142,7 @@ impl VisualizerState {
                     }
                 }
 
-                // Shimmer flash effect
+                // Beat-highlight flash envelope
                 self.update_flash_effect(&output, visual_count);
 
                 return true;
@@ -1158,15 +1151,24 @@ impl VisualizerState {
         false
     }
 
-    /// Update flash effect (extracted for clarity)
+    /// Update the per-bar flash envelope that `bars.wgsl` blooms toward the
+    /// peak color. A bar whose value jumps by more than `SPIKE_THRESHOLD` in
+    /// one tick lights itself plus a falloff across its neighbors; the whole
+    /// envelope then releases multiplicatively, so the spread keeps its shape
+    /// for its entire life instead of collapsing onto the core bar.
     fn update_flash_effect(&self, output: &[f64], bar_count: usize) {
-        const FLASH_DECAY_RATE: f32 = 0.08;
-        const FLASH_SPREAD_RADIUS: usize = 3;
-        const FLASH_FALLOFF: f32 = 0.5;
-        const SHIMMER_AMPLITUDE_MIN: f64 = 0.15;
-        const SHIMMER_CHANCE_BASE: f64 = 0.08;
-        const SHIMMER_CHANCE_SCALE: f64 = 0.25;
+        /// Rise in one tick (normalized bar units) that counts as an onset.
         const SPIKE_THRESHOLD: f64 = 0.12;
+        /// Rise that maps to a full-strength flash.
+        const SPIKE_FULL_SCALE: f64 = 0.2;
+        /// Neighbors lit on each side of an onset.
+        const FLASH_SPREAD_RADIUS: usize = 3;
+        /// Per-bar falloff of the neighbor spread (`FALLOFF^distance`).
+        const FLASH_FALLOFF: f32 = 0.5;
+        /// Multiplicative release per tick: ~90 ms half-life at 60 Hz.
+        const FLASH_RELEASE: f32 = 0.88;
+        /// Values below this snap to zero so the envelope terminates.
+        const FLASH_FLOOR: f32 = 0.005;
 
         let mut display = self.display.lock();
         let mut effects = self.effects.lock();
@@ -1176,68 +1178,32 @@ impl VisualizerState {
             effects.prev_bars = vec![0.0; bar_count];
         }
 
-        // Simple LCG random
-        let mut rng_state = ((effects.elapsed_time * 12_345.679) as u32)
-            .wrapping_mul(1103515245)
-            .wrapping_add(12345);
-        let mut next_rand = || -> f64 {
-            rng_state = rng_state.wrapping_mul(1103515245).wrapping_add(12345);
-            f64::from((rng_state >> 16) & 0x7FFF) / 32768.0
-        };
-
-        let mut new_flashes: Vec<(usize, f32)> = Vec::new();
-
-        // Using explicit index loop: we need `i` to cross-reference output[], effects.prev_bars[],
-        // and to use as center_idx for flash spreading calculations.
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..bar_count.min(output.len()) {
-            let current = output[i];
-            let previous = effects.prev_bars[i];
-            let increase = current - previous;
-
-            if increase > SPIKE_THRESHOLD {
-                let flash = (increase / 0.2).min(1.0) as f32;
-                new_flashes.push((i, flash));
-            } else if current > SHIMMER_AMPLITUDE_MIN {
-                let shimmer_chance = SHIMMER_CHANCE_BASE + (current * SHIMMER_CHANCE_SCALE);
-                if next_rand() < shimmer_chance {
-                    let flash = (0.3 + current * 0.4).min(0.7) as f32;
-                    new_flashes.push((i, flash));
-                }
-            }
-
-            effects.prev_bars[i] = current;
-        }
-
-        // Apply flashes with neighbor spread
-        for (center_idx, flash_intensity) in new_flashes {
-            display.flash_intensities[center_idx] =
-                display.flash_intensities[center_idx].max(flash_intensity);
-
-            for dist in 1..=FLASH_SPREAD_RADIUS {
-                let neighbor_intensity = flash_intensity * FLASH_FALLOFF.powi(dist as i32);
-
-                if center_idx >= dist {
-                    let left_idx = center_idx - dist;
-                    display.flash_intensities[left_idx] =
-                        display.flash_intensities[left_idx].max(neighbor_intensity);
-                }
-
-                let right_idx = center_idx + dist;
-                if right_idx < bar_count {
-                    display.flash_intensities[right_idx] =
-                        display.flash_intensities[right_idx].max(neighbor_intensity);
-                }
-            }
-        }
-
-        // Decay all flashes
+        // Release first so a flash triggered this tick starts at full strength.
         for flash in display.flash_intensities.iter_mut() {
-            *flash = (*flash - FLASH_DECAY_RATE).max(0.0);
+            *flash *= FLASH_RELEASE;
+            if *flash < FLASH_FLOOR {
+                *flash = 0.0;
+            }
         }
 
-        // Update elapsed time
-        effects.elapsed_time += VisualizerTiming::TICK_INTERVAL_SECS_F32;
+        let n = bar_count
+            .min(output.len())
+            .min(effects.prev_bars.len())
+            .min(display.flash_intensities.len());
+        for (i, &current) in output.iter().enumerate().take(n) {
+            let increase = current - effects.prev_bars[i];
+            effects.prev_bars[i] = current;
+            if increase <= SPIKE_THRESHOLD {
+                continue;
+            }
+            let strength = (increase / SPIKE_FULL_SCALE).min(1.0) as f32;
+            let lo = i.saturating_sub(FLASH_SPREAD_RADIUS);
+            let hi = (i + FLASH_SPREAD_RADIUS).min(n - 1);
+            for (j, flash) in display.flash_intensities[lo..=hi].iter_mut().enumerate() {
+                let dist = (lo + j).abs_diff(i) as i32;
+                *flash = flash.max(strength * FLASH_FALLOFF.powi(dist));
+            }
+        }
     }
 
     pub(crate) fn get_bars(&self) -> Vec<f64> {
@@ -1731,7 +1697,6 @@ mod tests {
         assert_eq!(VisualizerTiming::TICK_RATE_HZ, 60);
         assert_eq!(VisualizerTiming::TICK_INTERVAL.as_nanos(), 16_666_666_u128);
         assert!((VisualizerTiming::TICK_INTERVAL_MS_F64 - (1000.0 / 60.0)).abs() < 1e-12);
-        assert!((VisualizerTiming::TICK_INTERVAL_SECS_F32 - (1.0 / 60.0)).abs() < 1e-7);
     }
 
     #[test]

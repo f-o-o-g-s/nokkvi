@@ -80,6 +80,14 @@ const BARS_GRADIENT_CYCLE_SPEED: f32 = 0.25;
 // (uniforms.audio.x = beat_pulse). Keeps the spectrum pumping with the music.
 const BARS_BEAT_LIFT: f32 = 0.18;
 
+// Peak-flash bloom: linear response to the CPU flash envelope. Gain keeps the
+// core about as bright as the old squared response at the default Peak Flash
+// (0.6 * 0.6 = 0.36); above ~0.8 the shoulders haze and the field washes out.
+const BARS_FLASH_GAIN: f32 = 0.6;
+// Bloom weight at a bar's base; it ramps to 1.0 at that bar's own top, so short
+// shoulder bars flash as brightly at their tops as the tall core bar.
+const BARS_FLASH_TOP_BASE: f32 = 0.35;
+
 // ---------- Palette segment-count constants ----------
 // CPU side (ThemeBarColors::get_bar_gradient_colors) pads to 8 entries.
 // Static gradient uses 6 colors (indices 0..5); looped/animated/peak modes wrap `% 6u`.
@@ -314,25 +322,6 @@ fn get_flash_intensity(bar_index: u32) -> f32 {
     }
     
     return uniforms.config.flash_data[vec_idx][component];
-}
-
-// Get gradient color with flash effect
-// Bars flash towards the opposite gradient color when they hit peaks
-fn get_gradient_color_flash(normalized_y: f32, bar_index: u32) -> vec4<f32> {
-    // Get base gradient color
-    let base_color = get_gradient_color(normalized_y);
-    
-    // Get flash intensity for this bar
-    let flash = get_flash_intensity(bar_index);
-    
-    if (flash <= 0.01) {
-        return base_color;
-    }
-    
-    // Flash effect: lerp towards the opposite end of the gradient
-    // This keeps the shimmer colorful and within the user's palette
-    let flash_color = get_gradient_color(1.0 - normalized_y);
-    return mix(base_color, flash_color, flash * 0.7);  // 70% max flash intensity
 }
 
 // Get gradient color with height-based stretching (wave mode)
@@ -814,16 +803,18 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             base_color = get_gradient_color(base_pos);
         }
         
-        // Peak-flash bloom: bars bloom toward the warm peak color on a peak
-        // hit, using the per-bar flash envelope (computed + uploaded every
-        // tick, previously unused). Squared for a punchy attack, weighted
-        // toward the bar top, additive so it reads as emissive over any
-        // gradient mode. Applied before brightness_mod so the 3D top/side
-        // faces inherit the bloom and stay shading-consistent.
+        // Peak-flash bloom: bars bloom toward the warm peak color on an
+        // onset, using the per-bar flash envelope (computed + uploaded every
+        // tick). Linear in the envelope so the CPU-side neighbor spread keeps
+        // its shape on screen, weighted toward each bar's OWN top (not the
+        // canvas top, which starved short shoulder bars), additive so it reads
+        // as emissive over any gradient mode. Applied before brightness_mod so
+        // the 3D top/side faces inherit the bloom and stay shading-consistent.
         let flash = get_flash_intensity(u32(input.bar_index)) * uniforms.config.bars_flash_intensity;
         if (flash > 0.001) {
-            let top_weight = 0.4 + 0.6 * clamped_y;
-            let bloom = uniforms.peak_gradient_colors[0].rgb * (flash * flash * top_weight);
+            let within_bar = clamp(clamped_y / max(input.bar_amplitude, 0.02), 0.0, 1.0);
+            let top_weight = BARS_FLASH_TOP_BASE + (1.0 - BARS_FLASH_TOP_BASE) * within_bar;
+            let bloom = uniforms.peak_gradient_colors[0].rgb * (flash * BARS_FLASH_GAIN * top_weight);
             base_color = vec4<f32>(min(base_color.rgb + bloom, vec3<f32>(1.0)), base_color.a);
         }
 

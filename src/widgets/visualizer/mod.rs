@@ -786,6 +786,21 @@ mod wgsl_helper_tests {
             BARS.contains("const BARS_PALETTE_INDEX_MOD: u32 = 6u;"),
             "bars.wgsl is missing BARS_PALETTE_INDEX_MOD const",
         );
+        // Peak-flash bloom: a linear response (squaring collapsed the CPU-side
+        // neighbor spread onto the core bar) weighted by height within the bar.
+        assert!(
+            BARS.contains("const BARS_FLASH_GAIN: f32 = 0.6;"),
+            "bars.wgsl is missing BARS_FLASH_GAIN const",
+        );
+        assert!(
+            BARS.contains("const BARS_FLASH_TOP_BASE: f32 = 0.35;"),
+            "bars.wgsl is missing BARS_FLASH_TOP_BASE const",
+        );
+        assert!(
+            BARS.contains("flash * BARS_FLASH_GAIN * top_weight")
+                && !BARS.contains("flash * flash"),
+            "bars.wgsl peak-flash bloom is no longer linear in the flash envelope",
+        );
     }
 
     #[test]

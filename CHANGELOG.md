@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The Bars beat flash now spreads across neighboring bars instead of flickering on a single bar.
+- Bars no longer sparkle with random flashes between beats.
+
 ### Fixed
 
 ### Removed
