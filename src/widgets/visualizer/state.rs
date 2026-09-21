@@ -17,7 +17,7 @@ use nokkvi_data::audio::spectrum::{self, SpectrumEngine};
 use parking_lot::{Mutex, RwLock};
 use tracing::{debug, trace};
 
-use super::particles::ParticleSystem;
+use super::{flash::FlashField, particles::ParticleSystem};
 use crate::visualizer_config::VisualizerConfig;
 
 /// Maximum number of bars the FFT can meaningfully produce for a given sample rate.
@@ -32,7 +32,7 @@ pub(super) fn max_bars_for_sample_rate(sample_rate: u32) -> usize {
 /// Each visual bar maps to a fractional position in the FFT output and lerps
 /// between the two nearest bins. Adjacent frequency bins are naturally correlated,
 /// so the interpolation is visually seamless.
-fn interpolate_bars(fft_output: &[f64], visual_count: usize) -> Vec<f64> {
+pub(super) fn interpolate_bars(fft_output: &[f64], visual_count: usize) -> Vec<f64> {
     let fft_count = fft_output.len();
     if fft_count == 0 || visual_count == 0 {
         return vec![0.0; visual_count];
@@ -300,28 +300,24 @@ impl PeakState {
 /// Groups effect processing state
 #[derive(Clone)]
 struct EffectState {
-    /// Previous bar values for detecting rapid increases
-    prev_bars: Vec<f64>,
+    /// Beat-highlight flash field: onset events, their baseline, and the
+    /// per-bar render published to `DisplayBuffers::flash_intensities`
+    flash: FlashField,
 }
 
 impl EffectState {
     fn new(bar_count: usize) -> Self {
-        let s = Self {
-            prev_bars: vec![0.0; bar_count],
-        };
-        // EffectState currently has only one per-bar Vec; assert included for
-        // consistency so a future addition triggers the same pattern.
-        debug_assert_eq!(s.prev_bars.len(), bar_count);
-        s
+        Self {
+            flash: FlashField::new(bar_count),
+        }
     }
 
     fn resize(&mut self, bar_count: usize) {
-        self.prev_bars = vec![0.0; bar_count];
-        debug_assert_eq!(self.prev_bars.len(), bar_count);
+        self.flash.resize(bar_count);
     }
 
     fn clear(&mut self, bar_count: usize) {
-        self.prev_bars = vec![0.0; bar_count];
+        self.flash.resize(bar_count);
     }
 }
 
@@ -465,7 +461,7 @@ pub(crate) struct VisualizerState {
     display: Arc<Mutex<DisplayBuffers>>,
     /// Peak animation state (hold times, velocities) — internal to tick
     peaks: Arc<Mutex<PeakState>>,
-    /// Effect processing state (prev_bars, elapsed) — internal to tick
+    /// Effect processing state (beat-highlight flash field) — internal to tick
     effects: Arc<Mutex<EffectState>>,
     /// Audio processing state (smoothed, processed_samples) — internal to tick
     processing: Arc<Mutex<ProcessingState>>,
@@ -973,40 +969,6 @@ impl VisualizerState {
                     );
                 }
 
-                // Update display buffers. Copy into the existing buffers in place
-                // (clear + extend retains their capacity) so the 60 Hz tick path
-                // doesn't heap-allocate a fresh Vec every frame.
-                {
-                    let Some(mut display) = self.display.try_lock() else {
-                        return true; // Skip display update if lock contended
-                    };
-                    display.bars.clear();
-                    display.bars.extend_from_slice(&output);
-                    if let Some(waveform) = scope_waveform {
-                        // Reuse the buffer's capacity (clear + extend) just like
-                        // `bars` above, rather than move-assigning a fresh Vec —
-                        // both are `visual_count` long, so this is identical in
-                        // result and keeps the display copy alloc-free.
-                        display.waveform.clear();
-                        display.waveform.extend_from_slice(&waveform);
-                    }
-                    // Brief nested lock: the expensive sim already ran above, so
-                    // this only memcpys the snapshot. Only this thread ever locks
-                    // `particles`, so the re-lock is effectively uncontended.
-                    if is_scope
-                        && particles_on
-                        && let Some(psys) = self.particles.try_lock()
-                    {
-                        display.particles.clear();
-                        display.particles.extend_from_slice(psys.gpu_data());
-                    }
-                    display.dirty = true;
-                    // Re-arm the trail drain budget while audio is live; when it
-                    // stops, the budget runs out and the redraw gate idles.
-                    self.trail_settle_frames
-                        .store(TRAIL_SETTLE_FRAMES, Ordering::Relaxed);
-                }
-
                 // Spectral flux: positive bin-to-bin deltas vs. the last
                 // frame, EMA-smoothed into a single onset-envelope scalar.
                 // Standard "give me an energy proxy from STFT" formulation
@@ -1078,6 +1040,45 @@ impl VisualizerState {
                     prev.copy_from_slice(&output);
                 }
 
+                // Beat-highlight flash field. Stepped after the beat pulse above (it
+                // scales onset strength) and before any display try_lock early return
+                // below, so its baseline never skips a tick.
+                self.update_flash_effect(&output);
+
+                // Update display buffers. Copy into the existing buffers in place
+                // (clear + extend retains their capacity) so the 60 Hz tick path
+                // doesn't heap-allocate a fresh Vec every frame.
+                {
+                    let Some(mut display) = self.display.try_lock() else {
+                        return true; // Skip display update if lock contended
+                    };
+                    display.bars.clear();
+                    display.bars.extend_from_slice(&output);
+                    if let Some(waveform) = scope_waveform {
+                        // Reuse the buffer's capacity (clear + extend) just like
+                        // `bars` above, rather than move-assigning a fresh Vec —
+                        // both are `visual_count` long, so this is identical in
+                        // result and keeps the display copy alloc-free.
+                        display.waveform.clear();
+                        display.waveform.extend_from_slice(&waveform);
+                    }
+                    // Brief nested lock: the expensive sim already ran above, so
+                    // this only memcpys the snapshot. Only this thread ever locks
+                    // `particles`, so the re-lock is effectively uncontended.
+                    if is_scope
+                        && particles_on
+                        && let Some(psys) = self.particles.try_lock()
+                    {
+                        display.particles.clear();
+                        display.particles.extend_from_slice(psys.gpu_data());
+                    }
+                    display.dirty = true;
+                    // Re-arm the trail drain budget while audio is live; when it
+                    // stops, the budget runs out and the redraw gate idles.
+                    self.trail_settle_frames
+                        .store(TRAIL_SETTLE_FRAMES, Ordering::Relaxed);
+                }
+
                 // Update peaks
                 let cfg = self.config.read();
                 let (peak_mode, peak_hold_time_ms, peak_fade_time_ms, peak_fall_speed) = (
@@ -1142,67 +1143,33 @@ impl VisualizerState {
                     }
                 }
 
-                // Beat-highlight flash envelope
-                self.update_flash_effect(&output, visual_count);
-
                 return true;
             }
         }
         false
     }
 
-    /// Update the per-bar flash envelope that `bars.wgsl` blooms toward the
-    /// peak color. A bar whose value jumps by more than `SPIKE_THRESHOLD` in
-    /// one tick lights itself plus a falloff across its neighbors; the whole
-    /// envelope then releases multiplicatively, so the spread keeps its shape
-    /// for its entire life instead of collapsing onto the core bar.
-    fn update_flash_effect(&self, output: &[f64], bar_count: usize) {
-        /// Rise in one tick (normalized bar units) that counts as an onset.
-        const SPIKE_THRESHOLD: f64 = 0.12;
-        /// Rise that maps to a full-strength flash.
-        const SPIKE_FULL_SCALE: f64 = 0.2;
-        /// Neighbors lit on each side of an onset.
-        const FLASH_SPREAD_RADIUS: usize = 3;
-        /// Per-bar falloff of the neighbor spread (`FALLOFF^distance`).
-        const FLASH_FALLOFF: f32 = 0.5;
-        /// Multiplicative release per tick: ~90 ms half-life at 60 Hz.
-        const FLASH_RELEASE: f32 = 0.88;
-        /// Values below this snap to zero so the envelope terminates.
-        const FLASH_FLOOR: f32 = 0.005;
-
-        let mut display = self.display.lock();
-        let mut effects = self.effects.lock();
-
-        if display.flash_intensities.len() != bar_count {
-            display.flash_intensities = vec![0.0; bar_count];
-            effects.prev_bars = vec![0.0; bar_count];
+    /// Advance the beat-highlight flash field one tick and publish it for
+    /// `bars.wgsl`, which blooms each bar toward the peak color by its value.
+    ///
+    /// Runs on the FFT worker, so both locks are `try_lock`. The field keeps its
+    /// own baseline behind `effects` and re-renders from its event list every
+    /// tick, so a publish skipped on a contended `display` heals on the next.
+    fn update_flash_effect(&self, output: &[f64]) {
+        let Some(mut effects) = self.effects.try_lock() else {
+            return;
+        };
+        // Only Bars mode reads the flash buffer. Elsewhere drop any live events
+        // so a switch back to Bars starts from a fresh baseline.
+        if self.is_lines_mode.load(Ordering::Relaxed) || self.is_scope_mode.load(Ordering::Relaxed)
+        {
+            effects.flash.reset();
+            return;
         }
-
-        // Release first so a flash triggered this tick starts at full strength.
-        for flash in display.flash_intensities.iter_mut() {
-            *flash *= FLASH_RELEASE;
-            if *flash < FLASH_FLOOR {
-                *flash = 0.0;
-            }
-        }
-
-        let n = bar_count
-            .min(output.len())
-            .min(effects.prev_bars.len())
-            .min(display.flash_intensities.len());
-        for (i, &current) in output.iter().enumerate().take(n) {
-            let increase = current - effects.prev_bars[i];
-            effects.prev_bars[i] = current;
-            if increase <= SPIKE_THRESHOLD {
-                continue;
-            }
-            let strength = (increase / SPIKE_FULL_SCALE).min(1.0) as f32;
-            let lo = i.saturating_sub(FLASH_SPREAD_RADIUS);
-            let hi = (i + FLASH_SPREAD_RADIUS).min(n - 1);
-            for (j, flash) in display.flash_intensities[lo..=hi].iter_mut().enumerate() {
-                let dist = (lo + j).abs_diff(i) as i32;
-                *flash = flash.max(strength * FLASH_FALLOFF.powi(dist));
-            }
+        let field = effects.flash.step(output, self.current_beat_pulse());
+        if let Some(mut display) = self.display.try_lock() {
+            display.flash_intensities.clear();
+            display.flash_intensities.extend_from_slice(field);
         }
     }
 
@@ -1564,7 +1531,7 @@ impl VisualizerState {
 /// Catmull-Rom pass afterward smooths the kinks where overlapping decays
 /// meet without flattening the distinctive monstercat aesthetic.
 #[allow(clippy::needless_range_loop)]
-fn monstercat_filter(bars: &mut [f64], monstercat: f64) {
+pub(super) fn monstercat_filter(bars: &mut [f64], monstercat: f64) {
     let number_of_bars = bars.len();
     if number_of_bars == 0 {
         return;

@@ -2,6 +2,7 @@
 //!
 //! Modular audio visualizer supporting multiple visualization modes.
 
+mod flash;
 mod particles;
 mod pipeline;
 pub(crate) mod shader;

@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- The Bars beat flash now spreads across neighboring bars instead of flickering on a single bar.
+- The Bars beat flash now swells into a soft glow that ripples out across neighboring bars instead of flickering on one bar.
 - Bars no longer sparkle with random flashes between beats.
 
 ### Fixed
