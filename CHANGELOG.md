@@ -8,12 +8,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- The Bars beat flash now swells into a soft glow that ripples out across neighboring bars instead of flickering on one bar.
-- Bars no longer sparkle with random flashes between beats.
-
 ### Fixed
 
 ### Removed
+
+## v0.19.1 — 2026-09-21
+
+### Changed
+
+- The Bars Peak Flash now lights a soft spread of neighboring bars instead of a single bar.
+- With Peak Flash on, loud bars no longer sparkle with random flashes.
 
 ## v0.19.0 — 2026-09-20
 
