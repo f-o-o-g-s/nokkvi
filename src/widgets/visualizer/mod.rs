@@ -709,9 +709,9 @@ mod wgsl_helper_tests {
     //! future agent stripping the helper/const and reinlining the magic literal would
     //! fail these tests before shipping.
     //!
-    //! Naga validation runs as part of pipeline construction (release build); these
-    //! tests are a separate string-level guard so the "did the helper get removed?"
-    //! question fails fast at `cargo test` time rather than depending on a release build.
+    //! Naga parse + validation is covered headlessly by `wgsl_compile_tests`; these
+    //! tests are a separate string-level guard for the "did the helper get removed?"
+    //! question, which a shader that still compiles with the literal reinlined can't answer.
     const BARS: &str = include_str!("shaders/bars.wgsl");
     const LINES: &str = include_str!("shaders/lines.wgsl");
 
@@ -1139,6 +1139,132 @@ mod wgsl_config_identity_tests {
                 "WGSL constant `{name}` drifted between lines.wgsl and scope.wgsl."
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod wgsl_compile_tests {
+    //! Headless WGSL compile gate. wgpu parses + validates each shader with naga
+    //! inside `create_shader_module` at first paint, so without these a WGSL typo
+    //! passes fmt/clippy/test/build and panics the running app instead. naga is
+    //! reached through iced's wgpu re-export (no extra dependency), and each test
+    //! feeds it the exact source `pipeline.rs` compiles.
+    use iced::wgpu::naga;
+
+    const PIPELINE_RS: &str = include_str!("pipeline.rs");
+
+    /// Parse + validate `src` the way wgpu-core does (`ValidationFlags::all()`),
+    /// panicking with naga's span-annotated diagnostic so the failure names the
+    /// shader and points at the offending line.
+    fn validate_wgsl(name: &str, src: &str) {
+        let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| {
+            panic!(
+                "{name}: WGSL parse error\n{}",
+                e.emit_to_string_with_path(src, name)
+            )
+        });
+        // Empty capabilities: iced requests no device features (bar an optional
+        // SHADER_F16), so every naga capability is adapter-dependent; the empty
+        // set is the floor the shaders can rely on across all adapters.
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|e| {
+            panic!(
+                "{name}: WGSL validation error\n{}",
+                e.emit_to_string_with_path(src, name)
+            )
+        });
+    }
+
+    /// The MSAA blit shader is an inline raw string in `pipeline.rs`, not a file.
+    /// Slice it out of the same source so the test sees the exact bytes handed to
+    /// `create_shader_module`, with no copy to drift.
+    fn inline_blit_wgsl() -> &'static str {
+        let label = PIPELINE_RS
+            .find("\"visualizer blit shader\"")
+            .expect("pipeline.rs must label the blit shader module");
+        let rest = &PIPELINE_RS[label..];
+        let start = rest
+            .find("r#\"")
+            .expect("blit shader source must be an r#\"…\"# literal")
+            + "r#\"".len();
+        let len = rest[start..]
+            .find("\"#")
+            .expect("blit shader raw string never closes");
+        &rest[start..start + len]
+    }
+
+    /// Shader files `pipeline.rs` loads via `include_str!`, each gated below.
+    const FILE_SHADERS: &[&str] = &[
+        "bars",
+        "lines",
+        "scope",
+        "particles",
+        "bloom",
+        "echo",
+        "crt",
+    ];
+
+    /// Every `create_shader_module` call in pipeline.rs must have a compile test
+    /// here: the file shaders above plus the inline blit. A new shader module
+    /// without a gate fails this count first.
+    #[test]
+    fn wgsl_gate_covers_every_pipeline_shader_module() {
+        for name in FILE_SHADERS {
+            assert!(
+                PIPELINE_RS.contains(&format!("\"shaders/{name}.wgsl\"")),
+                "pipeline.rs no longer loads shaders/{name}.wgsl — update FILE_SHADERS",
+            );
+        }
+        assert_eq!(
+            PIPELINE_RS.matches("create_shader_module(").count(),
+            FILE_SHADERS.len() + 1,
+            "pipeline.rs compiles a shader module with no WGSL compile test — add a \
+             `*_wgsl_compiles` test and a FILE_SHADERS entry for it",
+        );
+    }
+
+    #[test]
+    fn bars_wgsl_compiles() {
+        validate_wgsl("bars.wgsl", include_str!("shaders/bars.wgsl"));
+    }
+
+    #[test]
+    fn lines_wgsl_compiles() {
+        validate_wgsl("lines.wgsl", include_str!("shaders/lines.wgsl"));
+    }
+
+    #[test]
+    fn scope_wgsl_compiles() {
+        validate_wgsl("scope.wgsl", include_str!("shaders/scope.wgsl"));
+    }
+
+    #[test]
+    fn particles_wgsl_compiles() {
+        validate_wgsl("particles.wgsl", include_str!("shaders/particles.wgsl"));
+    }
+
+    #[test]
+    fn bloom_wgsl_compiles() {
+        validate_wgsl("bloom.wgsl", include_str!("shaders/bloom.wgsl"));
+    }
+
+    #[test]
+    fn echo_wgsl_compiles() {
+        validate_wgsl("echo.wgsl", include_str!("shaders/echo.wgsl"));
+    }
+
+    #[test]
+    fn crt_wgsl_compiles() {
+        validate_wgsl("crt.wgsl", include_str!("shaders/crt.wgsl"));
+    }
+
+    #[test]
+    fn blit_wgsl_compiles() {
+        validate_wgsl("pipeline.rs (inline blit)", inline_blit_wgsl());
     }
 }
 
