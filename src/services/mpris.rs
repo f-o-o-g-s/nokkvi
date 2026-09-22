@@ -41,6 +41,8 @@ pub enum MprisEvent {
     Pause,
     /// Stop method called
     Stop,
+    /// Raise method called (root `org.mpris.MediaPlayer2` interface)
+    Raise,
     /// Next method called
     Next,
     /// Previous method called
@@ -210,6 +212,7 @@ fn run_mpris_thread(
         let player = match Player::builder(&bus_suffix)
             .identity("Nokkvi")
             .desktop_entry("org.nokkvi.nokkvi")
+            .can_raise(true)
             .can_play(true)
             .can_pause(true)
             .can_go_next(true)
@@ -252,6 +255,12 @@ fn run_mpris_thread(
             let tx = event_tx.clone();
             player.connect_stop(move |_| {
                 let _ = tx.try_send(MprisEvent::Stop);
+            });
+
+            // Raise
+            let tx = event_tx.clone();
+            player.connect_raise(move |_| {
+                let _ = tx.try_send(MprisEvent::Raise);
             });
 
             // Next

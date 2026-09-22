@@ -55,6 +55,13 @@ impl Nokkvi {
                 Task::done(Message::Playback(PlaybackMessage::Stop))
             }
 
+            MprisEvent::Raise => {
+                // Same entry point as the `show` IPC verb: reopens a window
+                // closed to the tray, or flags one that is already open.
+                debug!(" MPRIS: Raise");
+                self.show_window().0
+            }
+
             MprisEvent::Next => {
                 debug!(" MPRIS: Next");
                 Task::done(Message::Playback(PlaybackMessage::NextTrack))
