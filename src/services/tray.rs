@@ -17,8 +17,10 @@
 //! 3. ksni callbacks (left-click, menu items) translate into `TrayEvent`s sent
 //!    over the event channel back to iced.
 //! 4. When the subscription is dropped (e.g. user disabled the tray toggle),
-//!    the command channel is closed, the thread breaks out of its loop, and
-//!    the tray icon is dropped.
+//!    its event receiver goes with it. The thread sees the event channel
+//!    closed, breaks out of its loop and shuts the ksni service down, which
+//!    removes the icon. It must not wait for the command channel instead:
+//!    the app keeps its `TrayConnection` after the toggle goes off.
 
 use std::{sync::mpsc as std_mpsc, time::Duration};
 
@@ -234,7 +236,8 @@ pub(crate) fn run() -> impl Sipper<Never, TrayEvent> {
 }
 
 /// Dedicated tray thread: owns a current-thread tokio runtime + the ksni
-/// `Handle`, processes app-side commands, and tears down on channel close.
+/// `Handle`, processes app-side commands, and tears down once
+/// [`pump_commands`] returns.
 fn run_tray_thread(
     event_tx: tokio_mpsc::Sender<TrayEvent>,
     cmd_rx: std_mpsc::Receiver<TrayCommand>,
@@ -251,6 +254,7 @@ fn run_tray_thread(
     };
 
     rt.block_on(async move {
+        let events = event_tx.clone();
         let tray = NokkviTray {
             event_tx,
             is_playing: false,
@@ -270,27 +274,56 @@ fn run_tray_thread(
 
         debug!(" Tray service started: org.nokkvi.nokkvi");
 
-        loop {
-            match cmd_rx.try_recv() {
-                Ok(TrayCommand::SetPlayingState { is_playing, title }) => {
-                    handle
-                        .update(|t: &mut NokkviTray| {
-                            t.is_playing = is_playing;
-                            t.title = title;
-                        })
-                        .await;
-                }
-                Err(std_mpsc::TryRecvError::Empty) => {
-                    tokio::time::sleep(TRAY_CMD_IDLE_SLEEP).await;
-                }
-                Err(std_mpsc::TryRecvError::Disconnected) => {
-                    debug!(" Tray command channel disconnected; shutting down tray");
-                    handle.shutdown().await;
-                    break;
-                }
+        let exit = pump_commands(&cmd_rx, &events, async |cmd| match cmd {
+            TrayCommand::SetPlayingState { is_playing, title } => {
+                handle
+                    .update(|t: &mut NokkviTray| {
+                        t.is_playing = is_playing;
+                        t.title = title;
+                    })
+                    .await;
             }
-        }
+        })
+        .await;
+        debug!(" Tray shutting down ({exit:?})");
+        handle.shutdown().await;
     });
+}
+
+/// Why [`pump_commands`] stopped.
+#[derive(Debug, PartialEq, Eq)]
+enum LoopExit {
+    /// Every `TrayConnection` was dropped.
+    CommandsClosed,
+    /// The iced subscription that owns the event receiver was cancelled.
+    SubscriptionGone,
+}
+
+/// Feed app-side commands to `apply` until the tray should shut down: the
+/// subscription is gone (`events` reports its receiver dropped), or every
+/// `TrayConnection` is.
+///
+/// The subscription check is the one that fires in practice. `Nokkvi`
+/// keeps its `TrayConnection` after Show Tray Icon goes off, so waiting for
+/// the command channel alone left the thread, and the icon, running with
+/// nothing to deliver its clicks to.
+async fn pump_commands(
+    cmd_rx: &std_mpsc::Receiver<TrayCommand>,
+    events: &tokio_mpsc::Sender<TrayEvent>,
+    mut apply: impl AsyncFnMut(TrayCommand),
+) -> LoopExit {
+    loop {
+        if events.is_closed() {
+            return LoopExit::SubscriptionGone;
+        }
+        match cmd_rx.try_recv() {
+            Ok(cmd) => apply(cmd).await,
+            Err(std_mpsc::TryRecvError::Empty) => {
+                tokio::time::sleep(TRAY_CMD_IDLE_SLEEP).await;
+            }
+            Err(std_mpsc::TryRecvError::Disconnected) => return LoopExit::CommandsClosed,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -306,5 +339,55 @@ mod tests {
         assert_eq!(TRAY_EVENT_CHANNEL_DEPTH, 32);
         assert_eq!(TRAY_EVENT_POLL_TIMEOUT, Duration::from_millis(100));
         assert_eq!(TRAY_CMD_IDLE_SLEEP, Duration::from_millis(50));
+    }
+
+    /// Upper bound for a loop that should end on its own; far above the
+    /// 50 ms idle sleep, so a pass is never a timing fluke.
+    const LOOP_DEADLINE: Duration = Duration::from_secs(2);
+
+    #[tokio::test]
+    async fn the_command_loop_ends_when_the_subscription_is_gone() {
+        // Show Tray Icon off: iced cancels the subscription, which drops the
+        // event receiver, but the app still holds its `TrayConnection`. The
+        // loop must end anyway, or the icon outlives the setting.
+        let (event_tx, event_rx) = tokio_mpsc::channel::<TrayEvent>(1);
+        let (cmd_tx, cmd_rx) = std_mpsc::channel();
+        let _still_held_by_the_app = TrayConnection { sender: cmd_tx };
+        drop(event_rx);
+
+        let exit = tokio::time::timeout(
+            LOOP_DEADLINE,
+            pump_commands(&cmd_rx, &event_tx, async |_| {}),
+        )
+        .await
+        .expect("the tray must shut down once its subscription is gone");
+        assert_eq!(exit, LoopExit::SubscriptionGone);
+    }
+
+    #[tokio::test]
+    async fn commands_are_applied_in_order_until_the_app_drops_its_handle() {
+        let (event_tx, _event_rx) = tokio_mpsc::channel::<TrayEvent>(1);
+        let (cmd_tx, cmd_rx) = std_mpsc::channel();
+        let connection = TrayConnection { sender: cmd_tx };
+        connection.set_playing_state(true, "A");
+        connection.set_playing_state(false, "B");
+        drop(connection);
+
+        let mut seen = Vec::new();
+        let exit = tokio::time::timeout(
+            LOOP_DEADLINE,
+            pump_commands(&cmd_rx, &event_tx, async |cmd| match cmd {
+                TrayCommand::SetPlayingState { is_playing, title } => {
+                    seen.push((is_playing, title));
+                }
+            }),
+        )
+        .await
+        .expect("the loop must end once the app drops its handle");
+        assert_eq!(exit, LoopExit::CommandsClosed);
+        assert_eq!(
+            seen,
+            vec![(true, "A".to_string()), (false, "B".to_string())]
+        );
     }
 }

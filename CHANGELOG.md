@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - A `nokkvi` command sent to a frozen instance now fails after five seconds instead of hanging.
+- Turning off Show Tray Icon now removes the tray icon instead of leaving a dead one until restart.
 
 ### Removed
 

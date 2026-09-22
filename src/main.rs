@@ -354,7 +354,10 @@ pub struct Nokkvi {
     // -------------------------------------------------------------------------
     // System Tray (StatusNotifierItem)
     // -------------------------------------------------------------------------
-    /// Handle to push state into the running tray (None when disabled).
+    /// Handle to push state into the tray. Set by each `TrayEvent::Connected`
+    /// and kept after Show Tray Icon goes off: the tray thread shuts itself
+    /// down when its subscription is cancelled, sends to it are then dropped
+    /// silently, and the next `Connected` replaces the handle.
     pub tray_connection: Option<services::tray::TrayConnection>,
     /// Whether the window is currently hidden into the tray.
     pub tray_window_hidden: bool,
@@ -685,8 +688,9 @@ impl Nokkvi {
 
         // System tray (StatusNotifierItem). Conditionally spawned: when the
         // user toggles `show_tray_icon` off, the subscription disappears
-        // from the batch and iced cancels it, which closes the command
-        // channel and tears down the ksni service on its dedicated thread.
+        // from the batch and iced cancels it, which drops its event
+        // receiver; the tray thread sees that and tears down the ksni
+        // service (see `services::tray::pump_commands`).
         let tray = if self.settings.show_tray_icon {
             iced::Subscription::run(services::tray::run).map(Message::Tray)
         } else {
