@@ -1260,14 +1260,25 @@ pub fn main() -> iced::Result {
         }
     }
 
-    // Any path that reaches here is about to start iced — including args we
+    // Any path that reaches here is about to start iced: a bare `nokkvi`
+    // (the `.desktop` entry, `uwsm app -- nokkvi`, `cargo run`) or args we
     // don't recognize (typos like `nokkvi haha`, unknown flags like
-    // `nokkvi --foo`, or `cargo run -- whatever`). Probe for a live daemon
-    // and refuse the second launch regardless of argv shape. Without this
-    // the second iced startup wastes ~8s of init before crashing on the
-    // redb single-instance lock — and prior to PID-suffixed sockets it
-    // also unlinked the live daemon's socket on its way down.
-    refuse_if_already_running();
+    // `nokkvi --foo`, `cargo run -- whatever`). Probe for a live instance
+    // first. A bare launch hands off to it by forwarding `show`, which brings
+    // back a window closed to the tray, and exits 0; any other argv shape
+    // refuses with exit 1. With nothing running, every shape boots. A second
+    // iced startup would waste ~8s of init before crashing on the redb
+    // single-instance lock, and before PID-suffixed sockets it also unlinked
+    // the live instance's socket on its way down.
+    //
+    // The launcher's `XDG_ACTIVATION_TOKEN` is not forwarded: iced's Linux
+    // window settings have no activation-token field and winit reads one only
+    // at window creation, so the running window cannot use it.
+    match second_launch_action(&args, nokkvi_ipc::find_live_socket()) {
+        SecondLaunch::Boot => {}
+        SecondLaunch::ForwardShow => return forward_ipc_command("show", serde_json::Value::Null),
+        SecondLaunch::Refuse(socket) => refuse_second_launch(&socket),
+    }
 
     // Initialize tracing.
     //
@@ -1432,6 +1443,10 @@ fn print_cli_help() {
     println!("  selection        Print the focused view's centered item (JSON)");
     println!("  love             Toggle star on the currently-playing track");
     println!("  rate <±N | 0-5>  Adjust playing track rating: delta (+1/-1) or 0..5");
+    println!("  show             Reopen the window from the tray, or flag it when already open");
+    println!();
+    println!("Running `{name}` with no arguments while an instance is up forwards `show`");
+    println!("to it and exits.");
     println!();
     println!("Each command prints a compact JSON result on success (mutating verbs echo");
     println!("their resulting state, e.g. {{\"consume\":true}}); errors print to stderr with a");
@@ -1557,27 +1572,46 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     }
 }
 
-/// Probe for a running nokkvi instance. If one is found, print "already
-/// running" and exit with status 1 so this process never reaches iced.
-/// Returns normally only when no live socket is enumerated — at which point
-/// the caller proceeds to daemon boot. Prevents a second daemon from
-/// tripping redb's exclusive lock at session-load time and crashing
-/// partway into boot.
+/// What a launch that reached the single-instance probe should do.
+#[derive(Debug, PartialEq, Eq)]
+enum SecondLaunch {
+    /// No live instance: start iced, whatever the argv shape.
+    Boot,
+    /// A bare `nokkvi` while an instance runs: forward `show` and exit.
+    ForwardShow,
+    /// Unrecognized args while an instance runs: refuse with exit 1.
+    Refuse(std::path::PathBuf),
+}
+
+/// Decide what a launch does once it has got past the known-verb gate and
+/// `--version` / `--help`. `live_socket` is the result of
+/// [`nokkvi_ipc::find_live_socket`], which enumerates `nokkvi-*.sock` in
+/// `$XDG_RUNTIME_DIR` (or the `/tmp` fallback) and connect-probes each, so a
+/// dead socket file from a `SIGKILL`'d instance reads as `None`.
 ///
-/// Uses [`nokkvi_ipc::find_live_socket`] to enumerate `nokkvi-*.sock` in
-/// `$XDG_RUNTIME_DIR` (or `/tmp` fallback) and connect-probe each. Dead
-/// corpse files from `SIGKILL`'d daemons are skipped automatically.
-fn refuse_if_already_running() {
-    if let Some(path) = nokkvi_ipc::find_live_socket() {
-        #[allow(clippy::print_stderr)]
-        {
-            eprintln!(
-                "nokkvi is already running (socket: {}). Refusing second launch.",
-                path.display()
-            );
-        }
-        std::process::exit(1);
+/// Only a bare `nokkvi` is handed to the running instance: args we don't
+/// recognize still refuse, so a typo like `nokkvi nexxt` never quietly shows
+/// the window. With no instance running, every argv shape boots as before.
+fn second_launch_action(args: &[String], live_socket: Option<std::path::PathBuf>) -> SecondLaunch {
+    match live_socket {
+        None => SecondLaunch::Boot,
+        Some(_) if args.len() <= 1 => SecondLaunch::ForwardShow,
+        Some(path) => SecondLaunch::Refuse(path),
     }
+}
+
+/// Print "already running" and exit with status 1 so this process never
+/// reaches iced. Prevents a second instance from tripping redb's exclusive
+/// lock at session-load time and crashing partway into boot.
+fn refuse_second_launch(socket: &std::path::Path) -> ! {
+    #[allow(clippy::print_stderr)]
+    {
+        eprintln!(
+            "nokkvi is already running (socket: {}). Refusing second launch.",
+            socket.display()
+        );
+    }
+    std::process::exit(1);
 }
 
 /// Daemon boot: build the initial state and queue a task to open the main
@@ -1748,6 +1782,63 @@ mod build_ipc_cli_args_tests {
             build_ipc_cli_args("rate", Some("loud")),
             json!({"delta": "loud"}),
         );
+    }
+}
+
+#[cfg(test)]
+mod second_launch_tests {
+    use std::path::PathBuf;
+
+    use super::{SecondLaunch, second_launch_action};
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|a| (*a).to_string()).collect()
+    }
+
+    fn live() -> Option<PathBuf> {
+        Some(PathBuf::from("/run/user/1000/nokkvi-4242.sock"))
+    }
+
+    #[test]
+    fn bare_launch_with_a_live_instance_forwards_show() {
+        // The `.desktop` `Exec=nokkvi`, `uwsm app -- nokkvi` and `cargo run`
+        // all arrive as argc == 1.
+        assert_eq!(
+            second_launch_action(&argv(&["nokkvi"]), live()),
+            SecondLaunch::ForwardShow
+        );
+    }
+
+    #[test]
+    fn bare_launch_without_an_instance_boots() {
+        assert_eq!(
+            second_launch_action(&argv(&["nokkvi"]), None),
+            SecondLaunch::Boot
+        );
+    }
+
+    #[test]
+    fn unknown_args_with_a_live_instance_refuse() {
+        // A typo like `nokkvi nexxt` must never quietly show the window.
+        for args in [["nokkvi", "haha"], ["nokkvi", "--foo"]] {
+            assert_eq!(
+                second_launch_action(&argv(&args), live()),
+                SecondLaunch::Refuse(PathBuf::from("/run/user/1000/nokkvi-4242.sock")),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_args_without_an_instance_boot() {
+        // Today's behaviour: with nothing running, stray args start the app.
+        for args in [["nokkvi", "haha"], ["nokkvi", "--foo"]] {
+            assert_eq!(
+                second_launch_action(&argv(&args), None),
+                SecondLaunch::Boot,
+                "{args:?}"
+            );
+        }
     }
 }
 

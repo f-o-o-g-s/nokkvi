@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - `nokkvi show` reopens the window after it was closed to the tray.
 - `nokkvi show` on an already open window asks the desktop to flag it for attention.
+- Launching nokkvi again while it runs now reopens a window closed to the tray instead of refusing.
+- Launching nokkvi again while its window is open now flags that window instead of exiting with an error.
 
 ### Changed
 
