@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use nokkvi_ipc::{
-    client::{ClientError, send_request},
+    client::{ClientError, send_request, send_request_with_timeout},
     protocol::{IpcRequest, IpcResponse, PROTOCOL_VERSION},
     server::listen,
 };
@@ -71,6 +71,36 @@ async fn connect_to_missing_socket_returns_connect_error() {
     match result {
         Err(ClientError::Connect { .. }) => {}
         other => panic!("expected ClientError::Connect, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_server_that_never_answers_times_out() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = socket_path(&tmp);
+
+    // Bound but never accepted: connect() still completes from the listen
+    // backlog, exactly like an instance whose UI thread is stopped or wedged.
+    let _listener = std::os::unix::net::UnixListener::bind(&path).expect("bind socket");
+
+    // A plain thread + channel, so a hanging client fails this test instead
+    // of hanging the runtime that would otherwise wait on it.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let req = IpcRequest::new(1, "show", serde_json::Value::Null);
+        let _ = tx.send(send_request_with_timeout(
+            &path,
+            &req,
+            Duration::from_millis(100),
+        ));
+    });
+
+    let result = rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("the client must give up instead of blocking forever");
+    match result {
+        Err(ClientError::Timeout(after)) => assert_eq!(after, Duration::from_millis(100)),
+        other => panic!("expected ClientError::Timeout, got {other:?}"),
     }
 }
 

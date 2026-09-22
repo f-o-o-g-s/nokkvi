@@ -17,6 +17,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A `nokkvi` command sent to a frozen instance now fails after five seconds instead of hanging.
+
 ### Removed
 
 ## v0.19.1 — 2026-09-21

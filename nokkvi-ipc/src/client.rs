@@ -13,6 +13,7 @@
 use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use interprocess::local_socket::{GenericFilePath, Stream, ToFsName, prelude::*};
@@ -46,7 +47,12 @@ pub enum ClientError {
     EmptyResponse,
     #[error("failed to parse response from IPC server: {0}")]
     ParseResponse(#[source] serde_json::Error),
+    #[error("no response from the IPC server within {0:?}")]
+    Timeout(Duration),
 }
+
+/// How long [`send_request`] waits for the server's answer.
+pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Connect to the IPC socket at `path`, send `req`, read one response, return.
 ///
@@ -54,6 +60,20 @@ pub enum ClientError {
 /// kernel refuses the connection — that's the signal `main()` uses to fall
 /// through to bringing up a fresh nokkvi instance.
 pub fn send_request(path: &Path, req: &IpcRequest) -> Result<IpcResponse, ClientError> {
+    send_request_with_timeout(path, req, RESPONSE_TIMEOUT)
+}
+
+/// [`send_request`] with a caller-chosen response timeout.
+///
+/// The liveness probe only proves `connect()` succeeds, and the kernel
+/// completes that from the listen backlog even when the instance is stopped
+/// or its UI thread is wedged, so the read must be bounded: without it a
+/// launcher click or a WM keybind leaves a blocked process behind forever.
+pub fn send_request_with_timeout(
+    path: &Path,
+    req: &IpcRequest,
+    timeout: Duration,
+) -> Result<IpcResponse, ClientError> {
     let name = path
         .to_fs_name::<GenericFilePath>()
         .map_err(|source| ClientError::InvalidPath {
@@ -65,16 +85,25 @@ pub fn send_request(path: &Path, req: &IpcRequest) -> Result<IpcResponse, Client
         path: path.to_path_buf(),
         source,
     })?;
+    stream.set_recv_timeout(Some(timeout))?;
+    stream.set_send_timeout(Some(timeout))?;
+    // An elapsed socket timeout surfaces as `WouldBlock` (EAGAIN) on Linux.
+    let timed_out = |err: std::io::Error| match err.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            ClientError::Timeout(timeout)
+        }
+        _ => ClientError::Io(err),
+    };
 
     let mut payload = serde_json::to_vec(req).map_err(ClientError::SerializeRequest)?;
     payload.push(b'\n');
 
     let mut reader = BufReader::new(stream);
-    reader.get_mut().write_all(&payload)?;
-    reader.get_mut().flush()?;
+    reader.get_mut().write_all(&payload).map_err(timed_out)?;
+    reader.get_mut().flush().map_err(timed_out)?;
 
     let mut line = String::with_capacity(256);
-    let read = reader.read_line(&mut line)?;
+    let read = reader.read_line(&mut line).map_err(timed_out)?;
     if read == 0 {
         return Err(ClientError::EmptyResponse);
     }

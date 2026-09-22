@@ -1265,18 +1265,19 @@ pub fn main() -> iced::Result {
     // don't recognize (typos like `nokkvi haha`, unknown flags like
     // `nokkvi --foo`, `cargo run -- whatever`). Probe for a live instance
     // first. A bare launch hands off to it by forwarding `show`, which brings
-    // back a window closed to the tray, and exits 0; any other argv shape
-    // refuses with exit 1. With nothing running, every shape boots. A second
-    // iced startup would waste ~8s of init before crashing on the redb
-    // single-instance lock, and before PID-suffixed sockets it also unlinked
-    // the live instance's socket on its way down.
+    // back a window closed to the tray, and exits 0 (an older instance without
+    // `show`, or one that never answers, still gets the exit-1 refusal); any
+    // other argv shape refuses with exit 1. With nothing running, every shape
+    // boots. A second iced startup would waste ~8s of init before crashing on
+    // the redb single-instance lock, and before PID-suffixed sockets it also
+    // unlinked the live instance's socket on its way down.
     //
     // The launcher's `XDG_ACTIVATION_TOKEN` is not forwarded: iced's Linux
     // window settings have no activation-token field and winit reads one only
     // at window creation, so the running window cannot use it.
     match second_launch_action(&args, nokkvi_ipc::find_live_socket()) {
         SecondLaunch::Boot => {}
-        SecondLaunch::ForwardShow => return forward_ipc_command("show", serde_json::Value::Null),
+        SecondLaunch::ForwardShow(socket) => return hand_off_to_running_instance(&socket),
         SecondLaunch::Refuse(socket) => refuse_second_launch(&socket),
     }
 
@@ -1534,34 +1535,7 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     let request = nokkvi_ipc::IpcRequest::new(1, verb, args);
 
     match nokkvi_ipc::client::send_request(&path, &request) {
-        Ok(response) => {
-            if let Some(err) = response.error {
-                #[allow(clippy::print_stderr)]
-                {
-                    eprintln!(
-                        "nokkvi {verb}: server returned error: {} ({})",
-                        err.message, err.code
-                    );
-                }
-                std::process::exit(1);
-            }
-            #[allow(clippy::print_stdout)]
-            {
-                // Every server success now carries a `data` payload (mutating
-                // verbs echo their resulting state; others send `{"ok":true}`),
-                // so a successful command is never silent. The `None` branch is
-                // a belt-and-suspenders fallback for hand-written/older clients:
-                // print a JSON ack rather than nothing. String payloads print
-                // unquoted; objects/numbers print as compact JSON.
-                let payload = match response.data.as_ref() {
-                    Some(serde_json::Value::String(s)) => s.clone(),
-                    Some(other) => other.to_string(),
-                    None => "{\"ok\":true}".to_string(),
-                };
-                println!("{payload}");
-            }
-            Ok(())
-        }
+        Ok(response) => print_ipc_response(verb, response),
         Err(err) => {
             #[allow(clippy::print_stderr)]
             {
@@ -1572,13 +1546,46 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     }
 }
 
+/// Print a server's answer to `verb` and return, or print its error to
+/// stderr and exit 1. Shared by [`forward_ipc_command`] and the bare-launch
+/// hand-off.
+fn print_ipc_response(verb: &str, response: nokkvi_ipc::IpcResponse) -> iced::Result {
+    if let Some(err) = response.error {
+        #[allow(clippy::print_stderr)]
+        {
+            eprintln!(
+                "nokkvi {verb}: server returned error: {} ({})",
+                err.message, err.code
+            );
+        }
+        std::process::exit(1);
+    }
+    #[allow(clippy::print_stdout)]
+    {
+        // Every server success now carries a `data` payload (mutating
+        // verbs echo their resulting state; others send `{"ok":true}`),
+        // so a successful command is never silent. The `None` branch is
+        // a belt-and-suspenders fallback for hand-written/older clients:
+        // print a JSON ack rather than nothing. String payloads print
+        // unquoted; objects/numbers print as compact JSON.
+        let payload = match response.data.as_ref() {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+            None => "{\"ok\":true}".to_string(),
+        };
+        println!("{payload}");
+    }
+    Ok(())
+}
+
 /// What a launch that reached the single-instance probe should do.
 #[derive(Debug, PartialEq, Eq)]
 enum SecondLaunch {
     /// No live instance: start iced, whatever the argv shape.
     Boot,
-    /// A bare `nokkvi` while an instance runs: forward `show` and exit.
-    ForwardShow,
+    /// A bare `nokkvi` while an instance runs: forward `show` to the probed
+    /// socket and exit.
+    ForwardShow(std::path::PathBuf),
     /// Unrecognized args while an instance runs: refuse with exit 1.
     Refuse(std::path::PathBuf),
 }
@@ -1595,9 +1602,43 @@ enum SecondLaunch {
 fn second_launch_action(args: &[String], live_socket: Option<std::path::PathBuf>) -> SecondLaunch {
     match live_socket {
         None => SecondLaunch::Boot,
-        Some(_) if args.len() <= 1 => SecondLaunch::ForwardShow,
+        Some(path) if args.len() <= 1 => SecondLaunch::ForwardShow(path),
         Some(path) => SecondLaunch::Refuse(path),
     }
+}
+
+/// Hand a bare second launch to the running instance: forward `show` to the
+/// socket the probe found, print its answer and exit, like `nokkvi show`.
+///
+/// Two answers keep the old refusal instead: an instance started before `show`
+/// existed (the binary was upgraded under it) says `unknown_command`, and one
+/// that is stopped or wedged never answers, which the client's response
+/// timeout turns into an error rather than a launch that blocks forever.
+fn hand_off_to_running_instance(socket: &std::path::Path) -> iced::Result {
+    let request = nokkvi_ipc::IpcRequest::new(1, "show", serde_json::Value::Null);
+    match nokkvi_ipc::client::send_request(socket, &request) {
+        Ok(response) if running_instance_predates_show(&response) => refuse_second_launch(socket),
+        Ok(response) => print_ipc_response("show", response),
+        Err(err) => {
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!(
+                    "nokkvi is already running (socket: {}) but did not answer: {err}",
+                    socket.display()
+                );
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Whether the running instance answered `show` with `unknown_command`,
+/// i.e. it predates the verb.
+fn running_instance_predates_show(response: &nokkvi_ipc::IpcResponse) -> bool {
+    response
+        .error
+        .as_ref()
+        .is_some_and(|err| err.code == "unknown_command")
 }
 
 /// Print "already running" and exit with status 1 so this process never
@@ -1789,7 +1830,10 @@ mod build_ipc_cli_args_tests {
 mod second_launch_tests {
     use std::path::PathBuf;
 
-    use super::{SecondLaunch, second_launch_action};
+    use nokkvi_ipc::IpcResponse;
+    use serde_json::json;
+
+    use super::{SecondLaunch, running_instance_predates_show, second_launch_action};
 
     fn argv(args: &[&str]) -> Vec<String> {
         args.iter().map(|a| (*a).to_string()).collect()
@@ -1805,7 +1849,8 @@ mod second_launch_tests {
         // all arrive as argc == 1.
         assert_eq!(
             second_launch_action(&argv(&["nokkvi"]), live()),
-            SecondLaunch::ForwardShow
+            SecondLaunch::ForwardShow(PathBuf::from("/run/user/1000/nokkvi-4242.sock")),
+            "the hand-off goes to the socket the probe found, not a fresh lookup"
         );
     }
 
@@ -1827,6 +1872,24 @@ mod second_launch_tests {
                 "{args:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_instance_without_the_show_verb_is_detected() {
+        // A binary upgraded under a running older instance: its dispatcher
+        // answers `unknown_command`, and the bare launch falls back to the
+        // old "already running" refusal instead of echoing a verb the user
+        // never typed.
+        let old_instance = IpcResponse::err(1, "unknown_command", "unknown command: show");
+        assert!(running_instance_predates_show(&old_instance));
+    }
+
+    #[test]
+    fn a_show_answer_or_another_error_is_not_an_old_instance() {
+        let shown = IpcResponse::ok(1, Some(json!({ "window": "opened" })));
+        assert!(!running_instance_predates_show(&shown));
+        let other = IpcResponse::err(1, "invalid_args", "boom");
+        assert!(!running_instance_predates_show(&other));
     }
 
     #[test]
