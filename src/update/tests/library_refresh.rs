@@ -846,6 +846,25 @@ fn tray_activate_without_window_id_is_noop() {
     );
 }
 
+#[test]
+fn tray_activate_never_opens_a_second_window() {
+    use crate::services::tray::TrayEvent;
+
+    // The reopen half of the toggle goes through `show_window`, which checks
+    // for a live window before opening. No known path pairs a live id with
+    // the hidden flag, but if one does, the click must not open a second
+    // window beside it.
+    let mut app = test_app();
+    let id = iced::window::Id::unique();
+    app.main_window_id = Some(id);
+    app.tray_window_hidden = true;
+
+    let _ = app.handle_tray(TrayEvent::Activate);
+
+    assert_eq!(app.main_window_id, Some(id), "the live window is kept");
+    assert!(app.tray_window_hidden, "nothing was opened");
+}
+
 // ============================================================================
 // LargeArtistLoaded — id-gated marker clear (negative-path coverage for the
 // stuck-marker regression).

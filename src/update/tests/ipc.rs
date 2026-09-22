@@ -10,6 +10,7 @@ use serde_json::json;
 use tokio::sync::oneshot;
 
 use crate::{
+    Nokkvi,
     app_message::Message,
     services::ipc::{IpcIncoming, IpcResponder},
     test_helpers::test_app,
@@ -52,6 +53,12 @@ fn drive_with_args(command: &str, args: serde_json::Value) -> IpcResponse {
 /// responder receives. Shared by every fire-and-forget verb test.
 fn drive(command: &str) -> IpcResponse {
     let mut app = test_app();
+    drive_on(&mut app, command)
+}
+
+/// [`drive`] against a caller-prepared app, so a test can seed state before
+/// the verb runs and assert on it afterwards.
+fn drive_on(app: &mut Nokkvi, command: &str) -> IpcResponse {
     let (incoming, rx) = make_incoming(command);
 
     let dispatched = app.update(Message::Ipc(Box::new(incoming)));
@@ -88,6 +95,7 @@ fn every_verb_carries_a_data_payload_so_success_is_never_silent() {
         "repeat",
         "consume",
         "clear-queue",
+        "show",
     ] {
         let resp = drive(verb);
         assert_eq!(resp.request_id, 7, "{verb}: request_id must echo");
@@ -255,6 +263,94 @@ fn status_returns_a_full_state_snapshot() {
     assert_eq!(data.get("consume"), Some(&json!(false)));
 }
 
+// ----------------------------------------------------------------------------
+// show — the one "bring the window back" entry point (`Nokkvi::show_window`)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn show_reopens_a_tray_hidden_window() {
+    // Closed to the tray: the surface is destroyed, so there is no id.
+    let mut app = test_app();
+    app.tray_window_hidden = true;
+    app.main_window_id = None;
+
+    let resp = drive_on(&mut app, "show");
+
+    assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "window": "opened" })));
+    // Flipped synchronously, so a second show before WindowOpened reads the
+    // window as on its way instead of opening another one.
+    assert!(!app.tray_window_hidden);
+    assert_eq!(
+        app.main_window_id, None,
+        "the new id arrives later via WindowOpened"
+    );
+}
+
+#[test]
+fn show_on_an_open_window_reports_already_open() {
+    let mut app = test_app();
+    let id = iced::window::Id::unique();
+    app.main_window_id = Some(id);
+
+    let resp = drive_on(&mut app, "show");
+
+    assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "window": "already-open" })));
+    assert_eq!(app.main_window_id, Some(id), "the open window is kept");
+    assert!(!app.tray_window_hidden);
+}
+
+#[test]
+fn show_checks_the_window_id_before_the_hidden_flag() {
+    // No known path yields a live id with the hidden flag set, but if one
+    // ever does, the existing window wins: opening would leave two windows.
+    let mut app = test_app();
+    let id = iced::window::Id::unique();
+    app.main_window_id = Some(id);
+    app.tray_window_hidden = true;
+
+    let resp = drive_on(&mut app, "show");
+
+    assert_eq!(resp.data, Some(json!({ "window": "already-open" })));
+    assert_eq!(app.main_window_id, Some(id));
+    assert!(
+        app.tray_window_hidden,
+        "the already-open path mutates nothing"
+    );
+}
+
+#[test]
+fn show_during_the_boot_gap_is_a_no_op() {
+    // test_app() mirrors the boot gap: no id yet and not hidden, because the
+    // boot task's window has not reported WindowOpened. It is also logged out
+    // with no app_service, so this pins that show never needs one.
+    let mut app = test_app();
+
+    let resp = drive_on(&mut app, "show");
+
+    assert!(resp.error.is_none());
+    assert_eq!(resp.data, Some(json!({ "window": "opening" })));
+    assert!(!app.tray_window_hidden);
+    assert_eq!(app.main_window_id, None);
+}
+
+#[test]
+fn two_shows_back_to_back_open_one_window() {
+    let mut app = test_app();
+    app.tray_window_hidden = true;
+
+    let first = drive_on(&mut app, "show");
+    let second = drive_on(&mut app, "show");
+
+    assert_eq!(first.data, Some(json!({ "window": "opened" })));
+    assert_eq!(
+        second.data,
+        Some(json!({ "window": "opening" })),
+        "the second show must not open another window"
+    );
+}
+
 #[test]
 fn unknown_command_yields_structured_error() {
     let resp = drive("bogus-verb");
@@ -305,6 +401,8 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         "nav-down",
         "enter",
         "selection",
+        // Window
+        "show",
     ]
     .into_iter()
     .collect();

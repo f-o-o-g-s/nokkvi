@@ -173,4 +173,4 @@ All wrapped in an overlay container with `mouse_area` for correct SVG rendering.
 
 ## System Tray
 
-`src/services/tray.rs` runs a ksni-based StatusNotifierItem on a dedicated thread. `update/tray.rs` handles `TrayEvent` (toggle window, play/pause, next/prev, quit) and window-close-to-tray when `close_to_tray` is enabled.
+`src/services/tray.rs` runs a ksni-based StatusNotifierItem on a dedicated thread. `update/tray.rs` handles `TrayEvent` (toggle window, play/pause, next/prev, quit) and window-close-to-tray when `close_to_tray` is enabled. Every "bring the window back" caller goes through `Nokkvi::show_window` (same file), which returns a `ShowOutcome`: `AlreadyOpen` when `main_window_id` is set (flags the window with `request_user_attention`), `Opened` when it was closed to the tray (reopens via `set_window_hidden(false)`), and `Opening` when neither holds because a window is already on its way (boot gap, or a second show before `WindowOpened`), which does nothing. The `show` IPC verb echoes it as `{"window":"already-open"|"opened"|"opening"}`.

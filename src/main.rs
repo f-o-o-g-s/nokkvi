@@ -358,7 +358,9 @@ pub struct Nokkvi {
     pub tray_connection: Option<services::tray::TrayConnection>,
     /// Whether the window is currently hidden into the tray.
     pub tray_window_hidden: bool,
-    /// Captured id of the main window — needed to issue `window::set_mode`.
+    /// Id of the open main window, adopted from each `WindowOpened`. `None`
+    /// while it is closed to the tray and in the boot gap before the first
+    /// `WindowOpened`; `show_window` checks it before opening a window.
     pub main_window_id: Option<iced::window::Id>,
 
     // -------------------------------------------------------------------------

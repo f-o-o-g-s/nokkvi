@@ -15,13 +15,51 @@
 //! the gap because `iced::daemon` (see `main.rs`) doesn't treat
 //! "no windows" as an exit condition. Audio / MPRIS / tray subscriptions
 //! all keep running while the window is gone.
+//!
+//! ## Bringing the window back
+//!
+//! [`Nokkvi::show_window`] is the one entry point for every caller that
+//! wants the window back: the `show` IPC verb (which a bare second `nokkvi`
+//! launch forwards), MPRIS `Raise`, and the reopen half of the tray click.
+//! It checks `main_window_id` before anything else, because
+//! `set_window_hidden(false)` opens a window unconditionally. When the
+//! window is already open it can only flag it: `window::gain_focus` maps to
+//! winit's Wayland `focus_window()`, which is empty, so the flag is
+//! `request_user_attention` (an xdg_activation token the compositor turns
+//! into an urgency hint).
 
 use std::time::Duration;
 
-use iced::{Task, window};
+use iced::{
+    Task,
+    window::{self, UserAttention},
+};
 use tracing::{debug, warn};
 
 use crate::{Message, Nokkvi, app_message::PlaybackMessage, services::tray::TrayEvent};
+
+/// What [`Nokkvi::show_window`] did. The `show` IPC verb echoes it as
+/// `{"window": <as_str()>}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShowOutcome {
+    /// A window exists; it was flagged for attention, not reopened.
+    AlreadyOpen,
+    /// The window was closed to the tray; a fresh one is opening.
+    Opened,
+    /// No window yet but one is on its way (the boot gap, or a show that
+    /// already opened one before its `WindowOpened` arrived); nothing done.
+    Opening,
+}
+
+impl ShowOutcome {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::AlreadyOpen => "already-open",
+            Self::Opened => "opened",
+            Self::Opening => "opening",
+        }
+    }
+}
 
 /// Maximum wall-clock time we are willing to spend in `request_shutdown` before
 /// abandoning and proceeding to `iced::exit()` anyway. The OS cleans up after
@@ -124,11 +162,33 @@ impl Nokkvi {
         Task::none()
     }
 
-    fn toggle_window_visibility(&mut self) -> Task<Message> {
-        let target_hidden = !self.tray_window_hidden;
-        self.set_window_hidden(target_hidden)
+    /// Bring the main window back. The single entry point for every caller
+    /// that wants the window shown (see the module docs); never open a window
+    /// any other way. `main_window_id` is checked first: a live window is only
+    /// flagged, whatever `tray_window_hidden` says.
+    pub(crate) fn show_window(&mut self) -> (Task<Message>, ShowOutcome) {
+        if let Some(id) = self.main_window_id {
+            debug!(" Show requested — window already open, requesting attention");
+            let task = window::request_user_attention(id, Some(UserAttention::Informational));
+            return (task, ShowOutcome::AlreadyOpen);
+        }
+        if self.tray_window_hidden {
+            return (self.set_window_hidden(false), ShowOutcome::Opened);
+        }
+        debug!(" Show requested — a window is already opening, nothing to do");
+        (Task::none(), ShowOutcome::Opening)
     }
 
+    fn toggle_window_visibility(&mut self) -> Task<Message> {
+        if self.tray_window_hidden {
+            self.show_window().0
+        } else {
+            self.set_window_hidden(true)
+        }
+    }
+
+    /// Destroy (`true`) or open (`false`) the main window. The open half is
+    /// unconditional, so it is reached only through [`Self::show_window`].
     fn set_window_hidden(&mut self, hidden: bool) -> Task<Message> {
         if hidden {
             // Destroy the window. main_window_id is consumed; the next show

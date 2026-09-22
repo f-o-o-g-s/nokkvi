@@ -139,6 +139,9 @@
 //! | `queue-pull`  | act       | `{"dispatched":"pull"}`; restore the server's   |
 //! |               |           | saved queue (cue, don't play). Same guards     |
 //! |               |           | minus the empty-queue one.                     |
+//! | `show`        | act       | `{"window":"opened"\|"already-open"\|"opening"}`;|
+//! |               |           | reopen from the tray, flag an open window, or  |
+//! |               |           | no-op while one is opening (`show_window`).    |
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
@@ -582,6 +585,11 @@ define_commands! {
         guard_queue_sync(app)?;
         let task = app.pull_queue_task();
         Ok((task, json!({ "dispatched": "pull" })))
+    });
+    // Window: also the path MPRIS Raise and a bare second launch take.
+    "show"        => act      (|app: &mut Nokkvi| {
+        let (task, outcome) = app.show_window();
+        Ok((task, json!({ "window": outcome.as_str() })))
     });
 }
 

@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `nokkvi show` reopens the window after it was closed to the tray.
+- `nokkvi show` on an already open window asks the desktop to flag it for attention.
+
 ### Changed
 
 ### Fixed
