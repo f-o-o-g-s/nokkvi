@@ -752,6 +752,37 @@ mod wgsl_helper_tests {
         );
     }
 
+    /// The LED gap mirrors the horizontal bar gap (`spacing_per_bar`), so
+    /// every LED-gap reader goes through `led_segment_gap()` — including
+    /// `vs_main`'s bar pitch, which keeps the two axes from drifting.
+    #[test]
+    fn bars_wgsl_led_gap_follows_bar_spacing() {
+        assert!(
+            BARS.contains("fn led_segment_gap() -> f32"),
+            "bars.wgsl is missing led_segment_gap helper",
+        );
+        assert_eq!(
+            BARS.matches(
+                "snap_to_led_segments(bar_height, uniforms.config.led_segment_height, led_segment_gap())"
+            )
+            .count(),
+            2,
+            "both LED snap call sites (bar + peak) must use led_segment_gap()",
+        );
+        assert!(
+            BARS.contains("let segment_gap = led_segment_gap();"),
+            "fs_main LED discard is not using led_segment_gap()",
+        );
+        assert!(
+            BARS.contains("let spacing_per_bar = led_segment_gap();"),
+            "vs_main bar pitch is not using led_segment_gap()",
+        );
+        assert!(
+            !BARS.contains("uniforms.config.led_segment_height, uniforms.config.border_width)"),
+            "an LED snap still uses border_width as the gap",
+        );
+    }
+
     #[test]
     fn bars_wgsl_constants_are_defined() {
         assert!(

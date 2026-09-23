@@ -428,7 +428,7 @@ keyword_table! {
         "visualizer.bars.led_bars" => &["vu meter", "segments", "blocks"],
         "visualizer.bars.led_segment_height" => &["block", "segment size", "vu"],
         "visualizer.bars.max_bars" => &["bands", "resolution", "number of bars"],
-        "visualizer.bars.bar_spacing" => &["gap", "padding", "separation"],
+        "visualizer.bars.bar_spacing" => &["gap", "padding", "separation", "led"],
         "visualizer.bars.bar_width_min" => &["thin bars", "narrow", "bar size"],
         "visualizer.bars.bar_width_max" => &["thick bars", "wide", "bar size"],
         "visualizer.bars.border_width" => &["outline", "stroke", "edge"],

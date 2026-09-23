@@ -27,7 +27,7 @@ struct Config {
     peak_alpha: f32,
     line_thickness: f32,
     bar_width: f32,      // Fixed bar width in pixels (e.g., 20.0)
-    bar_spacing: f32,    // Fixed spacing between bars in pixels (e.g., 2.0)
+    bar_spacing: f32,    // Fixed spacing between bars in pixels (e.g., 2.0); also sets the LED gap (led_segment_gap)
     edge_spacing: f32,   // Edge spacing for centering bars in pixels
     time: f32,           // Time in seconds for animation
     led_bars: u32,       // 0 = normal bars, 1 = LED segmented bars
@@ -118,6 +118,15 @@ fn apply_brightness_mod(color: vec4<f32>, bm: f32) -> vec4<f32> {
         );
     }
     return color;
+}
+
+// Gap between LED segments: the same fill-to-fill distance as between two bars
+// (bar_spacing, plus border_width when borders are on), so the LED grid reads
+// the same vertically as the bars do horizontally. vs_main uses it for the bar
+// pitch too, so the two axes cannot drift apart.
+fn led_segment_gap() -> f32 {
+    let border_width = uniforms.config.border_width;
+    return uniforms.config.bar_spacing + select(0.0, border_width, border_width > 0.0);
 }
 
 // Snap bar height to the nearest complete LED segment count, leaving the trailing gap off.
@@ -591,11 +600,9 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     
     // === Pixel-based bar calculations (matching QML barrenderer.cpp) ===
     let bar_width = uniforms.config.bar_width;
-    let bar_spacing = uniforms.config.bar_spacing;
     let edge_spacing = uniforms.config.edge_spacing;
     
-    let gap_between_borders = select(0.0, border_width, border_width > 0.0);
-    let spacing_per_bar = bar_spacing + gap_between_borders;
+    let spacing_per_bar = led_segment_gap();
     
     let bar_x = edge_spacing + f32(bar_idx) * (bar_width + spacing_per_bar);
     let snapped_x = bar_x;
@@ -627,7 +634,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
         // LED snap
         if (uniforms.config.led_bars != 0u) {
-            bar_height = snap_to_led_segments(bar_height, uniforms.config.led_segment_height, uniforms.config.border_width);
+            bar_height = snap_to_led_segments(bar_height, uniforms.config.led_segment_height, led_segment_gap());
         }
 
         let snapped_bar_height = round(bar_height);
@@ -665,7 +672,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
         // LED snap
         if (uniforms.config.led_bars != 0u) {
-            bar_height = snap_to_led_segments(bar_height, uniforms.config.led_segment_height, uniforms.config.border_width);
+            bar_height = snap_to_led_segments(bar_height, uniforms.config.led_segment_height, led_segment_gap());
         }
 
         let snapped_bar_height = round(bar_height);
@@ -762,7 +769,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // LED bars mode: create gaps between segments (front face + side face, not top face)
         if (uniforms.config.led_bars != 0u && input.brightness_mod < 1.1) {
             let segment_height = uniforms.config.led_segment_height;
-            let segment_gap = uniforms.config.border_width;
+            let segment_gap = led_segment_gap();
             let segment_period = segment_height + segment_gap;
             
             let dist_from_bottom = canvas_height - input.local_y;

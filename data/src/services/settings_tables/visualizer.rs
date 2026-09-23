@@ -380,7 +380,7 @@ define_settings! {
             ui_meta: {
                 label: "Bar Spacing",
                 category: "Bars",
-                subtitle: Some("Gap between bars in pixels"),
+                subtitle: Some("Gap between bars; in LED mode also the gap between LEDs"),
                 default: crate::types::visualizer_config::VisualizerConfig::default().bars.bar_spacing as i64,
                 min: 0,
                 max: 10,
@@ -398,7 +398,7 @@ define_settings! {
             ui_meta: {
                 label: "Border Width",
                 category: "Bars",
-                subtitle: Some("Outline around each bar; also sets LED gap size"),
+                subtitle: Some("Outline around each bar"),
                 default: crate::types::visualizer_config::VisualizerConfig::default().bars.border_width as i64,
                 min: 0,
                 max: 5,

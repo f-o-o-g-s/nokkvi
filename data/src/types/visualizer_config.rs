@@ -168,11 +168,12 @@ pub struct BarsConfig {
     pub bar_width_max: f32,
 
     /// Spacing between bars in pixels.
+    /// In LED mode, this also sets the gap between segments (plus `border_width`
+    /// when borders are on, the same fill-to-fill distance bars have).
     /// Default: 2.0
     pub bar_spacing: f32,
 
     /// Border width around each bar in pixels.
-    /// In LED mode, this also controls the gap between segments.
     /// Default: 2.0
     pub border_width: f32,
 

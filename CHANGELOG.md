@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Launching nokkvi again while its window is open now flags that window instead of exiting with an error.
 - MPRIS Raise now reopens a window closed to the tray.
 - MPRIS Raise on an open window asks the desktop to flag it for attention.
+- In Bars LED mode, the gap between LEDs now follows Bar Spacing, matching the gap between bars.
 
 ### Changed
 

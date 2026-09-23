@@ -41,6 +41,8 @@ Mode enums live in `data/src/types/visualizer_config.rs` as `wire_enum!` invocat
 - `BarsGradientOrientation`: `Vertical` (within-bar) / `Horizontal` (bass → treble across bars).
 - `BarsPeakGradientMode`: `Static` / `Cycle` / `Height` / `Match` (separate enum from bar gradients).
 
+**LED gap.** In LED mode the gap between segments is `spacing_per_bar` (`bar_spacing` + `border_width` when borders are on), the same fill-to-fill distance bars have horizontally. It is computed by the `led_segment_gap()` helper in `bars.wgsl`, which `vs_main` also calls for the horizontal layout, so the two cannot drift.
+
 ## Lines Mode
 
 - `LinesStyle`: `Smooth` (Catmull-Rom spline) / `Angular` (straight segments).
