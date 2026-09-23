@@ -55,7 +55,9 @@
 //!   radios/settings), `love` (toggle star on playing track), `rate` (arg
 //!   `delta: string` — `"+N"`/`"-N"` delta or `"0".."5"` absolute on
 //!   playing track), `queue-push` / `queue-pull` (server queue sync via the
-//!   OpenSubsonic indexBasedQueue extension; capability- and radio-gated).
+//!   OpenSubsonic indexBasedQueue extension; capability- and radio-gated),
+//!   `show` (reopen the window from the tray, or flag an open one; a bare
+//!   second `nokkvi` launch forwards it).
 //!
 //! The full per-verb dispatch catalog lives in `src/update/ipc.rs`.
 

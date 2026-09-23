@@ -807,9 +807,9 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     } else {
         output.local_y = pixel_y;
     }
-    // Front and side border quads get the per-LED outline cut. Top borders sit
-    // above the bar and peak fills carry no border, so neither is cut.
-    output.is_border = select(0.0, 1.0, face_type == 0u || face_type == 4u);
+    // Bar front and side border quads get the per-LED outline cut. Top borders
+    // sit above the bar and a peak is a single LED, so neither is cut.
+    output.is_border = select(0.0, 1.0, !is_peak && (face_type == 0u || face_type == 4u));
     output.is_gradient_bar = is_gradient_bar;
     output.bar_height = quad_h;
     output.bar_index = f32(bar_idx);
@@ -862,7 +862,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // gradient_mode discriminants: 0=static, 2=wave, 3=drift, 4=swell,
         // 5=pulse, 6=ripple. 1u is intentionally
         // unused — see BarsConfig::get_gradient_mode_value in
-        // src/visualizer_config.rs; the bars_gradient_mode_never_emits_dead_1u
+        // data/src/types/visualizer_config.rs; the bars_gradient_mode_never_emits_dead_1u
         // test pins the emitted set so a future agent who picks 1u as a
         // discriminant fails before shipping a dead branch. (Modes 3–5 —
         // shimmer/energy/alternate — were removed; the glow/bloom/beat effects
