@@ -34,7 +34,7 @@ struct Config {
     led_segment_height: f32,  // Height of each LED segment in pixels
     led_border_opacity: f32,  // 0.0 = transparent, 1.0 = opaque (outline around each LED, LED mode)
     border_opacity: f32,      // 0.0 = transparent, 1.0 = opaque (bar outline, non-LED mode)
-    gradient_mode: u32,          // 0 = static, 2 = wave (1 is intentionally unused)
+    gradient_mode: u32,          // 0=static, 2=wave, 3=drift, 4=swell, 5=pulse, 6=ripple (1 unused)
     peak_gradient_mode: u32,  // 0=static, 1=cycle, 2=height, 3=match
     peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade
     peak_hold_time: f32,      // Time in seconds for peak to hold
@@ -75,6 +75,22 @@ const BRIGHTNESS_LIGHTEN_FACTOR: f32 = 0.5;
 // ---------- Animation constants ----------
 // Complete cycle through gradient/peak colors in ~4 seconds (1.0 / 0.25).
 const BARS_GRADIENT_CYCLE_SPEED: f32 = 0.25;
+
+// Animated gradient modes. Periods are seconds per loop (Drift/Ripple) or per
+// breath (Swell). Swell depth is the exponent swing (in powers of two) of the
+// gradient curve; the brightness terms are the peak +/- fraction.
+const TAU: f32 = 6.2831853;
+const BARS_DRIFT_PERIOD: f32 = 12.0;
+const BARS_SWELL_PERIOD: f32 = 7.0;
+const BARS_SWELL_DEPTH: f32 = 1.2;
+const BARS_SWELL_BRIGHTNESS: f32 = 0.12;
+const BARS_PULSE_STRETCH: f32 = 4.0;
+const BARS_PULSE_BRIGHTNESS: f32 = 0.25;
+const BARS_RIPPLE_PERIOD: f32 = 10.0;
+// How many half-palettes the ripple spans from the leftmost to the rightmost bar.
+const BARS_RIPPLE_SPREAD: f32 = 0.75;
+// Wave mode: how far a full-height bar stretches its bottom colors upward.
+const BARS_WAVE_STRETCH: f32 = 1.5;
 
 // Beat lift: brighten the whole bar field by up to this fraction on a full kick
 // (uniforms.audio.x = beat_pulse). Keeps the spectrum pumping with the music.
@@ -357,9 +373,47 @@ fn get_flash_intensity(bar_index: u32) -> f32 {
 fn get_gradient_color_stretched(normalized_y: f32, bar_amplitude: f32) -> vec4<f32> {
     // As bar gets taller, stretch the bottom gradient colors
     // This makes the bottom colors occupy more vertical space
-    let stretch_factor = 1.0 + (bar_amplitude * 1.5);  // 1.0-2.5 range
+    let stretch_factor = 1.0 + (bar_amplitude * BARS_WAVE_STRETCH);  // 1.0-2.5 range
     let stretched_y = pow(normalized_y, 1.0 / stretch_factor);
     return get_gradient_color(stretched_y);
+}
+
+// ---------- Animated gradient modes (3=drift, 4=swell, 5=pulse, 6=ripple) ----------
+// Triangle wave 0 -> 1 -> 0 over one period. Scrolling the palette through it
+// never hits the hard last->first seam a plain fract() wrap would.
+fn gradient_tri(x: f32) -> f32 {
+    let f = fract(x);
+    return 1.0 - abs(f * 2.0 - 1.0);
+}
+
+// Drift: the palette slowly rolls up through the bars.
+fn get_gradient_color_drift(pos: f32) -> vec4<f32> {
+    return get_gradient_color(gradient_tri(pos * 0.5 - uniforms.config.time / BARS_DRIFT_PERIOD));
+}
+
+// Swell: the gradient inhales/exhales. The light colors spread down the bar,
+// then recede to the top, with a gentle brightness swell in step.
+fn get_gradient_color_swell(pos: f32) -> vec4<f32> {
+    let s = sin(uniforms.config.time * TAU / BARS_SWELL_PERIOD);
+    let c = get_gradient_color(pow(pos, exp2(BARS_SWELL_DEPTH * s)));
+    return vec4<f32>(min(c.rgb * (1.0 + BARS_SWELL_BRIGHTNESS * s), vec3<f32>(1.0)), c.a);
+}
+
+// Pulse: overall loudness pushes the light colors down every bar, on top of
+// each bar's own height stretch (the Wave mode response).
+fn get_gradient_color_pulse(pos: f32, bar_amplitude: f32) -> vec4<f32> {
+    let e = clamp(uniforms.config.average_energy, 0.0, 1.0);
+    let stretch = 1.0 + bar_amplitude * BARS_WAVE_STRETCH + e * BARS_PULSE_STRETCH;
+    let c = get_gradient_color(pow(pos, 1.0 / stretch));
+    return vec4<f32>(min(c.rgb * (1.0 + BARS_PULSE_BRIGHTNESS * e), vec3<f32>(1.0)), c.a);
+}
+
+// Ripple: a slow color wave travels sideways across the bars.
+fn get_gradient_color_ripple(pos: f32, bar_index: f32) -> vec4<f32> {
+    let across = bar_index / max(f32(uniforms.config.bar_count) - 1.0, 1.0);
+    return get_gradient_color(gradient_tri(
+        pos * 0.5 + across * BARS_RIPPLE_SPREAD - uniforms.config.time / BARS_RIPPLE_PERIOD,
+    ));
 }
 
 // Helper: create a "dead" (offscreen) vertex output to cull unused quads
@@ -805,7 +859,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         
         // Choose color based on gradient mode, using orientation-aware base position.
         //
-        // gradient_mode discriminants: 0=static, 2=wave. 1u is intentionally
+        // gradient_mode discriminants: 0=static, 2=wave, 3=drift, 4=swell,
+        // 5=pulse, 6=ripple. 1u is intentionally
         // unused — see BarsConfig::get_gradient_mode_value in
         // src/visualizer_config.rs; the bars_gradient_mode_never_emits_dead_1u
         // test pins the emitted set so a future agent who picks 1u as a
@@ -817,6 +872,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
         if (gradient_mode == 2u) {
             base_color = get_gradient_color_stretched(base_pos, input.bar_amplitude);
+        } else if (gradient_mode == 3u) {
+            base_color = get_gradient_color_drift(base_pos);
+        } else if (gradient_mode == 4u) {
+            base_color = get_gradient_color_swell(base_pos);
+        } else if (gradient_mode == 5u) {
+            base_color = get_gradient_color_pulse(base_pos, input.bar_amplitude);
+        } else if (gradient_mode == 6u) {
+            base_color = get_gradient_color_ripple(base_pos, input.bar_index);
         } else {
             // 0u (static) and any unexpected value fall through to the
             // height-based gradient.

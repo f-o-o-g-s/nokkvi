@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - MPRIS Raise on an open window asks the desktop to flag it for attention.
 - In Bars LED mode, the gap between LEDs now follows Bar Spacing, matching the gap between bars.
 - In Bars LED mode, each LED now gets its own outline, like each bar does.
+- Bars gain four animated Gradient Modes (Drift, Swell, Pulse, Ripple) that keep the bar colors moving.
 
 ### Changed
 

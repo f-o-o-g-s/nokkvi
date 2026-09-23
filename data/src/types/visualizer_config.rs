@@ -40,9 +40,10 @@ crate::wire_enum! {
     /// `widgets/visualizer/shaders/bars.wgsl`. `1` is intentionally skipped —
     /// `bars.wgsl` has no branch for it and would silently fall through to
     /// the static gradient. See the `bars_gradient_mode_never_emits_dead_1u`
-    /// test below. (Modes 3 Shimmer / 4 Energy / 5 Alternate were removed:
-    /// the glow / bloom / beat-reactive effects supersede them; existing
-    /// configs naming them fall back to Wave via `deserialize_or_default`.)
+    /// test below. (The old 3 Shimmer / 4 Energy / 5 Alternate modes were
+    /// removed; configs still naming them fall back to Wave via
+    /// `deserialize_or_default`. Their numbers now belong to the animated
+    /// modes below, which have different wire strings.)
     #[repr(u32)]
     pub enum BarsGradientMode {
         /// Height-based gradient (bottom to top).
@@ -51,6 +52,15 @@ crate::wire_enum! {
         /// Gradient stretching (taller bars show more bottom colors).
         #[default]
         Wave = 2 => "wave",
+        /// The palette slowly scrolls up through the bars.
+        Drift = 3 => "drift",
+        /// The gradient slowly breathes in and out (light colors spread down
+        /// the bars, then pull back), with a gentle brightness swell.
+        Swell = 4 => "swell",
+        /// Overall loudness pushes the light colors down every bar.
+        Pulse = 5 => "pulse",
+        /// A slow color wave travels sideways across the bars.
+        Ripple = 6 => "ripple",
     }
 }
 
@@ -297,11 +307,12 @@ impl Default for BarsConfig {
 }
 
 impl BarsConfig {
-    /// Get the gradient mode as u32 for shader (0=static, 2=wave).
+    /// Get the gradient mode as u32 for shader (0=static, 2=wave, 3=drift,
+    /// 4=swell, 5=pulse, 6=ripple).
     ///
     /// `1u` is intentionally absent from the emitted set — `bars.wgsl` does not branch on it
     /// and would silently fall through to the static gradient. The explicit discriminants on
-    /// [`BarsGradientMode`] preserve this non-contiguous {0, 2} encoding; the
+    /// [`BarsGradientMode`] preserve this non-contiguous {0, 2..=6} encoding; the
     /// `bars_gradient_mode_never_emits_dead_1u` test below pins this so a future agent who
     /// adds a `1`-valued variant fails immediately.
     pub fn get_gradient_mode_value(&self) -> u32 {
@@ -957,7 +968,14 @@ mod tests {
     #[test]
     fn bars_gradient_mode_never_emits_dead_1u() {
         // Every defined variant (the only inputs reachable from the TOML config + UI dropdown).
-        let variants = [BarsGradientMode::Static, BarsGradientMode::Wave];
+        let variants = [
+            BarsGradientMode::Static,
+            BarsGradientMode::Wave,
+            BarsGradientMode::Drift,
+            BarsGradientMode::Swell,
+            BarsGradientMode::Pulse,
+            BarsGradientMode::Ripple,
+        ];
         for variant in variants {
             let cfg = BarsConfig {
                 gradient_mode: variant,
@@ -984,8 +1002,14 @@ mod tests {
     /// "no variant maps to 1" and "the full set is what bars.wgsl branches on".
     #[test]
     fn bars_gradient_mode_emits_expected_discriminants() {
-        let expected: &[(BarsGradientMode, u32)] =
-            &[(BarsGradientMode::Static, 0), (BarsGradientMode::Wave, 2)];
+        let expected: &[(BarsGradientMode, u32)] = &[
+            (BarsGradientMode::Static, 0),
+            (BarsGradientMode::Wave, 2),
+            (BarsGradientMode::Drift, 3),
+            (BarsGradientMode::Swell, 4),
+            (BarsGradientMode::Pulse, 5),
+            (BarsGradientMode::Ripple, 6),
+        ];
         for (variant, want) in expected {
             let cfg = BarsConfig {
                 gradient_mode: *variant,
@@ -1007,6 +1031,10 @@ mod tests {
         let cases: &[(BarsGradientMode, &str)] = &[
             (BarsGradientMode::Static, "static"),
             (BarsGradientMode::Wave, "wave"),
+            (BarsGradientMode::Drift, "drift"),
+            (BarsGradientMode::Swell, "swell"),
+            (BarsGradientMode::Pulse, "pulse"),
+            (BarsGradientMode::Ripple, "ripple"),
         ];
         for (variant, expected_wire) in cases {
             assert_eq!(variant.as_wire_str(), *expected_wire);
@@ -1247,9 +1275,20 @@ placement = "nowhere"
     fn bars_gradient_mode_discriminants_match_wgsl_dispatch() {
         assert_eq!(BarsGradientMode::Static as u32, 0);
         assert_eq!(BarsGradientMode::Wave as u32, 2);
+        assert_eq!(BarsGradientMode::Drift as u32, 3);
+        assert_eq!(BarsGradientMode::Swell as u32, 4);
+        assert_eq!(BarsGradientMode::Pulse as u32, 5);
+        assert_eq!(BarsGradientMode::Ripple as u32, 6);
 
-        // Lock the full {0, 2} set — assert no variant emits 1 (dead in bars.wgsl).
-        let all = [BarsGradientMode::Static, BarsGradientMode::Wave];
+        // Lock the full {0, 2..=6} set — assert no variant emits 1 (dead in bars.wgsl).
+        let all = [
+            BarsGradientMode::Static,
+            BarsGradientMode::Wave,
+            BarsGradientMode::Drift,
+            BarsGradientMode::Swell,
+            BarsGradientMode::Pulse,
+            BarsGradientMode::Ripple,
+        ];
         for v in all {
             assert_ne!(v as u32, 1, "{v:?} emits 1u — dead in bars.wgsl");
         }
@@ -1301,10 +1340,15 @@ placement = "nowhere"
     fn all_consts_are_exhaustive_and_ordered() {
         for v in BarsGradientMode::ALL {
             match v {
-                BarsGradientMode::Static | BarsGradientMode::Wave => {}
+                BarsGradientMode::Static
+                | BarsGradientMode::Wave
+                | BarsGradientMode::Drift
+                | BarsGradientMode::Swell
+                | BarsGradientMode::Pulse
+                | BarsGradientMode::Ripple => {}
             }
         }
-        assert_eq!(BarsGradientMode::ALL.len(), 2);
+        assert_eq!(BarsGradientMode::ALL.len(), 6);
 
         for v in BarsGradientOrientation::ALL {
             match v {
@@ -1388,7 +1432,10 @@ placement = "nowhere"
     /// display order and the snake_case wire contract.
     #[test]
     fn all_wire_strs_pin_dropdown_display_order() {
-        assert_eq!(BarsGradientMode::all_wire_strs(), vec!["static", "wave"]);
+        assert_eq!(
+            BarsGradientMode::all_wire_strs(),
+            vec!["static", "wave", "drift", "swell", "pulse", "ripple"]
+        );
         assert_eq!(
             BarsGradientOrientation::all_wire_strs(),
             vec!["vertical", "horizontal"],

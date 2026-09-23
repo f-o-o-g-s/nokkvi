@@ -449,7 +449,7 @@ define_settings! {
             ui_meta: {
                 label: "Gradient Mode",
                 category: "Bars",
-                subtitle: Some("static: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)"),
+                subtitle: Some("static / wave: fixed gradient; wave stretches bottom colors up taller bars\ndrift: colors slowly scroll up through the bars\nswell: the gradient slowly breathes in and out\npulse: louder music pushes the light colors down every bar\nripple: a slow color wave travels sideways across the bars"),
                 default: crate::types::visualizer_config::VisualizerConfig::default().bars.gradient_mode.as_wire_str(),
                 options: BarsGradientMode::all_wire_strs(),
                 read_field: |d| d.bars_gradient_mode.as_ref(),

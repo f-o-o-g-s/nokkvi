@@ -783,6 +783,24 @@ mod wgsl_helper_tests {
         );
     }
 
+    /// Every non-static bars gradient mode needs its own branch in
+    /// `bars.wgsl`; a missing one silently falls through to the static
+    /// gradient, so the dropdown entry would look identical to Static.
+    #[test]
+    fn bars_wgsl_branches_on_every_gradient_mode() {
+        use nokkvi_data::types::visualizer_config::BarsGradientMode;
+        for mode in BarsGradientMode::ALL {
+            if *mode == BarsGradientMode::Static {
+                continue;
+            }
+            let branch = format!("gradient_mode == {}u", mode.as_u32());
+            assert!(
+                BARS.contains(&branch),
+                "bars.wgsl has no `{branch}` branch for {mode:?}",
+            );
+        }
+    }
+
     /// Each LED gets its own outline, the way each bar does: the fill and the
     /// border quads share one period helper, border quads are told apart from
     /// peak fills by `is_border`, and the side-face unslant is keyed on the
