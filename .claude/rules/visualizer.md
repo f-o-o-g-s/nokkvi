@@ -41,7 +41,7 @@ Mode enums live in `data/src/types/visualizer_config.rs` as `wire_enum!` invocat
 - `BarsGradientOrientation`: `Vertical` (within-bar) / `Horizontal` (bass → treble across bars).
 - `BarsPeakGradientMode`: `Static` / `Cycle` / `Height` / `Match` (separate enum from bar gradients).
 
-**LED gap.** In LED mode the gap between segments is `spacing_per_bar` (`bar_spacing` + `border_width` when borders are on), the same fill-to-fill distance bars have horizontally. It is computed by the `led_segment_gap()` helper in `bars.wgsl`, which `vs_main` also calls for the horizontal layout, so the two cannot drift.
+**LED gap.** In LED mode the gap between segments is `spacing_per_bar` (`bar_spacing` + `border_width` when borders are on), the same fill-to-fill distance bars have horizontally. It is computed by the `led_segment_gap()` helper in `bars.wgsl`, which `vs_main` also calls for the horizontal layout, so the two cannot drift. Each LED is its own outlined box: front and side border quads (vertex output `is_border`, `@location(10)`; top borders and peak fills carry 0) are discarded mid-gap by `in_led_gap()`, the period helper the fill path also calls, keeping this LED's top outline and the next LED's bottom outline, so the gap reads outline | background | outline when `bar_spacing > border_width` and the outlines merge otherwise. The 3D side-face unslant is keyed on `face_type` (4 or 5), not brightness, so the side border quad unslants too.
 
 ## Lines Mode
 

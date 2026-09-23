@@ -770,8 +770,8 @@ mod wgsl_helper_tests {
             "both LED snap call sites (bar + peak) must use led_segment_gap()",
         );
         assert!(
-            BARS.contains("let segment_gap = led_segment_gap();"),
-            "fs_main LED discard is not using led_segment_gap()",
+            BARS.contains("let segment_period = segment_height + led_segment_gap();"),
+            "in_led_gap is not using led_segment_gap() for the LED period",
         );
         assert!(
             BARS.contains("let spacing_per_bar = led_segment_gap();"),
@@ -780,6 +780,38 @@ mod wgsl_helper_tests {
         assert!(
             !BARS.contains("uniforms.config.led_segment_height, uniforms.config.border_width)"),
             "an LED snap still uses border_width as the gap",
+        );
+    }
+
+    /// Each LED gets its own outline, the way each bar does: the fill and the
+    /// border quads share one period helper, border quads are told apart from
+    /// peak fills by `is_border`, and the side-face unslant is keyed on the
+    /// face type so the side border (brightness 1.0) is unslanted too.
+    #[test]
+    fn bars_wgsl_led_outline_per_segment() {
+        assert!(
+            BARS.contains("@location(10) is_border: f32"),
+            "bars.wgsl VertexOutput is missing is_border",
+        );
+        assert!(
+            BARS.contains("fn in_led_gap(dist_from_bottom: f32, is_border: bool) -> bool"),
+            "bars.wgsl is missing the in_led_gap helper",
+        );
+        assert!(
+            BARS.contains("in_led_gap(canvas_height - input.local_y, false)"),
+            "gradient (fill) path is not calling in_led_gap",
+        );
+        assert!(
+            BARS.contains("in_led_gap(uniforms.viewport.w - input.local_y, true)"),
+            "border path is not calling in_led_gap",
+        );
+        assert!(
+            BARS.contains("output.local_y = pixel_y + (pixel_x - c_tl.x);"),
+            "side-face unslant is not the per-vertex horizontal offset",
+        );
+        assert!(
+            !BARS.contains("if (brightness < 0.5)"),
+            "side-face unslant is still keyed on brightness",
         );
     }
 

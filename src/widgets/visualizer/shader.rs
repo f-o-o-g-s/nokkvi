@@ -96,8 +96,8 @@ pub(crate) struct VisualizerConfig {
     pub time: f32,                    // Time in seconds for animation
     pub led_bars: u32,                // 0 = normal bars, 1 = LED segmented bars
     pub led_segment_height: f32,      // Height of each LED segment in pixels
-    pub led_border_opacity: f32, // 0.0 = transparent, 1.0 = opaque (border opacity in LED mode)
-    pub border_opacity: f32,     // 0.0 = transparent, 1.0 = opaque (border opacity in non-LED mode)
+    pub led_border_opacity: f32, // 0.0 = transparent, 1.0 = opaque (outline around each LED, LED mode)
+    pub border_opacity: f32,     // 0.0 = transparent, 1.0 = opaque (bar outline, non-LED mode)
     pub gradient_mode: u32,      // 0 = static, 2 = wave (1 is intentionally unused)
     pub peak_gradient_mode: u32, // 0=static, 1=cycle, 2=height, 3=match
     pub peak_mode: u32,          // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade

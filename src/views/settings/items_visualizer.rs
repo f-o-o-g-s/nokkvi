@@ -34,7 +34,7 @@ fn push_visualizer_color_entries(
                 "Border Color",
                 label,
             )
-            .with_subtitle("Color of bar borders and LED gaps"),
+            .with_subtitle("Color of bar and LED outlines"),
             &colors.border_color,
             &defaults.border_color,
         )
@@ -64,7 +64,7 @@ fn push_visualizer_color_entries(
                 "LED Border Opacity",
                 label,
             )
-            .with_subtitle("Opacity of gaps between LED segments"),
+            .with_subtitle("Opacity of the outline around each LED"),
             colors.led_border_opacity as f64,
             defaults.led_border_opacity as f64,
             0.0,

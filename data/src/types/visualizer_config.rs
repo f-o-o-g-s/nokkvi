@@ -174,6 +174,7 @@ pub struct BarsConfig {
     pub bar_spacing: f32,
 
     /// Border width around each bar in pixels.
+    /// In LED mode, each segment gets its own outline of this width.
     /// Default: 2.0
     pub border_width: f32,
 

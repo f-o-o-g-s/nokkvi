@@ -398,7 +398,7 @@ define_settings! {
             ui_meta: {
                 label: "Border Width",
                 category: "Bars",
-                subtitle: Some("Outline around each bar"),
+                subtitle: Some("Outline around each bar and, in LED mode, around each LED"),
                 default: crate::types::visualizer_config::VisualizerConfig::default().bars.border_width as i64,
                 min: 0,
                 max: 5,
