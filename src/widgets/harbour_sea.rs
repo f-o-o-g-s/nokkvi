@@ -1711,15 +1711,13 @@ impl<Message> canvas::Program<Message> for SeaCanvas<'_> {
             .and_then(|c| parse_hex_color(c))
             .unwrap_or(Color::from_rgb(0.35, 0.5, 0.6));
         let crest = parse_hex_color(&viz.border_color).unwrap_or(Color::from_rgb(0.5, 0.5, 0.5));
-        // Starlight: the PEAK gradient's first stop — the visualizer's
-        // bright sparkle-top, the one reliably light color in every theme's
-        // visualizer palette. The border color the rope/boat use is a DARK
-        // stroke in most themes (Svalbard: #111817), which vanishes on the
-        // dark sky; the water gradient is mid-tone. Peaks read as stars.
-        let starlight = viz
-            .peak_gradient_colors
-            .first()
-            .and_then(|c| parse_hex_color(c))
+        // Starlight: the PEAK gradient's lightest stop — the visualizer's
+        // bright sparkle-top. Chosen by luminance, not position, because a
+        // theme may order its peaks dark-to-light (Svalbard does). The border
+        // color the rope/boat use is a DARK stroke in most themes (Svalbard:
+        // #111817), which vanishes on the dark sky; the water gradient is
+        // mid-tone. Peaks read as stars.
+        let starlight = crate::theme::brightest_peak_color(&viz)
             .or_else(|| {
                 viz.bar_gradient_colors
                     .last()

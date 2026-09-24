@@ -2,6 +2,7 @@
 //! contrast helpers, accent-wash, and the derived highlight-fill family.
 
 use iced::Color;
+use nokkvi_data::types::theme_file::VisualizerColors;
 
 use super::{is_light_mode, read_color};
 
@@ -263,6 +264,17 @@ pub(super) fn relative_luminance(c: Color) -> f32 {
         }
     };
     0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+}
+
+/// The lightest parseable peak color in a visualizer palette — the Harbour
+/// scene's starlight (stars + moon face). Picked by luminance rather than
+/// position so a theme's peak ORDER (which drives the visualizer's height and
+/// cycle modes) can't turn the night sky's light sources dark.
+pub(crate) fn brightest_peak_color(viz: &VisualizerColors) -> Option<Color> {
+    viz.peak_gradient_colors
+        .iter()
+        .filter_map(|hex| crate::theme_config::parse_hex_color(hex))
+        .max_by(|a, b| relative_luminance(*a).total_cmp(&relative_luminance(*b)))
 }
 
 /// WCAG contrast ratio between two colors. Result is in `[1.0, 21.0]`.

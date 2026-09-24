@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Svalbard's visualizer peaks now step from dark to light teal instead of alternating two colors.
+- The Harbour moon and stars now glow in the lightest peak color, whatever order a theme lists its peaks in.
+
 ### Fixed
 
 ### Removed

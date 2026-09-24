@@ -281,27 +281,24 @@ const LOGO_VIEWBOX: [f32; 4] = [70.96, 119.96, 881.07, 881.07];
 
 /// The owner's circular smiley avatar — the harbour trawl scene's moon.
 /// Normalized to the LOGO master's token scheme: its two semantic roles
-/// (pale face fill, dark line work) carry the SAME Svalbard-default
-/// sentinels as the ship — [`LOGO_TOKEN_BODY`] and [`LOGO_TOKEN_OUTLINE`]
-/// — so the untouched asset renders correctly as the default theme and no
-/// new color literal exists anywhere in the pipeline.
+/// (pale face fill, dark line work) carry the SAME sentinels as the ship —
+/// [`LOGO_TOKEN_BODY`] and [`LOGO_TOKEN_OUTLINE`] — so no new color literal
+/// exists anywhere in the pipeline. The face token is only the fallback: at
+/// runtime `themed_moon_face_svg` always rewrites it to the starlight color.
 const MOON_FACE_SVG: &str = include_str!("../assets/moon_face.svg");
 
 /// Return the moon-face avatar themed for the harbour scene. Follows the
 /// boat OVERLAY's convention (not the standalone logo's): the scene's
 /// doodads all key on the mode-stable dark visualizer palette — the face
-/// fill takes the PEAK color (the scene's starlight, so the moon shares the
-/// stars' light) and the line work takes the border ink, exactly the color
+/// fill takes the lightest PEAK color (`theme::brightest_peak_color`, the
+/// scene's starlight, so the moon shares the stars' light) and the line work takes the border ink, exactly the color
 /// `themed_boat_svg` strokes the hull with. Handle caching lives on
 /// `BoatState` beside the boat and anchor handles, sharing their
 /// theme-generation invalidation.
 pub(crate) fn themed_moon_face_svg() -> String {
     let viz = crate::theme::get_visualizer_colors_dark();
-    let fill = viz
-        .peak_gradient_colors
-        .first()
-        .cloned()
-        .unwrap_or_else(|| LOGO_TOKEN_BODY.to_string());
+    let fill = crate::theme::brightest_peak_color(&viz)
+        .map_or_else(|| LOGO_TOKEN_BODY.to_string(), color_to_hex);
     MOON_FACE_SVG
         .replace(LOGO_TOKEN_BODY, &fill)
         .replace(LOGO_TOKEN_OUTLINE, &viz.border_color)
@@ -1192,6 +1189,11 @@ mod tests {
         assert!(
             out.contains(&viz.border_color),
             "line work must use the dark visualizer border color"
+        );
+        let starlight = crate::theme::brightest_peak_color(&viz).map(color_to_hex);
+        assert!(
+            starlight.is_none_or(|fill| out.contains(&fill)),
+            "the face fill must be the lightest peak color (the scene's starlight)"
         );
     }
 

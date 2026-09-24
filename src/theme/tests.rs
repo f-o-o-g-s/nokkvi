@@ -61,6 +61,25 @@ fn theme_accessor_microbench_fg0_x10000() {
 // routine that keeps muted theme accents readable as strip text.
 // ------------------------------------------------------------------------
 
+/// Harbour starlight (stars + moon face) must stay the palette's lightest
+/// peak color whatever order the theme lists its peaks in: Svalbard's dark
+/// peaks run dark-to-light, so taking the FIRST stop turned the night sky's
+/// stars and moon dark teal.
+#[test]
+fn brightest_peak_color_ignores_order_and_bad_hex() {
+    let viz = |peaks: &[&str]| nokkvi_data::types::theme_file::VisualizerColors {
+        peak_gradient_colors: peaks.iter().map(|s| (*s).to_string()).collect(),
+        ..Default::default()
+    };
+    let ramp = viz(&["#5E887F", "#6D9A94", "not-a-color", "#BFD0CA", "#92B7B2"]);
+    assert_eq!(
+        brightest_peak_color(&ramp),
+        crate::theme_config::parse_hex_color("#BFD0CA"),
+    );
+    assert_eq!(brightest_peak_color(&viz(&[])), None);
+    assert_eq!(brightest_peak_color(&viz(&["garbage"])), None);
+}
+
 #[test]
 fn relative_luminance_at_endpoints() {
     assert!((relative_luminance(Color::WHITE) - 1.0).abs() < 0.001);
