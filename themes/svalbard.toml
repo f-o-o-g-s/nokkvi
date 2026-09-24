@@ -50,7 +50,7 @@ bar_gradient_colors = ["#5E887F", "#6D9A94", "#80A9A3", "#92B7B2", "#A8C5C0", "#
 border_color = "#111817"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#E7ECEB", "#A8C5C0", "#E7ECEB", "#A8C5C0", "#E7ECEB", "#A8C5C0"]
+peak_gradient_colors = ["#5E887F", "#6D9A94", "#80A9A3", "#92B7B2", "#A8C5C0", "#BFD0CA"]
 
 [light]
 border = "#C5D5D1"
@@ -98,4 +98,4 @@ bar_gradient_colors = ["#5E887F", "#6D9A94", "#80A9A3", "#92B7B2", "#A8C5C0", "#
 border_color = "#111817"
 border_opacity = 0.50
 led_border_opacity = 1.0
-peak_gradient_colors = ["#4A7771", "#A75A60", "#4A7771", "#A75A60", "#4A7771", "#A75A60"]
+peak_gradient_colors = ["#4A7771", "#5A8983", "#6D9A94", "#80A9A3", "#92B7B2", "#A8C5C0"]
