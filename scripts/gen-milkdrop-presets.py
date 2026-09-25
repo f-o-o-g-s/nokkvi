@@ -200,34 +200,85 @@ presets["nokkvi - cover ripple"] = preset(
     init="pulse = 0; a1 = 9; a2 = 9; a3 = 9; slot = 0; cool = 0; drift = 0; x1 = 0; y1 = 0; x2 = 0; y2 = 0; x3 = 0; y3 = 0;",
     frame=ripple_frame)
 
-# 5. Slices (new) ---------------------------------------------------------
-presets["nokkvi - cover slices"] = preset(
-    {"decay": 0.9, "wave_a": 0.0},
-    "",
-    "uniform sampler2D sampler_fw_cover;\n shader_body {\n" + HEAD + f'''
+# Orb: the cover wrapped on a spinning, lit sphere; kicks send rings outward.
+orb_r = "float R = 0.31 + 0.035 * q3 + 0.01 * clamp(bass_att, 0.0, 2.0);"
+presets["nokkvi - cover orb"] = preset(
+    {"zoom": 1.025, "rot": 0.004, "decay": 1.0},
+    " shader_body {\n" + HEAD + f"""
+  {orb_r}
+  vec2 p = (uv_orig - 0.5) * s;
+  float d = length(p);
+  vec3 fb = texture(sampler_main, uv).xyz * 0.925 - 0.003;
+  float ring = smoothstep(0.008, 0.0, abs(d - R - 0.006));
+  fb += NOKKVI_ACCENT * ring * (0.05 + 0.75 * q3);
+  ret = max(fb, vec3(0.0));
+ }}""",
+    "uniform sampler2D sampler_fw_cover;\n shader_body {\n" + HEAD + f"""
+  {orb_r}
   vec2 p = (uv - 0.5) * s;
-  float n = 11.0;
-  float y = p.y * 0.72 + 0.5;
-  float row = floor(y * n);
-  float frac = fract(y * n);
-  float seed = fract(sin(row * 12.9898) * 43758.5453);
-  float dir = (seed < 0.5) ? -1.0 : 1.0;
-  float slide = dir * (0.02 + 0.12 * q3 * (0.4 + seed)) + 0.04 * sin(q1 + row * 0.9);
-  vec2 c = vec2(p.x * 0.72 + 0.5 + slide, y);
-''' + cover("cov", "c") + f'''
-  float cl = dot(cov, {LUM});
-  vec2 cg = c + vec2(0.012 + 0.02 * q3, 0.0);
-''' + cover("ghost", "cg") + f'''
-  float lum = clamp((cl - 0.5) * 1.6 + 0.5, 0.0, 1.0);
-''' + tone("col", "lum") + f'''
-  col += NOKKVI_WARM * clamp(dot(ghost, {LUM}) - cl, 0.0, 1.0) * (0.15 + 0.6 * q3);
-  float seam = smoothstep(0.06, 0.0, min(frac, 1.0 - frac));
-  col = mix(col, NOKKVI_BG, seam * 0.8);
-  col += NOKKVI_ACCENT * seam * (0.15 + 0.8 * q3);
+  float d2 = dot(p, p);
+  vec3 trail = texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.9;
+  float tl = clamp(dot(trail, {LUM}) * 1.4, 0.0, 1.0);
+""" + tone("bg", "tl") + f"""
+  vec3 col = bg;
+  float edge = smoothstep(R * R, (R - 0.004) * (R - 0.004), d2);
+  if (d2 < R * R) {{
+    vec3 n = vec3(p.x, -p.y, sqrt(max(R * R - d2, 0.0))) / R;
+    float ct = cos(0.35); float st = sin(0.35);
+    n = vec3(n.x, n.y * ct - n.z * st, n.y * st + n.z * ct);
+    float cs = cos(q1); float sn = sin(q1);
+    vec3 m = vec3(n.x * cs + n.z * sn, n.y, -n.x * sn + n.z * cs);
+    float lon = atan(m.x, m.z);
+    float lat = asin(clamp(m.y, -1.0, 1.0));
+    vec3 cov = texture(sampler_fw_cover, vec2(lon / 3.14159265 + 0.5, 0.5 - lat / 3.14159265)).xyz;
+    vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
+    vec3 nv = vec3(p.x, -p.y, sqrt(max(R * R - d2, 0.0))) / R;
+    float diff = max(dot(nv, L), 0.0);
+    float spec = pow(max(dot(reflect(-L, nv), vec3(0.0, 0.0, 1.0)), 0.0), 28.0);
+    float rim = pow(1.0 - nv.z, 3.0);
+    vec3 lit = cov * (0.22 + 0.9 * diff) + NOKKVI_TEXT * spec * 0.55;
+    lit += NOKKVI_HIGHLIGHT * rim * (0.5 + 0.8 * q3);
+    col = mix(bg, lit, edge);
+  }}
+  col += NOKKVI_WARM * smoothstep(0.02, 0.0, abs(sqrt(d2) - R)) * clamp(treb_att - 1.0, 0.0, 1.0) * 0.4;
   ret = col;
- }}''',
+ }}""",
+    init="pulse = 0; spin = 0;",
+    frame=PULSE + "spin = spin + 0.006 + 0.008 * min(mid_att, 2) + 0.03 * q3;\nq1 = spin;")
+
+# Starfield: warp-speed streaks in the theme's gradient; no cover.
+presets["nokkvi - starfield"] = preset(
+    {"zoom": 1.045, "rot": 0.0, "decay": 1.0},
+    " shader_body {\n" + HEAD + """
+  vec2 g = vec2(110.0, 62.0);
+  vec2 cell = floor(uv_orig * g);
+  float h = fract(sin(dot(cell + floor(time * 7.0) * vec2(3.1, 1.7), vec2(12.9898, 78.233))) * 43758.5453);
+  float star = step(0.9955 - 0.004 * q3, h);
+  vec2 f = fract(uv_orig * g) - 0.5;
+  star *= smoothstep(0.45, 0.0, length(f));
+  // Sample halfway back along the zoom too, so a star's per-frame jumps
+  // join into one streak instead of a dotted line.
+  vec3 fb = max(
+    texture(sampler_main, uv).xyz,
+    max(texture(sampler_main, mix(uv, uv_orig, 0.33)).xyz, texture(sampler_main, mix(uv, uv_orig, 0.66)).xyz)
+  ) * (0.9 - 0.04 * q3);
+  fb += vec3(star) * (0.7 + 0.8 * q3) * smoothstep(0.02, 0.2, length((uv_orig - 0.5) * s));
+  ret = fb;
+ }""",
+    " shader_body {\n" + HEAD + f"""
+  vec2 p = (uv - 0.5) * s;
+  float r = length(p);
+  vec3 m = texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.6;
+  float lum = clamp(dot(m, {LUM}) * 1.5, 0.0, 1.0);
+""" + ramp("hue", "clamp(r * 1.4 + 0.15 * sin(q1), 0.0, 1.0)") + f"""
+  vec3 col = mix(NOKKVI_BG, hue, smoothstep(0.0, 0.45, lum));
+  col = mix(col, NOKKVI_TEXT, smoothstep(0.75, 1.0, lum) * 0.7);
+  col += NOKKVI_ACCENT * exp(-r * 9.0) * (0.15 + 0.5 * q3);
+  col += NOKKVI_WARM * smoothstep(0.85, 1.0, lum) * q3 * 0.3;
+  ret = col;
+ }}""",
     init="pulse = 0; phase = 0;",
-    frame=PULSE + "phase = phase + 0.01 + 0.02 * min(mid_att, 2);\nq1 = phase;")
+    frame=PULSE + "phase = phase + 0.01 + 0.02 * min(mid_att, 2);\nq1 = phase;\nzoom = 1.035 + 0.02 * min(bass_att, 2) + 0.05 * q3;\nrot = 0.004 * sin(time * 0.2);")
 
 # 6. Aurora (new; no cover) -----------------------------------------------
 presets["nokkvi - aurora"] = preset(
