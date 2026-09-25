@@ -2,16 +2,16 @@
  "version": 2,
  "baseVals": {
   "gammaadj": 1.0,
-  "decay": 0.93,
+  "decay": 1.0,
   "echo_zoom": 1.0,
   "echo_alpha": 0.0,
   "wave_mode": 0,
   "additivewave": 1,
-  "wave_a": 0.7,
-  "wave_scale": 0.45,
-  "wave_smoothing": 0.5,
-  "zoom": 1.03,
-  "rot": 0.02,
+  "wave_a": 0.0,
+  "wave_scale": 0.8,
+  "wave_smoothing": 0.7,
+  "zoom": 1.0,
+  "rot": 0.0,
   "warp": 0.0,
   "wave_r": 1.0,
   "wave_g": 1.0,
@@ -60,11 +60,23 @@
  "waves": [
   {
    "baseVals": {
-    "enabled": 0
+    "enabled": 1,
+    "samples": 400,
+    "sep": 0,
+    "spectrum": 0,
+    "usedots": 0,
+    "thick": 1,
+    "additive": 1,
+    "scaling": 0.6,
+    "smoothing": 0.5,
+    "r": 1.0,
+    "g": 0.0,
+    "b": 0.0,
+    "a": 0.9
    },
    "init_eqs_eel": "",
-   "frame_eqs_eel": "",
-   "point_eqs_eel": ""
+   "frame_eqs_eel": "a = 0.9 * q9;",
+   "point_eqs_eel": "w = min(1, 8 * min(sample, 1 - sample));\nx = 0.5 + (sample - 0.5) / aspectx;\ny = 0.5 - (0.42 - value1 * 0.35 * w) / aspecty;\n"
   },
   {
    "baseVals": {
@@ -91,9 +103,9 @@
    "point_eqs_eel": ""
   }
  ],
- "init_eqs_eel": "depth = 0; twist = 0; pulse = 0; pop = 0;",
- "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\ndepth = depth + 0.005 + 0.012 * min(bass_att, 2.5) + 0.03 * min(kick, 1.5) + 0.02 * pop;\ntwist = twist + 0.0015 + 0.003 * (mid_att - 1);\nq1 = depth;\nq2 = twist;\nwave_r = NOKKVI_HIGHLIGHT_R;\nwave_g = NOKKVI_HIGHLIGHT_G;\nwave_b = NOKKVI_HIGHLIGHT_B;\n",
+ "init_eqs_eel": "depth = 0; twist = 0; pulse = 0; pop = 0; cool = 0;",
+ "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\ndd = 0.005 + 0.012 * min(bass_att, 2.5) + 0.03 * min(kick, 1.5) + 0.02 * pop;\ndepth = depth + dd;\ntwist = twist + 0.0015 + 0.003 * (mid_att - 1);\ncool = max(cool - 1 / max(fps, 1), 0);\nstamp = above(kick, 0.2) * below(cool, 0.001);\ncool = if(stamp, 0.18, cool);\nq1 = depth;\nq2 = twist;\nq6 = dd;\nq9 = stamp;",
  "pixel_eqs_eel": "",
- "warp": "",
- "comp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv - 0.5) * s;\n  p += vec2(0.07 * sin(time * 0.23), 0.06 * cos(time * 0.19));\n  float r0 = max(length(p), 0.002);\n  float a = atan(p.y, p.x);\n  float r = r0 * (1.0 + 0.07 * sin(a * 3.0 + q1 * 1.7) * clamp(mid_att, 0.0, 2.0));\n  r *= 1.0 + 0.10 * q3 + 0.08 * q5;\n  float dep = 0.26 / r;\n  vec2 t = vec2(a / 6.2831853 * 2.0 + q2 + 0.06 * dep, dep + q1);\n  float cl = dot(texture(sampler_fw_cover, vec2(t.x, -t.y)).xyz, vec3(0.299, 0.587, 0.114));\n  float lum = clamp((cl - 0.5) * 1.6 + 0.5, 0.0, 1.0);\n  float col_r_x = clamp(lum, 0.0, 1.0) * 5.0;\n  vec3 col_r = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(col_r_x, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP2, clamp(col_r_x - 1.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP3, clamp(col_r_x - 2.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP4, clamp(col_r_x - 3.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP5, clamp(col_r_x - 4.0, 0.0, 1.0));\n  vec3 col = mix(NOKKVI_BG, col_r, smoothstep(0.02, 0.35, lum));\n  col = mix(col, NOKKVI_TEXT, smoothstep(0.85, 1.0, lum) * 0.7);\n  float band = pow(abs(sin((dep + q1) * 4.7123889)), 28.0);\n  col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, q3 * 0.5) * band * (0.25 + 0.9 * q3 + 0.8 * q5);\n  col += NOKKVI_WARM * band * clamp(treb_att - 1.0, 0.0, 1.0) * 0.5;\n  float fog = smoothstep(0.03, 0.42, r0);\n  col = mix(NOKKVI_BG, col, fog * fog);\n  col += NOKKVI_ACCENT * smoothstep(0.035, 0.0, abs(r0 - 0.07 - 0.05 * q3 - 0.04 * q5)) * (0.3 + 0.7 * q3 + 0.6 * q5);\n  col *= 1.0 + 0.45 * q5;\n  col += NOKKVI_ACCENT * GetBlur1(uv) * 0.9;\n  col *= 0.85 + 0.15 * smoothstep(0.95, 0.3, r0);\n  ret = col;\n }"
+ "warp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 src = vec2(uv_orig.x, uv_orig.y + q6 / 2.0);\n  float ink = texture(sampler_main, src).x * 0.995 * step(2.5, frame) * step(src.y, 1.0);\n  ret = vec3(ink, 0.0, 0.0);\n }",
+ "comp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv - 0.5) * s;\n  p += vec2(0.07 * sin(time * 0.23), 0.06 * cos(time * 0.19));\n  float r0 = max(length(p), 0.002);\n  float a = atan(p.y, p.x);\n  float r = r0 * (1.0 + 0.07 * sin(a * 3.0 + q1 * 1.7) * clamp(mid_att, 0.0, 2.0));\n  r *= 1.0 + 0.10 * q3 + 0.08 * q5;\n  float dep = 0.26 / r;\n  vec2 t = vec2(a / 6.2831853 * 2.0 + q2 + 0.06 * dep, dep + q1);\n  float cl = dot(texture(sampler_fw_cover, vec2(t.x, -t.y)).xyz, vec3(0.299, 0.587, 0.114));\n  float ca = dot(texture(sampler_fw_cover, vec2(t.x + 0.012, -t.y)).xyz, vec3(0.299, 0.587, 0.114));\n  float cd = dot(texture(sampler_fw_cover, vec2(t.x, -t.y - 0.02)).xyz, vec3(0.299, 0.587, 0.114));\n  vec3 wn = normalize(vec3((cl - ca) * 5.0, (cl - cd) * 5.0, 1.0));\n  vec3 wl = normalize(vec3(0.3, -0.7, 0.65));\n  float shade = 0.45 + 0.75 * max(dot(wn, wl), 0.0);\n  float lum = clamp((cl - 0.5) * 1.6 + 0.5, 0.0, 1.0);\n  float col_r_x = clamp(lum, 0.0, 1.0) * 5.0;\n  vec3 col_r = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(col_r_x, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP2, clamp(col_r_x - 1.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP3, clamp(col_r_x - 2.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP4, clamp(col_r_x - 3.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP5, clamp(col_r_x - 4.0, 0.0, 1.0));\n  vec3 col = mix(NOKKVI_BG, col_r, smoothstep(0.02, 0.35, lum));\n  col = mix(col, NOKKVI_TEXT, smoothstep(0.85, 1.0, lum) * 0.7);\n  col *= shade;\n  float band = pow(abs(sin((dep + q1) * 4.7123889)), 28.0);\n  col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, q3 * 0.5) * band * (0.2 + 0.7 * q3 + 0.6 * q5);\n  col += NOKKVI_WARM * band * clamp(treb_att - 1.0, 0.0, 1.0) * 0.5;\n  float fog = smoothstep(0.03, 0.30, r0);\n  float fogf = fog * fog;\n  col = mix(NOKKVI_BG, col, fogf);\n  vec2 hu = vec2(a / 6.2831853 + 0.5, dep / 2.0);\n  float hoop = texture(sampler_main, hu).x * step(hu.y, 1.0);\n  col += NOKKVI_ACCENT * GetBlur1(hu).x * step(hu.y, 1.0) * 1.5 * fogf;\n  col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, hoop) * hoop * (2.0 + 0.8 * q3) * fogf;\n  col += NOKKVI_ACCENT * smoothstep(0.035, 0.0, abs(r0 - 0.07 - 0.05 * q3 - 0.04 * q5)) * (0.3 + 0.7 * q3 + 0.6 * q5);\n  col *= 1.0 + 0.4 * q5;\n  col *= 0.85 + 0.15 * smoothstep(0.95, 0.3, r0);\n  ret = col;\n }"
 }

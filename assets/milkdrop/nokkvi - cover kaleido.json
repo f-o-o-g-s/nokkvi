@@ -60,11 +60,23 @@
  "waves": [
   {
    "baseVals": {
-    "enabled": 0
+    "enabled": 1,
+    "samples": 256,
+    "sep": 0,
+    "spectrum": 0,
+    "usedots": 0,
+    "thick": 1,
+    "additive": 1,
+    "scaling": 1.0,
+    "smoothing": 0.3,
+    "r": 0.9,
+    "g": 1.0,
+    "b": 0.0,
+    "a": 0.12
    },
    "init_eqs_eel": "",
-   "frame_eqs_eel": "",
-   "point_eqs_eel": ""
+   "frame_eqs_eel": "a = 0.1 + 0.6 * q9;",
+   "point_eqs_eel": "x = 0.5 + value1 * 1.3;\ny = 0.5 + value2 * 1.3;\n"
   },
   {
    "baseVals": {
@@ -91,9 +103,9 @@
    "point_eqs_eel": ""
   }
  ],
- "init_eqs_eel": "phase = 0; orbit = 0; pulse = 0; pop = 0; speed = 0;",
- "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\nphase = phase + 0.002 + 0.004 * min(bass_att, 2) + 0.01 * q3 + 0.012 * pop;\norbit = orbit + 0.0015 + 0.002 * min(mid_att, 2);\nspeed = speed * 0.9 + 0.1 * (0.2 + 0.4 * min(bass_att, 2) + 1.2 * q3);\nq1 = phase;\nq2 = speed;\nq4 = orbit;",
+ "init_eqs_eel": "phase = 0; orbit = 0; pulse = 0; pop = 0; speed = 0; cool = 0; kicks = 0; q6 = 6;",
+ "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\nphase = phase + 0.002 + 0.004 * min(bass_att, 2) + 0.01 * q3 + 0.012 * pop;\norbit = orbit + 0.0015 + 0.002 * min(mid_att, 2);\nspeed = speed * 0.9 + 0.1 * (0.2 + 0.4 * min(bass_att, 2) + 1.2 * q3);\ncool = max(cool - 1 / max(fps, 1), 0);\nstamp = above(kick, 0.2) * below(cool, 0.001);\ncool = if(stamp, 0.18, cool);\nkicks = kicks + stamp;\nact = floor(kicks / 12) % 4;\nq6 = if(equal(act, 0), 6, if(equal(act, 1), 8, if(equal(act, 2), 5, 4)));\nq1 = phase;\nq2 = speed;\nq4 = orbit;\nq9 = stamp;",
  "pixel_eqs_eel": "",
- "warp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv_orig - 0.5) * s;\n  float zm = 1.012 + 0.02 * q2 + 0.035 * q5;\n  float rt = 0.004 + 0.012 * q3;\n  vec2 c = vec2(p.x * cos(rt) - p.y * sin(rt), p.x * sin(rt) + p.y * cos(rt)) / zm;\n  vec2 src = c / s + 0.5;\n  vec3 m = texture(sampler_main, src).xyz;\n  vec3 b1 = GetBlur1(src);\n  vec3 b2 = GetBlur2(src);\n  float u = m.x + (m.x - b1.x) * 0.5 + (m.x - b2.x) * 0.2;\n  u += (texture(sampler_noise_lq, uv_orig * texsize.xy * 0.4 / 256.0 + rand_frame.xy).x - 0.5) * 0.18;\n  vec2 cc = p * 0.9 + vec2(0.5, 0.5) + 0.2 * vec2(cos(q4), sin(q4 * 0.7));\n  vec2 cov_m = 1.0 - abs(1.0 - mod(cc, 2.0));\n  vec3 cov = texture(sampler_fw_cover, vec2(cov_m.x, 1.0 - cov_m.y)).xyz;\n  float cl = dot(cov, vec3(0.299, 0.587, 0.114));\n  float seed = smoothstep(0.22, 0.05, length(p));\n  u = mix(u, cl, seed * (0.12 + 0.2 * q5));\n  u = clamp(u * 0.93 + 0.035, 0.0, 1.0);\n  ret = vec3(u, 0.0, 0.0);\n }",
- "comp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 k_p = (uv - 0.5) * s;\n  float k_r = length(k_p);\n  float k_seg = 6.2831853 / 6.0;\n  float k_a = mod(atan(k_p.y, k_p.x) + q1, k_seg);\n  k_a = abs(k_a - k_seg * 0.5);\n  vec2 k = vec2(cos(k_a), sin(k_a)) * k_r / (1.0);\n  vec2 ku = k / s + 0.5;\n  vec2 px = texsize.zw * 2.0;\n  float hx = GetBlur1(ku + vec2(px.x, 0.0)).x - GetBlur1(ku - vec2(px.x, 0.0)).x;\n  float hy = GetBlur1(ku + vec2(0.0, px.y)).x - GetBlur1(ku - vec2(0.0, px.y)).x;\n  vec3 n = normalize(vec3(-hx * 6.0, -hy * 6.0, 1.0));\n  vec3 L = normalize(vec3(0.5, 0.6, 0.8));\n  float diff = max(dot(n, L), 0.0);\n  float spc = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 32.0);\n  float lum = texture(sampler_main, ku).x;\n  float hue = clamp(lum * 0.7 + k_r * 0.5, 0.0, 1.0);\n  float body_x = clamp(hue, 0.0, 1.0) * 5.0;\n  vec3 body = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(body_x, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP2, clamp(body_x - 1.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP3, clamp(body_x - 2.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP4, clamp(body_x - 3.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP5, clamp(body_x - 4.0, 0.0, 1.0));\n  vec3 col = mix(NOKKVI_BG, body, smoothstep(0.15, 0.6, lum));\n  col = mix(col, NOKKVI_TEXT, smoothstep(0.9, 1.0, lum) * 0.5);\n  col *= 0.35 + 0.9 * diff;\n  col += NOKKVI_TEXT * spc * (0.35 + 0.5 * q5);\n  col += NOKKVI_HIGHLIGHT * smoothstep(0.012, 0.0, abs(k_r - 0.08 - 0.3 * q3)) * q3 * 0.6;\n  col += NOKKVI_WARM * smoothstep(0.85, 1.0, lum) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.3;\n  col *= 0.75 + 0.25 * smoothstep(0.95, 0.15, k_r);\n  col *= 1.0 + 0.3 * q5;\n  ret = col;\n }"
+ "warp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv_orig - 0.5) * s;\n  float zm = 1.012 + 0.02 * q2 + 0.035 * q5;\n  float rt = 0.004 + 0.012 * q3;\n  vec2 c = vec2(p.x * cos(rt) - p.y * sin(rt), p.x * sin(rt) + p.y * cos(rt)) / zm;\n  vec2 src = c / s + 0.5;\n  vec3 m = texture(sampler_main, src).xyz;\n  vec3 b1 = GetBlur1(src);\n  vec3 b2 = GetBlur2(src);\n  float u = m.x + (m.x - b1.x) * 0.5 + (m.x - b2.x) * 0.2;\n  u += (texture(sampler_noise_lq, uv_orig * texsize.xy * 0.4 / 256.0 + rand_frame.xy).x - 0.5) * 0.18;\n  vec2 cc = p * 0.9 + vec2(0.5, 0.5) + 0.2 * vec2(cos(q4), sin(q4 * 0.7));\n  vec2 cov_m = 1.0 - abs(1.0 - mod(cc, 2.0));\n  vec3 cov = texture(sampler_fw_cover, vec2(cov_m.x, 1.0 - cov_m.y)).xyz;\n  float cl = dot(cov, vec3(0.299, 0.587, 0.114));\n  float seed = smoothstep(0.22, 0.05, length(p));\n  u = mix(u, cl, seed * (0.12 + 0.2 * q5));\n  u = clamp(u * 0.93 + 0.035, 0.0, 1.0);\n  float tint = max(m.y, b1.y * 0.9) * 0.985;\n  ret = vec3(u, tint, 0.0);\n }",
+ "comp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 k_p = (uv - 0.5) * s;\n  float k_r = length(k_p);\n  float k_seg = 6.2831853 / q6;\n  float k_a = mod(atan(k_p.y, k_p.x) + q1, k_seg);\n  k_a = abs(k_a - k_seg * 0.5);\n  vec2 k = vec2(cos(k_a), sin(k_a)) * k_r / (1.0);\n  vec2 ku = k / s + 0.5;\n  vec2 px = texsize.zw * 2.0;\n  float hx = GetBlur1(ku + vec2(px.x, 0.0)).x - GetBlur1(ku - vec2(px.x, 0.0)).x;\n  float hy = GetBlur1(ku + vec2(0.0, px.y)).x - GetBlur1(ku - vec2(0.0, px.y)).x;\n  float edge = smoothstep(0.015, 0.09, length(vec2(hx, hy)));\n  vec3 n = normalize(vec3(-hx * 4.0, -hy * 4.0, 1.0));\n  vec3 L = normalize(vec3(cos(q4), sin(q4), 0.8));\n  float spc = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 24.0);\n  vec3 m = texture(sampler_main, ku).xyz;\n  float lum = m.x;\n  float hue = clamp(lum * 0.55 + k_r * 0.35 + m.y * 0.4, 0.0, 1.0);\n  float glass_x = clamp(hue, 0.0, 1.0) * 5.0;\n  vec3 glass = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(glass_x, 0.0, 1.0));\n  glass = mix(glass, NOKKVI_RAMP2, clamp(glass_x - 1.0, 0.0, 1.0));\n  glass = mix(glass, NOKKVI_RAMP3, clamp(glass_x - 2.0, 0.0, 1.0));\n  glass = mix(glass, NOKKVI_RAMP4, clamp(glass_x - 3.0, 0.0, 1.0));\n  glass = mix(glass, NOKKVI_RAMP5, clamp(glass_x - 4.0, 0.0, 1.0));\n  vec2 p = (uv - 0.5) * s;\n  vec2 lp = 0.35 * vec2(cos(q4 * 0.7), sin(q4 * 0.5));\n  float lamp = 0.55 + 0.7 * exp(-dot(p - lp, p - lp) * 2.5);\n  float transmit = 0.18 + 0.82 * smoothstep(0.1, 0.9, lum);\n  vec3 col = glass * transmit * lamp;\n  col += glass * GetBlur2(ku).x * 0.3;\n  float seam = smoothstep(0.012, 0.0, min(k_a, k_seg * 0.5 - k_a) * k_r) * step(0.03, k_r);\n  float lead = max(edge * 0.85, seam * 0.7);\n  col *= 1.0 - lead;\n  col += NOKKVI_TEXT * spc * (edge * 0.5 + 0.1) * (0.4 + 0.5 * q5);\n  col += NOKKVI_HIGHLIGHT * smoothstep(0.012, 0.0, abs(k_r - 0.08 - 0.3 * q3)) * q3 * 0.6;\n  col += NOKKVI_WARM * smoothstep(0.85, 1.0, lum) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.3;\n  col *= 0.75 + 0.25 * smoothstep(0.95, 0.15, k_r);\n  col *= 1.0 + 0.3 * q5;\n  ret = col;\n }"
 }
