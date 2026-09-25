@@ -21,6 +21,7 @@ use crate::{
     state::{MILKDROP_HISTORY_CAP, MILKDROP_MAX_CONSECUTIVE_FAILURES},
     widgets::visualizer::milkdrop::{
         BuiltPreset, CompiledPreset, GpuHandles, build_renderer, compile_preset,
+        palette::PresetPalette,
     },
 };
 
@@ -138,11 +139,8 @@ impl Nokkvi {
 
     /// Push the settings the library and the render side read on their own.
     fn milkdrop_apply_config(&mut self) {
-        use nokkvi_data::types::visualizer_config::MilkdropPresetSource;
         let cfg = self.milkdrop_config();
-        self.milkdrop
-            .library
-            .set_favorites_only(cfg.preset_source == MilkdropPresetSource::FavoritesOnly);
+        self.milkdrop.library.set_source(cfg.preset_source);
         self.milkdrop
             .shared
             .quality_short_side
@@ -220,6 +218,7 @@ impl Nokkvi {
         self.milkdrop.shared.running.store(false, Ordering::Release);
         self.milkdrop.current = None;
         self.milkdrop.on_screen = None;
+        self.milkdrop.current_themed = false;
         self.milkdrop.build_in_flight = None;
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.next_switch_at = None;
@@ -303,13 +302,17 @@ impl Nokkvi {
         self.milkdrop.build_in_flight = Some(generation);
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.current = Some(name.clone());
+        // Colour nokkvi's presets with the theme showing now.
+        let palette = PresetPalette::from_theme();
+        self.milkdrop.palette_used = Some(palette);
+        self.milkdrop.theme_generation_seen = crate::theme::theme_generation();
 
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
                     let started = Instant::now();
                     let text = source.read().map_err(|e| format!("{name}: {e}"))?;
-                    let preset = compile_preset(name, &text)?;
+                    let preset = compile_preset(name, &text, &palette)?;
                     debug!(
                         preset = %preset.name,
                         ms = started.elapsed().as_millis(),
@@ -336,17 +339,30 @@ impl Nokkvi {
         }
         match result {
             Err(e) => self.milkdrop_failed(&e),
-            Ok(preset) => match self.milkdrop.shared.gpu_handles() {
-                Some(gpu) if self.milkdrop_is_running() => {
-                    self.milkdrop_build_task(gpu, generation, preset)
-                }
-                _ => {
-                    // No device yet, or nobody would see it: the tick builds it
-                    // once `prepare` has run and MilkDrop is running.
-                    self.milkdrop.awaiting_gpu = Some((generation, preset));
-                    Task::none()
-                }
-            },
+            Ok(preset) => {
+                self.milkdrop.current_themed = preset.themed;
+                self.milkdrop_build_or_wait(generation, preset)
+            }
+        }
+    }
+
+    /// Build a compiled preset now, or park it until `prepare` has captured
+    /// the device and MilkDrop is running.
+    fn milkdrop_build_or_wait(
+        &mut self,
+        generation: u64,
+        preset: Arc<CompiledPreset>,
+    ) -> Task<Message> {
+        match self.milkdrop.shared.gpu_handles() {
+            Some(gpu) if self.milkdrop_is_running() => {
+                self.milkdrop_build_task(gpu, generation, preset)
+            }
+            _ => {
+                // No device yet, or nobody would see it: the tick builds it
+                // once `prepare` has run and MilkDrop is running.
+                self.milkdrop.awaiting_gpu = Some((generation, preset));
+                Task::none()
+            }
         }
     }
 
@@ -783,6 +799,27 @@ impl Nokkvi {
         }
 
         let mut tasks = Vec::new();
+
+        // A theme change recolours a themed preset (reload, not a new pick).
+        // The counter also moves on every settings reload, so compare the
+        // actual palette before reloading anything.
+        let theme_generation = crate::theme::theme_generation();
+        if theme_generation != self.milkdrop.theme_generation_seen {
+            self.milkdrop.theme_generation_seen = theme_generation;
+            self.milkdrop.palette_check_pending = true;
+        }
+        if self.milkdrop.palette_check_pending && running && self.milkdrop.build_in_flight.is_none()
+        {
+            self.milkdrop.palette_check_pending = false;
+            if self.milkdrop.current_themed
+                && let Some(name) = self.milkdrop.current.clone()
+                && self.milkdrop.palette_used != Some(PresetPalette::from_theme())
+            {
+                debug!(preset = %name, "milkdrop: theme changed; recolouring");
+                tasks.push(self.milkdrop_load(name));
+            }
+        }
+
         if let Some((generation, preset)) = self.milkdrop.awaiting_gpu.take() {
             match self.milkdrop.shared.gpu_handles() {
                 _ if self.milkdrop.build_in_flight != Some(generation) => {}

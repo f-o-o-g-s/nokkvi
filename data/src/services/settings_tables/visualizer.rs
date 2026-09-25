@@ -1230,7 +1230,7 @@ define_settings! {
             ui_meta: {
                 label: "Presets",
                 category: "MilkDrop",
-                subtitle: Some("all: every preset you have not hidden\nfavorites_only: only the presets you favorited in the panel menu, and all of them while there are none"),
+                subtitle: Some("all: every preset you have not hidden\nfavorites_only: only the presets you favorited in the panel menu\nnokkvi: only nokkvi's own presets, drawn in your theme's colours with the playing cover\nWith none left to draw, every preset is used"),
                 default: crate::types::visualizer_config::VisualizerConfig::default().milkdrop.preset_source.as_wire_str(),
                 options: MilkdropPresetSource::all_wire_strs(),
                 read_field: |d| d.milkdrop_preset_source.as_ref(),

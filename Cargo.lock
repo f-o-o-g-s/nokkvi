@@ -3813,7 +3813,7 @@ dependencies = [
 [[package]]
 name = "particle-audio"
 version = "0.1.0"
-source = "git+https://github.com/f-o-o-g-s/ojodrop?rev=94f1fa5f4456fca40dac2d26a6c5a069fce5038b#94f1fa5f4456fca40dac2d26a6c5a069fce5038b"
+source = "git+https://github.com/f-o-o-g-s/ojodrop?rev=6caf7c75cdbf723416129e09b612eef773638477#6caf7c75cdbf723416129e09b612eef773638477"
 dependencies = [
  "log",
  "realfft",
@@ -3823,7 +3823,7 @@ dependencies = [
 [[package]]
 name = "particle-milkdrop"
 version = "0.1.0"
-source = "git+https://github.com/f-o-o-g-s/ojodrop?rev=94f1fa5f4456fca40dac2d26a6c5a069fce5038b#94f1fa5f4456fca40dac2d26a6c5a069fce5038b"
+source = "git+https://github.com/f-o-o-g-s/ojodrop?rev=6caf7c75cdbf723416129e09b612eef773638477#6caf7c75cdbf723416129e09b612eef773638477"
 dependencies = [
  "bytemuck",
  "image",

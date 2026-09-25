@@ -542,6 +542,8 @@ crate::wire_enum! {
         All = 0 => "all",
         /// Favorited presets only (all of them while there are none).
         FavoritesOnly = 1 => "favorites_only",
+        /// nokkvi's own theme-coloured, cover-aware presets (`nokkvi - …`).
+        Nokkvi = 2 => "nokkvi",
     }
 }
 
@@ -1024,7 +1026,7 @@ mod tests {
         );
         assert_eq!(
             MilkdropPresetSource::all_wire_strs(),
-            ["all", "favorites_only"]
+            ["all", "favorites_only", "nokkvi"]
         );
     }
 

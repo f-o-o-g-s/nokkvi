@@ -114,7 +114,12 @@ fn stale_compiled_is_dropped() {
     assert_eq!(app.milkdrop.generation, 2);
 
     let (name, json) = BUNDLED_MILKDROP_PRESETS[0];
-    let preset = compile_preset(name.to_string(), json).expect("bundled preset compiles");
+    let preset = compile_preset(
+        name.to_string(),
+        json,
+        &crate::widgets::visualizer::milkdrop::palette::PresetPalette::from_theme(),
+    )
+    .expect("bundled preset compiles");
     let toasts = app.toast.toasts.len();
     let _ = app.update(Message::Milkdrop(MilkdropMessage::Compiled {
         generation: 1,
@@ -133,7 +138,12 @@ fn compiled_before_gpu_waits() {
     enter_milkdrop(&mut app);
     let generation = app.milkdrop.generation;
     let (name, json) = BUNDLED_MILKDROP_PRESETS[0];
-    let preset = compile_preset(name.to_string(), json).expect("bundled preset compiles");
+    let preset = compile_preset(
+        name.to_string(),
+        json,
+        &crate::widgets::visualizer::milkdrop::palette::PresetPalette::from_theme(),
+    )
+    .expect("bundled preset compiles");
     let _ = app.update(Message::Milkdrop(MilkdropMessage::Compiled {
         generation,
         result: Ok(std::sync::Arc::new(preset)),
@@ -928,4 +938,62 @@ fn next_while_paused_says_why() {
     let toasts = app.toast.toasts.len();
     control(&mut app, crate::app_message::MilkdropControl::Next);
     assert_eq!(app.toast.toasts.len(), toasts + 1);
+}
+
+// ----------------------------------------------------------------------------
+// nokkvi presets: theme colours
+// ----------------------------------------------------------------------------
+
+#[test]
+fn a_themed_preset_reloads_when_the_palette_changes() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.milkdrop.current_themed = true;
+    tick(&mut app);
+    let name = app.milkdrop.current.clone();
+    let generation = app.milkdrop.generation;
+
+    let was_light = crate::theme::is_light_mode();
+    crate::theme::set_light_mode(!was_light);
+    tick(&mut app);
+    crate::theme::set_light_mode(was_light);
+
+    assert!(
+        app.milkdrop.generation > generation,
+        "reloaded in the new colours"
+    );
+    assert_eq!(app.milkdrop.current, name, "the same preset, recoloured");
+    assert!(
+        app.milkdrop.history.is_empty(),
+        "a recolour is not a new preset"
+    );
+}
+
+#[test]
+fn an_unthemed_preset_ignores_palette_changes() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.milkdrop.current_themed = false;
+    let generation = app.milkdrop.generation;
+    let was_light = crate::theme::is_light_mode();
+    crate::theme::set_light_mode(!was_light);
+    tick(&mut app);
+    crate::theme::set_light_mode(was_light);
+    assert_eq!(app.milkdrop.generation, generation);
+}
+
+#[test]
+fn a_theme_bump_without_a_colour_change_reloads_nothing() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.milkdrop.current_themed = true;
+    tick(&mut app);
+    let generation = app.milkdrop.generation;
+    // A settings reload re-applies the same light mode, bumping the counter.
+    crate::theme::set_light_mode(crate::theme::is_light_mode());
+    tick(&mut app);
+    assert_eq!(app.milkdrop.generation, generation);
 }

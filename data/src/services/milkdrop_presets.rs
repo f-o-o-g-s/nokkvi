@@ -13,6 +13,12 @@ use std::{
 };
 
 use rand::{RngExt, seq::SliceRandom};
+
+pub use crate::types::visualizer_config::MilkdropPresetSource;
+
+/// nokkvi's own presets (theme-coloured, cover-aware) are named with this
+/// prefix; the `nokkvi` preset source draws only from them.
+pub const NOKKVI_PRESET_PREFIX: &str = "nokkvi - ";
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -91,7 +97,7 @@ pub struct PresetLibrary {
     /// Sorted by name; a user file shadows a bundled preset with the same stem.
     entries: Vec<PresetEntry>,
     curation: Curation,
-    favorites_only: bool,
+    source: MilkdropPresetSource,
     /// Names still to be drawn this round, popped from the end.
     bag: Vec<String>,
     /// Presets that failed to load this session: out of the rotation until
@@ -112,7 +118,7 @@ impl PresetLibrary {
             user_dir: user_dir.to_path_buf(),
             entries: Vec::new(),
             curation,
-            favorites_only: false,
+            source: MilkdropPresetSource::All,
             bag: Vec::new(),
             broken: HashSet::new(),
         };
@@ -188,9 +194,10 @@ impl PresetLibrary {
         !self.curation.hidden.contains(name) && !self.broken.contains(name)
     }
 
-    pub fn set_favorites_only(&mut self, favorites_only: bool) {
-        if self.favorites_only != favorites_only {
-            self.favorites_only = favorites_only;
+    /// Which presets the draws come from (the Presets setting).
+    pub fn set_source(&mut self, source: MilkdropPresetSource) {
+        if self.source != source {
+            self.source = source;
             self.bag.clear();
         }
     }
@@ -217,30 +224,40 @@ impl PresetLibrary {
             self.curation.favorites.insert(name.to_string());
             true
         };
-        if self.favorites_only {
+        if self.source == MilkdropPresetSource::FavoritesOnly {
             self.bag.clear();
         }
         now_favorite
     }
 
-    /// Names the next draw may pick: not hidden, and, with favorites only on and
-    /// at least one favorite eligible, favorites only (else all of them).
+    /// Names the next draw may pick: not hidden (nor broken this session),
+    /// narrowed by the source (favorites, or nokkvi's own presets). A source
+    /// with nothing eligible falls back to every drawable preset.
     pub fn eligible(&self) -> Vec<&str> {
         let visible = self
             .entries
             .iter()
             .map(|e| e.name.as_str())
             .filter(|n| self.is_drawable(n));
-        if self.favorites_only {
-            let favorites: Vec<&str> = visible
-                .clone()
-                .filter(|n| self.curation.favorites.contains(*n))
-                .collect();
-            if !favorites.is_empty() {
-                return favorites;
-            }
+        let narrowed: Option<Vec<&str>> = match self.source {
+            MilkdropPresetSource::All => None,
+            MilkdropPresetSource::FavoritesOnly => Some(
+                visible
+                    .clone()
+                    .filter(|n| self.curation.favorites.contains(*n))
+                    .collect(),
+            ),
+            MilkdropPresetSource::Nokkvi => Some(
+                visible
+                    .clone()
+                    .filter(|n| n.starts_with(NOKKVI_PRESET_PREFIX))
+                    .collect(),
+            ),
+        };
+        match narrowed {
+            Some(names) if !names.is_empty() => names,
+            Some(_) | None => visible.collect(),
         }
-        visible.collect()
     }
 
     /// Draw the next preset from the shuffle bag: every eligible preset once
@@ -377,7 +394,7 @@ mod tests {
     #[test]
     fn favorites_only_falls_back_to_all_when_none_eligible() {
         let mut lib = library(&no_user_dir());
-        lib.set_favorites_only(true);
+        lib.set_source(MilkdropPresetSource::FavoritesOnly);
         assert_eq!(lib.eligible(), ["a", "b", "c", "d"], "no favorites → all");
 
         assert!(lib.toggle_favorite("c"));
@@ -395,7 +412,7 @@ mod tests {
             !lib.toggle_favorite("c"),
             "second toggle clears the favorite"
         );
-        lib.set_favorites_only(false);
+        lib.set_source(MilkdropPresetSource::All);
         assert_eq!(lib.eligible(), ["a", "b", "d"]);
     }
 
@@ -420,6 +437,17 @@ mod tests {
             "{}",
             "unshadowed presets stay bundled"
         );
+    }
+
+    #[test]
+    fn nokkvi_source_draws_only_nokkvi_presets_and_falls_back() {
+        static TABLE: &[(&str, &str)] = &[("a", "{}"), ("nokkvi - x", "{}"), ("nokkvi - y", "{}")];
+        let mut lib = PresetLibrary::new(TABLE, &no_user_dir(), Curation::default());
+        lib.set_source(MilkdropPresetSource::Nokkvi);
+        assert_eq!(lib.eligible(), ["nokkvi - x", "nokkvi - y"]);
+        lib.hide("nokkvi - x");
+        lib.hide("nokkvi - y");
+        assert_eq!(lib.eligible(), ["a"], "none left → all");
     }
 
     #[test]

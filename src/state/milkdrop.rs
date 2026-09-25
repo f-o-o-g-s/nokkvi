@@ -53,6 +53,16 @@ pub struct MilkdropState {
     /// Why the curation file could not be read; while set, the file is never
     /// written (it would overwrite the user's hand edits).
     pub curation_error: Option<String>,
+    /// The current preset names theme colours (`NOKKVI_*` tokens), so a
+    /// palette change reloads it.
+    pub current_themed: bool,
+    /// The palette the current load was coloured with.
+    pub palette_used: Option<crate::widgets::visualizer::milkdrop::palette::PresetPalette>,
+    /// `theme_generation()` when the tick last compared palettes.
+    pub theme_generation_seen: u64,
+    /// The theme changed while a themed preset could not reload (paused, off
+    /// the panel); compare once MilkDrop runs again.
+    pub palette_check_pending: bool,
     /// The switch interval the current timer was armed with; a different
     /// live setting re-arms it.
     pub armed_interval: Option<std::time::Duration>,
@@ -78,6 +88,10 @@ impl Default for MilkdropState {
             user_dir: PathBuf::new(),
             curation_path: PathBuf::new(),
             curation_error: None,
+            current_themed: false,
+            palette_used: None,
+            theme_generation_seen: 0,
+            palette_check_pending: false,
             armed_interval: None,
         }
     }

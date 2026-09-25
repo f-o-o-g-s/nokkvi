@@ -10,6 +10,7 @@
 //!   times a second while playing, and blits its retained composite
 //!   ([`program`]).
 
+pub(crate) mod palette;
 mod program;
 pub(crate) mod shared;
 
@@ -82,6 +83,8 @@ pub(crate) fn apply_features(renderer: &mut MilkdropRenderer, f: &particle_audio
 /// for a device.
 pub struct CompiledPreset {
     pub name: String,
+    /// The source names theme colours (`NOKKVI_*`); a palette change reloads it.
+    pub themed: bool,
     pub shaders: MilkShaders,
     pub bodies: CompiledMilkdropShaderBodies,
 }
@@ -95,13 +98,20 @@ impl std::fmt::Debug for CompiledPreset {
     }
 }
 
-/// Parse a Butterchurn JSON preset and translate its shaders. Pure CPU, no
-/// device; run it off the UI thread.
-pub(crate) fn compile_preset(name: String, json: &str) -> Result<CompiledPreset, String> {
-    let shaders = particle_milkdrop::load_preset_str(json, true)?;
+/// Fill a Butterchurn JSON preset's theme placeholders from `palette`, parse
+/// it and translate its shaders. Pure CPU, no device; run it off the UI thread.
+pub(crate) fn compile_preset(
+    name: String,
+    json: &str,
+    palette: &palette::PresetPalette,
+) -> Result<CompiledPreset, String> {
+    let themed = palette::uses_theme(json);
+    let json = palette.substitute(json);
+    let shaders = particle_milkdrop::load_preset_str(&json, true)?;
     let bodies = particle_milkdrop::compile_milkdrop_shader_bodies(&shaders)?;
     Ok(CompiledPreset {
         name,
+        themed,
         shaders,
         bodies,
     })
@@ -234,7 +244,11 @@ mod tests {
         let failures: Vec<String> = BUNDLED_MILKDROP_PRESETS
             .iter()
             .filter_map(|(name, json)| {
-                let preset = match compile_preset((*name).to_string(), json) {
+                let preset = match compile_preset(
+                    (*name).to_string(),
+                    json,
+                    &palette::PresetPalette::from_theme(),
+                ) {
                     Ok(p) => p,
                     Err(e) => return Some(format!("{name}: compile: {e}")),
                 };
@@ -260,9 +274,13 @@ mod tests {
         let failures: Vec<String> = BUNDLED_MILKDROP_PRESETS
             .iter()
             .filter_map(|(name, json)| {
-                compile_preset((*name).to_string(), json)
-                    .err()
-                    .map(|e| format!("{name}: {}", e.lines().next().unwrap_or_default()))
+                compile_preset(
+                    (*name).to_string(),
+                    json,
+                    &palette::PresetPalette::from_theme(),
+                )
+                .err()
+                .map(|e| format!("{name}: {}", e.lines().next().unwrap_or_default()))
             })
             .collect();
         assert!(
