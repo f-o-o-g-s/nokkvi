@@ -129,6 +129,35 @@ impl ArtworkColumnMode {
 }
 
 define_labeled_enum! {
+    /// Whether the now-playing panels (the Queue cover, the Radios panel,
+    /// Theater Mode) draw the cover picture or a black backdrop in its place.
+    /// Hiding keeps the panel's size, the over-cover visualizer and the lyrics.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum ArtworkCover {
+        /// Draw the cover.
+        #[default]
+        Show { label: "Show", wire: "show" },
+        /// Black backdrop in Theater Mode only.
+        HideInTheater { label: "Hide in Theater Mode", wire: "hide_in_theater" },
+        /// Black backdrop on every now-playing panel.
+        HideEverywhere { label: "Hide everywhere", wire: "hide_everywhere" },
+    }
+}
+
+impl ArtworkCover {
+    /// Whether a now-playing panel draws the black backdrop instead of the
+    /// cover; `in_theater` says whether the panel is Theater Mode's.
+    pub fn hides_cover(self, in_theater: bool) -> bool {
+        match self {
+            Self::Show => false,
+            Self::HideInTheater => in_theater,
+            Self::HideEverywhere => true,
+        }
+    }
+}
+
+define_labeled_enum! {
     /// Fit mode for `ArtworkColumnMode::AlwaysStretched` — picks how the image
     /// fills the non-square column. Other modes ignore this value.
     ///
@@ -141,5 +170,29 @@ define_labeled_enum! {
         Cover { label: "Cover", wire: "cover" },
         /// `iced::ContentFit::Fill` — true stretch, distorts album art.
         Fill { label: "Fill", wire: "fill" },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artwork_cover_hides_where_it_says() {
+        assert!(!ArtworkCover::Show.hides_cover(false));
+        assert!(!ArtworkCover::Show.hides_cover(true));
+        assert!(!ArtworkCover::HideInTheater.hides_cover(false));
+        assert!(ArtworkCover::HideInTheater.hides_cover(true));
+        assert!(ArtworkCover::HideEverywhere.hides_cover(false));
+        assert!(ArtworkCover::HideEverywhere.hides_cover(true));
+    }
+
+    #[test]
+    fn artwork_cover_wire_names_are_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&ArtworkCover::HideInTheater).expect("serializes"),
+            "\"hide_in_theater\""
+        );
+        assert_eq!(ArtworkCover::HideEverywhere.as_label(), "Hide everywhere");
     }
 }

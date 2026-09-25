@@ -5,7 +5,7 @@ use crate::{
     types::{
         hotkey_config::HotkeyConfig,
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
+            ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, ScrollbarVisibility, SlotRowHeight,
@@ -369,6 +369,9 @@ crate::player_settings_schema! {
     /// Fit mode used when `artwork_column_mode == AlwaysStretched`.
     #[serde(default)]
     same artwork_column_stretch_fit: ArtworkStretchFit = ArtworkStretchFit::default(),
+    /// Cover picture or black backdrop on the now-playing panels.
+    #[serde(default)]
+    same artwork_cover: ArtworkCover = ArtworkCover::default(),
     /// Artwork column width as a fraction of window width (0.05..=0.80).
     /// Only consulted in always modes.
     #[serde(default = "default_artwork_column_width_pct")]

@@ -10,7 +10,7 @@ use crate::{
     audio::eq::{CustomEqPreset, EQ_BAND_COUNT},
     types::{
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
+            ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, ScrollbarVisibility, SlotRowHeight,
@@ -61,6 +61,8 @@ pub struct TomlSettings {
     pub artwork_column_mode: ArtworkColumnMode,
     #[serde(default)]
     pub artwork_column_stretch_fit: ArtworkStretchFit,
+    #[serde(default)]
+    pub artwork_cover: ArtworkCover,
     #[serde(
         default = "default_artwork_column_width_pct",
         serialize_with = "round_f32"
@@ -326,6 +328,7 @@ impl Default for TomlSettings {
             playlists_artwork_overlay: true,
             artwork_column_mode: ArtworkColumnMode::default(),
             artwork_column_stretch_fit: ArtworkStretchFit::default(),
+            artwork_cover: ArtworkCover::default(),
             artwork_column_width_pct: default_artwork_column_width_pct(),
             artwork_auto_max_pct: default_artwork_auto_max_pct(),
             artwork_vertical_height_pct: default_artwork_vertical_height_pct(),

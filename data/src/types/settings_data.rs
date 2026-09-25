@@ -102,6 +102,8 @@ pub struct InterfaceSettingsData {
     pub artwork_column_mode: Cow<'static, str>,
     /// Artwork column stretch fit label (Cover / Fill) — only consumed when mode is stretched.
     pub artwork_column_stretch_fit: Cow<'static, str>,
+    /// Cover Art label (Show / Hide in Theater Mode / Hide everywhere).
+    pub artwork_cover: Cow<'static, str>,
     /// Auto-mode max artwork fraction of the window's short axis (0.30..=0.70).
     pub artwork_auto_max_pct: f64,
     /// Always-Vertical artwork height as a fraction of window height (0.10..=0.80).
@@ -140,6 +142,7 @@ impl Default for InterfaceSettingsData {
             playlists_artwork_overlay: false,
             artwork_column_mode: Cow::Borrowed("test-default"),
             artwork_column_stretch_fit: Cow::Borrowed("test-default"),
+            artwork_cover: Cow::Borrowed("test-default"),
             artwork_auto_max_pct: 0.0,
             artwork_vertical_height_pct: 0.0,
         }

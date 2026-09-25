@@ -334,6 +334,22 @@ pub(crate) enum ArtworkPlaceholder {
     /// Centered radio-tower glyph on the artwork background — Radios stations
     /// with no logo / not-yet-loaded now-playing art.
     RadioTower,
+    /// Pure black, no glyph: the Cover Art setting's hidden-cover backdrop,
+    /// so the over-cover visualizer stands out.
+    Backdrop,
+}
+
+/// How an artwork panel sizes itself.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum PanelShape {
+    /// The artwork column mode decides: a `min(w, h)` square, or the whole
+    /// rect in the stretched modes.
+    #[default]
+    FollowColumnMode,
+    /// Always the whole rect, as in the stretched modes — Theater Mode with
+    /// the cover hidden, so Bars and Lines span the window and Scope stays a
+    /// centred circle sized by the shorter side.
+    Fill,
 }
 
 impl ArtworkPlaceholder {
@@ -341,8 +357,12 @@ impl ArtworkPlaceholder {
     /// styled square; `RadioTower` centers the tower glyph on it.
     fn content<'a, Message: 'a>(self, width: Length, height: Length) -> Element<'a, Message> {
         use iced::widget::{container, text};
+        let background = match self {
+            ArtworkPlaceholder::Backdrop => Color::BLACK,
+            ArtworkPlaceholder::Blank | ArtworkPlaceholder::RadioTower => artwork_outer_bg(),
+        };
         let base = container::<Message, _, _>(match self {
-            ArtworkPlaceholder::Blank => Element::from(text("")),
+            ArtworkPlaceholder::Blank | ArtworkPlaceholder::Backdrop => Element::from(text("")),
             ArtworkPlaceholder::RadioTower => crate::embedded_svg::svg_widget(
                 crate::widgets::track_info_strip::RADIO_TOWER_ICON_PATH,
             )
@@ -357,8 +377,8 @@ impl ArtworkPlaceholder {
         .height(height)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        .style(|_theme| container::Style {
-            background: Some(artwork_outer_bg().into()),
+        .style(move |_theme| container::Style {
+            background: Some(background.into()),
             ..Default::default()
         });
         base.into()
@@ -384,6 +404,7 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a + 'static>(
         None,
         None,
         ArtworkPlaceholder::Blank,
+        PanelShape::FollowColumnMode,
     )
 }
 
@@ -439,8 +460,9 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
     lyrics: Option<crate::widgets::lyrics_viewport::LyricsPanelData<'a>>,
     lyrics_on_wheel: Option<fn(f32) -> Message>,
     placeholder: ArtworkPlaceholder,
+    shape: PanelShape,
 ) -> Element<'a, Message> {
-    if theme::artwork_column_mode().is_stretched() {
+    if shape == PanelShape::Fill || theme::artwork_column_mode().is_stretched() {
         let fit = match theme::artwork_column_stretch_fit() {
             ArtworkStretchFit::Cover => ContentFit::Cover,
             ArtworkStretchFit::Fill => ContentFit::Fill,
@@ -753,6 +775,7 @@ pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone +
     // now-playing cover.
     lyrics_on_wheel: Option<fn(f32) -> Message>,
     placeholder: ArtworkPlaceholder,
+    shape: PanelShape,
     menu_entries: Vec<crate::widgets::context_menu::PanelMenuEntry<Message>>,
     is_open: bool,
     open_position: Option<iced::Point>,
@@ -765,6 +788,7 @@ pub(crate) fn single_artwork_panel_with_visualizer_and_menu<'a, Message: Clone +
         lyrics,
         lyrics_on_wheel,
         placeholder,
+        shape,
     );
     wrap_with_panel_menu(panel, menu_entries, is_open, open_position, on_open_change)
 }

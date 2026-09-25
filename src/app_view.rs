@@ -915,13 +915,19 @@ impl Nokkvi {
         // theater container does both here.
         let now = std::time::Instant::now();
         let menu_open = self.open_menu.is_some();
+        // A hidden cover makes the whole window the black backdrop.
+        let field = if self.theater_cover_hidden() {
+            iced::Color::BLACK
+        } else {
+            artwork_outer_bg()
+        };
         let panel = container(self.theater_panel())
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center)
-            .style(|_theme| container::Style {
-                background: Some(artwork_outer_bg().into()),
+            .style(move |_theme| container::Style {
+                background: Some(field.into()),
                 ..Default::default()
             });
         // The cursor hides on idle, as in a video player. `mouse_area` applies
@@ -977,16 +983,27 @@ impl Nokkvi {
     fn theater_panel(&self) -> Element<'_, Message> {
         use crate::widgets::{
             base_slot_list_layout::{
-                ArtworkPlaceholder, single_artwork_panel_with_visualizer_and_menu,
+                ArtworkPlaceholder, PanelShape, single_artwork_panel_with_visualizer_and_menu,
             },
             context_menu::{PanelMenuEntry, panel_menu_open_state},
         };
 
         let is_radio = self.active_playback.is_radio();
-        let placeholder = if is_radio {
+        let cover_hidden = self.theater_cover_hidden();
+        let placeholder = if cover_hidden {
+            ArtworkPlaceholder::Backdrop
+        } else if is_radio {
             ArtworkPlaceholder::RadioTower
         } else {
             ArtworkPlaceholder::Blank
+        };
+        // With the cover hidden there is no picture to keep square, so the
+        // panel fills the window: Bars and Lines span its width undistorted
+        // and Scope stays a centred circle sized by the shorter side.
+        let shape = if cover_hidden {
+            PanelShape::Fill
+        } else {
+            PanelShape::FollowColumnMode
         };
         let (over_art, boat) = self.over_cover_overlays();
 
@@ -1013,6 +1030,7 @@ impl Nokkvi {
             self.theater_lyrics_panel_data(),
             Some(|delta| Message::Queue(views::QueueMessage::LyricsWheel(delta))),
             placeholder,
+            shape,
             entries,
             menu_open,
             menu_position,

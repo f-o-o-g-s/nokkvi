@@ -15,7 +15,7 @@ use crate::{
         player_settings::{
             ARTWORK_AUTO_MAX_PCT_DEFAULT, ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN,
             ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
-            ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkStretchFit,
+            ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkCover, ArtworkStretchFit,
             CollapsedAppearance, IconSet, NavDisplayMode, NavLayout, ScrollbarVisibility,
             SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
         },
@@ -451,6 +451,26 @@ define_settings! {
             read: |src, out| out.artwork_column_stretch_fit = src.artwork_column_stretch_fit,
             write: |ps, ts| ts.artwork_column_stretch_fit = ps.artwork_column_stretch_fit,
         },
+        ArtworkCoverSetting {
+            key: "general.artwork_cover",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_artwork_cover(ArtworkCover::from_label(&v)),
+            toml_apply: |ts, p| p.artwork_cover = ts.artwork_cover,
+            read: |src, out| out.artwork_cover = src.artwork_cover,
+            write: |ps, ts| ts.artwork_cover = ps.artwork_cover,
+            ui_meta: {
+                label: "Cover Art",
+                category: "Artwork Column",
+                subtitle: Some(
+                    "Hide swaps the now-playing cover for black so the visualizer stands out; \
+                     lyrics and the visualizer stay. Hide in Theater Mode keeps covers in the \
+                     Queue and Radios columns",
+                ),
+                default: "Show",
+                options: &["Show", "Hide in Theater Mode", "Hide everywhere"],
+                read_field: |d| d.artwork_cover.as_ref(),
+            },
+        },
         ArtworkAutoMaxPctSetting {
             key: "general.artwork_auto_max_pct",
             value_type: Float,
@@ -572,23 +592,25 @@ mod tests {
             playlists_artwork_overlay: true,
             artwork_column_mode: "Auto".into(),
             artwork_column_stretch_fit: "Cover".into(),
+            artwork_cover: "Show".into(),
             artwork_auto_max_pct: 0.40,
             artwork_vertical_height_pct: 0.40,
         }
     }
 
-    /// 19 entries get ui_meta — 5 Layout + 5 Slot List (autohide toggle +
+    /// 20 entries get ui_meta — 5 Layout + 5 Slot List (autohide toggle +
     /// collapsed-appearance + hidden-height + grip + scrollbar visibility) +
-    /// 1 Views + 1 Appearance (icon set) + 4 Metadata Strip + 3 Artwork Column
-    /// (mode dropdown + auto-max-pct slider + vertical-height slider). The
+    /// 1 Views + 1 Appearance (icon set) + 4 Metadata Strip + 4 Artwork Column
+    /// (mode dropdown + cover art dropdown + auto-max-pct slider +
+    /// vertical-height slider). The
     /// mini-player show-volume/show-modes toggles and the 8 ToggleSet sub-keys
     /// (`strip_show_*`, `*_artwork_overlay`) plus the conditional
     /// `artwork_column_stretch_fit` stay hand-written.
     #[test]
-    fn build_interface_tab_settings_items_emits_nineteen_rows() {
+    fn build_interface_tab_settings_items_emits_twenty_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 19);
+        assert_eq!(entries.len(), 20);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -765,6 +787,16 @@ mod tests {
     }
 
     #[test]
+    fn apply_toml_copies_artwork_cover() {
+        use crate::types::player_settings::ArtworkCover;
+        let mut ts = TomlSettings::default();
+        ts.artwork_cover = ArtworkCover::HideInTheater;
+        let mut p = PersistedPlayerSettings::default();
+        apply_toml_interface_tab(&ts, &mut p);
+        assert_eq!(p.artwork_cover, ArtworkCover::HideInTheater);
+    }
+
+    #[test]
     fn tab_interface_contains_recognizes_declared_keys() {
         assert!(tab_interface_contains("general.nav_layout"));
         assert!(tab_interface_contains("general.strip_show_title"));
@@ -781,13 +813,14 @@ mod tests {
         assert!(keys.contains(&"general.playlists_artwork_overlay"));
         assert!(keys.contains(&"general.artwork_auto_max_pct"));
         assert!(keys.contains(&"general.artwork_vertical_height_pct"));
+        assert!(keys.contains(&"general.artwork_cover"));
         assert!(keys.contains(&"general.autohide_toolbar"));
         assert!(keys.contains(&"general.autohide_toolbar_height"));
         assert!(keys.contains(&"general.autohide_toolbar_grip"));
         assert!(keys.contains(&"general.autohide_collapsed_appearance"));
         assert!(keys.contains(&"general.scrollbar_visibility"));
         assert!(keys.contains(&"general.icon_set"));
-        assert_eq!(keys.len(), 30);
+        assert_eq!(keys.len(), 31);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated
@@ -909,6 +942,7 @@ mod tests {
             playlists_artwork_overlay: live.playlists_artwork_overlay,
             artwork_column_mode: live.artwork_column_mode.as_label().into(),
             artwork_column_stretch_fit: live.artwork_column_stretch_fit.as_label().into(),
+            artwork_cover: live.artwork_cover.as_label().into(),
             artwork_auto_max_pct: f64::from(live.artwork_auto_max_pct),
             artwork_vertical_height_pct: f64::from(live.artwork_vertical_height_pct),
         };

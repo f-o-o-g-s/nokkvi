@@ -10,8 +10,8 @@ use crate::{
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode, EnterBehavior,
-            LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
+            ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
+            EnterBehavior, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TrackInfoDisplay,
             VolumeNormalizationMode,
         },
@@ -733,6 +733,11 @@ impl SettingsManager {
 
     pub fn set_artwork_column_stretch_fit(&mut self, fit: ArtworkStretchFit) -> Result<()> {
         self.settings.player.artwork_column_stretch_fit = fit;
+        self.save()
+    }
+
+    pub fn set_artwork_cover(&mut self, cover: ArtworkCover) -> Result<()> {
+        self.settings.player.artwork_cover = cover;
         self.save()
     }
 
@@ -1588,6 +1593,7 @@ mod sentinel_roundtrip_tests {
             // Artwork column layout
             artwork_column_mode: ArtworkColumnMode::AlwaysStretched, // default Auto
             artwork_column_stretch_fit: ArtworkStretchFit::Fill,     // default Cover
+            artwork_cover: ArtworkCover::HideEverywhere,             // default Show
             artwork_column_width_pct: 0.6543,
             artwork_auto_max_pct: 0.5234,
             artwork_vertical_height_pct: 0.6789,

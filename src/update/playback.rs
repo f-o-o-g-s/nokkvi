@@ -2455,6 +2455,7 @@ impl Nokkvi {
         // Apply artwork column layout settings from persisted settings
         crate::theme::set_artwork_column_mode(settings.artwork_column_mode);
         crate::theme::set_artwork_column_stretch_fit(settings.artwork_column_stretch_fit);
+        crate::theme::set_artwork_cover(settings.artwork_cover);
         crate::theme::set_artwork_column_width_pct(settings.artwork_column_width_pct);
         crate::theme::set_artwork_auto_max_pct(settings.artwork_auto_max_pct);
         crate::theme::set_artwork_vertical_height_pct(settings.artwork_vertical_height_pct);

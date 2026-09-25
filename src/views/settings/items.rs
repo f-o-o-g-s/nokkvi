@@ -606,6 +606,7 @@ mod tests {
                 "general.strip_click_action",
                 "__toggle_artwork_overlays",
                 "general.artwork_column_mode",
+                "general.artwork_cover",
                 "general.artwork_auto_max_pct",
                 "general.artwork_vertical_height_pct",
             ],

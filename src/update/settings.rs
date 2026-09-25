@@ -90,6 +90,7 @@ impl Nokkvi {
             artwork_column_stretch_fit: crate::theme::artwork_column_stretch_fit()
                 .as_label()
                 .into(),
+            artwork_cover: crate::theme::artwork_cover().as_label().into(),
             artwork_auto_max_pct: f64::from(crate::theme::artwork_auto_max_pct()),
             artwork_vertical_height_pct: f64::from(crate::theme::artwork_vertical_height_pct()),
         };

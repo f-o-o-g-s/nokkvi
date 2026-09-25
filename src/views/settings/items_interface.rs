@@ -1,10 +1,11 @@
 //! Interface tab setting entries — navigation, lists, player bar, font, and
 //! metadata strip.
 //!
-//! 19 rows come from `define_settings!` via `build_interface_tab_settings_items`
+//! 20 rows come from `define_settings!` via `build_interface_tab_settings_items`
 //! (2 Navigation + 7 Slot List + 1 Player Bar + 1 Font & Icons (`icon_set`) +
-//! 5 Metadata Strip + 3 Artwork Column: mode dropdown, `artwork_auto_max_pct`
-//! slider, `artwork_vertical_height_pct` slider). The Slot List count includes the
+//! 5 Metadata Strip + 4 Artwork Column: mode dropdown, `artwork_cover`
+//! dropdown, `artwork_auto_max_pct` slider, `artwork_vertical_height_pct`
+//! slider). The Slot List count includes the
 //! `scrollbar_visibility` dropdown plus the three auto-hide sub-controls
 //! (`autohide_collapsed_appearance` / `autohide_toolbar_height` /
 //! `autohide_toolbar_grip`), which are inserted beneath the Auto-hide Toolbar
@@ -164,6 +165,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             icon: ARTWORK_COL,
         },
         macro_rows.take("general.artwork_column_mode"),
+        macro_rows.take("general.artwork_cover"),
         macro_rows.take("general.artwork_auto_max_pct"),
         macro_rows.take("general.artwork_vertical_height_pct"),
     ];

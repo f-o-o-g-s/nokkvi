@@ -602,16 +602,23 @@ impl RadiosPage {
                 data.open_menu,
                 RadiosMessage::SetOpenMenu,
             );
+        // The Cover Art setting swaps the picture for a black backdrop.
+        let cover_hidden = crate::theme::artwork_cover().hides_cover(false);
         let artwork_content = Some(
             crate::widgets::base_slot_list_layout::single_artwork_panel_with_visualizer_and_menu(
-                panel_handle,
+                panel_handle.filter(|_| !cover_hidden),
                 over_art_visualizer,
                 over_art_boat,
                 // Lyrics are Queue-only (ICY stream titles starve the matcher),
                 // so there is no plain sheet here and no wheel to capture.
                 None,
                 None,
-                crate::widgets::base_slot_list_layout::ArtworkPlaceholder::RadioTower,
+                if cover_hidden {
+                    crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Backdrop
+                } else {
+                    crate::widgets::base_slot_list_layout::ArtworkPlaceholder::RadioTower
+                },
+                crate::widgets::base_slot_list_layout::PanelShape::FollowColumnMode,
                 panel_menu_entries,
                 menu_open,
                 menu_position,

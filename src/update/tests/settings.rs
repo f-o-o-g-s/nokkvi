@@ -351,6 +351,7 @@ fn player_settings_loaded_mirrors_all_theme_atomics() {
     let prior_playlists_overlay = crate::theme::playlists_artwork_overlay();
     let prior_artwork_column_mode = crate::theme::artwork_column_mode();
     let prior_artwork_column_stretch_fit = crate::theme::artwork_column_stretch_fit();
+    let prior_artwork_cover = crate::theme::artwork_cover();
     let prior_artwork_column_width_pct = crate::theme::artwork_column_width_pct();
     let prior_artwork_auto_max_pct = crate::theme::artwork_auto_max_pct();
     let prior_artwork_vertical_height_pct = crate::theme::artwork_vertical_height_pct();
@@ -382,6 +383,7 @@ fn player_settings_loaded_mirrors_all_theme_atomics() {
     crate::theme::set_playlists_artwork_overlay(false);
     crate::theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
     crate::theme::set_artwork_column_stretch_fit(ArtworkStretchFit::Cover);
+    crate::theme::set_artwork_cover(nokkvi_data::types::player_settings::ArtworkCover::Show);
     crate::theme::set_artwork_column_width_pct(0.99);
     crate::theme::set_artwork_auto_max_pct(0.99);
     crate::theme::set_artwork_vertical_height_pct(0.99);
@@ -413,6 +415,7 @@ fn player_settings_loaded_mirrors_all_theme_atomics() {
         playlists_artwork_overlay: true,
         artwork_column_mode: ArtworkColumnMode::AlwaysVerticalStretched,
         artwork_column_stretch_fit: ArtworkStretchFit::Fill,
+        artwork_cover: nokkvi_data::types::player_settings::ArtworkCover::HideEverywhere,
         artwork_column_width_pct: 0.37,
         artwork_auto_max_pct: 0.55,
         artwork_vertical_height_pct: 0.42,
@@ -541,6 +544,11 @@ fn player_settings_loaded_mirrors_all_theme_atomics() {
         "artwork_column_stretch_fit not mirrored (missing set_artwork_column_stretch_fit)"
     );
     assert_eq!(
+        crate::theme::artwork_cover(),
+        settings.artwork_cover,
+        "artwork_cover not mirrored (missing set_artwork_cover)"
+    );
+    assert_eq!(
         crate::theme::artwork_column_width_pct(),
         settings.artwork_column_width_pct,
         "artwork_column_width_pct not mirrored (missing set_artwork_column_width_pct)"
@@ -580,6 +588,7 @@ fn player_settings_loaded_mirrors_all_theme_atomics() {
     crate::theme::set_playlists_artwork_overlay(prior_playlists_overlay);
     crate::theme::set_artwork_column_mode(prior_artwork_column_mode);
     crate::theme::set_artwork_column_stretch_fit(prior_artwork_column_stretch_fit);
+    crate::theme::set_artwork_cover(prior_artwork_cover);
     crate::theme::set_artwork_column_width_pct(prior_artwork_column_width_pct);
     crate::theme::set_artwork_auto_max_pct(prior_artwork_auto_max_pct);
     crate::theme::set_artwork_vertical_height_pct(prior_artwork_vertical_height_pct);

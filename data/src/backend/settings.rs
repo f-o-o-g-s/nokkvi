@@ -20,7 +20,7 @@ use crate::{
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
-            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
+            ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, LibraryPageSize,
             LivePlayerSettings, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
@@ -256,6 +256,7 @@ impl SettingsService {
     // -- Artwork column (slot list) --
     delegate_setter!(set_artwork_column_mode, ArtworkColumnMode);
     delegate_setter!(set_artwork_column_stretch_fit, ArtworkStretchFit);
+    delegate_setter!(set_artwork_cover, ArtworkCover);
     delegate_setter!(
         /// Set the artwork column width fraction (0.05..=0.80)
         set_artwork_column_width_pct,

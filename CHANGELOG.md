@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - In Theater Mode the player bar slides away after 2.5 idle seconds and slides back on any mouse or key activity.
 - In Theater Mode the mouse cursor hides after 2.5 idle seconds, like in a video player.
 - In Theater Mode the lyrics grow with the window, up to two and a half times their Queue size.
+- A Cover Art setting can swap the now-playing cover for a black backdrop, everywhere or only in Theater Mode.
+- With the cover hidden in Theater Mode, the visualizer spans the whole window instead of a centered square.
 
 ### Changed
 

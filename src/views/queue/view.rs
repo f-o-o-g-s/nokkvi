@@ -1099,8 +1099,11 @@ impl QueuePage {
         );
         let lyrics_layer = data.lyrics.filter(|_| cover_is_now_playing);
 
+        // The Cover Art setting swaps the picture for a black backdrop; the
+        // lyrics and visualizer gates above are unaffected.
+        let cover_hidden = crate::theme::artwork_cover().hides_cover(false);
         let artwork_content = Some(single_artwork_panel_with_visualizer_and_menu(
-            center_artwork_handle,
+            center_artwork_handle.filter(|_| !cover_hidden),
             over_art_overlay,
             over_art_boat,
             // Lyrics layer: haloed text topmost, its scrim slotted BELOW the
@@ -1110,7 +1113,12 @@ impl QueuePage {
             // over a synced sheet and over the empty state, so right-click and
             // left-click keep reaching the panel beneath either way.
             Some(QueueMessage::LyricsWheel),
-            crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Blank,
+            if cover_hidden {
+                crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Backdrop
+            } else {
+                crate::widgets::base_slot_list_layout::ArtworkPlaceholder::Blank
+            },
+            crate::widgets::base_slot_list_layout::PanelShape::FollowColumnMode,
             panel_menu_entries,
             artwork_menu_open,
             artwork_menu_position,

@@ -958,3 +958,41 @@ fn theater_lyrics_fit_the_panel_but_queue_lyrics_do_not() {
             .fit_to_panel
     );
 }
+
+mod cover_art {
+    use nokkvi_data::types::player_settings::ArtworkCover;
+
+    use super::{byte_handle, home_app};
+    use crate::test_helpers::make_queue_song;
+
+    /// Seed a playing queue track whose large art is cached.
+    fn seeded() -> crate::Nokkvi {
+        let mut app = home_app();
+        app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
+        app.scrobble.current_song_id = Some("s1".to_string());
+        app.artwork
+            .large_artwork
+            .put("album_s1".to_string(), byte_handle(1));
+        app
+    }
+
+    #[test]
+    fn hidden_cover_blacks_out_and_fills_the_theater_panel() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let prior = crate::theme::artwork_cover();
+        let app = seeded();
+
+        crate::theme::set_artwork_cover(ArtworkCover::Show);
+        assert!(!app.theater_cover_hidden());
+        assert!(app.theater_now_playing_cover().is_some());
+
+        crate::theme::set_artwork_cover(ArtworkCover::HideInTheater);
+        assert!(app.theater_cover_hidden(), "theater hides the cover");
+        assert!(app.theater_now_playing_cover().is_none());
+
+        crate::theme::set_artwork_cover(ArtworkCover::HideEverywhere);
+        assert!(app.theater_cover_hidden());
+
+        crate::theme::set_artwork_cover(prior);
+    }
+}
