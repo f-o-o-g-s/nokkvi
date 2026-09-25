@@ -942,18 +942,20 @@ impl Nokkvi {
         // same squash), so `OverflowPin` lays the bar out at full size and
         // moves it.
         //
-        // `on_move` as well as `on_enter`: after a refocus with the cursor
-        // parked on the bar, `on_enter` never re-fires (the `mouse_area` kept
-        // its own hover flag). `Idle` makes the bar opaque to the pointer, so
-        // a right-click on it never reaches the panel's menu beneath. Hidden
-        // at offset 1.0 the bar sits wholly below the window, so the hover
-        // cannot strand on hide.
+        // No `on_move`: `mouse_area` publishes it whenever its BOUNDS change
+        // under a parked cursor, so a sliding bar would publish every frame,
+        // each message would move the bar again, and iced would loop its
+        // redraw ("More than 3 consecutive RedrawRequested events produced
+        // layout invalidation"). Enter / exit suffice because the bar really
+        // leaves the window while unfocused: its exit and re-entry fire as it
+        // slides out and back in under a parked cursor. `Idle` makes the bar
+        // opaque to the pointer, so a right-click on it never reaches the
+        // panel's menu beneath.
         let chrome_h = widgets::player_bar::player_bar_height();
         let bar = iced::widget::mouse_area(player_bar)
             .on_enter(Message::Theater(
                 crate::app_message::TheaterMessage::BarHover(true),
             ))
-            .on_move(|_| Message::Theater(crate::app_message::TheaterMessage::BarHover(true)))
             .on_exit(Message::Theater(
                 crate::app_message::TheaterMessage::BarHover(false),
             ))
