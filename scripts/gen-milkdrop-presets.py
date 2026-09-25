@@ -107,6 +107,21 @@ presets = {}
 # row, which the comp wraps around the walls: a squiggly hoop that flies
 # past, lighting the wall around it. (The previous preset's picture is wiped
 # from the buffer on the first frames, since it would read as hoops.)
+# Seams: the walls tile the cover MIRRORED in both directions, so no cover
+# edge ever meets its opposite edge. atan's jump behind the viewer would
+# still make the GPU pick the smallest mip along one ray (a line), so every
+# angular lookup is done twice, once with the jump on the left and once on
+# the right, and blended by side: each copy's jump sits where its weight is 0.
+def tunnel_wall(sfx, ang):
+    return f"""
+  vec2 t{sfx} = vec2({ang} / 6.2831853 * 2.0 + q2 + 0.06 * dep, dep + q1);
+  vec2 m{sfx} = 1.0 - abs(1.0 - mod(t{sfx}, 2.0));
+  vec2 ma{sfx} = 1.0 - abs(1.0 - mod(t{sfx} + vec2(0.012, 0.0), 2.0));
+  vec2 md{sfx} = 1.0 - abs(1.0 - mod(t{sfx} + vec2(0.0, 0.02), 2.0));
+  vec3 w{sfx} = vec3(dot(texture(sampler_fw_cover, vec2(m{sfx}.x, 1.0 - m{sfx}.y)).xyz, {LUM}),
+                     dot(texture(sampler_fw_cover, vec2(ma{sfx}.x, 1.0 - ma{sfx}.y)).xyz, {LUM}),
+                     dot(texture(sampler_fw_cover, vec2(md{sfx}.x, 1.0 - md{sfx}.y)).xyz, {LUM}));
+"""
 TUNNEL_V = "2.0"
 TUNNEL_WAVE = wave_def(
     {"samples": 400, "scaling": 0.6, "smoothing": 0.5, "r": 1.0, "g": 0.0, "b": 0.0, "a": 0.9},
@@ -129,10 +144,13 @@ presets["nokkvi - cover tunnel"] = preset(
   float r = r0 * (1.0 + 0.07 * sin(a * 3.0 + q1 * 1.7) * clamp(mid_att, 0.0, 2.0));
   r *= 1.0 + 0.10 * q3 + 0.08 * q5;
   float dep = 0.26 / r;
-  vec2 t = vec2(a / 6.2831853 * 2.0 + q2 + 0.06 * dep, dep + q1);
-  float cl = dot(texture(sampler_fw_cover, vec2(t.x, -t.y)).xyz, {LUM});
-  float ca = dot(texture(sampler_fw_cover, vec2(t.x + 0.012, -t.y)).xyz, {LUM});
-  float cd = dot(texture(sampler_fw_cover, vec2(t.x, -t.y - 0.02)).xyz, {LUM});
+  float aR = atan(-p.y, -p.x) + 3.14159265;
+  float side = smoothstep(0.03, -0.03, p.x);
+""" + tunnel_wall("L", "a") + tunnel_wall("R", "aR") + f"""
+  vec3 wall = mix(wL, wR, side);
+  float cl = wall.x;
+  float ca = wall.y;
+  float cd = wall.z;
   vec3 wn = normalize(vec3((cl - ca) * 5.0, (cl - cd) * 5.0, 1.0));
   vec3 wl = normalize(vec3(0.3, -0.7, 0.65));
   float shade = 0.45 + 0.75 * max(dot(wn, wl), 0.0);
@@ -146,7 +164,8 @@ presets["nokkvi - cover tunnel"] = preset(
   float fogf = fog * fog;
   col = mix(NOKKVI_BG, col, fogf);
   vec2 hu = vec2(a / 6.2831853 + 0.5, dep / {TUNNEL_V});
-  float hoop = texture(sampler_main, hu).x * step(hu.y, 1.0);
+  vec2 huR = vec2(aR / 6.2831853 - 0.5, hu.y);
+  float hoop = mix(texture(sampler_fw_main, hu).x, texture(sampler_fw_main, huR).x, side) * step(hu.y, 1.0);
   col += NOKKVI_ACCENT * GetBlur1(hu).x * step(hu.y, 1.0) * 1.5 * fogf;
   col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, hoop) * hoop * (2.0 + 0.8 * q3) * fogf;
   col += NOKKVI_ACCENT * smoothstep(0.035, 0.0, abs(r0 - 0.07 - 0.05 * q3 - 0.04 * q5)) * (0.3 + 0.7 * q3 + 0.6 * q5);
