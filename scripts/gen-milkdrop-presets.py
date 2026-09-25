@@ -41,7 +41,14 @@ def cover(v, c, sampler="sampler_fw_cover"):
   vec3 {v} = texture({sampler}, vec2({v}_m.x, 1.0 - {v}_m.y)).xyz;
 '''
 
+def strip_comments(shader):
+    """The engine's shader preprocessor does not understand `//` comments (the
+    converted pack has none), so drop them from the generated text."""
+    import re
+    return "\n".join(l for l in (re.sub(r"\s*//.*$", "", l) for l in shader.split("\n")) if l.strip())
+
 def preset(base, warp, comp, init='', frame=''):
+    warp, comp = strip_comments(warp), strip_comments(comp)
     b = {"gammaadj": 1.0, "decay": 0.98, "echo_zoom": 1.0, "echo_alpha": 0.0,
          "wave_mode": 0, "additivewave": 1, "wave_a": 0.0, "wave_scale": 0.8,
          "wave_smoothing": 0.7, "zoom": 1.0, "rot": 0.0, "warp": 0.0,
@@ -200,51 +207,80 @@ presets["nokkvi - cover ripple"] = preset(
     init="pulse = 0; a1 = 9; a2 = 9; a3 = 9; slot = 0; cool = 0; drift = 0; x1 = 0; y1 = 0; x2 = 0; y2 = 0; x3 = 0; y3 = 0;",
     frame=ripple_frame)
 
-# Orb: the cover wrapped on a spinning, lit sphere; kicks send rings outward.
-orb_r = "float R = 0.31 + 0.035 * q3 + 0.01 * clamp(bass_att, 0.0, 2.0);"
+# Orb: the cover on a spinning, lit sphere that sheds its colours as paint:
+# a thin rim feeds the feedback, which curls away through a noise flow field
+# (sharpened against its blur so strokes stay crisp), and the sphere's edge
+# melts into it. Kicks shed more paint and swell the orb.
+orb_r = "float R = 0.26 + 0.03 * q3 + 0.01 * clamp(bass_att, 0.0, 2.0);"
+ORB_SPHERE = """
+    vec3 n = vec3(p.x, -p.y, sqrt(max(R * R - d2, 0.0))) / R;
+    float ct = cos(0.35); float st = sin(0.35);
+    vec3 nt = vec3(n.x, n.y * ct - n.z * st, n.y * st + n.z * ct);
+    float cs = cos(q1); float sn = sin(q1);
+    vec3 m = vec3(nt.x * cs + nt.z * sn, nt.y, -nt.x * sn + nt.z * cs);
+    float lon = atan(m.x, m.z);
+    float lat = asin(clamp(m.y, -1.0, 1.0));
+    vec3 cov = texture(sampler_fw_cover, vec2(lon / 3.14159265 + 0.5, 0.5 + lat / 3.14159265)).xyz;
+"""
 presets["nokkvi - cover orb"] = preset(
-    {"zoom": 1.025, "rot": 0.004, "decay": 1.0},
-    " shader_body {\n" + HEAD + f"""
+    {"zoom": 1.0, "rot": 0.0, "decay": 1.0},
+    "uniform sampler2D sampler_fw_cover;\n shader_body {\n" + HEAD + f"""
   {orb_r}
   vec2 p = (uv_orig - 0.5) * s;
   float d = length(p);
-  vec3 fb = texture(sampler_main, uv).xyz * 0.925 - 0.003;
-  float ring = smoothstep(0.008, 0.0, abs(d - R - 0.006));
-  fb += NOKKVI_ACCENT * ring * (0.05 + 0.75 * q3);
-  ret = max(fb, vec3(0.0));
+  // Flow: two octaves of noise steer the paint; a gentle swirl around the orb
+  // and an outward drift carry it away from the source.
+  vec2 nuv = uv_orig * 0.45 + vec2(q2 * 0.02, -q2 * 0.013);
+  float flow_ang = (texture(sampler_noise_hq, nuv).x + 0.5 * texture(sampler_noise_hq, nuv * 2.1 + 0.3).x) * 9.0;
+  vec2 flow = vec2(cos(flow_ang), sin(flow_ang)) * (0.0026 + 0.0026 * clamp(mid_att, 0.0, 2.0));
+  vec2 swirl = vec2(-p.y, p.x) / max(d, 0.08) * 0.0018;
+  vec2 outward = p / max(d, 0.05) * (0.0008 + 0.004 * q3);
+  vec2 src = uv - (flow + swirl + outward) / s;
+  vec3 fb = texture(sampler_main, src).xyz;
+  // Paint diffuses a little as it travels (soft, blended strokes), then fades.
+  fb = mix(fb, GetBlur1(src), 0.1);
+  fb = fb * 0.992 - 0.001;
+  // The rim sheds the cover's colours into the flow.
+  float d2 = dot(p, p);
+  float band = smoothstep(0.05, 0.0, abs(d - R * 0.96));
+  if (d < R) {{
+""" + ORB_SPHERE + f"""
+    fb = mix(fb, cov, band * (0.12 + 0.4 * q3));
+  }}
+  ret = clamp(fb, 0.0, 1.0);
  }}""",
     "uniform sampler2D sampler_fw_cover;\n shader_body {\n" + HEAD + f"""
   {orb_r}
   vec2 p = (uv - 0.5) * s;
   float d2 = dot(p, p);
-  vec3 trail = texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.9;
-  float tl = clamp(dot(trail, {LUM}) * 1.4, 0.0, 1.0);
-""" + tone("bg", "tl") + f"""
-  vec3 col = bg;
-  float edge = smoothstep(R * R, (R - 0.004) * (R - 0.004), d2);
-  if (d2 < R * R) {{
-    vec3 n = vec3(p.x, -p.y, sqrt(max(R * R - d2, 0.0))) / R;
-    float ct = cos(0.35); float st = sin(0.35);
-    n = vec3(n.x, n.y * ct - n.z * st, n.y * st + n.z * ct);
-    float cs = cos(q1); float sn = sin(q1);
-    vec3 m = vec3(n.x * cs + n.z * sn, n.y, -n.x * sn + n.z * cs);
-    float lon = atan(m.x, m.z);
-    float lat = asin(clamp(m.y, -1.0, 1.0));
-    vec3 cov = texture(sampler_fw_cover, vec2(lon / 3.14159265 + 0.5, 0.5 + lat / 3.14159265)).xyz;
+  float d = sqrt(d2);
+  // The paint field: the cover's own colours, sunk towards the theme's
+  // background where thin and lifted by the theme's highlight where dense.
+  vec3 paint = texture(sampler_main, uv).xyz;
+  vec3 halo = GetBlur2(uv);
+  float pl = dot(paint, {LUM});
+  vec3 col = mix(NOKKVI_BG, paint, smoothstep(0.0, 0.25, pl + 0.15));
+  col += NOKKVI_HIGHLIGHT * dot(halo, {LUM}) * 0.25;
+  // A wobbling edge, so the orb melts into its paint.
+  float wob = (texture(sampler_noise_hq, p * 0.7 + q2 * 0.006).x - 0.5) * 0.022;
+  float Rw = R + wob;
+  if (d < Rw) {{
+""" + ORB_SPHERE + f"""
     vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
-    vec3 nv = vec3(p.x, -p.y, sqrt(max(R * R - d2, 0.0))) / R;
-    float diff = max(dot(nv, L), 0.0);
-    float spec = pow(max(dot(reflect(-L, nv), vec3(0.0, 0.0, 1.0)), 0.0), 28.0);
-    float rim = pow(1.0 - nv.z, 3.0);
-    vec3 lit = cov * (0.22 + 0.9 * diff) + NOKKVI_TEXT * spec * 0.55;
-    lit += NOKKVI_HIGHLIGHT * rim * (0.5 + 0.8 * q3);
-    col = mix(bg, lit, edge);
+    float diff = max(dot(n, L), 0.0);
+    float spec = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 28.0);
+    float rim = pow(1.0 - n.z, 3.0);
+    vec3 lit = cov * (0.25 + 0.85 * diff) + NOKKVI_TEXT * spec * 0.5;
+    lit += NOKKVI_HIGHLIGHT * rim * (0.35 + 0.6 * q3);
+    float edge = smoothstep(Rw, Rw - 0.02, d);
+    col = mix(col, lit, edge);
   }}
-  col += NOKKVI_WARM * smoothstep(0.02, 0.0, abs(sqrt(d2) - R)) * clamp(treb_att - 1.0, 0.0, 1.0) * 0.4;
+  col += NOKKVI_WARM * smoothstep(0.02, 0.0, abs(d - R)) * clamp(treb_att - 1.0, 0.0, 1.0) * 0.3;
   ret = col;
  }}""",
-    init="pulse = 0; spin = 0;",
-    frame=PULSE + "spin = spin + 0.006 + 0.008 * min(mid_att, 2) + 0.03 * q3;\nq1 = spin;")
+    init="pulse = 0; spin = 0; drift = 0;",
+    frame=PULSE + "spin = spin + 0.005 + 0.006 * min(mid_att, 2) + 0.02 * q3;\n"
+          "drift = drift + 0.01 + 0.02 * min(bass_att, 2);\nq1 = spin;\nq2 = drift;")
 
 # Starfield: 3D star layers flown through with parallax, speed-stretched
 # streaks, a noise nebula in the theme's gradient, hyperspace surges on kicks.
