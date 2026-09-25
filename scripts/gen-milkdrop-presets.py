@@ -997,6 +997,61 @@ presets["nokkvi - fractal zoom"] = preset(
           "q8 = 0.2 + 0.06 * min(kick / 0.5, 1);\nq9 = stamp;",
     waves=[FZ_WAVE])
 
+# Ports -------------------------------------------------------------------
+# "Flexi, martin + geiss - dedicated to the sherwin maxawow" is the preset
+# Butterchurn's README loads as its example, the first one most people see,
+# and it has many remixes. Its look: three whirlpools (bass, mid, treble)
+# stir the picture, the warp smears it along its own colour (painterly
+# strokes), and the comp embosses it with glinting ridges; the paint comes
+# from an inner border whose colour cycles through a rainbow. The ports keep
+# all of that and change only where the paint comes from: the theme's
+# gradient (the border walks along it, the wave takes the far end), or the
+# playing cover (its colours bleed in from the screen edges while the border
+# is off). The border also pulses between the theme's background and the
+# gradient, since a theme gradient alone has far less brightness range than
+# the original's rainbow and the relief washed out. The ridges glint in the theme's highlight instead of white.
+MAXAWOW = "Flexi, martin + geiss - dedicated to the sherwin maxawow"
+def ramp_eel(v, t):
+    """EEL: r/g/b of the theme gradient at `t` (0..1) into v_r, v_g, v_b,
+    as a sum of clamped linear segments."""
+    out = f"{v}_x = min(max({t}, 0), 1) * 5;\n"
+    for ch in "RGB":
+        terms = [f"NOKKVI_RAMP0_{ch}"]
+        for k in range(1, 6):
+            terms.append(f"(NOKKVI_RAMP{k}_{ch} - NOKKVI_RAMP{k-1}_{ch}) * min(max({v}_x - {k-1}, 0), 1)")
+        out += f"{v}_{ch.lower()} = " + " + ".join(terms) + ";\n"
+    return out
+def maxawow_port(cover):
+    src = json.load(open(os.path.join(OUT, MAXAWOW + ".json")))
+    p = json.loads(json.dumps(src))
+    frame = ("t = 0.5 + 0.3 * sin(time * 2.3) + 0.2 * sin(time * 0.61);\n"
+             + ramp_eel("c", "t") + ramp_eel("w", "1 - t")
+             + "lit = 0.2 + 0.8 * (0.5 + 0.5 * sin(time * 4));\n"
+             + "ib_r = c_r * lit + NOKKVI_BG_R * (1 - lit); ib_g = c_g * lit + NOKKVI_BG_G * (1 - lit); ib_b = c_b * lit + NOKKVI_BG_B * (1 - lit);\n"
+             + "wave_r = w_r; wave_g = w_g; wave_b = w_b;\n"
+             + "wave_x = 0.5 + sin(time * 3) * 0.3;\nwave_y = 0.5 + cos(time * 2.187) * 0.3;\n")
+    if cover:
+        frame += "ib_a = 0;\n"
+    p["frame_eqs_eel"] = frame
+    comp = p["comp"]
+    old = "tmpvar_6.xyz = (tmpvar_5 +"
+    assert comp.count(old) == 1
+    p["comp"] = comp.replace(old, "tmpvar_6.xyz = (NOKKVI_HIGHLIGHT * tmpvar_5 +")
+    if cover:
+        warp = p["warp"]
+        old = "  ret = tmpvar_4.xyz;\n"
+        assert warp.count(old) == 1
+        p["warp"] = "uniform sampler2D sampler_fw_cover;\n" + warp.replace(old,
+            "  vec2 ed = min(uv_orig, 1.0 - uv_orig);\n"
+            "  float edge = smoothstep(0.02, 0.0, min(ed.x, ed.y));\n"
+            "  vec2 cc = uv_orig * 0.6 + 0.2 + 0.18 * vec2(sin(time * 0.13), cos(time * 0.11));\n"
+            "  vec3 cov = texture(sampler_fw_cover, vec2(cc.x, 1.0 - cc.y)).xyz;\n"
+            "  tmpvar_4.xyz = mix(tmpvar_4.xyz, cov, edge * 0.5);\n"
+            "  ret = tmpvar_4.xyz;\n")
+    return p
+presets["nokkvi - maxawow"] = maxawow_port(False)
+presets["nokkvi - cover maxawow"] = maxawow_port(True)
+
 for name, p in presets.items():
     json.dump(p, open(os.path.join(OUT, name + ".json"), "w"), indent=1)
 print(len(presets))
