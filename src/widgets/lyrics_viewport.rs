@@ -45,6 +45,12 @@ const LINE_HEIGHT: f32 = 22.0;
 const SLOT_PAD: f32 = 6.0;
 /// Horizontal inset of the text column from the panel edges.
 const H_PAD: f32 = 18.0;
+/// The panel side (shorter of width and height) at which a panel-fit sheet
+/// starts growing: about a Queue cover on a 1080p window, so theater never
+/// shows lyrics smaller than the Queue's.
+const LYRICS_REFERENCE_SIDE: f32 = 540.0;
+/// The largest panel-fit scale (a 4K theater window).
+const LYRICS_MAX_SCALE: f32 = 2.5;
 /// Max wrapped rows a slot reserves; longer lines clip (honest trade — the
 /// corpus p95 line is 54 chars, well inside 2 rows at typical panel widths).
 const MAX_SLOT_ROWS: usize = 3;
@@ -224,6 +230,16 @@ pub(crate) struct LyricsPanelData<'a> {
     /// The previous track's sheet dissolving out across a crossfaded
     /// transition (the incoming sheet fades in against it).
     pub dissolve: Option<DissolveView<'a>>,
+    /// Grow the text with the panel ([`panel_fit_scale`]) instead of the fixed
+    /// column size. Theater Mode sets it; the Queue cover keeps the fixed size.
+    pub fit_to_panel: bool,
+}
+
+/// The lyric text scale for a panel of `width` × `height` when the sheet fits
+/// the panel: 1.0 up to a Queue-cover-sized panel, then growing with the
+/// panel's shorter side, capped.
+pub(crate) fn panel_fit_scale(width: f32, height: f32) -> f32 {
+    (width.min(height) / LYRICS_REFERENCE_SIDE).clamp(1.0, LYRICS_MAX_SCALE)
 }
 
 /// Borrowed view of the dissolving outgoing sheet.
@@ -247,13 +263,14 @@ pub(crate) struct DissolveView<'a> {
 #[derive(Default)]
 struct State {
     paragraphs: Vec<Plain<<iced::Renderer as TextRenderer>::Paragraph>>,
-    /// `(content identity, shaped width)` the cache was built for.
-    cache_key: (u64, u32),
+    /// `(content identity, shaped width, text scale × 100)` the cache was
+    /// built for.
+    cache_key: (u64, u32, u32),
     /// Uniform slot height for this document (max wrapped rows, clamped).
     slot_height: f32,
     /// Second cache for the dissolving outgoing sheet (empty when idle).
     out_paragraphs: Vec<Plain<<iced::Renderer as TextRenderer>::Paragraph>>,
-    out_cache_key: (u64, u32),
+    out_cache_key: (u64, u32, u32),
     out_slot_height: f32,
 }
 
@@ -264,15 +281,17 @@ fn shape_lines(
     lines: &[LrcLine],
     text_width: f32,
     scale_factor: Option<f32>,
+    text_scale: f32,
 ) -> (Vec<Plain<<iced::Renderer as TextRenderer>::Paragraph>>, f32) {
+    let line_height = LINE_HEIGHT * text_scale;
     let mut paragraphs = Vec::with_capacity(lines.len());
     let mut max_rows = 1usize;
     for line in lines {
         let text = Text {
             content: line.text.as_str(),
             bounds: Size::new(text_width, f32::INFINITY),
-            size: Pixels(LYRIC_FONT_SIZE),
-            line_height: advanced_text::LineHeight::Absolute(Pixels(LINE_HEIGHT)),
+            size: Pixels(LYRIC_FONT_SIZE * text_scale),
+            line_height: advanced_text::LineHeight::Absolute(Pixels(line_height)),
             font: theme::ui_font(),
             align_x: advanced_text::Alignment::Center,
             align_y: iced::alignment::Vertical::Top,
@@ -283,13 +302,16 @@ fn shape_lines(
         };
         let mut paragraph = Plain::default();
         paragraph.update(text);
-        let rows = (paragraph.min_bounds().height / LINE_HEIGHT)
+        let rows = (paragraph.min_bounds().height / line_height)
             .round()
             .max(1.0) as usize;
         max_rows = max_rows.max(rows.min(MAX_SLOT_ROWS));
         paragraphs.push(paragraph);
     }
-    (paragraphs, (max_rows as f32) * LINE_HEIGHT + 2.0 * SLOT_PAD)
+    (
+        paragraphs,
+        (max_rows as f32) * line_height + 2.0 * SLOT_PAD * text_scale,
+    )
 }
 
 /// Fill a paragraph with its glyph halo: the dual offset-ring in `bg0_hard`
@@ -310,6 +332,7 @@ fn fill_haloed_paragraph(
     pos: iced::Point,
     color: Color,
     clip: Rectangle,
+    text_scale: f32,
 ) {
     let weight = color.a * color.a.sqrt();
     let halo = theme::bg0_hard();
@@ -318,7 +341,7 @@ fn fill_haloed_paragraph(
         for (dx, dy) in HALO_INNER_OFFSETS {
             renderer.fill_paragraph(
                 paragraph,
-                pos + Vector::new(dx, dy),
+                pos + Vector::new(dx, dy) * text_scale,
                 Color { a: a_inner, ..halo },
                 clip,
             );
@@ -329,7 +352,7 @@ fn fill_haloed_paragraph(
         for (dx, dy) in HALO_OUTER_OFFSETS {
             renderer.fill_paragraph(
                 paragraph,
-                pos + Vector::new(dx, dy),
+                pos + Vector::new(dx, dy) * text_scale,
                 Color { a: a_outer, ..halo },
                 clip,
             );
@@ -372,6 +395,7 @@ fn draw_column(
     synced: bool,
     accent: Color,
     base: Color,
+    text_scale: f32,
 ) {
     let center_y = bounds.y + bounds.height / 2.0;
     for (i, paragraph) in paragraphs.iter().enumerate() {
@@ -414,9 +438,12 @@ fn draw_column(
         let Some(visible) = slot_bounds.intersection(&bounds) else {
             continue;
         };
-        let pos = iced::Point::new(bounds.x + H_PAD, slot_top + SLOT_PAD);
+        let pos = iced::Point::new(
+            bounds.x + H_PAD * text_scale,
+            slot_top + SLOT_PAD * text_scale,
+        );
         renderer.with_translation(Vector::new(0.0, 0.0), |renderer| {
-            fill_haloed_paragraph(renderer, paragraph.raw(), pos, color, visible);
+            fill_haloed_paragraph(renderer, paragraph.raw(), pos, color, visible, text_scale);
         });
     }
 }
@@ -448,6 +475,16 @@ impl<'a, M> LyricViewport<'a, M> {
     pub(crate) fn new(data: LyricsPanelData<'a>, on_wheel: Option<fn(f32) -> M>) -> Self {
         Self { data, on_wheel }
     }
+
+    /// The text scale for a viewport of `size`: 1.0 unless the sheet fits
+    /// the panel.
+    fn text_scale(&self, size: Size) -> f32 {
+        if self.data.fit_to_panel {
+            panel_fit_scale(size.width, size.height)
+        } else {
+            1.0
+        }
+    }
 }
 
 impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
@@ -476,12 +513,15 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         let state = tree.state.downcast_mut::<State>();
 
         // (Re-)shape the paragraphs when the doc or the panel width changes.
-        let text_width = (bounds.width - 2.0 * H_PAD).max(1.0);
+        let text_scale = self.text_scale(bounds);
+        let text_width = (bounds.width - 2.0 * H_PAD * text_scale).max(1.0);
         let scale = renderer.scale_factor();
-        let key = (doc_hash(self.data.lines), text_width as u32);
+        let scale_key = (text_scale * 100.0).round() as u32;
+        let key = (doc_hash(self.data.lines), text_width as u32, scale_key);
         if state.cache_key != key {
             state.cache_key = key;
-            let (paragraphs, slot_height) = shape_lines(self.data.lines, text_width, scale);
+            let (paragraphs, slot_height) =
+                shape_lines(self.data.lines, text_width, scale, text_scale);
             state.paragraphs = paragraphs;
             state.slot_height = slot_height;
         }
@@ -489,16 +529,17 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
         // Dissolving outgoing sheet (second cache; cleared when idle so a long
         // doc doesn't linger in memory after its fade).
         if let Some(dissolve) = &self.data.dissolve {
-            let out_key = (doc_hash(dissolve.lines), text_width as u32);
+            let out_key = (doc_hash(dissolve.lines), text_width as u32, scale_key);
             if state.out_cache_key != out_key {
                 state.out_cache_key = out_key;
-                let (paragraphs, slot_height) = shape_lines(dissolve.lines, text_width, scale);
+                let (paragraphs, slot_height) =
+                    shape_lines(dissolve.lines, text_width, scale, text_scale);
                 state.out_paragraphs = paragraphs;
                 state.out_slot_height = slot_height;
             }
         } else if !state.out_paragraphs.is_empty() {
             state.out_paragraphs = Vec::new();
-            state.out_cache_key = (0, 0);
+            state.out_cache_key = (0, 0, 0);
         }
 
         layout::Node::new(bounds)
@@ -516,6 +557,9 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
     ) {
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
+        let text_scale = self.text_scale(bounds.size());
+        let h_pad = H_PAD * text_scale;
+        let line_height = LINE_HEIGHT * text_scale;
 
         // Empty state — but NOT during a cold-path dissolve, where the
         // previous sheet must keep fading below while the resolve runs.
@@ -524,9 +568,9 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
             if let Some(message) = self.data.empty_message {
                 let text = Text {
                     content: message,
-                    bounds: Size::new((bounds.width - 2.0 * H_PAD).max(1.0), f32::INFINITY),
-                    size: Pixels(LYRIC_FONT_SIZE - 2.0),
-                    line_height: advanced_text::LineHeight::Absolute(Pixels(LINE_HEIGHT)),
+                    bounds: Size::new((bounds.width - 2.0 * h_pad).max(1.0), f32::INFINITY),
+                    size: Pixels((LYRIC_FONT_SIZE - 2.0) * text_scale),
+                    line_height: advanced_text::LineHeight::Absolute(Pixels(line_height)),
                     font: theme::ui_font(),
                     align_x: advanced_text::Alignment::Center,
                     align_y: iced::alignment::Vertical::Top,
@@ -538,19 +582,19 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                 let paragraph = <iced::Renderer as TextRenderer>::Paragraph::with_text(text);
                 let text_h = paragraph.min_bounds().height;
                 let pos =
-                    iced::Point::new(bounds.x + H_PAD, bounds.y + (bounds.height - text_h) / 2.0);
+                    iced::Point::new(bounds.x + h_pad, bounds.y + (bounds.height - text_h) / 2.0);
                 let color = Color {
                     a: 0.45,
                     ..theme::fg0()
                 };
                 renderer.with_layer(bounds, |renderer| {
-                    fill_haloed_paragraph(renderer, &paragraph, pos, color, bounds);
+                    fill_haloed_paragraph(renderer, &paragraph, pos, color, bounds, text_scale);
                 });
             }
             return;
         }
 
-        let slot_h = state.slot_height.max(LINE_HEIGHT);
+        let slot_h = state.slot_height.max(line_height);
         // The column's center in slot-index space, published by the boat tick
         // and clamped to THIS doc so a stale value from a previous one (a long
         // plain sheet before a short synced one) can't fling the column.
@@ -586,13 +630,14 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                     renderer,
                     &state.out_paragraphs,
                     bounds,
-                    state.out_slot_height.max(LINE_HEIGHT),
+                    state.out_slot_height.max(line_height),
                     dissolve.center.clamp(0.0, out_max),
                     1.0 - dissolve.progress,
                     None,
                     dissolve.synced,
                     accent,
                     base,
+                    text_scale,
                 );
             }
             draw_column(
@@ -608,6 +653,7 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for LyricViewport<'_, M> {
                 self.data.synced,
                 accent,
                 base,
+                text_scale,
             );
         });
     }
@@ -739,6 +785,23 @@ pub(crate) fn lyrics_text_layer<'a, Message: 'a + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panel_fit_scale_grows_with_the_shorter_side_and_caps() {
+        assert_eq!(panel_fit_scale(400.0, 400.0), 1.0, "Queue-sized: unchanged");
+        assert_eq!(
+            panel_fit_scale(3000.0, 300.0),
+            1.0,
+            "the shorter side rules"
+        );
+        let fhd = panel_fit_scale(1920.0, 1080.0);
+        assert!(
+            fhd > 1.5 && fhd < 2.5,
+            "a 1080p window roughly doubles: {fhd}"
+        );
+        assert!(panel_fit_scale(1920.0, 1200.0) > fhd, "monotone");
+        assert_eq!(panel_fit_scale(8000.0, 8000.0), LYRICS_MAX_SCALE, "capped");
+    }
 
     #[test]
     fn ease_out_expo_endpoints_and_monotonic() {

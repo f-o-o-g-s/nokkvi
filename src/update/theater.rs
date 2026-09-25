@@ -381,6 +381,18 @@ impl Nokkvi {
         ))))
     }
 
+    /// The lyrics layer for theater's panel: the Queue's, sized to the panel.
+    pub(crate) fn theater_lyrics_panel_data(
+        &self,
+    ) -> Option<crate::widgets::lyrics_viewport::LyricsPanelData<'_>> {
+        self.queue_lyrics_panel_data().map(|data| {
+            crate::widgets::lyrics_viewport::LyricsPanelData {
+                fit_to_panel: true,
+                ..data
+            }
+        })
+    }
+
     /// The now-playing cover theater shows: the playing station's art for
     /// radio, else the playing album's (frosted only while the lyrics layer
     /// shows). `None` means the placeholder.

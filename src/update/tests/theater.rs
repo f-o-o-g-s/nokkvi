@@ -939,3 +939,22 @@ mod r1 {
         assert!(!app.theater.active);
     }
 }
+
+#[test]
+fn theater_lyrics_fit_the_panel_but_queue_lyrics_do_not() {
+    let mut app = home_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    app.lyrics.enabled = true;
+    app.playback.playing = true;
+    assert!(
+        !app.queue_lyrics_panel_data()
+            .expect("lyrics layer shows")
+            .fit_to_panel
+    );
+    assert!(
+        app.theater_lyrics_panel_data()
+            .expect("lyrics layer shows")
+            .fit_to_panel
+    );
+}

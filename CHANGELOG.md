@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Right-clicking the Theater Mode cover offers Exit Theater Mode and Refresh Artwork.
 - In Theater Mode the player bar slides away after 2.5 idle seconds and slides back on any mouse or key activity.
 - In Theater Mode the mouse cursor hides after 2.5 idle seconds, like in a video player.
+- In Theater Mode the lyrics grow with the window, up to two and a half times their Queue size.
 
 ### Changed
 

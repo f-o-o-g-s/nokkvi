@@ -1008,8 +1008,9 @@ impl Nokkvi {
             self.theater_now_playing_cover(),
             over_art,
             boat,
-            // Transport-gated and queue-only already (`None` for radio).
-            self.queue_lyrics_panel_data(),
+            // Transport-gated and queue-only already (`None` for radio), with
+            // the text grown to the panel.
+            self.theater_lyrics_panel_data(),
             Some(|delta| Message::Queue(views::QueueMessage::LyricsWheel(delta))),
             placeholder,
             entries,
@@ -1910,6 +1911,7 @@ impl Nokkvi {
                 active_index: self.lyrics.active_index,
                 empty_message: resolved_no_match.then_some("No lyrics for this track"),
                 dissolve,
+                fit_to_panel: false,
             }
         })
     }
