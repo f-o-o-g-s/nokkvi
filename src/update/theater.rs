@@ -26,6 +26,29 @@ pub(crate) const HIDE_DELAY: Duration = Duration::from_millis(2500);
 /// How long the bar takes to slide fully in or out.
 pub(crate) const SLIDE_DURATION: Duration = Duration::from_millis(220);
 
+/// How long after an exit's restore request a contradicting mode report is
+/// treated as the compositor not having caught up yet.
+pub(crate) const RESTORE_SETTLE: Duration = Duration::from_secs(1);
+
+/// The prior mode to record on entry. `reported` is the window's answer;
+/// when an exit asked for a different mode within [`RESTORE_SETTLE`], the
+/// answer is stale (Wayland reports the compositor's last reply) and the
+/// requested mode is the truth.
+pub(crate) fn effective_prior_mode(
+    reported: iced::window::Mode,
+    restore_sent: Option<(iced::window::Mode, Instant)>,
+    now: Instant,
+) -> iced::window::Mode {
+    match restore_sent {
+        Some((requested, at))
+            if requested != reported && now.saturating_duration_since(at) < RESTORE_SETTLE =>
+        {
+            requested
+        }
+        _ => reported,
+    }
+}
+
 /// Where the chrome should be right now. `AutoHide` shows it while the
 /// window has focus and the cursor is on the bar, an overlay menu is open, or
 /// there was activity within [`HIDE_DELAY`].
@@ -312,7 +335,10 @@ impl Nokkvi {
         // Restore the window mode Theater Fills the Screen replaced. Taken even
         // without a window, so a stale prior never outlives this exit.
         match (self.theater.prior_window_mode.take(), self.main_window_id) {
-            (Some(prior), Some(id)) => iced::window::set_mode(id, prior),
+            (Some(prior), Some(id)) => {
+                self.theater.restore_sent = Some((prior, Instant::now()));
+                iced::window::set_mode(id, prior)
+            }
             _ => Task::none(),
         }
     }
@@ -346,7 +372,11 @@ impl Nokkvi {
         {
             return Task::none();
         }
-        self.theater.prior_window_mode = Some(prior);
+        self.theater.prior_window_mode = Some(effective_prior_mode(
+            prior,
+            self.theater.restore_sent,
+            Instant::now(),
+        ));
         iced::window::set_mode(id, iced::window::Mode::Fullscreen)
     }
 

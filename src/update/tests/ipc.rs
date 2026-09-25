@@ -271,7 +271,18 @@ fn status_returns_a_full_state_snapshot() {
 fn home_app() -> Nokkvi {
     let mut app = test_app();
     app.screen = crate::Screen::Home;
+    app.main_window_id = Some(iced::window::Id::unique());
     app
+}
+
+#[test]
+fn theater_refuses_while_the_window_is_closed_to_the_tray() {
+    let mut app = home_app();
+    app.main_window_id = None;
+    let resp = drive_on(&mut app, "theater");
+    let err = resp.error.expect("no window to show theater in");
+    assert_eq!(err.code, "unavailable");
+    assert!(!app.theater.active);
 }
 
 #[test]

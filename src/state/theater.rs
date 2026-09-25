@@ -29,6 +29,10 @@ pub struct TheaterState {
     /// The window's mode before Theater Fills the Screen went fullscreen;
     /// restored (and consumed) on exit.
     pub prior_window_mode: Option<iced::window::Mode>,
+    /// The mode the last exit asked the window to return to, and when. On
+    /// Wayland the mode query answers from the compositor's last reply, so a
+    /// re-entry right after an exit can read the fullscreen being undone.
+    pub restore_sent: Option<(iced::window::Mode, Instant)>,
 }
 
 impl Default for TheaterState {
@@ -44,6 +48,7 @@ impl Default for TheaterState {
                 from: 0.0,
             },
             prior_window_mode: None,
+            restore_sent: None,
         }
     }
 }

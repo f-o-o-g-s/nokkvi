@@ -1140,3 +1140,65 @@ mod settings_and_window {
         assert!(!app.theater.active);
     }
 }
+
+mod r2 {
+    use std::time::{Duration, Instant};
+
+    use iced::window::{Id, Mode};
+
+    use super::home_app;
+    use crate::{
+        app_message::{Message, TheaterMessage},
+        update::theater::{RESTORE_SETTLE, effective_prior_mode},
+    };
+
+    #[test]
+    fn a_stale_fullscreen_report_after_our_restore_is_replaced() {
+        let now = Instant::now();
+        let just_sent = Some((Mode::Windowed, now - Duration::from_millis(50)));
+        assert_eq!(
+            effective_prior_mode(Mode::Fullscreen, just_sent, now),
+            Mode::Windowed,
+            "the compositor has not confirmed our un-fullscreen yet"
+        );
+        let long_ago = Some((
+            Mode::Windowed,
+            now - RESTORE_SETTLE - Duration::from_millis(1),
+        ));
+        assert_eq!(
+            effective_prior_mode(Mode::Fullscreen, long_ago, now),
+            Mode::Fullscreen,
+            "past the settle window the user may have gone fullscreen themselves"
+        );
+        assert_eq!(
+            effective_prior_mode(Mode::Windowed, None, now),
+            Mode::Windowed
+        );
+    }
+
+    #[test]
+    fn fast_reentry_records_the_restored_mode_not_the_stale_report() {
+        let id = Id::unique();
+        let mut app = home_app();
+        app.main_window_id = Some(id);
+        app.settings.theater_window_fullscreen = true;
+        let _ = app.enter_theater();
+        let _ = app.update(Message::Theater(TheaterMessage::PriorModeKnown(
+            id,
+            Mode::Windowed,
+        )));
+        let _ = app.exit_theater();
+        assert!(
+            app.theater.restore_sent.is_some(),
+            "the exit records its restore"
+        );
+
+        let _ = app.enter_theater();
+        // The compositor still reports the fullscreen we just undid.
+        let _ = app.update(Message::Theater(TheaterMessage::PriorModeKnown(
+            id,
+            Mode::Fullscreen,
+        )));
+        assert_eq!(app.theater.prior_window_mode, Some(Mode::Windowed));
+    }
+}

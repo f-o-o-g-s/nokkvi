@@ -144,7 +144,8 @@
 //! |               |           | reopen from the tray, flag an open window, or  |
 //! |               |           | no-op while one is opening (`show_window`).    |
 //! | `theater`     | act       | `{"theater":bool}`; toggle Theater Mode (the   |
-//! |               |           | F11 entry point). `unavailable` on Login.      |
+//! |               |           | F11 entry point). `unavailable` on Login or    |
+//! |               |           | while the window is closed to the tray.        |
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
@@ -598,6 +599,10 @@ define_commands! {
     "theater"     => act      (|app: &mut Nokkvi| {
         if app.screen != crate::Screen::Home {
             return Err(("unavailable", "theater mode needs a logged-in window".to_string()));
+        }
+        // Closed to the tray: entering now would greet the next window.
+        if !app.theater.active && app.main_window_id.is_none() {
+            return Err(("unavailable", "theater mode needs an open window".to_string()));
         }
         let task = app.toggle_theater();
         Ok((task, json!({ "theater": app.theater.active })))
