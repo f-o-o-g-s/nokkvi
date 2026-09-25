@@ -304,8 +304,8 @@ presets["nokkvi - cover orb"] = preset(
 
 # Starfield: 3D star layers flown through with parallax, drawn into the
 # feedback so every star leaves a motion trail that zooms outward (longer at
-# speed); each star is tied to a frequency and flares with it; a soft nebula
-# in the theme's gradient sits behind; kicks surge the speed.
+# speed); each star is tied to a frequency and flares with it; kicks surge
+# the speed. (A screen-space nebula read as a smudge on the lens; removed.)
 STAR_LAYERS = 6
 def star_layer(l):
     return f"""
@@ -357,19 +357,9 @@ presets["nokkvi - starfield"] = preset(
  }""",
     " shader_body {\n" + HEAD + """
   vec2 p = (uv - 0.5) * s;
-  // Nebula: domain-warped sine layers. Smooth everywhere, so no texel grid
-  // can show (a snapped noise texture left square patches).
-  vec2 w = p * 2.2 + vec2(q1 * 0.35, q1 * 0.2);
-  w += 0.7 * vec2(sin(w.y * 1.7 + q1 * 0.3), sin(w.x * 1.3 - q1 * 0.2));
-  w += 0.35 * vec2(sin(w.y * 3.1 + 1.0), sin(w.x * 2.9 + 2.0));
-  float n = 0.5 + 0.25 * sin(w.x * 1.1 + w.y * 0.7)
-          + 0.15 * sin(-w.x * 0.6 + w.y * 1.9 + 1.3)
-          + 0.1 * sin(w.x * 2.3 - w.y * 2.1 + 0.4);
-  float neb = pow(smoothstep(0.5, 0.95, n), 1.6) * (0.3 + 0.3 * clamp(bass_att, 0.0, 2.0) + 0.5 * q5);
-""" + ramp("nc", "n") + """
   float grain = texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.xy).x;
-  vec3 col = NOKKVI_BG + nc * neb * 0.55;
-  col += texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.35;
+  vec3 col = NOKKVI_BG;
+  col += texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.2;
   col += NOKKVI_ACCENT * exp(-length(p) * 6.0) * (0.08 + 0.45 * q3);
   col += NOKKVI_WARM * exp(-length(p) * 14.0) * q3 * 0.35;
   col *= 0.9 + 0.1 * smoothstep(1.1, 0.2, length(p));
