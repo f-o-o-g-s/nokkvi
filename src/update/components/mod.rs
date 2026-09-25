@@ -1532,6 +1532,9 @@ impl Nokkvi {
     ///   Login screen doesn't render the player bar.
     /// - retained: last_mpris_position_us — overwritten on next playback.
     pub(crate) fn reset_session_state(&mut self) -> Task<Message> {
+        // Theater Mode never survives to the Login screen (logout or session
+        // expiry); its layout must not greet the next login.
+        let exit_theater = self.exit_theater();
         // Phase 1: cache the storage handle for re-login, then build a single
         // async teardown Task that — in this strict order — (1) stops the audio
         // engine, (2) drains the TaskManager so every tracked persistence /
@@ -1714,6 +1717,6 @@ impl Nokkvi {
         // screen (the window already exists, so this lands on the next frame).
         let focus_task = Task::done(Message::Login(crate::views::LoginMessage::FocusFirstField));
 
-        Task::batch([stop_task, mpris_art_clear_task, focus_task])
+        Task::batch([exit_theater, stop_task, mpris_art_clear_task, focus_task])
     }
 }

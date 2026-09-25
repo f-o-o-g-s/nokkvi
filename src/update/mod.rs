@@ -460,6 +460,13 @@ impl Nokkvi {
                 // non-empty search filter (query) is preserved.
                 self.set_all_window_focused(false);
                 self.clear_all_toolbar_reveal_locks();
+                // Theater's bar hides while unfocused and returns on the next
+                // real activity after refocus, not on focus alone; an
+                // unfocused surface gets no `on_exit` to clear the hover.
+                self.theater.window_focused = false;
+                self.theater.bar_hovered = false;
+                self.theater.last_activity = None;
+                self.close_theater_bar_menus();
                 // An unfocused Wayland surface stops delivering pointer events,
                 // so a held drag can never get its ButtonReleased — clear any
                 // stranded within-list drag on focus loss too.
@@ -482,6 +489,7 @@ impl Nokkvi {
                 // Re-enable transient reveals; the toolbar stays collapsed until
                 // a genuine cursor move re-fires the header hover.
                 self.set_all_window_focused(true);
+                self.theater.window_focused = true;
                 Task::none()
             }
             Message::HotkeyConfigUpdated(config) => self.handle_hotkey_config_updated(config),
@@ -627,7 +635,10 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Raw Keyboard Events → HotkeyConfig dispatch (see hotkeys/mod.rs)
             // -----------------------------------------------------------------
-            Message::RawKeyEvent(key, modifiers, status) => {
+            Message::RawKeyEvent(key, modifiers, status, repeat) => {
+                if self.is_repeated_theater_toggle(&key, modifiers, repeat) {
+                    return Task::none();
+                }
                 self.handle_raw_key_event(key, modifiers, status)
             }
             Message::ModifiersChanged(modifiers) => self.handle_modifiers_changed(modifiers),

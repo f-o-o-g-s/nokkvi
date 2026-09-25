@@ -970,6 +970,8 @@ impl Nokkvi {
 
         // Theater Mode's key policy. A modal open over theater keeps owning
         // its keys (the block above), so this runs only without one.
+        // Any key press counts as activity for Theater Mode's bar.
+        self.stamp_theater_activity();
         if self.theater.active && !any_blocking_modal {
             // No text input is mounted in theater, so a Captured Escape is
             // one an overlay menu just consumed closing itself
@@ -978,7 +980,7 @@ impl Nokkvi {
             if is_escape && status == iced::event::Status::Captured {
                 return Task::none();
             }
-            match resolved_action.map(crate::update::theater::theater_key_policy) {
+            match resolved_action.map(|a| self.theater_key_policy_here(a)) {
                 Some(crate::update::theater::TheaterKeyPolicy::ExitOnly) => {
                     return self.exit_theater();
                 }

@@ -969,14 +969,19 @@ pub enum CrossPaneDragMessage {
 }
 
 /// Theater Mode messages — the now-playing layout with a transient player
-/// bar. Handled by `update/theater.rs`; every entry path (F11, the panel
-/// menu, the corner icon, the `theater` verb) lands on `Nokkvi::enter_theater`.
+/// bar. Handled by `update/theater.rs`; every entry path lands on
+/// `Nokkvi::enter_theater`.
 #[derive(Debug, Clone)]
 pub enum TheaterMessage {
     /// Enter when off, leave when on (the F11 hotkey).
     Toggle,
     /// Leave Theater Mode (the theater panel's menu row).
     Exit,
+    /// A mouse move, wheel or press while active: keeps the bar (and the
+    /// cursor) on screen for another hold.
+    Activity,
+    /// The cursor entered / moved over (`true`) or left (`false`) the bar.
+    BarHover(bool),
 }
 
 /// Toast notification messages, namespaced under `Message::Toast(..)`
@@ -1487,10 +1492,13 @@ pub enum Message {
     /// Raw key press forwarded from subscription; dispatched via HotkeyConfig in update()
     /// The `Status` field indicates whether a widget (e.g. text_input) has already
     /// captured this event. Used to suppress hotkeys while typing in search fields.
+    ///
+    /// The trailing `bool` is winit's key-repeat flag (a held key).
     RawKeyEvent(
         iced::keyboard::Key,
         iced::keyboard::Modifiers,
         iced::event::Status,
+        bool,
     ),
     /// Tracks global keyboard modifiers (shift/ctrl/alt/logo) for mouse interaction (e.g. shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),

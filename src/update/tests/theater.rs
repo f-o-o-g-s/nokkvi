@@ -553,3 +553,389 @@ fn lyrics_surface_admits_theater() {
     let _ = app.enter_theater();
     assert!(app.lyrics_surface_visible());
 }
+
+// ----------------------------------------------------------------------------
+// The transient bar
+// ----------------------------------------------------------------------------
+
+mod transient {
+    use std::time::{Duration, Instant};
+
+    use nokkvi_data::types::player_settings::TheaterControls;
+
+    use super::home_app;
+    use crate::{
+        app_message::{Message, TheaterMessage},
+        state::{ChromeMotion, TheaterState},
+        update::theater::{HIDE_DELAY, SLIDE_DURATION, chrome_target, cursor_hidden, slide_offset},
+    };
+
+    fn active_state(now: Instant) -> TheaterState {
+        TheaterState {
+            active: true,
+            last_activity: Some(now),
+            ..TheaterState::default()
+        }
+    }
+
+    #[test]
+    fn chrome_target_truth_table() {
+        let now = Instant::now();
+        let later = now + HIDE_DELAY + Duration::from_millis(1);
+        let auto = TheaterControls::AutoHide;
+
+        let s = active_state(now);
+        assert!(chrome_target(&s, now, false, auto), "recent activity shows");
+        assert!(
+            !chrome_target(&s, later, false, auto),
+            "idle past the delay hides"
+        );
+        assert!(
+            chrome_target(&s, later, true, auto),
+            "an open menu holds it"
+        );
+
+        let mut hovered = active_state(now);
+        hovered.bar_hovered = true;
+        assert!(
+            chrome_target(&hovered, later, false, auto),
+            "hover holds it"
+        );
+
+        let mut unfocused = active_state(now);
+        unfocused.window_focused = false;
+        unfocused.bar_hovered = true;
+        assert!(
+            !chrome_target(&unfocused, now, true, auto),
+            "an unfocused window never shows the bar"
+        );
+
+        let mut never = active_state(now);
+        never.last_activity = None;
+        assert!(!chrome_target(&never, now, false, auto), "no activity yet");
+
+        assert!(chrome_target(
+            &s,
+            later,
+            false,
+            TheaterControls::AlwaysShown
+        ));
+        assert!(!chrome_target(&s, now, true, TheaterControls::AlwaysHidden));
+    }
+
+    #[test]
+    fn slide_offset_eases_between_endpoints() {
+        let now = Instant::now();
+        assert_eq!(
+            slide_offset(
+                ChromeMotion::Shown {
+                    since: now,
+                    from: 0.0
+                },
+                now
+            ),
+            0.0
+        );
+        let done = now - SLIDE_DURATION;
+        assert_eq!(
+            slide_offset(
+                ChromeMotion::Hidden {
+                    since: done,
+                    from: 0.0
+                },
+                now
+            ),
+            1.0
+        );
+        // Monotone toward the target in between.
+        let hide = ChromeMotion::Hidden {
+            since: now,
+            from: 0.0,
+        };
+        let mut prev = 0.0;
+        for step in 1..=10 {
+            let t = now + SLIDE_DURATION.mul_f32(step as f32 / 10.0);
+            let off = slide_offset(hide, t);
+            assert!(off >= prev, "monotone");
+            assert!((0.0..=1.0).contains(&off));
+            prev = off;
+        }
+        // A reversal mid-slide starts from the recorded offset.
+        let back = ChromeMotion::Shown {
+            since: now,
+            from: 0.6,
+        };
+        assert!((slide_offset(back, now) - 0.6).abs() < 1e-6);
+        assert!(slide_offset(back, now + SLIDE_DURATION / 2) < 0.6);
+    }
+
+    #[test]
+    fn cursor_hidden_ignores_focus_and_setting_but_respects_menu() {
+        let now = Instant::now();
+        let later = now + HIDE_DELAY;
+        let s = active_state(now);
+        assert!(!cursor_hidden(&s, now, false));
+        assert!(cursor_hidden(&s, later, false));
+        assert!(!cursor_hidden(&s, later, true), "a menu keeps the cursor");
+        let mut unfocused = active_state(now);
+        unfocused.window_focused = false;
+        assert!(cursor_hidden(&unfocused, later, false));
+        let inactive = TheaterState::default();
+        assert!(!cursor_hidden(&inactive, later, false));
+    }
+
+    #[test]
+    fn unfocus_clears_bar_hover_and_hides() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        app.theater.bar_hovered = true;
+        let _ = app.update(Message::WindowUnfocused);
+        assert!(!app.theater.window_focused);
+        assert!(!app.theater.bar_hovered);
+        let now = Instant::now();
+        assert!(!chrome_target(
+            &app.theater,
+            now,
+            false,
+            TheaterControls::AutoHide
+        ));
+
+        // Refocus alone does not bring the bar back; activity does.
+        let _ = app.update(Message::WindowFocused);
+        assert!(app.theater.window_focused);
+        assert!(!chrome_target(
+            &app.theater,
+            Instant::now(),
+            false,
+            TheaterControls::AutoHide
+        ));
+        let _ = app.update(Message::Theater(TheaterMessage::Activity));
+        assert!(chrome_target(
+            &app.theater,
+            Instant::now(),
+            false,
+            TheaterControls::AutoHide
+        ));
+    }
+
+    #[test]
+    fn activity_stamps_and_reveals() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        app.theater.last_activity = None;
+        let _ = app.update(Message::Theater(TheaterMessage::Activity));
+        assert!(app.theater.last_activity.is_some());
+    }
+
+    #[test]
+    fn key_press_stamps_activity() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        app.theater.last_activity = None;
+        super::press(
+            &mut app,
+            iced::keyboard::Key::Character("x".into()),
+            iced::keyboard::Modifiers::default(),
+        );
+        assert!(app.theater.active);
+        assert!(app.theater.last_activity.is_some());
+    }
+
+    #[test]
+    fn bar_hover_tracks_enter_and_exit() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        let _ = app.update(Message::Theater(TheaterMessage::BarHover(true)));
+        assert!(app.theater.bar_hovered);
+        let _ = app.update(Message::Theater(TheaterMessage::BarHover(false)));
+        assert!(!app.theater.bar_hovered);
+    }
+
+    #[test]
+    fn exit_clears_bar_hover() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        app.theater.bar_hovered = true;
+        let _ = app.exit_theater();
+        assert!(!app.theater.bar_hovered);
+    }
+
+    #[test]
+    fn tick_flips_chrome_once() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        assert!(app.theater.chrome.is_shown());
+        let t1 = Instant::now() + HIDE_DELAY + Duration::from_millis(10);
+        crate::update::theater::tick(&mut app, t1);
+        let first = app.theater.chrome;
+        assert!(!first.is_shown(), "idle past the delay flips to hidden");
+        crate::update::theater::tick(&mut app, t1 + Duration::from_millis(16));
+        assert_eq!(
+            app.theater.chrome, first,
+            "a second tick keeps the first flip"
+        );
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Reviewer R1 findings
+// ----------------------------------------------------------------------------
+
+mod r1 {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+
+    use super::{char_key, home_app, press};
+    use crate::{View, app_message::OpenMenu};
+
+    #[test]
+    fn strip_find_similar_leaves_theater_even_on_the_similar_tab() {
+        let mut app = home_app();
+        app.current_view = View::Queue;
+        let mut panel = crate::views::BrowsingPanel::new();
+        panel.active_view = crate::views::BrowsingView::Similar;
+        app.browsing_panel = Some(panel);
+        let _ = app.enter_theater();
+        let _ = app.handle_find_similar("id".into(), "label".into());
+        assert!(!app.theater.active, "the Similar results are shown");
+
+        let _ = app.enter_theater();
+        let _ = app.handle_find_top_songs("artist".into(), "label".into());
+        assert!(!app.theater.active);
+    }
+
+    #[test]
+    fn enter_clears_the_editor_slot_list_too() {
+        use nokkvi_data::types::playlist_edit::PlaylistEditState;
+
+        let mut app = home_app();
+        let mut editor = crate::state::PlaylistEditorState::new(PlaylistEditState::new(
+            "p1".into(),
+            "P".into(),
+            String::new(),
+            false,
+            Vec::new(),
+        ));
+        editor.common.slot_list.hovered_slot = Some(crate::widgets::HoveredSlot::Item {
+            slot_index: 5,
+            item_index: 5,
+            items_len: 10,
+        });
+        editor.common.search_input_focused = true;
+        editor.common.toolbar_hovered = true;
+        app.playlist_editor = Some(editor);
+
+        let _ = app.enter_theater();
+
+        let editor = app.playlist_editor.as_ref().expect("editor survives");
+        assert!(editor.common.slot_list.hovered_slot.is_none());
+        assert!(!editor.common.search_input_focused);
+        assert!(!editor.common.toolbar_hovered);
+    }
+
+    #[test]
+    fn session_reset_leaves_theater() {
+        let _guard = super::super::SSE_SLOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        let _ = app.reset_session_state();
+        assert!(!app.theater.active);
+    }
+
+    #[test]
+    fn enter_cancels_a_pending_find_and_expand() {
+        let mut app = home_app();
+        app.pending_expand.target = Some(crate::state::PendingExpand::Album {
+            album_id: "a1".into(),
+            for_browsing_pane: false,
+        });
+        let _ = app.enter_theater();
+        assert!(app.pending_expand.target.is_none());
+    }
+
+    #[test]
+    fn a_toggle_whose_hidden_target_is_already_on_only_leaves() {
+        // Backtick over a hidden Settings view shows Settings, not the view
+        // before it.
+        let mut app = home_app();
+        app.current_view = View::Settings;
+        let _ = app.enter_theater();
+        press(&mut app, char_key("`"), Modifiers::default());
+        assert!(!app.theater.active);
+        assert_eq!(app.current_view, View::Settings);
+
+        // Ctrl+E with the split view open shows the split view.
+        let mut app = home_app();
+        app.current_view = View::Queue;
+        app.browsing_panel = Some(crate::views::BrowsingPanel::new());
+        let _ = app.enter_theater();
+        press(&mut app, char_key("e"), Modifiers::CTRL);
+        assert!(!app.theater.active);
+        assert!(app.browsing_panel.is_some());
+
+        // From elsewhere, backtick still leaves and opens Settings.
+        let mut app = home_app();
+        app.current_view = View::Albums;
+        let _ = app.enter_theater();
+        press(&mut app, char_key("`"), Modifiers::default());
+        assert!(!app.theater.active);
+        assert_eq!(app.current_view, View::Settings);
+    }
+
+    #[test]
+    fn a_held_toggle_key_does_not_flicker() {
+        let mut app = home_app();
+        let raw = |repeat| {
+            crate::Message::RawKeyEvent(
+                Key::Named(Named::F11),
+                Modifiers::default(),
+                iced::event::Status::Ignored,
+                repeat,
+            )
+        };
+        let _ = app.update(raw(false));
+        assert!(app.theater.active);
+        for _ in 0..5 {
+            let _ = app.update(raw(true));
+        }
+        assert!(app.theater.active, "repeats of the toggle are dropped");
+        // A held seek key still repeats (bare Right seeks, stays in theater).
+        let _ = app.update(crate::Message::RawKeyEvent(
+            Key::Named(Named::Escape),
+            Modifiers::default(),
+            iced::event::Status::Ignored,
+            true,
+        ));
+        assert!(!app.theater.active, "other repeated keys are delivered");
+    }
+
+    #[test]
+    fn unfocus_closes_the_bar_menus() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        app.open_menu = Some(OpenMenu::PlayerModes);
+        let _ = app.update(crate::Message::WindowUnfocused);
+        assert!(app.open_menu.is_none(), "the bar hides, so its menu closes");
+
+        app.open_menu = Some(OpenMenu::Hamburger);
+        let _ = app.update(crate::Message::WindowUnfocused);
+        assert!(app.open_menu.is_none());
+
+        // The panel's own menu stays: the panel does not move.
+        app.open_menu = Some(OpenMenu::Context {
+            id: crate::app_message::ContextMenuId::TheaterPanel,
+            position: iced::Point::ORIGIN,
+        });
+        let _ = app.update(crate::Message::WindowUnfocused);
+        assert!(app.open_menu.is_some());
+    }
+
+    #[test]
+    fn bare_key_press_helper_still_works() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        press(&mut app, Key::Named(Named::F11), Modifiers::default());
+        assert!(!app.theater.active);
+    }
+}

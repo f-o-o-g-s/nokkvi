@@ -636,9 +636,12 @@ impl Nokkvi {
         // text_input widgets silently swallow Escape/Enter before our hotkey
         // system ever sees them.
         let keyboard = event::listen_with(|event, status, _window| match event {
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                Some(Message::RawKeyEvent(key, modifiers, status))
-            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                repeat,
+                ..
+            }) => Some(Message::RawKeyEvent(key, modifiers, status, repeat)),
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }
@@ -683,6 +686,22 @@ impl Nokkvi {
         // Forward events to login page for tab navigation when on Login screen
         let login_events = if self.screen == Screen::Login {
             event::listen().map(|e| Message::Login(views::LoginMessage::Event(e)))
+        } else {
+            iced::Subscription::none()
+        };
+
+        // Theater Mode activity: any mouse move, wheel or press (captured or
+        // not; a slider drag is activity too) keeps the transient bar and the
+        // cursor on screen. Present only while theater is active.
+        let theater_events = if self.theater.active {
+            event::listen_with(|event, _status, _window| match event {
+                Event::Mouse(
+                    iced::mouse::Event::CursorMoved { .. }
+                    | iced::mouse::Event::WheelScrolled { .. }
+                    | iced::mouse::Event::ButtonPressed(_),
+                ) => Some(Message::Theater(app_message::TheaterMessage::Activity)),
+                _ => None,
+            })
         } else {
             iced::Subscription::none()
         };
@@ -793,6 +812,7 @@ impl Nokkvi {
             keyboard,
             window_events,
             login_events,
+            theater_events,
             mpris,
             tray,
             notifications,

@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 - Theater Mode (F11) fills the window with the playing track's cover, visualizer and lyrics, hiding the library, toolbar and nav.
 - Escape leaves Theater Mode; keys aimed at the hidden list leave it too, and view keys leave and then switch.
 - Right-clicking the Theater Mode cover offers Exit Theater Mode and Refresh Artwork.
+- In Theater Mode the player bar slides away after 2.5 idle seconds and slides back on any mouse or key activity.
+- In Theater Mode the mouse cursor hides after 2.5 idle seconds, like in a video player.
 
 ### Changed
 

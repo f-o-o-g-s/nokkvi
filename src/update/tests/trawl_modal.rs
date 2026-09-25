@@ -64,6 +64,7 @@ fn send_raw_key(
         key,
         modifiers,
         iced::event::Status::Ignored,
+        false,
     ))
 }
 
@@ -710,6 +711,7 @@ fn send_raw_key_captured(
         key,
         modifiers,
         iced::event::Status::Captured,
+        false,
     ))
 }
 

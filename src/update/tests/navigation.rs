@@ -1339,6 +1339,7 @@ fn press_arrow(app: &mut crate::Nokkvi, right: bool, shift: bool) {
         iced::keyboard::Key::Named(named),
         modifiers,
         iced::event::Status::Ignored,
+        false,
     ));
 }
 

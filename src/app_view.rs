@@ -913,6 +913,8 @@ impl Nokkvi {
         // The square artwork modes draw their square at the panel's own origin
         // (the slot-list layouts centre it and paint the letterbox), so the
         // theater container does both here.
+        let now = std::time::Instant::now();
+        let menu_open = self.open_menu.is_some();
         let panel = container(self.theater_panel())
             .width(Length::Fill)
             .height(Length::Fill)
@@ -922,6 +924,16 @@ impl Nokkvi {
                 background: Some(artwork_outer_bg().into()),
                 ..Default::default()
             });
+        // The cursor hides on idle, as in a video player. `mouse_area` applies
+        // this only where the content reports no interaction of its own, and
+        // any other interaction (leaving theater included) restores it.
+        let panel = iced::widget::mouse_area(panel).interaction(
+            if crate::update::theater::cursor_hidden(&self.theater, now, menu_open) {
+                iced::mouse::Interaction::Hidden
+            } else {
+                iced::mouse::Interaction::None
+            },
+        );
 
         let stack = self.bottom_band_layers(Stack::new().push(panel), 0.0, 0.0);
 
@@ -929,13 +941,30 @@ impl Nokkvi {
         // squash a `Fixed`-height bar instead of moving it (and `pin` has the
         // same squash), so `OverflowPin` lays the bar out at full size and
         // moves it.
+        //
+        // `on_move` as well as `on_enter`: after a refocus with the cursor
+        // parked on the bar, `on_enter` never re-fires (the `mouse_area` kept
+        // its own hover flag). `Idle` makes the bar opaque to the pointer, so
+        // a right-click on it never reaches the panel's menu beneath. Hidden
+        // at offset 1.0 the bar sits wholly below the window, so the hover
+        // cannot strand on hide.
         let chrome_h = widgets::player_bar::player_bar_height();
-        let chrome = column![player_bar].width(Length::Fill);
+        let bar = iced::widget::mouse_area(player_bar)
+            .on_enter(Message::Theater(
+                crate::app_message::TheaterMessage::BarHover(true),
+            ))
+            .on_move(|_| Message::Theater(crate::app_message::TheaterMessage::BarHover(true)))
+            .on_exit(Message::Theater(
+                crate::app_message::TheaterMessage::BarHover(false),
+            ))
+            .interaction(iced::mouse::Interaction::Idle);
+        let chrome = column![bar].width(Length::Fill);
+        let offset = crate::update::theater::slide_offset(self.theater.chrome, now);
         stack
-            .push(
-                OverflowPin::new(chrome)
-                    .position(iced::Point::new(0.0, self.window.height - chrome_h)),
-            )
+            .push(OverflowPin::new(chrome).position(iced::Point::new(
+                0.0,
+                self.window.height - chrome_h + offset * chrome_h,
+            )))
             .into()
     }
 
@@ -1201,7 +1230,15 @@ impl Nokkvi {
             // Status bar at bottom of content area.
             // On Home screen, leave room for player bar (~56px).
             // On Login screen, player bar is not visible.
-            let bottom_padding = if self.screen == Screen::Home {
+            let bottom_padding = if self.screen == Screen::Home && self.theater.active {
+                // Follow the sliding bar so the toast never floats above an
+                // empty edge.
+                let offset = crate::update::theater::slide_offset(
+                    self.theater.chrome,
+                    std::time::Instant::now(),
+                );
+                (1.0 - offset) * widgets::player_bar::player_bar_height() + 12.0
+            } else if self.screen == Screen::Home {
                 widgets::player_bar::player_bar_height()
             } else {
                 12.0 // Just a bit of margin from bottom

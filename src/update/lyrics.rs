@@ -64,14 +64,6 @@ impl Nokkvi {
         self.lyrics_kick_if_unresolved()
     }
 
-    /// Dispatch a resolve for the current song when lyrics are enabled, the
-    /// Queue view is showing, and the track has NO rendered lyrics — either
-    /// never resolved (`matched_song_id` differs) or resolved to a no-match
-    /// (empty doc). Re-driving landed no-matches is deliberate: a channel may
-    /// have been unavailable at resolve time (store index building, extensions
-    /// probe pending), and complete misses are LRU-cached backend-side, so a
-    /// re-kick for a genuinely lyric-less track costs one cache hit. Callers:
-    /// enter-Queue, index-ready, extensions-probe-landed.
     /// Whether a lyrics surface is on screen: the Queue view's cover or
     /// Theater Mode's panel. Resolves, next-track prefetch and the backdrop
     /// blur run only while one is, so no network work happens off-surface.
@@ -79,6 +71,14 @@ impl Nokkvi {
         self.current_view == View::Queue || self.theater.active
     }
 
+    /// Dispatch a resolve for the current song when lyrics are enabled, a
+    /// lyrics surface is showing (`lyrics_surface_visible`), and the track has
+    /// NO rendered lyrics — either never resolved (`matched_song_id` differs)
+    /// or resolved to a no-match (empty doc). Re-driving landed no-matches is deliberate: a channel may
+    /// have been unavailable at resolve time (store index building, extensions
+    /// probe pending), and complete misses are LRU-cached backend-side, so a
+    /// re-kick for a genuinely lyric-less track costs one cache hit. Callers:
+    /// enter-Queue, enter-theater, index-ready, extensions-probe-landed.
     pub(crate) fn lyrics_kick_if_unresolved(&mut self) -> Task<Message> {
         if self.lyrics.enabled
             && self.lyrics_surface_visible()

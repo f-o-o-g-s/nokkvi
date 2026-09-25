@@ -25,6 +25,9 @@ use crate::{
 /// against the live bar buffer. When hidden, position/velocity/phase are
 /// preserved so the boat resumes mid-stroke when re-shown.
 pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> {
+    // Theater Mode's chrome flips here, per frame, before every early-out.
+    crate::update::theater::tick(app, now);
+
     // Drive the now-playing breathing glow off this per-frame frame tick so it
     // stays smooth at any display refresh rate (a fixed-interval timer steps
     // visibly on high-Hz displays). Runs BEFORE the boat's early-outs so the

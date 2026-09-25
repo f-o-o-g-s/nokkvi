@@ -11,6 +11,7 @@ mod navigation;
 mod playback;
 mod slot_list;
 mod strip;
+mod theater;
 mod verbose;
 mod visualizer;
 
@@ -21,6 +22,7 @@ pub use navigation::*;
 pub use playback::*;
 pub use slot_list::*;
 pub use strip::*;
+pub use theater::*;
 pub use verbose::*;
 pub use visualizer::*;
 

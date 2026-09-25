@@ -133,6 +133,9 @@ impl Nokkvi {
     /// Handle "Find Similar" — opens browsing panel on Similar tab and fires API.
     pub(crate) fn handle_find_similar(&mut self, id: String, label: String) -> Task<Message> {
         info!("🎵 Finding similar songs for id={}", id);
+        // Results land in the split view, so Theater Mode leaves first (the
+        // route backstop cannot see a re-run on an already-open Similar tab).
+        let exit_theater = self.exit_theater();
 
         // Ensure browsing panel is open and on Similar tab
         self.ensure_browsing_panel_on_similar();
@@ -149,7 +152,7 @@ impl Nokkvi {
         // Reset slot list to top
         self.similar_page.common.slot_list.set_offset(0, 0);
 
-        self.shell_task(
+        let fetch = self.shell_task(
             move |shell| async move {
                 let api = shell.similar_api().await?;
                 api.get_similar_songs(&id, 500).await
@@ -161,7 +164,8 @@ impl Nokkvi {
                     label,
                 ))
             },
-        )
+        );
+        Task::batch([exit_theater, fetch])
     }
 
     /// Handle "Top Songs" — opens browsing panel on Similar tab and fires API.
@@ -171,6 +175,7 @@ impl Nokkvi {
         label: String,
     ) -> Task<Message> {
         info!("🎵 Finding top songs for artist='{}'", artist_name);
+        let exit_theater = self.exit_theater();
 
         // Ensure browsing panel is open and on Similar tab
         self.ensure_browsing_panel_on_similar();
@@ -187,7 +192,7 @@ impl Nokkvi {
         // Reset slot list to top
         self.similar_page.common.slot_list.set_offset(0, 0);
 
-        self.shell_task(
+        let fetch = self.shell_task(
             move |shell| async move {
                 let api = shell.similar_api().await?;
                 api.get_top_songs(&artist_name, 500).await
@@ -199,7 +204,8 @@ impl Nokkvi {
                     label,
                 ))
             },
-        )
+        );
+        Task::batch([exit_theater, fetch])
     }
 
     /// Handle API response for similar/top songs.
