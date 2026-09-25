@@ -366,6 +366,7 @@ impl QueuePage {
             },
             QueueMessage::EditPlaylist => (Task::none(), QueueAction::EditPlaylist),
             QueueMessage::QuickSavePlaylist => (Task::none(), QueueAction::SaveAsPlaylist),
+            QueueMessage::EnterTheater => (Task::none(), QueueAction::EnterTheater),
             QueueMessage::RefreshArtwork(album_id) => {
                 (Task::none(), QueueAction::RefreshArtwork(album_id))
             }

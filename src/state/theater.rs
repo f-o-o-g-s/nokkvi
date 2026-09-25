@@ -20,6 +20,8 @@ pub struct TheaterState {
     /// The cursor is on the transient bar (its `mouse_area` enter / move /
     /// exit). Cleared on unfocus and exit, whose `on_exit` may never fire.
     pub bar_hovered: bool,
+    /// The cursor is on the corner exit icon riding above the bar.
+    pub corner_hovered: bool,
     /// OS window focus, mirrored from `WindowFocused` / `WindowUnfocused`.
     pub window_focused: bool,
     /// Where the chrome is going, since when, and from what offset it left.
@@ -32,6 +34,7 @@ impl Default for TheaterState {
             active: false,
             last_activity: None,
             bar_hovered: false,
+            corner_hovered: false,
             window_focused: true,
             chrome: ChromeMotion::Shown {
                 since: Instant::now(),

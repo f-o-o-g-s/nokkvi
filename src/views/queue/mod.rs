@@ -266,6 +266,8 @@ pub enum QueueMessage {
 
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
+    /// Enter Theater Mode (the cover's corner icon and its menu row).
+    EnterTheater,
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     /// Navigate to Albums and auto-expand the album with this id (no filter set).
@@ -351,6 +353,7 @@ pub enum QueueAction {
     ShowInfo(usize),        // Open info modal (queue index for full Song lookup)
     ShowInFolder(usize),    // Open containing folder (queue index, path fetched via API)
     RefreshArtwork(String), // album_id - refresh artwork from server
+    EnterTheater,           // enter Theater Mode from the now-playing cover
     FindSimilar(usize),     // Open Find Similar panel for queue index
     TopSongs(usize),        // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter

@@ -980,8 +980,12 @@ pub enum TheaterMessage {
     /// A mouse move, wheel or press while active: keeps the bar (and the
     /// cursor) on screen for another hold.
     Activity,
-    /// The cursor entered / moved over (`true`) or left (`false`) the bar.
+    /// The cursor entered (`true`) or left (`false`) the bar.
     BarHover(bool),
+    /// The cursor entered (`true`) or left (`false`) the corner exit icon
+    /// above the bar (a separate flag: two `mouse_area`s updated in tree
+    /// order would otherwise let one's exit overwrite the other's enter).
+    CornerHover(bool),
 }
 
 /// Toast notification messages, namespaced under `Message::Toast(..)`

@@ -996,3 +996,60 @@ mod cover_art {
         crate::theme::set_artwork_cover(prior);
     }
 }
+
+mod corner {
+    use std::time::{Duration, Instant};
+
+    use nokkvi_data::types::player_settings::TheaterControls;
+
+    use super::home_app;
+    use crate::{
+        app_message::{Message, TheaterMessage},
+        update::theater::{HIDE_DELAY, chrome_target},
+        views::QueueMessage,
+        widgets::context_menu::PanelMenuEntry,
+    };
+
+    #[test]
+    fn queue_enter_theater_message_enters() {
+        let mut app = home_app();
+        app.current_view = crate::View::Queue;
+        let _ = app.update(Message::Queue(QueueMessage::EnterTheater));
+        assert!(app.theater.active);
+        let _ = app.update(Message::Theater(TheaterMessage::Exit));
+        assert!(!app.theater.active);
+    }
+
+    #[test]
+    fn panel_rows_carry_the_shipped_icons() {
+        let enter = PanelMenuEntry::enter_theater(());
+        let exit = PanelMenuEntry::exit_theater(());
+        assert_eq!(enter.icon, "assets/icons/maximize-2.svg");
+        assert_eq!(enter.label, "Enter Theater Mode");
+        assert_eq!(exit.icon, "assets/icons/minimize-2.svg");
+        assert_eq!(exit.label, "Exit Theater Mode");
+    }
+
+    #[test]
+    fn corner_hover_holds_the_chrome_and_clears_on_exit_and_unfocus() {
+        let mut app = home_app();
+        let _ = app.enter_theater();
+        let _ = app.update(Message::Theater(TheaterMessage::CornerHover(true)));
+        assert!(app.theater.corner_hovered);
+        let later = Instant::now() + HIDE_DELAY + Duration::from_millis(5);
+        assert!(chrome_target(
+            &app.theater,
+            later,
+            false,
+            TheaterControls::AutoHide
+        ));
+
+        let _ = app.update(Message::WindowUnfocused);
+        assert!(!app.theater.corner_hovered);
+
+        let _ = app.update(Message::WindowFocused);
+        let _ = app.update(Message::Theater(TheaterMessage::CornerHover(true)));
+        let _ = app.exit_theater();
+        assert!(!app.theater.corner_hovered);
+    }
+}

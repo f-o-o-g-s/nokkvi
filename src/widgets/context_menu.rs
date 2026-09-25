@@ -432,6 +432,16 @@ impl<Message> PanelMenuEntry<Message> {
         }
     }
 
+    /// "Enter Theater Mode" — the Queue cover's way into the now-playing
+    /// layout.
+    pub(crate) fn enter_theater(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/maximize-2.svg",
+            label: "Enter Theater Mode",
+            message,
+        }
+    }
+
     /// "Exit Theater Mode" — leave the now-playing layout (Theater Mode's
     /// panel menu).
     pub(crate) fn exit_theater(message: Message) -> Self {

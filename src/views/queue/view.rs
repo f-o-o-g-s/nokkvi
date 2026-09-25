@@ -1052,7 +1052,7 @@ impl QueuePage {
                 .and_then(|center_idx| queue_songs.get(center_idx))
                 .map(|song| song.album_id.clone())
         });
-        let panel_menu_entries: Vec<_> = center_album_id
+        let mut panel_menu_entries: Vec<_> = center_album_id
             .map(|id| {
                 crate::widgets::context_menu::PanelMenuEntry::refresh_artwork(
                     QueueMessage::RefreshArtwork(id),
@@ -1060,6 +1060,9 @@ impl QueuePage {
             })
             .into_iter()
             .collect();
+        panel_menu_entries.push(crate::widgets::context_menu::PanelMenuEntry::enter_theater(
+            QueueMessage::EnterTheater,
+        ));
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
             crate::widgets::context_menu::artwork_panel_open_state(
                 crate::View::Queue,
@@ -1102,7 +1105,7 @@ impl QueuePage {
         // The Cover Art setting swaps the picture for a black backdrop; the
         // lyrics and visualizer gates above are unaffected.
         let cover_hidden = crate::theme::artwork_cover().hides_cover(false);
-        let artwork_content = Some(single_artwork_panel_with_visualizer_and_menu(
+        let panel = single_artwork_panel_with_visualizer_and_menu(
             center_artwork_handle.filter(|_| !cover_hidden),
             over_art_overlay,
             over_art_boat,
@@ -1123,6 +1126,19 @@ impl QueuePage {
             artwork_menu_open,
             artwork_menu_position,
             on_artwork_menu_change,
+        );
+        // Theater Mode's way in: an expand icon revealed while the cursor is
+        // over the cover. `hover` is the OUTERMOST wrapper so the panel's
+        // right-click menu (inside) keeps working; the icon's own
+        // `mouse_area` captures only its left press.
+        let artwork_content = Some(iced::widget::hover(
+            panel,
+            crate::widgets::theater_corner::bottom_right(
+                crate::widgets::theater_corner::corner_button(
+                    "assets/icons/maximize-2.svg",
+                    QueueMessage::EnterTheater,
+                ),
+            ),
         ));
 
         crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(

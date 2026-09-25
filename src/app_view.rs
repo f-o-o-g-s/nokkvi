@@ -957,7 +957,30 @@ impl Nokkvi {
         // slides out and back in under a parked cursor. `Idle` makes the bar
         // opaque to the pointer, so a right-click on it never reaches the
         // panel's menu beneath.
-        let chrome_h = widgets::player_bar::player_bar_height();
+        use crate::widgets::theater_corner::{CORNER_BUTTON_SIZE, CORNER_INSET, corner_button};
+        // The exit icon rides above the bar's right end and slides with it;
+        // its own hover flag holds the chrome like the bar's does.
+        let corner_row = container(
+            iced::widget::mouse_area(corner_button(
+                "assets/icons/minimize-2.svg",
+                Message::Theater(crate::app_message::TheaterMessage::Exit),
+            ))
+            .on_enter(Message::Theater(
+                crate::app_message::TheaterMessage::CornerHover(true),
+            ))
+            .on_exit(Message::Theater(
+                crate::app_message::TheaterMessage::CornerHover(false),
+            )),
+        )
+        .width(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Right)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: CORNER_INSET,
+            bottom: CORNER_INSET,
+            left: 0.0,
+        });
+        let chrome_h = widgets::player_bar::player_bar_height() + CORNER_BUTTON_SIZE + CORNER_INSET;
         let bar = iced::widget::mouse_area(player_bar)
             .on_enter(Message::Theater(
                 crate::app_message::TheaterMessage::BarHover(true),
@@ -966,7 +989,7 @@ impl Nokkvi {
                 crate::app_message::TheaterMessage::BarHover(false),
             ))
             .interaction(iced::mouse::Interaction::Idle);
-        let chrome = column![bar].width(Length::Fill);
+        let chrome = column![corner_row, bar].width(Length::Fill);
         let offset = crate::update::theater::slide_offset(self.theater.chrome, now);
         stack
             .push(OverflowPin::new(chrome).position(iced::Point::new(

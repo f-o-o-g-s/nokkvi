@@ -39,7 +39,11 @@ pub(crate) fn chrome_target(
         TheaterControls::AlwaysShown => true,
         TheaterControls::AlwaysHidden => false,
         TheaterControls::AutoHide => {
-            state.window_focused && (state.bar_hovered || menu_open || activity_recent(state, now))
+            state.window_focused
+                && (state.bar_hovered
+                    || state.corner_hovered
+                    || menu_open
+                    || activity_recent(state, now))
         }
     }
 }
@@ -218,6 +222,12 @@ impl Nokkvi {
                 self.stamp_theater_activity();
                 Task::none()
             }
+            TheaterMessage::CornerHover(hovered) => {
+                if self.theater.active {
+                    self.theater.corner_hovered = hovered;
+                }
+                Task::none()
+            }
             TheaterMessage::BarHover(hovered) => {
                 // Only while active: a stray exit from an unmounting bar must
                 // not re-arm a flag the exit edge just cleared.
@@ -250,6 +260,7 @@ impl Nokkvi {
         let now = Instant::now();
         self.theater.last_activity = Some(now);
         self.theater.bar_hovered = false;
+        self.theater.corner_hovered = false;
         self.theater.chrome = ChromeMotion::Shown {
             since: now,
             from: 0.0,
@@ -286,6 +297,7 @@ impl Nokkvi {
         self.theater.active = false;
         // The bar unmounts, so its `on_exit` may never fire.
         self.theater.bar_hovered = false;
+        self.theater.corner_hovered = false;
         self.open_menu = None;
         Task::none()
     }

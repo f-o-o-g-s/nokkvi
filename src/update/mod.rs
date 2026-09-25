@@ -465,6 +465,7 @@ impl Nokkvi {
                 // unfocused surface gets no `on_exit` to clear the hover.
                 self.theater.window_focused = false;
                 self.theater.bar_hovered = false;
+                self.theater.corner_hovered = false;
                 self.theater.last_activity = None;
                 self.close_theater_bar_menus();
                 // An unfocused Wayland surface stops delivering pointer events,
