@@ -1049,6 +1049,69 @@ def maxawow_port(cover):
             "  tmpvar_4.xyz = mix(tmpvar_4.xyz, cov, edge * 0.5);\n"
             "  ret = tmpvar_4.xyz;\n")
     return p
+
+# "Flexi - black holes [sucking fractals for lunch] 2", one of the most
+# downloaded presets in the Internet Archive's MilkDrop collection. It is not
+# in the Butterchurn pack (it needs a photo texture, "sunrise"), so its
+# source lives in scripts/milkdrop-sources/. Four black holes bounce around
+# the screen with gravity and collide with each other; the comp shows the
+# feedback through 16 / ((p - h1)(p - h2)(p - h3)(p - h4)) in the complex
+# plane, which has a pole at each hole, so the picture spirals endlessly
+# into every one of them and the space between them warps as they move. The
+# picture is the inverted feedback blended with the photo. The ports put the
+# playing cover (or clouds in the theme's gradient) where the photo was,
+# colour the inverted feedback from the theme instead of its raw channels,
+# mix the two by brightness rather than per channel (which tinted the result
+# blue and red whatever the theme), give holes near the floor a hop on each
+# kick (the original only swells them) and add a ceiling so a hop never
+# launches a hole off the screen for good. The holes' height is flipped
+# (this engine's v runs up), so gravity pulls them to the bottom.
+SOURCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "milkdrop-sources")
+BLACK_HOLES = "Flexi - black holes [sucking fractals for lunch] 2"
+def black_holes_port(cover):
+    p = json.load(open(os.path.join(SOURCES, BLACK_HOLES + ".json")))
+    hop = ("kick = max(bass - bass_att, 0);\ncool = max(cool - 1 / max(fps, 1), 0);\n"
+           "hop = above(kick, 0.25) * below(cool, 0.001);\ncool = if(hop, 0.25, cool);\n")
+    for i in range(1, 5):
+        hop += (f"low = below(y{i}, 0.35);\n"
+                f"vy{i} = vy{i} + hop * low * (0.002 + 0.002 * rand(100) / 100);\n"
+                f"vx{i} = vx{i} + hop * low * (rand(100) / 100 - 0.5) * 0.006;\n"
+                f"vy{i} = if(above(y{i}, 0.96), -abs(vy{i}) * 0.9, vy{i});\n")
+    frame = p["frame_eqs_eel"]
+    for i, q in ((1, 2), (2, 4), (3, 6), (4, 8)):
+        old_q = f"q{q} = -0.5 + y{i};"
+        assert frame.count(old_q) == 1, old_q
+        frame = frame.replace(old_q, f"q{q} = 0.5 - y{i};")
+    p["frame_eqs_eel"] = hop + frame
+    p["init_eqs_eel"] = p["init_eqs_eel"] + "\ncool = 0;\n"
+    comp = p["comp"]
+    def rep(old, new):
+        nonlocal comp
+        assert comp.count(old) == 1, old
+        comp = comp.replace(old, new)
+    if cover:
+        rep("uniform sampler2D sampler_sunrise;", "uniform sampler2D sampler_fw_cover;")
+        photo = "texture (sampler_fw_cover, vec2(uv_1.x, 1.0 - uv_1.y))"
+        sky_code = ""
+    else:
+        rep("uniform sampler2D sampler_sunrise;\n", "")
+        n = ("clamp(texture(sampler_noise_hq, uv_1 * 0.35 + vec2(time * 0.004, 0.0)).x * 0.7"
+             " + texture(sampler_noise_hq, uv_1 * 0.9 - vec2(0.0, time * 0.006)).x * 0.3, 0.0, 1.0)")
+        sky_code = "  float sky_n = " + n + ";\n" + ramp("sky", "0.15 + 0.7 * sky_n")
+        photo = "vec4(sky, 1.0)"
+    rep("texture (sampler_sunrise, uv_1)", photo)
+    rep("  vec4 tmpvar_19;\n  tmpvar_19.w = 0.0;\n  tmpvar_19.xyz = (1.1 - tmpvar_18.xyz);\n",
+        sky_code
+        + f"  float inv_l = clamp(1.1 - dot(tmpvar_18.xyz, {LUM}), 0.0, 1.0);\n"
+        + ramp("inv_c", "inv_l")
+        + "  vec4 tmpvar_19;\n  tmpvar_19.w = 0.0;\n"
+          "  tmpvar_19.xyz = mix(NOKKVI_BG, inv_c, smoothstep(0.05, 0.6, inv_l)) + NOKKVI_TEXT * smoothstep(0.85, 1.1, inv_l) * 0.5;\n")
+    rep("  tmpvar_20.xyz = ((-(tmpvar_18.xyz) * 1.1) + 1.5);\n",
+        f"  tmpvar_20.xyz = vec3(1.5 - 1.1 * dot(tmpvar_18.xyz, {LUM}));\n")
+    p["comp"] = comp
+    return p
+presets["nokkvi - black holes"] = black_holes_port(False)
+presets["nokkvi - cover black holes"] = black_holes_port(True)
 presets["nokkvi - maxawow"] = maxawow_port(False)
 presets["nokkvi - cover maxawow"] = maxawow_port(True)
 

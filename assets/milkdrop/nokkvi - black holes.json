@@ -1,0 +1,161 @@
+{
+ "version": 2,
+ "baseVals": {
+  "rating": 3,
+  "gammaadj": 1.56,
+  "decay": 1,
+  "echo_zoom": 0.362,
+  "echo_orient": 1,
+  "wave_thick": 1,
+  "wave_brighten": 0,
+  "darken": 1,
+  "wave_a": 0.001,
+  "wave_scale": 1.599,
+  "wave_smoothing": 0,
+  "wave_mystery": -0.5,
+  "modwavealphastart": 2,
+  "modwavealphaend": 2,
+  "warpscale": 0.107,
+  "zoomexp": 0.1584,
+  "fshader": 1,
+  "warp": 0.01,
+  "wave_r": 0.51,
+  "wave_g": 0.5,
+  "ob_size": 0.05,
+  "ob_a": 1,
+  "ib_r": 1,
+  "ib_g": 1,
+  "ib_b": 1,
+  "ib_a": 1,
+  "mv_x": 64,
+  "mv_y": 48,
+  "mv_l": 0.5,
+  "mv_r": 0,
+  "mv_g": 0,
+  "mv_b": 0,
+  "mv_a": 0.05
+ },
+ "shapes": [
+  {
+   "baseVals": {
+    "sides": 100,
+    "thickoutline": 1,
+    "rad": 0.50126,
+    "tex_zoom": 0.99996,
+    "g": 1,
+    "b": 1,
+    "r2": 1,
+    "g2": 0,
+    "border_a": 0,
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "x = 0.5+sin(time*0.618)*0.2;\ny = 0.5+cos(time*1.618)*0.2;\nrad = bass*0.05;\nborder_r = 1-(sin(time*1.25)*0.3+0.7);\nborder_g = 1-(sin(time)*0.3+0.3);\nborder_b = 1-(sin(time/3)*0.5+0.5);",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "x = 0.5+sin(time*0.618)*0.2;\ny = 0.5+cos(time*1.618)*0.2;\nrad = bass*0.05;\nborder_r = 1-(sin(time*1.25)*0.3+0.7);\nborder_g = 1-(sin(time)*0.3+0.3);\nborder_b = 1-(sin(time/3)*0.5+0.5);"
+  },
+  {
+   "baseVals": {
+    "sides": 100,
+    "thickoutline": 1,
+    "rad": 0.50126,
+    "g": 1,
+    "b": 1,
+    "g2": 0,
+    "b2": 1,
+    "border_g": 0,
+    "border_a": 0,
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "x = 0.5+sin(time*2.618)*0.3;\ny = 0.5+cos(time*3.14)*0.3;\nrad = bass*0.05;\nborder_r = 1-(sin(time*1.25)*0.3+0.7);\nborder_g = 1-(sin(time)*0.3+0.3);\nborder_b = 1-(sin(time/3)*0.5+0.5);\n",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "x = 0.5+sin(time*2.618)*0.3;\ny = 0.5+cos(time*3.14)*0.3;\nrad = bass*0.05;\nborder_r = 1-(sin(time*1.25)*0.3+0.7);\nborder_g = 1-(sin(time)*0.3+0.3);\nborder_b = 1-(sin(time/3)*0.5+0.5);\n"
+  },
+  {
+   "baseVals": {
+    "sides": 100,
+    "thickoutline": 1,
+    "rad": 0.50126,
+    "tex_zoom": 0.9998,
+    "g": 1,
+    "b": 1,
+    "border_a": 0,
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "x = 0.5+sin(-time*2.618)*0.4;\ny = 0.5+cos(-time*1.14)*0.4;\nrad = bass*0.05;\nborder_r = 1-(sin(time*1.25)*0.3+0.7);\nborder_g = 1-(sin(time)*0.3+0.3);\nborder_b = 1-(sin(time/3)*0.5+0.5);",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "x = 0.5+sin(-time*2.618)*0.4;\ny = 0.5+cos(-time*1.14)*0.4;\nrad = bass*0.05;\nborder_r = 1-(sin(time*1.25)*0.3+0.7);\nborder_g = 1-(sin(time)*0.3+0.3);\nborder_b = 1-(sin(time/3)*0.5+0.5);"
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  }
+ ],
+ "waves": [
+  {
+   "baseVals": {
+    "scaling": 0.16188,
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "",
+   "point_eqs_str": "",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "thick": 1,
+    "additive": 1,
+    "scaling": 25.12601,
+    "smoothing": 1,
+    "a": 0.1,
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "",
+   "point_eqs_str": "",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "",
+   "point_eqs_str": "",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_str": "",
+   "frame_eqs_str": "",
+   "point_eqs_str": "",
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  }
+ ],
+ "init_eqs_str": "a['y3'] = 0; a['y1'] = 0; a['w2'] = 0; a['ref_ang'] = 0; a['x1'] = 0; a['vx3'] = 0; a['q6'] = 0; a['q1'] = 0; a['q5'] = 0; a['vx1'] = 0; a['vx4'] = 0; a['x3'] = 0; a['q4'] = 0; a['vy4'] = 0; a['bounce'] = 0; a['x4'] = 0; a['w1'] = 0; a['r'] = 0; a['x2'] = 0; a['vy2'] = 0; a['y2'] = 0; a['vy1'] = 0; a['q2'] = 0; a['v1'] = 0; a['vx2'] = 0; a['q3'] = 0; a['y4'] = 0; a['q7'] = 0; a['vy3'] = 0; a['v2'] = 0; a['q8'] = 0; a['x1']=0.5; a['x2']=0.51; a['y2']=0.9; a['y1']=0.7; a['x3']=0.8; a['y3']=0.5; a['x4']=0.2; a['y4']=0.5; a['ax1']=0; a['ay1']=0; a['ax2']=0; a['ay2']=0; a['ax3']=0; a['ay3']=0; a['vx1']=0.000; a['vx2']=0.000;",
+ "frame_eqs_str": "a['wave_a']=0; a['r']=(0.04+(Math.max(a['bass_att'], a['treb_att'])*0.004)); a['bounce']=below(a['y1'], a['r']); a['y1']=(a['y1']+a['vy1']); a['vy1']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vy1'])*0.94)+((a['r']-a['y1'])*0.1))):((a['vy1']-div((0.0001*60),a['fps'])))); a['bounce']=below(a['x1'], a['r']); a['x1']=(a['x1']+a['vx1']); a['vx1']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vx1'])*0.94)+((a['r']-a['x1'])*0.1))):(a['vx1'])); a['bounce']=above(a['x1'], (1-a['r'])); a['vx1']=((Math.abs(a['bounce'])>0.00001)?(((-Math.abs(a['vx1'])*0.94)+(((1-a['r'])-a['x1'])*0.04))):(a['vx1'])); a['bounce']=below(a['y2'], a['r']); a['y2']=(a['y2']+a['vy2']); a['vy2']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vy2'])*0.94)+((a['r']-a['y2'])*0.1))):((a['vy2']-div((0.0001*60),a['fps'])))); a['bounce']=below(a['x2'], a['r']); a['x2']=(a['x2']+a['vx2']); a['vx2']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vx2'])*0.94)+((a['r']-a['x2'])*0.1))):(a['vx2'])); a['bounce']=above(a['x2'], (1-a['r'])); a['vx2']=((Math.abs(a['bounce'])>0.00001)?(((-Math.abs(a['vx2'])*0.94)+(((1-a['r'])-a['x2'])*0.1))):(a['vx2'])); a['bounce']=below(a['y3'], a['r']); a['y3']=(a['y3']+a['vy3']); a['vy3']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vy3'])*0.94)+((a['r']-a['y3'])*0.1))):((a['vy3']-div((0.0001*60),a['fps'])))); a['bounce']=below(a['x3'], a['r']); a['x3']=(a['x3']+a['vx3']); a['vx3']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vx3'])*0.94)+((a['r']-a['x3'])*0.1))):(a['vx3'])); a['bounce']=above(a['x3'], (1-a['r'])); a['vx3']=((Math.abs(a['bounce'])>0.00001)?(((-Math.abs(a['vx3'])*0.94)+(((1-a['r'])-a['x3'])*0.1))):(a['vx3'])); a['bounce']=below(a['y4'], a['r']); a['y4']=(a['y4']+a['vy4']); a['vy4']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vy4'])*0.94)+((a['r']-a['y4'])*0.1))):((a['vy4']-div((0.0001*60),a['fps'])))); a['bounce']=below(a['x4'], a['r']); a['x4']=(a['x4']+a['vx4']); a['vx4']=((Math.abs(a['bounce'])>0.00001)?(((Math.abs(a['vx4'])*0.94)+((a['r']-a['x4'])*0.1))):(a['vx4'])); a['bounce']=above(a['x4'], (1-a['r'])); a['vx4']=((Math.abs(a['bounce'])>0.00001)?(((-Math.abs(a['vx4'])*0.94)+(((1-a['r'])-a['x4'])*0.1))):(a['vx4'])); a['bounce']=below(sqrt((sqr((((a['x1']+a['vx1'])-a['x2'])-a['vx2']))+sqr((((a['y1']+a['vy1'])-a['y2'])-a['vy2'])))), (2*a['r'])); a['ref_ang']=(Math.atan2((a['x2']-a['x1']), (a['y2']-a['y1']))+Math.asin(1)); a['v1']=sqrt(((a['vx1']*a['vx1'])+(a['vy1']*a['vy1']))); a['v2']=sqrt(((a['vx2']*a['vx2'])+(a['vy2']*a['vy2']))); a['w1']=Math.atan2(a['vx1'], a['vy1']); a['w2']=Math.atan2(a['vx2'], a['vy2']); a['vx1']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vx1'])); a['vy1']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vy1'])); a['vx2']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vx2'])); a['vy2']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vy2'])); a['bounce']=below(sqrt((sqr((((a['x1']+a['vx1'])-a['x3'])-a['vx3']))+sqr((((a['y1']+a['vy1'])-a['y3'])-a['vy3'])))), (2*a['r'])); a['ref_ang']=(Math.atan2((a['x3']-a['x1']), (a['y3']-a['y1']))+Math.asin(1)); a['v1']=sqrt(((a['vx1']*a['vx1'])+(a['vy1']*a['vy1']))); a['v2']=sqrt(((a['vx3']*a['vx3'])+(a['vy3']*a['vy3']))); a['w1']=Math.atan2(a['vx1'], a['vy1']); a['w2']=Math.atan2(a['vx3'], a['vy3']); a['vx1']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vx1'])); a['vy1']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vy1'])); a['vx3']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vx3'])); a['vy3']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vy3'])); a['bounce']=below(sqrt((sqr((((a['x2']+a['vx2'])-a['x3'])-a['vx3']))+sqr((((a['y2']+a['vy2'])-a['y3'])-a['vy3'])))), (2*a['r'])); a['ref_ang']=(Math.atan2((a['x3']-a['x2']), (a['y3']-a['y2']))+Math.asin(1)); a['v1']=sqrt(((a['vx2']*a['vx2'])+(a['vy2']*a['vy2']))); a['v2']=sqrt(((a['vx3']*a['vx3'])+(a['vy3']*a['vy3']))); a['w1']=Math.atan2(a['vx2'], a['vy2']); a['w2']=Math.atan2(a['vx3'], a['vy3']); a['vx2']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vx2'])); a['vy2']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vy2'])); a['vx3']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vx3'])); a['vy3']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vy3'])); a['bounce']=below(sqrt((sqr((((a['x1']+a['vx1'])-a['x4'])-a['vx4']))+sqr((((a['y1']+a['vy1'])-a['y4'])-a['vy4'])))), (2*a['r'])); a['ref_ang']=(Math.atan2((a['x4']-a['x1']), (a['y4']-a['y1']))+Math.asin(1)); a['v1']=sqrt(((a['vx1']*a['vx1'])+(a['vy1']*a['vy1']))); a['v2']=sqrt(((a['vx4']*a['vx4'])+(a['vy4']*a['vy4']))); a['w1']=Math.atan2(a['vx1'], a['vy1']); a['w2']=Math.atan2(a['vx4'], a['vy4']); a['vx1']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vx1'])); a['vy1']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vy1'])); a['vx4']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vx4'])); a['vy4']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vy4'])); a['bounce']=below(sqrt((sqr((((a['x2']+a['vx2'])-a['x4'])-a['vx4']))+sqr((((a['y2']+a['vy2'])-a['y4'])-a['vy4'])))), (2*a['r'])); a['ref_ang']=(Math.atan2((a['x4']-a['x2']), (a['y4']-a['y2']))+Math.asin(1)); a['v1']=sqrt(((a['vx2']*a['vx2'])+(a['vy2']*a['vy2']))); a['v2']=sqrt(((a['vx4']*a['vx4'])+(a['vy4']*a['vy4']))); a['w1']=Math.atan2(a['vx2'], a['vy2']); a['w2']=Math.atan2(a['vx4'], a['vy4']); a['vx2']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vx2'])); a['vy2']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vy2'])); a['vx4']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vx4'])); a['vy4']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vy4'])); a['bounce']=below(sqrt((sqr((((a['x3']+a['vx3'])-a['x4'])-a['vx4']))+sqr((((a['y3']+a['vy3'])-a['y4'])-a['vy4'])))), (2*a['r'])); a['ref_ang']=(Math.atan2((a['x4']-a['x3']), (a['y4']-a['y3']))+Math.asin(1)); a['v1']=sqrt(((a['vx3']*a['vx3'])+(a['vy3']*a['vy3']))); a['v2']=sqrt(((a['vx4']*a['vx4'])+(a['vy4']*a['vy4']))); a['w1']=Math.atan2(a['vx3'], a['vy3']); a['w2']=Math.atan2(a['vx4'], a['vy4']); a['vx3']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vx3'])); a['vy3']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v1'])*Math.cos((a['w1']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v2'])*Math.cos(((a['w2']-a['ref_ang'])-Math.asin(1)))))):(a['vy3'])); a['vx4']=((Math.abs(a['bounce'])>0.00001)?((((Math.sin(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.sin((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vx4'])); a['vy4']=((Math.abs(a['bounce'])>0.00001)?((((Math.cos(a['ref_ang'])*a['v2'])*Math.cos((a['w2']-a['ref_ang'])))+((Math.cos((a['ref_ang']+Math.asin(1)))*a['v1'])*Math.cos(((a['w1']-a['ref_ang'])-Math.asin(1)))))):(a['vy4'])); a['q1']=(0.5-a['x1']); a['q2']=(-0.5+a['y1']); a['q3']=(0.5-a['x2']); a['q4']=(-0.5+a['y2']); a['q5']=(0.5-a['x3']); a['q6']=(-0.5+a['y3']); a['q7']=(0.5-a['x4']); a['q8']=(-0.5+a['y4']);",
+ "pixel_eqs_str": "",
+ "init_eqs_eel": "x1 = 0.5;\nx2 = 0.51;\n\ny2 = 0.9;\ny1 = 0.7;\n\nx3 = 0.8;\ny3 = 0.5;\n\nx4 = 0.2;\ny4 = 0.5;\n\n\nax1 = 0;\nay1 = 0;\nax2 = 0;\nay2 = 0;\nax3 = 0;\nay3 = 0;\n\nvx1 = 0.000;\nvx2 = 0.000;\ncool = 0;\n",
+ "frame_eqs_eel": "kick = max(bass - bass_att, 0);\ncool = max(cool - 1 / max(fps, 1), 0);\nhop = above(kick, 0.25) * below(cool, 0.001);\ncool = if(hop, 0.25, cool);\nlow = below(y1, 0.35);\nvy1 = vy1 + hop * low * (0.002 + 0.002 * rand(100) / 100);\nvx1 = vx1 + hop * low * (rand(100) / 100 - 0.5) * 0.006;\nvy1 = if(above(y1, 0.96), -abs(vy1) * 0.9, vy1);\nlow = below(y2, 0.35);\nvy2 = vy2 + hop * low * (0.002 + 0.002 * rand(100) / 100);\nvx2 = vx2 + hop * low * (rand(100) / 100 - 0.5) * 0.006;\nvy2 = if(above(y2, 0.96), -abs(vy2) * 0.9, vy2);\nlow = below(y3, 0.35);\nvy3 = vy3 + hop * low * (0.002 + 0.002 * rand(100) / 100);\nvx3 = vx3 + hop * low * (rand(100) / 100 - 0.5) * 0.006;\nvy3 = if(above(y3, 0.96), -abs(vy3) * 0.9, vy3);\nlow = below(y4, 0.35);\nvy4 = vy4 + hop * low * (0.002 + 0.002 * rand(100) / 100);\nvx4 = vx4 + hop * low * (rand(100) / 100 - 0.5) * 0.006;\nvy4 = if(above(y4, 0.96), -abs(vy4) * 0.9, vy4);\nwave_a = 0;\n//pogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogo\nr = 0.04+ max(bass_att,treb_att)*0.004;\nbounce = below(y1,r);y1 = y1+vy1;vy1 = if(bounce, abs(vy1)*0.94 + (r-y1)*0.1, vy1-0.0001*60/fps);\nbounce = below(x1,r);x1 = x1+vx1;vx1 = if(bounce, abs(vx1)*0.94 + (r-x1)*0.1, vx1);\nbounce = above(x1,1-r);vx1 = if(bounce, - abs(vx1)*0.94 + (1-r-x1)*0.04, vx1);\nbounce = below(y2,r);y2 = y2 + vy2;vy2 = if(bounce,abs(vy2)*0.94+(r-y2)*.1, vy2-0.0001*60/fps);\nbounce = below(x2,r);x2 = x2+ vx2;vx2 = if(bounce, abs(vx2)*0.94 + (r-x2)*0.1, vx2);\nbounce = above(x2,1-r);vx2 = if(bounce, - abs(vx2)*0.94 + (1-r-x2)*0.1, vx2);\nbounce = below(y3,r);y3 = y3 + vy3;vy3 = if(bounce,abs(vy3)*0.94+(r-y3)*.1, vy3-0.0001*60/fps);\nbounce = below(x3,r);x3 = x3+ vx3;vx3 = if(bounce, abs(vx3)*0.94 + (r-x3)*0.1, vx3);\nbounce = above(x3,1-r);vx3 = if(bounce, - abs(vx3)*0.94 + (1-r-x3)*0.1, vx3);\nbounce = below(y4,r);y4 = y4 + vy4;vy4 = if(bounce,abs(vy4)*0.94+(r-y4)*.1, vy4-0.0001*60/fps);\nbounce = below(x4,r);x4 = x4+ vx4;vx4 = if(bounce, abs(vx4)*0.94 + (r-x4)*0.1, vx4);\nbounce = above(x4,1-r);vx4 = if(bounce, - abs(vx4)*0.94 + (1-r-x4)*0.1, vx4);\nbounce = below( sqrt( sqr(x1+vx1-x2-vx2) + sqr(y1+vy1-y2-vy2)), 2*r);\nref_ang = atan2(x2-x1,y2-y1)+asin(1); // common tangent\nv1 = sqrt(vx1*vx1+vy1*vy1);v2 = sqrt(vx2*vx2+vy2*vy2);w1 = atan2(vx1,vy1);w2 = atan2(vx2,vy2);\nvx1 = if(bounce,sin(ref_ang)*v1*cos(w1-ref_ang) + sin(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vx1);\nvy1 = if(bounce,cos(ref_ang)*v1*cos(w1-ref_ang) + cos(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vy1);\nvx2 = if(bounce,sin(ref_ang)*v2*cos(w2-ref_ang) + sin(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vx2);\nvy2 = if(bounce,cos(ref_ang)*v2*cos(w2-ref_ang) + cos(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vy2);\nbounce = below( sqrt( sqr(x1+vx1-x3-vx3) + sqr(y1+vy1-y3-vy3)), 2*r);\nref_ang = atan2(x3-x1,y3-y1)+asin(1); // common tangent\nv1 = sqrt(vx1*vx1+vy1*vy1);v2 = sqrt(vx3*vx3+vy3*vy3);w1 = atan2(vx1,vy1);w2 = atan2(vx3,vy3);\nvx1 = if(bounce,sin(ref_ang)*v1*cos(w1-ref_ang) + sin(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vx1);\nvy1 = if(bounce,cos(ref_ang)*v1*cos(w1-ref_ang) + cos(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vy1);\nvx3 = if(bounce,sin(ref_ang)*v2*cos(w2-ref_ang) + sin(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vx3);\nvy3 = if(bounce,cos(ref_ang)*v2*cos(w2-ref_ang) + cos(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vy3);\nbounce = below( sqrt( sqr(x2+vx2-x3-vx3) + sqr(y2+vy2-y3-vy3)), 2*r);\nref_ang = atan2(x3-x2,y3-y2)+asin(1); // common tangent\nv1 = sqrt(vx2*vx2+vy2*vy2);v2 = sqrt(vx3*vx3+vy3*vy3);w1 = atan2(vx2,vy2);w2 = atan2(vx3,vy3);\nvx2 = if(bounce,sin(ref_ang)*v1*cos(w1-ref_ang) + sin(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vx2);\nvy2 = if(bounce,cos(ref_ang)*v1*cos(w1-ref_ang) + cos(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vy2);\nvx3 = if(bounce,sin(ref_ang)*v2*cos(w2-ref_ang) + sin(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vx3);\nvy3 = if(bounce,cos(ref_ang)*v2*cos(w2-ref_ang) + cos(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vy3);\nbounce = below( sqrt( sqr(x1+vx1-x4-vx4) + sqr(y1+vy1-y4-vy4)), 2*r);\nref_ang = atan2(x4-x1,y4-y1)+asin(1); // common tangent\nv1 = sqrt(vx1*vx1+vy1*vy1);v2 = sqrt(vx4*vx4+vy4*vy4);w1 = atan2(vx1,vy1);w2 = atan2(vx4,vy4);\nvx1 = if(bounce,sin(ref_ang)*v1*cos(w1-ref_ang) + sin(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vx1);\nvy1 = if(bounce,cos(ref_ang)*v1*cos(w1-ref_ang) + cos(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vy1);\nvx4 = if(bounce,sin(ref_ang)*v2*cos(w2-ref_ang) + sin(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vx4);\nvy4 = if(bounce,cos(ref_ang)*v2*cos(w2-ref_ang) + cos(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vy4);\nbounce = below( sqrt( sqr(x2+vx2-x4-vx4) + sqr(y2+vy2-y4-vy4)), 2*r);\nref_ang = atan2(x4-x2,y4-y2)+asin(1); // common tangent\nv1 = sqrt(vx2*vx2+vy2*vy2);v2 = sqrt(vx4*vx4+vy4*vy4);w1 = atan2(vx2,vy2);w2 = atan2(vx4,vy4);\nvx2 = if(bounce,sin(ref_ang)*v1*cos(w1-ref_ang) + sin(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vx2);\nvy2 = if(bounce,cos(ref_ang)*v1*cos(w1-ref_ang) + cos(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vy2);\nvx4 = if(bounce,sin(ref_ang)*v2*cos(w2-ref_ang) + sin(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vx4);\nvy4 = if(bounce,cos(ref_ang)*v2*cos(w2-ref_ang) + cos(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vy4);\nbounce = below( sqrt( sqr(x3+vx3-x4-vx4) + sqr(y3+vy3-y4-vy4)), 2*r);\nref_ang = atan2(x4-x3,y4-y3)+asin(1); // common tangent\nv1 = sqrt(vx3*vx3+vy3*vy3);v2 = sqrt(vx4*vx4+vy4*vy4);w1 = atan2(vx3,vy3);w2 = atan2(vx4,vy4);\nvx3 = if(bounce,sin(ref_ang)*v1*cos(w1-ref_ang) + sin(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vx3);\nvy3 = if(bounce,cos(ref_ang)*v1*cos(w1-ref_ang) + cos(ref_ang+asin(1))*v2*cos(w2-ref_ang-asin(1)), vy3);\nvx4 = if(bounce,sin(ref_ang)*v2*cos(w2-ref_ang) + sin(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vx4);\nvy4 = if(bounce,cos(ref_ang)*v2*cos(w2-ref_ang) + cos(ref_ang+asin(1))*v1*cos(w1-ref_ang-asin(1)), vy4);\n//pogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogopogo\nq1 =  0.5 - x1;\nq2 = 0.5 - y1;\nq3 =  0.5 - x2;\nq4 = 0.5 - y2;\nq5 =  0.5 - x3;\nq6 = 0.5 - y3;\nq7 =  0.5 - x4;\nq8 = 0.5 - y4;",
+ "pixel_eqs_eel": "",
+ "warp": " shader_body { \n  vec2 uv_blue_1;\n  vec3 ret_2;\n  vec3 tmpvar_3;\n  tmpvar_3 = (texture (sampler_noise_lq, ((\n    (uv_orig * texsize.xy)\n   * texsize_noise_lq.zw) + rand_frame.xy)) - 0.5).xyz;\n  vec3 tmpvar_4;\n  tmpvar_4.xy = uv_orig;\n  tmpvar_4.z = q1;\n  vec3 tmpvar_5;\n  tmpvar_5 = (texture (sampler_noisevol_hq, (tmpvar_4 + vec3(0.03, 0.0, 0.0))) - texture (sampler_noisevol_hq, (tmpvar_4 - vec3(0.03, 0.0, 0.0)))).xyz;\n  vec3 tmpvar_6;\n  tmpvar_6 = (texture (sampler_noisevol_hq, (tmpvar_4 + vec3(0.0, 0.03, 0.0))) - texture (sampler_noisevol_hq, (tmpvar_4 - vec3(0.0, 0.03, 0.0)))).xyz;\n  vec4 tmpvar_7;\n  tmpvar_7 = texture (sampler_noisevol_hq, tmpvar_4);\n  vec2 tmpvar_8;\n  tmpvar_8.x = tmpvar_5.x;\n  tmpvar_8.y = tmpvar_6.x;\n  vec2 tmpvar_9;\n  tmpvar_9.x = tmpvar_6.x;\n  tmpvar_9.y = -(tmpvar_5.x);\n  vec2 tmpvar_10;\n  tmpvar_10 = ((0.5 + (\n    (uv - 0.5)\n   * 1.01)) + ((\n    ((-8.0 * tmpvar_8) * (1.0 - tmpvar_7.x))\n   - \n    (8.0 * tmpvar_9)\n  ) * texsize.zw));\n  ret_2.x = texture (sampler_main, tmpvar_10).x;\n  ret_2.x = (ret_2.x + ((ret_2.x - \n    ((texture (sampler_blur3, tmpvar_10).xyz * scale3) + bias3)\n  ) * 0.1).x);\n  ret_2.x = (ret_2.x * 0.95);\n  ret_2.x = (ret_2.x + ((tmpvar_3 * 0.4) * (1.0 - \n    (tmpvar_7.x * 2.0)\n  )).x);\n  ret_2.y = ((texture (sampler_main, uv_orig).y * 0.96) - 0.004);\n  uv_blue_1 = (mix (uv_orig, (0.5 + \n    ((tmpvar_10 - 0.5) * 1.02)\n  ), vec2(-1.0, -1.0)) + ((tmpvar_3.xy * texsize.zw) * 4.0));\n  ret_2.z = (texture (sampler_main, uv_blue_1).z + (ret_2.x * 0.2));\n  ret_2.z = (ret_2.z + ((\n    (((texture (sampler_blur1, uv_blue_1).xyz * scale1) + bias1).z - ret_2.z)\n   * 0.1) - 0.03));\n  vec4 tmpvar_11;\n  tmpvar_11.w = 1.0;\n  tmpvar_11.xyz = ret_2;\n  ret = tmpvar_11.xyz;\n }",
+ "comp": "vec2 xlat_mutablefactorA;\n shader_body { \n  vec2 uv_1;\n  vec2 tmpvar_2;\n  tmpvar_2 = (uv - 0.5);\n  vec2 tmpvar_3;\n  tmpvar_3.x = q1;\n  tmpvar_3.y = q2;\n  xlat_mutablefactorA = (tmpvar_2 + tmpvar_3);\n  vec2 tmpvar_4;\n  tmpvar_4 = (xlat_mutablefactorA * vec2(8.0, 8.0));\n  vec2 tmpvar_5;\n  tmpvar_5.x = q3;\n  tmpvar_5.y = q4;\n  xlat_mutablefactorA = (tmpvar_2 + tmpvar_5);\n  vec2 tmpvar_6;\n  tmpvar_6 = (xlat_mutablefactorA * vec2(8.0, 8.0));\n  vec2 tmpvar_7;\n  tmpvar_7.x = q5;\n  tmpvar_7.y = q6;\n  xlat_mutablefactorA = (tmpvar_2 + tmpvar_7);\n  vec2 tmpvar_8;\n  tmpvar_8 = (xlat_mutablefactorA * vec2(8.0, 8.0));\n  vec2 tmpvar_9;\n  tmpvar_9.x = q7;\n  tmpvar_9.y = q8;\n  xlat_mutablefactorA = (tmpvar_2 + tmpvar_9);\n  vec2 tmpvar_10;\n  tmpvar_10 = (xlat_mutablefactorA * vec2(8.0, 8.0));\n  vec2 tmpvar_11;\n  tmpvar_11.x = ((tmpvar_4.x * tmpvar_6.x) - (tmpvar_4.y * tmpvar_6.y));\n  tmpvar_11.y = ((tmpvar_4.x * tmpvar_6.y) + (tmpvar_4.y * tmpvar_6.x));\n  vec2 tmpvar_12;\n  tmpvar_12.x = ((tmpvar_8.x * tmpvar_10.x) - (tmpvar_8.y * tmpvar_10.y));\n  tmpvar_12.y = ((tmpvar_8.x * tmpvar_10.y) + (tmpvar_8.y * tmpvar_10.x));\n  xlat_mutablefactorA = tmpvar_11;\n  vec2 tmpvar_13;\n  tmpvar_13.x = ((tmpvar_11.x * tmpvar_12.x) - (tmpvar_11.y * tmpvar_12.y));\n  tmpvar_13.y = ((tmpvar_11.x * tmpvar_12.y) + (tmpvar_11.y * tmpvar_12.x));\n  vec2 tmpvar_14;\n  tmpvar_14.x = tmpvar_13.x;\n  tmpvar_14.y = -(tmpvar_13.y);\n  uv_1 = ((tmpvar_14 / (\n    (tmpvar_13.x * tmpvar_13.x)\n   + \n    (tmpvar_13.y * tmpvar_13.y)\n  )) * 16.0);\n  vec2 tmpvar_15;\n  tmpvar_15 = mix ((0.5 + (tmpvar_2 * \n    (2.0 + ((bass_att - treb_att) * 0.02))\n  )), (uv_1 + 0.5), vec2(0.5, 0.5));\n  float tmpvar_16;\n  vec2 x_17;\n  x_17 = (tmpvar_15 - 0.5);\n  tmpvar_16 = sqrt(dot (x_17, x_17));\n  uv_1 = (0.5 + ((1.0 - \n    abs(((fract(\n      (tmpvar_15 * 0.5)\n    ) * 2.0) - 1.0))\n  ) - 0.5));\n  vec4 tmpvar_18;\n  tmpvar_18 = texture (sampler_fc_main, uv_1);\n  float sky_n = clamp(texture(sampler_noise_hq, uv_1 * 0.35 + vec2(time * 0.004, 0.0)).x * 0.7 + texture(sampler_noise_hq, uv_1 * 0.9 - vec2(0.0, time * 0.006)).x * 0.3, 0.0, 1.0);\n\n  float sky_x = clamp(0.15 + 0.7 * sky_n, 0.0, 1.0) * 5.0;\n  vec3 sky = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(sky_x, 0.0, 1.0));\n  sky = mix(sky, NOKKVI_RAMP2, clamp(sky_x - 1.0, 0.0, 1.0));\n  sky = mix(sky, NOKKVI_RAMP3, clamp(sky_x - 2.0, 0.0, 1.0));\n  sky = mix(sky, NOKKVI_RAMP4, clamp(sky_x - 3.0, 0.0, 1.0));\n  sky = mix(sky, NOKKVI_RAMP5, clamp(sky_x - 4.0, 0.0, 1.0));\n  float inv_l = clamp(1.1 - dot(tmpvar_18.xyz, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);\n\n  float inv_c_x = clamp(inv_l, 0.0, 1.0) * 5.0;\n  vec3 inv_c = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(inv_c_x, 0.0, 1.0));\n  inv_c = mix(inv_c, NOKKVI_RAMP2, clamp(inv_c_x - 1.0, 0.0, 1.0));\n  inv_c = mix(inv_c, NOKKVI_RAMP3, clamp(inv_c_x - 2.0, 0.0, 1.0));\n  inv_c = mix(inv_c, NOKKVI_RAMP4, clamp(inv_c_x - 3.0, 0.0, 1.0));\n  inv_c = mix(inv_c, NOKKVI_RAMP5, clamp(inv_c_x - 4.0, 0.0, 1.0));\n  vec4 tmpvar_19;\n  tmpvar_19.w = 0.0;\n  tmpvar_19.xyz = mix(NOKKVI_BG, inv_c, smoothstep(0.05, 0.6, inv_l)) + NOKKVI_TEXT * smoothstep(0.85, 1.1, inv_l) * 0.5;\n  vec4 tmpvar_20;\n  tmpvar_20.w = 0.0;\n  tmpvar_20.xyz = vec3(1.5 - 1.1 * dot(tmpvar_18.xyz, vec3(0.299, 0.587, 0.114)));\n  vec4 tmpvar_21;\n  tmpvar_21.w = 1.0;\n  tmpvar_21.xyz = (mix (tmpvar_19, clamp (\n    (vec4(sky, 1.0) - 0.1)\n  , 0.0, 1.0), tmpvar_20) * clamp ((1.0 - \n    ((tmpvar_16 * tmpvar_16) * (tmpvar_16 * 0.001337))\n  ), 0.0, 1.0)).xyz;\n  ret = tmpvar_21.xyz;\n }"
+}

@@ -31,8 +31,9 @@ All notable changes to this project will be documented in this file.
 - Never Show This Preset hides a preset for good and moves on at once.
 - Presets dropped into `~/.config/nokkvi/milkdrop/` join the rotation; the refresh key picks up new ones.
 - A MilkDrop settings section sets the preset interval, whether tracks change presets, favorites only, render quality and name toasts.
-- Twelve nokkvi MilkDrop presets draw in your theme's colours; seven of them use the playing album's cover.
+- Fourteen nokkvi MilkDrop presets draw in your theme's colours; eight of them use the playing album's cover.
 - Two nokkvi presets remake the classic "dedicated to the sherwin maxawow" in your theme's colours or your cover's.
+- Two nokkvi presets remake Flexi's "black holes", whose bouncing holes swallow the picture, in your theme's colours or your cover's.
 - nokkvi's MilkDrop presets recolour on the spot when you change theme, and keep the theme's dark colours in light mode.
 - The MilkDrop Presets setting gains `nokkvi`, which plays only nokkvi's own presets.
 - Each MilkDrop preset starts from the previous preset's picture, as in MilkDrop, instead of from black.
