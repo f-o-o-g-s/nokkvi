@@ -462,9 +462,9 @@ define_settings! {
                 label: "Cover Art",
                 category: "Artwork Column",
                 subtitle: Some(
-                    "Hide swaps the now-playing cover for black so the visualizer stands out; \
-                     lyrics and the visualizer stay. Hide in Theater Mode keeps covers in the \
-                     Queue and Radios columns",
+                    "Hide swaps the now-playing cover for a plain backdrop (black in dark \
+                     mode) so the visualizer stands out; lyrics and the visualizer stay. Hide \
+                     in Theater Mode keeps covers in the Queue and Radios columns",
                 ),
                 default: "Show",
                 options: &["Show", "Hide in Theater Mode", "Hide everywhere"],

@@ -915,9 +915,9 @@ impl Nokkvi {
         // theater container does both here.
         let now = std::time::Instant::now();
         let menu_open = self.open_menu.is_some();
-        // A hidden cover makes the whole window the black backdrop.
+        // A hidden cover makes the whole window the backdrop.
         let field = if self.theater_cover_hidden() {
-            iced::Color::BLACK
+            crate::widgets::base_slot_list_layout::cover_backdrop()
         } else {
             artwork_outer_bg()
         };

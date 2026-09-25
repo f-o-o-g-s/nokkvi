@@ -130,7 +130,8 @@ impl ArtworkColumnMode {
 
 define_labeled_enum! {
     /// Whether the now-playing panels (the Queue cover, the Radios panel,
-    /// Theater Mode) draw the cover picture or a black backdrop in its place.
+    /// Theater Mode) draw the cover picture or a plain backdrop in its place
+    /// (black in dark mode, the theme's hard background in light mode).
     /// Hiding keeps the panel's size, the over-cover visualizer and the lyrics.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]

@@ -30,6 +30,19 @@ pub(crate) fn artwork_outer_bg() -> Color {
     theme::bg0_soft()
 }
 
+/// The hidden-cover backdrop (the Cover Art setting): pure black in dark
+/// mode, so the visualizer stands out; the theme's hard background in light
+/// mode, because the lyric text, its glyph halo, the lyrics scrim and the
+/// light visualizer palette are all tuned for a light surface (over black the
+/// scrim washed to grey and the dark lyrics sank into it).
+pub(crate) fn cover_backdrop() -> Color {
+    if theme::is_light_mode() {
+        theme::bg0_hard()
+    } else {
+        Color::BLACK
+    }
+}
+
 /// Minimum slot list width before artwork column hides (Auto mode only)
 pub(crate) const MIN_SLOT_LIST_WIDTH: f32 = 800.0;
 
@@ -334,8 +347,8 @@ pub(crate) enum ArtworkPlaceholder {
     /// Centered radio-tower glyph on the artwork background — Radios stations
     /// with no logo / not-yet-loaded now-playing art.
     RadioTower,
-    /// Pure black, no glyph: the Cover Art setting's hidden-cover backdrop,
-    /// so the over-cover visualizer stands out.
+    /// [`cover_backdrop`], no glyph: the Cover Art setting's hidden-cover
+    /// backdrop, so the over-cover visualizer stands out.
     Backdrop,
 }
 
@@ -358,7 +371,7 @@ impl ArtworkPlaceholder {
     fn content<'a, Message: 'a>(self, width: Length, height: Length) -> Element<'a, Message> {
         use iced::widget::{container, text};
         let background = match self {
-            ArtworkPlaceholder::Backdrop => Color::BLACK,
+            ArtworkPlaceholder::Backdrop => cover_backdrop(),
             ArtworkPlaceholder::Blank | ArtworkPlaceholder::RadioTower => artwork_outer_bg(),
         };
         let base = container::<Message, _, _>(match self {
@@ -1354,6 +1367,21 @@ where
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn cover_backdrop_is_black_in_dark_mode_and_the_hard_background_in_light() {
+        let _guard = crate::theme::THEME_MODE_LOCK.lock();
+        let prior = crate::theme::is_light_mode();
+        crate::theme::set_light_mode(false);
+        assert_eq!(cover_backdrop(), Color::BLACK);
+        crate::theme::set_light_mode(true);
+        assert_eq!(
+            cover_backdrop(),
+            theme::bg0_hard(),
+            "light mode's lyrics, scrim and visualizer are tuned for a light surface"
+        );
+        crate::theme::set_light_mode(prior);
+    }
 
     /// All tests in this module mutate the global theme atomics for artwork
     /// column mode/fit/width_pct. Acquire the crate-wide theme lock at the
