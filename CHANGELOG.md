@@ -25,6 +25,9 @@ All notable changes to this project will be documented in this file.
 - MilkDrop switches to another preset every 30 seconds and on each new track, showing the preset's name.
 - In MilkDrop mode, `n` jumps to another preset and `p` returns to the previous one.
 - In MilkDrop mode, Shift+M locks the current preset until pressed again.
+- Right-clicking the MilkDrop panel offers Next, Previous, Lock, Favorite and Never Show This Preset.
+- Never Show This Preset hides a preset for good and moves on at once.
+- Presets dropped into `~/.config/nokkvi/milkdrop/` join the rotation; the refresh key picks up new ones.
 
 ### Changed
 

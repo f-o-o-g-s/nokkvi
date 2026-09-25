@@ -590,3 +590,152 @@ fn off_the_panel_a_failure_does_not_retry() {
         "no retry off the panel"
     );
 }
+
+// ----------------------------------------------------------------------------
+// Curation from the panel menu
+// ----------------------------------------------------------------------------
+
+/// A unique scratch directory under the system temp dir, removed on drop.
+struct TestDir(std::path::PathBuf);
+
+impl TestDir {
+    fn new() -> Self {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("nokkvi-milkdrop-test-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("create test dir");
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn control(app: &mut Nokkvi, c: crate::app_message::MilkdropControl) {
+    let _ = app.update(Message::Milkdrop(MilkdropMessage::Control(c)));
+}
+
+/// `md_app` with the curation file in a temp dir (never the real one).
+fn curated_app(dir: &TestDir) -> Nokkvi {
+    let mut app = md_app();
+    app.milkdrop.user_dir = dir.path().to_path_buf();
+    app.milkdrop.curation_path = dir.path().join("curation.toml");
+    app
+}
+
+#[test]
+fn hide_persists_and_advances() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    on_screen(&mut app);
+    let shown = app.milkdrop.on_screen.clone().expect("a preset on screen");
+
+    control(&mut app, crate::app_message::MilkdropControl::Hide);
+    assert!(app.milkdrop.library.is_hidden(&shown));
+    assert_ne!(
+        app.milkdrop.current.as_deref(),
+        Some(shown.as_str()),
+        "moved on"
+    );
+    let saved =
+        nokkvi_data::services::milkdrop_presets::Curation::load(&app.milkdrop.curation_path);
+    assert!(saved.hidden.contains(&shown), "written to curation.toml");
+}
+
+#[test]
+fn favorite_toggles_and_persists() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    on_screen(&mut app);
+    let shown = app.milkdrop.on_screen.clone().expect("a preset on screen");
+
+    control(
+        &mut app,
+        crate::app_message::MilkdropControl::ToggleFavorite,
+    );
+    assert!(app.milkdrop.library.is_favorite(&shown));
+    let load = |app: &Nokkvi| {
+        nokkvi_data::services::milkdrop_presets::Curation::load(&app.milkdrop.curation_path)
+    };
+    assert!(load(&app).favorites.contains(&shown));
+
+    control(
+        &mut app,
+        crate::app_message::MilkdropControl::ToggleFavorite,
+    );
+    assert!(!app.milkdrop.library.is_favorite(&shown));
+    assert!(!load(&app).favorites.contains(&shown));
+}
+
+#[test]
+fn curation_controls_are_inert_outside_milkdrop_mode() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    on_screen(&mut app);
+    let shown = app.milkdrop.on_screen.clone().expect("a preset on screen");
+    app.engine.visualization_mode = VisualizationMode::Bars;
+    control(&mut app, crate::app_message::MilkdropControl::Hide);
+    control(
+        &mut app,
+        crate::app_message::MilkdropControl::ToggleFavorite,
+    );
+    assert!(!app.milkdrop.library.is_hidden(&shown));
+    assert!(!app.milkdrop.library.is_favorite(&shown));
+    assert!(!app.milkdrop.curation_path.exists());
+}
+
+#[test]
+fn refresh_rescans_the_user_dir_in_milkdrop_mode() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    app.milkdrop.library =
+        PresetLibrary::new(BUNDLED_MILKDROP_PRESETS, dir.path(), Curation::default());
+    enter_milkdrop(&mut app);
+    let before = app.milkdrop.library.len();
+    std::fs::write(dir.path().join("zz my own preset.json"), "{}").expect("write");
+    let _ = app.update(Message::Hotkey(
+        crate::app_message::HotkeyMessage::RefreshView,
+    ));
+    assert_eq!(app.milkdrop.library.len(), before + 1);
+}
+
+#[test]
+fn queue_panel_menu_rows_reach_the_same_handlers() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    on_screen(&mut app);
+    let _ = app.update(Message::Queue(crate::views::QueueMessage::Milkdrop(
+        crate::app_message::MilkdropControl::ToggleLock,
+    )));
+    assert!(app.milkdrop.locked);
+}
+
+#[test]
+fn milkdrop_menu_rows_carry_the_shipped_icons() {
+    use crate::{app_message::MilkdropControl as C, widgets::context_menu::milkdrop_panel_entries};
+    let rows = milkdrop_panel_entries(false, false, |c| c);
+    let pairs: Vec<(&str, &str)> = rows.iter().map(|r| (r.icon, r.label)).collect();
+    assert_eq!(
+        pairs,
+        [
+            ("assets/icons/skip-forward.svg", "Next Preset"),
+            ("assets/icons/skip-back.svg", "Previous Preset"),
+            ("assets/icons/lock.svg", "Lock Preset"),
+            ("assets/icons/heart.svg", "Favorite Preset"),
+            ("assets/icons/eye-off.svg", "Never Show This Preset"),
+        ]
+    );
+    assert!(matches!(rows[4].message, C::Hide));
+    let rows = milkdrop_panel_entries(true, true, |c| c);
+    assert_eq!(rows[2].label, "Unlock Preset");
+    assert_eq!(rows[2].icon, "assets/icons/lock-open.svg");
+    assert_eq!(rows[3].label, "Unfavorite Preset");
+}

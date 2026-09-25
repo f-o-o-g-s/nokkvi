@@ -407,10 +407,13 @@ impl Nokkvi {
             HotkeyMessage::SettingsCategoryMotion(forward) => {
                 self.handle_settings_category_motion(forward)
             }
-            HotkeyMessage::RefreshView => self
-                .current_view_page()
-                .and_then(|p| p.reload_message())
-                .map_or_else(Task::none, Task::done),
+            HotkeyMessage::RefreshView => {
+                // MilkDrop: pick up presets dropped into the user folder.
+                self.milkdrop_rescan_if_active();
+                self.current_view_page()
+                    .and_then(|p| p.reload_message())
+                    .map_or_else(Task::none, Task::done)
+            }
             HotkeyMessage::StartRoulette => {
                 // Resolve the focused list: under browser-pane focus the visible
                 // list is the active tab, not self.current_view (pinned to the

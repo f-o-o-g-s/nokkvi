@@ -135,14 +135,18 @@ pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::ToggleConsume => Message::Playback(PlaybackMessage::ToggleConsume),
         HotkeyAction::ToggleSoundEffects => Message::Playback(PlaybackMessage::ToggleSoundEffects),
         HotkeyAction::CycleVisualization => Message::Playback(PlaybackMessage::CycleVisualization),
-        HotkeyAction::NextVisualizerPreset => {
-            Message::Milkdrop(crate::app_message::MilkdropMessage::NextPreset)
-        }
+        HotkeyAction::NextVisualizerPreset => Message::Milkdrop(
+            crate::app_message::MilkdropMessage::Control(crate::app_message::MilkdropControl::Next),
+        ),
         HotkeyAction::PreviousVisualizerPreset => {
-            Message::Milkdrop(crate::app_message::MilkdropMessage::PreviousPreset)
+            Message::Milkdrop(crate::app_message::MilkdropMessage::Control(
+                crate::app_message::MilkdropControl::Previous,
+            ))
         }
         HotkeyAction::ToggleVisualizerPresetLock => {
-            Message::Milkdrop(crate::app_message::MilkdropMessage::ToggleLock)
+            Message::Milkdrop(crate::app_message::MilkdropMessage::Control(
+                crate::app_message::MilkdropControl::ToggleLock,
+            ))
         }
         HotkeyAction::ToggleEqModal => Message::EqModal(crate::widgets::EqModalMessage::Toggle),
         HotkeyAction::OpenTrawl => {

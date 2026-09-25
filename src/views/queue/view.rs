@@ -1063,6 +1063,13 @@ impl QueuePage {
         panel_menu_entries.push(crate::widgets::context_menu::PanelMenuEntry::enter_theater(
             QueueMessage::EnterTheater,
         ));
+        if data.milkdrop_on {
+            panel_menu_entries.extend(crate::widgets::context_menu::milkdrop_panel_entries(
+                data.milkdrop_locked,
+                data.milkdrop_favorite,
+                QueueMessage::Milkdrop,
+            ));
+        }
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
             crate::widgets::context_menu::artwork_panel_open_state(
                 crate::View::Queue,

@@ -90,6 +90,7 @@ const NAME_MAP: &[(&str, &str)] = &[
         "ellipsis-vertical",
         "assets/icons-phosphor/dots-three-vertical-regular.svg",
     ),
+    ("eye-off", "assets/icons-phosphor/eye-slash-regular.svg"),
     ("file-music", "assets/icons-phosphor/file-audio-regular.svg"),
     (
         "folder-open",

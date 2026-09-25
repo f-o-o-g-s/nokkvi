@@ -985,12 +985,24 @@ pub enum MilkdropMessage {
         generation: u64,
         result: Result<(), String>,
     },
+    /// A preset control from a key, a panel menu row or the CLI.
+    Control(MilkdropControl),
+}
+
+/// The MilkDrop preset controls, shared by the hotkeys, the Queue and Theater
+/// panel menus and the `preset` CLI verb so they all reach one handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MilkdropControl {
     /// Jump to another preset (the `n` key).
-    NextPreset,
+    Next,
     /// Go back to the preset before this one (the `p` key).
-    PreviousPreset,
+    Previous,
     /// Keep the current preset until unlocked (Shift+M).
     ToggleLock,
+    /// Mark the preset on screen as a favorite, or clear the mark.
+    ToggleFavorite,
+    /// Never show the preset on screen again, and move on.
+    Hide,
 }
 
 /// Theater Mode messages — the now-playing layout with a transient player

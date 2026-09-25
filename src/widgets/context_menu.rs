@@ -461,6 +461,60 @@ impl<Message> PanelMenuEntry<Message> {
         }
     }
 
+    /// "Next Preset" — MilkDrop: jump to another preset.
+    pub(crate) fn next_preset(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/skip-forward.svg",
+            label: "Next Preset",
+            message,
+        }
+    }
+
+    /// "Previous Preset" — MilkDrop: go back to the preset before this one.
+    pub(crate) fn previous_preset(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/skip-back.svg",
+            label: "Previous Preset",
+            message,
+        }
+    }
+
+    /// "Lock Preset" / "Unlock Preset" — MilkDrop: stop or resume the timer.
+    pub(crate) fn lock_preset(locked: bool, message: Message) -> Self {
+        let (icon, label) = if locked {
+            ("assets/icons/lock-open.svg", "Unlock Preset")
+        } else {
+            ("assets/icons/lock.svg", "Lock Preset")
+        };
+        Self {
+            icon,
+            label,
+            message,
+        }
+    }
+
+    /// "Favorite Preset" / "Unfavorite Preset" — MilkDrop curation.
+    pub(crate) fn favorite_preset(is_favorite: bool, message: Message) -> Self {
+        Self {
+            icon: "assets/icons/heart.svg",
+            label: if is_favorite {
+                "Unfavorite Preset"
+            } else {
+                "Favorite Preset"
+            },
+            message,
+        }
+    }
+
+    /// "Never Show This Preset" — MilkDrop curation: hide it for good.
+    pub(crate) fn hide_preset(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/eye-off.svg",
+            label: "Never Show This Preset",
+            message,
+        }
+    }
+
     /// Render this entry as a standard menu row. Consumes the entry (the
     /// message moves into the button).
     pub(crate) fn view<'a>(self) -> Element<'a, Message>
@@ -469,6 +523,23 @@ impl<Message> PanelMenuEntry<Message> {
     {
         menu_button(Some(self.icon), self.label, self.message)
     }
+}
+
+/// The MilkDrop rows appended to the Queue and Theater panel menus, in menu
+/// order; `map` wraps each control in the host's message type.
+pub(crate) fn milkdrop_panel_entries<Message>(
+    locked: bool,
+    is_favorite: bool,
+    map: impl Fn(crate::app_message::MilkdropControl) -> Message,
+) -> Vec<PanelMenuEntry<Message>> {
+    use crate::app_message::MilkdropControl as C;
+    vec![
+        PanelMenuEntry::next_preset(map(C::Next)),
+        PanelMenuEntry::previous_preset(map(C::Previous)),
+        PanelMenuEntry::lock_preset(locked, map(C::ToggleLock)),
+        PanelMenuEntry::favorite_preset(is_favorite, map(C::ToggleFavorite)),
+        PanelMenuEntry::hide_preset(map(C::Hide)),
+    ]
 }
 
 // ============================================================================

@@ -771,6 +771,12 @@ impl Nokkvi {
             QueueAction::EnterTheater => {
                 return Task::batch([cmd.map(Message::Queue), self.enter_theater()]);
             }
+            QueueAction::Milkdrop(control) => {
+                return Task::batch([
+                    cmd.map(Message::Queue),
+                    self.handle_milkdrop(crate::app_message::MilkdropMessage::Control(control)),
+                ]);
+            }
             QueueAction::RefreshArtwork(album_id) => {
                 return self.update(Message::Artwork(ArtworkMessage::RefreshAlbumArtwork(
                     album_id,

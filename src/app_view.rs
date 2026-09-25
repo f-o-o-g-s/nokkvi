@@ -1038,6 +1038,18 @@ impl Nokkvi {
                 crate::app_message::ArtworkMessage::RefreshAlbumArtwork(album_id.to_string()),
             )));
         }
+        if self.engine.visualization_mode
+            == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
+        {
+            entries.extend(crate::widgets::context_menu::milkdrop_panel_entries(
+                self.milkdrop.locked,
+                self.milkdrop
+                    .on_screen
+                    .as_deref()
+                    .is_some_and(|name| self.milkdrop.library.is_favorite(name)),
+                |c| Message::Milkdrop(crate::app_message::MilkdropMessage::Control(c)),
+            ));
+        }
         let (menu_open, menu_position, on_menu_change) = panel_menu_open_state(
             crate::app_message::ContextMenuId::TheaterPanel,
             self.open_menu.as_ref(),
@@ -1876,6 +1888,14 @@ impl Nokkvi {
             current_playing_song_id: self.scrobble.current_song_id.clone(),
             current_playing_entry_id: self.last_queue_current_entry_id,
             is_playing: self.playback.playing && !self.playback.paused,
+            milkdrop_on: self.engine.visualization_mode
+                == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop,
+            milkdrop_locked: self.milkdrop.locked,
+            milkdrop_favorite: self
+                .milkdrop
+                .on_screen
+                .as_deref()
+                .is_some_and(|name| self.milkdrop.library.is_favorite(name)),
             total_queue_count: self
                 .library
                 .queue_loading_target

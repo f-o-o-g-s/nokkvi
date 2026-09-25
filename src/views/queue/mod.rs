@@ -125,6 +125,11 @@ pub struct QueueViewData<'a> {
     /// follow producers (see `FocusCurrentPlaying`).
     pub current_playing_entry_id: Option<u64>,
     pub is_playing: bool, // True if playback is active (not stopped/paused)
+    /// MilkDrop is the over-cover mode: the cover menu gains the preset rows.
+    pub milkdrop_on: bool,
+    pub milkdrop_locked: bool,
+    /// The preset on screen is a favorite (labels the Favorite row).
+    pub milkdrop_favorite: bool,
     pub total_queue_count: usize, // Total count before filtering (for empty state detection)
     pub stable_viewport: bool,
     /// Whether artwork-elevation is in effect for this frame. Forwarded into
@@ -268,6 +273,8 @@ pub enum QueueMessage {
     RefreshArtwork(String),
     /// Enter Theater Mode (the cover's corner icon and its menu row).
     EnterTheater,
+    /// A MilkDrop preset control from the cover's menu (bubbled to the root).
+    Milkdrop(crate::app_message::MilkdropControl),
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     /// Navigate to Albums and auto-expand the album with this id (no filter set).
@@ -354,6 +361,7 @@ pub enum QueueAction {
     ShowInFolder(usize),    // Open containing folder (queue index, path fetched via API)
     RefreshArtwork(String), // album_id - refresh artwork from server
     EnterTheater,           // enter Theater Mode from the now-playing cover
+    Milkdrop(crate::app_message::MilkdropControl), // a MilkDrop preset control
     FindSimilar(usize),     // Open Find Similar panel for queue index
     TopSongs(usize),        // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter

@@ -21,8 +21,11 @@ pub(crate) const MILKDROP_MAX_CONSECUTIVE_FAILURES: u8 = 5;
 pub struct MilkdropState {
     pub shared: Arc<MilkdropShared>,
     pub library: PresetLibrary,
-    /// Stem of the preset on screen (or being built).
+    /// Stem of the preset being built, or on screen once built.
     pub current: Option<String>,
+    /// Stem of the preset whose frames are on screen now; what Hide and
+    /// Favorite act on (it lags `current` while a replacement builds).
+    pub on_screen: Option<String>,
     /// For Previous; capped at [`MILKDROP_HISTORY_CAP`].
     pub history: Vec<String>,
     pub locked: bool,
@@ -55,6 +58,7 @@ impl Default for MilkdropState {
             shared: Arc::new(MilkdropShared::new()),
             library: PresetLibrary::default(),
             current: None,
+            on_screen: None,
             history: Vec::new(),
             locked: false,
             generation: 0,

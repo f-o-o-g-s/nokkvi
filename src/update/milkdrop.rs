@@ -17,7 +17,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     Nokkvi, Screen, View,
-    app_message::{Message, MilkdropMessage},
+    app_message::{Message, MilkdropControl, MilkdropMessage},
     state::{MILKDROP_HISTORY_CAP, MILKDROP_MAX_CONSECUTIVE_FAILURES},
     widgets::visualizer::milkdrop::{
         BuiltPreset, CompiledPreset, GpuHandles, build_renderer, compile_preset,
@@ -122,9 +122,13 @@ impl Nokkvi {
             MilkdropMessage::Built { generation, result } => {
                 self.handle_milkdrop_built(generation, result)
             }
-            MilkdropMessage::NextPreset => self.handle_milkdrop_next(),
-            MilkdropMessage::PreviousPreset => self.handle_milkdrop_previous(),
-            MilkdropMessage::ToggleLock => self.handle_milkdrop_toggle_lock(),
+            MilkdropMessage::Control(control) => match control {
+                MilkdropControl::Next => self.handle_milkdrop_next(),
+                MilkdropControl::Previous => self.handle_milkdrop_previous(),
+                MilkdropControl::ToggleLock => self.handle_milkdrop_toggle_lock(),
+                MilkdropControl::ToggleFavorite => self.handle_milkdrop_toggle_favorite(),
+                MilkdropControl::Hide => self.handle_milkdrop_hide(),
+            },
         }
     }
 
@@ -153,6 +157,7 @@ impl Nokkvi {
     pub(crate) fn milkdrop_release(&mut self) {
         self.milkdrop.shared.running.store(false, Ordering::Release);
         self.milkdrop.current = None;
+        self.milkdrop.on_screen = None;
         self.milkdrop.build_in_flight = None;
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.next_switch_at = None;
@@ -375,6 +380,78 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// "Never Show This Preset": hide the preset on screen for good (persisted
+    /// in `curation.toml`, logged for the repo cleanup) and move on.
+    fn handle_milkdrop_hide(&mut self) -> Task<Message> {
+        if !self.milkdrop_mode_active() {
+            debug!("milkdrop: Hide ignored outside MilkDrop mode");
+            return Task::none();
+        }
+        let Some(name) = self.milkdrop.on_screen.clone() else {
+            return Task::none();
+        };
+        self.milkdrop.library.hide(&name);
+        info!(preset = %name, "milkdrop: preset hidden");
+        self.milkdrop_save_curation();
+        self.toast_info(format!("MilkDrop: {name} won't show again"));
+        if self.milkdrop_is_running() {
+            self.milkdrop.consecutive_failures = 0;
+            self.milkdrop.next_switch_at = None;
+            let task = self.milkdrop_advance(AdvanceReason::Manual);
+            // A hidden preset never belongs in Previous's history.
+            self.milkdrop.history.retain(|n| *n != name);
+            task
+        } else {
+            Task::none()
+        }
+    }
+
+    fn handle_milkdrop_toggle_favorite(&mut self) -> Task<Message> {
+        if !self.milkdrop_mode_active() {
+            debug!("milkdrop: Favorite ignored outside MilkDrop mode");
+            return Task::none();
+        }
+        let Some(name) = self.milkdrop.on_screen.clone() else {
+            return Task::none();
+        };
+        let favorite = self.milkdrop.library.toggle_favorite(&name);
+        self.milkdrop_save_curation();
+        self.toast_info(if favorite {
+            format!("MilkDrop: {name} favorited")
+        } else {
+            format!("MilkDrop: {name} unfavorited")
+        });
+        Task::none()
+    }
+
+    /// Persist hidden + favorite presets; a failed write is reported, never
+    /// fatal (the in-memory curation still applies this session).
+    fn milkdrop_save_curation(&mut self) {
+        if self.milkdrop.curation_path.as_os_str().is_empty() {
+            return;
+        }
+        if let Err(e) = self
+            .milkdrop
+            .library
+            .curation()
+            .save(&self.milkdrop.curation_path)
+        {
+            warn!("milkdrop: could not save curation: {e:#}");
+            self.toast_warn("MilkDrop: could not save the preset list; see nokkvi.log");
+        }
+    }
+
+    /// Re-read the user preset folder (the refresh key, in MilkDrop mode only).
+    pub(crate) fn milkdrop_rescan_if_active(&mut self) {
+        if self.milkdrop_mode_active() {
+            self.milkdrop.library.rescan_user_dir();
+            debug!(
+                presets = self.milkdrop.library.len(),
+                "milkdrop: rescanned the user preset folder"
+            );
+        }
+    }
+
     /// Hook for a new track: switch presets when that setting is on.
     pub(crate) fn milkdrop_on_track_change(&mut self) -> Task<Message> {
         if self.milkdrop_is_running()
@@ -496,6 +573,7 @@ impl Nokkvi {
             self.milkdrop.empty_warned = false;
             if let Some(name) = self.milkdrop.current.clone() {
                 info!(preset = %name, "milkdrop: preset on screen");
+                self.milkdrop.on_screen = Some(name.clone());
                 self.toast_info(name);
             }
         }
