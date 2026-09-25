@@ -33,6 +33,18 @@ def tone(v, lum):
   vec3 {v} = mix(NOKKVI_BG, {v}_r, smoothstep(0.02, 0.35, {lum}));
   {v} = mix({v}, NOKKVI_TEXT, smoothstep(0.85, 1.0, {lum}) * 0.7);
 '''
+def tnoise(v, x):
+    """Smooth noise from the engine's 256 px noise texture at `x` (in texels
+    / 256) into float `v`. A magnified texture shows its bilinear grid; snapping
+    to texel centres with a quintic curve (Inigo Quilez's trick) removes it with
+    a single read."""
+    return f"""
+  vec2 {v}_x = ({x}) * 256.0 + 0.5;
+  vec2 {v}_i = floor({v}_x);
+  vec2 {v}_f = fract({v}_x);
+  {v}_f = {v}_f * {v}_f * {v}_f * ({v}_f * ({v}_f * 6.0 - 15.0) + 10.0);
+  float {v} = texture(sampler_noise_hq, ({v}_i + {v}_f - 0.5) / 256.0).x;
+"""
 LUM = "vec3(0.299, 0.587, 0.114)"
 # Mirror-tiled cover lookup filling any aspect: `c` in 0..1 around the centre.
 def cover(v, c, sampler="sampler_fw_cover"):
@@ -64,7 +76,11 @@ def preset(base, warp, comp, init='', frame=''):
 
 WAVE_THEME = "wave_r = NOKKVI_HIGHLIGHT_R;\nwave_g = NOKKVI_HIGHLIGHT_G;\nwave_b = NOKKVI_HIGHLIGHT_B;\n"
 # Beat envelope in q3: jumps on a kick, decays over ~0.3 s.
-PULSE = "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\n"
+# q3: a kick envelope (bass jumping above its follower), ~0.3 s.
+# q5: an instant pop from the raw bass level, ~0.15 s: brightness flashes and
+#     punches hit on the beat instead of easing in.
+PULSE = ("kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\n"
+         "pop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\n")
 
 presets = {}
 
@@ -78,28 +94,29 @@ presets["nokkvi - cover tunnel"] = preset(
   float r0 = max(length(p), 0.002);
   float a = atan(p.y, p.x);
   float r = r0 * (1.0 + 0.07 * sin(a * 3.0 + q1 * 1.7) * clamp(mid_att, 0.0, 2.0));
-  r *= 1.0 + 0.10 * q3;
+  r *= 1.0 + 0.10 * q3 + 0.08 * q5;
   float dep = 0.26 / r;
   vec2 t = vec2(a / 6.2831853 * 2.0 + q2 + 0.06 * dep, dep + q1);
-  float cl = dot(texture(sampler_fw_cover, vec2(-t.x, -t.y)).xyz, {LUM});
+  float cl = dot(texture(sampler_fw_cover, vec2(t.x, -t.y)).xyz, {LUM});
   float lum = clamp((cl - 0.5) * 1.6 + 0.5, 0.0, 1.0);
 ''' + tone("col", "lum") + '''
   float band = pow(abs(sin((dep + q1) * 4.7123889)), 28.0);
-  col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, q3 * 0.5) * band * (0.25 + 0.9 * q3);
+  col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, q3 * 0.5) * band * (0.25 + 0.9 * q3 + 0.8 * q5);
   col += NOKKVI_WARM * band * clamp(treb_att - 1.0, 0.0, 1.0) * 0.5;
   float fog = smoothstep(0.03, 0.42, r0);
   col = mix(NOKKVI_BG, col, fog * fog);
-  col += NOKKVI_ACCENT * smoothstep(0.035, 0.0, abs(r0 - 0.07 - 0.05 * q3)) * (0.3 + 0.7 * q3);
+  col += NOKKVI_ACCENT * smoothstep(0.035, 0.0, abs(r0 - 0.07 - 0.05 * q3 - 0.04 * q5)) * (0.3 + 0.7 * q3 + 0.6 * q5);
+  col *= 1.0 + 0.45 * q5;
   col += NOKKVI_ACCENT * GetBlur1(uv) * 0.9;
   col *= 0.85 + 0.15 * smoothstep(0.95, 0.3, r0);
   ret = col;
  }''',
-    init="depth = 0; twist = 0; pulse = 0;",
-    frame=PULSE + "depth = depth + 0.005 + 0.012 * min(bass_att, 2.5) + 0.03 * min(kick, 1.5);\n"
+    init="depth = 0; twist = 0; pulse = 0; pop = 0;",
+    frame=PULSE + "depth = depth + 0.005 + 0.012 * min(bass_att, 2.5) + 0.03 * min(kick, 1.5) + 0.02 * pop;\n"
           "twist = twist + 0.0015 + 0.003 * (mid_att - 1);\nq1 = depth;\nq2 = twist;\n" + WAVE_THEME)
 
 # 2. Halo -----------------------------------------------------------------
-halo_box = "float box = 0.30 + 0.02 * clamp(bass_att, 0.0, 2.0) + 0.03 * q3;"
+halo_box = "float box = 0.30 + 0.02 * clamp(bass_att, 0.0, 2.0) + 0.03 * q3 + 0.035 * q5;"
 presets["nokkvi - cover halo"] = preset(
     {"zoom": 1.02, "rot": 0.0, "warp": 0.15, "decay": 0.97, "wave_mode": 0, "wave_a": 0.3, "wave_scale": 0.6},
     "uniform sampler2D sampler_fc_cover;\n shader_body {\n" + HEAD + f'''
@@ -109,7 +126,7 @@ presets["nokkvi - cover halo"] = preset(
   vec3 cov = texture(sampler_fc_cover, vec2(0.5, 0.5) + vec2(1.0, -1.0) * p / (2.0 * box)).xyz;
   float rim = (1.0 - step(box, d)) * smoothstep(box - 0.05, box, d);
   vec3 fb = texture(sampler_main, uv).xyz * 0.955 - 0.003;
-  fb += cov * rim * (0.22 + 0.5 * q3);
+  fb += cov * rim * (0.22 + 0.5 * q3 + 0.45 * q5);
   ret = max(fb, vec3(0.0));
  }}''',
     "uniform sampler2D sampler_fc_cover;\n shader_body {\n" + HEAD + f'''
@@ -120,14 +137,15 @@ presets["nokkvi - cover halo"] = preset(
   float lum = clamp(dot(fb, {LUM}) * 1.3, 0.0, 1.0);
 ''' + tone("col", "lum") + f'''
   col += NOKKVI_WARM * smoothstep(0.75, 1.0, lum) * clamp(treb_att - 0.8, 0.0, 1.0) * 0.35;
+  col *= 1.0 + 0.4 * q5;
   vec3 cov = texture(sampler_fc_cover, vec2(0.5, 0.5) + vec2(1.0, -1.0) * p / (2.0 * box)).xyz;
   float inside = 1.0 - smoothstep(box - 0.003, box, d);
   col = mix(col, cov, inside);
   float frame = smoothstep(0.010, 0.0, abs(d - box));
-  col += NOKKVI_HIGHLIGHT * frame * (0.35 + 0.65 * max(q3, clamp(bass_att - 0.8, 0.0, 1.0)));
+  col += NOKKVI_HIGHLIGHT * frame * (0.35 + 0.65 * max(q3, clamp(bass_att - 0.8, 0.0, 1.0)) + 0.9 * q5);
   ret = col;
  }}''',
-    init="pulse = 0;",
+    init="pulse = 0; pop = 0;",
     frame=PULSE + "rot = 0.006 * sin(time * 0.3) + 0.01 * q3;\nzoom = 1.015 + 0.02 * q3;\n" + WAVE_THEME)
 
 # 3. Kaleido --------------------------------------------------------------
@@ -138,7 +156,7 @@ def kal(uvname, extra=""):
   float seg = 6.2831853 / 6.0;
   float a = mod(atan(p.y, p.x) + q1, seg);
   a = abs(a - seg * 0.5);
-  vec2 k = vec2(cos(a), sin(a)) * r * (0.75 - 0.08 * clamp(bass_att, 0.0, 2.0) - 0.08 * q3);
+  vec2 k = vec2(cos(a), sin(a)) * r * (0.75 - 0.08 * clamp(bass_att, 0.0, 2.0) - 0.08 * q3 - 0.12 * q5);
   k += vec2(0.5, 0.5) + 0.24 * vec2(cos(q2), sin(q2 * 0.7));
   float cl = dot(texture(sampler_fw_cover, vec2(k.x, 1.0 - k.y)).xyz, {LUM});
   float lum = clamp((cl - 0.5) * 1.9 + 0.5, 0.0, 1.0);
@@ -154,16 +172,17 @@ presets["nokkvi - cover kaleido"] = preset(
   col += NOKKVI_WARM * smoothstep(0.85, 1.0, lum) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.35;
   col += NOKKVI_TEXT * smoothstep(0.012, 0.0, abs(r - 0.35 - 0.2 * q3)) * q3 * 0.5;
   col *= 0.7 + 0.3 * smoothstep(0.9, 0.15, r);
+  col *= 1.0 + 0.4 * q5;
   ret = col;
  }''',
-    init="phase = 0; orbit = 0; pulse = 0;",
-    frame=PULSE + "phase = phase + 0.002 + 0.004 * min(bass_att, 2) + 0.01 * q3;\norbit = orbit + 0.0015 + 0.002 * min(mid_att, 2);\nq1 = phase;\nq2 = orbit;")
+    init="phase = 0; orbit = 0; pulse = 0; pop = 0;",
+    frame=PULSE + "phase = phase + 0.002 + 0.004 * min(bass_att, 2) + 0.01 * q3 + 0.012 * pop;\norbit = orbit + 0.0015 + 0.002 * min(mid_att, 2);\nq1 = phase;\nq2 = orbit;")
 
 # 4. Ripple (new) ---------------------------------------------------------
 ripple_frame = PULSE + '''dt = 1 / max(fps, 1);
 a1 = a1 + dt; a2 = a2 + dt; a3 = a3 + dt;
 cool = max(cool - dt, 0);
-spawn = above(kick, 0.3) * below(cool, 0.001);
+spawn = above(kick, 0.22) * below(cool, 0.001);
 slot = if(spawn, slot + 1 - 3 * above(slot, 1.5), slot);
 cool = if(spawn, 0.22, cool);
 nx = (rand(1000) / 1000 - 0.5) * 0.9;
@@ -194,24 +213,25 @@ presets["nokkvi - cover ripple"] = preset(
   vec2 off = vec2(0.0);
   float crest = 0.0;
 ''' + wave(1, "q4", "q5", "q6") + wave(2, "q7", "q8", "q9") + wave(3, "q10", "q11", "q12") + '''
-  vec2 c = p * 0.62 + off * 0.055 + vec2(0.5 + 0.12 * sin(q13 * 2.0), 0.5 + 0.12 * cos(q13 * 1.3));
+  vec2 c = p * 0.62 + off * 0.055 * (1.0 + 0.8 * q5) + vec2(0.5 + 0.12 * sin(q13 * 2.0), 0.5 + 0.12 * cos(q13 * 1.3));
 ''' + cover("cov", "c") + f'''
   float lum = clamp((dot(cov, {LUM}) - 0.5) * 1.5 + 0.5, 0.0, 1.0);
 ''' + tone("col", "lum") + '''
   col = mix(col, NOKKVI_HIGHLIGHT, clamp(crest, 0.0, 1.0) * 0.6);
-  col += NOKKVI_TEXT * pow(clamp(crest, 0.0, 1.0), 3.0) * 0.45;
+  col += NOKKVI_TEXT * pow(clamp(crest, 0.0, 1.0), 3.0) * (0.45 + 0.5 * q5);
   col = mix(col, NOKKVI_BG, clamp(-crest, 0.0, 1.0) * 0.35);
   col *= 0.8 + 0.2 * smoothstep(1.0, 0.3, length(p));
+  col *= 1.0 + 0.3 * q5;
   ret = col;
  }''',
-    init="pulse = 0; a1 = 9; a2 = 9; a3 = 9; slot = 0; cool = 0; drift = 0; x1 = 0; y1 = 0; x2 = 0; y2 = 0; x3 = 0; y3 = 0;",
+    init="pulse = 0; pop = 0; a1 = 9; a2 = 9; a3 = 9; slot = 0; cool = 0; drift = 0; x1 = 0; y1 = 0; x2 = 0; y2 = 0; x3 = 0; y3 = 0;",
     frame=ripple_frame)
 
 # Orb: the cover on a spinning, lit sphere that sheds its colours as paint:
 # a thin rim feeds the feedback, which curls away through a noise flow field
 # (sharpened against its blur so strokes stay crisp), and the sphere's edge
 # melts into it. Kicks shed more paint and swell the orb.
-orb_r = "float R = 0.26 + 0.03 * q3 + 0.01 * clamp(bass_att, 0.0, 2.0);"
+orb_r = "float R = 0.26 + 0.03 * q3 + 0.035 * q5 + 0.01 * clamp(bass_att, 0.0, 2.0);"
 ORB_SPHERE = """
     vec3 n = vec3(p.x, -p.y, sqrt(max(R * R - d2, 0.0))) / R;
     float ct = cos(0.35); float st = sin(0.35);
@@ -234,7 +254,7 @@ presets["nokkvi - cover orb"] = preset(
   float flow_ang = (texture(sampler_noise_hq, nuv).x + 0.5 * texture(sampler_noise_hq, nuv * 2.1 + 0.3).x) * 9.0;
   vec2 flow = vec2(cos(flow_ang), sin(flow_ang)) * (0.0026 + 0.0026 * clamp(mid_att, 0.0, 2.0));
   vec2 swirl = vec2(-p.y, p.x) / max(d, 0.08) * 0.0018;
-  vec2 outward = p / max(d, 0.05) * (0.0008 + 0.004 * q3);
+  vec2 outward = p / max(d, 0.05) * (0.0008 + 0.004 * q3 + 0.006 * q5);
   vec2 src = uv - (flow + swirl + outward) / s;
   vec3 fb = texture(sampler_main, src).xyz;
   // Paint diffuses a little as it travels (soft, blended strokes), then fades.
@@ -245,7 +265,7 @@ presets["nokkvi - cover orb"] = preset(
   float band = smoothstep(0.05, 0.0, abs(d - R * 0.96));
   if (d < R) {{
 """ + ORB_SPHERE + f"""
-    fb = mix(fb, cov, band * (0.12 + 0.4 * q3));
+    fb = mix(fb, cov, band * (0.12 + 0.4 * q3 + 0.5 * q5));
   }}
   ret = clamp(fb, 0.0, 1.0);
  }}""",
@@ -271,14 +291,14 @@ presets["nokkvi - cover orb"] = preset(
     float spec = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 28.0);
     float rim = pow(1.0 - n.z, 3.0);
     vec3 lit = cov * (0.25 + 0.85 * diff) + NOKKVI_TEXT * spec * 0.5;
-    lit += NOKKVI_HIGHLIGHT * rim * (0.35 + 0.6 * q3);
+    lit += NOKKVI_HIGHLIGHT * rim * (0.35 + 0.6 * q3 + 0.8 * q5);
     float edge = smoothstep(Rw, Rw - 0.02, d);
     col = mix(col, lit, edge);
   }}
   col += NOKKVI_WARM * smoothstep(0.02, 0.0, abs(d - R)) * clamp(treb_att - 1.0, 0.0, 1.0) * 0.3;
   ret = col;
  }}""",
-    init="pulse = 0; spin = 0; drift = 0;",
+    init="pulse = 0; pop = 0; spin = 0; drift = 0;",
     frame=PULSE + "spin = spin + 0.005 + 0.006 * min(mid_att, 2) + 0.02 * q3;\n"
           "drift = drift + 0.01 + 0.02 * min(bass_att, 2);\nq1 = spin;\nq2 = drift;")
 
@@ -300,13 +320,16 @@ def star_layer(l):
     vec2 dir = normalize(pr + vec2(0.0001));
     float along = dot(d, dir);
     float across = dot(d, vec2(-dir.y, dir.x));
-    float stretch = 1.0 + q2 * z * 14.0;
+    float stretch = min(1.0 + q2 * z * 14.0, 5.0);
     float dist = length(vec2(along / stretch, across));
     float size = mix(0.015, 0.05, h2) * (0.6 + z);
     float core = smoothstep(size, 0.0, dist);
     float glow = size * 0.6 / (dist + 0.02);
+    // Fade out before the cell edge, or the clipped glow draws the grid.
+    float cell_edge = smoothstep(0.5, 0.3, max(abs(f.x), abs(f.y)));
     float twinkle = 0.75 + 0.25 * sin(time * (3.0 + h * 5.0) + h * 40.0);
-    float b = (core + glow * 0.35) * fade * twinkle * step(0.55, h);
+    float spec = get_fft(0.02 + h2 * 0.6);
+    float b = (core + glow * 0.35) * cell_edge * fade * twinkle * step(0.55, h) * (0.35 + 2.2 * spec);
 """ + ramp(f"sc{l}", "h2") + f"""
     stars += mix(sc{l}, NOKKVI_TEXT, core * 0.7) * b;
   }}
@@ -321,11 +344,10 @@ presets["nokkvi - starfield"] = preset(
   vec3 stars = vec3(0.0);
 """ + "".join(star_layer(l) for l in range(STAR_LAYERS)) + """
   // Nebula: large soft fbm clouds drifting past, sparse so the stars lead.
-  vec2 nuv = pr * 0.12 / (0.6 + 0.4 * length(p)) + vec2(q1 * 0.02, q1 * 0.011);
-  float n = texture(sampler_noise_hq, nuv).x * 0.55
-          + texture(sampler_noise_hq, nuv * 2.03 + 0.37).x * 0.3
-          + texture(sampler_noise_hq, nuv * 4.01 + 0.71).x * 0.15;
-  float neb = pow(smoothstep(0.5, 0.95, n), 1.6) * (0.3 + 0.3 * clamp(bass_att, 0.0, 2.0));
+  vec2 nuv = pr * 0.05 / (0.6 + 0.4 * length(p)) + vec2(q1 * 0.008, q1 * 0.0045);
+""" + tnoise("n0", "nuv") + tnoise("n1", "nuv * 2.03 + 0.37") + tnoise("n2", "nuv * 4.1 + 0.71") + """
+  float n = n0 * 0.55 + n1 * 0.3 + n2 * 0.15;
+  float neb = pow(smoothstep(0.5, 0.95, n), 1.6) * (0.3 + 0.3 * clamp(bass_att, 0.0, 2.0) + 0.5 * q5);
 """ + ramp("nc", "n") + """
   float grain = texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.xy).x;
   vec3 col = NOKKVI_BG + nc * neb * 0.55;
@@ -336,8 +358,8 @@ presets["nokkvi - starfield"] = preset(
   col += (grain - 0.5) * 0.012;
   ret = col;
  }""",
-    init="pulse = 0; travel = 0; roll = 0; speed = 0;",
-    frame=PULSE + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3);\n"
+    init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0;",
+    frame=PULSE + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3 + 0.1 * pop);\n"
           "travel = travel + speed * 0.25;\nroll = roll + 0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05));\n"
           "q1 = travel;\nq2 = speed * 6;\nq4 = roll;")
 
@@ -349,6 +371,9 @@ presets["nokkvi - aurora"] = preset(
   vec2 flow = vec2(sin(p.y * 6.0 + time * 0.35 + q1), cos(p.x * 5.0 - time * 0.27));
   vec2 src = uv - vec2(0.0, 0.0025) + flow * 0.0022 * (0.6 + clamp(mid_att, 0.0, 2.0));
   vec3 fb = texture(sampler_main, src).xyz * (0.976 - 0.01 * q3);
+  float spec = get_fft(0.02 + uv_orig.x * 0.55);
+  float line = 0.62 - spec * 0.35;
+  fb += vec3(smoothstep(0.018, 0.0, abs(uv_orig.y - line)) * spec * (0.5 + 0.6 * q5));
   fb += (GetBlur1(src) - fb) * 0.08;
   ret = max(fb - 0.002, vec3(0.0));
  }''',
@@ -361,9 +386,10 @@ presets["nokkvi - aurora"] = preset(
   col = mix(col, NOKKVI_TEXT, smoothstep(0.8, 1.0, lum) * 0.6);
   col += NOKKVI_WARM * smoothstep(0.9, 1.0, lum) * clamp(treb_att - 1.0, 0.0, 1.0) * 0.4;
   col = mix(NOKKVI_BG, col, 0.85 + 0.15 * q3);
+  col *= 1.0 + 0.3 * q5;
   ret = col;
  }}''',
-    init="pulse = 0; phase = 0;",
+    init="pulse = 0; pop = 0; phase = 0;",
     frame=PULSE + "phase = phase + 0.01 + 0.03 * min(bass_att, 2);\nq1 = phase;\n"
           "wave_y = 0.5 + 0.12 * sin(time * 0.21);\nwave_r = NOKKVI_TEXT_R;\nwave_g = NOKKVI_TEXT_G;\nwave_b = NOKKVI_TEXT_B;\nwave_a = 0.5 + 0.5 * min(bass_att, 1);")
 
