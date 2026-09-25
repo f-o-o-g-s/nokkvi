@@ -302,8 +302,10 @@ presets["nokkvi - cover orb"] = preset(
     frame=PULSE + "spin = spin + 0.005 + 0.006 * min(mid_att, 2) + 0.02 * q3;\n"
           "drift = drift + 0.01 + 0.02 * min(bass_att, 2);\nq1 = spin;\nq2 = drift;")
 
-# Starfield: 3D star layers flown through with parallax, speed-stretched
-# streaks, a noise nebula in the theme's gradient, hyperspace surges on kicks.
+# Starfield: 3D star layers flown through with parallax, drawn into the
+# feedback so every star leaves a motion trail that zooms outward (longer at
+# speed); each star is tied to a frequency and flares with it; a soft nebula
+# in the theme's gradient sits behind; kicks surge the speed.
 STAR_LAYERS = 6
 def star_layer(l):
     return f"""
@@ -316,42 +318,47 @@ def star_layer(l):
     vec2 f = fract(g) - 0.5;
     float h = fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453);
     float h2 = fract(h * 91.3);
-    vec2 d = f - (vec2(h, h2) - 0.5) * 0.7;
-    vec2 dir = normalize(pr + vec2(0.0001));
-    float along = dot(d, dir);
-    float across = dot(d, vec2(-dir.y, dir.x));
-    float stretch = min(1.0 + q2 * z * 14.0, 5.0);
-    float dist = length(vec2(along / stretch, across));
-    float size = mix(0.015, 0.05, h2) * (0.6 + z);
+    vec2 d = f - (vec2(h, h2) - 0.5) * 0.5;
+    float size = mix(0.012, 0.04, h2) * (0.6 + z);
+    float dist = length(d);
     float core = smoothstep(size, 0.0, dist);
-    float glow = size * 0.6 / (dist + 0.02);
-    // Fade out before the cell edge, or the clipped glow draws the grid.
-    float cell_edge = smoothstep(0.5, 0.3, max(abs(f.x), abs(f.y)));
+    float glow = size * 0.5 / (dist + 0.02) * smoothstep(0.2, 0.0, dist);
     float twinkle = 0.75 + 0.25 * sin(time * (3.0 + h * 5.0) + h * 40.0);
     float spec = get_fft(0.02 + h2 * 0.6);
-    float b = (core + glow * 0.35) * cell_edge * fade * twinkle * step(0.55, h) * (0.35 + 2.2 * spec);
+    float b = (core * 1.6 + glow * 0.5) * fade * twinkle * step(0.55, h) * (0.45 + 2.4 * spec);
 """ + ramp(f"sc{l}", "h2") + f"""
     stars += mix(sc{l}, NOKKVI_TEXT, core * 0.7) * b;
   }}
 """
 presets["nokkvi - starfield"] = preset(
-    {"decay": 1.0, "wave_a": 0.0},
-    "",
+    {"decay": 1.0, "wave_a": 0.0, "zoom": 1.0},
     " shader_body {\n" + HEAD + """
-  vec2 p = (uv - 0.5) * s;
+  vec2 p = (uv_orig - 0.5) * s;
   float cr = cos(q4); float sr = sin(q4);
   vec2 pr = vec2(p.x * cr - p.y * sr, p.x * sr + p.y * cr);
   vec3 stars = vec3(0.0);
 """ + "".join(star_layer(l) for l in range(STAR_LAYERS)) + """
-  // Nebula: large soft fbm clouds drifting past, sparse so the stars lead.
-  vec2 nuv = pr * 0.05 / (0.6 + 0.4 * length(p)) + vec2(q1 * 0.008, q1 * 0.0045);
-""" + tnoise("n0", "nuv") + tnoise("n1", "nuv * 2.03 + 0.37") + tnoise("n2", "nuv * 4.1 + 0.71") + """
-  float n = n0 * 0.55 + n1 * 0.3 + n2 * 0.15;
+  vec2 back = (uv - 0.5) / (1.0 + 0.012 + q2 * 0.05) + 0.5;
+  float keep = clamp(0.8 + q2 * 0.6, 0.8, 0.95);
+  vec2 half_back = mix(back, uv, 0.5);
+  vec3 fb = max(texture(sampler_main, back).xyz, texture(sampler_main, half_back).xyz * 0.92) * keep;
+  ret = max(fb, stars);
+ }""",
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s;
+  // Nebula: domain-warped sine layers. Smooth everywhere, so no texel grid
+  // can show (a snapped noise texture left square patches).
+  vec2 w = p * 2.2 + vec2(q1 * 0.35, q1 * 0.2);
+  w += 0.7 * vec2(sin(w.y * 1.7 + q1 * 0.3), sin(w.x * 1.3 - q1 * 0.2));
+  w += 0.35 * vec2(sin(w.y * 3.1 + 1.0), sin(w.x * 2.9 + 2.0));
+  float n = 0.5 + 0.25 * sin(w.x * 1.1 + w.y * 0.7)
+          + 0.15 * sin(-w.x * 0.6 + w.y * 1.9 + 1.3)
+          + 0.1 * sin(w.x * 2.3 - w.y * 2.1 + 0.4);
   float neb = pow(smoothstep(0.5, 0.95, n), 1.6) * (0.3 + 0.3 * clamp(bass_att, 0.0, 2.0) + 0.5 * q5);
 """ + ramp("nc", "n") + """
   float grain = texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.xy).x;
   vec3 col = NOKKVI_BG + nc * neb * 0.55;
-  col += stars;
+  col += texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.35;
   col += NOKKVI_ACCENT * exp(-length(p) * 6.0) * (0.08 + 0.45 * q3);
   col += NOKKVI_WARM * exp(-length(p) * 14.0) * q3 * 0.35;
   col *= 0.9 + 0.1 * smoothstep(1.1, 0.2, length(p));
