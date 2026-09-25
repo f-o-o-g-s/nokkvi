@@ -230,7 +230,7 @@ presets["nokkvi - cover orb"] = preset(
     vec3 m = vec3(n.x * cs + n.z * sn, n.y, -n.x * sn + n.z * cs);
     float lon = atan(m.x, m.z);
     float lat = asin(clamp(m.y, -1.0, 1.0));
-    vec3 cov = texture(sampler_fw_cover, vec2(lon / 3.14159265 + 0.5, 0.5 - lat / 3.14159265)).xyz;
+    vec3 cov = texture(sampler_fw_cover, vec2(lon / 3.14159265 + 0.5, 0.5 + lat / 3.14159265)).xyz;
     vec3 L = normalize(vec3(-0.45, 0.55, 0.75));
     vec3 nv = vec3(p.x, -p.y, sqrt(max(R * R - d2, 0.0))) / R;
     float diff = max(dot(nv, L), 0.0);
@@ -246,39 +246,64 @@ presets["nokkvi - cover orb"] = preset(
     init="pulse = 0; spin = 0;",
     frame=PULSE + "spin = spin + 0.006 + 0.008 * min(mid_att, 2) + 0.03 * q3;\nq1 = spin;")
 
-# Starfield: warp-speed streaks in the theme's gradient; no cover.
+# Starfield: 3D star layers flown through with parallax, speed-stretched
+# streaks, a noise nebula in the theme's gradient, hyperspace surges on kicks.
+STAR_LAYERS = 6
+def star_layer(l):
+    return f"""
+  {{
+    float z = fract({l}.0 / {STAR_LAYERS}.0 + q1);
+    float scale = mix(26.0, 0.6, z);
+    float fade = smoothstep(0.0, 0.25, z) * smoothstep(1.0, 0.85, z);
+    vec2 g = pr * scale + vec2({l * 37.1:.1f}, {l * 91.7:.1f});
+    vec2 id = floor(g);
+    vec2 f = fract(g) - 0.5;
+    float h = fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453);
+    float h2 = fract(h * 91.3);
+    vec2 d = f - (vec2(h, h2) - 0.5) * 0.7;
+    vec2 dir = normalize(pr + vec2(0.0001));
+    float along = dot(d, dir);
+    float across = dot(d, vec2(-dir.y, dir.x));
+    float stretch = 1.0 + q2 * z * 14.0;
+    float dist = length(vec2(along / stretch, across));
+    float size = mix(0.015, 0.05, h2) * (0.6 + z);
+    float core = smoothstep(size, 0.0, dist);
+    float glow = size * 0.6 / (dist + 0.02);
+    float twinkle = 0.75 + 0.25 * sin(time * (3.0 + h * 5.0) + h * 40.0);
+    float b = (core + glow * 0.35) * fade * twinkle * step(0.55, h);
+""" + ramp(f"sc{l}", "h2") + f"""
+    stars += mix(sc{l}, NOKKVI_TEXT, core * 0.7) * b;
+  }}
+"""
 presets["nokkvi - starfield"] = preset(
-    {"zoom": 1.045, "rot": 0.0, "decay": 1.0},
+    {"decay": 1.0, "wave_a": 0.0},
+    "",
     " shader_body {\n" + HEAD + """
-  vec2 g = vec2(110.0, 62.0);
-  vec2 cell = floor(uv_orig * g);
-  float h = fract(sin(dot(cell + floor(time * 7.0) * vec2(3.1, 1.7), vec2(12.9898, 78.233))) * 43758.5453);
-  float star = step(0.9955 - 0.004 * q3, h);
-  vec2 f = fract(uv_orig * g) - 0.5;
-  star *= smoothstep(0.45, 0.0, length(f));
-  // Sample halfway back along the zoom too, so a star's per-frame jumps
-  // join into one streak instead of a dotted line.
-  vec3 fb = max(
-    texture(sampler_main, uv).xyz,
-    max(texture(sampler_main, mix(uv, uv_orig, 0.33)).xyz, texture(sampler_main, mix(uv, uv_orig, 0.66)).xyz)
-  ) * (0.9 - 0.04 * q3);
-  fb += vec3(star) * (0.7 + 0.8 * q3) * smoothstep(0.02, 0.2, length((uv_orig - 0.5) * s));
-  ret = fb;
- }""",
-    " shader_body {\n" + HEAD + f"""
   vec2 p = (uv - 0.5) * s;
-  float r = length(p);
-  vec3 m = texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.6;
-  float lum = clamp(dot(m, {LUM}) * 1.5, 0.0, 1.0);
-""" + ramp("hue", "clamp(r * 1.4 + 0.15 * sin(q1), 0.0, 1.0)") + f"""
-  vec3 col = mix(NOKKVI_BG, hue, smoothstep(0.0, 0.45, lum));
-  col = mix(col, NOKKVI_TEXT, smoothstep(0.75, 1.0, lum) * 0.7);
-  col += NOKKVI_ACCENT * exp(-r * 9.0) * (0.15 + 0.5 * q3);
-  col += NOKKVI_WARM * smoothstep(0.85, 1.0, lum) * q3 * 0.3;
+  float cr = cos(q4); float sr = sin(q4);
+  vec2 pr = vec2(p.x * cr - p.y * sr, p.x * sr + p.y * cr);
+  vec3 stars = vec3(0.0);
+""" + "".join(star_layer(l) for l in range(STAR_LAYERS)) + """
+  // Nebula: large soft fbm clouds drifting past, sparse so the stars lead.
+  vec2 nuv = pr * 0.12 / (0.6 + 0.4 * length(p)) + vec2(q1 * 0.02, q1 * 0.011);
+  float n = texture(sampler_noise_hq, nuv).x * 0.55
+          + texture(sampler_noise_hq, nuv * 2.03 + 0.37).x * 0.3
+          + texture(sampler_noise_hq, nuv * 4.01 + 0.71).x * 0.15;
+  float neb = pow(smoothstep(0.5, 0.95, n), 1.6) * (0.3 + 0.3 * clamp(bass_att, 0.0, 2.0));
+""" + ramp("nc", "n") + """
+  float grain = texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.xy).x;
+  vec3 col = NOKKVI_BG + nc * neb * 0.55;
+  col += stars;
+  col += NOKKVI_ACCENT * exp(-length(p) * 6.0) * (0.08 + 0.45 * q3);
+  col += NOKKVI_WARM * exp(-length(p) * 14.0) * q3 * 0.35;
+  col *= 0.9 + 0.1 * smoothstep(1.1, 0.2, length(p));
+  col += (grain - 0.5) * 0.012;
   ret = col;
- }}""",
-    init="pulse = 0; phase = 0;",
-    frame=PULSE + "phase = phase + 0.01 + 0.02 * min(mid_att, 2);\nq1 = phase;\nzoom = 1.035 + 0.02 * min(bass_att, 2) + 0.05 * q3;\nrot = 0.004 * sin(time * 0.2);")
+ }""",
+    init="pulse = 0; travel = 0; roll = 0; speed = 0;",
+    frame=PULSE + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3);\n"
+          "travel = travel + speed * 0.25;\nroll = roll + 0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05));\n"
+          "q1 = travel;\nq2 = speed * 6;\nq4 = roll;")
 
 # 6. Aurora (new; no cover) -----------------------------------------------
 presets["nokkvi - aurora"] = preset(
