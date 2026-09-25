@@ -35,6 +35,10 @@ Adaptive layout via `PlayerBarLayout { kebab_mode_count, wide_for_three_section 
 
 Theater Mode reuses the bar unchanged, translated by `OverflowPin` under a corner exit icon (see ui-views.md "Theater Mode").
 
+The Visualizer mode icon per mode: Off/Bars `audio-lines`, Lines `audio-waveform`, Scope `radar`, MilkDrop `droplet` (Phosphor `drop-regular`); tooltip and kebab label are the same string ("Visualizer: MilkDrop").
+
+**MilkDrop panel menu rows** (`context_menu::milkdrop_panel_entries`): appended to the Queue cover and Theater panel menus while the mode is MilkDrop — Next Preset (`skip-forward`), Previous Preset (`skip-back`), Lock/Unlock Preset (`lock`/`lock-open`), Favorite/Unfavorite Preset (`heart`), Never Show This Preset (`eye-off` → Phosphor `eye-slash-regular`). Every row, key and the `preset` CLI verb carry one `MilkdropControl` into the same handler.
+
 Scroll-to-volume on wheel (both music + SFX sliders publish a delta via `on_scroll`). Horizontal volume mode stacks sliders. `Nokkvi::mini_player_artwork()` is the gated resolver that surfaces the cached large-artwork handle only in `MiniPlayer` mode.
 
 **`MiniPlayer` mode** renders a full-width "capsule" seek scrub (a `filled` progress bar, no handle, color-aware overlaid elapsed/duration + dimmed codec/bitrate end-caps via `capsule_scrub_labels` → `CapLabel`) framed by 1 px separators, above a responsive content row. `wide_for_three_section` (hysteretic band `MINI_THREE_SECTION_ENTER`/`EXIT`, deliberately BELOW the cull range so modes cull while the layout stays centered) selects: WIDE = three-section `[metadata (Fill, Start) | transports (Shrink, centered by equal Fill siblings) | modes+volume (Fill, End)]` with modes expanded/culling like the normal bar; COMPACT = single-cluster `[metadata | transports | divider | kebab | volume]` with all modes force-folded. Volume is rightmost in both. Bar height (`MINI_PLAYER_BAR_HEIGHT = 78`) is regime-independent. Per-control visibility = `mini_player_show_volume()` / `mini_player_show_modes()` (a MiniPlayer-only "Visible Controls" ToggleSet).

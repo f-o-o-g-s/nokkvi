@@ -64,6 +64,14 @@ paths:
 - **Repeat track replay**: `on_track_finished` natively supports repeat-track by re-loading the same row — it returns `TrackTransitionPlan::LoadFresh` (reload from the stream URL) or `PlayPrepared` (the gapless-prepared decoder), not a seek-to-start. Manual skip (next/prev) bypasses repeat-track (`get_next_song` in `services/queue/navigation.rs`).
 - **Pulled server queue must be re-cued**: a `pull_queue` (savePlayQueue / indexBasedQueue) replaces the model via `set_queue`, which only mutates the queue — the engine keeps playing the pre-pull song unless `PlaybackController::cue_pulled_queue` re-cues it. Mid-song resume rides a one-shot engine `pending_start_ms` (consumed in `play()`'s fresh-start branch, cleared by `set_source` so a stale arm can't fire on a later reload). It must NOT route through `plan_click_play` — a skip-fade would blend the pulled song in from position 0, and the saved position could only land afterwards as an audible jump. (see audio-engine.md)
 
+## MilkDrop
+
+- **iced's device grants `max_bind_groups: 2`** (`iced_wgpu` compositor). The upstream engine's custom-warp pipeline needed 3; the fork pin fixes it. A new engine pin must pass the ignored `bundled_pack_builds_on_icedlike_limits` test on a real GPU before it ships.
+- **`MilkdropRenderer` is `Send` but not `Sync`** (a `RefCell` in its EEL program), so it lives in a `parking_lot::Mutex` inside iced's pipeline storage. Only `prepare` and `trim` touch it.
+- **Never hand iced's target to the engine**: `render(view)` clears the whole view it gets. Use `render_to_retained_comp()` + the blit. The retained view is REPLACED on every resize, so rebuild the bind group after `try_resize`.
+- **`wgpu` and `naga` must stay one version each** (`cargo tree -i wgpu`, `cargo tree -i naga`); the engine shares iced's device.
+- **Downgrade hazard**: a pre-MilkDrop binary cannot parse `visualization_mode = "milkdrop"`. It resets the whole `[settings]` section of `config.toml` AND the redb settings blob to defaults. Switch the mode off MilkDrop before running an older build.
+
 ## Config & Persistence
 
 - **Typed config writer routing**: `ConfigKey::AppScalar` → `config.toml`; `ConfigKey::Theme` / `ThemeArrayEntry` → active theme file. Match on the variant — never sniff key prefixes.

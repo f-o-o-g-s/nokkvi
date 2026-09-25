@@ -34,6 +34,7 @@ Things that shaped this project:
 - **[mpd](https://github.com/MusicPlayerDaemon/MPD)**: Shaped the queue and consume logic.
 - **[fooyin](https://github.com/fooyin/fooyin)**: Referenced for the native PipeWire implementation.
 - **[cava](https://github.com/karlstav/cava)**: The visualizer DSP (`spectrum.rs`) is a Rust port of cavacore, and the Monstercat smoothing filter is ported from cava.c.
+- **[OjoDrop](https://github.com/sho-run/ojodrop)** and **[Butterchurn](https://github.com/jberg/butterchurn)**: The MilkDrop mode runs OjoDrop's Rust MilkDrop engine on presets from Butterchurn's converted pack.
 - **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the MusicWheel-style slot list (fixed odd-row centered viewport, height-adaptive) and the roulette wheel's discrete-tick decel.
 - **Vim**: Inspired the color schemes and keyboard-first approach.
 
@@ -41,7 +42,7 @@ Things that shaped this project:
 
 - Native **PipeWire** audio engine: gapless playback, a 10-band EQ, ReplayGain and AGC normalization, and configurable crossfade with transition fades.
 - Opt-in **bit-perfect** playback (Strict or Relaxed, follows the native sample rate) with a badge that reads the real hardware clock as `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED`.
-- GPU visualizer with `bars`, `lines`, and `scope` modes plus beat glow, bloom, trails, echo, and CRT, shown in a band above the player bar or over the cover art.
+- GPU visualizer with `bars`, `lines`, and `scope` modes plus beat glow, bloom, trails, echo, and CRT, shown in a band above the player bar or over the cover art, and a `milkdrop` mode that plays MilkDrop presets in place of the cover.
 - **Smart playlists** authored in-app: a rules editor with nested All/Any groups, live validation, presets, a raw-JSON mode, and server-evaluated previews. Also imports `.nsp` (needs Navidrome 0.61+).
 - **Trawl** mix builder: blend artist, album, song, genre, and playlist seeds into a crate (round-robin, weighted, or shuffle-all) and save the result as a playlist.
 - Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull).
