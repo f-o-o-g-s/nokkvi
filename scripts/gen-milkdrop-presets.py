@@ -313,7 +313,9 @@ def star_layer(l):
     float z = fract({l}.0 / {STAR_LAYERS}.0 + q1);
     float scale = mix(26.0, 0.6, z);
     float fade = smoothstep(0.0, 0.25, z) * smoothstep(1.0, 0.85, z);
-    vec2 g = pr * scale + vec2({l * 37.1:.1f}, {l * 91.7:.1f});
+    float tw = q11 * (1.0 - z) * 2.2;
+    vec2 prt = vec2(pr.x * cos(tw) - pr.y * sin(tw), pr.x * sin(tw) + pr.y * cos(tw));
+    vec2 g = prt * scale + vec2({l * 37.1:.1f}, {l * 91.7:.1f});
     vec2 id = floor(g);
     vec2 f = fract(g) - 0.5;
     float h = fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453);
@@ -338,9 +340,18 @@ presets["nokkvi - starfield"] = preset(
   vec2 pr = vec2(p.x * cr - p.y * sr, p.x * sr + p.y * cr);
   vec3 stars = vec3(0.0);
 """ + "".join(star_layer(l) for l in range(STAR_LAYERS)) + """
-  vec2 back = (uv - 0.5) / (1.0 + 0.012 + q2 * 0.05) + 0.5;
+  // One frame of flight: spin by `sw` (more at the edge, faster with speed)
+  // and zoom in. The second sample sits halfway along that same spiral, so
+  // trails curve smoothly instead of beading or fanning.
+  vec2 cs = (uv - 0.5) * s;
+  float sw = clamp(q10 / 0.02, -1.0, 1.0) * (0.004 + 0.02 * q2) * (0.4 + 1.1 * length(cs));
+  float zm = 1.0 + 0.012 + q2 * 0.05;
+  vec2 c1 = vec2(cs.x * cos(sw) - cs.y * sin(sw), cs.x * sin(sw) + cs.y * cos(sw));
+  vec2 back = c1 / s / zm + 0.5;
+  float sh = sw * 0.5;
+  vec2 c2 = vec2(cs.x * cos(sh) - cs.y * sin(sh), cs.x * sin(sh) + cs.y * cos(sh));
+  vec2 half_back = c2 / s / sqrt(zm) + 0.5;
   float keep = clamp(0.8 + q2 * 0.6, 0.8, 0.95);
-  vec2 half_back = mix(back, uv, 0.5);
   vec3 fb = max(texture(sampler_main, back).xyz, texture(sampler_main, half_back).xyz * 0.92) * keep;
   ret = max(fb, stars);
  }""",
@@ -365,10 +376,12 @@ presets["nokkvi - starfield"] = preset(
   col += (grain - 0.5) * 0.012;
   ret = col;
  }""",
-    init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0;",
+    init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0; twist = 0.015; spiral = 0;",
     frame=PULSE + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3 + 0.1 * pop);\n"
           "travel = travel + speed * 0.25;\nroll = roll + 0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05));\n"
-          "q1 = travel;\nq2 = speed * 6;\nq4 = roll;")
+          "q1 = travel;\nq2 = speed * 6;\nq4 = roll;\n"
+          "twist = twist * 0.97 + 0.03 * (0.02 * sin(time * 0.11) + 0.012 * (mid_att - 1) + 0.03 * pop * sign(sin(time * 0.11)));\n"
+          "spiral = spiral + twist * 60 * speed;\nq10 = twist;\nq11 = spiral;")
 
 # Living ink: a self-organising reaction-diffusion surface (difference of
 # blurs, flexi's trick) that creeps along its own gradient and a slow current,
