@@ -25,6 +25,7 @@ pub(crate) mod menu_dismiss;
 pub(crate) mod metadata_pill;
 pub(crate) mod modal_button;
 pub(crate) mod nav_bar;
+pub(crate) mod overflow_pin;
 pub(crate) mod pill_segmented_button;
 pub(crate) mod player_bar;
 pub(crate) mod player_modes_menu;

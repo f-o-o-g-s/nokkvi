@@ -968,6 +968,17 @@ pub enum CrossPaneDragMessage {
     Cancel,
 }
 
+/// Theater Mode messages — the now-playing layout with a transient player
+/// bar. Handled by `update/theater.rs`; every entry path (F11, the panel
+/// menu, the corner icon, the `theater` verb) lands on `Nokkvi::enter_theater`.
+#[derive(Debug, Clone)]
+pub enum TheaterMessage {
+    /// Enter when off, leave when on (the F11 hotkey).
+    Toggle,
+    /// Leave Theater Mode (the theater panel's menu row).
+    Exit,
+}
+
 /// Toast notification messages, namespaced under `Message::Toast(..)`
 #[derive(Debug, Clone)]
 pub enum ToastMessage {
@@ -1247,6 +1258,9 @@ pub enum ContextMenuId {
     /// The single "Refresh Artwork" right-click menu on a view's main artwork
     /// panel (one per view at most).
     ArtworkPanel(View),
+    /// The now-playing panel shown by Theater Mode (one at most; it replaces
+    /// every view's panel while active).
+    TheaterPanel,
 }
 
 ///
@@ -1518,6 +1532,9 @@ pub enum Message {
 
     // --- Cross-Pane Drag (browsing panel → queue) ---
     CrossPaneDrag(CrossPaneDragMessage),
+
+    // --- Theater Mode (now-playing layout) ---
+    Theater(TheaterMessage),
 
     /// Open a song's containing folder in the file manager (relative path from Navidrome)
     ShowInFolder(String),

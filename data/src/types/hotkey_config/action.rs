@@ -197,6 +197,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.switch_to_settings",
             default: KeyCombo::key(KeyCode::Char('`')),
         },
+        ToggleTheater {
+            display: "Theater Mode",
+            description: "Show only the now-playing panel; the player bar slides in when the mouse moves",
+            category: "Views",
+            toml_key: "toggle_theater",
+            settings_key: "hotkey.toggle_theater",
+            default: KeyCombo::key(KeyCode::F11),
+        },
 
         // --- Playback ---
         TogglePlay {

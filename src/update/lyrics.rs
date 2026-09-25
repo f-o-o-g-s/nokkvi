@@ -72,9 +72,16 @@ impl Nokkvi {
     /// probe pending), and complete misses are LRU-cached backend-side, so a
     /// re-kick for a genuinely lyric-less track costs one cache hit. Callers:
     /// enter-Queue, index-ready, extensions-probe-landed.
+    /// Whether a lyrics surface is on screen: the Queue view's cover or
+    /// Theater Mode's panel. Resolves, next-track prefetch and the backdrop
+    /// blur run only while one is, so no network work happens off-surface.
+    pub(crate) fn lyrics_surface_visible(&self) -> bool {
+        self.current_view == View::Queue || self.theater.active
+    }
+
     pub(crate) fn lyrics_kick_if_unresolved(&mut self) -> Task<Message> {
         if self.lyrics.enabled
-            && self.current_view == View::Queue
+            && self.lyrics_surface_visible()
             && self.active_playback.is_queue()
             && let Some(current) = self.scrobble.current_song_id.clone()
             && (self.lyrics.matched_song_id.as_deref() != Some(current.as_str())
@@ -161,7 +168,7 @@ impl Nokkvi {
     /// debounced cold path covers those transitions instead.
     pub(crate) fn lyrics_prefetch_next_task(&self) -> Task<Message> {
         if !self.lyrics.enabled
-            || self.current_view != View::Queue
+            || !self.lyrics_surface_visible()
             || self.modes.random
             || self.lyrics.pending_next.is_some()
         {
@@ -345,14 +352,14 @@ fn blur_cover_bytes(bytes: &[u8], sigma: f32) -> Option<iced::widget::image::Han
 
 impl Nokkvi {
     /// Kick the cover-blur job for the lyrics backdrop when every gate holds:
-    /// lyrics showing on the Queue, a non-`Off` blur level, the playing
+    /// lyrics showing on the Queue or in Theater Mode, a non-`Off` blur level, the playing
     /// track's large cover cached as bytes, and no fresh blur / in-flight job
     /// for this exact `(album, source, level)`. Called from the 100 ms
     /// playback tick — idempotent, cheap when gated out.
     pub(crate) fn lyrics_blur_task(&mut self) -> Option<Task<Message>> {
         let level = self.settings.lyrics_backdrop_blur;
         let sigma = level.sigma()?;
-        if !self.lyrics.enabled || self.current_view != View::Queue {
+        if !self.lyrics.enabled || !self.lyrics_surface_visible() {
             return None;
         }
         let album_id = self.current_queue_song_album_id()?.to_string();

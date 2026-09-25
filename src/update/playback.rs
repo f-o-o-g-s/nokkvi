@@ -740,7 +740,7 @@ impl Nokkvi {
                 // fetch its 80px mini into `album_art`, the LRU the mini-player
                 // fallback reads. Deduped (Some only when neither LRU is warm)
                 // and marker-free: routes through SongMiniLoaded, never touching
-                // the centered-view `loading_large_artwork` spinner marker.
+                // the centered-view `loading_large_artwork` marker.
                 if let Some(album_id) = self.now_playing_artwork_to_warm()
                     && let Some(shell) = &self.app_service
                 {
@@ -765,6 +765,15 @@ impl Nokkvi {
                     ));
                 }
 
+                // Theater Mode shows the playing cover full-window, and only
+                // the Queue's centered-row prefetch loads large art; load the
+                // landed album's large cover here while theater is active.
+                if self.theater.active
+                    && let Some(task) = self.theater_large_art_task()
+                {
+                    tasks.push(task);
+                }
+
                 // Lyrics: promote the prefetched next-track doc into
                 // place synchronously (no blank gap on sequential/gapless
                 // transitions), else clear and — only while the Queue view is
@@ -787,7 +796,7 @@ impl Nokkvi {
                         Some(new_id) => {
                             if !self.lyrics.promote_next(new_id) {
                                 self.lyrics.clear();
-                                if self.current_view == View::Queue {
+                                if self.lyrics_surface_visible() {
                                     tasks.push(Self::lyrics_debounce_task(
                                         new_id.to_string(),
                                         self.lyrics.load_epoch,

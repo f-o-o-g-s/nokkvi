@@ -123,8 +123,16 @@ const NAME_MAP: &[(&str, &str)] = &[
     ("lock", "assets/icons-phosphor/lock-regular.svg"),
     ("lock-open", "assets/icons-phosphor/lock-open-regular.svg"),
     ("log-out", "assets/icons-phosphor/sign-out-regular.svg"),
+    (
+        "maximize-2",
+        "assets/icons-phosphor/arrows-out-simple-regular.svg",
+    ),
     ("menu", "assets/icons-phosphor/list-regular.svg"),
     ("mic", "assets/icons-phosphor/microphone-regular.svg"),
+    (
+        "minimize-2",
+        "assets/icons-phosphor/arrows-in-simple-regular.svg",
+    ),
     ("monitor", "assets/icons-phosphor/monitor-regular.svg"),
     ("mouse-pointer", "assets/icons-phosphor/cursor-regular.svg"),
     ("music", "assets/icons-phosphor/music-note-regular.svg"),

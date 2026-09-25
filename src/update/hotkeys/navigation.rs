@@ -87,6 +87,13 @@ impl Nokkvi {
             ));
         }
 
+        // Theater Mode leaves after every overlay above has had its Escape and
+        // before anything below could act on the hidden view (Settings'
+        // drill-down, the split view, the search).
+        if self.theater.active {
+            return self.exit_theater();
+        }
+
         // Settings has its own Escape handling — must be checked before the
         // browsing panel block, because current_view_page() returns None for
         // Settings, making all is_none_or() guards pass true and silently
@@ -196,6 +203,9 @@ impl Nokkvi {
     pub(crate) fn horizontal_arrow_owner(&self) -> HorizontalArrowOwner {
         if self.trawl_modal.is_some() {
             HorizontalArrowOwner::TrawlTray
+        } else if self.theater.active {
+            // Theater hides the view, so a hidden Settings row never edits.
+            HorizontalArrowOwner::View
         } else if self.current_view == View::Settings {
             HorizontalArrowOwner::SettingsEdit
         } else {

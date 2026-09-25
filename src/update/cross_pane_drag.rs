@@ -97,6 +97,10 @@ impl Nokkvi {
     /// slot in the browsing panel's active view; chrome, queue pane, and
     /// empty-trailing-slot presses are no-ops.
     pub(crate) fn handle_cross_pane_drag_pressed(&mut self) -> Task<Message> {
+        // Theater Mode hides both panes; a press there is never a drag.
+        if self.theater.active {
+            return Task::none();
+        }
         // When Ctrl or Shift is held the user is multi-selecting, not starting
         // a drag.  Bail out to avoid clearing the selection state — the button's
         // on_press (which fires on mouse-up) will handle the click via
@@ -142,6 +146,9 @@ impl Nokkvi {
     /// Cursor moved while tracking — check threshold and update drag position.
     pub(crate) fn handle_cross_pane_drag_moved(&mut self, position: iced::Point) -> Task<Message> {
         self.cross_pane_drag.last_cursor_position = position;
+        if self.theater.active {
+            return Task::none();
+        }
 
         // If we have a press origin but no active drag, check threshold
         if let Some(origin) = self.cross_pane_drag.press_origin {

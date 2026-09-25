@@ -89,6 +89,7 @@ mod tests_queue_filter;
 #[cfg(test)]
 mod tests_star_rating;
 mod text_input_dialog;
+pub(crate) mod theater;
 mod toast;
 mod trawl_modal;
 mod tray;
@@ -110,7 +111,16 @@ impl Nokkvi {
     /// Routes the message to its domain handler, then re-sizes every page's
     /// stored `slot_count` against the state the handler left behind.
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        let task = self.dispatch_message(message);
+        // Theater Mode's backstop: any message that changes what the hidden
+        // layout would show (the view, the split view, the editor) leaves
+        // theater, so no mouse or async route changes the view invisibly.
+        let theater_route = self.theater.active.then(|| self.theater_route_snapshot());
+        let mut task = self.dispatch_message(message);
+        if self.theater.active
+            && theater_route.is_some_and(|before| before != self.theater_route_snapshot())
+        {
+            task = Task::batch([task, self.exit_theater()]);
+        }
         // The drag mappers, the scrollbar thumb, the centered-row reads, and
         // find-and-expand read the stored slot_count between renders, so it
         // must equal what the next render draws. Its inputs (pane width,
@@ -677,6 +687,7 @@ impl Nokkvi {
             // Cross-Pane Drag (browsing panel → queue)
             // -----------------------------------------------------------------
             Message::CrossPaneDrag(msg) => self.handle_cross_pane_drag_message(msg),
+            Message::Theater(msg) => self.handle_theater(msg),
 
             // -----------------------------------------------------------------
             // Show in File Manager

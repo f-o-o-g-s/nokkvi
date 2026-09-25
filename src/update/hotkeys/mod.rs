@@ -856,7 +856,8 @@ impl Nokkvi {
 
         // Look up the key event against the user's hotkey config once — reused
         // by the modal-open guard below and the final dispatch.
-        let resolved = crate::hotkeys::handle_hotkey(key.clone(), modifiers, &self.hotkey_config);
+        let resolved_action = crate::hotkeys::resolve_action(&key, modifiers, &self.hotkey_config);
+        let resolved = resolved_action.map(crate::hotkeys::action_to_message);
 
         // A root-level modal open OVER the rules split-view (the Trawl mix
         // builder via `t`, EQ, Info, About, a text-input dialog, the
@@ -878,7 +879,9 @@ impl Nokkvi {
         // invariant), but AFTER the no-modal check — the session is
         // view-hosted, and its own sub-pickers get their modal-grade key
         // ownership inside the intercept.
+        // Theater Mode hides the editor, so its grammar stands down there.
         if !any_blocking_modal
+            && !self.theater.active
             && let Some(task) = self.rules_session_key_intercept(&key, modifiers, status, &resolved)
         {
             return task;
@@ -962,6 +965,32 @@ impl Nokkvi {
                 )
             {
                 return Task::none();
+            }
+        }
+
+        // Theater Mode's key policy. A modal open over theater keeps owning
+        // its keys (the block above), so this runs only without one.
+        if self.theater.active && !any_blocking_modal {
+            // No text input is mounted in theater, so a Captured Escape is
+            // one an overlay menu just consumed closing itself
+            // (`menu_dismiss::handle_dismiss`): the menu closes on this press,
+            // theater on the next.
+            if is_escape && status == iced::event::Status::Captured {
+                return Task::none();
+            }
+            match resolved_action.map(crate::update::theater::theater_key_policy) {
+                Some(crate::update::theater::TheaterKeyPolicy::ExitOnly) => {
+                    return self.exit_theater();
+                }
+                Some(crate::update::theater::TheaterKeyPolicy::ExitThenPerform) => {
+                    // Re-run the raw key rather than dispatching `resolved`, so
+                    // every gate above (the rules-editor remaps, the Settings
+                    // arrows) applies exactly as it would without theater.
+                    // Cannot loop: theater is off by the second pass.
+                    let exit = self.exit_theater();
+                    return Task::batch([exit, self.handle_raw_key_event(key, modifiers, status)]);
+                }
+                Some(crate::update::theater::TheaterKeyPolicy::Passthrough) | None => {}
             }
         }
 

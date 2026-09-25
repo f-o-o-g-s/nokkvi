@@ -13,6 +13,10 @@ use crate::{
     views, widgets,
 };
 
+/// Layers [`Nokkvi::bottom_band_layers`] always pushes: the bottom-band
+/// visualizer and its surfing boat, each real or a placeholder.
+const BOTTOM_BAND_LAYERS: usize = 2;
+
 // ============================================================================
 // View ⇄ NavView conversions
 // ============================================================================
@@ -733,6 +737,17 @@ impl Nokkvi {
             }
         };
 
+        // Theater Mode: the now-playing panel fills the window and the player
+        // bar rides above it. The nav, the strips, the elevated artwork and
+        // `main_content` are all left out (nothing is torn down by omitting
+        // them: the split view, the editor and the search come back as they
+        // were).
+        if self.theater.active {
+            return self.theater_view(
+                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+            );
+        }
+
         let base_layer: Element<'_, Message> = if crate::theme::is_side_nav()
             || crate::theme::is_none_nav()
         {
@@ -872,8 +887,119 @@ impl Nokkvi {
             Stack::new().push(base).push(nav_overlay).into()
         };
 
-        // Create stack with base layer
-        let mut stack = Stack::new().push(base_layer);
+        // In side-nav mode the sidebar is the full-height leftmost band; the
+        // visualizer (and boat) overlay must start to its RIGHT, not at x=0,
+        // or the bars/lines bleed under the icons.
+        let side_nav_inset = if crate::theme::is_side_nav() {
+            crate::widgets::side_nav_bar::side_nav_total_width()
+        } else {
+            0.0
+        };
+        self.bottom_band_layers(
+            Stack::new().push(base_layer),
+            widgets::player_bar::player_bar_height(),
+            side_nav_inset,
+        )
+        .into()
+    }
+
+    /// Theater Mode's layout (see `update/theater.rs`). A fixed four-layer
+    /// `Stack`, because `Stack` matches child state by position: the panel,
+    /// the two bottom-band layers (real or placeholder), and the chrome, which
+    /// stays mounted at the same index and only moves.
+    fn theater_view<'a>(&'a self, player_bar: Element<'a, Message>) -> Element<'a, Message> {
+        use crate::widgets::{base_slot_list_layout::artwork_outer_bg, overflow_pin::OverflowPin};
+
+        // The square artwork modes draw their square at the panel's own origin
+        // (the slot-list layouts centre it and paint the letterbox), so the
+        // theater container does both here.
+        let panel = container(self.theater_panel())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .style(|_theme| container::Style {
+                background: Some(artwork_outer_bg().into()),
+                ..Default::default()
+            });
+
+        let stack = self.bottom_band_layers(Stack::new().push(panel), 0.0, 0.0);
+
+        // The chrome is translated, never resized: a `Column` spacer would
+        // squash a `Fixed`-height bar instead of moving it (and `pin` has the
+        // same squash), so `OverflowPin` lays the bar out at full size and
+        // moves it.
+        let chrome_h = widgets::player_bar::player_bar_height();
+        let chrome = column![player_bar].width(Length::Fill);
+        stack
+            .push(
+                OverflowPin::new(chrome)
+                    .position(iced::Point::new(0.0, self.window.height - chrome_h)),
+            )
+            .into()
+    }
+
+    /// Theater Mode's now-playing panel: the shared artwork panel helper fed
+    /// the PLAYING subject (never the centred row). Radio shows the station's
+    /// art or the tower glyph and no lyrics; the queue shows the playing
+    /// album's cover, the over-cover visualizer and the lyrics.
+    fn theater_panel(&self) -> Element<'_, Message> {
+        use crate::widgets::{
+            base_slot_list_layout::{
+                ArtworkPlaceholder, single_artwork_panel_with_visualizer_and_menu,
+            },
+            context_menu::{PanelMenuEntry, panel_menu_open_state},
+        };
+
+        let is_radio = self.active_playback.is_radio();
+        let placeholder = if is_radio {
+            ArtworkPlaceholder::RadioTower
+        } else {
+            ArtworkPlaceholder::Blank
+        };
+        let (over_art, boat) = self.over_cover_overlays();
+
+        let mut entries = vec![PanelMenuEntry::exit_theater(Message::Theater(
+            crate::app_message::TheaterMessage::Exit,
+        ))];
+        if let Some(album_id) = self.current_queue_song_album_id() {
+            entries.push(PanelMenuEntry::refresh_artwork(Message::Artwork(
+                crate::app_message::ArtworkMessage::RefreshAlbumArtwork(album_id.to_string()),
+            )));
+        }
+        let (menu_open, menu_position, on_menu_change) = panel_menu_open_state(
+            crate::app_message::ContextMenuId::TheaterPanel,
+            self.open_menu.as_ref(),
+            Message::SetOpenMenu,
+        );
+
+        single_artwork_panel_with_visualizer_and_menu(
+            self.theater_now_playing_cover(),
+            over_art,
+            boat,
+            // Transport-gated and queue-only already (`None` for radio).
+            self.queue_lyrics_panel_data(),
+            Some(|delta| Message::Queue(views::QueueMessage::LyricsWheel(delta))),
+            placeholder,
+            entries,
+            menu_open,
+            menu_position,
+            on_menu_change,
+        )
+    }
+
+    /// Push the bottom-band visualizer and its surfing boat onto `stack`:
+    /// always exactly [`BOTTOM_BAND_LAYERS`] layers, real or placeholder.
+    /// `bar_reserved` is the height kept free below the band (the player bar;
+    /// `0.0` in Theater Mode, where the bar floats over the band) and `inset`
+    /// the width kept free on the left (the side nav).
+    fn bottom_band_layers<'a>(
+        &'a self,
+        mut stack: Stack<'a, Message>,
+        bar_reserved: f32,
+        inset: f32,
+    ) -> Stack<'a, Message> {
+        let mut pushed = 0;
 
         // Add the bottom-band visualizer overlay. `resolve_placement` decides
         // whether the active mode draws here (a band above the player bar) or
@@ -907,24 +1033,14 @@ impl Nokkvi {
             let lines_mirror = cfg.lines.mirror;
             drop(cfg);
 
-            // In side-nav mode the sidebar is the full-height leftmost
-            // band; the visualizer (and boat) overlay must start to its
-            // RIGHT, not at x=0, or the bars/lines bleed under the icons.
-            let side_nav_inset = if crate::theme::is_side_nav() {
-                crate::widgets::side_nav_bar::side_nav_total_width()
-            } else {
-                0.0
-            };
-            let visualizer_width = (self.window.width - side_nav_inset).max(0.0);
+            let visualizer_width = (self.window.width - inset).max(0.0);
 
             let visualizer_height = widgets::visualizer::visualizer_area_height(
                 visualizer_width,
                 self.window.height,
                 height_percent,
             );
-            let spacer_height =
-                (self.window.height - widgets::player_bar::player_bar_height() - visualizer_height)
-                    .max(0.0);
+            let spacer_height = (self.window.height - bar_reserved - visualizer_height).max(0.0);
             let visualizer_inner = column![
                 container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
                 container(viz_with_mode.view())
@@ -934,19 +1050,20 @@ impl Nokkvi {
             .width(Length::Fill)
             .height(Length::Fill);
             let visualizer_overlay = iced::widget::row![
-                iced::widget::Space::new().width(Length::Fixed(side_nav_inset)),
+                iced::widget::Space::new().width(Length::Fixed(inset)),
                 visualizer_inner,
             ]
             .width(Length::Fill)
             .height(Length::Fill);
 
             stack = stack.push(visualizer_overlay);
+            pushed += 1;
 
             // Surfing-boat overlay (lines mode only). Mirrors the spacer
             // shape above so the boat overlay's pixel coordinate space lines
             // up with the visualizer area. `boat_overlay()` returns a
             // fixed-size, self-clipping container, so we don't need an
-            // outer wrapper here. Insets the same `side_nav_inset` so the
+            // outer wrapper here. Insets the same `inset` so the
             // boat sails over the visualizer, not the sidebar.
             if self.boat.visible && widget_mode == widgets::visualizer::VisualizationMode::Lines {
                 let boat_inner = column![
@@ -968,17 +1085,26 @@ impl Nokkvi {
                 .width(Length::Fill)
                 .height(Length::Fill);
                 let boat_overlay_col = iced::widget::row![
-                    iced::widget::Space::new().width(Length::Fixed(side_nav_inset)),
+                    iced::widget::Space::new().width(Length::Fixed(inset)),
                     boat_inner,
                 ]
                 .width(Length::Fill)
                 .height(Length::Fill);
 
                 stack = stack.push(boat_overlay_col);
+                pushed += 1;
             }
         }
 
-        stack.into()
+        // Pad to a fixed layer count: `Stack` diffs children by position, so a
+        // layer that comes and goes (pressing `v`) would otherwise reset the
+        // state of any layer above it (Theater Mode's player bar sits there).
+        // `Space::new()` fills, which `Stack::push` keeps; a zero-size
+        // placeholder would be dropped.
+        for _ in pushed..BOTTOM_BAND_LAYERS {
+            stack = stack.push(iced::widget::Space::new());
+        }
+        stack
     }
 
     /// Wrap a base view with global overlays (modals, toasts, dialogs)

@@ -260,7 +260,30 @@ impl Nokkvi {
         }
     }
 
+    /// Cancel an in-progress roulette spin, restoring the original viewport
+    /// before clearing state so the user lands back where they started rather
+    /// than mid-spin. No-op without a spin. Used on the unmount edges that
+    /// take the spinning list off screen (a view switch, entering theater).
+    pub(crate) fn cancel_roulette_restoring_offset(&mut self) {
+        let Some(state) = self.roulette.as_ref() else {
+            return;
+        };
+        let prev = state.view;
+        let original = state.original_offset;
+        let total = state.total_items;
+        self.roulette = None;
+        self.roulette_apply_offset(prev, original, total);
+        self.sfx_engine.play(audio::SfxType::Escape);
+    }
+
     pub(crate) fn handle_switch_view(&mut self, view: View) -> Task<Message> {
+        // The gear button, a strip click and every other mouse route that
+        // switches the view must never do it invisibly behind Theater Mode.
+        let exit_theater = self.exit_theater();
+        Task::batch([exit_theater, self.switch_view_inner(view)])
+    }
+
+    fn switch_view_inner(&mut self, view: View) -> Task<Message> {
         // Close any open overlay menu — its anchor (cursor position, trigger
         // bounds) is tied to the previous view's layout.
         self.open_menu = None;
@@ -280,17 +303,12 @@ impl Nokkvi {
         // continuing the spin on a different view's slot list would scroll
         // through unrelated rows and dispatch a play action against an
         // index that no longer corresponds to anything visible.
-        if let Some(state) = self.roulette.as_ref()
-            && state.view != view
+        if self
+            .roulette
+            .as_ref()
+            .is_some_and(|state| state.view != view)
         {
-            // Restore the original viewport before clearing state so the
-            // user lands back where they started rather than mid-spin.
-            let prev = state.view;
-            let original = state.original_offset;
-            let total = state.total_items;
-            self.roulette = None;
-            self.roulette_apply_offset(prev, original, total);
-            self.sfx_engine.play(audio::SfxType::Escape);
+            self.cancel_roulette_restoring_offset();
         }
         // Save current view before entering Settings so we can restore it on close
         if view == View::Settings && self.current_view != View::Settings {

@@ -244,6 +244,9 @@ pub struct Nokkvi {
     /// `widgets::player_bar::compute_layout`) so a slow drag near a threshold
     /// doesn't flicker the layout.
     pub player_bar_layout: crate::widgets::player_bar::PlayerBarLayout,
+    /// Theater Mode: the now-playing layout toggled by F11 (see
+    /// `update/theater.rs`). Transient, never persisted.
+    pub theater: crate::state::TheaterState,
     pub toast: crate::state::ToastState,
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
@@ -508,6 +511,7 @@ impl Default for Nokkvi {
             artwork: crate::state::ArtworkState::default(),
             window: crate::state::WindowState::default(),
             player_bar_layout: crate::widgets::player_bar::PlayerBarLayout::default(),
+            theater: crate::state::TheaterState::default(),
             // Misc state
             last_queue_current_index: None,
             last_queue_current_entry_id: None,

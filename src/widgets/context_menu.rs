@@ -432,6 +432,16 @@ impl<Message> PanelMenuEntry<Message> {
         }
     }
 
+    /// "Exit Theater Mode" — leave the now-playing layout (Theater Mode's
+    /// panel menu).
+    pub(crate) fn exit_theater(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/minimize-2.svg",
+            label: "Exit Theater Mode",
+            message,
+        }
+    }
+
     /// "Reset Artwork" — delete the custom image so the automatic art returns.
     pub(crate) fn reset_artwork(message: Message) -> Self {
         Self {
@@ -483,7 +493,22 @@ pub(crate) fn artwork_panel_open_state<M>(
     open_menu: Option<&crate::app_message::OpenMenu>,
     on_set_open_menu: impl Fn(Option<crate::app_message::OpenMenu>) -> M + Clone,
 ) -> (bool, Option<Point>, impl Fn(Option<Point>) -> M + Clone) {
-    let id = crate::app_message::ContextMenuId::ArtworkPanel(view);
+    panel_menu_open_state(
+        crate::app_message::ContextMenuId::ArtworkPanel(view),
+        open_menu,
+        on_set_open_menu,
+    )
+}
+
+/// The `(is_open, open_position, on_change)` trio for any single-instance
+/// panel menu keyed by `id` — the shared body behind
+/// [`artwork_panel_open_state`], also used by Theater Mode's panel
+/// (`ContextMenuId::TheaterPanel`).
+pub(crate) fn panel_menu_open_state<M>(
+    id: crate::app_message::ContextMenuId,
+    open_menu: Option<&crate::app_message::OpenMenu>,
+    on_set_open_menu: impl Fn(Option<crate::app_message::OpenMenu>) -> M + Clone,
+) -> (bool, Option<Point>, impl Fn(Option<Point>) -> M + Clone) {
     let (is_open, position) = open_state_for(open_menu, &id);
     let on_change = move |position: Option<Point>| match position {
         Some(p) => on_set_open_menu(Some(crate::app_message::OpenMenu::Context {

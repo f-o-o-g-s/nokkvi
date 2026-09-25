@@ -5,4 +5,4 @@
 
 mod global;
 
-pub(crate) use global::{handle_hotkey, iced_key_to_keycode};
+pub(crate) use global::{action_to_message, iced_key_to_keycode, resolve_action};

@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Theater Mode (F11) fills the window with the playing track's cover, visualizer and lyrics, hiding the library, toolbar and nav.
+- Escape leaves Theater Mode; keys aimed at the hidden list leave it too, and view keys leave and then switch.
+- Right-clicking the Theater Mode cover offers Exit Theater Mode and Refresh Artwork.
+
 ### Changed
 
 - Svalbard's visualizer peaks now step from dark to light teal instead of alternating two colors.

@@ -103,6 +103,14 @@ keyword_table! {
         | "hotkey.switch_to_radios"
         | "hotkey.switch_to_harbour"
         | "hotkey.switch_to_settings" => &["go to", "jump to", "open view", "navigate", "switch"],
+        "hotkey.toggle_theater" => &[
+            "fullscreen",
+            "now playing screen",
+            "immersive",
+            "hide player bar",
+            "theatre",
+            "f11",
+        ],
 
         // ── Hotkeys · Playback ───────────────────────────────────────────────
         "hotkey.toggle_play" => &["pause", "resume", "start", "stop", "space"],

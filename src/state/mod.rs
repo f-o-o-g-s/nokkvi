@@ -54,6 +54,7 @@ mod seek;
 mod session;
 mod similar;
 mod snapshotted_lru;
+mod theater;
 mod toast;
 mod window;
 
@@ -72,5 +73,6 @@ pub(crate) use scrobble::*;
 pub(crate) use seek::*;
 pub(crate) use session::*;
 pub(crate) use similar::*;
+pub(crate) use theater::*;
 pub(crate) use toast::*;
 pub(crate) use window::*;

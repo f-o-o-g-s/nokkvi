@@ -99,7 +99,7 @@ pub(crate) fn iced_key_to_keycode(key: &keyboard::Key) -> Option<KeyCode> {
 }
 
 /// Convert a `HotkeyAction` to the corresponding `Message`.
-fn action_to_message(action: HotkeyAction) -> Message {
+pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
     match action {
         // Navigation
         HotkeyAction::SwitchToQueue => {
@@ -127,6 +127,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
             Message::Navigation(NavigationMessage::SwitchView(View::Harbour))
         }
         HotkeyAction::SwitchToSettings => Message::ToggleSettings,
+        HotkeyAction::ToggleTheater => Message::Theater(crate::app_message::TheaterMessage::Toggle),
         // Playback
         HotkeyAction::TogglePlay => Message::Playback(PlaybackMessage::TogglePlay),
         HotkeyAction::ToggleRandom => Message::Playback(PlaybackMessage::ToggleRandom),
@@ -208,19 +209,33 @@ fn action_to_message(action: HotkeyAction) -> Message {
 ///
 /// Converts iced key events to `KeyCode`, looks up the bound action
 /// in the `HotkeyConfig`, and returns the corresponding `Message`.
+/// Test-only: the raw-key handler resolves the action itself
+/// ([`resolve_action`]) because Theater Mode's key policy classifies actions.
+#[cfg(test)]
 pub(crate) fn handle_hotkey(
     key: keyboard::Key,
     modifiers: keyboard::Modifiers,
     config: &HotkeyConfig,
 ) -> Option<Message> {
-    let keycode = iced_key_to_keycode(&key)?;
-    let action = config.lookup(
+    resolve_action(&key, modifiers, config).map(action_to_message)
+}
+
+/// The `HotkeyAction` a key event resolves to under the user's bindings, or
+/// `None` when the key is unbindable or unbound. [`handle_hotkey`] maps it to a
+/// `Message`; the raw-key handler also reads the action itself (Theater Mode's
+/// key policy classifies actions, not messages).
+pub(crate) fn resolve_action(
+    key: &keyboard::Key,
+    modifiers: keyboard::Modifiers,
+    config: &HotkeyConfig,
+) -> Option<HotkeyAction> {
+    let keycode = iced_key_to_keycode(key)?;
+    config.lookup(
         &keycode,
         modifiers.shift(),
         modifiers.control(),
         modifiers.alt(),
-    )?;
-    Some(action_to_message(action))
+    )
 }
 
 #[cfg(test)]
