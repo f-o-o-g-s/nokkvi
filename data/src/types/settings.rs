@@ -9,8 +9,8 @@ use crate::{
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, ScrollbarVisibility, SlotRowHeight,
-            StripClickAction, StripSeparator, TrackInfoDisplay, VerboseConfig, VisualizationMode,
-            VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
+            StripClickAction, StripSeparator, TheaterControls, TrackInfoDisplay, VerboseConfig,
+            VisualizationMode, VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
         queue::{QueueSortPreferences, SortPreferences},
@@ -372,6 +372,12 @@ crate::player_settings_schema! {
     /// Cover picture or black backdrop on the now-playing panels.
     #[serde(default)]
     same artwork_cover: ArtworkCover = ArtworkCover::default(),
+    /// How Theater Mode shows the player bar (auto-hide / always / never).
+    #[serde(default)]
+    same theater_controls: TheaterControls = TheaterControls::default(),
+    /// Entering Theater Mode also makes the window fullscreen (default: off).
+    #[serde(default)]
+    same theater_window_fullscreen: bool = false,
     /// Artwork column width as a fraction of window width (0.05..=0.80).
     /// Only consulted in always modes.
     #[serde(default = "default_artwork_column_width_pct")]

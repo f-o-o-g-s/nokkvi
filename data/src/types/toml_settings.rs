@@ -14,7 +14,7 @@ use crate::{
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, FadeOnSkip, IconSet,
             LibraryPageSize, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, ScrollbarVisibility, SlotRowHeight,
-            StripClickAction, TrackInfoDisplay, VerboseConfig, VisualizationMode,
+            StripClickAction, TheaterControls, TrackInfoDisplay, VerboseConfig, VisualizationMode,
             VolumeNormalizationMode, deserialize_bit_perfect_with_bool_compat,
             deserialize_rounded_mode_with_bool_compat, deserialize_verbose_config_with_bool_compat,
         },
@@ -63,6 +63,10 @@ pub struct TomlSettings {
     pub artwork_column_stretch_fit: ArtworkStretchFit,
     #[serde(default)]
     pub artwork_cover: ArtworkCover,
+    #[serde(default)]
+    pub theater_controls: TheaterControls,
+    #[serde(default)]
+    pub theater_window_fullscreen: bool,
     #[serde(
         default = "default_artwork_column_width_pct",
         serialize_with = "round_f32"
@@ -329,6 +333,8 @@ impl Default for TomlSettings {
             artwork_column_mode: ArtworkColumnMode::default(),
             artwork_column_stretch_fit: ArtworkStretchFit::default(),
             artwork_cover: ArtworkCover::default(),
+            theater_controls: TheaterControls::default(),
+            theater_window_fullscreen: false,
             artwork_column_width_pct: default_artwork_column_width_pct(),
             artwork_auto_max_pct: default_artwork_auto_max_pct(),
             artwork_vertical_height_pct: default_artwork_vertical_height_pct(),

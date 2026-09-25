@@ -1053,3 +1053,90 @@ mod corner {
         assert!(!app.theater.corner_hovered);
     }
 }
+
+mod settings_and_window {
+    use iced::window::{Id, Mode};
+    use nokkvi_data::types::player_settings::TheaterControls;
+
+    use super::home_app;
+    use crate::app_message::{Message, TheaterMessage};
+
+    #[test]
+    fn theater_controls_follow_the_setting() {
+        let mut app = home_app();
+        assert_eq!(app.theater_controls(), TheaterControls::AutoHide);
+        app.settings.theater_controls = TheaterControls::AlwaysShown;
+        assert_eq!(app.theater_controls(), TheaterControls::AlwaysShown);
+    }
+
+    #[test]
+    fn prior_mode_is_stored_only_while_active_on_the_same_window() {
+        let id = Id::unique();
+        let mut app = home_app();
+        app.main_window_id = Some(id);
+        app.settings.theater_window_fullscreen = true;
+
+        // Arrives after the exit (a fast double toggle): dropped.
+        let _ = app.update(Message::Theater(TheaterMessage::PriorModeKnown(
+            id,
+            Mode::Windowed,
+        )));
+        assert!(app.theater.prior_window_mode.is_none());
+
+        let _ = app.enter_theater();
+        // A different (stale) window: dropped.
+        let _ = app.update(Message::Theater(TheaterMessage::PriorModeKnown(
+            Id::unique(),
+            Mode::Windowed,
+        )));
+        assert!(app.theater.prior_window_mode.is_none());
+
+        let _ = app.update(Message::Theater(TheaterMessage::PriorModeKnown(
+            id,
+            Mode::Windowed,
+        )));
+        assert_eq!(app.theater.prior_window_mode, Some(Mode::Windowed));
+
+        let _ = app.exit_theater();
+        assert!(
+            app.theater.prior_window_mode.is_none(),
+            "exit consumes the prior mode when it restores it"
+        );
+    }
+
+    #[test]
+    fn close_to_tray_leaves_theater_by_both_paths() {
+        let id = Id::unique();
+        let mut app = home_app();
+        app.settings.show_tray_icon = true;
+        app.settings.close_to_tray = true;
+        app.main_window_id = Some(id);
+        let _ = app.enter_theater();
+        app.theater.prior_window_mode = Some(Mode::Windowed);
+        let _ = app.handle_window_close_requested(id);
+        assert!(!app.theater.active, "the X button to the tray");
+        assert!(app.theater.prior_window_mode.is_none());
+
+        let mut app = home_app();
+        app.main_window_id = Some(id);
+        let _ = app.enter_theater();
+        app.theater.prior_window_mode = Some(Mode::Windowed);
+        let _ = app.update(Message::Tray(crate::services::tray::TrayEvent::Activate));
+        assert!(
+            app.main_window_id.is_none(),
+            "the tray click closed the window"
+        );
+        assert!(!app.theater.active, "the tray click");
+        assert!(app.theater.prior_window_mode.is_none());
+    }
+
+    #[test]
+    fn quitting_through_the_close_button_leaves_theater() {
+        let id = Id::unique();
+        let mut app = home_app();
+        app.main_window_id = Some(id);
+        let _ = app.enter_theater();
+        let _ = app.handle_window_close_requested(id);
+        assert!(!app.theater.active);
+    }
+}

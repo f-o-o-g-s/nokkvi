@@ -12,8 +12,8 @@ use crate::{
         player_settings::{
             ArtworkColumnMode, ArtworkCover, ArtworkResolution, ArtworkStretchFit, BitPerfectMode,
             EnterBehavior, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
-            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TrackInfoDisplay,
-            VolumeNormalizationMode,
+            RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, TheaterControls,
+            TrackInfoDisplay, VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -733,6 +733,16 @@ impl SettingsManager {
 
     pub fn set_artwork_column_stretch_fit(&mut self, fit: ArtworkStretchFit) -> Result<()> {
         self.settings.player.artwork_column_stretch_fit = fit;
+        self.save()
+    }
+
+    pub fn set_theater_controls(&mut self, controls: TheaterControls) -> Result<()> {
+        self.settings.player.theater_controls = controls;
+        self.save()
+    }
+
+    pub fn set_theater_window_fullscreen(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.theater_window_fullscreen = enabled;
         self.save()
     }
 
@@ -1594,6 +1604,8 @@ mod sentinel_roundtrip_tests {
             artwork_column_mode: ArtworkColumnMode::AlwaysStretched, // default Auto
             artwork_column_stretch_fit: ArtworkStretchFit::Fill,     // default Cover
             artwork_cover: ArtworkCover::HideEverywhere,             // default Show
+            theater_controls: TheaterControls::AlwaysHidden,         // default AutoHide
+            theater_window_fullscreen: true,                         // default false
             artwork_column_width_pct: 0.6543,
             artwork_auto_max_pct: 0.5234,
             artwork_vertical_height_pct: 0.6789,

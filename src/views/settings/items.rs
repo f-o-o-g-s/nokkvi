@@ -581,7 +581,8 @@ mod tests {
                 "Font & Icons",
                 "Metadata Strip",
                 "Artwork Overlays",
-                "Artwork Column"
+                "Artwork Column",
+                "Theater"
             ],
             "Interface tab section headers diverge",
         );
@@ -609,6 +610,8 @@ mod tests {
                 "general.artwork_cover",
                 "general.artwork_auto_max_pct",
                 "general.artwork_vertical_height_pct",
+                "general.theater_controls",
+                "general.theater_window_fullscreen",
             ],
             "Interface tab baseline item keys diverge (order matters)",
         );

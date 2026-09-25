@@ -176,6 +176,8 @@
   "artwork_column_mode": "always_stretched",
   "artwork_column_stretch_fit": "fill",
   "artwork_cover": "hide_everywhere",
+  "theater_controls": "always_hidden",
+  "theater_window_fullscreen": true,
   "artwork_column_width_pct": 0.6543,
   "artwork_auto_max_pct": 0.5234,
   "artwork_vertical_height_pct": 0.6789,

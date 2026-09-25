@@ -1,11 +1,12 @@
 //! Interface tab setting entries — navigation, lists, player bar, font, and
 //! metadata strip.
 //!
-//! 20 rows come from `define_settings!` via `build_interface_tab_settings_items`
+//! 22 rows come from `define_settings!` via `build_interface_tab_settings_items`
 //! (2 Navigation + 7 Slot List + 1 Player Bar + 1 Font & Icons (`icon_set`) +
 //! 5 Metadata Strip + 4 Artwork Column: mode dropdown, `artwork_cover`
 //! dropdown, `artwork_auto_max_pct` slider, `artwork_vertical_height_pct`
-//! slider). The Slot List count includes the
+//! slider + 2 Theater: `theater_controls` dropdown,
+//! `theater_window_fullscreen` toggle). The Slot List count includes the
 //! `scrollbar_visibility` dropdown plus the three auto-hide sub-controls
 //! (`autohide_collapsed_appearance` / `autohide_toolbar_height` /
 //! `autohide_toolbar_grip`), which are inserted beneath the Auto-hide Toolbar
@@ -39,6 +40,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
     const STRIP: &str = "assets/icons/radio-tower.svg";
     const ARTWORK_OVERLAYS: &str = "assets/icons/layout-grid.svg";
     const ARTWORK_COL: &str = "assets/icons/panel-right-open.svg";
+    const THEATER: &str = "assets/icons/maximize-2.svg";
 
     let font_display = if data.font_family.is_empty() {
         "(system default)"
@@ -168,6 +170,13 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         macro_rows.take("general.artwork_cover"),
         macro_rows.take("general.artwork_auto_max_pct"),
         macro_rows.take("general.artwork_vertical_height_pct"),
+        // --- Theater ---
+        SettingsEntry::Header {
+            label: "Theater",
+            icon: THEATER,
+        },
+        macro_rows.take("general.theater_controls"),
+        macro_rows.take("general.theater_window_fullscreen"),
     ];
 
     // MiniPlayer-only controls: the volume slider and the mode-toggle / kebab

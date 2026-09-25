@@ -231,6 +231,20 @@ keyword_table! {
         "general.strip_separator" => &["delimiter", "divider"],
         "general.artwork_column_mode" => &["cover art", "album art panel", "sidebar art"],
         "general.artwork_column_stretch_fit" => &["crop", "fill", "aspect ratio", "cover"],
+        "general.theater_controls" => &[
+            "theatre",
+            "hide player bar",
+            "now playing screen",
+            "immersive",
+            "auto hide",
+        ],
+        "general.theater_window_fullscreen" => &[
+            "fullscreen",
+            "theatre",
+            "full screen",
+            "immersive",
+            "fullscreen player",
+        ],
         "general.artwork_cover" => &[
             "hide cover",
             "black background",

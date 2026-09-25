@@ -104,6 +104,10 @@ pub struct InterfaceSettingsData {
     pub artwork_column_stretch_fit: Cow<'static, str>,
     /// Cover Art label (Show / Hide in Theater Mode / Hide everywhere).
     pub artwork_cover: Cow<'static, str>,
+    /// Theater Controls label (Auto-hide / Always shown / Always hidden).
+    pub theater_controls: Cow<'static, str>,
+    /// Theater Fills the Screen toggle.
+    pub theater_window_fullscreen: bool,
     /// Auto-mode max artwork fraction of the window's short axis (0.30..=0.70).
     pub artwork_auto_max_pct: f64,
     /// Always-Vertical artwork height as a fraction of window height (0.10..=0.80).
@@ -143,6 +147,8 @@ impl Default for InterfaceSettingsData {
             artwork_column_mode: Cow::Borrowed("test-default"),
             artwork_column_stretch_fit: Cow::Borrowed("test-default"),
             artwork_cover: Cow::Borrowed("test-default"),
+            theater_controls: Cow::Borrowed("test-default"),
+            theater_window_fullscreen: false,
             artwork_auto_max_pct: 0.0,
             artwork_vertical_height_pct: 0.0,
         }

@@ -26,6 +26,9 @@ pub struct TheaterState {
     pub window_focused: bool,
     /// Where the chrome is going, since when, and from what offset it left.
     pub chrome: ChromeMotion,
+    /// The window's mode before Theater Fills the Screen went fullscreen;
+    /// restored (and consumed) on exit.
+    pub prior_window_mode: Option<iced::window::Mode>,
 }
 
 impl Default for TheaterState {
@@ -40,6 +43,7 @@ impl Default for TheaterState {
                 since: Instant::now(),
                 from: 0.0,
             },
+            prior_window_mode: None,
         }
     }
 }

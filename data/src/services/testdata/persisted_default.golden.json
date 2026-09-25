@@ -160,6 +160,8 @@
   "artwork_column_mode": "auto",
   "artwork_column_stretch_fit": "cover",
   "artwork_cover": "show",
+  "theater_controls": "auto_hide",
+  "theater_window_fullscreen": false,
   "artwork_column_width_pct": 0.4,
   "artwork_auto_max_pct": 0.7,
   "artwork_vertical_height_pct": 0.4,

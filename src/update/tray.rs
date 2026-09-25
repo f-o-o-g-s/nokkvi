@@ -101,6 +101,8 @@ impl Nokkvi {
     /// `Message::ShutdownComplete` regardless of whether the timeout fired —
     /// the OS reaps anything left after process exit anyway.
     pub fn handle_window_close_requested(&mut self, id: window::Id) -> Task<Message> {
+        // Theater Mode must not greet the next window (or linger into exit).
+        self.exit_theater_for_closing_window();
         if self.settings.show_tray_icon && self.settings.close_to_tray {
             debug!(" Close requested → destroying window (will reopen via tray)");
             self.tray_window_hidden = true;
@@ -194,6 +196,7 @@ impl Nokkvi {
             // Destroy the window. main_window_id is consumed; the next show
             // path opens a fresh window with a new id (delivered via the
             // open_events subscription → handle_window_opened).
+            self.exit_theater_for_closing_window();
             let Some(id) = self.main_window_id.take() else {
                 debug!(" Tray hide requested but no main window — nothing to close");
                 return Task::none();

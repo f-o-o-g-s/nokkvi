@@ -17,7 +17,7 @@ use crate::{
             ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
             ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkCover, ArtworkStretchFit,
             CollapsedAppearance, IconSet, NavDisplayMode, NavLayout, ScrollbarVisibility,
-            SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
+            SlotRowHeight, StripClickAction, StripSeparator, TheaterControls, TrackInfoDisplay,
         },
         setting_def::Tab,
         settings_data::InterfaceSettingsData,
@@ -471,6 +471,45 @@ define_settings! {
                 read_field: |d| d.artwork_cover.as_ref(),
             },
         },
+        TheaterControlsSetting {
+            key: "general.theater_controls",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_theater_controls(TheaterControls::from_label(&v)),
+            toml_apply: |ts, p| p.theater_controls = ts.theater_controls,
+            read: |src, out| out.theater_controls = src.theater_controls,
+            write: |ps, ts| ts.theater_controls = ps.theater_controls,
+            ui_meta: {
+                label: "Theater Controls",
+                category: "Theater",
+                subtitle: Some(
+                    "Auto-hide slides the player bar away 2.5 seconds after the last mouse or \
+                     key activity and brings it back on any movement. Always shown keeps it on \
+                     screen. Always hidden keeps it away; hotkeys still work",
+                ),
+                default: "Auto-hide",
+                options: &["Auto-hide", "Always shown", "Always hidden"],
+                read_field: |d| d.theater_controls.as_ref(),
+            },
+        },
+        TheaterWindowFullscreen {
+            key: "general.theater_window_fullscreen",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_theater_window_fullscreen(v),
+            toml_apply: |ts, p| p.theater_window_fullscreen = ts.theater_window_fullscreen,
+            read: |src, out| out.theater_window_fullscreen = src.theater_window_fullscreen,
+            write: |ps, ts| ts.theater_window_fullscreen = ps.theater_window_fullscreen,
+            ui_meta: {
+                label: "Theater Fills the Screen",
+                category: "Theater",
+                subtitle: Some(
+                    "On: entering Theater Mode also makes the window fullscreen and leaving \
+                     restores it. Off: only the layout changes; your compositor's fullscreen \
+                     key still works on top",
+                ),
+                default: false,
+                read_field: |d| d.theater_window_fullscreen,
+            },
+        },
         ArtworkAutoMaxPctSetting {
             key: "general.artwork_auto_max_pct",
             value_type: Float,
@@ -593,24 +632,26 @@ mod tests {
             artwork_column_mode: "Auto".into(),
             artwork_column_stretch_fit: "Cover".into(),
             artwork_cover: "Show".into(),
+            theater_controls: "Auto-hide".into(),
+            theater_window_fullscreen: false,
             artwork_auto_max_pct: 0.40,
             artwork_vertical_height_pct: 0.40,
         }
     }
 
-    /// 20 entries get ui_meta — 5 Layout + 5 Slot List (autohide toggle +
+    /// 22 entries get ui_meta — 5 Layout + 5 Slot List (autohide toggle +
     /// collapsed-appearance + hidden-height + grip + scrollbar visibility) +
     /// 1 Views + 1 Appearance (icon set) + 4 Metadata Strip + 4 Artwork Column
     /// (mode dropdown + cover art dropdown + auto-max-pct slider +
-    /// vertical-height slider). The
+    /// vertical-height slider) + 2 Theater (controls + fills the screen). The
     /// mini-player show-volume/show-modes toggles and the 8 ToggleSet sub-keys
     /// (`strip_show_*`, `*_artwork_overlay`) plus the conditional
     /// `artwork_column_stretch_fit` stay hand-written.
     #[test]
-    fn build_interface_tab_settings_items_emits_twenty_rows() {
+    fn build_interface_tab_settings_items_emits_twenty_two_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 20);
+        assert_eq!(entries.len(), 22);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -797,6 +838,26 @@ mod tests {
     }
 
     #[test]
+    fn apply_toml_copies_the_theater_settings() {
+        use crate::types::player_settings::TheaterControls;
+        let mut ts = TomlSettings::default();
+        ts.theater_controls = TheaterControls::AlwaysShown;
+        ts.theater_window_fullscreen = true;
+        let mut p = PersistedPlayerSettings::default();
+        apply_toml_interface_tab(&ts, &mut p);
+        assert_eq!(p.theater_controls, TheaterControls::AlwaysShown);
+        assert!(p.theater_window_fullscreen);
+
+        let mut live = crate::types::player_settings::LivePlayerSettings::default();
+        live.theater_controls = p.theater_controls;
+        live.theater_window_fullscreen = p.theater_window_fullscreen;
+        let mut back = TomlSettings::default();
+        write_interface_tab_toml(&live, &mut back);
+        assert_eq!(back.theater_controls, TheaterControls::AlwaysShown);
+        assert!(back.theater_window_fullscreen);
+    }
+
+    #[test]
     fn tab_interface_contains_recognizes_declared_keys() {
         assert!(tab_interface_contains("general.nav_layout"));
         assert!(tab_interface_contains("general.strip_show_title"));
@@ -814,13 +875,15 @@ mod tests {
         assert!(keys.contains(&"general.artwork_auto_max_pct"));
         assert!(keys.contains(&"general.artwork_vertical_height_pct"));
         assert!(keys.contains(&"general.artwork_cover"));
+        assert!(keys.contains(&"general.theater_controls"));
+        assert!(keys.contains(&"general.theater_window_fullscreen"));
         assert!(keys.contains(&"general.autohide_toolbar"));
         assert!(keys.contains(&"general.autohide_toolbar_height"));
         assert!(keys.contains(&"general.autohide_toolbar_grip"));
         assert!(keys.contains(&"general.autohide_collapsed_appearance"));
         assert!(keys.contains(&"general.scrollbar_visibility"));
         assert!(keys.contains(&"general.icon_set"));
-        assert_eq!(keys.len(), 31);
+        assert_eq!(keys.len(), 33);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated
@@ -943,6 +1006,8 @@ mod tests {
             artwork_column_mode: live.artwork_column_mode.as_label().into(),
             artwork_column_stretch_fit: live.artwork_column_stretch_fit.as_label().into(),
             artwork_cover: live.artwork_cover.as_label().into(),
+            theater_controls: live.theater_controls.as_label().into(),
+            theater_window_fullscreen: live.theater_window_fullscreen,
             artwork_auto_max_pct: f64::from(live.artwork_auto_max_pct),
             artwork_vertical_height_pct: f64::from(live.artwork_vertical_height_pct),
         };

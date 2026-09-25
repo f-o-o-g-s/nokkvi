@@ -986,6 +986,10 @@ pub enum TheaterMessage {
     /// above the bar (a separate flag: two `mouse_area`s updated in tree
     /// order would otherwise let one's exit overwrite the other's enter).
     CornerHover(bool),
+    /// The window's mode before entering (Theater Fills the Screen): stored
+    /// for the exit, then fullscreen is requested, only while theater is
+    /// still active on that same window.
+    PriorModeKnown(iced::window::Id, iced::window::Mode),
 }
 
 /// Toast notification messages, namespaced under `Message::Toast(..)`

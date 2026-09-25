@@ -222,6 +222,7 @@ impl Nokkvi {
                 self.stamp_theater_activity();
                 Task::none()
             }
+            TheaterMessage::PriorModeKnown(id, prior) => self.handle_prior_window_mode(id, prior),
             TheaterMessage::CornerHover(hovered) => {
                 if self.theater.active {
                     self.theater.corner_hovered = hovered;
@@ -279,9 +280,18 @@ impl Nokkvi {
             clear_unmounting_list_state(&mut editor.common);
         }
 
+        // Theater Fills the Screen: ask the window for its current mode; the
+        // answer (`PriorModeKnown`) records it and goes fullscreen.
+        let window_mode = match self.main_window_id {
+            Some(id) if self.settings.theater_window_fullscreen => iced::window::mode(id)
+                .map(move |prior| Message::Theater(TheaterMessage::PriorModeKnown(id, prior))),
+            _ => Task::none(),
+        };
+
         // Theater may be entered from a view that is not a lyrics surface, so
         // the playing track's cover and lyrics may never have been fetched.
         Task::batch([
+            window_mode,
             self.theater_large_art_task().unwrap_or_else(Task::none),
             self.lyrics_kick_if_unresolved(),
         ])
@@ -299,7 +309,12 @@ impl Nokkvi {
         self.theater.bar_hovered = false;
         self.theater.corner_hovered = false;
         self.open_menu = None;
-        Task::none()
+        // Restore the window mode Theater Fills the Screen replaced. Taken even
+        // without a window, so a stale prior never outlives this exit.
+        match (self.theater.prior_window_mode.take(), self.main_window_id) {
+            (Some(prior), Some(id)) => iced::window::set_mode(id, prior),
+            _ => Task::none(),
+        }
     }
 
     /// Keep the bar and the cursor on screen for another [`HIDE_DELAY`].
@@ -309,10 +324,39 @@ impl Nokkvi {
         }
     }
 
-    /// The Theater Controls setting. Always `AutoHide` until the setting
-    /// ships.
+    /// The Theater Controls setting.
     pub(crate) fn theater_controls(&self) -> TheaterControls {
-        TheaterControls::AutoHide
+        self.settings.theater_controls
+    }
+
+    /// Theater Fills the Screen, second half: the window's mode is known.
+    /// Store it for the exit and go fullscreen, but only while theater is
+    /// still active on that same window: a fast double toggle lands this
+    /// after the exit, and a stale window may already be gone. Applying
+    /// fullscreen here rather than chaining it after the query is what keeps
+    /// a double toggle from leaving the window stuck fullscreen.
+    fn handle_prior_window_mode(
+        &mut self,
+        id: iced::window::Id,
+        prior: iced::window::Mode,
+    ) -> Task<Message> {
+        if !self.theater.active
+            || self.main_window_id != Some(id)
+            || self.theater.prior_window_mode.is_some()
+        {
+            return Task::none();
+        }
+        self.theater.prior_window_mode = Some(prior);
+        iced::window::set_mode(id, iced::window::Mode::Fullscreen)
+    }
+
+    /// Leave theater for a window that is about to close (to the tray or on
+    /// quit): the recorded window mode is dropped rather than restored, so
+    /// no mode change is sent to a closing window and the next window opens
+    /// normally.
+    pub(crate) fn exit_theater_for_closing_window(&mut self) {
+        self.theater.prior_window_mode = None;
+        let _ = self.exit_theater();
     }
 
     /// [`theater_key_policy`] refined by the hidden state: a toggle whose

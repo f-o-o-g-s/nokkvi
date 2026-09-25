@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 - With the cover hidden in Theater Mode, the visualizer spans the whole window instead of a centered square.
 - Hovering the Queue cover reveals an expand icon that enters Theater Mode; its right-click menu gains Enter Theater Mode.
 - In Theater Mode an exit icon rides above the player bar.
+- A Theater Controls setting keeps Theater Mode's player bar auto-hiding, always shown, or always hidden.
+- A Theater Fills the Screen setting also makes the window fullscreen in Theater Mode and restores it on leaving.
 
 ### Changed
 

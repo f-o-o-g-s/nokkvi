@@ -24,7 +24,8 @@ use crate::{
             CollapsedAppearance, CrossfadeCurve, EnterBehavior, LibraryPageSize,
             LivePlayerSettings, LyricsBackdropBlur, NavDisplayMode, NavLayout, NormalizationLevel,
             RatingReminderTrigger, RoundedMode, SlotRowHeight, StripClickAction, StripSeparator,
-            TrackInfoDisplay, VerboseConfig, VisualizationMode, VolumeNormalizationMode,
+            TheaterControls, TrackInfoDisplay, VerboseConfig, VisualizationMode,
+            VolumeNormalizationMode,
         },
         queue_sort_mode::QueueSortMode,
         sort_mode::SortMode,
@@ -257,6 +258,8 @@ impl SettingsService {
     delegate_setter!(set_artwork_column_mode, ArtworkColumnMode);
     delegate_setter!(set_artwork_column_stretch_fit, ArtworkStretchFit);
     delegate_setter!(set_artwork_cover, ArtworkCover);
+    delegate_setter!(set_theater_controls, TheaterControls);
+    delegate_setter!(set_theater_window_fullscreen, bool);
     delegate_setter!(
         /// Set the artwork column width fraction (0.05..=0.80)
         set_artwork_column_width_pct,

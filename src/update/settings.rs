@@ -91,6 +91,8 @@ impl Nokkvi {
                 .as_label()
                 .into(),
             artwork_cover: crate::theme::artwork_cover().as_label().into(),
+            theater_controls: self.settings.theater_controls.as_label().into(),
+            theater_window_fullscreen: self.settings.theater_window_fullscreen,
             artwork_auto_max_pct: f64::from(crate::theme::artwork_auto_max_pct()),
             artwork_vertical_height_pct: f64::from(crate::theme::artwork_vertical_height_pct()),
         };
