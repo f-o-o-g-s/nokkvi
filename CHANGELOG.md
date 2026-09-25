@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.21.0 — 2026-09-25
+
+### Added
+
 - Theater Mode (F11) fills the window with the playing track's cover, visualizer and lyrics, hiding the library, toolbar and nav.
 - Escape leaves Theater Mode; keys aimed at the hidden list leave it too, and view keys leave and then switch.
 - Right-clicking the Theater Mode cover offers Exit Theater Mode and Refresh Artwork.
@@ -43,34 +53,9 @@ All notable changes to this project will be documented in this file.
 - Svalbard's visualizer peaks now step from dark to light teal instead of alternating two colors.
 - The Harbour moon and stars now glow in the lightest peak color, whatever order a theme lists its peaks in.
 
-### Fixed
-
-### Removed
-
-## v0.20.0 — 2026-09-23
-
-### Added
-
-- `nokkvi show` reopens the window after it was closed to the tray.
-- `nokkvi show` on an already open window asks the desktop to flag it for attention.
-- Launching nokkvi again while it runs now reopens a window closed to the tray instead of refusing.
-- Launching nokkvi again while its window is open now flags that window instead of exiting with an error.
-- MPRIS Raise now reopens a window closed to the tray.
-- MPRIS Raise on an open window asks the desktop to flag it for attention.
-- Bars gain four animated Gradient Modes (Drift, Swell, Pulse, Ripple) that keep the bar colors moving.
-
-### Changed
-
-- In Bars LED mode, the gap between LEDs now follows Bar Spacing, matching the gap between bars.
-- In Bars LED mode, each LED now gets its own outline, like each bar does.
-
-### Fixed
-
-- A `nokkvi` command sent to a frozen instance now fails after five seconds instead of hanging.
-- Turning off Show Tray Icon now removes the tray icon instead of leaving a dead one until restart.
-
 ## Older releases
 
+- **v0.20.x** (2026-09-23, v0.20.0): [CHANGELOG-0.20.md](./changelog-archive/CHANGELOG-0.20.md)
 - **v0.19.x** (2026-09-20 → 2026-09-21, v0.19.0–v0.19.1): [CHANGELOG-0.19.md](./changelog-archive/CHANGELOG-0.19.md)
 - **v0.18.x** (2026-07-19 → 2026-07-25, v0.18.0–v0.18.4): [CHANGELOG-0.18.md](./changelog-archive/CHANGELOG-0.18.md)
 - **v0.17.x** (2026-07-18, v0.17.0): [CHANGELOG-0.17.md](./changelog-archive/CHANGELOG-0.17.md)

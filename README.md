@@ -42,7 +42,8 @@ Things that shaped this project:
 
 - Native **PipeWire** audio engine: gapless playback, a 10-band EQ, ReplayGain and AGC normalization, and configurable crossfade with transition fades.
 - Opt-in **bit-perfect** playback (Strict or Relaxed, follows the native sample rate) with a badge that reads the real hardware clock as `BIT-PERFECT`, `RESAMPLED`, or `UNVERIFIED`.
-- GPU visualizer with `bars`, `lines`, and `scope` modes plus beat glow, bloom, trails, echo, and CRT, shown in a band above the player bar or over the cover art, and a `milkdrop` mode that plays MilkDrop presets in place of the cover.
+- GPU visualizer with `bars`, `lines`, and `scope` modes plus beat glow, bloom, trails, echo, and CRT, shown in a band above the player bar or over the cover art, and a `milkdrop` mode that plays MilkDrop presets in place of the cover, including nokkvi's own presets drawn in your theme's colours, several built on the playing album's cover.
+- **Theater Mode** (F11): the playing track's cover, visualizer, and lyrics fill the window, with an auto-hiding player bar and optional fullscreen.
 - **Smart playlists** authored in-app: a rules editor with nested All/Any groups, live validation, presets, a raw-JSON mode, and server-evaluated previews. Also imports `.nsp` (needs Navidrome 0.61+).
 - **Trawl** mix builder: blend artist, album, song, genre, and playlist seeds into a crate (round-robin, weighted, or shuffle-all) and save the result as a playlist.
 - Scriptable from the shell: `nokkvi <verb>` drives the running player over a local socket (transport, volume, modes, love and rate, queue push/pull).
