@@ -204,7 +204,8 @@ mod tests {
                 "Bar Colors (Dark)",
                 "Bar Colors (Light)",
                 "Lines",
-                "Scope"
+                "Scope",
+                "MilkDrop"
             ],
             "Visualizer tab section headers diverge",
         );
@@ -327,11 +328,22 @@ mod tests {
                 vkeys::SCOPE_ECHO,
             ],
         );
+        assert_section_keys(
+            &entries,
+            "MilkDrop",
+            &[
+                vkeys::MILKDROP_PRESET_INTERVAL_SECS,
+                vkeys::MILKDROP_SWITCH_ON_TRACK_CHANGE,
+                vkeys::MILKDROP_PRESET_SOURCE,
+                vkeys::MILKDROP_RENDER_QUALITY,
+                vkeys::MILKDROP_SHOW_PRESET_NAMES,
+            ],
+        );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 7 + 4 + 23 + 5 + 5 + 14 + 17 = 75. Catches an item landing OUTSIDE the
-        // pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 75);
+        // 7 + 4 + 23 + 5 + 5 + 14 + 17 + 5 = 80. Catches an item landing OUTSIDE
+        // the pinned sections (which the section asserts cannot see).
+        assert_eq!(count_items(&entries), 80);
     }
 
     /// Every dispatchable Visualizer-table key renders exactly one UI row —

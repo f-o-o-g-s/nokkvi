@@ -434,6 +434,18 @@ keyword_table! {
             "psychedelic",
             "warp",
         ],
+        "visualizer.milkdrop.preset_interval_secs" => &["milkdrop", "preset", "timer", "switch", "rotate", "seconds"],
+        "visualizer.milkdrop.switch_on_track_change" => &["milkdrop", "preset", "track", "song change", "next song"],
+        "visualizer.milkdrop.preset_source" => &["milkdrop", "preset", "favorites", "pool"],
+        "visualizer.milkdrop.render_quality" => &[
+            "milkdrop",
+            "resolution",
+            "sharpness",
+            "performance",
+            "gpu",
+            "pixels",
+        ],
+        "visualizer.milkdrop.show_preset_names" => &["milkdrop", "preset", "name", "toast", "title"],
         "visualizer.bars.placement" | "visualizer.lines.placement" => &[
             "position",
             "location",

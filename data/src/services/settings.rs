@@ -2543,6 +2543,36 @@ name = "sentinel preset"
         );
     }
 
+    /// A non-default MilkDrop config survives config.toml → in-memory →
+    /// LivePlayerSettings; validate() clamps the interval and a typo in an
+    /// enum falls back to its default instead of dropping the section.
+    #[test]
+    fn milkdrop_mode_config_toml_live_roundtrip() {
+        use crate::types::visualizer_config::{MilkdropPresetSource, MilkdropRenderQuality};
+        let live = visualizer_toml_to_live(
+            "[visualizer.milkdrop]\npreset_interval_secs = 9000\nswitch_on_track_change = false\npreset_source = \"favorites_only\"\nrender_quality = \"native\"\nshow_preset_names = false\n",
+        );
+        let md = &live.visualizer.milkdrop;
+        assert_eq!(
+            md.preset_interval_secs, 600,
+            "validate() must clamp on read"
+        );
+        assert!(!md.switch_on_track_change);
+        assert_eq!(md.preset_source, MilkdropPresetSource::FavoritesOnly);
+        assert_eq!(md.render_quality, MilkdropRenderQuality::Native);
+        assert!(!md.show_preset_names);
+
+        let live = visualizer_toml_to_live(
+            "[visualizer.milkdrop]\nrender_quality = \"ultra\"\npreset_interval_secs = 45\n",
+        );
+        assert_eq!(
+            live.visualizer.milkdrop.render_quality,
+            MilkdropRenderQuality::Medium,
+            "a typo falls back to the default"
+        );
+        assert_eq!(live.visualizer.milkdrop.preset_interval_secs, 45);
+    }
+
     // ── M4 golden-bytes harness ─────────────────────────────────────────
     //
     // These four tests pin the EXACT serde_json bytes PersistedPlayerSettings

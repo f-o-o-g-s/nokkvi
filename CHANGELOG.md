@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - Right-clicking the MilkDrop panel offers Next, Previous, Lock, Favorite and Never Show This Preset.
 - Never Show This Preset hides a preset for good and moves on at once.
 - Presets dropped into `~/.config/nokkvi/milkdrop/` join the rotation; the refresh key picks up new ones.
+- A MilkDrop settings section sets the preset interval, whether tracks change presets, favorites only, render quality and name toasts.
 
 ### Changed
 

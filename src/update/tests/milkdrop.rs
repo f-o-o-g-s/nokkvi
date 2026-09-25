@@ -739,3 +739,77 @@ fn milkdrop_menu_rows_carry_the_shipped_icons() {
     assert_eq!(rows[2].icon, "assets/icons/lock-open.svg");
     assert_eq!(rows[3].label, "Unfavorite Preset");
 }
+
+// ----------------------------------------------------------------------------
+// Settings
+// ----------------------------------------------------------------------------
+
+fn set_milkdrop_config(
+    app: &mut Nokkvi,
+    f: impl FnOnce(&mut nokkvi_data::types::visualizer_config::MilkdropConfig),
+) {
+    let mut cfg = app.visualizer_config.read().clone();
+    f(&mut cfg.milkdrop);
+    use crate::visualizer_config::SharedVisualizerConfigExt;
+    app.visualizer_config.apply(cfg);
+}
+
+#[test]
+fn interval_zero_never_arms() {
+    let mut app = md_app();
+    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 0);
+    on_screen(&mut app);
+    assert_eq!(app.milkdrop.next_switch_at, None);
+    tick(&mut app);
+    assert_eq!(app.milkdrop.next_switch_at, None);
+}
+
+#[test]
+fn show_preset_names_off_is_silent() {
+    let mut app = md_app();
+    set_milkdrop_config(&mut app, |md| md.show_preset_names = false);
+    let toasts = app.toast.toasts.len();
+    on_screen(&mut app);
+    assert_eq!(app.toast.toasts.len(), toasts);
+    assert!(
+        app.milkdrop.on_screen.is_some(),
+        "still tracked, just not toasted"
+    );
+}
+
+#[test]
+fn switch_on_track_change_off_keeps_the_preset() {
+    let mut app = md_app();
+    set_milkdrop_config(&mut app, |md| md.switch_on_track_change = false);
+    on_screen(&mut app);
+    let generation = app.milkdrop.generation;
+    let mut update = super::playback::make_playback_update();
+    update.song_id = Some("song_z".to_string());
+    let _ = app.handle_playback_state_updated(update);
+    assert_eq!(app.milkdrop.generation, generation);
+}
+
+#[test]
+fn favorites_only_and_quality_reach_the_library_and_renderer() {
+    use nokkvi_data::types::visualizer_config::{MilkdropPresetSource, MilkdropRenderQuality};
+    let mut app = md_app();
+    set_milkdrop_config(&mut app, |md| {
+        md.preset_source = MilkdropPresetSource::FavoritesOnly;
+        md.render_quality = MilkdropRenderQuality::High;
+    });
+    let (first, _) = BUNDLED_MILKDROP_PRESETS[0];
+    app.milkdrop.library.toggle_favorite(first);
+    enter_milkdrop(&mut app);
+    assert_eq!(
+        app.milkdrop.current.as_deref(),
+        Some(first),
+        "favorites only"
+    );
+    assert_eq!(
+        app.milkdrop
+            .shared
+            .quality_short_side
+            .load(Ordering::Acquire),
+        1080
+    );
+}

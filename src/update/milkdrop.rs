@@ -58,10 +58,6 @@ pub(crate) enum AdvanceReason {
     Manual,
 }
 
-/// Seconds between automatic preset changes; 0 keeps the current one.
-/// (The MilkDrop settings section makes this configurable.)
-pub(crate) const MILKDROP_DEFAULT_INTERVAL_SECS: u64 = 30;
-
 impl Nokkvi {
     fn milkdrop_mode_active(&self) -> bool {
         self.engine.visualization_mode == VisualizationMode::Milkdrop
@@ -88,13 +84,31 @@ impl Nokkvi {
         )
     }
 
+    /// The live `[visualizer.milkdrop]` settings (hot-reloaded).
+    fn milkdrop_config(&self) -> nokkvi_data::types::visualizer_config::MilkdropConfig {
+        self.visualizer_config.read().milkdrop.clone()
+    }
+
     fn milkdrop_interval(&self) -> Option<std::time::Duration> {
-        (MILKDROP_DEFAULT_INTERVAL_SECS > 0)
-            .then(|| std::time::Duration::from_secs(MILKDROP_DEFAULT_INTERVAL_SECS))
+        let secs = self.milkdrop_config().preset_interval_secs;
+        (secs > 0).then(|| std::time::Duration::from_secs(u64::from(secs)))
     }
 
     fn milkdrop_switch_on_track_change(&self) -> bool {
-        true
+        self.milkdrop_config().switch_on_track_change
+    }
+
+    /// Push the settings the library and the render side read on their own.
+    fn milkdrop_apply_config(&mut self) {
+        use nokkvi_data::types::visualizer_config::MilkdropPresetSource;
+        let cfg = self.milkdrop_config();
+        self.milkdrop
+            .library
+            .set_favorites_only(cfg.preset_source == MilkdropPresetSource::FavoritesOnly);
+        self.milkdrop
+            .shared
+            .quality_short_side
+            .store(cfg.render_quality.short_side_px(), Ordering::Release);
     }
 
     /// Arm the switch timer from now, unless locked or the interval is 0.
@@ -541,6 +555,7 @@ impl Nokkvi {
             self.milkdrop.shared.running.store(false, Ordering::Release);
             return Task::none();
         }
+        self.milkdrop_apply_config();
 
         let running = self.milkdrop_is_running();
         self.milkdrop
@@ -574,7 +589,9 @@ impl Nokkvi {
             if let Some(name) = self.milkdrop.current.clone() {
                 info!(preset = %name, "milkdrop: preset on screen");
                 self.milkdrop.on_screen = Some(name.clone());
-                self.toast_info(name);
+                if self.milkdrop_config().show_preset_names {
+                    self.toast_info(name);
+                }
             }
         }
 

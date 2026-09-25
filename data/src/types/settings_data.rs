@@ -363,6 +363,11 @@ pub struct VisualizerSettingsData {
     pub scope_beam: bool,
     pub scope_trails: f64,
     pub scope_echo: f64,
+    pub milkdrop_preset_interval_secs: i64,
+    pub milkdrop_switch_on_track_change: bool,
+    pub milkdrop_preset_source: Cow<'static, str>,
+    pub milkdrop_render_quality: Cow<'static, str>,
+    pub milkdrop_show_preset_names: bool,
 }
 
 impl Default for VisualizerSettingsData {
@@ -432,6 +437,11 @@ impl Default for VisualizerSettingsData {
             scope_beam: false,
             scope_trails: 0.0,
             scope_echo: 0.0,
+            milkdrop_preset_interval_secs: 0,
+            milkdrop_switch_on_track_change: false,
+            milkdrop_preset_source: Cow::Borrowed("test-default"),
+            milkdrop_render_quality: Cow::Borrowed("test-default"),
+            milkdrop_show_preset_names: false,
         }
     }
 }
@@ -503,6 +513,11 @@ impl From<&crate::types::visualizer_config::VisualizerConfig> for VisualizerSett
             scope_beam: c.scope.beam,
             scope_trails: f64::from(c.scope.trails),
             scope_echo: f64::from(c.scope.echo),
+            milkdrop_preset_interval_secs: i64::from(c.milkdrop.preset_interval_secs),
+            milkdrop_switch_on_track_change: c.milkdrop.switch_on_track_change,
+            milkdrop_preset_source: Cow::Borrowed(c.milkdrop.preset_source.as_wire_str()),
+            milkdrop_render_quality: Cow::Borrowed(c.milkdrop.render_quality.as_wire_str()),
+            milkdrop_show_preset_names: c.milkdrop.show_preset_names,
         }
     }
 }

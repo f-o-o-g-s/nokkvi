@@ -104,7 +104,7 @@ fn push_visualizer_color_entries(
 
 /// Build settings entries for the Visualizer tab from live config.
 ///
-/// The 64 scalar/enum rows come from `define_settings!` via
+/// The 69 scalar/enum rows come from `define_settings!` via
 /// `build_visualizer_tab_settings_items` (the Visualizer table in
 /// `data/src/services/settings_tables/visualizer.rs`) — one `ui_meta` cluster
 /// per dispatchable key, consumed here through the `MacroRows` take-in-
@@ -128,6 +128,7 @@ pub(crate) fn build_visualizer_items(
     const P: &str = "assets/icons/palette.svg";
     const L: &str = "assets/icons/audio-waveform.svg";
     const SC: &str = "assets/icons/radar.svg";
+    const MD: &str = "assets/icons/droplet.svg";
 
     let data = VisualizerSettingsData::from(config);
     let mut m = MacroRows::new(build_visualizer_tab_settings_items(&data));
@@ -259,6 +260,17 @@ pub(crate) fn build_visualizer_items(
     e.push(m.take(keys::SCOPE_BEAM));
     e.push(m.take(keys::SCOPE_TRAILS));
     e.push(m.take(keys::SCOPE_ECHO));
+
+    // --- MilkDrop section (preset switching + render resolution) ---
+    e.push(SettingsEntry::Header {
+        label: "MilkDrop",
+        icon: MD,
+    });
+    e.push(m.take(keys::MILKDROP_PRESET_INTERVAL_SECS));
+    e.push(m.take(keys::MILKDROP_SWITCH_ON_TRACK_CHANGE));
+    e.push(m.take(keys::MILKDROP_PRESET_SOURCE));
+    e.push(m.take(keys::MILKDROP_RENDER_QUALITY));
+    e.push(m.take(keys::MILKDROP_SHOW_PRESET_NAMES));
 
     m.finish();
     e

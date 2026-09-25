@@ -7,7 +7,7 @@
 //! `ConfigWatcher`, `SharedVisualizerConfig`) stays in
 //! `src/visualizer_config.rs`, which re-exports everything here.
 //!
-//! The 7 mode enums are [`wire_enum!`][crate::wire_enum] invocations: explicit
+//! The 9 mode enums are [`wire_enum!`][crate::wire_enum] invocations: explicit
 //! per-variant wire literals tied to serde renames, explicit `#[repr(u32)]`
 //! discriminants consumed by the WGSL shaders (note `BarsGradientMode`'s
 //! intentionally dead `1`), and a tolerant `from_wire_str` fallback matching
@@ -533,6 +533,79 @@ impl ScopeConfig {
     }
 }
 
+crate::wire_enum! {
+    /// Which presets MilkDrop draws from.
+    #[repr(u32)]
+    pub enum MilkdropPresetSource {
+        /// Every preset that is not hidden.
+        #[default]
+        All = 0 => "all",
+        /// Favorited presets only (all of them while there are none).
+        FavoritesOnly = 1 => "favorites_only",
+    }
+}
+
+crate::wire_enum! {
+    /// How many pixels MilkDrop renders on the panel's shorter side before
+    /// the result is scaled to the panel.
+    #[repr(u32)]
+    pub enum MilkdropRenderQuality {
+        /// 480 px: soft and cheap.
+        Low = 0 => "low",
+        /// 720 px.
+        #[default]
+        Medium = 1 => "medium",
+        /// 1080 px.
+        High = 2 => "high",
+        /// The panel's own size: pixel-exact, the most expensive.
+        Native = 3 => "native",
+    }
+}
+
+impl MilkdropRenderQuality {
+    /// Shorter-side render cap in physical px; 0 = native (no cap).
+    pub fn short_side_px(self) -> u32 {
+        match self {
+            Self::Low => 480,
+            Self::Medium => 720,
+            Self::High => 1080,
+            Self::Native => 0,
+        }
+    }
+}
+
+/// MilkDrop mode settings (`[visualizer.milkdrop]`): how presets change and how
+/// sharply they render.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MilkdropConfig {
+    /// Seconds before another preset (0 = keep the current one until Next
+    /// Preset). Clamped to 0-600. Default: 30
+    pub preset_interval_secs: u32,
+    /// A new track brings a new preset. Default: true
+    pub switch_on_track_change: bool,
+    /// All presets, or favorites only. Default: All
+    #[serde(deserialize_with = "deserialize_or_default")]
+    pub preset_source: MilkdropPresetSource,
+    /// Shorter-side render resolution. Default: Medium (720 px)
+    #[serde(deserialize_with = "deserialize_or_default")]
+    pub render_quality: MilkdropRenderQuality,
+    /// Toast each preset's name as it appears. Default: true
+    pub show_preset_names: bool,
+}
+
+impl Default for MilkdropConfig {
+    fn default() -> Self {
+        Self {
+            preset_interval_secs: 30,
+            switch_on_track_change: true,
+            preset_source: MilkdropPresetSource::All,
+            render_quality: MilkdropRenderQuality::Medium,
+            show_preset_names: true,
+        }
+    }
+}
+
 /// Minimum effective monstercat value.
 /// Below this, `monstercat * 1.5 < 1.0` so the exponential base inverts the filter
 /// (amplifies neighbors instead of attenuating). Values in `(0.0, MIN)` are snapped to 0.0.
@@ -617,6 +690,13 @@ pub mod keys {
     pub const SCOPE_TRAILS: &str = "visualizer.scope.trails";
     pub const SCOPE_ECHO: &str = "visualizer.scope.echo";
 
+    // MilkDrop section
+    pub const MILKDROP_PRESET_INTERVAL_SECS: &str = "visualizer.milkdrop.preset_interval_secs";
+    pub const MILKDROP_SWITCH_ON_TRACK_CHANGE: &str = "visualizer.milkdrop.switch_on_track_change";
+    pub const MILKDROP_PRESET_SOURCE: &str = "visualizer.milkdrop.preset_source";
+    pub const MILKDROP_RENDER_QUALITY: &str = "visualizer.milkdrop.render_quality";
+    pub const MILKDROP_SHOW_PRESET_NAMES: &str = "visualizer.milkdrop.show_preset_names";
+
     /// Every `visualizer.*` key exactly once — the exhaustiveness registry the
     /// `every_visualizer_key_has_a_macro_entry` test pins the dispatch table
     /// against (bidirectionally). Add new key consts here AND to the
@@ -686,6 +766,11 @@ pub mod keys {
         SCOPE_BEAM,
         SCOPE_TRAILS,
         SCOPE_ECHO,
+        MILKDROP_PRESET_INTERVAL_SECS,
+        MILKDROP_SWITCH_ON_TRACK_CHANGE,
+        MILKDROP_PRESET_SOURCE,
+        MILKDROP_RENDER_QUALITY,
+        MILKDROP_SHOW_PRESET_NAMES,
     ];
 }
 
@@ -777,6 +862,11 @@ pub struct VisualizerConfig {
     /// Use [visualizer.scope] in config.toml
     #[serde(default)]
     pub scope: ScopeConfig,
+
+    /// MilkDrop mode settings
+    /// Use [visualizer.milkdrop] in config.toml
+    #[serde(default)]
+    pub milkdrop: MilkdropConfig,
 }
 
 fn default_auto_sensitivity() -> bool {
@@ -802,6 +892,7 @@ impl Default for VisualizerConfig {
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
             scope: ScopeConfig::default(),
+            milkdrop: MilkdropConfig::default(),
         }
     }
 }
@@ -881,6 +972,8 @@ impl VisualizerConfig {
         self.scope.trails = finite_clamp32(self.scope.trails, 0.0, 1.0);
         self.scope.echo = finite_clamp32(self.scope.echo, 0.0, 1.0);
 
+        self.milkdrop.preset_interval_secs = self.milkdrop.preset_interval_secs.min(600);
+
         // Validate height_percent (10% to 60% — above 60% the visualizer overlaps the player bar)
         self.height_percent = finite_clamp32(self.height_percent, 0.1, 0.60);
 
@@ -910,6 +1003,30 @@ pub struct ConfigFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_quality_maps_to_short_side() {
+        assert_eq!(MilkdropRenderQuality::Low.short_side_px(), 480);
+        assert_eq!(MilkdropRenderQuality::Medium.short_side_px(), 720);
+        assert_eq!(MilkdropRenderQuality::High.short_side_px(), 1080);
+        assert_eq!(
+            MilkdropRenderQuality::Native.short_side_px(),
+            0,
+            "0 = no cap"
+        );
+        assert_eq!(
+            MilkdropRenderQuality::default(),
+            MilkdropRenderQuality::Medium
+        );
+        assert_eq!(
+            MilkdropRenderQuality::all_wire_strs(),
+            ["low", "medium", "high", "native"]
+        );
+        assert_eq!(
+            MilkdropPresetSource::all_wire_strs(),
+            ["all", "favorites_only"]
+        );
+    }
 
     /// M3-S1 pin: the pure visualizer types live in the DATA crate
     /// and are constructible from here.
