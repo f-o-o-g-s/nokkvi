@@ -247,6 +247,9 @@ pub struct Nokkvi {
     /// Theater Mode: the now-playing layout toggled by F11 (see
     /// `update/theater.rs`). Transient, never persisted.
     pub theater: crate::state::TheaterState,
+    /// MilkDrop mode: the preset library, the load pipeline and the state
+    /// shared with the render side (see `update/milkdrop.rs`).
+    pub milkdrop: crate::state::MilkdropState,
     pub toast: crate::state::ToastState,
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
@@ -512,6 +515,7 @@ impl Default for Nokkvi {
             window: crate::state::WindowState::default(),
             player_bar_layout: crate::widgets::player_bar::PlayerBarLayout::default(),
             theater: crate::state::TheaterState::default(),
+            milkdrop: crate::state::MilkdropState::default(),
             // Misc state
             last_queue_current_index: None,
             last_queue_current_entry_id: None,

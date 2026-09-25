@@ -1391,15 +1391,12 @@ impl VisualizerState {
 
     /// MilkDrop mode: `tick()` feeds the whole buffered run into the MilkDrop
     /// analyzer instead of the spectrum engine.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the MilkDrop mode edges call it once the renderer lands"
-        )
-    )]
     pub(crate) fn set_milkdrop_mode(&self, is_milkdrop: bool) {
         self.is_milkdrop_mode.store(is_milkdrop, Ordering::Relaxed);
+    }
+
+    pub(crate) fn milkdrop_shared(&self) -> Arc<MilkdropShared> {
+        self.milkdrop.clone()
     }
 
     /// Apply config changes by signaling engine reinitialization on the FFT thread.

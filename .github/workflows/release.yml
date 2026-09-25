@@ -109,8 +109,10 @@ jobs:
           mkdir -p "$STAGE"
           cp target/release/nokkvi "$STAGE/"
           cp -r assets themes "$STAGE/"
+          # The MilkDrop presets are embedded in the binary; skip the 4 MB copy.
+          rm -rf "$STAGE/assets/milkdrop"
           cp install.sh "$STAGE/"
-          cp README.md CHANGELOG.md LICENSE "$STAGE/"
+          cp README.md CHANGELOG.md LICENSE THIRD-PARTY-LICENSES.md "$STAGE/"
           tar czf "${STAGE}.tar.gz" "$STAGE"
           sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
           echo "ASSET=${STAGE}.tar.gz" >> "$GITHUB_ENV"

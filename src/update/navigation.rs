@@ -637,8 +637,9 @@ impl Nokkvi {
                 let visualizer = widgets::visualizer::visualizer(
                     192,
                     self.visualizer_config.clone(),
-                    std::sync::Arc::default(),
+                    self.milkdrop.shared.clone(),
                 );
+                self.milkdrop_build_library();
                 // Connect audio callback to engine. The visualizer's audio_callback()
                 // now accepts &[f32] directly — no adapter or allocation needed.
                 let audio_callback = visualizer.audio_callback();

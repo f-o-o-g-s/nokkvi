@@ -296,6 +296,25 @@ pub fn get_sfx_dir() -> Result<PathBuf> {
     Ok(sfx_dir)
 }
 
+/// MilkDrop curation filename. Debug builds use a separate file, as with
+/// `config.debug.toml`, so a dev `cargo run` never rewrites the real one.
+#[cfg(debug_assertions)]
+const MILKDROP_CURATION_FILENAME: &str = "curation.debug.toml";
+#[cfg(not(debug_assertions))]
+const MILKDROP_CURATION_FILENAME: &str = "curation.toml";
+
+/// The user's MilkDrop directory (`~/.config/nokkvi/milkdrop`): extra `*.json`
+/// presets (a same-named file shadows a bundled preset) and the curation file.
+/// Not created here; the first curation save creates it.
+pub fn get_milkdrop_dir() -> Result<PathBuf> {
+    Ok(get_app_dir()?.join("milkdrop"))
+}
+
+/// Hidden + favorite MilkDrop presets (`~/.config/nokkvi/milkdrop/curation.toml`).
+pub fn get_milkdrop_curation_path() -> Result<PathBuf> {
+    Ok(get_milkdrop_dir()?.join(MILKDROP_CURATION_FILENAME))
+}
+
 /// Get the themes directory (`~/.config/nokkvi/themes`).
 ///
 /// Contains color-only theme TOML files. Built-in themes are seeded

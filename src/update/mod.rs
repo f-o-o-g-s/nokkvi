@@ -60,6 +60,7 @@ mod library_refresh;
 mod loader_target;
 mod lyrics;
 mod menus;
+pub(crate) mod milkdrop;
 mod mpris;
 mod navigation;
 mod notifications;
@@ -700,6 +701,7 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::CrossPaneDrag(msg) => self.handle_cross_pane_drag_message(msg),
             Message::Theater(msg) => self.handle_theater(msg),
+            Message::Milkdrop(msg) => self.handle_milkdrop(msg),
 
             // -----------------------------------------------------------------
             // Show in File Manager

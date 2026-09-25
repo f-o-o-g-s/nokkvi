@@ -21,6 +21,19 @@ pub enum VisualizationMode {
     /// Circular oscilloscope: the time-domain waveform mapped around a ring,
     /// drawn over the now-playing cover art.
     Scope,
+    /// Plays MilkDrop presets, filling the panel and replacing the cover.
+    Milkdrop,
+}
+
+impl VisualizationMode {
+    /// Fills the whole over-cover panel (Scope's ring, MilkDrop's frame) rather
+    /// than a bottom-anchored band of `height_percent`.
+    pub(crate) fn fills_panel(self) -> bool {
+        match self {
+            Self::Scope | Self::Milkdrop => true,
+            Self::Bars | Self::Lines => false,
+        }
+    }
 }
 
 /// Which render slot the active visualizer occupies. The bottom band (above the
@@ -70,9 +83,10 @@ pub(crate) fn resolve_placement(
             bottom_band: None,
             over_art: Some(VisualizationMode::Scope),
         },
-        // Slice 1: the data mode exists but has no widget yet, so it draws
-        // nothing. The over-cover MilkDrop element lands with the renderer.
-        Mode::Milkdrop => VisualizerSlots::default(),
+        Mode::Milkdrop => VisualizerSlots {
+            bottom_band: None,
+            over_art: Some(VisualizationMode::Milkdrop),
+        },
         Mode::Bars => route(bars_placement, VisualizationMode::Bars),
         Mode::Lines => route(lines_placement, VisualizationMode::Lines),
     }
@@ -91,7 +105,13 @@ mod placement_tests {
     #[test]
     fn at_most_one_slot_is_filled() {
         let placements = [BottomBand, OverCover];
-        for mode in [Mode::Off, Mode::Bars, Mode::Lines, Mode::Scope] {
+        for mode in [
+            Mode::Off,
+            Mode::Bars,
+            Mode::Lines,
+            Mode::Scope,
+            Mode::Milkdrop,
+        ] {
             for bars in placements {
                 for lines in placements {
                     let slots = resolve_placement(mode, bars, lines);
@@ -123,6 +143,20 @@ mod placement_tests {
                 assert_eq!(slots.bottom_band, None);
             }
         }
+    }
+
+    #[test]
+    fn placement_puts_milkdrop_over_art() {
+        for bars in [BottomBand, OverCover] {
+            for lines in [BottomBand, OverCover] {
+                let slots = resolve_placement(Mode::Milkdrop, bars, lines);
+                assert_eq!(slots.over_art, Some(WidgetMode::Milkdrop));
+                assert_eq!(slots.bottom_band, None);
+            }
+        }
+        assert!(WidgetMode::Milkdrop.fills_panel());
+        assert!(WidgetMode::Scope.fills_panel());
+        assert!(!WidgetMode::Bars.fills_panel());
     }
 
     #[test]
@@ -557,6 +591,12 @@ impl Visualizer {
         self.state.set_feed_active(active);
     }
 
+    /// MilkDrop mode: the FFT worker feeds the MilkDrop analyzer instead of
+    /// the spectrum engine.
+    pub fn set_milkdrop_mode(&self, is_milkdrop: bool) {
+        self.state.set_milkdrop_mode(is_milkdrop);
+    }
+
     /// Get callback for clearing sample buffer on track changes
     ///
     /// Clears the raw sample buffer used by the visualizer.
@@ -601,6 +641,8 @@ impl Visualizer {
             VisualizationMode::Bars => (cfg.bars.trails, cfg.bars.echo),
             VisualizationMode::Lines => (cfg.lines.trails, cfg.lines.echo),
             VisualizationMode::Scope => (cfg.scope.trails, cfg.scope.echo),
+            // No shader params for MilkDrop; `view()` returns before this runs.
+            VisualizationMode::Milkdrop => (0.0, 0.0),
         };
 
         let (
@@ -687,6 +729,15 @@ impl Visualizer {
     /// Uses GPU shader widget for hardware-accelerated rendering
     pub fn view<'a, Message: 'a>(&self) -> Element<'a, Message> {
         use iced::widget::shader;
+
+        if self.mode == VisualizationMode::Milkdrop {
+            return shader(milkdrop::MilkdropProgram {
+                shared: self.state.milkdrop_shared(),
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+        }
 
         // Read behavior config from shared config (hot-reload from config.toml)
         // Colors now come from the theme system (not config.toml)

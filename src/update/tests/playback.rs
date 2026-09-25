@@ -53,7 +53,7 @@ fn consume_toggled_sets_flag() {
 // Playback State Machine (playback.rs)
 // ============================================================================
 
-fn make_playback_update() -> PlaybackStateUpdate {
+pub(super) fn make_playback_update() -> PlaybackStateUpdate {
     PlaybackStateUpdate {
         position: 42,
         position_ms: 42_000,

@@ -971,6 +971,25 @@ pub enum CrossPaneDragMessage {
 /// Theater Mode messages — the now-playing layout with a transient player
 /// bar. Handled by `update/theater.rs`; every entry path lands on
 /// `Nokkvi::enter_theater`.
+/// MilkDrop mode: the off-thread preset pipeline's results plus the preset
+/// controls. Handled by `update/milkdrop.rs`; every control is a no-op outside
+/// MilkDrop mode.
+#[derive(Debug, Clone)]
+pub enum MilkdropMessage {
+    /// A preset finished parsing + shader translation for load `generation`.
+    Compiled {
+        generation: u64,
+        result:
+            Result<std::sync::Arc<crate::widgets::visualizer::milkdrop::CompiledPreset>, String>,
+    },
+    /// The renderer for load `generation` finished building (it rides in
+    /// `MilkdropShared`, not here: a renderer is neither `Clone` nor `Debug`).
+    Built {
+        generation: u64,
+        result: Result<(), String>,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub enum TheaterMessage {
     /// Enter when off, leave when on (the F11 hotkey).
@@ -1551,6 +1570,9 @@ pub enum Message {
 
     // --- Theater Mode (now-playing layout) ---
     Theater(TheaterMessage),
+
+    // --- MilkDrop visualizer mode (preset loading + switching) ---
+    Milkdrop(MilkdropMessage),
 
     /// Open a song's containing folder in the file manager (relative path from Navidrome)
     ShowInFolder(String),

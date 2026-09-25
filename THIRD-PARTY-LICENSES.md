@@ -136,6 +136,40 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
+## MilkDrop presets
+
+The presets bundled under `assets/milkdrop/` (embedded in the binary) are the pre-converted JSON presets from [butterchurn-presets](https://github.com/jberg/butterchurn-presets) at commit `c10e2616762f262de898e5d4c1f162a3e01340c1`, minus the presets that repo lists as broken and those that need external images. The file names keep each preset author's credit.
+
+The pack repository is MIT-licensed (below). The individual presets are the work of the MilkDrop community, each author holding copyright in their own preset; they have been freely shared for two decades without a stated license. nokkvi follows the stance of projectM's `presets-cream-of-the-crop` collection: the presets are treated as freely redistributable, and any author who objects to their preset being included will have it removed on request (open an issue).
+
+**License (pack repository):** MIT
+
+```
+MIT License
+
+Copyright (c) 2013-2018 Jordan Berg
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
 ## Rust Dependencies
 
 All Rust crate dependencies are listed in `Cargo.toml` and `data/Cargo.toml`. Every transitive dependency uses a permissive or file-based weak copyleft open source license (including MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, CC0-1.0, BSL-1.0, Zlib, MPL-2.0, Unicode-3.0, CDLA-Permissive-2.0, and The Unlicense). There are no strong copyleft-only (e.g., GPL-only) dependencies.

@@ -1600,6 +1600,12 @@ impl Nokkvi {
         if !self.lyrics.enabled || !self.active_playback.is_queue() {
             return None;
         }
+        // MilkDrop replaces the cover, so there is no cover to frost.
+        if self.engine.visualization_mode
+            == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
+        {
+            return None;
+        }
         let level = self.settings.lyrics_backdrop_blur;
         level.sigma()?;
         let album_id = self.current_queue_song_album_id()?;

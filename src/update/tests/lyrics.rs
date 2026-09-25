@@ -1171,8 +1171,15 @@ fn blurred_cover_resolver_gates_on_track_level_and_toggle() {
     app.settings.lyrics_backdrop_blur = LyricsBackdropBlur::Off;
     assert!(app.lyrics_blurred_cover_for_view().is_none());
 
-    // Lyrics toggled off: the cover goes back to sharp.
+    // MilkDrop replaces the cover: nothing to frost.
     app.settings.lyrics_backdrop_blur = LyricsBackdropBlur::Medium;
+    assert!(app.lyrics_blurred_cover_for_view().is_some());
+    app.engine.visualization_mode =
+        nokkvi_data::types::player_settings::VisualizationMode::Milkdrop;
+    assert!(app.lyrics_blurred_cover_for_view().is_none());
+    app.engine.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Bars;
+
+    // Lyrics toggled off: the cover goes back to sharp.
     app.lyrics.enabled = false;
     assert!(app.lyrics_blurred_cover_for_view().is_none());
 }

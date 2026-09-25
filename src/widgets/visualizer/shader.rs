@@ -361,7 +361,9 @@ impl VisualizerPrimitive {
         let config = VisualizerConfig {
             bar_count: bar_count_val as u32,
             mode: match mode {
-                VisualizationMode::Bars => 0,
+                // MilkDrop never reaches this shader (`Visualizer::view` hands it
+                // its own program); Bars' value keeps the match exhaustive.
+                VisualizationMode::Bars | VisualizationMode::Milkdrop => 0,
                 VisualizationMode::Lines => 1,
                 VisualizationMode::Scope => 2,
             },

@@ -515,16 +515,22 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
             // while the visualizer keeps full strength above it; the haloed
             // lyric text stacks topmost. All lyric pieces are event-
             // transparent, so the panel context menu still works.
+            //
+            // MilkDrop is the exception: it replaces the cover, so the scrim
+            // moves ABOVE it (dimming the preset, not the hidden cover).
+            let milkdrop_over_art = over_art.as_ref().is_some_and(|(_, mode, _)| {
+                *mode == crate::widgets::visualizer::VisualizationMode::Milkdrop
+            });
+            let scrim = || {
+                crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(size.width, size.height)
+            };
             let mut layers = stack![cover];
-            if lyrics.is_some() {
-                layers = layers.push(crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(
-                    size.width,
-                    size.height,
-                ));
+            if lyrics.is_some() && !milkdrop_over_art {
+                layers = layers.push(scrim());
             }
             let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
-                let is_scope = *mode == crate::widgets::visualizer::VisualizationMode::Scope;
-                let band_h = if is_scope {
+                let fills_panel = mode.fills_panel();
+                let band_h = if fills_panel {
                     size.height
                 } else {
                     (size.height * *height_percent).clamp(0.0, size.height)
@@ -540,7 +546,7 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
                     configured = configured.width(size.width);
                 }
                 let ring = configured.view::<Message>();
-                let ring_layer: Element<'_, Message> = if is_scope {
+                let ring_layer: Element<'_, Message> = if fills_panel {
                     container(ring)
                         .width(Length::Fill)
                         .height(Length::Fill)
@@ -557,6 +563,9 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
                     .into()
                 };
                 layers = layers.push(ring_layer);
+                if lyrics.is_some() && milkdrop_over_art {
+                    layers = layers.push(scrim());
+                }
                 // Surfing boat over the Lines wave, confined to the same bottom
                 // band so it rides the rendered waveform. Inert + event-
                 // transparent, so it never steals the artwork right-click.
@@ -639,17 +648,20 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
         // square (centered ring). Bars/Lines honor the Visualizer Height setting:
         // they occupy `height_percent` of the square, bottom-anchored (cover art
         // shows above) — the same knob the bottom band uses.
-        // Lyrics scrim BELOW the visualizer (see the stretched closure above).
+        // Lyrics scrim BELOW the visualizer, ABOVE MilkDrop (see the stretched
+        // closure above).
+        let milkdrop_over_art = over_art.as_ref().is_some_and(|(_, mode, _)| {
+            *mode == crate::widgets::visualizer::VisualizationMode::Milkdrop
+        });
+        let scrim =
+            || crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(square_size, square_size);
         let mut layers = stack![cover];
-        if lyrics.is_some() {
-            layers = layers.push(crate::widgets::lyrics_viewport::lyrics_scrim::<Message>(
-                square_size,
-                square_size,
-            ));
+        if lyrics.is_some() && !milkdrop_over_art {
+            layers = layers.push(scrim());
         }
         let panel: Element<'_, Message> = if let Some((viz, mode, height_percent)) = &over_art {
-            let is_scope = *mode == crate::widgets::visualizer::VisualizationMode::Scope;
-            let band_h = if is_scope {
+            let fills_panel = mode.fills_panel();
+            let band_h = if fills_panel {
                 square_size
             } else {
                 (square_size * *height_percent).clamp(0.0, square_size)
@@ -661,7 +673,7 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
                 configured = configured.width(square_size);
             }
             let ring = configured.view::<Message>();
-            let ring_layer: Element<'_, Message> = if is_scope {
+            let ring_layer: Element<'_, Message> = if fills_panel {
                 container(ring)
                     .width(Length::Fixed(square_size))
                     .height(Length::Fixed(square_size))
@@ -678,6 +690,9 @@ fn single_artwork_panel_inner<'a, Message: 'a + 'static>(
                 .into()
             };
             layers = layers.push(ring_layer);
+            if lyrics.is_some() && milkdrop_over_art {
+                layers = layers.push(scrim());
+            }
             // Surfing boat over the Lines wave, confined to the same bottom band
             // so it rides the rendered waveform. Inert + transparent.
             if let Some(b) = &boat

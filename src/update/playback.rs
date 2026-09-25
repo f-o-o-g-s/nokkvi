@@ -686,6 +686,13 @@ impl Nokkvi {
         if playback_stopped && let Some(ref viz) = self.visualizer {
             viz.reset();
         }
+        // Stopped: MilkDrop gives the panel back to the cover.
+        if playback_stopped
+            && self.engine.visualization_mode
+                == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
+        {
+            self.milkdrop_release();
+        }
 
         let mut tasks: Vec<Task<Message>> = Vec::new();
 
@@ -1363,6 +1370,11 @@ impl Nokkvi {
         if let Some(ref viz) = self.visualizer {
             viz.reset();
         }
+        if self.engine.visualization_mode
+            == nokkvi_data::types::player_settings::VisualizationMode::Milkdrop
+        {
+            self.milkdrop_release();
+        }
         self.shell_task(
             |shell| async move {
                 let _ = shell.stop().await;
@@ -1713,9 +1725,11 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_cycle_visualization(&mut self) -> Task<Message> {
-        self.engine.visualization_mode = self.engine.visualization_mode.next();
+        let prev = self.engine.visualization_mode;
+        self.engine.visualization_mode = prev.next();
 
         let mode = self.engine.visualization_mode;
+        self.milkdrop_mode_edge(prev, mode);
         let active = mode != nokkvi_data::types::player_settings::VisualizationMode::Off;
 
         // Synchronously gate the UI-side FFT worker + sample-buffering callback
@@ -2146,7 +2160,11 @@ impl Nokkvi {
         self.playback.volume = settings.volume;
         self.sfx.volume = settings.sfx_volume;
         self.sfx.enabled = settings.sound_effects_enabled;
+        // Also runs on every config hot reload: the edge compares against the
+        // previous mode, so re-delivering the same one fires nothing.
+        let prev_mode = self.engine.visualization_mode;
         self.engine.visualization_mode = settings.visualization_mode;
+        self.milkdrop_mode_edge(prev_mode, settings.visualization_mode);
         // Sync the visualizer feed gate to the loaded mode so a persisted "Off"
         // doesn't leave the FFT worker + audio tap running after login. The
         // synchronous half idles the UI-side worker now; the engine-side tap
@@ -2661,7 +2679,10 @@ impl Nokkvi {
                 // prefetch for rows it scrolls in.
                 let autoscroll = self.tick_within_list_autoscroll();
 
-                Task::batch([autoscroll, self.handle_tick()])
+                // ── MilkDrop: running flag, GPU poll, preset loading ────
+                let milkdrop = self.milkdrop_tick();
+
+                Task::batch([autoscroll, milkdrop, self.handle_tick()])
             }
             PlaybackMessage::PlaybackStateUpdated(update) => {
                 self.handle_playback_state_updated(*update)
