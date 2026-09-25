@@ -3021,6 +3021,7 @@ dependencies = [
  "log",
  "num-traits",
  "once_cell",
+ "pp-rs",
  "rustc-hash 1.1.0",
  "spirv",
  "thiserror 2.0.18",
@@ -3081,6 +3082,8 @@ dependencies = [
  "nokkvi-ipc",
  "notify",
  "parking_lot",
+ "particle-audio",
+ "particle-milkdrop",
  "reqwest",
  "rfd",
  "serde",
@@ -3808,6 +3811,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "particle-audio"
+version = "0.1.0"
+source = "git+https://github.com/sho-run/ojodrop?rev=093e4098f18d89af571ccd59f62aaf8305546084#093e4098f18d89af571ccd59f62aaf8305546084"
+dependencies = [
+ "log",
+ "realfft",
+ "rtrb",
+]
+
+[[package]]
+name = "particle-milkdrop"
+version = "0.1.0"
+source = "git+https://github.com/sho-run/ojodrop?rev=093e4098f18d89af571ccd59f62aaf8305546084#093e4098f18d89af571ccd59f62aaf8305546084"
+dependencies = [
+ "bytemuck",
+ "image",
+ "log",
+ "naga",
+ "rayon",
+ "serde",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4015,6 +4043,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b73949432f5e2a09657003c25bca5e19a0e9c84f8058ca374f49e0ebe605af77"
 dependencies = [
  "zerovec",
+]
+
+[[package]]
+name = "pp-rs"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb458bb7f6e250e6eb79d5026badc10a3ebb8f9a15d1fff0f13d17c71f4d6dee"
+dependencies = [
+ "unicode-xid",
 ]
 
 [[package]]
@@ -4367,9 +4404,9 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
 dependencies = [
  "either",
  "rayon-core",
@@ -4404,6 +4441,15 @@ dependencies = [
  "bytemuck",
  "core_maths",
  "font-types 0.11.0",
+]
+
+[[package]]
+name = "realfft"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f821338fddb99d089116342c46e9f1fbf3828dba077674613e734e01d6ea8677"
+dependencies = [
+ "rustfft",
 ]
 
 [[package]]
@@ -4637,6 +4683,12 @@ name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "rtrb"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fae8ee26b0371a29a77d2b2d6b3ae13aa81def6f9bf1b1b92a32d279a5e709b7"
 
 [[package]]
 name = "rustc-hash"

@@ -3,6 +3,7 @@
 //! Modular audio visualizer supporting multiple visualization modes.
 
 mod flash;
+pub(crate) mod milkdrop;
 mod particles;
 mod pipeline;
 pub(crate) mod shader;
@@ -69,6 +70,9 @@ pub(crate) fn resolve_placement(
             bottom_band: None,
             over_art: Some(VisualizationMode::Scope),
         },
+        // Slice 1: the data mode exists but has no widget yet, so it draws
+        // nothing. The over-cover MilkDrop element lands with the renderer.
+        Mode::Milkdrop => VisualizerSlots::default(),
         Mode::Bars => route(bars_placement, VisualizationMode::Bars),
         Mode::Lines => route(lines_placement, VisualizationMode::Lines),
     }
@@ -301,8 +305,12 @@ pub struct Visualizer {
 
 impl Visualizer {
     /// Create a new visualizer with bars mode
-    pub fn new(bar_count: usize, config: SharedVisualizerConfig) -> Self {
-        let state = VisualizerState::new(bar_count, config.clone());
+    pub fn new(
+        bar_count: usize,
+        config: SharedVisualizerConfig,
+        milkdrop: std::sync::Arc<milkdrop::MilkdropShared>,
+    ) -> Self {
+        let state = VisualizerState::new(bar_count, config.clone(), milkdrop);
         let shutdown_guard = state.make_fft_shutdown_guard();
 
         // Read initial settings from config
@@ -699,8 +707,12 @@ impl Visualizer {
 }
 
 /// Helper function to create a visualizer
-pub(crate) fn visualizer(bar_count: usize, config: SharedVisualizerConfig) -> Visualizer {
-    Visualizer::new(bar_count, config)
+pub(crate) fn visualizer(
+    bar_count: usize,
+    config: SharedVisualizerConfig,
+    milkdrop: std::sync::Arc<milkdrop::MilkdropShared>,
+) -> Visualizer {
+    Visualizer::new(bar_count, config, milkdrop)
 }
 
 #[cfg(test)]
@@ -1407,7 +1419,7 @@ mod build_shader_params_tests {
         cfg.scope.echo = 0.1;
 
         let shared = Arc::new(RwLock::new(cfg.clone()));
-        let viz = Visualizer::new(64, shared.clone());
+        let viz = Visualizer::new(64, shared.clone(), Default::default());
         let colors = ThemeBarColors::default();
         let params = viz.build_shader_params(&cfg, &colors);
 
@@ -1430,13 +1442,13 @@ mod build_shader_params_tests {
         assert!((params.echo - 0.6).abs() < 1e-6);
 
         // Lines mode must source cfg.lines.*; Scope mode must source cfg.scope.*.
-        let lines_params = Visualizer::new(64, shared.clone())
+        let lines_params = Visualizer::new(64, shared.clone(), Default::default())
             .mode(VisualizationMode::Lines)
             .build_shader_params(&cfg, &colors);
         assert!((lines_params.trails - 0.5).abs() < 1e-6);
         assert!((lines_params.echo - 0.7).abs() < 1e-6);
 
-        let scope_params = Visualizer::new(64, shared)
+        let scope_params = Visualizer::new(64, shared, Default::default())
             .mode(VisualizationMode::Scope)
             .build_shader_params(&cfg, &colors);
         assert!((scope_params.trails - 0.9).abs() < 1e-6);
@@ -1470,7 +1482,7 @@ mod fft_shutdown_guard_tests {
 
     fn build_visualizer() -> Visualizer {
         let shared: SharedVisualizerConfig = Arc::new(RwLock::new(VisualizerConfig::default()));
-        Visualizer::new(192, shared)
+        Visualizer::new(192, shared, Default::default())
     }
 
     #[test]

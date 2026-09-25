@@ -85,6 +85,7 @@ const NAME_MAP: &[(&str, &str)] = &[
     ("copy", "assets/icons-phosphor/copy-regular.svg"),
     ("database", "assets/icons-phosphor/database-regular.svg"),
     ("disc-3", "assets/icons-phosphor/disc-regular.svg"),
+    ("droplet", "assets/icons-phosphor/drop-regular.svg"),
     (
         "ellipsis-vertical",
         "assets/icons-phosphor/dots-three-vertical-regular.svg",

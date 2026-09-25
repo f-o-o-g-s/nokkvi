@@ -311,6 +311,7 @@ fn over_cover_viz_coexists_with_lyrics() {
     app.visualizer = Some(crate::widgets::visualizer::Visualizer::new(
         192,
         app.visualizer_config.clone(),
+        std::sync::Arc::default(),
     ));
     app.engine.visualization_mode = nokkvi_data::types::player_settings::VisualizationMode::Scope;
     seed_matched(&mut app, "song_1", timed_doc(&[1_000]));

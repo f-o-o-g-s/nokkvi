@@ -4,7 +4,7 @@ members = [".", "data", "nokkvi-ipc"]
 [workspace.package]
 repository = "https://github.com/f-o-o-g-s/nokkvi"
 license = "GPL-3.0-only"
-rust-version = "1.89"
+rust-version = "1.92"
 
 [workspace.lints.clippy]
 # Code clarity
@@ -105,5 +105,9 @@ libc = "0.2"
 # gtk3 link-time dependency. The async dialog future is runtime-agnostic and is
 # awaited inside iced `Task::perform` closures on the tokio runtime.
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
-
-
+# MilkDrop visualizer mode: the `particle-milkdrop` renderer (wgpu 29.0.3, the same wgpu iced pins)
+# and its `particle-audio` analyzer, from sho-run/ojodrop at a pinned rev. `default-features = false`
+# drops the standalone player (winit/cpal) and the C++ .milk converter: presets load from
+# Butterchurn's pre-converted JSON. Root crate only; data/ and nokkvi-ipc/ stay free of both.
+particle-milkdrop = { git = "https://github.com/sho-run/ojodrop", rev = "093e4098f18d89af571ccd59f62aaf8305546084", default-features = false }
+particle-audio = { git = "https://github.com/sho-run/ojodrop", rev = "093e4098f18d89af571ccd59f62aaf8305546084", default-features = false }

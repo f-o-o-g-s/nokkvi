@@ -634,8 +634,11 @@ impl Nokkvi {
                 self.login_page.on_login_success();
 
                 // Initialize visualizer with shared config for hot-reload
-                let visualizer =
-                    widgets::visualizer::visualizer(192, self.visualizer_config.clone());
+                let visualizer = widgets::visualizer::visualizer(
+                    192,
+                    self.visualizer_config.clone(),
+                    std::sync::Arc::default(),
+                );
                 // Connect audio callback to engine. The visualizer's audio_callback()
                 // now accepts &[f32] directly — no adapter or allocation needed.
                 let audio_callback = visualizer.audio_callback();

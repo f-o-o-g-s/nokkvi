@@ -249,7 +249,7 @@ define_hotkey_actions! {
         },
         CycleVisualization {
             display: "Cycle Visualizer",
-            description: "Cycle visualizer (off → bars → lines)",
+            description: "Cycle visualizer (off → bars → lines → scope → MilkDrop)",
             category: "Playback",
             toml_key: "cycle_visualization",
             settings_key: "hotkey.cycle_vis",

@@ -48,7 +48,7 @@ Engine lock discipline, root-widget stability, immediate search, FFT `try_lock()
 
 ## Dependencies
 
-Discuss before adding new crates. The authoritative dependency list is the three Cargo.tomls (workspace root, data/, nokkvi-ipc/) plus the summary in CLAUDE.md. nokkvi-ipc must stay iced-free — the client path links it before iced exists. rfd is pinned to the xdg-portal backend only.
+Discuss before adding new crates. The authoritative dependency list is the three Cargo.tomls (workspace root, data/, nokkvi-ipc/) plus the summary in CLAUDE.md. nokkvi-ipc must stay iced-free — the client path links it before iced exists. `particle-milkdrop` + `particle-audio` (git, pinned; MilkDrop engine + analysis) are root-crate only: data/ and nokkvi-ipc/ stay free of both, and `cargo tree -i naga` / `cargo tree -i wgpu` must each show ONE version (the engine shares iced's wgpu). rfd is pinned to the xdg-portal backend only.
 
 **Nix flake**: `flake.nix` is community-contributed (PR #11) and nobody on the project runs Nix, so keep it in step by hand. A crate that links a system library or needs a native build tool (a `-sys` crate, `pkg-config`, `cmake`) also goes into `flake.nix`: libraries in `runtimeLibs`, tools in `nativeBuildInputs`. Add it there alongside the pacman line in CLAUDE.md and the AUR `PKGBUILD`. Dependencies and version come from `Cargo.lock`/`Cargo.toml` automatically. Code that needs a newer Rust than the nixpkgs pinned in `flake.lock` calls for a `nix flake update`. Verify flake changes in the `nixos/nix` Docker image: `git archive HEAD` into a scratch dir, mount it, enable `nix-command flakes`, and run `nix build path:/src#default`. Always mount the archive rather than the live tree, which would copy `target/` into the store.
 

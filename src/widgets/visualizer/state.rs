@@ -17,7 +17,7 @@ use nokkvi_data::audio::spectrum::{self, SpectrumEngine};
 use parking_lot::{Mutex, RwLock};
 use tracing::{debug, trace};
 
-use super::{flash::FlashField, particles::ParticleSystem};
+use super::{flash::FlashField, milkdrop::MilkdropShared, particles::ParticleSystem};
 use crate::visualizer_config::VisualizerConfig;
 
 /// Maximum number of bars the FFT can meaningfully produce for a given sample rate.
@@ -568,6 +568,27 @@ pub(crate) struct VisualizerState {
     /// so a PAUSED trail fades out instead of freezing on screen, then converges
     /// to 0 so the GPU still idles once nothing is animating.
     trail_settle_frames: Arc<AtomicU32>,
+
+    // === MilkDrop mode ===
+    /// True in MilkDrop mode: `tick()` feeds the analyzer below and skips the
+    /// spectrum engine entirely.
+    is_milkdrop_mode: Arc<AtomicBool>,
+    /// The MilkDrop analyzer and its conversion scratch. Only the FFT worker
+    /// touches it (`try_lock`); the Arc exists because the state is `Clone`.
+    milkdrop_feed: Arc<Mutex<MilkdropFeed>>,
+    /// Where the analyzer's features go; the render pipeline reads them.
+    milkdrop: Arc<MilkdropShared>,
+}
+
+/// The FFT worker's MilkDrop analysis state.
+#[derive(Default)]
+struct MilkdropFeed {
+    /// The analyzer plus the stream rate it was built for. Stateful (tempo, AGC
+    /// averages), so it is rebuilt only when that rate changes, never on
+    /// `pending_engine_reinit`, which every settings write also sets.
+    analyzer: Option<(u32, particle_audio::Analyzer)>,
+    /// Reused ±1 `f32` copy of the buffered run.
+    scratch: Vec<f32>,
 }
 
 /// EMA smoothing coefficient for the fast onset envelope. At 60 Hz tick
@@ -623,8 +644,12 @@ impl Drop for FftShutdownGuard {
 }
 
 impl VisualizerState {
-    pub(crate) fn new(bar_count: usize, config: SharedVisualizerConfig) -> Self {
-        let state = Self::build(bar_count, config);
+    pub(crate) fn new(
+        bar_count: usize,
+        config: SharedVisualizerConfig,
+        milkdrop: Arc<MilkdropShared>,
+    ) -> Self {
+        let state = Self::build(bar_count, config, milkdrop);
         // Spawn the background FFT thread
         state.start_fft_thread();
         state
@@ -635,7 +660,11 @@ impl VisualizerState {
     /// `new()` spawns the worker on top of this; tests call `build()` directly
     /// so they can drive `tick()` deterministically — with no concurrent worker
     /// draining the sample buffer underneath the assertions.
-    fn build(bar_count: usize, config: SharedVisualizerConfig) -> Self {
+    fn build(
+        bar_count: usize,
+        config: SharedVisualizerConfig,
+        milkdrop: Arc<MilkdropShared>,
+    ) -> Self {
         // Generate unique instance ID for debugging
         static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(0);
         let instance_id = INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -701,6 +730,9 @@ impl VisualizerState {
             band_mid: Arc::new(AtomicU32::new(0_f32.to_bits())),
             band_treble: Arc::new(AtomicU32::new(0_f32.to_bits())),
             trail_settle_frames: Arc::new(AtomicU32::new(0)),
+            is_milkdrop_mode: Arc::new(AtomicBool::new(false)),
+            milkdrop_feed: Arc::new(Mutex::new(MilkdropFeed::default())),
+            milkdrop,
         }
     }
 
@@ -844,6 +876,13 @@ impl VisualizerState {
         if self.pending_clear.swap(false, Ordering::SeqCst) {
             self.apply_pending_clear();
             return true;
+        }
+
+        // MilkDrop renders from the analyzer's features, never from the
+        // spectrum engine. `pending_engine_reinit` stays set for the next
+        // spectrum mode.
+        if self.is_milkdrop_mode.load(Ordering::Relaxed) {
+            return self.milkdrop_tick();
         }
 
         // Check for pending resize (debounced)
@@ -1155,6 +1194,64 @@ impl VisualizerState {
     /// Runs on the FFT worker, so both locks are `try_lock`. The field keeps its
     /// own baseline behind `effects` and re-renders from its event list every
     /// tick, so a publish skipped on a contended `display` heals on the next.
+    /// MilkDrop half of `tick()`: push the WHOLE buffered run into the analyzer
+    /// (the spectrum path's three-chunk cap would splice the stream a stateful
+    /// analyzer sees) and publish its latest features. `try_lock` only.
+    fn milkdrop_tick(&self) -> bool {
+        let Some(mut feed) = self.milkdrop_feed.try_lock() else {
+            return false;
+        };
+        let feed = &mut *feed;
+
+        let rate = self.sample_rate.load(Ordering::Acquire);
+        if feed
+            .analyzer
+            .as_ref()
+            .is_none_or(|(built_for, _)| *built_for != rate)
+        {
+            let analyzer = particle_audio::Analyzer::new(rate, 1.0);
+            // The analyzer decimates high rates; the engine is told the rate it
+            // actually analyzes at, never the stream rate.
+            self.milkdrop
+                .set_analysis_rate(analyzer.analysis_sample_rate());
+            debug!(
+                "MilkDrop analyzer built for {rate} Hz (analysis rate {} Hz)",
+                analyzer.analysis_sample_rate()
+            );
+            feed.analyzer = Some((rate, analyzer));
+        }
+
+        {
+            let Some(mut buffer) = self.sample_buffer.try_lock() else {
+                return false;
+            };
+            // Whole stereo frames only; an odd tail waits for the next tick so
+            // the channels never swap.
+            let take = buffer.len() & !1;
+            if take == 0 {
+                return false;
+            }
+            feed.scratch.clear();
+            feed.scratch.extend(
+                buffer
+                    .drain(..take)
+                    .map(|s| (s as f32 / WAVEFORM_FULL_SCALE).clamp(-1.0, 1.0)),
+            );
+        }
+
+        let Some((_, analyzer)) = feed.analyzer.as_mut() else {
+            return false;
+        };
+        let features = *analyzer.push_interleaved(&feed.scratch, 2);
+        if let Some(mut slot) = self.milkdrop.features.try_lock() {
+            *slot = features;
+        }
+        if let Some(mut display) = self.display.try_lock() {
+            display.dirty = true;
+        }
+        true
+    }
+
     fn update_flash_effect(&self, output: &[f64]) {
         let Some(mut effects) = self.effects.try_lock() else {
             return;
@@ -1290,6 +1387,19 @@ impl VisualizerState {
     /// buffer (for the circular oscilloscope) and skips CPU bar smoothing.
     pub(crate) fn set_scope_mode(&self, is_scope: bool) {
         self.is_scope_mode.store(is_scope, Ordering::Relaxed);
+    }
+
+    /// MilkDrop mode: `tick()` feeds the whole buffered run into the MilkDrop
+    /// analyzer instead of the spectrum engine.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the MilkDrop mode edges call it once the renderer lands"
+        )
+    )]
+    pub(crate) fn set_milkdrop_mode(&self, is_milkdrop: bool) {
+        self.is_milkdrop_mode.store(is_milkdrop, Ordering::Relaxed);
     }
 
     /// Apply config changes by signaling engine reinitialization on the FFT thread.
@@ -2018,7 +2128,7 @@ mod tests {
     /// `build()` (not `new()`) so no background worker races `tick()`.
     fn test_state() -> VisualizerState {
         let config: SharedVisualizerConfig = Arc::new(RwLock::new(VisualizerConfig::default()));
-        VisualizerState::build(8, config)
+        VisualizerState::build(8, config, Arc::new(MilkdropShared::new()))
     }
 
     /// Feed-gate regression (FFT worker): when the feed is off, `tick()` must
@@ -2058,6 +2168,95 @@ mod tests {
         assert!(
             state.sample_buffer.lock().len() < before,
             "an active tick() must drain at least one chunk"
+        );
+    }
+
+    /// Build a thread-free state in MilkDrop mode plus the audio callback that
+    /// feeds it, S16-scaled exactly like the engine's visualizer tap.
+    fn milkdrop_state() -> (VisualizerState, impl Fn(&[f32], u32)) {
+        let state = test_state();
+        state.set_milkdrop_mode(true);
+        let cb = state.audio_callback();
+        (state, cb)
+    }
+
+    /// Interleaved stereo sine at `hz`, `secs` long, S16-scaled (×32767).
+    fn stereo_tone(hz: f32, rate: u32, secs: f32) -> Vec<f32> {
+        let frames = (rate as f32 * secs) as usize;
+        let mut out = Vec::with_capacity(frames * 2);
+        for i in 0..frames {
+            let v = (std::f32::consts::TAU * hz * i as f32 / rate as f32).sin() * 0.5 * 32767.0;
+            out.push(v);
+            out.push(v);
+        }
+        out
+    }
+
+    #[test]
+    fn milkdrop_features_follow_pushed_pcm() {
+        let (state, cb) = milkdrop_state();
+        for batch in stereo_tone(440.0, 44_100, 0.5).chunks(2048) {
+            cb(batch, 44_100);
+        }
+        assert!(
+            state.tick(),
+            "a MilkDrop tick with audio queued reports an update"
+        );
+        let features = *state.milkdrop.features.lock();
+        assert!(
+            features.waveform_left_full.iter().any(|v| v.abs() > 1e-3),
+            "the analyzer's waveform must carry the pushed tone"
+        );
+        assert!(
+            features.is_silent < 0.5,
+            "a -6 dB tone is not silence (is_silent = {})",
+            features.is_silent
+        );
+    }
+
+    #[test]
+    fn milkdrop_analyzer_reinits_on_sample_rate_change_and_publishes_the_analysis_rate() {
+        let (state, cb) = milkdrop_state();
+        cb(&stereo_tone(440.0, 44_100, 0.1), 44_100);
+        state.tick();
+        assert_eq!(state.milkdrop.analysis_rate(), Some(44_100.0));
+
+        cb(&stereo_tone(440.0, 96_000, 0.1), 96_000);
+        state.tick();
+        let expected = particle_audio::Analyzer::new(96_000, 1.0).analysis_sample_rate();
+        assert_eq!(state.milkdrop.analysis_rate(), Some(expected));
+        assert_ne!(
+            expected, 96_000.0,
+            "the engine must be told the decimated analysis rate, not the stream rate"
+        );
+    }
+
+    #[test]
+    fn milkdrop_tick_skips_spectrum_work() {
+        let (state, cb) = milkdrop_state();
+        cb(&stereo_tone(440.0, 44_100, 0.2), 44_100);
+        state.tick();
+        assert_eq!(
+            state.processing.lock().processed_samples,
+            0,
+            "MilkDrop mode must not run the spectrum engine"
+        );
+        assert!(
+            state.display.lock().bars.iter().all(|&b| b == 0.0),
+            "MilkDrop mode leaves the bars buffer untouched"
+        );
+    }
+
+    #[test]
+    fn milkdrop_tick_consumes_the_whole_buffer() {
+        let (state, cb) = milkdrop_state();
+        let chunk = state.cached_chunk_size.load(Ordering::Acquire);
+        let tone = stereo_tone(440.0, 44_100, 1.0);
+        cb(&tone[..chunk * 3], 44_100);
+        state.tick();
+        assert!(
+            state.sample_buffer.lock().is_empty(),
+            "MilkDrop feeds the analyzer every buffered sample (no three-chunk cap)"
         );
     }
 

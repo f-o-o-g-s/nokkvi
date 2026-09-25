@@ -412,6 +412,7 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
             icon: Some(match data.visualization_mode {
                 VisualizationMode::Lines => "assets/icons/audio-waveform.svg",
                 VisualizationMode::Scope => "assets/icons/radar.svg",
+                VisualizationMode::Milkdrop => "assets/icons/droplet.svg",
                 VisualizationMode::Bars | VisualizationMode::Off => "assets/icons/audio-lines.svg",
             }),
             tooltip: match data.visualization_mode {
@@ -419,6 +420,7 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 VisualizationMode::Lines => "Visualizer: Waveform",
                 VisualizationMode::Bars => "Visualizer: Bars",
                 VisualizationMode::Scope => "Visualizer: Scope",
+                VisualizationMode::Milkdrop => "Visualizer: MilkDrop",
             },
             // Equals the tooltip verbatim today, but kept as a separate field
             // so a future divergence has a home — do not collapse to one.
@@ -427,6 +429,7 @@ fn mode_descriptor(mode: ModeId, data: &PlayerBarViewData) -> ModeDescriptor {
                 VisualizationMode::Lines => "Visualizer: Waveform",
                 VisualizationMode::Bars => "Visualizer: Bars",
                 VisualizationMode::Scope => "Visualizer: Scope",
+                VisualizationMode::Milkdrop => "Visualizer: MilkDrop",
             },
             message: PlayerBarMessage::CycleVisualization,
         },
@@ -2724,7 +2727,7 @@ mod mode_descriptor_tests {
         assert_eq!(d.kebab_label, "Repeat: Off");
     }
 
-    /// Visualizer couples a dynamic icon to a four-way mode. Pins the
+    /// Visualizer couples a dynamic icon to a five-way mode. Pins the
     /// icon + dual-label pair for every `VisualizationMode`.
     #[test]
     fn visualizer_descriptor_matches_visualization_mode() {
@@ -2748,6 +2751,11 @@ mod mode_descriptor_tests {
                 VisualizationMode::Scope,
                 "assets/icons/radar.svg",
                 "Visualizer: Scope",
+            ),
+            (
+                VisualizationMode::Milkdrop,
+                "assets/icons/droplet.svg",
+                "Visualizer: MilkDrop",
             ),
         ];
         for (mode, icon, label) in cases {

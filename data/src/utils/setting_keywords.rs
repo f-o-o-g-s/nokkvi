@@ -118,7 +118,7 @@ keyword_table! {
         "hotkey.toggle_repeat" => &["loop", "again", "replay"],
         "hotkey.toggle_consume" => &["remove after play", "burn", "pop"],
         "hotkey.toggle_sfx" => &["sound effects", "clicks", "audio feedback", "beeps"],
-        "hotkey.cycle_vis" => &["spectrum", "bars", "lines", "scope", "waveform"],
+        "hotkey.cycle_vis" => &["spectrum", "bars", "lines", "scope", "waveform", "milkdrop"],
         "hotkey.toggle_eq_modal" => &["eq", "bands", "tone", "treble", "bass"],
         "hotkey.open_trawl" => &["mix", "trawl", "crate", "builder", "blend", "anchor"],
         "hotkey.toggle_crossfade" => &["fade", "blend", "gapless"],
