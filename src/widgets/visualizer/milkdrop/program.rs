@@ -186,19 +186,32 @@ impl MilkdropPipeline {
             debug!(preset = %built.name, "milkdrop: dropped a stale renderer");
             return;
         }
-        let size = built.renderer.dimensions();
+        let mut renderer = built.renderer;
+        // Start from the picture on screen, as MilkDrop does: presets that grow
+        // out of the previous image (self-sharpening feedback) have nothing to
+        // grow from on black. Declines on its own when the sizes differ.
+        if let Some(old) = self.slot.as_ref() {
+            let old = old.renderer.lock();
+            match run_in_error_scopes(device, || renderer.seed_feedback_from(&old)) {
+                Ok(seeded) => debug!(preset = %built.name, seeded, "milkdrop: picture handoff"),
+                Err(e) => {
+                    warn!(preset = %built.name, "milkdrop: GPU error on picture handoff: {e}");
+                }
+            }
+        }
+        let size = renderer.dimensions();
         let bind_group = make_bind_group(
             device,
             &self.layout,
             &self.sampler,
             &self.params,
-            built.renderer.retained_comp_view(),
+            renderer.retained_comp_view(),
         );
         debug!(preset = %built.name, ?size, "milkdrop: renderer swapped in");
         self.slot = Some(Slot {
             generation: built.generation,
             name: built.name,
-            renderer: Mutex::new(built.renderer),
+            renderer: Mutex::new(renderer),
             bind_group,
             size,
             frames_rendered: 0,
@@ -355,9 +368,10 @@ impl shader::Primitive for MilkdropPrimitive {
         }
 
         if lost {
-            // The app's tick sees the flag and loads another preset.
+            // The app's tick takes the generation and blames that load.
+            let generation = slot.generation;
             *slot_opt = None;
-            shared.slot_lost.store(true, Ordering::Release);
+            shared.slot_lost.store(generation, Ordering::Release);
         }
     }
 

@@ -434,6 +434,9 @@ fn track_change_switches_presets() {
     let mut update = super::playback::make_playback_update();
     update.song_id = Some("song_a".to_string());
     let _ = app.handle_playback_state_updated(update.clone());
+    // Let that switch land; a track change never discards a pending build.
+    let generation = app.milkdrop.generation;
+    built(&mut app, generation, Ok(()));
     update.song_id = Some("song_b".to_string());
     let _ = app.handle_playback_state_updated(update.clone());
     assert_eq!(
@@ -550,7 +553,10 @@ fn a_lost_renderer_counts_as_a_failure() {
     for _ in 0..5 {
         let generation = app.milkdrop.generation;
         built(&mut app, generation, Ok(()));
-        app.milkdrop.shared.slot_lost.store(true, Ordering::Release);
+        app.milkdrop
+            .shared
+            .slot_lost
+            .store(app.milkdrop.generation, Ordering::Release);
         tick(&mut app);
     }
     assert_eq!(
@@ -924,7 +930,10 @@ fn a_changed_interval_rearms_the_timer() {
 fn a_lost_renderer_clears_the_preset_on_screen() {
     let mut app = md_app();
     on_screen(&mut app);
-    app.milkdrop.shared.slot_lost.store(true, Ordering::Release);
+    app.milkdrop
+        .shared
+        .slot_lost
+        .store(app.milkdrop.generation, Ordering::Release);
     tick(&mut app);
     assert_eq!(app.milkdrop.on_screen, None);
 }
@@ -954,10 +963,12 @@ fn a_themed_preset_reloads_when_the_palette_changes() {
     let name = app.milkdrop.current.clone();
     let generation = app.milkdrop.generation;
 
-    let was_light = crate::theme::is_light_mode();
-    crate::theme::set_light_mode(!was_light);
+    // The theme's colours changed since the preset was built.
+    let mut before = crate::widgets::visualizer::milkdrop::palette::PresetPalette::from_theme();
+    before.bg = [before.bg[0] + 0.1, before.bg[1], before.bg[2]];
+    app.milkdrop.palette_used = Some(before);
+    app.milkdrop.palette_check_pending = true;
     tick(&mut app);
-    crate::theme::set_light_mode(was_light);
 
     assert!(
         app.milkdrop.generation > generation,
@@ -1199,4 +1210,150 @@ fn non_square_covers_are_padded_not_stretched() {
     let cover = crate::widgets::visualizer::milkdrop::cover_from_rgba(4, 2, vec![255; 4 * 2 * 4])
         .expect("pixels");
     assert_eq!((cover.width, cover.height), (4, 4));
+}
+
+// ----------------------------------------------------------------------------
+// Unreleased-review fixes (2026-09-25)
+// ----------------------------------------------------------------------------
+
+/// On screen with `favorites_only` and the preset on screen as the only
+/// favorite: the library can only ever draw that same preset again.
+fn single_eligible_app() -> Nokkvi {
+    use nokkvi_data::types::visualizer_config::MilkdropPresetSource;
+    let mut app = md_app();
+    on_screen(&mut app);
+    let only = app.milkdrop.current.clone().expect("a preset");
+    app.milkdrop.library.toggle_favorite(&only);
+    set_milkdrop_config(&mut app, |md| {
+        md.preset_source = MilkdropPresetSource::FavoritesOnly;
+    });
+    tick(&mut app);
+    app
+}
+
+#[test]
+fn a_single_eligible_preset_is_not_reloaded_by_the_timer() {
+    let mut app = single_eligible_app();
+    let generation = app.milkdrop.generation;
+    let toasts = app.toast.toasts.len();
+    app.milkdrop.next_switch_at = Some(past());
+    tick(&mut app);
+    tick(&mut app);
+    assert_eq!(app.milkdrop.generation, generation, "no rebuild from black");
+    assert_eq!(app.toast.toasts.len(), toasts, "no repeated name toast");
+    assert!(
+        app.milkdrop.next_switch_at.is_some(),
+        "the timer re-arms and waits"
+    );
+}
+
+#[test]
+fn a_single_eligible_preset_is_not_reloaded_by_a_track_change() {
+    let mut app = single_eligible_app();
+    let generation = app.milkdrop.generation;
+    let mut update = super::playback::make_playback_update();
+    update.song_id = Some("song_single".to_string());
+    let _ = app.handle_playback_state_updated(update);
+    assert_eq!(app.milkdrop.generation, generation);
+}
+
+#[test]
+fn a_track_change_during_a_build_keeps_that_build() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    press_plain(&mut app, "n");
+    let building = app.milkdrop.generation;
+    assert_eq!(app.milkdrop.build_in_flight, Some(building));
+
+    let mut update = super::playback::make_playback_update();
+    update.song_id = Some("song_mid_build".to_string());
+    let _ = app.handle_playback_state_updated(update);
+    assert_eq!(
+        app.milkdrop.generation, building,
+        "the pending build is not thrown away"
+    );
+}
+
+#[test]
+fn losing_the_old_renderer_does_not_blame_the_new_build() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let old_generation = app.milkdrop.generation;
+    let old = app.milkdrop.current.clone().expect("a preset");
+
+    press_plain(&mut app, "n");
+    let new = app.milkdrop.current.clone().expect("a new preset");
+    let new_generation = app.milkdrop.generation;
+    built(&mut app, new_generation, Ok(()));
+
+    // `prepare` lost the OLD renderer, still in the slot, before the swap.
+    app.milkdrop
+        .shared
+        .slot_lost
+        .store(old_generation, Ordering::Release);
+    tick(&mut app);
+    assert_eq!(
+        app.milkdrop.current.as_deref(),
+        Some(new.as_str()),
+        "the new preset stays current"
+    );
+    assert!(
+        app.milkdrop.library.eligible().contains(&new.as_str()),
+        "the new preset is not marked broken"
+    );
+    assert!(
+        !app.milkdrop.library.eligible().contains(&old.as_str()),
+        "the old one is"
+    );
+    assert_eq!(app.milkdrop.consecutive_failures, 1);
+}
+
+#[test]
+fn a_hidden_preset_never_returns_to_history() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    on_screen(&mut app);
+    let shown = app.milkdrop.on_screen.clone().expect("a preset on screen");
+    control(&mut app, crate::app_message::MilkdropControl::Hide);
+    assert!(
+        !app.milkdrop.history.contains(&shown),
+        "Previous cannot walk back to it"
+    );
+}
+
+#[test]
+fn a_light_dark_toggle_leaves_a_preset_that_ignores_it() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.milkdrop.current_themed = true;
+    app.milkdrop.current_uses_light = false;
+    tick(&mut app);
+    let generation = app.milkdrop.generation;
+
+    let was_light = crate::theme::is_light_mode();
+    crate::theme::set_light_mode(!was_light);
+    tick(&mut app);
+    crate::theme::set_light_mode(was_light);
+    assert_eq!(
+        app.milkdrop.generation, generation,
+        "same dark colours: nothing to recolour"
+    );
+}
+
+#[test]
+fn a_light_dark_toggle_reloads_a_preset_that_reads_it() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.milkdrop.current_themed = true;
+    app.milkdrop.current_uses_light = true;
+    tick(&mut app);
+    let generation = app.milkdrop.generation;
+
+    let was_light = crate::theme::is_light_mode();
+    crate::theme::set_light_mode(!was_light);
+    tick(&mut app);
+    crate::theme::set_light_mode(was_light);
+    assert!(app.milkdrop.generation > generation);
 }

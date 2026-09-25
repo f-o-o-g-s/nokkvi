@@ -66,7 +66,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 ## particle-milkdrop / OjoDrop
 
-The MilkDrop visualizer mode renders presets with the `particle-milkdrop` engine and analyzes audio with `particle-audio`, both from [OjoDrop](https://github.com/sho-run/ojodrop) (built from the project's fork, [f-o-o-g-s/ojodrop](https://github.com/f-o-o-g-s/ojodrop): upstream rev `093e4098f18d89af571ccd59f62aaf8305546084` plus one patch that lets it run inside iced's GPU device). nokkvi builds them without the standalone player and without the C++ `.milk` converter, so none of the converter's components (hlsl2glslfork, MojoShader, glsl-optimizer) are compiled in. OjoDrop credits Ryan Geiss (MilkDrop), Jordan Berg (Butterchurn, milkdrop-shader-converter) and Nullsoft / Winamp.
+The MilkDrop visualizer mode renders presets with the `particle-milkdrop` engine and analyzes audio with `particle-audio`, both from [OjoDrop](https://github.com/sho-run/ojodrop) (built from the project's fork, [f-o-o-g-s/ojodrop](https://github.com/f-o-o-g-s/ojodrop): upstream rev `093e4098f18d89af571ccd59f62aaf8305546084` plus patches that let it run inside iced's GPU device, feed a preset the playing cover, and read preset code case-insensitively as MilkDrop does). nokkvi builds them without the standalone player and without the C++ `.milk` converter, so none of the converter's components (hlsl2glslfork, MojoShader, glsl-optimizer) are compiled in. OjoDrop credits Ryan Geiss (MilkDrop), Jordan Berg (Butterchurn, milkdrop-shader-converter) and Nullsoft / Winamp.
 
 **License:** MIT
 

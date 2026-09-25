@@ -178,6 +178,8 @@ pub struct CompiledPreset {
     pub name: String,
     /// The source names theme colours (`NOKKVI_*`); a palette change reloads it.
     pub themed: bool,
+    /// The source reads `NOKKVI_LIGHT`, so a light/dark toggle reloads it too.
+    pub uses_light: bool,
     pub shaders: MilkShaders,
     pub bodies: CompiledMilkdropShaderBodies,
 }
@@ -199,12 +201,14 @@ pub(crate) fn compile_preset(
     palette: &palette::PresetPalette,
 ) -> Result<CompiledPreset, String> {
     let themed = palette::uses_theme(json);
+    let uses_light = palette::uses_light(json);
     let json = palette.substitute(json);
     let shaders = particle_milkdrop::load_preset_str(&json, true)?;
     let bodies = particle_milkdrop::compile_milkdrop_shader_bodies(&shaders)?;
     Ok(CompiledPreset {
         name,
         themed,
+        uses_light,
         shaders,
         bodies,
     })

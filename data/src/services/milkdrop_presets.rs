@@ -147,6 +147,13 @@ impl PresetLibrary {
             }
         }
         entries.sort_by(|a, b| a.name.cmp(&b.name));
+        // A user file may have been fixed since it failed: give it another go.
+        // Bundled presets cannot change, so they stay out for the session.
+        self.broken.retain(|name| {
+            !entries
+                .iter()
+                .any(|e| e.name == *name && matches!(e.source, PresetSource::User(_)))
+        });
         self.entries = entries;
     }
 
@@ -471,6 +478,18 @@ mod tests {
         lib.rescan_user_dir();
         assert_eq!(lib.len(), 5);
         assert!(lib.source("e").is_some());
+    }
+
+    #[test]
+    fn rescan_gives_a_fixed_user_preset_another_chance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("e.json"), "{}").expect("write");
+        let mut lib = library(dir.path());
+        lib.mark_broken("e");
+        lib.mark_broken("a");
+        lib.rescan_user_dir();
+        assert!(lib.eligible().contains(&"e"), "the user file may be fixed");
+        assert!(!lib.eligible().contains(&"a"), "a bundled dud stays out");
     }
 
     #[test]

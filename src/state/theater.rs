@@ -17,8 +17,7 @@ pub struct TheaterState {
     /// the window loses focus, so the bar returns on the next real activity
     /// rather than on refocus alone.
     pub last_activity: Option<Instant>,
-    /// The cursor is on the transient bar (its `mouse_area` enter / move /
-    /// exit). Cleared on unfocus and exit, whose `on_exit` may never fire.
+    /// The cursor is on the transient bar (its `mouse_area` enter / exit). Cleared on unfocus and exit, whose `on_exit` may never fire.
     pub bar_hovered: bool,
     /// The cursor is on the corner exit icon riding above the bar.
     pub corner_hovered: bool,

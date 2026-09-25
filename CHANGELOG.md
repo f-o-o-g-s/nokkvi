@@ -22,7 +22,7 @@ All notable changes to this project will be documented in this file.
 - `nokkvi status` now reports whether Theater Mode is on.
 - `nokkvi preset next` (or previous, lock, unlock, favorite, unfavorite, hide) controls MilkDrop presets from the command line.
 - `nokkvi status` now reports the visualizer mode and the MilkDrop preset on screen.
-- A MilkDrop visualizer mode plays MilkDrop presets in place of the Queue cover and fills Theater Mode.
+- A MilkDrop visualizer mode plays MilkDrop presets in place of the Queue or Radios cover and fills Theater Mode.
 - The visualizer button and `v` now cycle Off, Bars, Lines, Scope and MilkDrop.
 - MilkDrop switches to another preset every 30 seconds and on each new track, showing the preset's name.
 - In MilkDrop mode, `n` jumps to another preset and `p` returns to the previous one.
@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Ten nokkvi MilkDrop presets draw in your theme's colours; six of them use the playing album's cover.
 - nokkvi's MilkDrop presets recolour on the spot when you change theme, and keep the theme's dark colours in light mode.
 - The MilkDrop Presets setting gains `nokkvi`, which plays only nokkvi's own presets.
+- Each MilkDrop preset starts from the previous preset's picture, as in MilkDrop, instead of from black.
 
 ### Changed
 

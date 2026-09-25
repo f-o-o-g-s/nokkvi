@@ -2,8 +2,8 @@
 //! nav leave the window, which shows only the playing track's cover with its
 //! over-cover visualizer and lyrics.
 //!
-//! `Nokkvi::enter_theater` is the single entry point: every way in (today
-//! the F11 hotkey) calls it. Entering and leaving are both unmount edges; see
+//! `Nokkvi::enter_theater` is the single entry point: every way in (F11, the
+//! Queue cover's corner icon and menu row, the `theater` IPC verb) calls it. Entering and leaving are both unmount edges; see
 //! the two methods for what each one clears.
 
 use std::{

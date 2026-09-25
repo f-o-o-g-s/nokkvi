@@ -56,6 +56,8 @@ pub struct MilkdropState {
     /// The current preset names theme colours (`NOKKVI_*` tokens), so a
     /// palette change reloads it.
     pub current_themed: bool,
+    /// The current preset reads `NOKKVI_LIGHT` (see `CompiledPreset::uses_light`).
+    pub current_uses_light: bool,
     /// The palette the current load was coloured with.
     pub palette_used: Option<crate::widgets::visualizer::milkdrop::palette::PresetPalette>,
     /// `theme_generation()` when the tick last compared palettes.
@@ -104,6 +106,7 @@ impl Default for MilkdropState {
             curation_path: PathBuf::new(),
             curation_error: None,
             current_themed: false,
+            current_uses_light: false,
             palette_used: None,
             theme_generation_seen: 0,
             palette_check_pending: false,

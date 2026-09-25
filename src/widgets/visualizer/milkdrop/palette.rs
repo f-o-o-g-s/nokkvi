@@ -39,6 +39,19 @@ fn rgb(c: iced::Color) -> Rgb {
     [c.r, c.g, c.b]
 }
 
+/// Spread a theme gradient of any length over the six ramp slots, first
+/// colour to last (`fallback` when the theme has none).
+fn stretch_ramp(src: &[Rgb], fallback: Rgb) -> [Rgb; 6] {
+    std::array::from_fn(|i| {
+        if src.is_empty() {
+            fallback
+        } else {
+            // round(i * (len - 1) / 5), in integers.
+            src[(i * (src.len() - 1) * 2 + 5) / 10]
+        }
+    })
+}
+
 impl PresetPalette {
     /// The active theme's DARK palette, in either mode: nokkvi's presets are
     /// light on a dark canvas (additive glows, trails fading to black), which a
@@ -55,14 +68,7 @@ impl PresetPalette {
             .filter_map(|hex| crate::theme_config::parse_hex_color(hex))
             .map(rgb)
             .collect();
-        let ramp = std::array::from_fn(|i| {
-            if ramp_src.is_empty() {
-                accent
-            } else {
-                // Stretch a shorter gradient over the six slots.
-                ramp_src[i * ramp_src.len() / 6]
-            }
-        });
+        let ramp = stretch_ramp(&ramp_src, accent);
         Self {
             bg: rgb(read_dark_color(|t| t.bg0_hard)),
             surface: rgb(read_dark_color(|t| t.bg1)),
@@ -73,6 +79,16 @@ impl PresetPalette {
             ramp,
             light: theme::is_light_mode(),
         }
+    }
+
+    /// Whether a preset built with `self` looks different under `now`: any
+    /// colour changed, or the light/dark flag when the preset reads it.
+    pub(crate) fn recolours(&self, now: &Self, uses_light: bool) -> bool {
+        let colours_changed = Self {
+            light: now.light,
+            ..*self
+        } != *now;
+        colours_changed || (uses_light && self.light != now.light)
     }
 
     /// `(role, colour)` pairs, longest names first so `RAMP1` never shadows a
@@ -149,6 +165,12 @@ pub(crate) fn uses_theme(text: &str) -> bool {
     text.contains(PREFIX)
 }
 
+/// Whether a preset reads the light/dark flag (so a mode toggle must reload it;
+/// its colours come from the dark palette in both modes).
+pub(crate) fn uses_light(text: &str) -> bool {
+    text.contains("NOKKVI_LIGHT")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +215,20 @@ mod tests {
         assert_eq!(p.substitute("x = NOKKVI_LIGHT;"), "x = 0.0;");
         let light = PresetPalette { light: true, ..p };
         assert_eq!(light.substitute("NOKKVI_LIGHT"), "1.0");
+    }
+
+    #[test]
+    fn the_ramp_spans_the_whole_gradient() {
+        let src: Vec<Rgb> = (0..7).map(|i| [i as f32; 3]).collect();
+        let ramp = stretch_ramp(&src, [9.0; 3]);
+        assert_eq!(ramp[0], src[0]);
+        assert_eq!(ramp[5], src[6], "the last slot is the last colour");
+        let two = [[0.0; 3], [1.0; 3]];
+        assert_eq!(
+            stretch_ramp(&two, [9.0; 3]),
+            [two[0], two[0], two[0], two[1], two[1], two[1]]
+        );
+        assert_eq!(stretch_ramp(&[], [9.0; 3]), [[9.0; 3]; 6]);
     }
 
     #[test]

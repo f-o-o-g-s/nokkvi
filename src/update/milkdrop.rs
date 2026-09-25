@@ -222,6 +222,7 @@ impl Nokkvi {
         self.milkdrop.current = None;
         self.milkdrop.on_screen = None;
         self.milkdrop.current_themed = false;
+        self.milkdrop.current_uses_light = false;
         self.milkdrop.recolouring = false;
         self.milkdrop.build_in_flight = None;
         self.milkdrop.awaiting_gpu = None;
@@ -242,6 +243,10 @@ impl Nokkvi {
     pub(crate) fn milkdrop_on_window_closed(&mut self) {
         self.milkdrop_release();
         self.milkdrop.shared.gpu.lock().take();
+        // Only a mounted pipeline enforces the watermark, and none is mounted
+        // until the next window opens: drop a renderer parked for `prepare`.
+        let parked = self.milkdrop.shared.built.lock().take();
+        drop(parked);
     }
 
     /// Build the preset library at login: the bundled pack, the user's
@@ -347,6 +352,7 @@ impl Nokkvi {
             Err(e) => self.milkdrop_failed(&e),
             Ok(preset) => {
                 self.milkdrop.current_themed = preset.themed;
+                self.milkdrop.current_uses_light = preset.uses_light;
                 self.milkdrop_build_or_wait(generation, preset)
             }
         }
@@ -794,12 +800,14 @@ impl Nokkvi {
         self.milkdrop.cover_large_requested = None;
     }
 
-    /// Hook for a new track: switch presets when that setting is on.
+    /// Hook for a new track: switch presets when that setting is on. A build
+    /// already in flight is a new preset on its way, so it is left to land.
     pub(crate) fn milkdrop_on_track_change(&mut self) -> Task<Message> {
         if self.milkdrop_is_running()
             && self.milkdrop_switch_on_track_change()
             && !self.milkdrop.locked
             && self.milkdrop.current.is_some()
+            && self.milkdrop.build_in_flight.is_none()
         {
             self.milkdrop.next_switch_at = None;
             self.milkdrop_advance(AdvanceReason::TrackChange)
@@ -859,13 +867,32 @@ impl Nokkvi {
             self.milkdrop.next_switch_at = None;
             return Task::none();
         };
+        // The only eligible preset is already current: rebuilding it would
+        // restart it from black and toast its name again, so keep it running.
+        let same = current.as_deref() == Some(next.as_str());
+        if same
+            && matches!(
+                reason,
+                AdvanceReason::Timer | AdvanceReason::TrackChange | AdvanceReason::Manual
+            )
+            && self.milkdrop.build_in_flight.is_none()
+        {
+            debug!(?reason, preset = %next, "milkdrop: only one preset to show; keeping it");
+            if reason == AdvanceReason::Manual {
+                self.toast_info("MilkDrop: this is the only preset to show");
+            }
+            self.milkdrop_arm_timer();
+            return Task::none();
+        }
         debug!(?reason, preset = %next, "milkdrop: next preset");
-        // History records only presets that reached the screen.
+        // History records only presets that reached the screen, and never
+        // one just hidden.
         let current_was_shown = self.milkdrop.announced_generation == self.milkdrop.generation
             || self.milkdrop.recolouring;
         if let Some(previous) = current
             && reason != AdvanceReason::Failure
             && current_was_shown
+            && !self.milkdrop.library.is_hidden(&previous)
         {
             self.milkdrop.history.push(previous);
             if self.milkdrop.history.len() > MILKDROP_HISTORY_CAP {
@@ -898,17 +925,24 @@ impl Nokkvi {
             .running
             .store(running, Ordering::Release);
 
-        // `prepare` dropped the renderer after a GPU error: a failure like any
-        // other (so a device that fails every preset stops at the cap).
-        if self.milkdrop.shared.slot_lost.swap(false, Ordering::AcqRel) {
-            self.milkdrop.build_in_flight = None;
+        // `prepare` dropped a renderer after a GPU error: a failure like any
+        // other (so a device that fails every preset stops at the cap). Only
+        // the load that renderer belonged to is to blame: after a switch it
+        // can be the OLD preset while the new one is already built.
+        let lost = self.milkdrop.shared.slot_lost.swap(0, Ordering::AcqRel);
+        if lost != 0 {
             self.milkdrop.consecutive_failures =
                 self.milkdrop.consecutive_failures.saturating_add(1);
+            if lost == self.milkdrop.generation {
+                self.milkdrop.build_in_flight = None;
+                if let Some(name) = self.milkdrop.current.take() {
+                    self.milkdrop.library.mark_broken(&name);
+                }
+            } else if let Some(name) = self.milkdrop.on_screen.as_deref() {
+                self.milkdrop.library.mark_broken(name);
+            }
             if self.milkdrop.consecutive_failures >= MILKDROP_MAX_CONSECUTIVE_FAILURES {
                 self.milkdrop_give_up();
-            }
-            if let Some(name) = self.milkdrop.current.take() {
-                self.milkdrop.library.mark_broken(&name);
             }
             self.milkdrop.on_screen = None;
         }
@@ -961,9 +995,14 @@ impl Nokkvi {
         if self.milkdrop.palette_check_pending && running && self.milkdrop.build_in_flight.is_none()
         {
             self.milkdrop.palette_check_pending = false;
+            let now = PresetPalette::from_theme();
+            let uses_light = self.milkdrop.current_uses_light;
             if self.milkdrop.current_themed
                 && let Some(name) = self.milkdrop.current.clone()
-                && self.milkdrop.palette_used != Some(PresetPalette::from_theme())
+                && self
+                    .milkdrop
+                    .palette_used
+                    .is_none_or(|used| used.recolours(&now, uses_light))
             {
                 debug!(preset = %name, "milkdrop: theme changed; recolouring");
                 tasks.push(self.milkdrop_load(name));

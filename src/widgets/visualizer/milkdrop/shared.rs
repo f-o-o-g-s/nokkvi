@@ -13,7 +13,8 @@ use iced::wgpu;
 use parking_lot::Mutex;
 use particle_milkdrop::MilkdropRenderer;
 
-/// Shorter-side render cap (physical px) until the Render Quality setting lands.
+/// Shorter-side render cap (physical px) before the Render Quality setting is
+/// first applied (the `medium` value).
 pub(crate) const DEFAULT_QUALITY_SHORT_SIDE: u32 = 720;
 
 /// A panel counts as on screen while its `prepare` ran this recently. While
@@ -69,9 +70,10 @@ pub struct MilkdropShared {
     /// than a one-shot flag, so a release that no frame saw can never drop a
     /// renderer built by a LATER load.
     pub(crate) released_below: AtomicU64,
-    /// Set by `prepare` when a GPU error forced it to drop the renderer; the
-    /// app's tick takes it, counts a failure and loads another preset.
-    pub(crate) slot_lost: AtomicBool,
+    /// The load generation of a renderer `prepare` dropped after a GPU error
+    /// (0 = none). The app's tick takes it and blames that load only: after a
+    /// switch the lost renderer may be the OLD preset, not the one building.
+    pub(crate) slot_lost: AtomicU64,
     /// The load generation whose renderer `prepare` last drew a first frame
     /// for. The app toasts the name and clears the failure count off this, so
     /// both follow what is really on screen.
@@ -112,7 +114,7 @@ impl MilkdropShared {
         Self {
             running: AtomicBool::new(false),
             released_below: AtomicU64::new(0),
-            slot_lost: AtomicBool::new(false),
+            slot_lost: AtomicU64::new(0),
             shown_generation: AtomicU64::new(0),
             last_prepare_ms: AtomicU64::new(0),
             epoch_counter: AtomicU64::new(0),

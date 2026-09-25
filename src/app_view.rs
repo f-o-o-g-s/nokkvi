@@ -1184,8 +1184,8 @@ impl Nokkvi {
         // Pad to a fixed layer count: `Stack` diffs children by position, so a
         // layer that comes and goes (pressing `v`) would otherwise reset the
         // state of any layer above it (Theater Mode's player bar sits there).
-        // `Space::new()` fills, which `Stack::push` keeps; a zero-size
-        // placeholder would be dropped.
+        // `Stack::push` drops only a child with a `Fixed(0.0)` side, so the
+        // default (`Shrink`) `Space::new()` is kept as a placeholder.
         for _ in pushed..BOTTOM_BAND_LAYERS {
             stack = stack.push(iced::widget::Space::new());
         }
