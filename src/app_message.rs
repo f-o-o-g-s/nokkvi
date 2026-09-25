@@ -968,9 +968,6 @@ pub enum CrossPaneDragMessage {
     Cancel,
 }
 
-/// Theater Mode messages — the now-playing layout with a transient player
-/// bar. Handled by `update/theater.rs`; every entry path lands on
-/// `Nokkvi::enter_theater`.
 /// MilkDrop mode: the off-thread preset pipeline's results plus the preset
 /// controls. Handled by `update/milkdrop.rs`; every control is a no-op outside
 /// MilkDrop mode.
@@ -996,6 +993,9 @@ pub enum MilkdropMessage {
     ToggleLock,
 }
 
+/// Theater Mode messages — the now-playing layout with a transient player
+/// bar. Handled by `update/theater.rs`; every entry path lands on
+/// `Nokkvi::enter_theater`.
 #[derive(Debug, Clone)]
 pub enum TheaterMessage {
     /// Enter when off, leave when on (the F11 hotkey).

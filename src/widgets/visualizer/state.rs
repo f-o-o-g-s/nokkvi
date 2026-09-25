@@ -1188,12 +1188,6 @@ impl VisualizerState {
         false
     }
 
-    /// Advance the beat-highlight flash field one tick and publish it for
-    /// `bars.wgsl`, which blooms each bar toward the peak color by its value.
-    ///
-    /// Runs on the FFT worker, so both locks are `try_lock`. The field keeps its
-    /// own baseline behind `effects` and re-renders from its event list every
-    /// tick, so a publish skipped on a contended `display` heals on the next.
     /// MilkDrop half of `tick()`: push the WHOLE buffered run into the analyzer
     /// (the spectrum path's three-chunk cap would splice the stream a stateful
     /// analyzer sees) and publish its latest features. `try_lock` only.
@@ -1252,6 +1246,12 @@ impl VisualizerState {
         true
     }
 
+    /// Advance the beat-highlight flash field one tick and publish it for
+    /// `bars.wgsl`, which blooms each bar toward the peak color by its value.
+    ///
+    /// Runs on the FFT worker, so both locks are `try_lock`. The field keeps its
+    /// own baseline behind `effects` and re-renders from its event list every
+    /// tick, so a publish skipped on a contended `display` heals on the next.
     fn update_flash_effect(&self, output: &[f64]) {
         let Some(mut effects) = self.effects.try_lock() else {
             return;

@@ -160,7 +160,7 @@ impl MilkdropPipeline {
         if same {
             return;
         }
-        let epoch = gpu.as_ref().map_or(1, |g| g.epoch + 1);
+        let epoch = shared.epoch_counter.fetch_add(1, Ordering::AcqRel) + 1;
         debug!(epoch, format = ?self.format, "milkdrop: captured the GPU device");
         *gpu = Some(GpuHandles {
             device: Arc::new(device.clone()),
@@ -225,6 +225,7 @@ impl shader::Primitive for MilkdropPrimitive {
             .shared
             .get_or_insert_with(|| self.shared.clone())
             .clone();
+        shared.mark_mounted();
         pipeline.track_device(&shared, device, queue);
         pipeline.enforce_release(&shared);
 
@@ -263,7 +264,15 @@ impl shader::Primitive for MilkdropPrimitive {
         }
         if let Some((w, h)) = slot.debouncer.take_ready(now) {
             let mut renderer = slot.renderer.lock();
-            match run_in_error_scopes(device, || renderer.try_resize(w, h)) {
+            // Render once right away: `try_resize` rebuilds the retained comp
+            // texture black, and a paused (or not-yet-due) panel would blit
+            // that until the next advance.
+            let resized = run_in_error_scopes(device, || {
+                renderer
+                    .try_resize(w, h)
+                    .map(|()| renderer.render_to_retained_comp())
+            });
+            match resized {
                 Ok(Ok(())) => {
                     slot.size = renderer.dimensions();
                     // The retained view is replaced on every resize.
@@ -311,6 +320,9 @@ impl shader::Primitive for MilkdropPrimitive {
                 renderer.render_to_retained_comp();
             }
             if !lost {
+                if slot.frames_rendered == 0 {
+                    shared.mark_shown(slot.generation);
+                }
                 slot.frames_rendered += 1;
             }
         }

@@ -35,7 +35,17 @@ fn md_app() -> Nokkvi {
     );
     app.playback.playing = true;
     app.playback.paused = false;
+    app.main_window_id = Some(iced::window::Id::unique());
+    // Stand-in for the panel's `prepare` having run this frame.
+    app.milkdrop.shared.mark_mounted();
     app
+}
+
+/// Stand-in for the pipeline rendering the current load's first frame.
+fn first_frame(app: &mut Nokkvi) {
+    let generation = app.milkdrop.generation;
+    app.milkdrop.shared.mark_shown(generation);
+    tick(app);
 }
 
 /// Whether a renderer from load `generation` is below the release watermark.
@@ -293,6 +303,7 @@ fn on_screen(app: &mut Nokkvi) {
     let generation = app.milkdrop.generation;
     built(app, generation, Ok(()));
     assert!(app.milkdrop.build_in_flight.is_none());
+    first_frame(app);
 }
 
 fn past() -> std::time::Instant {
@@ -450,4 +461,132 @@ fn theater_policy_passes_preset_keys() {
     ] {
         assert_eq!(theater_key_policy(action), TheaterKeyPolicy::Passthrough);
     }
+}
+
+// ----------------------------------------------------------------------------
+// Review fixes: only work (and toast) for a preset someone can see
+// ----------------------------------------------------------------------------
+
+#[test]
+fn hidden_window_stops_running_and_releases() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let generation = app.milkdrop.generation;
+    app.milkdrop_on_window_closed();
+    app.main_window_id = None;
+    tick(&mut app);
+    assert!(!app.milkdrop.shared.running.load(Ordering::Acquire));
+    assert!(released(&app, generation));
+    assert!(
+        app.milkdrop.shared.gpu_handles().is_none(),
+        "the old device is let go"
+    );
+    assert_eq!(app.milkdrop.current, None, "nothing loads while hidden");
+}
+
+#[test]
+fn an_unmounted_panel_is_not_running() {
+    let mut app = md_app();
+    app.milkdrop.shared.forget_mounted();
+    enter_milkdrop(&mut app);
+    assert!(!app.milkdrop.shared.running.load(Ordering::Acquire));
+    assert_eq!(
+        app.milkdrop.current, None,
+        "no panel drew MilkDrop: nothing builds"
+    );
+}
+
+#[test]
+fn the_failure_cap_never_rewarns_on_the_timer() {
+    let mut app = md_app();
+    enter_milkdrop(&mut app);
+    for _ in 0..5 {
+        let generation = app.milkdrop.generation;
+        built(&mut app, generation, Err("boom".to_string()));
+    }
+    let toasts = app.toast.toasts.len();
+    for _ in 0..3 {
+        tick(&mut app);
+        if let Some(at) = app.milkdrop.next_switch_at.as_mut() {
+            *at = past();
+        }
+        tick(&mut app);
+    }
+    assert_eq!(app.toast.toasts.len(), toasts);
+    assert_eq!(
+        app.milkdrop.next_switch_at, None,
+        "no timer without a preset"
+    );
+}
+
+#[test]
+fn the_name_toasts_on_the_first_frame_not_on_build() {
+    let mut app = md_app();
+    enter_milkdrop(&mut app);
+    let generation = app.milkdrop.generation;
+    let toasts = app.toast.toasts.len();
+    built(&mut app, generation, Ok(()));
+    assert_eq!(app.toast.toasts.len(), toasts, "built but not yet drawn");
+    first_frame(&mut app);
+    assert_eq!(app.toast.toasts.len(), toasts + 1);
+    tick(&mut app);
+    assert_eq!(app.toast.toasts.len(), toasts + 1, "announced once");
+}
+
+#[test]
+fn a_lost_renderer_counts_as_a_failure() {
+    let mut app = md_app();
+    enter_milkdrop(&mut app);
+    for _ in 0..5 {
+        let generation = app.milkdrop.generation;
+        built(&mut app, generation, Ok(()));
+        app.milkdrop.shared.slot_lost.store(true, Ordering::Release);
+        tick(&mut app);
+    }
+    assert_eq!(
+        app.milkdrop.current, None,
+        "five lost renderers stop the loop"
+    );
+    let generation = app.milkdrop.generation;
+    tick(&mut app);
+    assert_eq!(app.milkdrop.generation, generation);
+}
+
+#[test]
+fn preset_keys_wait_for_a_running_panel() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let generation = app.milkdrop.generation;
+    app.playback.paused = true;
+    tick(&mut app);
+    press_plain(&mut app, "n");
+    press_plain(&mut app, "p");
+    assert_eq!(
+        app.milkdrop.generation, generation,
+        "paused: nothing builds"
+    );
+}
+
+#[test]
+fn history_only_records_presets_that_were_shown() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let shown = app.milkdrop.current.clone().expect("a preset");
+    press_plain(&mut app, "n"); // B requested, never drawn
+    press_plain(&mut app, "n"); // C requested
+    assert_eq!(app.milkdrop.history, std::slice::from_ref(&shown));
+}
+
+#[test]
+fn off_the_panel_a_failure_does_not_retry() {
+    let mut app = md_app();
+    enter_milkdrop(&mut app);
+    let generation = app.milkdrop.generation;
+    app.current_view = View::Albums;
+    tick(&mut app);
+    built(&mut app, generation, Err("boom".to_string()));
+    assert_eq!(
+        app.milkdrop.generation, generation,
+        "no retry off the panel"
+    );
 }

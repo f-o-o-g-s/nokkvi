@@ -192,6 +192,65 @@ mod tests {
         }
     }
 
+    /// A device with the limits iced's compositor requests
+    /// (`iced_wgpu::window::compositor`: `Limits::default()` with
+    /// `max_bind_groups: 2`, `max_non_sampler_bindings: 2048`), so a preset
+    /// that needs more than iced grants fails here instead of on screen.
+    fn iced_like_gpu() -> Option<GpuHandles> {
+        let instance = wgpu::Instance::default();
+        let adapter = futures::executor::block_on(
+            instance.request_adapter(&wgpu::RequestAdapterOptions::default()),
+        )
+        .ok()?;
+        let limits = wgpu::Limits {
+            max_bind_groups: 2,
+            max_non_sampler_bindings: 2048,
+            ..wgpu::Limits::default().using_resolution(adapter.limits())
+        };
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("nokkvi milkdrop test (iced limits)"),
+                required_limits: limits,
+                ..Default::default()
+            }))
+            .ok()?;
+        Some(GpuHandles {
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            epoch: 1,
+        })
+    }
+
+    /// Needs a GPU: `cargo test -p nokkvi -- --ignored bundled_pack_builds`.
+    /// Builds every bundled preset's renderer (plus a warm-up frame) on a
+    /// device with iced's limits, under the same error scopes the app uses.
+    #[test]
+    #[ignore = "needs a GPU adapter; slow"]
+    fn bundled_pack_builds_on_icedlike_limits() {
+        let Some(gpu) = iced_like_gpu() else {
+            panic!("no GPU adapter available");
+        };
+        let failures: Vec<String> = BUNDLED_MILKDROP_PRESETS
+            .iter()
+            .filter_map(|(name, json)| {
+                let preset = match compile_preset((*name).to_string(), json) {
+                    Ok(p) => p,
+                    Err(e) => return Some(format!("{name}: compile: {e}")),
+                };
+                build_renderer(&gpu, (256, 256), &preset)
+                    .err()
+                    .map(|e| format!("{name}: {}", e.replace('\n', " ")))
+            })
+            .collect();
+        assert!(
+            failures.is_empty(),
+            "{} presets fail to build:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
+
     /// Slow (naga over every preset): `cargo test -p nokkvi -- --ignored
     /// bundled_pack_compiles`. Lists every preset whose shaders fail to
     /// translate; drop those files from `assets/milkdrop/`.

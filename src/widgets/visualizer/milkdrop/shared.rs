@@ -1,9 +1,12 @@
 //! State shared between the app, the FFT worker, the preset builder thread and
 //! the MilkDrop render pipeline.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+use std::{
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 use iced::wgpu;
@@ -12,6 +15,21 @@ use particle_milkdrop::MilkdropRenderer;
 
 /// Shorter-side render cap (physical px) until the Render Quality setting lands.
 pub(crate) const DEFAULT_QUALITY_SHORT_SIDE: u32 = 720;
+
+/// A panel counts as on screen while its `prepare` ran this recently. While
+/// playing, the 100 ms progress updates redraw the window, so a mounted panel
+/// reports well inside this.
+pub(crate) const MOUNTED_WINDOW: Duration = Duration::from_millis(500);
+
+/// Milliseconds since the first call (a process-local monotonic clock that
+/// fits an atomic). Never 0, so 0 can mean "never".
+fn now_ms() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    let start = *START.get_or_init(Instant::now);
+    u64::try_from(start.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .saturating_add(1)
+}
 
 /// Size the builder uses before the panel has reported one.
 pub(crate) const FALLBACK_RENDER_SIZE: (u32, u32) = (720, 720);
@@ -50,8 +68,18 @@ pub struct MilkdropShared {
     /// renderer built by a LATER load.
     pub(crate) released_below: AtomicU64,
     /// Set by `prepare` when a GPU error forced it to drop the renderer; the
-    /// app's tick takes it and loads another preset.
+    /// app's tick takes it, counts a failure and loads another preset.
     pub(crate) slot_lost: AtomicBool,
+    /// The load generation whose renderer `prepare` last drew a first frame
+    /// for. The app toasts the name and clears the failure count off this, so
+    /// both follow what is really on screen.
+    pub(crate) shown_generation: AtomicU64,
+    /// `now_ms()` of the last `prepare`: proof a MilkDrop panel is mounted
+    /// (Artwork Column Never, a narrow window or a split view draw none).
+    last_prepare_ms: AtomicU64,
+    /// Bumps on every device capture; never reset, so a device captured after
+    /// a release can never share an epoch with a build for the old one.
+    pub(crate) epoch_counter: AtomicU64,
     /// The app's newest load generation; the builder and `prepare` refuse
     /// anything older.
     pub(crate) current_generation: AtomicU64,
@@ -79,6 +107,9 @@ impl MilkdropShared {
             running: AtomicBool::new(false),
             released_below: AtomicU64::new(0),
             slot_lost: AtomicBool::new(false),
+            shown_generation: AtomicU64::new(0),
+            last_prepare_ms: AtomicU64::new(0),
+            epoch_counter: AtomicU64::new(0),
             current_generation: AtomicU64::new(0),
             quality_short_side: AtomicU32::new(DEFAULT_QUALITY_SHORT_SIDE),
             analysis_rate: AtomicU32::new(0),
@@ -99,6 +130,29 @@ impl MilkdropShared {
         self.analysis_rate.store(hz.to_bits(), Ordering::Release);
     }
 
+    /// Called by `prepare` every frame the panel draws.
+    pub(crate) fn mark_mounted(&self) {
+        self.last_prepare_ms.store(now_ms(), Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn forget_mounted(&self) {
+        self.last_prepare_ms.store(0, Ordering::Release);
+    }
+
+    /// Whether a MilkDrop panel drew within [`MOUNTED_WINDOW`].
+    pub(crate) fn mounted_recently(&self) -> bool {
+        let last = self.last_prepare_ms.load(Ordering::Acquire);
+        last != 0
+            && now_ms().saturating_sub(last)
+                <= u64::try_from(MOUNTED_WINDOW.as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// Called by `prepare` after a swapped-in renderer's first frame.
+    pub(crate) fn mark_shown(&self, generation: u64) {
+        self.shown_generation.store(generation, Ordering::Release);
+    }
+
     pub(crate) fn gpu_handles(&self) -> Option<GpuHandles> {
         self.gpu.lock().clone()
     }
@@ -114,7 +168,11 @@ impl MilkdropShared {
     pub(crate) fn offer_built(&self, built: BuiltPreset) -> bool {
         let mut slot = self.built.lock();
         if built.generation == self.current_generation.load(Ordering::Acquire) {
-            *slot = Some(built);
+            let displaced = slot.replace(built);
+            // Drop a displaced renderer (~20 pipelines) after unlocking, so the
+            // render thread never waits on its teardown.
+            drop(slot);
+            drop(displaced);
             true
         } else {
             false

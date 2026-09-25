@@ -67,8 +67,14 @@ impl Nokkvi {
         self.engine.visualization_mode == VisualizationMode::Milkdrop
     }
 
+    /// A MilkDrop panel is on screen: the window is open, the view is one that
+    /// renders the over-cover slot, and the panel's `prepare` actually ran
+    /// lately (the Queue without an artwork column, a narrow window or a
+    /// split view draw none).
     fn milkdrop_panel_visible(&self) -> bool {
-        self.theater.active || matches!(self.current_view, View::Queue | View::Radios)
+        self.main_window_id.is_some()
+            && (self.theater.active || matches!(self.current_view, View::Queue | View::Radios))
+            && self.milkdrop.shared.mounted_recently()
     }
 
     /// Whether MilkDrop should animate right now (see [`milkdrop_running`]).
@@ -160,6 +166,14 @@ impl Nokkvi {
             .store(generation, Ordering::Release);
     }
 
+    /// The main window is closing (hidden to the tray, or quitting): release
+    /// the renderer and let go of the window's GPU device; the next window's
+    /// first frame captures a new one.
+    pub(crate) fn milkdrop_on_window_closed(&mut self) {
+        self.milkdrop_release();
+        self.milkdrop.shared.gpu.lock().take();
+    }
+
     /// Build the preset library at login: the bundled pack, the user's
     /// `~/.config/nokkvi/milkdrop/*.json` and the curation file. The only
     /// place the real paths are read, so tests never touch them.
@@ -240,9 +254,12 @@ impl Nokkvi {
         match result {
             Err(e) => self.milkdrop_failed(&e),
             Ok(preset) => match self.milkdrop.shared.gpu_handles() {
-                Some(gpu) => self.milkdrop_build_task(gpu, generation, preset),
-                None => {
-                    // `prepare` has not run yet; the tick drains this once it has.
+                Some(gpu) if self.milkdrop_is_running() => {
+                    self.milkdrop_build_task(gpu, generation, preset)
+                }
+                _ => {
+                    // No device yet, or nobody would see it: the tick builds it
+                    // once `prepare` has run and MilkDrop is running.
                     self.milkdrop.awaiting_gpu = Some((generation, preset));
                     Task::none()
                 }
@@ -302,22 +319,18 @@ impl Nokkvi {
         match result {
             Err(e) => self.milkdrop_failed(&e),
             Ok(()) => {
+                // The name toast and the failure reset wait for the first frame
+                // (`shown_generation`, read by the tick).
                 self.milkdrop.build_in_flight = None;
-                self.milkdrop.consecutive_failures = 0;
-                self.milkdrop.empty_warned = false;
                 self.milkdrop_arm_timer();
-                if let Some(name) = self.milkdrop.current.clone() {
-                    info!(preset = %name, "milkdrop: preset on screen");
-                    self.toast_info(name);
-                }
                 Task::none()
             }
         }
     }
 
     fn handle_milkdrop_next(&mut self) -> Task<Message> {
-        if !self.milkdrop_mode_active() {
-            debug!("milkdrop: Next Preset ignored outside MilkDrop mode");
+        if !self.milkdrop_is_running() {
+            debug!("milkdrop: Next Preset ignored (MilkDrop not on screen and playing)");
             return Task::none();
         }
         // An explicit request retries even after the failure cap.
@@ -327,8 +340,8 @@ impl Nokkvi {
     }
 
     fn handle_milkdrop_previous(&mut self) -> Task<Message> {
-        if !self.milkdrop_mode_active() {
-            debug!("milkdrop: Previous Preset ignored outside MilkDrop mode");
+        if !self.milkdrop_is_running() {
+            debug!("milkdrop: Previous Preset ignored (MilkDrop not on screen and playing)");
             return Task::none();
         }
         // Skip presets hidden (or removed) since they were shown.
@@ -384,18 +397,32 @@ impl Nokkvi {
         self.milkdrop.build_in_flight = None;
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.consecutive_failures = self.milkdrop.consecutive_failures.saturating_add(1);
-        self.milkdrop_advance(AdvanceReason::Failure)
+        if self.milkdrop_is_running() {
+            self.milkdrop_advance(AdvanceReason::Failure)
+        } else {
+            // Nobody would see a retry; the tick loads one once running.
+            if self.milkdrop.consecutive_failures >= MILKDROP_MAX_CONSECUTIVE_FAILURES {
+                self.milkdrop_give_up();
+            }
+            self.milkdrop.current = None;
+            Task::none()
+        }
+    }
+
+    /// Stop auto-advancing after too many failures; warns exactly once.
+    fn milkdrop_give_up(&mut self) {
+        if self.milkdrop.consecutive_failures == MILKDROP_MAX_CONSECUTIVE_FAILURES {
+            self.toast_warn("MilkDrop: no preset could be built; check nokkvi.log");
+        }
+        self.milkdrop.current = None;
+        self.milkdrop.next_switch_at = None;
     }
 
     /// Pick the next preset and load it, unless too many builds failed in a
     /// row or nothing is eligible (each warns once).
     pub(crate) fn milkdrop_advance(&mut self, reason: AdvanceReason) -> Task<Message> {
         if self.milkdrop.consecutive_failures >= MILKDROP_MAX_CONSECUTIVE_FAILURES {
-            if self.milkdrop.consecutive_failures == MILKDROP_MAX_CONSECUTIVE_FAILURES {
-                self.toast_warn("MilkDrop: no preset could be built; check nokkvi.log");
-            }
-            self.milkdrop.current = None;
-            self.milkdrop.next_switch_at = None;
+            self.milkdrop_give_up();
             return Task::none();
         }
         let current = self.milkdrop.current.clone();
@@ -409,8 +436,11 @@ impl Nokkvi {
             return Task::none();
         };
         debug!(?reason, preset = %next, "milkdrop: next preset");
+        // History records only presets that reached the screen.
+        let current_was_shown = self.milkdrop.announced_generation == self.milkdrop.generation;
         if let Some(previous) = current
             && reason != AdvanceReason::Failure
+            && current_was_shown
         {
             self.milkdrop.history.push(previous);
             if self.milkdrop.history.len() > MILKDROP_HISTORY_CAP {
@@ -441,10 +471,33 @@ impl Nokkvi {
             .running
             .store(running, Ordering::Release);
 
-        // `prepare` dropped the renderer after a GPU error: load another.
+        // `prepare` dropped the renderer after a GPU error: a failure like any
+        // other (so a device that fails every preset stops at the cap).
         if self.milkdrop.shared.slot_lost.swap(false, Ordering::AcqRel) {
-            self.milkdrop.current = None;
             self.milkdrop.build_in_flight = None;
+            self.milkdrop.consecutive_failures =
+                self.milkdrop.consecutive_failures.saturating_add(1);
+            if self.milkdrop.consecutive_failures >= MILKDROP_MAX_CONSECUTIVE_FAILURES {
+                self.milkdrop_give_up();
+            }
+            self.milkdrop.current = None;
+        }
+
+        // The current load reached the screen: announce it once, and only now
+        // count the preset as working.
+        let shown = self
+            .milkdrop
+            .shared
+            .shown_generation
+            .load(Ordering::Acquire);
+        if shown == self.milkdrop.generation && shown != self.milkdrop.announced_generation {
+            self.milkdrop.announced_generation = shown;
+            self.milkdrop.consecutive_failures = 0;
+            self.milkdrop.empty_warned = false;
+            if let Some(name) = self.milkdrop.current.clone() {
+                info!(preset = %name, "milkdrop: preset on screen");
+                self.toast_info(name);
+            }
         }
 
         // A new device (tray hide + show): everything built on the old one is
@@ -464,11 +517,11 @@ impl Nokkvi {
         let mut tasks = Vec::new();
         if let Some((generation, preset)) = self.milkdrop.awaiting_gpu.take() {
             match self.milkdrop.shared.gpu_handles() {
-                Some(gpu) if self.milkdrop.build_in_flight == Some(generation) => {
+                _ if self.milkdrop.build_in_flight != Some(generation) => {}
+                Some(gpu) if running => {
                     tasks.push(self.milkdrop_build_task(gpu, generation, preset));
                 }
-                Some(_) => {}
-                None => self.milkdrop.awaiting_gpu = Some((generation, preset)),
+                _ => self.milkdrop.awaiting_gpu = Some((generation, preset)),
             }
         }
 
@@ -479,7 +532,7 @@ impl Nokkvi {
             && self.milkdrop.consecutive_failures < MILKDROP_MAX_CONSECUTIVE_FAILURES
         {
             tasks.push(self.milkdrop_advance(AdvanceReason::Enter));
-        } else if self.milkdrop.build_in_flight.is_none() {
+        } else if self.milkdrop.build_in_flight.is_none() && self.milkdrop.current.is_some() {
             match self.milkdrop.next_switch_at {
                 None if !self.milkdrop.locked => self.milkdrop_arm_timer(),
                 None => {}

@@ -35,6 +35,9 @@ pub struct MilkdropState {
     pub awaiting_gpu: Option<(u64, Arc<CompiledPreset>)>,
     /// The GPU epoch the tick last saw; a change means the device was replaced.
     pub gpu_epoch_seen: u64,
+    /// The load generation whose name was last toasted (its first frame was
+    /// drawn); equals `generation` while the current preset is on screen.
+    pub announced_generation: u64,
     pub next_switch_at: Option<Instant>,
     pub consecutive_failures: u8,
     /// Set once the "nothing eligible" warning has shown, so the 100 ms tick
@@ -58,6 +61,7 @@ impl Default for MilkdropState {
             build_in_flight: None,
             awaiting_gpu: None,
             gpu_epoch_seen: 0,
+            announced_generation: 0,
             next_switch_at: None,
             consecutive_failures: 0,
             empty_warned: false,

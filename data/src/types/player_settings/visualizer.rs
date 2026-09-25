@@ -60,6 +60,20 @@ mod tests {
     }
 
     #[test]
+    fn milkdrop_round_trips_through_toml() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Row {
+            visualization_mode: VisualizationMode,
+        }
+        let row = Row {
+            visualization_mode: VisualizationMode::Milkdrop,
+        };
+        let text = toml::to_string(&row).unwrap();
+        assert_eq!(text.trim(), "visualization_mode = \"milkdrop\"");
+        assert_eq!(toml::from_str::<Row>(&text).unwrap(), row);
+    }
+
+    #[test]
     fn cycle_includes_milkdrop_after_scope() {
         let mut mode = VisualizationMode::Off;
         let mut seen = Vec::new();
