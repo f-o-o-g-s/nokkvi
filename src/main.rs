@@ -1447,7 +1447,9 @@ fn print_cli_help() {
     println!();
     println!("Commands:");
     println!("  ping             Probe the running instance over the IPC socket");
-    println!("  status           Print playback state, track, volume, and modes (JSON)");
+    println!(
+        "  status           Print playback state, track, volume, modes, and Theater Mode (JSON)"
+    );
     println!("  next             Skip to the next track in the queue");
     println!("  previous         Return to the previous track in the queue");
     println!("  play             Start playback");
@@ -1473,6 +1475,7 @@ fn print_cli_help() {
     println!("  love             Toggle star on the currently-playing track");
     println!("  rate <±N | 0-5>  Adjust playing track rating: delta (+1/-1) or 0..5");
     println!("  show             Reopen the window from the tray, or flag it when already open");
+    println!("  theater          Toggle Theater Mode (the now-playing layout, like F11)");
     println!();
     println!("Running `{name}` with no arguments while an instance is up forwards `show`");
     println!("to it and exits.");

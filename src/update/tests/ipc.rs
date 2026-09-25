@@ -252,7 +252,7 @@ fn status_returns_a_full_state_snapshot() {
     let data = resp.data.expect("status must carry data");
     for key in [
         "state", "title", "artist", "album", "position", "duration", "volume", "random", "repeat",
-        "consume",
+        "consume", "theater",
     ] {
         assert!(
             data.get(key).is_some(),
@@ -261,6 +261,57 @@ fn status_returns_a_full_state_snapshot() {
     }
     // status is a pure read — it must NOT mutate modes (consume stays off).
     assert_eq!(data.get("consume"), Some(&json!(false)));
+    assert_eq!(data.get("theater"), Some(&json!(false)));
+}
+
+// ----------------------------------------------------------------------------
+// theater — the same entry point as F11 (`Nokkvi::toggle_theater`)
+// ----------------------------------------------------------------------------
+
+fn home_app() -> Nokkvi {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app
+}
+
+#[test]
+fn theater_toggles_and_echoes_state() {
+    let mut app = home_app();
+    let first = drive_on(&mut app, "theater");
+    assert!(first.error.is_none());
+    assert_eq!(first.data, Some(json!({ "theater": true })));
+    assert!(app.theater.active);
+
+    let second = drive_on(&mut app, "theater");
+    assert_eq!(second.data, Some(json!({ "theater": false })));
+    assert!(!app.theater.active);
+}
+
+#[test]
+fn theater_is_never_silent_on_a_logged_in_window() {
+    let mut app = home_app();
+    let resp = drive_on(&mut app, "theater");
+    let data = resp.data.expect("theater must carry data");
+    assert!(!data.is_null());
+}
+
+#[test]
+fn theater_refuses_on_login_screen() {
+    let resp = drive("theater");
+    assert!(resp.data.is_none());
+    let err = resp.error.expect("login screen refuses theater");
+    assert_eq!(err.code, "unavailable");
+}
+
+#[test]
+fn status_reports_theater_mode() {
+    let mut app = home_app();
+    let _ = app.enter_theater();
+    let resp = drive_on(&mut app, "status");
+    assert_eq!(
+        resp.data.as_ref().and_then(|d| d.get("theater")),
+        Some(&json!(true))
+    );
 }
 
 // ----------------------------------------------------------------------------
@@ -403,6 +454,8 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         "selection",
         // Window
         "show",
+        // Layout
+        "theater",
     ]
     .into_iter()
     .collect();

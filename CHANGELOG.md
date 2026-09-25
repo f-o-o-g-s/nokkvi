@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
 - In Theater Mode an exit icon rides above the player bar.
 - A Theater Controls setting keeps Theater Mode's player bar auto-hiding, always shown, or always hidden.
 - A Theater Fills the Screen setting also makes the window fullscreen in Theater Mode and restores it on leaving.
+- `nokkvi theater` toggles Theater Mode from the command line.
+- `nokkvi status` now reports whether Theater Mode is on.
 
 ### Changed
 

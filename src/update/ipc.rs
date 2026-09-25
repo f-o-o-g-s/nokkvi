@@ -95,7 +95,8 @@
 //! |---------------|-----------|------------------------------------------------|
 //! | `ping`        | respond   | `"pong"` (bare string).                        |
 //! | `status`      | act       | `{state,title,artist,album,position,duration,` |
-//! |               |           | `volume,random,repeat,consume}` — pure read.   |
+//! |               |           | `volume,random,repeat,consume,theater}` — pure |
+//! |               |           | read.                                          |
 //! | `next`        | dispatch  | `{"ok":true}`; `NextTrack` (new track async).  |
 //! | `previous`    | dispatch  | `{"ok":true}`; `PrevTrack` (new track async).  |
 //! | `play`        | act       | `{"state":…}`; calls `handle_play`.            |
@@ -142,6 +143,8 @@
 //! | `show`        | act       | `{"window":"opened"\|"already-open"\|"opening"}`;|
 //! |               |           | reopen from the tray, flag an open window, or  |
 //! |               |           | no-op while one is opening (`show_window`).    |
+//! | `theater`     | act       | `{"theater":bool}`; toggle Theater Mode (the   |
+//! |               |           | F11 entry point). `unavailable` on Login.      |
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
@@ -591,6 +594,14 @@ define_commands! {
         let (task, outcome) = app.show_window();
         Ok((task, json!({ "window": outcome.as_str() })))
     });
+    // Layout: the same entry point F11, the corner icon and the panel menu use.
+    "theater"     => act      (|app: &mut Nokkvi| {
+        if app.screen != crate::Screen::Home {
+            return Err(("unavailable", "theater mode needs a logged-in window".to_string()));
+        }
+        let task = app.toggle_theater();
+        Ok((task, json!({ "theater": app.theater.active })))
+    });
 }
 
 /// Shared guard for the queue-sync verbs: the server must advertise the
@@ -696,6 +707,7 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "random": app.modes.random,
         "repeat": repeat_str(&app.modes),
         "consume": app.modes.consume,
+        "theater": app.theater.active,
     })
 }
 

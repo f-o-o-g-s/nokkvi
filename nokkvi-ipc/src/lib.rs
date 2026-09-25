@@ -57,7 +57,8 @@
 //!   playing track), `queue-push` / `queue-pull` (server queue sync via the
 //!   OpenSubsonic indexBasedQueue extension; capability- and radio-gated),
 //!   `show` (reopen the window from the tray, or flag an open one; a bare
-//!   second `nokkvi` launch forwards it).
+//!   second `nokkvi` launch forwards it), `theater` (toggle Theater Mode;
+//!   `status` reports it as `theater`).
 //!
 //! The full per-verb dispatch catalog lives in `src/update/ipc.rs`.
 
