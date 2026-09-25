@@ -95,7 +95,8 @@
 //! |---------------|-----------|------------------------------------------------|
 //! | `ping`        | respond   | `"pong"` (bare string).                        |
 //! | `status`      | act       | `{state,title,artist,album,position,duration,` |
-//! |               |           | `volume,random,repeat,consume,theater}` — pure |
+//! |               |           | `volume,random,repeat,consume,theater,`        |
+//! |               |           | `visualizer,preset}` — pure                     |
 //! |               |           | read.                                          |
 //! | `next`        | dispatch  | `{"ok":true}`; `NextTrack` (new track async).  |
 //! | `previous`    | dispatch  | `{"ok":true}`; `PrevTrack` (new track async).  |
@@ -146,6 +147,13 @@
 //! | `theater`     | act       | `{"theater":bool}`; toggle Theater Mode (the   |
 //! |               |           | F11 entry point). `unavailable` on Login or    |
 //! |               |           | while the window is closed to the tray.        |
+//! | `preset`      | act_str   | `{"preset":name\|null,"locked":bool}`; arg     |
+//! |               |           | `action`: `next`/`previous`/`lock`/`unlock`/   |
+//! |               |           | `favorite`/`unfavorite`/`hide` (MilkDrop).     |
+//! |               |           | `unavailable` on Login, outside MilkDrop mode, |
+//! |               |           | when not playing on screen (next/previous) or  |
+//! |               |           | with no preset on screen; bad word →           |
+//! |               |           | `invalid_args`.                                |
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
@@ -607,6 +615,22 @@ define_commands! {
         let task = app.toggle_theater();
         Ok((task, json!({ "theater": app.theater.active })))
     });
+    // Visualizer: the MilkDrop preset controls the keys and panel menus use.
+    "preset"      => act_str ("action", |app: &mut Nokkvi, raw: &str| {
+        if app.screen != crate::Screen::Home {
+            return Err(("unavailable", "preset controls need a logged-in window".to_string()));
+        }
+        let action = crate::update::milkdrop::PresetAction::parse(raw).ok_or_else(|| {
+            (
+                "invalid_args",
+                format!(
+                    "unknown preset action `{raw}`; expected one of: {}",
+                    crate::update::milkdrop::PresetAction::WORDS.join(", ")
+                ),
+            )
+        })?;
+        app.milkdrop_ipc_control(action)
+    });
 }
 
 /// Shared guard for the queue-sync verbs: the server must advertise the
@@ -713,6 +737,8 @@ fn status_json(app: &Nokkvi) -> serde_json::Value {
         "repeat": repeat_str(&app.modes),
         "consume": app.modes.consume,
         "theater": app.theater.active,
+        "visualizer": app.engine.visualization_mode.to_string(),
+        "preset": app.milkdrop.on_screen,
     })
 }
 

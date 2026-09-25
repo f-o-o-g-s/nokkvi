@@ -251,8 +251,19 @@ fn status_returns_a_full_state_snapshot() {
     assert!(resp.error.is_none());
     let data = resp.data.expect("status must carry data");
     for key in [
-        "state", "title", "artist", "album", "position", "duration", "volume", "random", "repeat",
-        "consume", "theater",
+        "state",
+        "title",
+        "artist",
+        "album",
+        "position",
+        "duration",
+        "volume",
+        "random",
+        "repeat",
+        "consume",
+        "theater",
+        "visualizer",
+        "preset",
     ] {
         assert!(
             data.get(key).is_some(),
@@ -262,6 +273,8 @@ fn status_returns_a_full_state_snapshot() {
     // status is a pure read — it must NOT mutate modes (consume stays off).
     assert_eq!(data.get("consume"), Some(&json!(false)));
     assert_eq!(data.get("theater"), Some(&json!(false)));
+    assert_eq!(data.get("visualizer"), Some(&json!("bars")));
+    assert_eq!(data.get("preset"), Some(&serde_json::Value::Null));
 }
 
 // ----------------------------------------------------------------------------
@@ -467,6 +480,8 @@ fn known_commands_lists_the_documented_phase0_through_phase2_set() {
         "show",
         // Layout
         "theater",
+        // Visualizer
+        "preset",
     ]
     .into_iter()
     .collect();
@@ -503,6 +518,7 @@ fn cli_args_const_lists_every_arg_taking_verb() {
         ("volume", "value"),
         ("switch-view", "view"),
         ("rate", "delta"),
+        ("preset", "action"),
     ]
     .into_iter()
     .collect();
@@ -1040,4 +1056,106 @@ fn queue_push_with_capability_and_songs_dispatches() {
         resp.data,
         Some(json!({ "dispatched": "push", "tracks": 2 }))
     );
+}
+
+// ----------------------------------------------------------------------------
+// preset — MilkDrop preset controls (the same handler as the keys and menus)
+// ----------------------------------------------------------------------------
+
+fn drive_on_with_args(app: &mut Nokkvi, command: &str, args: serde_json::Value) -> IpcResponse {
+    let (incoming, rx) = make_incoming_with_args(command, args);
+    drop(app.update(Message::Ipc(Box::new(incoming))));
+    rx.blocking_recv()
+        .unwrap_or_else(|_| panic!("responder must fire for {command} command"))
+}
+
+/// A logged-in, playing window with MilkDrop on screen showing a bundled preset.
+fn milkdrop_app() -> Nokkvi {
+    use crate::widgets::visualizer::milkdrop::BUNDLED_MILKDROP_PRESETS;
+    let mut app = home_app();
+    app.current_view = crate::View::Queue;
+    app.engine.visualization_mode =
+        nokkvi_data::types::player_settings::VisualizationMode::Milkdrop;
+    app.playback.playing = true;
+    app.milkdrop.library = nokkvi_data::services::milkdrop_presets::PresetLibrary::new(
+        BUNDLED_MILKDROP_PRESETS,
+        std::path::Path::new("/nonexistent/nokkvi-ipc-tests"),
+        nokkvi_data::services::milkdrop_presets::Curation::default(),
+    );
+    app.milkdrop.shared.mark_mounted();
+    let (name, _) = BUNDLED_MILKDROP_PRESETS[0];
+    app.milkdrop.current = Some(name.to_string());
+    app.milkdrop.on_screen = Some(name.to_string());
+    app
+}
+
+#[test]
+fn preset_every_subcommand_answers_in_milkdrop_mode() {
+    for action in [
+        "next",
+        "previous",
+        "lock",
+        "unlock",
+        "favorite",
+        "unfavorite",
+        "hide",
+    ] {
+        let mut app = milkdrop_app();
+        let resp = drive_on_with_args(&mut app, "preset", json!({ "action": action }));
+        let data = resp
+            .data
+            .unwrap_or_else(|| panic!("`preset {action}` must answer: {:?}", resp.error));
+        assert!(data.get("preset").is_some(), "`preset {action}`: {data}");
+        assert!(data.get("locked").is_some(), "`preset {action}`: {data}");
+    }
+}
+
+#[test]
+fn preset_lock_and_favorite_are_explicit_not_toggles() {
+    let mut app = milkdrop_app();
+    let name = app.milkdrop.on_screen.clone().expect("seeded");
+    for _ in 0..2 {
+        let resp = drive_on_with_args(&mut app, "preset", json!({ "action": "lock" }));
+        assert_eq!(
+            resp.data.and_then(|d| d.get("locked").cloned()),
+            Some(json!(true))
+        );
+        let _ = drive_on_with_args(&mut app, "preset", json!({ "action": "favorite" }));
+        assert!(app.milkdrop.library.is_favorite(&name));
+    }
+    let _ = drive_on_with_args(&mut app, "preset", json!({ "action": "unlock" }));
+    assert!(!app.milkdrop.locked);
+    let _ = drive_on_with_args(&mut app, "preset", json!({ "action": "unfavorite" }));
+    assert!(!app.milkdrop.library.is_favorite(&name));
+}
+
+#[test]
+fn preset_refuses_on_login_and_outside_milkdrop_mode() {
+    let resp = drive_with_args("preset", json!({ "action": "next" }));
+    assert_eq!(resp.error.expect("login refuses").code, "unavailable");
+
+    let mut app = home_app();
+    let resp = drive_on_with_args(&mut app, "preset", json!({ "action": "next" }));
+    let err = resp.error.expect("Bars mode refuses");
+    assert_eq!(err.code, "unavailable");
+    assert!(err.message.contains("MilkDrop"), "{}", err.message);
+}
+
+#[test]
+fn preset_rejects_an_unknown_action_listing_the_words() {
+    let mut app = milkdrop_app();
+    let resp = drive_on_with_args(&mut app, "preset", json!({ "action": "sideways" }));
+    let err = resp.error.expect("unknown word refused");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("unfavorite"), "{}", err.message);
+}
+
+#[test]
+fn status_reports_the_milkdrop_preset() {
+    let mut app = milkdrop_app();
+    let name = app.milkdrop.on_screen.clone();
+    let resp = drive_on(&mut app, "status");
+    let data = resp.data.expect("status data");
+    assert_eq!(data.get("visualizer"), Some(&json!("milkdrop")));
+    assert_eq!(data.get("preset"), Some(&json!(name)));
 }

@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - A Theater Fills the Screen setting also makes the window fullscreen in Theater Mode and restores it on leaving.
 - `nokkvi theater` toggles Theater Mode from the command line.
 - `nokkvi status` now reports whether Theater Mode is on.
+- `nokkvi preset next` (or previous, lock, unlock, favorite, unfavorite, hide) controls MilkDrop presets from the command line.
+- `nokkvi status` now reports the visualizer mode and the MilkDrop preset on screen.
 - A MilkDrop visualizer mode plays MilkDrop presets in place of the Queue cover and fills Theater Mode.
 - The visualizer button and `v` now cycle Off, Bars, Lines, Scope and MilkDrop.
 - MilkDrop switches to another preset every 30 seconds and on each new track, showing the preset's name.

@@ -43,6 +43,44 @@ pub(crate) fn milkdrop_running(
         && panel_visible
 }
 
+/// The `preset` CLI verb's actions. Lock and favorite are explicit (not
+/// toggles) so a script's result never depends on the current state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PresetAction {
+    Next,
+    Previous,
+    Lock,
+    Unlock,
+    Favorite,
+    Unfavorite,
+    Hide,
+}
+
+impl PresetAction {
+    pub(crate) const WORDS: &[&str] = &[
+        "next",
+        "previous",
+        "lock",
+        "unlock",
+        "favorite",
+        "unfavorite",
+        "hide",
+    ];
+
+    pub(crate) fn parse(word: &str) -> Option<Self> {
+        Some(match word.trim() {
+            "next" => Self::Next,
+            "previous" => Self::Previous,
+            "lock" => Self::Lock,
+            "unlock" => Self::Unlock,
+            "favorite" => Self::Favorite,
+            "unfavorite" => Self::Unfavorite,
+            "hide" => Self::Hide,
+            _ => return None,
+        })
+    }
+}
+
 /// Why a new preset is being picked (logged).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AdvanceReason {
@@ -464,6 +502,59 @@ impl Nokkvi {
                 "milkdrop: rescanned the user preset folder"
             );
         }
+    }
+
+    /// The `preset` CLI verb: the same handlers as the keys and menus, but
+    /// every refusal is an error the caller sees, never a silent no-op.
+    pub(crate) fn milkdrop_ipc_control(
+        &mut self,
+        action: PresetAction,
+    ) -> Result<(Task<Message>, serde_json::Value), (&'static str, String)> {
+        if !self.milkdrop_mode_active() {
+            return Err((
+                "unavailable",
+                "the visualizer is not in MilkDrop mode".to_string(),
+            ));
+        }
+        let needs_on_screen = matches!(
+            action,
+            PresetAction::Favorite | PresetAction::Unfavorite | PresetAction::Hide
+        );
+        if needs_on_screen && self.milkdrop.on_screen.is_none() {
+            return Err(("unavailable", "no MilkDrop preset is on screen".to_string()));
+        }
+        let needs_running = matches!(action, PresetAction::Next | PresetAction::Previous);
+        if needs_running && !self.milkdrop_is_running() {
+            return Err((
+                "unavailable",
+                "MilkDrop is not playing on screen".to_string(),
+            ));
+        }
+        let is_favorite = self
+            .milkdrop
+            .on_screen
+            .as_deref()
+            .is_some_and(|name| self.milkdrop.library.is_favorite(name));
+        let task = match action {
+            PresetAction::Next => self.handle_milkdrop_next(),
+            PresetAction::Previous => self.handle_milkdrop_previous(),
+            PresetAction::Lock if !self.milkdrop.locked => self.handle_milkdrop_toggle_lock(),
+            PresetAction::Unlock if self.milkdrop.locked => self.handle_milkdrop_toggle_lock(),
+            PresetAction::Favorite if !is_favorite => self.handle_milkdrop_toggle_favorite(),
+            PresetAction::Unfavorite if is_favorite => self.handle_milkdrop_toggle_favorite(),
+            PresetAction::Hide => self.handle_milkdrop_hide(),
+            PresetAction::Lock
+            | PresetAction::Unlock
+            | PresetAction::Favorite
+            | PresetAction::Unfavorite => Task::none(),
+        };
+        Ok((
+            task,
+            serde_json::json!({
+                "preset": self.milkdrop.current,
+                "locked": self.milkdrop.locked,
+            }),
+        ))
     }
 
     /// Hook for a new track: switch presets when that setting is on.

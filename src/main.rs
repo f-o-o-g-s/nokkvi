@@ -1480,6 +1480,8 @@ fn print_cli_help() {
     println!("  rate <±N | 0-5>  Adjust playing track rating: delta (+1/-1) or 0..5");
     println!("  show             Reopen the window from the tray, or flag it when already open");
     println!("  theater          Toggle Theater Mode (the now-playing layout, like F11)");
+    println!("  preset <action>  MilkDrop: next, previous, lock, unlock, favorite,");
+    println!("                   unfavorite or hide (MilkDrop visualizer mode only)");
     println!();
     println!("Running `{name}` with no arguments while an instance is up forwards `show`");
     println!("to it and exits.");
