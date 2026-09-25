@@ -781,6 +781,9 @@ impl Nokkvi {
                     tasks.push(task);
                 }
 
+                // MilkDrop: each new track brings a new preset.
+                tasks.push(self.milkdrop_on_track_change());
+
                 // Lyrics: promote the prefetched next-track doc into
                 // place synchronously (no blank gap on sequential/gapless
                 // transitions), else clear and — only while the Queue view is

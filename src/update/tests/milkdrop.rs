@@ -270,3 +270,184 @@ fn a_release_never_covers_a_later_load() {
         "a release no frame has enforced yet must not drop the new load"
     );
 }
+
+// ----------------------------------------------------------------------------
+// Switching: keys, timer, track change
+// ----------------------------------------------------------------------------
+
+fn press(app: &mut Nokkvi, c: &str, modifiers: iced::keyboard::Modifiers) {
+    let _ = app.handle_raw_key_event(
+        iced::keyboard::Key::Character(c.into()),
+        modifiers,
+        iced::event::Status::Ignored,
+    );
+}
+
+fn press_plain(app: &mut Nokkvi, c: &str) {
+    press(app, c, iced::keyboard::Modifiers::default());
+}
+
+/// Enter MilkDrop and land the first build, which arms the timer.
+fn on_screen(app: &mut Nokkvi) {
+    enter_milkdrop(app);
+    let generation = app.milkdrop.generation;
+    built(app, generation, Ok(()));
+    assert!(app.milkdrop.build_in_flight.is_none());
+}
+
+fn past() -> std::time::Instant {
+    std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(1))
+        .expect("monotonic clock is past boot")
+}
+
+#[test]
+fn next_key_advances_and_previous_returns() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let first = app.milkdrop.current.clone().expect("a preset");
+
+    press_plain(&mut app, "n");
+    let second = app.milkdrop.current.clone().expect("a preset");
+    assert_ne!(second, first);
+    assert_eq!(app.milkdrop.history, std::slice::from_ref(&first));
+
+    press_plain(&mut app, "p");
+    assert_eq!(app.milkdrop.current.as_deref(), Some(first.as_str()));
+    assert!(app.milkdrop.history.is_empty());
+}
+
+#[test]
+fn preset_keys_are_inert_outside_milkdrop_mode() {
+    let mut app = md_app();
+    app.engine.visualization_mode = VisualizationMode::Bars;
+    let toasts = app.toast.toasts.len();
+    press_plain(&mut app, "n");
+    press_plain(&mut app, "p");
+    press(&mut app, "m", iced::keyboard::Modifiers::SHIFT);
+    assert_eq!(app.milkdrop.current, None);
+    assert_eq!(app.milkdrop.generation, 0);
+    assert!(!app.milkdrop.locked);
+    assert_eq!(app.toast.toasts.len(), toasts);
+}
+
+#[test]
+fn lock_clears_the_timer_and_unlock_rearms() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    assert!(
+        app.milkdrop.next_switch_at.is_some(),
+        "the first build arms the timer"
+    );
+
+    press(&mut app, "m", iced::keyboard::Modifiers::SHIFT);
+    assert!(app.milkdrop.locked);
+    assert_eq!(app.milkdrop.next_switch_at, None);
+    tick(&mut app);
+    assert_eq!(
+        app.milkdrop.next_switch_at, None,
+        "a locked preset never arms"
+    );
+
+    press(&mut app, "m", iced::keyboard::Modifiers::SHIFT);
+    assert!(!app.milkdrop.locked);
+    assert!(app.milkdrop.next_switch_at.is_some());
+}
+
+#[test]
+fn timer_advances_only_while_running() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let first = app.milkdrop.current.clone();
+
+    app.playback.paused = true;
+    app.milkdrop.next_switch_at = Some(past());
+    tick(&mut app);
+    assert_eq!(app.milkdrop.current, first, "paused: no switch");
+
+    app.playback.paused = false;
+    app.milkdrop.next_switch_at = Some(past());
+    tick(&mut app);
+    let second = app.milkdrop.current.clone();
+    assert_ne!(second, first, "playing: one switch");
+    assert!(app.milkdrop.build_in_flight.is_some());
+    assert_eq!(
+        app.milkdrop.next_switch_at, None,
+        "disarmed until the build lands"
+    );
+
+    let generation = app.milkdrop.generation;
+    tick(&mut app);
+    assert_eq!(
+        app.milkdrop.current, second,
+        "no re-fire while the build is pending"
+    );
+    assert_eq!(app.milkdrop.generation, generation);
+
+    built(&mut app, generation, Ok(()));
+    assert!(
+        app.milkdrop.next_switch_at.is_some(),
+        "the landed build re-arms"
+    );
+}
+
+#[test]
+fn timer_is_idle_off_the_panel() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let first = app.milkdrop.current.clone();
+    app.current_view = View::Albums;
+    app.milkdrop.next_switch_at = Some(past());
+    let toasts = app.toast.toasts.len();
+    tick(&mut app);
+    assert_eq!(app.milkdrop.current, first);
+    assert_eq!(app.toast.toasts.len(), toasts);
+}
+
+#[test]
+fn track_change_switches_presets() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    let start = app.milkdrop.generation;
+
+    let mut update = super::playback::make_playback_update();
+    update.song_id = Some("song_a".to_string());
+    let _ = app.handle_playback_state_updated(update.clone());
+    update.song_id = Some("song_b".to_string());
+    let _ = app.handle_playback_state_updated(update.clone());
+    assert_eq!(
+        app.milkdrop.generation,
+        start + 2,
+        "one switch per new track"
+    );
+
+    let _ = app.handle_playback_state_updated(update);
+    assert_eq!(
+        app.milkdrop.generation,
+        start + 2,
+        "the same track switches nothing"
+    );
+}
+
+#[test]
+fn stopped_clears_the_timer() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    assert!(app.milkdrop.next_switch_at.is_some());
+    let _ = app.update(Message::Playback(PlaybackMessage::Stop));
+    assert_eq!(app.milkdrop.next_switch_at, None);
+}
+
+#[test]
+fn theater_policy_passes_preset_keys() {
+    use nokkvi_data::types::hotkey_config::HotkeyAction as A;
+
+    use crate::update::theater::{TheaterKeyPolicy, theater_key_policy};
+    for action in [
+        A::NextVisualizerPreset,
+        A::PreviousVisualizerPreset,
+        A::ToggleVisualizerPresetLock,
+    ] {
+        assert_eq!(theater_key_policy(action), TheaterKeyPolicy::Passthrough);
+    }
+}

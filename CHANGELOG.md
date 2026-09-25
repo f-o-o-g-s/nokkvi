@@ -22,6 +22,9 @@ All notable changes to this project will be documented in this file.
 - `nokkvi status` now reports whether Theater Mode is on.
 - A MilkDrop visualizer mode plays MilkDrop presets in place of the Queue cover and fills Theater Mode.
 - The visualizer button and `v` now cycle Off, Bars, Lines, Scope and MilkDrop.
+- MilkDrop switches to another preset every 30 seconds and on each new track, showing the preset's name.
+- In MilkDrop mode, `n` jumps to another preset and `p` returns to the previous one.
+- In MilkDrop mode, Shift+M locks the current preset until pressed again.
 
 ### Changed
 

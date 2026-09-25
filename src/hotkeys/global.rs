@@ -135,6 +135,15 @@ pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::ToggleConsume => Message::Playback(PlaybackMessage::ToggleConsume),
         HotkeyAction::ToggleSoundEffects => Message::Playback(PlaybackMessage::ToggleSoundEffects),
         HotkeyAction::CycleVisualization => Message::Playback(PlaybackMessage::CycleVisualization),
+        HotkeyAction::NextVisualizerPreset => {
+            Message::Milkdrop(crate::app_message::MilkdropMessage::NextPreset)
+        }
+        HotkeyAction::PreviousVisualizerPreset => {
+            Message::Milkdrop(crate::app_message::MilkdropMessage::PreviousPreset)
+        }
+        HotkeyAction::ToggleVisualizerPresetLock => {
+            Message::Milkdrop(crate::app_message::MilkdropMessage::ToggleLock)
+        }
         HotkeyAction::ToggleEqModal => Message::EqModal(crate::widgets::EqModalMessage::Toggle),
         HotkeyAction::OpenTrawl => {
             Message::TrawlModal(crate::widgets::trawl_modal::TrawlModalMessage::Open)

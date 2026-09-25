@@ -988,6 +988,12 @@ pub enum MilkdropMessage {
         generation: u64,
         result: Result<(), String>,
     },
+    /// Jump to another preset (the `n` key).
+    NextPreset,
+    /// Go back to the preset before this one (the `p` key).
+    PreviousPreset,
+    /// Keep the current preset until unlocked (Shift+M).
+    ToggleLock,
 }
 
 #[derive(Debug, Clone)]

@@ -50,7 +50,17 @@ pub(crate) enum AdvanceReason {
     Enter,
     /// The previous build failed.
     Failure,
+    /// The switch interval elapsed.
+    Timer,
+    /// A new track started.
+    TrackChange,
+    /// The Next Preset key.
+    Manual,
 }
+
+/// Seconds between automatic preset changes; 0 keeps the current one.
+/// (The MilkDrop settings section makes this configurable.)
+pub(crate) const MILKDROP_DEFAULT_INTERVAL_SECS: u64 = 30;
 
 impl Nokkvi {
     fn milkdrop_mode_active(&self) -> bool {
@@ -59,6 +69,35 @@ impl Nokkvi {
 
     fn milkdrop_panel_visible(&self) -> bool {
         self.theater.active || matches!(self.current_view, View::Queue | View::Radios)
+    }
+
+    /// Whether MilkDrop should animate right now (see [`milkdrop_running`]).
+    pub(crate) fn milkdrop_is_running(&self) -> bool {
+        milkdrop_running(
+            self.engine.visualization_mode,
+            self.playback.playing,
+            self.playback.paused,
+            self.screen,
+            self.milkdrop_panel_visible(),
+        )
+    }
+
+    fn milkdrop_interval(&self) -> Option<std::time::Duration> {
+        (MILKDROP_DEFAULT_INTERVAL_SECS > 0)
+            .then(|| std::time::Duration::from_secs(MILKDROP_DEFAULT_INTERVAL_SECS))
+    }
+
+    fn milkdrop_switch_on_track_change(&self) -> bool {
+        true
+    }
+
+    /// Arm the switch timer from now, unless locked or the interval is 0.
+    fn milkdrop_arm_timer(&mut self) {
+        self.milkdrop.next_switch_at = if self.milkdrop.locked {
+            None
+        } else {
+            self.milkdrop_interval().map(|d| Instant::now() + d)
+        };
     }
 
     fn milkdrop_set_generation(&mut self, generation: u64) {
@@ -77,6 +116,9 @@ impl Nokkvi {
             MilkdropMessage::Built { generation, result } => {
                 self.handle_milkdrop_built(generation, result)
             }
+            MilkdropMessage::NextPreset => self.handle_milkdrop_next(),
+            MilkdropMessage::PreviousPreset => self.handle_milkdrop_previous(),
+            MilkdropMessage::ToggleLock => self.handle_milkdrop_toggle_lock(),
         }
     }
 
@@ -263,12 +305,74 @@ impl Nokkvi {
                 self.milkdrop.build_in_flight = None;
                 self.milkdrop.consecutive_failures = 0;
                 self.milkdrop.empty_warned = false;
+                self.milkdrop_arm_timer();
                 if let Some(name) = self.milkdrop.current.clone() {
                     info!(preset = %name, "milkdrop: preset on screen");
                     self.toast_info(name);
                 }
                 Task::none()
             }
+        }
+    }
+
+    fn handle_milkdrop_next(&mut self) -> Task<Message> {
+        if !self.milkdrop_mode_active() {
+            debug!("milkdrop: Next Preset ignored outside MilkDrop mode");
+            return Task::none();
+        }
+        // An explicit request retries even after the failure cap.
+        self.milkdrop.consecutive_failures = 0;
+        self.milkdrop.next_switch_at = None;
+        self.milkdrop_advance(AdvanceReason::Manual)
+    }
+
+    fn handle_milkdrop_previous(&mut self) -> Task<Message> {
+        if !self.milkdrop_mode_active() {
+            debug!("milkdrop: Previous Preset ignored outside MilkDrop mode");
+            return Task::none();
+        }
+        // Skip presets hidden (or removed) since they were shown.
+        while let Some(previous) = self.milkdrop.history.pop() {
+            if self.milkdrop.library.source(&previous).is_some()
+                && !self.milkdrop.library.is_hidden(&previous)
+            {
+                self.milkdrop.consecutive_failures = 0;
+                self.milkdrop.next_switch_at = None;
+                return self.milkdrop_load(previous);
+            }
+        }
+        Task::none()
+    }
+
+    fn handle_milkdrop_toggle_lock(&mut self) -> Task<Message> {
+        if !self.milkdrop_mode_active() {
+            debug!("milkdrop: Lock Preset ignored outside MilkDrop mode");
+            return Task::none();
+        }
+        self.milkdrop.locked = !self.milkdrop.locked;
+        if self.milkdrop.locked {
+            self.milkdrop.next_switch_at = None;
+            self.toast_info("MilkDrop: preset locked");
+        } else {
+            if self.milkdrop.build_in_flight.is_none() {
+                self.milkdrop_arm_timer();
+            }
+            self.toast_info("MilkDrop: preset unlocked");
+        }
+        Task::none()
+    }
+
+    /// Hook for a new track: switch presets when that setting is on.
+    pub(crate) fn milkdrop_on_track_change(&mut self) -> Task<Message> {
+        if self.milkdrop_is_running()
+            && self.milkdrop_switch_on_track_change()
+            && !self.milkdrop.locked
+            && self.milkdrop.current.is_some()
+        {
+            self.milkdrop.next_switch_at = None;
+            self.milkdrop_advance(AdvanceReason::TrackChange)
+        } else {
+            Task::none()
         }
     }
 
@@ -331,13 +435,7 @@ impl Nokkvi {
             return Task::none();
         }
 
-        let running = milkdrop_running(
-            self.engine.visualization_mode,
-            self.playback.playing,
-            self.playback.paused,
-            self.screen,
-            self.milkdrop_panel_visible(),
-        );
+        let running = self.milkdrop_is_running();
         self.milkdrop
             .shared
             .running
@@ -381,6 +479,18 @@ impl Nokkvi {
             && self.milkdrop.consecutive_failures < MILKDROP_MAX_CONSECUTIVE_FAILURES
         {
             tasks.push(self.milkdrop_advance(AdvanceReason::Enter));
+        } else if self.milkdrop.build_in_flight.is_none() {
+            match self.milkdrop.next_switch_at {
+                None if !self.milkdrop.locked => self.milkdrop_arm_timer(),
+                None => {}
+                Some(at) if Instant::now() >= at => {
+                    // Disarm first: re-firing every tick until the build lands
+                    // would bump the generation each time and starve it.
+                    self.milkdrop.next_switch_at = None;
+                    tasks.push(self.milkdrop_advance(AdvanceReason::Timer));
+                }
+                Some(_) => {}
+            }
         }
         Task::batch(tasks)
     }
