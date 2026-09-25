@@ -502,11 +502,6 @@ presets["nokkvi - cover orb"] = preset(
 # feedback so every star leaves a motion trail that zooms outward (longer at
 # speed); each star is tied to a frequency and flares with it; kicks surge
 # the speed. (A screen-space nebula read as a smudge on the lens; removed.)
-# A gas giant drifts past in the foreground (faster when the ship surges),
-# banded from the theme's gradient, lit by a fixed sun with a night side and
-# an atmosphere rim that breathes with the bass; most carry a tilted ring
-# whose far half hides behind the planet. When one leaves the screen the next
-# rolls new size, height, ring, tilt and bands.
 STAR_LAYERS = 6
 def star_layer(l):
     return f"""
@@ -563,55 +558,16 @@ presets["nokkvi - starfield"] = preset(
   col += texture(sampler_main, uv).xyz + GetBlur1(uv) * 0.2;
   col += NOKKVI_ACCENT * exp(-length(p) * 6.0) * (0.08 + 0.45 * q3);
   col += NOKKVI_WARM * exp(-length(p) * 14.0) * q3 * 0.35;
-  vec2 pd = p - vec2(q12, q13);
-  float pr = q14;
-  float pl = length(pd);
-  vec3 pn = vec3(pd.x, pd.y, sqrt(max(pr * pr - pl * pl, 0.0))) / pr;
-  vec3 sun = normalize(vec3(0.6, 0.45, 0.55));
-  float lam = max(dot(pn, sun), 0.0);
-  float lat = asin(clamp(pn.y, -1.0, 1.0));
-  float lon = atan(pn.x, pn.z) + q18;
-  float pb1 = texture(sampler_noise_hq, vec2(lon * 0.08 + q17, lat * 0.9 + q17 * 0.3)).x;
-  float pb2 = texture(sampler_noise_hq, vec2(lon * 0.25 + q18 * 0.3, lat * 2.5)).x;
-  float bandv = clamp(pb1 * 0.7 + pb2 * 0.3, 0.0, 1.0);
-""" + ramp("pcol", "bandv") + """
-  vec3 planet = pcol * (0.08 + 0.95 * lam) + NOKKVI_TEXT * pow(lam, 8.0) * 0.15;
-  float atmo = pow(1.0 - pn.z, 4.0);
-  planet += NOKKVI_HIGHLIGHT * atmo * (0.3 + 0.3 * q3) * (0.3 + 0.7 * lam);
-  float pmask = smoothstep(pr, pr - 0.003, pl);
-  col = mix(col, planet, pmask);
-  col += NOKKVI_HIGHLIGHT * smoothstep(pr * 1.25, pr, pl) * step(pr, pl) * (0.08 + 0.08 * q3);
-  vec2 rc = vec2(pd.x, pd.y / q16);
-  float rr = length(rc) / pr;
-  float ringband = texture(sampler_noise_hq, vec2(rr * 0.35 + q17, 0.5)).x;
-  float ringm = smoothstep(1.35, 1.45, rr) * smoothstep(2.3, 2.1, rr) * q15;
-  ringm *= max(step(0.0, -pd.y), step(pr, pl));
-  float sunside = clamp(dot(normalize(pd), sun.xy) * 0.5 + 0.5, 0.0, 1.0);
-  vec3 ringcol = mix(NOKKVI_SURFACE, pcol, 0.5) * ringband * (0.35 + 0.5 * sunside) + NOKKVI_TEXT * ringband * 0.1;
-  col = mix(col, ringcol, ringm * (0.55 + 0.35 * ringband));
   col *= 0.9 + 0.1 * smoothstep(1.1, 0.2, length(p));
   col += (grain - 0.5) * 0.012;
   ret = col;
  }""",
-    init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0; twist = 0.015; spiral = 0; "
-         "px = 0.35; py = 0.08; prad = 0.16; pring = 1; ptilt = 0.3; pcol = 0.35; pspin = 0;",
+    init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0; twist = 0.015; spiral = 0;",
     frame=PULSE + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3 + 0.1 * pop);\n"
           "travel = travel + speed * 0.25;\nroll = roll + 0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05));\n"
           "q1 = travel;\nq2 = speed * 6;\nq4 = roll;\n"
           "twist = twist * 0.97 + 0.03 * (0.02 * sin(time * 0.11) + 0.012 * (mid_att - 1) + 0.03 * pop * sign(sin(time * 0.11)));\n"
-          "spiral = spiral + twist * 60 * speed;\nq10 = twist;\nq11 = spiral;\n"
-          "dt = 1 / max(fps, 1);\n"
-          "px = px - (0.03 + 0.25 * speed) * dt;\n"
-          "lim = 0.5 / aspectx + prad + 0.1;\n"
-          "wrap = below(px, -lim);\n"
-          "prad = if(wrap, 0.1 + 0.12 * rand(100) / 100, prad);\n"
-          "px = if(wrap, 0.5 / aspectx + prad + 0.1, px);\n"
-          "py = if(wrap, -0.28 + 0.56 * rand(100) / 100, py);\n"
-          "pring = if(wrap, above(rand(100), 35), pring);\n"
-          "ptilt = if(wrap, 0.18 + 0.3 * rand(100) / 100, ptilt);\n"
-          "pcol = if(wrap, rand(100) / 100, pcol);\n"
-          "pspin = pspin + dt * 0.05;\n"
-          "q12 = px;\nq13 = py;\nq14 = prad;\nq15 = pring;\nq16 = ptilt;\nq17 = pcol;\nq18 = pspin;")
+          "spiral = spiral + twist * 60 * speed;\nq10 = twist;\nq11 = spiral;")
 
 # Living ink: a self-organising reaction-diffusion surface (difference of
 # blurs, flexi's trick) that creeps along its own gradient and a slow current,
