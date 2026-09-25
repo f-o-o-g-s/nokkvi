@@ -1,0 +1,99 @@
+{
+ "version": 2,
+ "baseVals": {
+  "gammaadj": 1.0,
+  "decay": 1.0,
+  "echo_zoom": 1.0,
+  "echo_alpha": 0.0,
+  "wave_mode": 0,
+  "additivewave": 1,
+  "wave_a": 0.0,
+  "wave_scale": 0.8,
+  "wave_smoothing": 0.7,
+  "zoom": 1.0,
+  "rot": 0.0,
+  "warp": 0.0,
+  "wave_r": 1.0,
+  "wave_g": 1.0,
+  "wave_b": 1.0,
+  "ob_size": 0.0,
+  "ob_a": 0.0,
+  "ib_size": 0.0,
+  "ib_a": 0.0,
+  "mv_a": 0.0,
+  "darken_center": 0,
+  "brighten": 0,
+  "darken": 0,
+  "solarize": 0,
+  "invert": 0
+ },
+ "shapes": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  }
+ ],
+ "waves": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  }
+ ],
+ "init_eqs_eel": "pulse = 0; pop = 0; phase = 0; speed = 0; light = 0.8;",
+ "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\nspeed = speed * 0.9 + 0.1 * (0.2 + 0.5 * min(bass_att, 2) + 1.5 * q3);\nphase = phase + 0.01 + 0.02 * min(mid_att, 2);\nlight = light + 0.003 + 0.01 * q3;\nq1 = phase;\nq2 = speed;\nq4 = light;",
+ "pixel_eqs_eel": "",
+ "warp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 foc = vec2(0.09 * sin(q1 * 0.31), 0.07 * cos(q1 * 0.23));\n  vec2 p = (uv_orig - 0.5) * s - foc;\n  float zm = 1.010 + 0.022 * q2 + 0.03 * q5;\n  float rt = 0.0025 + 0.006 * sin(q1 * 0.13) + 0.01 * q3;\n  vec2 c = vec2(p.x * cos(rt) - p.y * sin(rt), p.x * sin(rt) + p.y * cos(rt)) / zm;\n  vec2 src = (c + foc) / s + 0.5;\n  vec3 m = texture(sampler_main, src).xyz;\n  vec3 b1 = GetBlur1(src);\n  vec3 b2 = GetBlur2(src);\n  float u = m.x + (m.x - b1.x) * 0.5 + (m.x - b2.x) * 0.3;\n  u += (texture(sampler_noise_lq, uv_orig * texsize.xy * 0.4 / 256.0 + rand_frame.xy).x - 0.5) * 0.3;\n  u = clamp(u * 0.92 + 0.04, 0.0, 1.0);\n  float age = min(m.z + 0.0045, 1.0);\n  float r = length(p);\n  float seedr = 0.06 + 0.015 * q3 + 0.02 * q5;\n  vec2 cc = p / (seedr * 2.0) + 0.5;\n  float cl = dot(texture(sampler_fw_cover, vec2(cc.x, 1.0 - cc.y)).xyz, vec3(0.299, 0.587, 0.114));\n  float seed = smoothstep(seedr, seedr * 0.55, r);\n  u = mix(u, cl, seed * 0.55);\n  age = mix(age, 0.0, seed);\n  float ang = atan(p.y, p.x) / 6.2831853 + 0.5;\n  float band = abs(ang * 2.0 - 1.0);\n  float spec = mix(mix(bass, mid, smoothstep(0.0, 0.5, band)), treb, smoothstep(0.5, 1.0, band)) * 0.4;\n  float ring = smoothstep(0.02, 0.0, abs(r - seedr * 1.15));\n  float feed = ring * spec * (0.5 + 0.9 * q5);\n  u = mix(u, 1.0, clamp(feed, 0.0, 1.0) * 0.3);\n  float heat = max(m.y * 0.9, clamp(feed, 0.0, 1.0));\n  ret = vec3(u, heat, age);\n }",
+ "comp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 foc = vec2(0.09 * sin(q1 * 0.31), 0.07 * cos(q1 * 0.23));\n  vec2 p = (uv - 0.5) * s - foc;\n  vec2 px = texsize.zw * 2.0;\n  float hx = GetBlur1(uv + vec2(px.x, 0.0)).x - GetBlur1(uv - vec2(px.x, 0.0)).x;\n  float hy = GetBlur1(uv + vec2(0.0, px.y)).x - GetBlur1(uv - vec2(0.0, px.y)).x;\n  vec3 n = normalize(vec3(-hx * 7.0, -hy * 7.0, 1.0));\n  vec3 L = normalize(vec3(cos(q4), sin(q4), 0.85));\n  float diff = max(dot(n, L), 0.0);\n  float spc = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 40.0);\n  vec3 m = texture(sampler_main, uv).xyz;\n  float body_x = clamp(clamp(m.z * 0.85 + (m.x - 0.5) * 0.35, 0.0, 1.0), 0.0, 1.0) * 5.0;\n  vec3 body = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(body_x, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP2, clamp(body_x - 1.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP3, clamp(body_x - 2.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP4, clamp(body_x - 3.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP5, clamp(body_x - 4.0, 0.0, 1.0));\n  vec3 trough = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.5 + 0.5 * m.z);\n  vec3 col = mix(trough, body, smoothstep(0.2, 0.8, m.x));\n  col *= 0.3 + 0.95 * diff;\n  col += NOKKVI_TEXT * spc * (0.4 + 0.5 * q5);\n  col += NOKKVI_HIGHLIGHT * m.y * 0.3;\n  col += NOKKVI_WARM * m.y * smoothstep(0.6, 1.0, m.y) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.4;\n  col *= 0.8 + 0.2 * smoothstep(1.1, 0.2, length(p));\n  col *= 1.0 + 0.25 * q5;\n  col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.zw).x - 0.5) * 0.01;\n  ret = col;\n }"
+}

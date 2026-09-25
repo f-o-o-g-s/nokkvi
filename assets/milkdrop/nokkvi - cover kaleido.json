@@ -2,7 +2,7 @@
  "version": 2,
  "baseVals": {
   "gammaadj": 1.0,
-  "decay": 0.97,
+  "decay": 1.0,
   "echo_zoom": 1.0,
   "echo_alpha": 0.0,
   "wave_mode": 0,
@@ -10,8 +10,8 @@
   "wave_a": 0.0,
   "wave_scale": 0.8,
   "wave_smoothing": 0.7,
-  "zoom": 0.985,
-  "rot": 0.01,
+  "zoom": 1.0,
+  "rot": 0.0,
   "warp": 0.0,
   "wave_r": 1.0,
   "wave_g": 1.0,
@@ -91,9 +91,9 @@
    "point_eqs_eel": ""
   }
  ],
- "init_eqs_eel": "phase = 0; orbit = 0; pulse = 0; pop = 0;",
- "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\nphase = phase + 0.002 + 0.004 * min(bass_att, 2) + 0.01 * q3 + 0.012 * pop;\norbit = orbit + 0.0015 + 0.002 * min(mid_att, 2);\nq1 = phase;\nq2 = orbit;",
+ "init_eqs_eel": "phase = 0; orbit = 0; pulse = 0; pop = 0; speed = 0;",
+ "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\nphase = phase + 0.002 + 0.004 * min(bass_att, 2) + 0.01 * q3 + 0.012 * pop;\norbit = orbit + 0.0015 + 0.002 * min(mid_att, 2);\nspeed = speed * 0.9 + 0.1 * (0.2 + 0.4 * min(bass_att, 2) + 1.2 * q3);\nq1 = phase;\nq2 = speed;\nq4 = orbit;",
  "pixel_eqs_eel": "",
- "warp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv_orig - 0.5) * s;\n  float r = length(p);\n  float seg = 6.2831853 / 6.0;\n  float a = mod(atan(p.y, p.x) + q1, seg);\n  a = abs(a - seg * 0.5);\n  vec2 k = vec2(cos(a), sin(a)) * r * (0.75 - 0.08 * clamp(bass_att, 0.0, 2.0) - 0.08 * q3 - 0.12 * q5);\n  k += vec2(0.5, 0.5) + 0.24 * vec2(cos(q2), sin(q2 * 0.7));\n  float cl = dot(texture(sampler_fw_cover, vec2(k.x, 1.0 - k.y)).xyz, vec3(0.299, 0.587, 0.114));\n  float lum = clamp((cl - 0.5) * 1.9 + 0.5, 0.0, 1.0);\n  vec3 fb = texture(sampler_main, uv).xyz * 0.88;\n  ret = max(fb, vec3((1.0 - lum) * 0.5 * clamp(bass_att - 0.7, 0.0, 1.5)));\n }",
- "comp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv - 0.5) * s;\n  float r = length(p);\n  float seg = 6.2831853 / 6.0;\n  float a = mod(atan(p.y, p.x) + q1, seg);\n  a = abs(a - seg * 0.5);\n  vec2 k = vec2(cos(a), sin(a)) * r * (0.75 - 0.08 * clamp(bass_att, 0.0, 2.0) - 0.08 * q3 - 0.12 * q5);\n  k += vec2(0.5, 0.5) + 0.24 * vec2(cos(q2), sin(q2 * 0.7));\n  float cl = dot(texture(sampler_fw_cover, vec2(k.x, 1.0 - k.y)).xyz, vec3(0.299, 0.587, 0.114));\n  float lum = clamp((cl - 0.5) * 1.9 + 0.5, 0.0, 1.0);\n  float col_r_x = clamp(lum, 0.0, 1.0) * 5.0;\n  vec3 col_r = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(col_r_x, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP2, clamp(col_r_x - 1.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP3, clamp(col_r_x - 2.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP4, clamp(col_r_x - 3.0, 0.0, 1.0));\n  col_r = mix(col_r, NOKKVI_RAMP5, clamp(col_r_x - 4.0, 0.0, 1.0));\n  vec3 col = mix(NOKKVI_BG, col_r, smoothstep(0.02, 0.35, lum));\n  col = mix(col, NOKKVI_TEXT, smoothstep(0.85, 1.0, lum) * 0.7);\n  col += NOKKVI_HIGHLIGHT * GetBlur1(uv) * 0.7;\n  col += NOKKVI_WARM * smoothstep(0.85, 1.0, lum) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.35;\n  col += NOKKVI_TEXT * smoothstep(0.012, 0.0, abs(r - 0.35 - 0.2 * q3)) * q3 * 0.5;\n  col *= 0.7 + 0.3 * smoothstep(0.9, 0.15, r);\n  col *= 1.0 + 0.4 * q5;\n  ret = col;\n }"
+ "warp": "uniform sampler2D sampler_fw_cover;\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv_orig - 0.5) * s;\n  float zm = 1.012 + 0.02 * q2 + 0.035 * q5;\n  float rt = 0.004 + 0.012 * q3;\n  vec2 c = vec2(p.x * cos(rt) - p.y * sin(rt), p.x * sin(rt) + p.y * cos(rt)) / zm;\n  vec2 src = c / s + 0.5;\n  vec3 m = texture(sampler_main, src).xyz;\n  vec3 b1 = GetBlur1(src);\n  vec3 b2 = GetBlur2(src);\n  float u = m.x + (m.x - b1.x) * 0.5 + (m.x - b2.x) * 0.2;\n  u += (texture(sampler_noise_lq, uv_orig * texsize.xy * 0.4 / 256.0 + rand_frame.xy).x - 0.5) * 0.18;\n  vec2 cc = p * 0.9 + vec2(0.5, 0.5) + 0.2 * vec2(cos(q4), sin(q4 * 0.7));\n  vec2 cov_m = 1.0 - abs(1.0 - mod(cc, 2.0));\n  vec3 cov = texture(sampler_fw_cover, vec2(cov_m.x, 1.0 - cov_m.y)).xyz;\n  float cl = dot(cov, vec3(0.299, 0.587, 0.114));\n  float seed = smoothstep(0.22, 0.05, length(p));\n  u = mix(u, cl, seed * (0.12 + 0.2 * q5));\n  u = clamp(u * 0.93 + 0.035, 0.0, 1.0);\n  ret = vec3(u, 0.0, 0.0);\n }",
+ "comp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 k_p = (uv - 0.5) * s;\n  float k_r = length(k_p);\n  float k_seg = 6.2831853 / 6.0;\n  float k_a = mod(atan(k_p.y, k_p.x) + q1, k_seg);\n  k_a = abs(k_a - k_seg * 0.5);\n  vec2 k = vec2(cos(k_a), sin(k_a)) * k_r / (1.0);\n  vec2 ku = k / s + 0.5;\n  vec2 px = texsize.zw * 2.0;\n  float hx = GetBlur1(ku + vec2(px.x, 0.0)).x - GetBlur1(ku - vec2(px.x, 0.0)).x;\n  float hy = GetBlur1(ku + vec2(0.0, px.y)).x - GetBlur1(ku - vec2(0.0, px.y)).x;\n  vec3 n = normalize(vec3(-hx * 6.0, -hy * 6.0, 1.0));\n  vec3 L = normalize(vec3(0.5, 0.6, 0.8));\n  float diff = max(dot(n, L), 0.0);\n  float spc = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 32.0);\n  float lum = texture(sampler_main, ku).x;\n  float hue = clamp(lum * 0.7 + k_r * 0.5, 0.0, 1.0);\n  float body_x = clamp(hue, 0.0, 1.0) * 5.0;\n  vec3 body = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(body_x, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP2, clamp(body_x - 1.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP3, clamp(body_x - 2.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP4, clamp(body_x - 3.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP5, clamp(body_x - 4.0, 0.0, 1.0));\n  vec3 col = mix(NOKKVI_BG, body, smoothstep(0.15, 0.6, lum));\n  col = mix(col, NOKKVI_TEXT, smoothstep(0.9, 1.0, lum) * 0.5);\n  col *= 0.35 + 0.9 * diff;\n  col += NOKKVI_TEXT * spc * (0.35 + 0.5 * q5);\n  col += NOKKVI_HIGHLIGHT * smoothstep(0.012, 0.0, abs(k_r - 0.08 - 0.3 * q3)) * q3 * 0.6;\n  col += NOKKVI_WARM * smoothstep(0.85, 1.0, lum) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.3;\n  col *= 0.75 + 0.25 * smoothstep(0.95, 0.15, k_r);\n  col *= 1.0 + 0.3 * q5;\n  ret = col;\n }"
 }

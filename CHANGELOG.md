@@ -31,7 +31,7 @@ All notable changes to this project will be documented in this file.
 - Never Show This Preset hides a preset for good and moves on at once.
 - Presets dropped into `~/.config/nokkvi/milkdrop/` join the rotation; the refresh key picks up new ones.
 - A MilkDrop settings section sets the preset interval, whether tracks change presets, favorites only, render quality and name toasts.
-- Eight nokkvi MilkDrop presets draw in your theme's colours; five of them use the playing album's cover.
+- Ten nokkvi MilkDrop presets draw in your theme's colours; six of them use the playing album's cover.
 - nokkvi's MilkDrop presets recolour on the spot when you change theme, and keep the theme's dark colours in light mode.
 - The MilkDrop Presets setting gains `nokkvi`, which plays only nokkvi's own presets.
 
