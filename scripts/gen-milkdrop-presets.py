@@ -59,7 +59,7 @@ def strip_comments(shader):
     import re
     return "\n".join(l for l in (re.sub(r"\s*//.*$", "", l) for l in shader.split("\n")) if l.strip())
 
-def preset(base, warp, comp, init='', frame=''):
+def preset(base, warp, comp, init='', frame='', waves=None):
     warp, comp = strip_comments(warp), strip_comments(comp)
     b = {"gammaadj": 1.0, "decay": 0.98, "echo_zoom": 1.0, "echo_alpha": 0.0,
          "wave_mode": 0, "additivewave": 1, "wave_a": 0.0, "wave_scale": 0.8,
@@ -70,9 +70,22 @@ def preset(base, warp, comp, init='', frame=''):
     b.update(base)
     off = {"baseVals": {"enabled": 0}, "init_eqs_eel": "", "frame_eqs_eel": "", "point_eqs_eel": ""}
     offs = {"baseVals": {"enabled": 0}, "init_eqs_eel": "", "frame_eqs_eel": ""}
-    return {"version": 2, "baseVals": b, "shapes": [offs]*4, "waves": [off]*4,
+    ws = list(waves or [])
+    return {"version": 2, "baseVals": b, "shapes": [offs]*4, "waves": ws + [off] * (4 - len(ws)),
             "init_eqs_eel": init, "frame_eqs_eel": frame, "pixel_eqs_eel": "",
             "warp": warp, "comp": comp}
+
+def wave_def(base, point, init='', frame=''):
+    """A custom wave: the engine draws `samples` points (per-point EEL sets
+    x, y in 0..1 around the centre and r, g, b, a) into the feedback texture
+    after the warp, so the next frame's warp carries them. `value1` / `value2`
+    are the left / right waveform samples, already scaled. With `additive`
+    each channel adds `channel * a`, so r, g, b address the warp's own channel
+    semantics rather than screen colours."""
+    b = {"enabled": 1, "samples": 512, "sep": 0, "spectrum": 0, "usedots": 0, "thick": 1,
+         "additive": 1, "scaling": 1.0, "smoothing": 0.5, "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
+    b.update(base)
+    return {"baseVals": b, "init_eqs_eel": init, "frame_eqs_eel": frame, "point_eqs_eel": point}
 
 WAVE_THEME = "wave_r = NOKKVI_HIGHLIGHT_R;\nwave_g = NOKKVI_HIGHLIGHT_G;\nwave_b = NOKKVI_HIGHLIGHT_B;\n"
 # Beat envelope in q3: jumps on a kick, decays over ~0.3 s.
@@ -498,35 +511,116 @@ q8 = light;
 q9 = scl;
 """)
 
-# 6. Aurora (new; no cover) -----------------------------------------------
+# 6. Aurora (no cover) ----------------------------------------------------
+# A night over the sea with a folded aurora curtain: a wavy arc (three
+# drifting sine folds) with rays reaching up from it, brightest at the arc,
+# in patches along it (a slow noise envelope) and where a fold turns edge-on
+# (denser), streaked by three layers of vertically stretched noise, and lit
+# from the theme's gradient: the light end at the arc, the dark end high up,
+# the theme's warm colour at the tops. A fainter, slower curtain hangs higher
+# behind it. The spectrum sets the rays' reach along the arc (bass in the
+# middle, treble at the sides), smoothed through the feedback's y channel so
+# it breathes instead of flickering; the rays' own glow rises through the
+# feedback's x channel. A kick launches a surge that sweeps along the curtain
+# (alternating sides); treble makes the rays shimmer. Stars twinkle behind
+# the curtain, a dark ridge closes the horizon and the sea below mirrors it
+# all through a ripple. (v runs upward in this engine's texture space: the
+# cover helpers sample 1 - y for that reason.) x = curtain light,
+# y = smoothed spectrum reach.
+AURORA_ARC = """
+  float xx = p.x + q2;
+  float base = -0.1 + 0.05 * sin(xx * 2.1 + q1 * 0.7) + 0.03 * sin(xx * 5.3 - q1 * 1.1) + 0.015 * sin(xx * 11.0 + q1 * 1.9);
+"""
+AURORA_SEA_Y = "-0.36"
 presets["nokkvi - aurora"] = preset(
-    {"decay": 1.0, "wave_mode": 6, "additivewave": 1, "wave_a": 0.9, "wave_scale": 1.2, "wave_smoothing": 0.6, "wave_thick": 1, "wave_y": 0.55},
-    " shader_body {\n" + HEAD + '''
-  vec2 p = (uv - 0.5);
-  vec2 flow = vec2(sin(p.y * 6.0 + time * 0.35 + q1), cos(p.x * 5.0 - time * 0.27));
-  vec2 src = uv - vec2(0.0, 0.0025) + flow * 0.0022 * (0.6 + clamp(mid_att, 0.0, 2.0));
-  vec3 fb = texture(sampler_main, src).xyz * (0.976 - 0.01 * q3);
-  float spec = get_fft(0.02 + uv_orig.x * 0.55);
-  float line = 0.62 - spec * 0.35;
-  fb += vec3(smoothstep(0.018, 0.0, abs(uv_orig.y - line)) * spec * (0.5 + 0.6 * q5));
-  fb += (GetBlur1(src) - fb) * 0.08;
-  ret = max(fb - 0.002, vec3(0.0));
- }''',
-    " shader_body {\n" + HEAD + f'''
-  vec3 m = texture(sampler_main, uv).xyz + GetBlur2(uv) * 0.9;
-  float lum = clamp(dot(m, {LUM}) * 1.2, 0.0, 1.0);
-  float hue = abs(fract(uv.x * 0.5 + uv.y * 0.25 + q1 * 0.04) * 2.0 - 1.0);
-''' + ramp("band", "hue") + f'''
-  vec3 col = mix(NOKKVI_BG, band, smoothstep(0.0, 0.5, lum));
-  col = mix(col, NOKKVI_TEXT, smoothstep(0.8, 1.0, lum) * 0.6);
-  col += NOKKVI_WARM * smoothstep(0.9, 1.0, lum) * clamp(treb_att - 1.0, 0.0, 1.0) * 0.4;
-  col = mix(NOKKVI_BG, col, 0.85 + 0.15 * q3);
-  col *= 1.0 + 0.3 * q5;
+    {"decay": 1.0, "wave_a": 0.0, "zoom": 1.0},
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv_orig - 0.5) * s;
+  float yup = p.y;
+  vec3 prev = texture(sampler_main, uv).xyz;
+  float band = abs(uv_orig.x * 2.0 - 1.0);
+  float spec = get_fft(0.02 + band * 0.45);
+  float hgt = mix(prev.y, clamp(spec * 2.0, 0.0, 1.0), 0.1);
+""" + AURORA_ARC + """
+  float slope = 0.105 * cos(xx * 2.1 + q1 * 0.7) + 0.159 * cos(xx * 5.3 - q1 * 1.1) + 0.165 * cos(xx * 11.0 + q1 * 1.9);
+  float dens = 0.4 + 2.5 * abs(slope);
+  float env = 0.3 + 0.7 * texture(sampler_noise_hq, vec2(uv_orig.x * 0.25 + q2 * 0.15, 0.23)).x;
+  float above = yup - base;
+  float r1 = texture(sampler_noise_hq, vec2(uv_orig.x * 3.0 + q2 * 0.35, uv_orig.y * 0.12 + q1 * 0.015)).x;
+  float r1c = texture(sampler_noise_hq, vec2(uv_orig.x * 3.0 + q2 * 0.35, 0.5 + q1 * 0.01)).x;
+  float r2 = texture(sampler_noise_hq, vec2(uv_orig.x * 8.0 - q2 * 0.6, uv_orig.y * 0.25 - q1 * 0.04)).x;
+  float r3 = texture(sampler_noise_hq, vec2(uv_orig.x * 20.0 + q2 * 0.9, uv_orig.y * 0.06 + q1 * 0.02)).x;
+  float len = (0.1 + 0.45 * hgt + 0.1 * q3) * (0.5 + 1.1 * r1c * r1c);
+  float body = exp(-max(above, 0.0) / len) * smoothstep(-0.025, 0.005, above);
+  float edge = exp(-abs(above) / 0.018) * (0.6 + 0.4 * r2);
+  float rays = (0.3 + 0.7 * r1 * r1) * (0.6 + 0.4 * r2) * (0.7 + 0.3 * r3);
+  float sweep = exp(-pow((uv_orig.x - q4) * 5.0, 2.0)) * q6;
+  float cur = (body * rays + edge * 0.7) * dens * env * (0.5 + 0.5 * hgt + 0.3 * q3) * (1.0 + 1.5 * sweep);
+  float xx2 = p.x * 0.8 - q2 * 0.5 + 3.0;
+  float base2 = 0.12 + 0.04 * sin(xx2 * 1.7 + q1 * 0.4) + 0.02 * sin(xx2 * 4.1 - q1 * 0.6);
+  float above2 = yup - base2;
+  float body2 = exp(-max(above2, 0.0) / (0.1 + 0.25 * hgt)) * smoothstep(-0.02, 0.005, above2);
+  float env2 = 0.3 + 0.7 * texture(sampler_noise_hq, vec2(uv_orig.x * 0.4 - q2 * 0.1 + 0.5, 0.61)).x;
+  cur += body2 * env2 * (0.4 + 0.6 * r1) * (0.6 + 0.4 * r3) * 0.35 * (0.6 + 0.4 * hgt);
+  cur *= 1.0 + 0.25 * (r2 - 0.5) * clamp(treb_att - 0.8, 0.0, 1.0);
+  float glow = texture(sampler_main, uv - vec2(0.0, texsize.w * 1.2)).x * 0.86;
+  ret = vec3(clamp(max(cur, glow), 0.0, 1.0), hgt, 0.0);
+ }""",
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s;
+  float yup = p.y;
+  vec3 m = texture(sampler_main, uv).xyz;
+  float I = m.x;
+""" + AURORA_ARC + """
+  float hpos = clamp((yup - base) / 0.55, 0.0, 1.0);
+""" + ramp("cc", "0.92 - 0.85 * hpos") + """
+  vec3 col = NOKKVI_BG * (0.7 + 0.3 * smoothstep(0.5, -0.5, yup));
+  vec2 g = uv * texsize.xy / 5.0;
+  vec2 id = floor(g);
+  vec2 f = fract(g) - 0.5;
+  float h = fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453);
+  float h2 = fract(h * 91.3);
+  float star = step(0.985, h) * smoothstep(0.35, 0.0, length(f - (vec2(h2, fract(h2 * 7.0)) - 0.5) * 0.4));
+  star *= 0.5 + 0.5 * sin(time * (1.5 + 3.0 * h2) + h * 50.0);
+  col += NOKKVI_TEXT * star * 0.55 * smoothstep(-0.32, -0.26, yup) * (1.0 - clamp(I * 2.5, 0.0, 1.0));
+  col += cc * I * 1.7;
+  col += NOKKVI_WARM * I * smoothstep(0.3, 0.85, hpos) * 0.45;
+  col += NOKKVI_TEXT * pow(I, 3.0) * 0.45;
+  col += cc * GetBlur2(uv).x * 0.5 + NOKKVI_HIGHLIGHT * GetBlur1(uv).x * 0.12;
+  float sea_y = """ + AURORA_SEA_Y + """;
+  float ridge = sea_y + 0.015 + 0.03 * texture(sampler_noise_hq, vec2(uv.x * 0.9 + 0.13, 0.37)).x + 0.012 * texture(sampler_noise_hq, vec2(uv.x * 3.1, 0.71)).x;
+  float ripple = (texture(sampler_noise_hq, vec2(uv.x * 2.0, uv.y * 12.0 - q1 * 0.3)).x - 0.5) * 0.02;
+  float ry = sea_y + (sea_y - yup) * 2.2;
+  float Ir = texture(sampler_main, vec2(uv.x + ripple, 0.5 + ry / s.y)).x;
+  float rhpos = clamp((ry - base) / 0.55, 0.0, 1.0);
+""" + ramp("rc", "0.92 - 0.85 * rhpos") + """
+  vec3 seacol = NOKKVI_BG * 0.45 + rc * Ir * 0.55 * (0.8 + 10.0 * ripple);
+  float landr = smoothstep(ridge + 0.004, ridge - 0.004, ry);
+  seacol = mix(seacol, NOKKVI_BG * 0.4, landr);
+  float sea = smoothstep(sea_y + 0.003, sea_y - 0.003, yup);
+  col = mix(col, seacol, sea);
+  float land = smoothstep(ridge + 0.004, ridge - 0.004, yup) * (1.0 - sea);
+  col = mix(col, NOKKVI_BG * 0.5, land);
+  col *= 1.0 + 0.25 * q5;
+  col *= 0.85 + 0.15 * smoothstep(1.2, 0.3, length(p));
   ret = col;
- }}''',
-    init="pulse = 0; pop = 0; phase = 0;",
-    frame=PULSE + "phase = phase + 0.01 + 0.03 * min(bass_att, 2);\nq1 = phase;\n"
-          "wave_y = 0.5 + 0.12 * sin(time * 0.21);\nwave_r = NOKKVI_TEXT_R;\nwave_g = NOKKVI_TEXT_G;\nwave_b = NOKKVI_TEXT_B;\nwave_a = 0.5 + 0.5 * min(bass_att, 1);")
+ }""",
+    init="pulse = 0; pop = 0; t = 0; drift = 0; cool = 0; dir = 1; sx = 2; surge = 0;",
+    frame=PULSE + """dt = 1 / max(fps, 1);
+t = t + dt * (0.35 + 0.25 * min(bass_att, 2));
+drift = drift + dt * (0.03 + 0.05 * (mid_att - 0.8));
+cool = max(cool - dt, 0);
+stamp = above(kick, 0.25) * below(cool, 0.001);
+cool = if(stamp, 0.25, cool);
+dir = if(stamp, -dir, dir);
+sx = if(stamp, 0.5 - 0.6 * dir, sx);
+sx = sx + dt * 1.6 * dir;
+surge = if(stamp, 1, surge * 0.965);
+q1 = t;
+q2 = drift;
+q4 = sx;
+q6 = surge;
+""")
 
 # Deep dive: an endless flight into a self-growing relief. The cover is
 # planted as a seed at the vanishing point; the feedback zooms into it while a
@@ -601,8 +695,18 @@ presets["nokkvi - cover deep dive"] = preset(
 # octaves that cross-fade in a loop, so the fall never ends; each octave's c
 # differs a little and drifts with the music, so the shapes warp and change as
 # you sink into them, and each octave turns as it zooms (the twist). The
-# feedback keeps a short glow trail; the comp lights the result as relief in
-# the theme's gradient. x = brightness, y = colour position.
+# waveform rides along: on every kick a custom wave stamps it as a squiggly
+# ring around the vanishing point, into the feedback's spare z channel (the
+# ink), and the feedback is zoomed and twisted at exactly the fractal's own
+# rate (q6 = the frame's magnification, q7 = its turn), so each beat's ring
+# flies outward past the viewer with the dive and the next beat pushes it on.
+# A magnified ring also gets thicker, so the ink fades with the zoom as well
+# as with time; otherwise the rings pile up into a white haze. (Redrawing the
+# ring every frame, sharpened against its blur, saturated the whole field
+# into a reaction-diffusion print.) The comp lights the result as relief in
+# the theme's gradient and draws the ink as neon, white-hot when fresh and
+# cooling along the gradient as it recedes. x = brightness, y = colour
+# position, z = ink.
 FZ_OCTAVES = 3
 def fz_octave(k):
     return f"""
@@ -629,6 +733,18 @@ def fz_octave(k):
     wsum += w;
   }}
 """
+# The squiggle: the left channel bends the ring's radius, the right nudges
+# its angle; both ease to zero at the seam so the ring closes. Drawn only on
+# the frame of a kick (q9), at radius q8 (bigger for a harder kick); q2 turns
+# the seam with the fractal.
+FZ_WAVE = wave_def(
+    {"samples": 400, "scaling": 0.9, "smoothing": 0.4, "r": 0.6, "g": 0.0, "b": 1.0, "a": 0.9},
+    "w = min(1, 8 * min(sample, 1 - sample));\n"
+    "ang = sample * 6.2831853 + q2 * 0.5 + value2 * 0.7 * w;\n"
+    "rad = q8 + value1 * 1.1 * w;\n"
+    "x = 0.5 + rad * cos(ang);\n"
+    "y = 0.5 + rad * sin(ang);\n",
+    frame="a = 0.9 * q9;")
 presets["nokkvi - fractal zoom"] = preset(
     {"decay": 1.0, "wave_a": 0.0, "zoom": 1.0},
     " shader_body {\n" + HEAD + """
@@ -640,39 +756,58 @@ presets["nokkvi - fractal zoom"] = preset(
   acc /= wsum;
   hue /= wsum;
   vec2 cs = (uv - 0.5) * s;
-  float tw = 0.006 + 0.02 * q3;
-  vec2 c1 = vec2(cs.x * cos(tw) - cs.y * sin(tw), cs.x * sin(tw) + cs.y * cos(tw)) / (1.01 + 0.02 * q5);
-  vec3 fb = texture(sampler_main, c1 / s + 0.5).xyz;
+  vec2 c1 = vec2(cs.x * cos(q7) - cs.y * sin(q7), cs.x * sin(q7) + cs.y * cos(q7)) / q6;
+  vec2 c1u = c1 / s + 0.5;
+  vec3 fb = texture(sampler_main, c1u).xyz;
+  float ink = fb.z * 0.996 / sqrt(q6);
   float b = max(acc, fb.x * (0.72 + 0.12 * q3));
   float h = mix(hue, fb.y, step(acc, fb.x * 0.9) * 0.8);
-  ret = vec3(clamp(b, 0.0, 1.0), h, 0.0);
+  ret = vec3(clamp(b, 0.0, 1.0), h, clamp(ink, 0.0, 1.0));
  }""",
     " shader_body {\n" + HEAD + """
   vec2 p = (uv - 0.5) * s;
   vec2 px = texsize.zw * 1.5;
-  float hx = GetBlur1(uv + vec2(px.x, 0.0)).x - GetBlur1(uv - vec2(px.x, 0.0)).x;
-  float hy = GetBlur1(uv + vec2(0.0, px.y)).x - GetBlur1(uv - vec2(0.0, px.y)).x;
+  vec3 bl = GetBlur1(uv - vec2(px.x, 0.0));
+  vec3 br = GetBlur1(uv + vec2(px.x, 0.0));
+  vec3 bd = GetBlur1(uv - vec2(0.0, px.y));
+  vec3 bu = GetBlur1(uv + vec2(0.0, px.y));
+  float hx = (br.x - bl.x) + (br.z - bl.z) * 0.6;
+  float hy = (bu.x - bd.x) + (bu.z - bd.z) * 0.6;
   vec3 n = normalize(vec3(-hx * 3.0, -hy * 3.0, 1.0));
   vec3 L = normalize(vec3(-0.5, 0.6, 0.8));
   float diff = max(dot(n, L), 0.0);
   float spc = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 30.0);
   vec3 m = texture(sampler_main, uv).xyz;
+  float ink = m.z;
 """ + ramp("body", "m.y") + """
   vec3 col = mix(NOKKVI_BG, body, smoothstep(0.08, 0.55, m.x));
   col = mix(col, NOKKVI_TEXT, smoothstep(0.85, 1.0, m.x) * 0.5);
   col *= 0.55 + 0.6 * diff;
-  col += NOKKVI_TEXT * spc * m.x * (0.3 + 0.5 * q5);
-  col += NOKKVI_HIGHLIGHT * GetBlur2(uv).x * (0.04 + 0.25 * q3);
+""" + ramp("inkc", "0.3 + 0.7 * ink") + """
+  inkc = mix(inkc, NOKKVI_TEXT, smoothstep(0.55, 1.0, ink) * 0.85);
+  col = mix(col, inkc * (0.7 + 0.6 * diff), clamp(ink * 1.3, 0.0, 1.0) * 0.85);
+  vec3 b2 = GetBlur2(uv);
+  col += NOKKVI_HIGHLIGHT * b2.x * (0.04 + 0.25 * q3);
+  col += NOKKVI_HIGHLIGHT * b2.z * (0.35 + 0.4 * q3);
+  col += NOKKVI_TEXT * spc * max(m.x, ink) * (0.3 + 0.5 * q5);
   col += NOKKVI_WARM * smoothstep(0.8, 1.0, m.x) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.3;
   col *= 0.8 + 0.2 * smoothstep(1.1, 0.2, length(p));
   col *= 1.0 + 0.3 * q5;
   ret = col;
  }""",
-    init="pulse = 0; pop = 0; dive = 0; turn = 0; morph = 0;",
-    frame=PULSE + "dive = dive + (0.0012 + 0.002 * min(bass_att, 2) + 0.006 * q3) * 60 / max(fps, 1);\n"
-          "turn = turn + 0.002 + 0.003 * (mid_att - 1) + 0.01 * q3;\n"
+    init="pulse = 0; pop = 0; dive = 0; turn = 0; morph = 0; cool = 0; q6 = 1; q7 = 0; q8 = 0.2; q9 = 0;",
+    frame=PULSE + "dd = (0.0015 + 0.002 * min(bass_att, 2) + 0.006 * q3) * 60 / max(fps, 1);\n"
+          "dive = dive + dd;\n"
+          "dturn = 0.002 + 0.003 * (mid_att - 1) + 0.01 * q3;\n"
+          "turn = turn + dturn;\n"
           "morph = morph + 0.004 + 0.01 * min(mid_att, 2) + 0.02 * pop;\n"
-          "q1 = dive;\nq2 = turn;\nq4 = morph;")
+          "q1 = dive;\nq2 = turn;\nq4 = morph;\n"
+          "q6 = pow(10, dd);\nq7 = dturn + 2.2 * dd;\n"
+          "cool = max(cool - 1 / max(fps, 1), 0);\n"
+          "stamp = above(kick, 0.2) * below(cool, 0.001);\n"
+          "cool = if(stamp, 0.16, cool);\n"
+          "q8 = 0.2 + 0.06 * min(kick / 0.5, 1);\nq9 = stamp;",
+    waves=[FZ_WAVE])
 
 for name, p in presets.items():
     json.dump(p, open(os.path.join(OUT, name + ".json"), "w"), indent=1)
