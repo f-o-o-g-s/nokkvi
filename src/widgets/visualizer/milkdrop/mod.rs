@@ -65,9 +65,16 @@ pub(crate) fn run_in_error_scopes<T>(
     }
 }
 
-/// Feed one analysis frame to the engine, exactly as the standalone player the
-/// owner watched does (a straight field copy).
-pub(crate) fn apply_features(renderer: &mut MilkdropRenderer, f: &particle_audio::Features) {
+/// Feed one analysis frame to the engine: the four band levels, their
+/// attenuated followers, the waveform and the spectrum (a straight field copy,
+/// as in the standalone player), plus the BeatDrop enhanced-audio rows that
+/// `get_fft` / `get_wave` read. The engine skips that last step for presets
+/// that do not call those helpers, so the bundled pack pays nothing for it.
+pub(crate) fn apply_features(
+    renderer: &mut MilkdropRenderer,
+    f: &particle_audio::Features,
+    analysis_rate_hz: f32,
+) {
     renderer.set_audio(f.bass_react, f.mid_react, f.treb_react, f.vol_react);
     renderer.set_audio_att(
         f.bass_react_att,
@@ -77,6 +84,15 @@ pub(crate) fn apply_features(renderer: &mut MilkdropRenderer, f: &particle_audio
     );
     renderer.set_waveform(&f.waveform_left_full, &f.waveform_right_full);
     renderer.set_freq_spectrum(&f.freq_spectrum);
+    renderer.set_enhanced_audio(
+        None,
+        None,
+        &f.waveform_left_full,
+        &f.waveform_right_full,
+        analysis_rate_hz,
+        MILKDROP_FRAME_INTERVAL.as_secs_f32(),
+        particle_milkdrop::enhanced_audio::EnhancedAudioConfig::default(),
+    );
 }
 
 /// The name a preset samples the playing cover by (`sampler_cover`,

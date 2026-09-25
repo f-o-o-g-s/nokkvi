@@ -331,7 +331,11 @@ impl shader::Primitive for MilkdropPrimitive {
                 renderer.set_enhanced_audio_sample_rate(rate);
                 slot.rate_set = Some(rate);
             }
-            super::apply_features(&mut renderer, &features);
+            super::apply_features(
+                &mut renderer,
+                &features,
+                shared.analysis_rate().unwrap_or(44_100.0),
+            );
             if slot.frames_rendered == 0 {
                 // A fresh renderer's first frame runs under error scopes: a
                 // validation error must never reach wgpu's panicking handler.
