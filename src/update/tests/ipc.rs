@@ -1101,6 +1101,9 @@ fn preset_every_subcommand_answers_in_milkdrop_mode() {
         "hide",
     ] {
         let mut app = milkdrop_app();
+        // Something to go back to, so `previous` has work to do.
+        let (earlier, _) = crate::widgets::visualizer::milkdrop::BUNDLED_MILKDROP_PRESETS[1];
+        app.milkdrop.history.push(earlier.to_string());
         let resp = drive_on_with_args(&mut app, "preset", json!({ "action": action }));
         let data = resp
             .data
@@ -1158,4 +1161,41 @@ fn status_reports_the_milkdrop_preset() {
     let data = resp.data.expect("status data");
     assert_eq!(data.get("visualizer"), Some(&json!("milkdrop")));
     assert_eq!(data.get("preset"), Some(&json!(name)));
+}
+
+#[test]
+fn preset_previous_and_next_refuse_when_there_is_nothing_to_show() {
+    let mut app = milkdrop_app();
+    let resp = drive_on_with_args(&mut app, "preset", json!({ "action": "previous" }));
+    assert_eq!(
+        resp.error.expect("empty history refuses").code,
+        "unavailable"
+    );
+
+    let mut app = milkdrop_app();
+    let names: Vec<String> = app
+        .milkdrop
+        .library
+        .entries()
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+    for name in &names {
+        app.milkdrop.library.hide(name);
+    }
+    let resp = drive_on_with_args(&mut app, "preset", json!({ "action": "next" }));
+    assert_eq!(
+        resp.error.expect("nothing eligible refuses").code,
+        "unavailable"
+    );
+}
+
+#[test]
+fn preset_answers_report_the_preset_on_screen_like_status() {
+    let mut app = milkdrop_app();
+    let shown = app.milkdrop.on_screen.clone();
+    let resp = drive_on_with_args(&mut app, "preset", json!({ "action": "next" }));
+    let data = resp.data.expect("next answers");
+    assert_eq!(data.get("preset"), Some(&json!(shown)));
+    assert!(data.get("loading").and_then(|v| v.as_str()).is_some());
 }

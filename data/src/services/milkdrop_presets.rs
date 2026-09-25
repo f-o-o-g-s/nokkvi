@@ -53,19 +53,22 @@ pub struct Curation {
 }
 
 impl Curation {
-    /// Missing file → empty curation. A file that cannot be read or parsed is
-    /// logged and treated as empty; it never stops the mode from running.
-    pub fn load(path: &Path) -> Self {
+    /// Missing file → empty curation; a file that cannot be read or parsed is
+    /// an `Err` so the caller can refuse to write over the user's edits.
+    pub fn try_load(path: &Path) -> Result<Self, String> {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::default(),
-            Err(e) => {
-                warn!(path = %path.display(), "milkdrop: cannot read curation file: {e}");
-                return Self::default();
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
         };
-        toml::from_str(&text).unwrap_or_else(|e| {
-            warn!(path = %path.display(), "milkdrop: ignoring unparsable curation file: {e}");
+        toml::from_str(&text).map_err(|e| format!("cannot parse {}: {e}", path.display()))
+    }
+
+    /// [`Self::try_load`], logging an error and treating it as empty; it never
+    /// stops the mode from running.
+    pub fn load(path: &Path) -> Self {
+        Self::try_load(path).unwrap_or_else(|e| {
+            warn!("milkdrop: ignoring the curation file: {e}");
             Self::default()
         })
     }
@@ -91,6 +94,9 @@ pub struct PresetLibrary {
     favorites_only: bool,
     /// Names still to be drawn this round, popped from the end.
     bag: Vec<String>,
+    /// Presets that failed to load this session: out of the rotation until
+    /// the next login, never written anywhere.
+    broken: HashSet<String>,
 }
 
 impl PresetLibrary {
@@ -108,6 +114,7 @@ impl PresetLibrary {
             curation,
             favorites_only: false,
             bag: Vec::new(),
+            broken: HashSet::new(),
         };
         library.rescan_user_dir();
         library
@@ -160,6 +167,27 @@ impl PresetLibrary {
         &self.curation
     }
 
+    /// Replace the curation (the file was re-read).
+    pub fn set_curation(&mut self, curation: Curation) {
+        self.curation = curation;
+        self.bag.clear();
+    }
+
+    /// Take a preset that failed to load out of the rotation for this session.
+    pub fn mark_broken(&mut self, name: &str) {
+        self.bag.retain(|n| n != name);
+        self.broken.insert(name.to_string());
+    }
+
+    /// Whether any preset is eligible (the allocation-free form of `eligible`).
+    pub fn has_eligible(&self) -> bool {
+        self.entries.iter().any(|e| self.is_drawable(&e.name))
+    }
+
+    fn is_drawable(&self, name: &str) -> bool {
+        !self.curation.hidden.contains(name) && !self.broken.contains(name)
+    }
+
     pub fn set_favorites_only(&mut self, favorites_only: bool) {
         if self.favorites_only != favorites_only {
             self.favorites_only = favorites_only;
@@ -202,7 +230,7 @@ impl PresetLibrary {
             .entries
             .iter()
             .map(|e| e.name.as_str())
-            .filter(|n| !self.curation.hidden.contains(*n));
+            .filter(|n| self.is_drawable(n));
         if self.favorites_only {
             let favorites: Vec<&str> = visible
                 .clone()
@@ -395,6 +423,18 @@ mod tests {
     }
 
     #[test]
+    fn broken_presets_leave_the_rotation() {
+        let mut lib = library(&no_user_dir());
+        lib.mark_broken("a");
+        assert_eq!(lib.eligible(), ["b", "c", "d"]);
+        for name in ["b", "c", "d"] {
+            lib.hide(name);
+        }
+        assert!(!lib.has_eligible());
+        assert_eq!(lib.next(None, &mut StdRng::seed_from_u64(1)), None);
+    }
+
+    #[test]
     fn rescan_picks_up_a_new_user_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut lib = library(dir.path());
@@ -425,5 +465,6 @@ mod tests {
 
         std::fs::write(&path, "hidden = [unterminated").expect("write");
         assert_eq!(Curation::load(&path), Curation::default(), "broken file");
+        assert!(Curation::try_load(&path).is_err(), "try_load reports it");
     }
 }

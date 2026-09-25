@@ -147,12 +147,14 @@
 //! | `theater`     | act       | `{"theater":bool}`; toggle Theater Mode (the   |
 //! |               |           | F11 entry point). `unavailable` on Login or    |
 //! |               |           | while the window is closed to the tray.        |
-//! | `preset`      | act_str   | `{"preset":name\|null,"locked":bool}`; arg     |
-//! |               |           | `action`: `next`/`previous`/`lock`/`unlock`/   |
-//! |               |           | `favorite`/`unfavorite`/`hide` (MilkDrop).     |
-//! |               |           | `unavailable` on Login, outside MilkDrop mode, |
-//! |               |           | when not playing on screen (next/previous) or  |
-//! |               |           | with no preset on screen; bad word →           |
+//! | `preset`      | act_str   | `{"preset":on-screen\|null,"loading":name\|null,`|
+//! |               |           | `"locked":bool}`; arg `action`: `next`/        |
+//! |               |           | `previous`/`lock`/`unlock`/`favorite`/         |
+//! |               |           | `unfavorite`/`hide` (MilkDrop). `unavailable`  |
+//! |               |           | on Login, outside MilkDrop mode, when not      |
+//! |               |           | playing on screen (next/previous), with no     |
+//! |               |           | preset on screen, nothing eligible (next) or   |
+//! |               |           | no history (previous); bad word →              |
 //! |               |           | `invalid_args`.                                |
 
 use iced::Task;

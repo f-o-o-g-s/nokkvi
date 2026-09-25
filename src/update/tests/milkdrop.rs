@@ -813,3 +813,119 @@ fn favorites_only_and_quality_reach_the_library_and_renderer() {
         1080
     );
 }
+
+// ----------------------------------------------------------------------------
+// Second review's fixes
+// ----------------------------------------------------------------------------
+
+#[test]
+fn hide_while_paused_loads_another_on_resume() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    on_screen(&mut app);
+    let hidden = app.milkdrop.on_screen.clone().expect("a preset on screen");
+    app.milkdrop.locked = true;
+    app.playback.paused = true;
+    tick(&mut app);
+    control(&mut app, crate::app_message::MilkdropControl::Hide);
+    assert_eq!(
+        app.milkdrop.on_screen, None,
+        "the hidden preset is no longer the target"
+    );
+    app.playback.paused = false;
+    tick(&mut app);
+    assert!(app.milkdrop.current.is_some());
+    assert_ne!(app.milkdrop.current.as_deref(), Some(hidden.as_str()));
+}
+
+#[test]
+fn hiding_the_last_eligible_preset_gives_the_cover_back() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    on_screen(&mut app);
+    let shown = app.milkdrop.on_screen.clone().expect("a preset");
+    for (name, _) in BUNDLED_MILKDROP_PRESETS {
+        if *name != shown {
+            app.milkdrop.library.hide(name);
+        }
+    }
+    let generation = app.milkdrop.generation;
+    control(&mut app, crate::app_message::MilkdropControl::Hide);
+    assert!(released(&app, generation), "the renderer is released");
+    assert_eq!(app.milkdrop.on_screen, None);
+    let toasts = app.toast.toasts.len();
+    let after = app.milkdrop.generation;
+    tick(&mut app);
+    tick(&mut app);
+    assert_eq!(
+        app.milkdrop.generation, after,
+        "no retry while nothing is eligible"
+    );
+    control(&mut app, crate::app_message::MilkdropControl::Hide);
+    assert_eq!(app.toast.toasts.len(), toasts, "a second Hide does nothing");
+}
+
+#[test]
+fn a_broken_curation_file_is_never_overwritten() {
+    let dir = TestDir::new();
+    let mut app = curated_app(&dir);
+    std::fs::write(&app.milkdrop.curation_path, "hidden = [unterminated").expect("write");
+    app.milkdrop_load_curation();
+    on_screen(&mut app);
+    control(
+        &mut app,
+        crate::app_message::MilkdropControl::ToggleFavorite,
+    );
+    let text = std::fs::read_to_string(&app.milkdrop.curation_path).expect("read");
+    assert_eq!(
+        text, "hidden = [unterminated",
+        "the user's file is left alone"
+    );
+}
+
+#[test]
+fn a_preset_that_fails_is_skipped_for_the_session() {
+    let mut app = md_app();
+    enter_milkdrop(&mut app);
+    let failed = app.milkdrop.current.clone().expect("a preset");
+    let generation = app.milkdrop.generation;
+    built(&mut app, generation, Err("broken".to_string()));
+    assert!(
+        !app.milkdrop.library.eligible().contains(&failed.as_str()),
+        "a failed preset leaves the rotation"
+    );
+}
+
+#[test]
+fn a_changed_interval_rearms_the_timer() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    assert!(app.milkdrop.next_switch_at.is_some());
+    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 0);
+    tick(&mut app);
+    assert_eq!(app.milkdrop.next_switch_at, None, "0 now means never");
+    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 10);
+    tick(&mut app);
+    let at = app.milkdrop.next_switch_at.expect("re-armed");
+    assert!(at <= std::time::Instant::now() + std::time::Duration::from_secs(10));
+}
+
+#[test]
+fn a_lost_renderer_clears_the_preset_on_screen() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.milkdrop.shared.slot_lost.store(true, Ordering::Release);
+    tick(&mut app);
+    assert_eq!(app.milkdrop.on_screen, None);
+}
+
+#[test]
+fn next_while_paused_says_why() {
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.playback.paused = true;
+    tick(&mut app);
+    let toasts = app.toast.toasts.len();
+    control(&mut app, crate::app_message::MilkdropControl::Next);
+    assert_eq!(app.toast.toasts.len(), toasts + 1);
+}

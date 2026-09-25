@@ -151,11 +151,21 @@ impl Nokkvi {
 
     /// Arm the switch timer from now, unless locked or the interval is 0.
     fn milkdrop_arm_timer(&mut self) {
+        let interval = self.milkdrop_interval();
+        self.milkdrop.armed_interval = interval;
         self.milkdrop.next_switch_at = if self.milkdrop.locked {
             None
         } else {
-            self.milkdrop_interval().map(|d| Instant::now() + d)
+            interval.map(|d| Instant::now() + d)
         };
+    }
+
+    /// Keys and menu rows that only work while MilkDrop animates say so.
+    fn milkdrop_explain_not_running(&mut self) {
+        debug!("milkdrop: preset change ignored (not playing on screen)");
+        if self.milkdrop_mode_active() {
+            self.toast_info("MilkDrop changes presets only while music plays on screen");
+        }
     }
 
     fn milkdrop_set_generation(&mut self, generation: u64) {
@@ -249,20 +259,36 @@ impl Nokkvi {
             }
             (Err(e), _) | (_, Err(e)) => warn!("milkdrop: no user preset directory: {e}"),
         }
-        let curation = if self.milkdrop.curation_path.as_os_str().is_empty() {
-            Curation::default()
-        } else {
-            Curation::load(&self.milkdrop.curation_path)
-        };
         self.milkdrop.library = PresetLibrary::new(
             crate::widgets::visualizer::milkdrop::BUNDLED_MILKDROP_PRESETS,
             &self.milkdrop.user_dir,
-            curation,
+            Curation::default(),
         );
+        self.milkdrop_load_curation();
         debug!(
             presets = self.milkdrop.library.len(),
             "milkdrop: preset library built"
         );
+    }
+
+    /// Read `curation.toml` into the library. An unreadable file is reported
+    /// once and then left untouched: saving over it would erase hand edits.
+    pub(crate) fn milkdrop_load_curation(&mut self) {
+        use nokkvi_data::services::milkdrop_presets::Curation;
+        if self.milkdrop.curation_path.as_os_str().is_empty() {
+            return;
+        }
+        match Curation::try_load(&self.milkdrop.curation_path) {
+            Ok(curation) => {
+                self.milkdrop.curation_error = None;
+                self.milkdrop.library.set_curation(curation);
+            }
+            Err(e) => {
+                warn!("milkdrop: {e}; it will not be overwritten until fixed");
+                self.milkdrop.curation_error = Some(e);
+                self.milkdrop.library.set_curation(Curation::default());
+            }
+        }
     }
 
     /// Start loading `name`: parse + translate its shaders on a blocking
@@ -387,7 +413,7 @@ impl Nokkvi {
 
     fn handle_milkdrop_next(&mut self) -> Task<Message> {
         if !self.milkdrop_is_running() {
-            debug!("milkdrop: Next Preset ignored (MilkDrop not on screen and playing)");
+            self.milkdrop_explain_not_running();
             return Task::none();
         }
         // An explicit request retries even after the failure cap.
@@ -398,20 +424,22 @@ impl Nokkvi {
 
     fn handle_milkdrop_previous(&mut self) -> Task<Message> {
         if !self.milkdrop_is_running() {
-            debug!("milkdrop: Previous Preset ignored (MilkDrop not on screen and playing)");
+            self.milkdrop_explain_not_running();
             return Task::none();
         }
         // Skip presets hidden (or removed) since they were shown.
         while let Some(previous) = self.milkdrop.history.pop() {
-            if self.milkdrop.library.source(&previous).is_some()
-                && !self.milkdrop.library.is_hidden(&previous)
-            {
+            if self.milkdrop_can_return_to(&previous) {
                 self.milkdrop.consecutive_failures = 0;
                 self.milkdrop.next_switch_at = None;
                 return self.milkdrop_load(previous);
             }
         }
         Task::none()
+    }
+
+    fn milkdrop_can_return_to(&self, name: &str) -> bool {
+        self.milkdrop.library.source(name).is_some() && !self.milkdrop.library.is_hidden(name)
     }
 
     fn handle_milkdrop_toggle_lock(&mut self) -> Task<Message> {
@@ -439,21 +467,37 @@ impl Nokkvi {
             debug!("milkdrop: Hide ignored outside MilkDrop mode");
             return Task::none();
         }
-        let Some(name) = self.milkdrop.on_screen.clone() else {
+        let Some(name) = self.milkdrop.on_screen.take() else {
             return Task::none();
         };
-        self.milkdrop.library.hide(&name);
+        if !self.milkdrop.library.hide(&name) {
+            return Task::none();
+        }
         info!(preset = %name, "milkdrop: preset hidden");
         self.milkdrop_save_curation();
         self.toast_info(format!("MilkDrop: {name} won't show again"));
+        // A hidden preset never belongs in Previous's history.
+        self.milkdrop.history.retain(|n| *n != name);
+
+        if !self.milkdrop.library.has_eligible() {
+            // Nothing left to show: give the panel back to the cover.
+            self.milkdrop_release();
+            self.milkdrop.empty_warned = true;
+            self.toast_warn("MilkDrop: every preset is hidden");
+            return Task::none();
+        }
+        self.milkdrop.consecutive_failures = 0;
+        self.milkdrop.next_switch_at = None;
         if self.milkdrop_is_running() {
-            self.milkdrop.consecutive_failures = 0;
-            self.milkdrop.next_switch_at = None;
-            let task = self.milkdrop_advance(AdvanceReason::Manual);
-            // A hidden preset never belongs in Previous's history.
-            self.milkdrop.history.retain(|n| *n != name);
-            task
+            self.milkdrop_advance(AdvanceReason::Manual)
         } else {
+            // Paused or off the panel: forget it (and any pending build) now;
+            // the tick loads another the moment MilkDrop runs again.
+            let generation = self.milkdrop.generation + 1;
+            self.milkdrop_set_generation(generation);
+            self.milkdrop.current = None;
+            self.milkdrop.build_in_flight = None;
+            self.milkdrop.awaiting_gpu = None;
             Task::none()
         }
     }
@@ -480,6 +524,13 @@ impl Nokkvi {
     /// fatal (the in-memory curation still applies this session).
     fn milkdrop_save_curation(&mut self) {
         if self.milkdrop.curation_path.as_os_str().is_empty() {
+            return;
+        }
+        if let Some(error) = &self.milkdrop.curation_error {
+            warn!("milkdrop: not saving curation over an unreadable file: {error}");
+            self.toast_warn(
+                "MilkDrop: curation.toml has an error, so this change is not saved; fix the file and restart",
+            );
             return;
         }
         if let Err(e) = self
@@ -530,6 +581,21 @@ impl Nokkvi {
                 "MilkDrop is not playing on screen".to_string(),
             ));
         }
+        if action == PresetAction::Next && !self.milkdrop.library.has_eligible() {
+            return Err((
+                "unavailable",
+                "no presets to show (all hidden?)".to_string(),
+            ));
+        }
+        if action == PresetAction::Previous
+            && !self
+                .milkdrop
+                .history
+                .iter()
+                .any(|name| self.milkdrop_can_return_to(name))
+        {
+            return Err(("unavailable", "no earlier preset to go back to".to_string()));
+        }
         let is_favorite = self
             .milkdrop
             .on_screen
@@ -548,10 +614,18 @@ impl Nokkvi {
             | PresetAction::Favorite
             | PresetAction::Unfavorite => Task::none(),
         };
+        // `preset` is what is on screen (as `status` reports); `loading` names
+        // a requested preset still being built.
+        let loading = self
+            .milkdrop
+            .current
+            .as_ref()
+            .filter(|current| self.milkdrop.on_screen.as_ref() != Some(*current));
         Ok((
             task,
             serde_json::json!({
-                "preset": self.milkdrop.current,
+                "preset": self.milkdrop.on_screen,
+                "loading": loading,
                 "locked": self.milkdrop.locked,
             }),
         ))
@@ -579,6 +653,11 @@ impl Nokkvi {
         self.milkdrop.build_in_flight = None;
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.consecutive_failures = self.milkdrop.consecutive_failures.saturating_add(1);
+        // Out of the rotation for this session, so a broken file is not
+        // retried every round.
+        if let Some(name) = self.milkdrop.current.clone() {
+            self.milkdrop.library.mark_broken(&name);
+        }
         if self.milkdrop_is_running() {
             self.milkdrop_advance(AdvanceReason::Failure)
         } else {
@@ -663,7 +742,10 @@ impl Nokkvi {
             if self.milkdrop.consecutive_failures >= MILKDROP_MAX_CONSECUTIVE_FAILURES {
                 self.milkdrop_give_up();
             }
-            self.milkdrop.current = None;
+            if let Some(name) = self.milkdrop.current.take() {
+                self.milkdrop.library.mark_broken(&name);
+            }
+            self.milkdrop.on_screen = None;
         }
 
         // The current load reached the screen: announce it once, and only now
@@ -716,11 +798,17 @@ impl Nokkvi {
         } else if self.milkdrop.current.is_none()
             && self.milkdrop.build_in_flight.is_none()
             && self.milkdrop.consecutive_failures < MILKDROP_MAX_CONSECUTIVE_FAILURES
+            && self.milkdrop.library.has_eligible()
         {
             tasks.push(self.milkdrop_advance(AdvanceReason::Enter));
         } else if self.milkdrop.build_in_flight.is_none() && self.milkdrop.current.is_some() {
+            // A changed Preset Interval re-arms from now (0 disarms).
+            let interval = self.milkdrop_interval();
+            if self.milkdrop.next_switch_at.is_some() && self.milkdrop.armed_interval != interval {
+                self.milkdrop_arm_timer();
+            }
             match self.milkdrop.next_switch_at {
-                None if !self.milkdrop.locked => self.milkdrop_arm_timer(),
+                None if !self.milkdrop.locked && interval.is_some() => self.milkdrop_arm_timer(),
                 None => {}
                 Some(at) if Instant::now() >= at => {
                     // Disarm first: re-firing every tick until the build lands

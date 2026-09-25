@@ -50,6 +50,12 @@ pub struct MilkdropState {
     /// use a temp dir.
     pub user_dir: PathBuf,
     pub curation_path: PathBuf,
+    /// Why the curation file could not be read; while set, the file is never
+    /// written (it would overwrite the user's hand edits).
+    pub curation_error: Option<String>,
+    /// The switch interval the current timer was armed with; a different
+    /// live setting re-arms it.
+    pub armed_interval: Option<std::time::Duration>,
 }
 
 impl Default for MilkdropState {
@@ -71,6 +77,8 @@ impl Default for MilkdropState {
             empty_warned: false,
             user_dir: PathBuf::new(),
             curation_path: PathBuf::new(),
+            curation_error: None,
+            armed_interval: None,
         }
     }
 }
