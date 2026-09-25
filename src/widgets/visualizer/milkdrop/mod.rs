@@ -287,6 +287,27 @@ mod tests {
         })
     }
 
+    #[test]
+    fn nokkvi_presets_are_themed_and_fully_substituted() {
+        let palette = palette::PresetPalette::from_theme();
+        let ours: Vec<_> = BUNDLED_MILKDROP_PRESETS
+            .iter()
+            .filter(|(name, _)| name.starts_with("nokkvi - "))
+            .collect();
+        assert!(ours.len() >= 6, "nokkvi's presets ship in the pack");
+        for (name, json) in ours {
+            assert!(palette::uses_theme(json), "{name} should use the theme");
+            let filled = palette.substitute(json);
+            assert!(
+                !filled.contains("NOKKVI_"),
+                "{name}: unknown placeholder left"
+            );
+            if let Err(e) = particle_milkdrop::load_preset_str(&filled, true) {
+                panic!("{name}: {e}");
+            }
+        }
+    }
+
     /// Needs a GPU: `cargo test -p nokkvi -- --ignored bundled_pack_builds`.
     /// Builds every bundled preset's renderer (plus a warm-up frame) on a
     /// device with iced's limits, under the same error scopes the app uses.
@@ -295,6 +316,15 @@ mod tests {
     fn bundled_pack_builds_on_icedlike_limits() {
         let Some(gpu) = iced_like_gpu() else {
             panic!("no GPU adapter available");
+        };
+        // A cover for the presets that sample one (exercises set_named_texture).
+        let pixels: Vec<u8> = (0..700u32 * 600)
+            .flat_map(|i| [(i % 251) as u8, (i % 97) as u8, (i % 13) as u8, 255])
+            .collect();
+        let cover = CoverImage {
+            width: 700,
+            height: 600,
+            rgba: pixels,
         };
         let failures: Vec<String> = BUNDLED_MILKDROP_PRESETS
             .iter()
@@ -307,7 +337,7 @@ mod tests {
                     Ok(p) => p,
                     Err(e) => return Some(format!("{name}: compile: {e}")),
                 };
-                build_renderer(&gpu, (256, 256), &preset, None)
+                build_renderer(&gpu, (256, 256), &preset, Some(&cover))
                     .err()
                     .map(|e| format!("{name}: {}", e.replace('\n', " ")))
             })
