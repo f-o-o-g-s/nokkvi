@@ -987,6 +987,12 @@ pub enum MilkdropMessage {
     },
     /// A preset control from a key, a panel menu row or the CLI.
     Control(MilkdropControl),
+    /// The playing cover decoded for presets that sample `cover` (`None` =
+    /// the bytes did not decode).
+    CoverDecoded {
+        source: iced::advanced::image::Id,
+        result: Option<std::sync::Arc<crate::widgets::visualizer::milkdrop::CoverImage>>,
+    },
 }
 
 /// The MilkDrop preset controls, shared by the hotkeys, the Queue and Theater

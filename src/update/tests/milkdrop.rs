@@ -997,3 +997,80 @@ fn a_theme_bump_without_a_colour_change_reloads_nothing() {
     tick(&mut app);
     assert_eq!(app.milkdrop.generation, generation);
 }
+
+// ----------------------------------------------------------------------------
+// nokkvi presets: the playing cover
+// ----------------------------------------------------------------------------
+
+/// A 2x2 PNG, so the handle is byte-backed like a fetched cover.
+fn tiny_png() -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([200, 30, 30, 255]))
+        .write_to(&mut out, image::ImageFormat::Png)
+        .expect("encode png");
+    out.into_inner()
+}
+
+/// md_app playing song s1 of album_s1 whose large cover is cached.
+fn app_with_cover() -> (Nokkvi, iced::advanced::image::Id) {
+    let mut app = md_app();
+    app.library.queue_songs = vec![make_queue_song("s1", "T", "A", "Al")];
+    app.scrobble.current_song_id = Some("s1".to_string());
+    let handle = iced::widget::image::Handle::from_bytes(tiny_png());
+    let id = handle.id();
+    app.artwork
+        .large_artwork
+        .put("album_s1".to_string(), handle);
+    (app, id)
+}
+
+#[test]
+fn the_playing_cover_is_decoded_for_milkdrop() {
+    let (mut app, id) = app_with_cover();
+    enter_milkdrop(&mut app);
+    assert_eq!(app.milkdrop.cover_pending, Some(id), "decode requested");
+    tick(&mut app);
+    assert_eq!(
+        app.milkdrop.cover_pending,
+        Some(id),
+        "requested once, not per tick"
+    );
+}
+
+#[test]
+fn a_decoded_cover_reaches_the_renderer_side() {
+    let (mut app, id) = app_with_cover();
+    enter_milkdrop(&mut app);
+    let cover = crate::widgets::visualizer::milkdrop::decode_cover(&tiny_png()).expect("decodes");
+    let _ = app.update(Message::Milkdrop(MilkdropMessage::CoverDecoded {
+        source: id,
+        result: Some(std::sync::Arc::new(cover)),
+    }));
+    let shared = app.milkdrop.shared.cover.lock().clone().expect("published");
+    assert_eq!((shared.width, shared.height), (2, 2));
+    assert!(app.milkdrop.shared.cover_version() > 0);
+    assert_eq!(app.milkdrop.cover_pending, None);
+    tick(&mut app);
+    assert_eq!(app.milkdrop.cover_pending, None, "not decoded again");
+}
+
+#[test]
+fn a_stale_cover_is_dropped() {
+    let (mut app, _id) = app_with_cover();
+    enter_milkdrop(&mut app);
+    let other = iced::widget::image::Handle::from_bytes(tiny_png()).id();
+    let cover = crate::widgets::visualizer::milkdrop::decode_cover(&tiny_png()).expect("decodes");
+    let _ = app.update(Message::Milkdrop(MilkdropMessage::CoverDecoded {
+        source: other,
+        result: Some(std::sync::Arc::new(cover)),
+    }));
+    assert!(app.milkdrop.shared.cover.lock().is_none());
+}
+
+#[test]
+fn no_cover_work_outside_milkdrop_mode() {
+    let (mut app, _id) = app_with_cover();
+    app.engine.visualization_mode = VisualizationMode::Bars;
+    tick(&mut app);
+    assert_eq!(app.milkdrop.cover_pending, None);
+}

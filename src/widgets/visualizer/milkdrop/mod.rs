@@ -79,6 +79,57 @@ pub(crate) fn apply_features(renderer: &mut MilkdropRenderer, f: &particle_audio
     renderer.set_freq_spectrum(&f.freq_spectrum);
 }
 
+/// The name a preset samples the playing cover by (`sampler_cover`,
+/// `sampler_fc_cover`, …).
+pub(crate) const COVER_TEXTURE: &str = "cover";
+
+/// The largest side a cover is decoded to; the engine's atlas cell is 512 px.
+const COVER_MAX_SIDE: u32 = 512;
+
+/// The playing album's (or station's) cover, decoded to RGBA8 for the engine.
+pub struct CoverImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+// Manual: the pixel buffer is large.
+impl std::fmt::Debug for CoverImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoverImage")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
+    }
+}
+
+fn cover_from_image(img: image::DynamicImage) -> CoverImage {
+    // Only ever shrink: the engine resizes to its atlas cell anyway.
+    let img = if img.width() > COVER_MAX_SIDE || img.height() > COVER_MAX_SIDE {
+        img.thumbnail(COVER_MAX_SIDE, COVER_MAX_SIDE)
+    } else {
+        img
+    }
+    .to_rgba8();
+    let (width, height) = img.dimensions();
+    CoverImage {
+        width,
+        height,
+        rgba: img.into_raw(),
+    }
+}
+
+/// Decode an encoded cover (PNG / JPEG / …). Blocking; run it off the UI thread.
+pub(crate) fn decode_cover(bytes: &[u8]) -> Option<CoverImage> {
+    image::load_from_memory(bytes).ok().map(cover_from_image)
+}
+
+/// Downscale already-decoded RGBA8 pixels (a `from_rgba` artwork handle).
+pub(crate) fn cover_from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> Option<CoverImage> {
+    image::RgbaImage::from_raw(width, height, pixels)
+        .map(|img| cover_from_image(image::DynamicImage::ImageRgba8(img)))
+}
+
 /// A parsed preset with its shaders already translated (the naga work), ready
 /// for a device.
 pub struct CompiledPreset {
@@ -124,6 +175,7 @@ pub(crate) fn build_renderer(
     gpu: &GpuHandles,
     size: (u32, u32),
     preset: &CompiledPreset,
+    cover: Option<&CoverImage>,
 ) -> Result<MilkdropRenderer, String> {
     let (w, h) = (size.0.max(MIN_RENDER_SIDE), size.1.max(MIN_RENDER_SIDE));
     run_in_error_scopes(&gpu.device, || {
@@ -138,6 +190,9 @@ pub(crate) fn build_renderer(
             None,
         )
         .map(|mut renderer| {
+            if let Some(cover) = cover {
+                renderer.set_named_texture(COVER_TEXTURE, &cover.rgba, cover.width, cover.height);
+            }
             renderer.render_to_retained_comp();
             renderer
         })
@@ -252,7 +307,7 @@ mod tests {
                     Ok(p) => p,
                     Err(e) => return Some(format!("{name}: compile: {e}")),
                 };
-                build_renderer(&gpu, (256, 256), &preset)
+                build_renderer(&gpu, (256, 256), &preset, None)
                     .err()
                     .map(|e| format!("{name}: {}", e.replace('\n', " ")))
             })

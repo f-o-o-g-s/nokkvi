@@ -84,6 +84,8 @@ struct Slot {
     /// The renderer's current output size (`dimensions()`).
     size: (u32, u32),
     frames_rendered: u64,
+    /// The cover version this renderer shows (0 = recheck on the next frame).
+    cover_version: u64,
     last_advance: Instant,
     /// The analysis rate last handed to the engine.
     rate_set: Option<f32>,
@@ -200,6 +202,7 @@ impl MilkdropPipeline {
             bind_group,
             size,
             frames_rendered: 0,
+            cover_version: 0,
             // Due at once: the first advance happens this frame.
             last_advance: Instant::now()
                 .checked_sub(MILKDROP_FRAME_INTERVAL)
@@ -256,6 +259,26 @@ impl shader::Primitive for MilkdropPrimitive {
             return;
         };
         let mut lost = false;
+
+        // A new playing cover: swap it into the live renderer in place.
+        let cover_version = shared.cover_version();
+        if cover_version != slot.cover_version {
+            slot.cover_version = cover_version;
+            if let Some(cover) = shared.cover.lock().clone() {
+                let mut renderer = slot.renderer.lock();
+                if let Err(e) = run_in_error_scopes(device, || {
+                    renderer.set_named_texture(
+                        super::COVER_TEXTURE,
+                        &cover.rgba,
+                        cover.width,
+                        cover.height,
+                    )
+                }) {
+                    warn!(preset = %slot.name, "milkdrop: GPU error updating the cover: {e}");
+                    lost = true;
+                }
+            }
+        }
 
         if desired != slot.size {
             slot.debouncer.request(desired.0, desired.1, now);

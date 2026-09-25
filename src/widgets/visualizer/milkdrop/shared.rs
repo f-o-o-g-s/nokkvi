@@ -99,6 +99,10 @@ pub struct MilkdropShared {
     pub(crate) built: Mutex<Option<BuiltPreset>>,
     /// The size `prepare` last wanted, so the builder constructs at that size.
     pub(crate) render_size: Mutex<(u32, u32)>,
+    /// The playing cover for presets that sample `cover`; replaced (never
+    /// mutated) on each new cover, with `cover_version` bumped after.
+    pub(crate) cover: Mutex<Option<Arc<super::CoverImage>>>,
+    cover_version: AtomicU64,
 }
 
 impl MilkdropShared {
@@ -117,6 +121,8 @@ impl MilkdropShared {
             gpu: Mutex::new(None),
             built: Mutex::new(None),
             render_size: Mutex::new(FALLBACK_RENDER_SIZE),
+            cover: Mutex::new(None),
+            cover_version: AtomicU64::new(0),
         }
     }
 
@@ -128,6 +134,17 @@ impl MilkdropShared {
 
     pub(crate) fn set_analysis_rate(&self, hz: f32) {
         self.analysis_rate.store(hz.to_bits(), Ordering::Release);
+    }
+
+    /// Publish a new cover; the renderer on screen picks it up next frame.
+    pub(crate) fn publish_cover(&self, cover: Arc<super::CoverImage>) {
+        *self.cover.lock() = Some(cover);
+        self.cover_version.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Bumps on every published cover (0 = none yet).
+    pub(crate) fn cover_version(&self) -> u64 {
+        self.cover_version.load(Ordering::Acquire)
     }
 
     /// Called by `prepare` every frame the panel draws.

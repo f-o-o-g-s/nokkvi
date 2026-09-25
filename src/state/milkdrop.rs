@@ -63,6 +63,11 @@ pub struct MilkdropState {
     /// The theme changed while a themed preset could not reload (paused, off
     /// the panel); compare once MilkDrop runs again.
     pub palette_check_pending: bool,
+    /// The artwork handle whose cover is being decoded for the engine.
+    pub cover_pending: Option<iced::advanced::image::Id>,
+    /// The artwork handle whose cover the engine last received (or that
+    /// failed to decode), so each cover is decoded once.
+    pub cover_sent: Option<iced::advanced::image::Id>,
     /// The switch interval the current timer was armed with; a different
     /// live setting re-arms it.
     pub armed_interval: Option<std::time::Duration>,
@@ -92,6 +97,8 @@ impl Default for MilkdropState {
             palette_used: None,
             theme_generation_seen: 0,
             palette_check_pending: false,
+            cover_pending: None,
+            cover_sent: None,
             armed_interval: None,
         }
     }
