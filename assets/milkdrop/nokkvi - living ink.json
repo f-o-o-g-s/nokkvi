@@ -1,0 +1,99 @@
+{
+ "version": 2,
+ "baseVals": {
+  "gammaadj": 1.0,
+  "decay": 1.0,
+  "echo_zoom": 1.0,
+  "echo_alpha": 0.0,
+  "wave_mode": 0,
+  "additivewave": 1,
+  "wave_a": 0.0,
+  "wave_scale": 0.8,
+  "wave_smoothing": 0.7,
+  "zoom": 1.0,
+  "rot": 0.0,
+  "warp": 0.0,
+  "wave_r": 1.0,
+  "wave_g": 1.0,
+  "wave_b": 1.0,
+  "ob_size": 0.0,
+  "ob_a": 0.0,
+  "ib_size": 0.0,
+  "ib_a": 0.0,
+  "mv_a": 0.0,
+  "darken_center": 0,
+  "brighten": 0,
+  "darken": 0,
+  "solarize": 0,
+  "invert": 0
+ },
+ "shapes": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  }
+ ],
+ "waves": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  }
+ ],
+ "init_eqs_eel": "pulse = 0; pop = 0; phase = 0; kicks = 0; scene = 0; shockr = 9; flowd = 1; flowt = 1; light = 0.8; lightt = 0.8; scl = 0.3; sclt = 0.3; cool = 0;",
+ "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\ndt = 1 / max(fps, 1);\nphase = phase + dt * (0.12 + 0.2 * min(mid_att, 2));\ncool = max(cool - dt, 0);\nhit = above(kick, 0.25) * below(cool, 0.001);\ncool = if(hit, 0.2, cool);\nkicks = kicks + hit;\nshockr = if(hit, 0.02, shockr + dt * 0.55);\nnewscene = hit * equal(kicks % 16, 0);\nscene = scene + newscene;\nflowt = if(newscene, -flowt, flowt);\nlightt = if(newscene, lightt + 2.1, lightt);\nsclt = if(newscene, 1 - sclt, sclt);\nflowd = flowd + (flowt - flowd) * 0.02;\nlight = light + (lightt - light) * 0.02 + dt * 0.08;\nscl = scl + (sclt - scl) * 0.02;\nq1 = phase;\nq6 = shockr;\nq7 = flowd;\nq8 = light;\nq9 = scl;\n",
+ "pixel_eqs_eel": "",
+ "warp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv_orig - 0.5) * s;\n  float r = length(p);\n  vec2 px = texsize.zw * 3.0;\n  float gx = GetBlur1(uv + vec2(px.x, 0.0)).x - GetBlur1(uv - vec2(px.x, 0.0)).x;\n  float gy = GetBlur1(uv + vec2(0.0, px.y)).x - GetBlur1(uv - vec2(0.0, px.y)).x;\n  vec2 grad = vec2(gx, gy);\n  vec2 current = vec2(sin(p.y * 2.3 + q1), cos(p.x * 2.1 - q1 * 0.8)) * 0.0011 * q7;\n  vec2 creep = vec2(-grad.y, grad.x) * 0.006 * q7;\n  vec2 shock = (r > 0.0001 ? p / r : vec2(0.0)) * smoothstep(0.06, 0.0, abs(r - q6)) * 0.004 * q3;\n  vec2 src = uv - (current + creep + shock) / s;\n  vec3 m = texture(sampler_main, src).xyz;\n  vec3 b1 = GetBlur1(src);\n  vec3 b2 = mix(GetBlur2(src), GetBlur3(src), q9);\n  float u = m.x + (b1.x - b2.x) * 1.3 + (m.x - b1.x) * 0.25;\n  u += (texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 + rand_frame.xy).x - 0.5) * 0.06;\n  u = u * 0.995 + 0.0015;\n  float ang = atan(p.y, p.x) / 6.2831853 + 0.5;\n  float spec = get_fft(0.02 + abs(ang * 2.0 - 1.0) * 0.5);\n  float ring = smoothstep(0.03, 0.0, abs(r - 0.3 - 0.05 * sin(q1 * 0.7)));\n  float feed = ring * spec * (0.6 + 0.8 * q5) + smoothstep(0.02, 0.0, abs(r - q6)) * q3 * 0.5;\n  u = mix(u, 1.0, clamp(feed, 0.0, 1.0) * 0.35);\n  float heat = max(m.y * 0.93, clamp(feed, 0.0, 1.0));\n  ret = vec3(clamp((u - 0.5) * 1.03 + 0.5, 0.0, 1.0), heat, 0.0);\n }",
+ "comp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv - 0.5) * s;\n  vec2 px = texsize.zw * 2.0;\n  float hx = GetBlur1(uv + vec2(px.x, 0.0)).x - GetBlur1(uv - vec2(px.x, 0.0)).x;\n  float hy = GetBlur1(uv + vec2(0.0, px.y)).x - GetBlur1(uv - vec2(0.0, px.y)).x;\n  vec3 n = normalize(vec3(-hx * 6.0, -hy * 6.0, 1.0));\n  vec3 L = normalize(vec3(cos(q8), sin(q8), 0.9));\n  float diff = max(dot(n, L), 0.0);\n  float spc = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 36.0);\n  vec3 m = texture(sampler_main, uv).xyz;\n  float u = m.x;\n  float ang = atan(p.y, p.x) / 6.2831853;\n  float hue = abs(fract(ang + length(p) * 0.6 + m.y * 0.25 + q1 * 0.03) * 2.0 - 1.0);\n  float body_x = clamp(0.25 + 0.75 * hue, 0.0, 1.0) * 5.0;\n  vec3 body = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(body_x, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP2, clamp(body_x - 1.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP3, clamp(body_x - 2.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP4, clamp(body_x - 3.0, 0.0, 1.0));\n  body = mix(body, NOKKVI_RAMP5, clamp(body_x - 4.0, 0.0, 1.0));\n  vec3 trough = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.6 + 0.4 * sin(length(p) * 9.0 - q1 * 2.0));\n  vec3 col = mix(trough, body, smoothstep(0.3, 0.6, u));\n  col *= 0.35 + 0.85 * diff;\n  col += NOKKVI_TEXT * spc * (0.35 + 0.5 * q5);\n  col += NOKKVI_HIGHLIGHT * m.y * 0.55;\n  col += NOKKVI_WARM * m.y * smoothstep(0.6, 1.0, m.y) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.6;\n  col *= 0.82 + 0.18 * smoothstep(1.05, 0.25, length(p));\n  col *= 1.0 + 0.25 * q5;\n  col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.zw).x - 0.5) * 0.01;\n  ret = col;\n }"
+}

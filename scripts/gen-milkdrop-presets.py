@@ -370,6 +370,87 @@ presets["nokkvi - starfield"] = preset(
           "travel = travel + speed * 0.25;\nroll = roll + 0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05));\n"
           "q1 = travel;\nq2 = speed * 6;\nq4 = roll;")
 
+# Living ink: a self-organising reaction-diffusion surface (difference of
+# blurs, flexi's trick) that creeps along its own gradient and a slow current,
+# fed by the music (the live spectrum seeds a ring, each frequency at its own
+# angle; kicks send shockwaves), shown as glossy lit enamel through the
+# theme's gradient. Every 16 kicks the scene shifts: pattern scale, flow
+# direction and light angle. Theme colours only; no cover.
+presets["nokkvi - living ink"] = preset(
+    {"decay": 1.0, "wave_a": 0.0, "zoom": 1.0},
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv_orig - 0.5) * s;
+  float r = length(p);
+  vec2 px = texsize.zw * 3.0;
+  float gx = GetBlur1(uv + vec2(px.x, 0.0)).x - GetBlur1(uv - vec2(px.x, 0.0)).x;
+  float gy = GetBlur1(uv + vec2(0.0, px.y)).x - GetBlur1(uv - vec2(0.0, px.y)).x;
+  vec2 grad = vec2(gx, gy);
+  vec2 current = vec2(sin(p.y * 2.3 + q1), cos(p.x * 2.1 - q1 * 0.8)) * 0.0011 * q7;
+  vec2 creep = vec2(-grad.y, grad.x) * 0.006 * q7;
+  vec2 shock = (r > 0.0001 ? p / r : vec2(0.0)) * smoothstep(0.06, 0.0, abs(r - q6)) * 0.004 * q3;
+  vec2 src = uv - (current + creep + shock) / s;
+  vec3 m = texture(sampler_main, src).xyz;
+  vec3 b1 = GetBlur1(src);
+  vec3 b2 = mix(GetBlur2(src), GetBlur3(src), q9);
+  float u = m.x + (b1.x - b2.x) * 1.3 + (m.x - b1.x) * 0.25;
+  u += (texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 + rand_frame.xy).x - 0.5) * 0.06;
+  u = u * 0.995 + 0.0015;
+  float ang = atan(p.y, p.x) / 6.2831853 + 0.5;
+  float spec = get_fft(0.02 + abs(ang * 2.0 - 1.0) * 0.5);
+  float ring = smoothstep(0.03, 0.0, abs(r - 0.3 - 0.05 * sin(q1 * 0.7)));
+  float feed = ring * spec * (0.6 + 0.8 * q5) + smoothstep(0.02, 0.0, abs(r - q6)) * q3 * 0.5;
+  u = mix(u, 1.0, clamp(feed, 0.0, 1.0) * 0.35);
+  float heat = max(m.y * 0.93, clamp(feed, 0.0, 1.0));
+  ret = vec3(clamp((u - 0.5) * 1.03 + 0.5, 0.0, 1.0), heat, 0.0);
+ }""",
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s;
+  vec2 px = texsize.zw * 2.0;
+  float hx = GetBlur1(uv + vec2(px.x, 0.0)).x - GetBlur1(uv - vec2(px.x, 0.0)).x;
+  float hy = GetBlur1(uv + vec2(0.0, px.y)).x - GetBlur1(uv - vec2(0.0, px.y)).x;
+  vec3 n = normalize(vec3(-hx * 6.0, -hy * 6.0, 1.0));
+  vec3 L = normalize(vec3(cos(q8), sin(q8), 0.9));
+  float diff = max(dot(n, L), 0.0);
+  float spc = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 36.0);
+  vec3 m = texture(sampler_main, uv).xyz;
+  float u = m.x;
+  float ang = atan(p.y, p.x) / 6.2831853;
+  float hue = abs(fract(ang + length(p) * 0.6 + m.y * 0.25 + q1 * 0.03) * 2.0 - 1.0);
+""" + ramp("body", "0.25 + 0.75 * hue") + """
+  vec3 trough = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.6 + 0.4 * sin(length(p) * 9.0 - q1 * 2.0));
+  vec3 col = mix(trough, body, smoothstep(0.3, 0.6, u));
+  col *= 0.35 + 0.85 * diff;
+  col += NOKKVI_TEXT * spc * (0.35 + 0.5 * q5);
+  col += NOKKVI_HIGHLIGHT * m.y * 0.55;
+  col += NOKKVI_WARM * m.y * smoothstep(0.6, 1.0, m.y) * clamp(treb_att - 0.9, 0.0, 1.0) * 0.6;
+  col *= 0.82 + 0.18 * smoothstep(1.05, 0.25, length(p));
+  col *= 1.0 + 0.25 * q5;
+  col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.zw).x - 0.5) * 0.01;
+  ret = col;
+ }""",
+    init="pulse = 0; pop = 0; phase = 0; kicks = 0; scene = 0; shockr = 9; flowd = 1; flowt = 1; light = 0.8; lightt = 0.8; scl = 0.3; sclt = 0.3; cool = 0;",
+    frame=PULSE + """dt = 1 / max(fps, 1);
+phase = phase + dt * (0.12 + 0.2 * min(mid_att, 2));
+cool = max(cool - dt, 0);
+hit = above(kick, 0.25) * below(cool, 0.001);
+cool = if(hit, 0.2, cool);
+kicks = kicks + hit;
+shockr = if(hit, 0.02, shockr + dt * 0.55);
+newscene = hit * equal(kicks % 16, 0);
+scene = scene + newscene;
+flowt = if(newscene, -flowt, flowt);
+lightt = if(newscene, lightt + 2.1, lightt);
+sclt = if(newscene, 1 - sclt, sclt);
+flowd = flowd + (flowt - flowd) * 0.02;
+light = light + (lightt - light) * 0.02 + dt * 0.08;
+scl = scl + (sclt - scl) * 0.02;
+q1 = phase;
+q6 = shockr;
+q7 = flowd;
+q8 = light;
+q9 = scl;
+""")
+
 # 6. Aurora (new; no cover) -----------------------------------------------
 presets["nokkvi - aurora"] = preset(
     {"decay": 1.0, "wave_mode": 6, "additivewave": 1, "wave_a": 0.9, "wave_scale": 1.2, "wave_smoothing": 0.6, "wave_thick": 1, "wave_y": 0.55},
