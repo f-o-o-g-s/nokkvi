@@ -21,7 +21,7 @@ use crate::{
     state::{MILKDROP_HISTORY_CAP, MILKDROP_MAX_CONSECUTIVE_FAILURES},
     widgets::visualizer::milkdrop::{
         BuiltPreset, CompiledPreset, GpuHandles, build_renderer, compile_preset, cover_from_rgba,
-        decode_cover, palette::PresetPalette,
+        decode_cover, neutral_cover, palette::PresetPalette,
     },
 };
 
@@ -222,6 +222,7 @@ impl Nokkvi {
         self.milkdrop.current = None;
         self.milkdrop.on_screen = None;
         self.milkdrop.current_themed = false;
+        self.milkdrop.recolouring = false;
         self.milkdrop.build_in_flight = None;
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.next_switch_at = None;
@@ -305,6 +306,8 @@ impl Nokkvi {
         self.milkdrop.build_in_flight = Some(generation);
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.current = Some(name.clone());
+        // A recolour sets this again right after; any other load is new.
+        self.milkdrop.recolouring = false;
         // Colour nokkvi's presets with the theme showing now.
         let palette = PresetPalette::from_theme();
         self.milkdrop.palette_used = Some(palette);
@@ -383,6 +386,7 @@ impl Nokkvi {
             async move {
                 tokio::task::spawn_blocking(move || {
                     let started = Instant::now();
+                    let cover_version = shared.cover_version();
                     let cover = shared.cover.lock().clone();
                     let renderer = build_renderer(&gpu, size, &preset, cover.as_deref())
                         .map_err(|e| format!("{}: {e}", preset.name))?;
@@ -395,6 +399,7 @@ impl Nokkvi {
                     shared.offer_built(BuiltPreset {
                         generation,
                         epoch: gpu.epoch,
+                        cover_version,
                         name: preset.name.clone(),
                         renderer,
                     });
@@ -425,7 +430,10 @@ impl Nokkvi {
                 // The name toast and the failure reset wait for the first frame
                 // (`shown_generation`, read by the tick).
                 self.milkdrop.build_in_flight = None;
-                self.milkdrop_arm_timer();
+                // A recolour keeps the running timer.
+                if !self.milkdrop.recolouring {
+                    self.milkdrop_arm_timer();
+                }
                 Task::none()
             }
         }
@@ -651,10 +659,13 @@ impl Nokkvi {
         ))
     }
 
-    /// Decode the playing cover (album art, or the station's logo during
-    /// radio) for presets that sample `cover`, once per artwork handle. A
-    /// larger handle replacing the mini thumbnail decodes again.
-    fn milkdrop_cover_task(&mut self) -> Option<Task<Message>> {
+    /// Keep the engine's `cover` in step with what is playing: the album's
+    /// cover (asking once for the large one when only the mini is cached) or
+    /// the station's logo during radio. Each artwork handle is decoded once,
+    /// off-thread. A new owner with no artwork gets a neutral stand-in rather
+    /// than keeping the previous album's; the same owner whose art was merely
+    /// evicted from the cache keeps what it has.
+    fn milkdrop_cover_tasks(&mut self) -> Vec<Task<Message>> {
         use iced::widget::image::Handle;
         // Generic so the handle's (unnameable, refcounted) byte type clones
         // cheaply into the blocking task.
@@ -662,50 +673,95 @@ impl Nokkvi {
             Bytes(B),
             Rgba(u32, u32, Vec<u8>),
         }
+        let mut tasks = Vec::new();
         let artwork = &self.artwork;
-        let handle = match self.active_playback.radio_station() {
-            Some(station) => artwork
-                .radio_large_art
-                .snapshot
-                .get(&station.id)
-                .or_else(|| artwork.radio_art.snapshot.get(&station.id)),
-            None => {
-                let album = self.current_queue_song_album_id()?;
+        let (owner, handle, want_large) = match self.active_playback.radio_station() {
+            Some(station) => (
+                format!("radio:{}", station.id),
                 artwork
-                    .large_artwork
+                    .radio_large_art
                     .snapshot
-                    .get(album)
-                    .or_else(|| artwork.album_art.snapshot.get(album))
+                    .get(&station.id)
+                    .or_else(|| artwork.radio_art.snapshot.get(&station.id)),
+                None,
+            ),
+            None => {
+                let Some(album) = self.current_queue_song_album_id() else {
+                    return tasks;
+                };
+                let large = artwork.large_artwork.snapshot.get(album);
+                (
+                    album.to_string(),
+                    large.or_else(|| artwork.album_art.snapshot.get(album)),
+                    large.is_none().then(|| album.to_string()),
+                )
             }
-        }?;
-        let source = handle.id();
-        if self.milkdrop.cover_sent == Some(source) || self.milkdrop.cover_pending == Some(source) {
-            return None;
-        }
-        let job = match handle {
-            Handle::Bytes(_, bytes) => Job::Bytes(bytes.clone()),
-            Handle::Rgba {
-                width,
-                height,
-                pixels,
-                ..
-            } => Job::Rgba(*width, *height, pixels.to_vec()),
-            Handle::Path(..) => return None,
         };
-        self.milkdrop.cover_pending = Some(source);
-        Some(Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || match job {
-                    Job::Bytes(bytes) => decode_cover(&bytes),
-                    Job::Rgba(w, h, pixels) => cover_from_rgba(w, h, pixels),
-                })
-                .await
-                .ok()
-                .flatten()
-                .map(Arc::new)
-            },
-            move |result| Message::Milkdrop(MilkdropMessage::CoverDecoded { source, result }),
-        ))
+        let job = handle.map(|h| {
+            (
+                h.id(),
+                match h {
+                    Handle::Bytes(_, bytes) => Some(Job::Bytes(bytes.clone())),
+                    Handle::Rgba {
+                        width,
+                        height,
+                        pixels,
+                        ..
+                    } => Some(Job::Rgba(*width, *height, pixels.to_vec())),
+                    Handle::Path(..) => None,
+                },
+            )
+        });
+
+        // Only the Queue's centred row and Theater Mode load large art; ask
+        // for the playing album's once so cover presets are not an 80 px blur.
+        if let Some(album) = want_large
+            && self.milkdrop.cover_large_requested.as_deref() != Some(album.as_str())
+        {
+            self.milkdrop.cover_large_requested = Some(album.clone());
+            tasks.push(Task::done(Message::Artwork(
+                crate::app_message::ArtworkMessage::LoadLarge(album),
+            )));
+        }
+
+        match job {
+            Some((source, Some(job))) => {
+                if self.milkdrop.cover_sent == Some(source)
+                    || self.milkdrop.cover_pending == Some(source)
+                {
+                    return tasks;
+                }
+                self.milkdrop.cover_pending = Some(source);
+                self.milkdrop.cover_pending_owner = Some(owner);
+                tasks.push(Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || match job {
+                            Job::Bytes(bytes) => decode_cover(&bytes),
+                            Job::Rgba(w, h, pixels) => cover_from_rgba(w, h, pixels),
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(Arc::new)
+                    },
+                    move |result| {
+                        Message::Milkdrop(MilkdropMessage::CoverDecoded { source, result })
+                    },
+                ));
+            }
+            // No usable artwork for this owner.
+            Some((_, None)) | None => {
+                if self.milkdrop.cover_owner.as_deref() != Some(owner.as_str()) {
+                    self.milkdrop.cover_owner = Some(owner);
+                    self.milkdrop.cover_sent = None;
+                    self.milkdrop.cover_pending = None;
+                    self.milkdrop
+                        .shared
+                        .publish_cover(Arc::new(neutral_cover()));
+                }
+            }
+        }
+        tasks
     }
 
     fn handle_milkdrop_cover_decoded(
@@ -719,11 +775,23 @@ impl Nokkvi {
         }
         self.milkdrop.cover_pending = None;
         self.milkdrop.cover_sent = Some(source);
-        match result {
-            Some(cover) => self.milkdrop.shared.publish_cover(cover),
-            None => warn!("milkdrop: the playing cover did not decode"),
-        }
+        self.milkdrop.cover_owner = self.milkdrop.cover_pending_owner.take();
+        let cover = result.unwrap_or_else(|| {
+            warn!("milkdrop: the playing cover did not decode");
+            Arc::new(neutral_cover())
+        });
+        self.milkdrop.shared.publish_cover(cover);
         Task::none()
+    }
+
+    /// Forget the cover (logout): the next session starts clean.
+    pub(crate) fn milkdrop_clear_cover(&mut self) {
+        self.milkdrop.shared.clear_cover();
+        self.milkdrop.cover_sent = None;
+        self.milkdrop.cover_pending = None;
+        self.milkdrop.cover_pending_owner = None;
+        self.milkdrop.cover_owner = None;
+        self.milkdrop.cover_large_requested = None;
     }
 
     /// Hook for a new track: switch presets when that setting is on.
@@ -793,7 +861,8 @@ impl Nokkvi {
         };
         debug!(?reason, preset = %next, "milkdrop: next preset");
         // History records only presets that reached the screen.
-        let current_was_shown = self.milkdrop.announced_generation == self.milkdrop.generation;
+        let current_was_shown = self.milkdrop.announced_generation == self.milkdrop.generation
+            || self.milkdrop.recolouring;
         if let Some(previous) = current
             && reason != AdvanceReason::Failure
             && current_was_shown
@@ -821,7 +890,7 @@ impl Nokkvi {
             return Task::none();
         }
         self.milkdrop_apply_config();
-        let cover_task = self.milkdrop_cover_task();
+        let cover_tasks = self.milkdrop_cover_tasks();
 
         let running = self.milkdrop_is_running();
         self.milkdrop
@@ -858,7 +927,8 @@ impl Nokkvi {
             if let Some(name) = self.milkdrop.current.clone() {
                 info!(preset = %name, "milkdrop: preset on screen");
                 self.milkdrop.on_screen = Some(name.clone());
-                if self.milkdrop_config().show_preset_names {
+                let recolour = std::mem::take(&mut self.milkdrop.recolouring);
+                if !recolour && self.milkdrop_config().show_preset_names {
                     self.toast_info(name);
                 }
             }
@@ -878,7 +948,7 @@ impl Nokkvi {
             self.milkdrop.gpu_epoch_seen = epoch;
         }
 
-        let mut tasks: Vec<Task<Message>> = cover_task.into_iter().collect();
+        let mut tasks: Vec<Task<Message>> = cover_tasks;
 
         // A theme change recolours a themed preset (reload, not a new pick).
         // The counter also moves on every settings reload, so compare the
@@ -897,6 +967,7 @@ impl Nokkvi {
             {
                 debug!(preset = %name, "milkdrop: theme changed; recolouring");
                 tasks.push(self.milkdrop_load(name));
+                self.milkdrop.recolouring = true;
             }
         }
 

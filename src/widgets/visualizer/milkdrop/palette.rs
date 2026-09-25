@@ -11,7 +11,8 @@
 //! Roles: `BG` (the darkest background), `SURFACE` (a raised background),
 //! `TEXT`, `ACCENT`, `HIGHLIGHT` (the bright accent), `WARM` (the theme's warm
 //! warning/star colour) and `RAMP0`..`RAMP5` (the visualizer gradient, dark to
-//! light as the theme defines it). Values are the theme's display-space
+//! light as the theme defines it). They always come from the theme's dark
+//! palette (see [`PresetPalette::from_theme`]). Values are display-space
 //! channels, which is what the MilkDrop blit shows.
 
 use std::borrow::Cow;
@@ -39,11 +40,15 @@ fn rgb(c: iced::Color) -> Rgb {
 }
 
 impl PresetPalette {
-    /// The active theme's palette (light or dark, whichever is showing).
+    /// The active theme's DARK palette, in either mode: nokkvi's presets are
+    /// light on a dark canvas (additive glows, trails fading to black), which a
+    /// light palette would wash out, so light mode shows them as a dark panel
+    /// in the theme's own dark colours. `light` still tells a preset the mode.
     pub(crate) fn from_theme() -> Self {
-        use crate::theme;
-        let bars: crate::visualizer_config::ThemeBarColors = theme::get_visualizer_colors().into();
-        let accent = rgb(theme::accent());
+        use crate::theme::{self, read_dark_color};
+        let bars: crate::visualizer_config::ThemeBarColors =
+            theme::get_visualizer_colors_dark().into();
+        let accent = rgb(read_dark_color(|t| t.accent));
         let ramp_src: Vec<Rgb> = bars
             .bar_gradient_colors
             .iter()
@@ -59,12 +64,12 @@ impl PresetPalette {
             }
         });
         Self {
-            bg: rgb(theme::bg0_hard()),
-            surface: rgb(theme::bg1()),
-            text: rgb(theme::fg0()),
+            bg: rgb(read_dark_color(|t| t.bg0_hard)),
+            surface: rgb(read_dark_color(|t| t.bg1)),
+            text: rgb(read_dark_color(|t| t.fg0)),
             accent,
-            highlight: rgb(theme::accent_bright()),
-            warm: rgb(theme::warning()),
+            highlight: rgb(read_dark_color(|t| t.accent_bright)),
+            warm: rgb(read_dark_color(|t| t.warning)),
             ramp,
             light: theme::is_light_mode(),
         }

@@ -129,7 +129,7 @@ pub(super) fn read_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
 /// background. The logo still recolors across *themes* (each theme's dark
 /// palette) — it just no longer flips with the light/dark toggle.
 #[inline]
-fn read_dark_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
+pub(crate) fn read_dark_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
     f(&DUAL_THEME.load().dark)
 }
 

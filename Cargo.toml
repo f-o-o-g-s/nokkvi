@@ -112,5 +112,5 @@ rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] 
 # the playing album's cover in place (512 px atlas cells). `default-features = false`
 # drops the standalone player (winit/cpal) and the C++ .milk converter: presets load from
 # Butterchurn's pre-converted JSON. Root crate only; data/ and nokkvi-ipc/ stay free of both.
-particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "6caf7c75cdbf723416129e09b612eef773638477", default-features = false }
-particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "6caf7c75cdbf723416129e09b612eef773638477", default-features = false }
+particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "03a07544aa9f3fd7ec2406ad695d16326b9721a2", default-features = false }
+particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "03a07544aa9f3fd7ec2406ad695d16326b9721a2", default-features = false }

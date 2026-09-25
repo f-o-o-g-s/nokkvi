@@ -50,6 +50,8 @@ pub(crate) struct GpuHandles {
 pub(crate) struct BuiltPreset {
     pub generation: u64,
     pub epoch: u64,
+    /// The cover version the builder already set (so `prepare` skips it).
+    pub cover_version: u64,
     pub name: String,
     pub renderer: MilkdropRenderer,
 }
@@ -139,6 +141,12 @@ impl MilkdropShared {
     /// Publish a new cover; the renderer on screen picks it up next frame.
     pub(crate) fn publish_cover(&self, cover: Arc<super::CoverImage>) {
         *self.cover.lock() = Some(cover);
+        self.cover_version.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Forget the cover (logout).
+    pub(crate) fn clear_cover(&self) {
+        *self.cover.lock() = None;
         self.cover_version.fetch_add(1, Ordering::AcqRel);
     }
 

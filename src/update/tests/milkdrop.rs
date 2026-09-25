@@ -1074,3 +1074,129 @@ fn no_cover_work_outside_milkdrop_mode() {
     tick(&mut app);
     assert_eq!(app.milkdrop.cover_pending, None);
 }
+
+// ----------------------------------------------------------------------------
+// Review fixes for nokkvi presets
+// ----------------------------------------------------------------------------
+
+#[test]
+fn presets_use_the_themes_dark_colours_even_in_light_mode() {
+    use crate::widgets::visualizer::milkdrop::palette::PresetPalette;
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let was_light = crate::theme::is_light_mode();
+    crate::theme::set_light_mode(true);
+    let p = PresetPalette::from_theme();
+    let dark_bg = crate::theme::read_dark_color(|t| t.bg0_hard);
+    crate::theme::set_light_mode(was_light);
+    assert_eq!(
+        p.bg,
+        [dark_bg.r, dark_bg.g, dark_bg.b],
+        "glow presets need a dark canvas"
+    );
+    assert!(p.light, "presets can still tell light mode apart");
+}
+
+#[test]
+fn a_new_album_without_art_gets_a_neutral_cover_not_the_last_one() {
+    let (mut app, id) = app_with_cover();
+    enter_milkdrop(&mut app);
+    let cover = crate::widgets::visualizer::milkdrop::decode_cover(&tiny_png()).expect("decodes");
+    let _ = app.update(Message::Milkdrop(MilkdropMessage::CoverDecoded {
+        source: id,
+        result: Some(std::sync::Arc::new(cover)),
+    }));
+    let version = app.milkdrop.shared.cover_version();
+    // Next track: another album, nothing cached for it.
+    let mut other = make_queue_song("s2", "T2", "B", "Bl");
+    other.album_id = "album_nothing".to_string();
+    app.library.queue_songs.push(other);
+    app.scrobble.current_song_id = Some("s2".to_string());
+    tick(&mut app);
+    assert!(
+        app.milkdrop.shared.cover_version() > version,
+        "the old cover is replaced"
+    );
+    let shared = app
+        .milkdrop
+        .shared
+        .cover
+        .lock()
+        .clone()
+        .expect("a neutral cover");
+    assert_eq!((shared.width, shared.height), (1, 1));
+    assert_eq!(
+        app.milkdrop.cover_large_requested.as_deref(),
+        Some("album_nothing"),
+        "and its large cover is asked for"
+    );
+}
+
+#[test]
+fn an_evicted_cover_for_the_same_album_is_kept() {
+    let (mut app, id) = app_with_cover();
+    enter_milkdrop(&mut app);
+    let cover = crate::widgets::visualizer::milkdrop::decode_cover(&tiny_png()).expect("decodes");
+    let _ = app.update(Message::Milkdrop(MilkdropMessage::CoverDecoded {
+        source: id,
+        result: Some(std::sync::Arc::new(cover)),
+    }));
+    let version = app.milkdrop.shared.cover_version();
+    app.artwork.large_artwork = crate::state::ArtworkState::default().large_artwork;
+    tick(&mut app);
+    assert_eq!(
+        app.milkdrop.shared.cover_version(),
+        version,
+        "same album: keep it"
+    );
+}
+
+#[test]
+fn logout_clears_the_cover() {
+    let (mut app, id) = app_with_cover();
+    enter_milkdrop(&mut app);
+    let cover = crate::widgets::visualizer::milkdrop::decode_cover(&tiny_png()).expect("decodes");
+    let _ = app.update(Message::Milkdrop(MilkdropMessage::CoverDecoded {
+        source: id,
+        result: Some(std::sync::Arc::new(cover)),
+    }));
+    let _lock = super::SSE_SLOT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _ = app.reset_session_state();
+    assert!(app.milkdrop.shared.cover.lock().is_none());
+    assert_eq!(app.milkdrop.cover_sent, None);
+}
+
+#[test]
+fn a_recolour_is_not_a_new_preset() {
+    let _guard = crate::theme::THEME_MODE_LOCK.lock();
+    let mut app = md_app();
+    on_screen(&mut app);
+    app.milkdrop.current_themed = true;
+    let armed = app.milkdrop.next_switch_at;
+    tick(&mut app);
+    let toasts = app.toast.toasts.len();
+
+    let was_light = crate::theme::is_light_mode();
+    crate::theme::set_light_mode(!was_light);
+    tick(&mut app);
+    crate::theme::set_light_mode(was_light);
+    let generation = app.milkdrop.generation;
+    // Next while the recolour builds still records the preset on screen.
+    let shown = app.milkdrop.on_screen.clone();
+    built(&mut app, generation, Ok(()));
+    assert_eq!(
+        app.milkdrop.next_switch_at, armed,
+        "the switch timer is kept"
+    );
+    first_frame(&mut app);
+    assert_eq!(app.toast.toasts.len(), toasts, "no second name toast");
+    assert_eq!(app.milkdrop.on_screen, shown);
+}
+
+#[test]
+fn non_square_covers_are_padded_not_stretched() {
+    let cover = crate::widgets::visualizer::milkdrop::cover_from_rgba(4, 2, vec![255; 4 * 2 * 4])
+        .expect("pixels");
+    assert_eq!((cover.width, cover.height), (4, 4));
+}

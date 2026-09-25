@@ -68,6 +68,16 @@ pub struct MilkdropState {
     /// The artwork handle whose cover the engine last received (or that
     /// failed to decode), so each cover is decoded once.
     pub cover_sent: Option<iced::advanced::image::Id>,
+    /// Who the cover being decoded belongs to (becomes `cover_owner`).
+    pub cover_pending_owner: Option<String>,
+    /// The album whose large cover MilkDrop last asked for (asked once).
+    pub cover_large_requested: Option<String>,
+    /// The album (or `radio:<station>`) the published cover belongs to, so an
+    /// LRU eviction of the same album's art does not blank it.
+    pub cover_owner: Option<String>,
+    /// The load in flight re-colours the preset on screen (a theme change),
+    /// so it keeps the timer, skips the name toast and counts as shown.
+    pub recolouring: bool,
     /// The switch interval the current timer was armed with; a different
     /// live setting re-arms it.
     pub armed_interval: Option<std::time::Duration>,
@@ -99,6 +109,10 @@ impl Default for MilkdropState {
             palette_check_pending: false,
             cover_pending: None,
             cover_sent: None,
+            cover_pending_owner: None,
+            cover_large_requested: None,
+            cover_owner: None,
+            recolouring: false,
             armed_interval: None,
         }
     }

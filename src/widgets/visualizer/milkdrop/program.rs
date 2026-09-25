@@ -202,7 +202,7 @@ impl MilkdropPipeline {
             bind_group,
             size,
             frames_rendered: 0,
-            cover_version: 0,
+            cover_version: built.cover_version,
             // Due at once: the first advance happens this frame.
             last_advance: Instant::now()
                 .checked_sub(MILKDROP_FRAME_INTERVAL)

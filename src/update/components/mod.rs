@@ -1535,8 +1535,9 @@ impl Nokkvi {
         // Theater Mode never survives to the Login screen (logout or session
         // expiry); its layout must not greet the next login.
         let exit_theater = self.exit_theater();
-        // The MilkDrop renderer belongs to the session's GPU work; drop it.
+        // The MilkDrop renderer and cover belong to the session; drop them.
         self.milkdrop_release();
+        self.milkdrop_clear_cover();
         // Phase 1: cache the storage handle for re-login, then build a single
         // async teardown Task that — in this strict order — (1) stops the audio
         // engine, (2) drains the TaskManager so every tracked persistence /

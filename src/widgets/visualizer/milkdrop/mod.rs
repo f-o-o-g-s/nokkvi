@@ -111,6 +111,22 @@ fn cover_from_image(img: image::DynamicImage) -> CoverImage {
         img
     }
     .to_rgba8();
+    // Pad to a square (the engine's cell is square; stretching would distort
+    // a wide station logo), centred on black.
+    let (w, h) = img.dimensions();
+    let img = if w == h {
+        img
+    } else {
+        let side = w.max(h);
+        let mut canvas = image::RgbaImage::from_pixel(side, side, image::Rgba([0, 0, 0, 255]));
+        image::imageops::overlay(
+            &mut canvas,
+            &img,
+            i64::from((side - w) / 2),
+            i64::from((side - h) / 2),
+        );
+        canvas
+    };
     let (width, height) = img.dimensions();
     CoverImage {
         width,
@@ -122,6 +138,16 @@ fn cover_from_image(img: image::DynamicImage) -> CoverImage {
 /// Decode an encoded cover (PNG / JPEG / …). Blocking; run it off the UI thread.
 pub(crate) fn decode_cover(bytes: &[u8]) -> Option<CoverImage> {
     image::load_from_memory(bytes).ok().map(cover_from_image)
+}
+
+/// A flat mid-grey stand-in for when the playing item has no cover, so a
+/// cover preset never keeps showing the previous album's.
+pub(crate) fn neutral_cover() -> CoverImage {
+    CoverImage {
+        width: 1,
+        height: 1,
+        rgba: vec![128, 128, 128, 255],
+    }
 }
 
 /// Downscale already-decoded RGBA8 pixels (a `from_rgba` artwork handle).
