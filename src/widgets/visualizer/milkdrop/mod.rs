@@ -13,6 +13,8 @@
 pub(crate) mod palette;
 mod program;
 pub(crate) mod shared;
+#[cfg_attr(not(test), expect(dead_code, reason = "wired by the pipeline slice"))]
+mod transition;
 
 use std::{sync::Arc, time::Duration};
 
