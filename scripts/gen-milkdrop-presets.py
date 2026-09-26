@@ -1416,13 +1416,13 @@ q9 = hue;
 # position q10-q12, forward q13-q15, up q16-q18; inversion strength q19,
 # sway phase q20, sway amplitude q21. The position wraps inside one 2-unit cell (space repeats).
 CORAL_ITERS = 8
-def coral_de_eel(x, y, z, out):
+def coral_de_eel(x, y, z, out, iters=CORAL_ITERS):
     """The distance estimate in EEL, mirroring coral_de() in the shader
     exactly (the autopilot must see the walls the viewer sees)."""
     fold = lambda v: f"{v} = -1 + 2 * (0.5 * {v} + 1000.5 - int(0.5 * {v} + 1000.5));"
     return f"""ex = {x}; ey = {y}; ez = {z};
 dx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;
-loop({CORAL_ITERS},
+loop({iters},
   {fold("dx")}
   {fold("dy")}
   {fold("dz")}
@@ -1441,13 +1441,14 @@ loop(18,
 );
 {out} = pt;
 """
-CORAL_FUNCS = f"""
+def coral_funcs(iters):
+    return f"""
 float coral_de(vec3 pw, out float trap, out float lights) {{
   vec3 z = pw + q21 * sin(3.14159265 * vec3(pw.y, pw.z, pw.x) + vec3(q20, q20 * 1.3, q20 * 0.7));
   float scl = 1.0;
   trap = 1e9;
   lights = 0.0;
-  for (int i = 0; i < {CORAL_ITERS}; i++) {{
+  for (int i = 0; i < {iters}; i++) {{
     z = -1.0 + 2.0 * fract(0.5 * z + 0.5);
     float r2 = max(dot(z, z), 0.000001);
     trap = min(trap, r2);
@@ -1464,6 +1465,7 @@ float coral_d(vec3 pw) {{
   return coral_de(pw, a, b);
 }}
 """
+CORAL_FUNCS = coral_funcs(CORAL_ITERS)
 
 presets["nokkvi - coral city"] = preset(
     {"decay": 0.0, "wave_a": 0.0, "zoom": 1.0},
@@ -1572,6 +1574,158 @@ q10 = q10 + fx * spd * dt; q11 = q11 + fy * spd * dt; q12 = q12 + fz * spd * dt;
 q10 = q10 - 2 * int(q10 / 2 + 30.5) + 60; q11 = q11 - 2 * int(q11 / 2 + 30.5) + 60; q12 = q12 - 2 * int(q12 / 2 + 30.5) + 60;
 q13 = fx; q14 = fy; q15 = fz; q16 = ux; q17 = uy; q18 = uz;
 q25 = min(spd * 0.12, 0.025) + 0.003;
+q26 = min(0.72 + 0.1 * q3, 0.85);
+hue = hue + dt * 0.006;
+q23 = hue;
+lite = max(lite * 0.85, min(treb - treb_att + 0.3, 1.5));
+q24 = lite;
+""")
+
+# Coral dive (no cover) ---------------------------------------------------
+# An endless dive into coral city's reef that keeps finding the same reef.
+# The reef is the set left fixed by its own step F (fold into the period-2
+# lattice, then invert: z -> s z / |z|^2, s = 1.2). F has a fixed point on
+# the x axis, x* = (1 + sqrt(1 + s), 0, 0), congruent to (sqrt(1 + s) - 1,
+# 0, 0) in the central cell, and there DF is s / |z|^2 times a reflection,
+# so F twice is a pure magnification by L = (s / (sqrt(1 + s) - 1)^2)^2,
+# about 26, with no turn: shrinking the camera's distance to x* by L shows
+# the same reef again. The camera sinks towards x* along a direction the
+# init search picks for open space at three scales (a golden-angle spiral
+# over the sphere, turned by a random phase each load), drifting and banking a
+# little (orientation is free: the seam only rescales); the last fifth of
+# every cycle crossfades into the view from L times further out, which is
+# where the next cycle starts. Every length in the render (march cutoff,
+# AO steps, fog) scales with the camera's distance, and the view reaches
+# only about six distances out. The dive runs at a
+# distance of 0.006 or less, where F is close to linear over the whole view,
+# so a cycle's two ends really match; the distance estimate runs 14
+# iterations (coral city: 8) to resolve the reef at that scale. No sway here: it would break the self-similarity. Lights flicker
+# with the treble, kicks brighten the near-miss glow, loudness sets the
+# dive speed (smoothly), and the scene leaves max-blend trails with bloom.
+DIVE_ITERS = 14
+DIVE_VIEW = """
+vec3 dive_view(vec3 cam, vec3 cf, vec3 cr, vec3 cu, vec2 sp, float zs) {
+  vec3 dir = normalize(cf + (sp.x * cr + sp.y * cu) * 1.1);
+  float pxa = 1.1 / min(texsize.x, texsize.y);
+  float tt = 0.002 * zs;
+  float dd = 1.0;
+  float st = 0.0;
+  float hh = 0.0;
+  for (int i = 0; i < 120; i++) {
+    dd = coral_d(cam + dir * tt);
+    if (dd < tt * pxa * 0.7) { hh = 1.0; break; }
+    tt += dd * 0.95;
+    st += 1.0;
+    if (tt > 4.0 * zs) break;
+  }
+  vec3 hp = cam + dir * tt;
+  float trp;
+  float lts;
+  coral_de(hp, trp, lts);
+  float ee = max(tt * pxa, 0.0005 * zs);
+  vec3 nn = normalize(vec3(
+    coral_d(hp + vec3(ee, 0.0, 0.0)) - coral_d(hp - vec3(ee, 0.0, 0.0)),
+    coral_d(hp + vec3(0.0, ee, 0.0)) - coral_d(hp - vec3(0.0, ee, 0.0)),
+    coral_d(hp + vec3(0.0, 0.0, ee)) - coral_d(hp - vec3(0.0, 0.0, ee))));
+  float occ = 0.0;
+  for (int k = 1; k <= 4; k++) {
+    float hk = 0.012 * float(k) * float(k) * zs;
+    occ += (hk - coral_d(hp + nn * hk)) / hk * (0.5 / float(k));
+  }
+  occ = clamp(1.0 - occ, 0.0, 1.0);
+  vec3 sun = normalize(vec3(0.5, 0.8, -0.3));
+  float dif = max(dot(nn, sun), 0.0) * 0.9 + max(dot(nn, -dir), 0.0) * 0.6 + 0.15 * (0.5 + 0.5 * nn.y);
+  float spc = pow(max(dot(reflect(dir, nn), sun), 0.0), 24.0);
+  float tx = clamp(sqrt(trp) * 0.9, 0.0, 1.0);
+""" + ramp("surf", "0.15 + 0.75 * fract(tx + q23)") + """
+  vec3 cc = surf * (0.15 + dif * 1.05) * (0.3 + 0.7 * occ);
+  cc += NOKKVI_TEXT * spc * 0.35 * occ;
+  float lit = clamp(lts, 0.0, 1.0) * smoothstep(0.07, 0.004, trp);
+  cc += mix(NOKKVI_WARM, NOKKVI_HIGHLIGHT, 0.5 + 0.5 * sin(tx * 9.0)) * lit * (0.7 + 1.0 * q24);
+  float fg = 1.0 - exp(-(tt / zs) * (0.6 + 0.25 * q5));
+  vec3 bgc = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.4 + 0.3 * sp.y);
+  cc = mix(cc, bgc, hh > 0.5 ? fg : 1.0);
+  cc += NOKKVI_HIGHLIGHT * pow(st / 120.0, 2.0) * (0.3 + 0.6 * q3);
+  return cc;
+}
+"""
+DIVE_S = 1.2
+presets["nokkvi - coral dive"] = preset(
+    {"decay": 0.0, "wave_a": 0.0, "zoom": 1.0},
+    coral_funcs(DIVE_ITERS) + DIVE_VIEW + " shader_body {\n" + HEAD + """
+  vec2 p = (uv_orig - 0.5) * s;
+  p = vec2(p.x * cos(q27) - p.y * sin(q27), p.x * sin(q27) + p.y * cos(q27));
+  vec3 ro = vec3(q10, q11, q12);
+  vec3 fw = normalize(vec3(q13, q14, q15));
+  vec3 rt = normalize(cross(fw, vec3(q16, q17, q18)));
+  vec3 up = cross(rt, fw);
+  vec3 xs = vec3(q22, 0.0, 0.0);
+  vec3 col = dive_view(ro, fw, rt, up, p, q6);
+  if (q28 > 0.0) {
+    vec3 colb = dive_view(xs + (ro - xs) * q31, fw, rt, up, p, q6 * q31);
+    col = mix(col, colb, q28);
+  }
+  col *= 1.0 + 0.15 * q5;
+  vec2 ez = 0.5 + (uv_orig - 0.5) * (1.0 - q25);
+  vec3 prev = texture(sampler_main, ez).xyz * step(2.5, frame);
+  ret = max(col, prev * q26 - 0.03);
+ }""",
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s;
+  vec3 m = texture(sampler_main, uv).xyz;
+  vec3 b1 = GetBlur1(uv);
+  vec3 b2 = GetBlur2(uv);
+  vec3 col = m + max(b1 - 0.28, 0.0) * 0.6 + max(b2 - 0.22, 0.0) * (0.9 + 0.8 * q3);
+  col *= 0.85 + 0.15 * smoothstep(1.2, 0.3, length(p));
+  ret = col;
+ }""",
+    init=f"""pulse = 0; pop = 0; hue = 0; lite = 0; glide = 0.8; dv = 0;
+q19 = {DIVE_S}; q20 = 0; q21 = 0;
+xsx = sqrt(1 + {DIVE_S}) - 1;
+lam = {DIVE_S} / (xsx * xsx);
+lam2 = lam * lam;
+d0 = 0.006;
+best = -1; bx = 0; by = 0; bz = 1; n = 0;
+sph = rand(1000) / 1000 * 6.2831853;
+loop(400,
+  cz = 1 - (n + 0.5) / 200; cr = sqrt(max(1 - cz * cz, 0));
+  cx = cr * cos(n * 2.3999632 + sph); cy = cr * sin(n * 2.3999632 + sph);
+  n = n + 1;
+""" + coral_de_eel("xsx + cx * d0", "cy * d0", "cz * d0", "s1", DIVE_ITERS)
+    + coral_de_eel("xsx + cx * d0 / 5", "cy * d0 / 5", "cz * d0 / 5", "s2", DIVE_ITERS)
+    + coral_de_eel("xsx + cx * d0 / lam2", "cy * d0 / lam2", "cz * d0 / lam2", "s3", DIVE_ITERS) + """
+  sc = min(min(s1 / d0, s2 * 5 / d0), s3 * lam2 / d0);
+  better = above(sc, best);
+  best = if(better, sc, best);
+  bx = if(better, cx, bx); by = if(better, cy, by); bz = if(better, cz, bz);
+);
+rfx = if(above(abs(bz), 0.8), 1, 0); rfz = 1 - rfx;
+""",
+    frame=PULSE + """dt = min(1 / max(fps, 1), 0.1);
+loud = min((bass_att + mid_att + treb_att) / 3, 2);
+glide = glide * 0.995 + 0.005 * (0.6 + 0.5 * loud);
+dv = dv + dt * glide / 32;
+f = dv - int(dv);
+dist = d0 * pow(lam2, -f);
+wa = 0.18 * sin(time * 0.05); wb = 0.14 * sin(time * 0.037 + 1);
+ux0 = by * rfz - bz * 0; uy0 = bz * rfx - bx * rfz; uz0 = bx * 0 - by * rfx;
+ul = sqrt(ux0 * ux0 + uy0 * uy0 + uz0 * uz0) + 0.0001; ux0 = ux0 / ul; uy0 = uy0 / ul; uz0 = uz0 / ul;
+vx0 = by * uz0 - bz * uy0; vy0 = bz * ux0 - bx * uz0; vz0 = bx * uy0 - by * ux0;
+ddx = bx + ux0 * wa + vx0 * wb; ddy = by + uy0 * wa + vy0 * wb; ddz = bz + uz0 * wa + vz0 * wb;
+dl = sqrt(ddx * ddx + ddy * ddy + ddz * ddz); ddx = ddx / dl; ddy = ddy / dl; ddz = ddz / dl;
+q10 = xsx + ddx * dist; q11 = ddy * dist; q12 = ddz * dist;
+la = 0.12 * sin(time * 0.071); lb = 0.1 * sin(time * 0.053 + 2);
+fx = -ddx + ux0 * la + vx0 * lb; fy = -ddy + uy0 * la + vy0 * lb; fz = -ddz + uz0 * la + vz0 * lb;
+fl = sqrt(fx * fx + fy * fy + fz * fz); fx = fx / fl; fy = fy / fl; fz = fz / fl;
+q13 = fx; q14 = fy; q15 = fz;
+q16 = vx0; q17 = vy0; q18 = vz0;
+q27 = 0.15 * sin(time * 0.06) + 0.05 * sin(time * 0.17);
+q6 = dist * 1.5;
+q22 = xsx;
+q31 = lam2;
+w = min(max((f - 0.8) / 0.2, 0), 1);
+q28 = w * w * (3 - 2 * w);
+q25 = 0.004 + 0.004 * glide;
 q26 = min(0.72 + 0.1 * q3, 0.85);
 hue = hue + dt * 0.006;
 q23 = hue;
