@@ -1734,46 +1734,60 @@ q24 = lite;
 """)
 
 # Infinity (no cover) ------------------------------------------------------
-# An endless corridor of luminous hoops, flown through by a camera that
-# glides, rolls and breathes, receding into a slowly turning haze. The idea
-# is martin's "infinity (2010 update)" (feedback copies on planes at depth
-# t = fract(n/10 - q9), screen scale 1/t, pan and roll); nothing of its code
-# is used. Here every plane is an analytic shape drawn with a pixel-wide
-# anti-aliased edge and a bounded glow (no textures, no 1/r kernels),
-# composited nearest first with "over" and fogged into the theme's background
-# with depth, so near hoops hide far ones where they overlap.
+# An infinite mirror: a corridor of portals flown through by a gliding,
+# rolling camera, each portal framed by a lit tube and filled with the
+# previous frame, so every portal holds the whole corridor again, down into a
+# haze of filaments at the vanishing point. The idea is martin's "infinity
+# (2010 update)" (eleven copies of the feedback on planes at depth t, screen
+# scale 1/t, pan and roll); nothing of its code is used. Where it tiled the
+# feedback, blew up its centre on the near planes and drew lens-flare dots,
+# here a portal shows the previous frame only inside its rim (mip-filtered,
+# fading out before a copy would be magnified), rims are anti-aliased from
+# each plane's pixel footprint, and nothing is a 1/r glow.
+# The music is drawn into the rims: when a plane spawns at the far end, the
+# warp writes the waveform at that moment into a row of a 16-row strip kept
+# along the texture's top edge (one row per plane identity mod 16; the comp
+# never shows the strip), and the plane's rim radius follows that row for
+# the rest of its flight: every rim is a frozen snapshot of the song, smooth
+# while it flies. The waveform tapers to nothing at atan's seam, and the
+# strip is read at mip 0, so neither shows. The strip is reset to flat on the
+# first frames (a seeded picture from the previous preset is not a waveform)
+# and after a resize (which crops or moves the rows); rims ignore it meanwhile.
+# Rims are tubes: a round cross-section lit by a fixed light (diffuse +
+# specular), with a soft shadow cast on whatever lies behind.
 # Depth: the camera has flown D plane spacings (a user variable, wrapped
 # modulo INF_P). Slot i of INF_N sits at depth z = (i + 1 - fract(D)) / N and
 # holds the plane whose identity is u = floor(D) + i + 1, constant while it
-# flies, so its colour, lobes and turn never change on the way in; every
-# function of u is periodic in INF_P, so nothing jumps when D wraps. A plane
-# fades in at the far end and out before it reaches the camera.
+# flies; every function of u is periodic in INF_P, so nothing jumps when D
+# wraps. Planes composite nearest first with "over", fogged and desaturated
+# with depth; the feedback gain through the portals stays below 1.
 # The corridor curves: plane u is centred on a smooth path C(u) (harmonics
-# periodic in INF_P) and the camera rides the path looking along its tangent,
-# so the near hoops stay centred while the far ones swing aside. The twist
-# of plane u is psi + tw * N * z, with psi += tw * dD: constant for a flying
-# plane, eased when tw changes. Camera speed, roll rate, pan, focal length,
-# twist and the path's bend are all eased twice (critically damped), toward
-# goals re-drawn on the clock, never on a beat. Beats drive brightness and a
-# speed surge only.
-# The vanishing point: faint filaments of domain-warped fbm (ridged, so they
-# read as wisps rather than cloud) in three layers that each zoom in by 8x
-# over their life and fade in and out (sin weights), phased by the flown
-# distance, so the haze streams toward the viewer without an angle seam; a
-# layer changes its pattern only while its weight is 0. The scene is
-# rendered in the warp and kept as max-blend trails zoomed toward the
-# vanishing point; the comp adds bloom and short, soft god rays from the core.
+# periodic in INF_P) and the camera rides the path looking along its tangent.
+# The twist of plane u is psi + tw * N * z, with psi += tw * dD: constant for
+# a flying plane, and the mirror copies inherit it, so the recursion spirals.
+# Camera speed, roll rate, pan, focal length, twist and bend are all eased
+# twice toward goals re-drawn on the clock, never on a beat; beats drive
+# brightness and a speed surge only.
+# The vanishing point: faint filaments of domain-warped fbm (ridged) in three
+# layers that each zoom in by 8x over their life and fade in and out, phased
+# by the flown distance, so the haze streams toward the viewer without an
+# angle seam. It glows through the portals' fill (only rims hide it), so the
+# mirror copies it outward. The scene keeps
+# max-blend trails zoomed toward the vanishing point; the comp adds bloom and
+# short, soft god rays from the core.
 # q map: q3 kick pulse, q5 pop, q7/q8 cos/sin roll, q9 fract(D), q10
 # floor(D), q11/q12 path at the camera, q13/q14 path tangent at the camera
-# (per plane spacing), q15/q16 pan, q17 focal length, q18 psi, q19 tw, q20/q21 path amplitudes,
-# q22 hoop breathing phase, q23 hue drift, q24 haze scroll, q25 core light,
-# q26/q27 vanishing point (camera plane units), q28 trail zoom, q29 trail
-# keep. Texture coordinates are the same in warp and comp, so q26/q27 map to
-# one uv in both (the comp's uv.y flip is internal to its preamble).
+# (per plane spacing), q15/q16 pan, q17 focal length, q18 psi, q19 tw,
+# q20/q21 path amplitudes, q22 a plane spawned this frame, q23 hue drift,
+# q24 haze scroll, q25 core light, q26/q27 vanishing point (camera plane
+# units), q28 trail zoom, q29 trail keep, q30 the spawned plane's strip row,
+# q31 the render size changed this frame.
+# Texture coordinates are shared by warp and comp; the picture fills
+# y < 1 - 16 / texsize.y and the strip the rows above.
 INF_N = 16
 INF_P = 64
+INF_ROWS = 16
 INF_W = f"{6.2831853 / INF_P:.9f}"
-INF_MOTIF = "hoop"
 def inf_path_eel(u, ox, oy):
     return (f"{ox} = q20 * cos({INF_W} * ({u})) + q21 * cos(3 * {INF_W} * ({u}) + 1.3);\n"
             f"{oy} = q20 * sin({INF_W} * ({u})) + q21 * sin(2 * {INF_W} * ({u}) + 0.4);\n")
@@ -1795,37 +1809,28 @@ vec2 inf_path(float pu) {{
 float inf_hash(float hu) {{
   return fract(sin(hu * 12.9898 + 4.1) * 43758.5453);
 }}
-vec3 inf_ramp(float rx) {{""" + ramp("rr", "rx") + """
+vec3 inf_ramp(float rx) {{""" + ramp("rr", "rx") + f"""
   return rr;
-}
-float inf_hoop(vec2 hc, float hh) {
-  float hr = length(hc);
-  float ha = atan(hc.y, hc.x);
-  float lobes = 3.0 + floor(hh * 3.0);
-  float amp = 0.028 * (0.55 + 0.45 * sin(q22 + hh * 6.2831853));
-  float rad0 = 0.30 + 0.05 * (hh - 0.5);
-  return abs(hr - rad0 - amp * sin(lobes * ha + hh * 6.2831853)) / (1.0 + lobes * amp / rad0);
-}
-float inf_frame(vec2 fc, float fh) {
-  vec2 fb = vec2(0.30, 0.22 + 0.08 * fh);
-  vec2 fq = abs(fc) - fb + 0.06;
-  float fd = length(max(fq, 0.0)) + min(max(fq.x, fq.y), 0.0) - 0.06;
-  return abs(fd);
-}
-float inf_fbm(vec2 nc) {
+}}
+float inf_wave(float wrow, float wx) {{
+  float wv = 1.0 - (wrow + 0.5) / texsize.y;
+  float ws = texture(sampler_fc_main, vec2(wx, wv), -16.0).x;
+  return (ws - 0.5) * step(0.05, ws);
+}}
+float inf_fbm(vec2 nc) {{
   float fs = 0.0;
   float fa = 0.5;
   vec2 fx = nc;
-  for (int o = 0; o < 4; o++) {
+  for (int o = 0; o < 4; o++) {{
     fs += fa * texture(sampler_noise_hq, fx).x;
     fx = fx * 2.0 + vec2(0.37, 0.61);
     fa *= 0.5;
-  }
+  }}
   return fs;
-}
-float inf_haze(vec2 tc) {
+}}
+float inf_haze(vec2 tc) {{
   float hs = 0.0;
-  for (int l = 0; l < 3; l++) {
+  for (int l = 0; l < 3; l++) {{
     float lp = q24 + float(l) / 3.0;
     float ph = fract(lp);
     float lid = mod(floor(lp), 4.0) * 3.0 + float(l);
@@ -1836,39 +1841,86 @@ float inf_haze(vec2 tc) {
     float wn = inf_fbm(lc * 0.6 + vec2(0.5, 0.2));
     vec2 wc = lc + vec2(wn, -wn) * 0.35;
     hs += inf_fbm(wc) * sin(3.14159265 * ph);
-  }
+  }}
   return hs / 1.5;
-}
+}}
+"""
+INF_TOP = f"float pic = 1.0 - {INF_ROWS}.0 / texsize.y;"
+INF_VP = """
+  vec2 vp = vec2(q26 * q7 - q27 * q8, q26 * q8 + q27 * q7) - vec2(q15, q16);
+  vec2 vuv = vp / s + 0.5;
 """
 def infinity():
-    shape = {"hoop": "inf_hoop", "frame": "inf_frame"}[INF_MOTIF]
     warp = INF_FUNCS + " shader_body {\n" + HEAD + f"""
-  vec2 sp = (uv_orig - 0.5) * s + vec2(q15, q16);
+  {INF_TOP}
+  if (uv_orig.y >= pic) {{
+    float srow = floor((1.0 - uv_orig.y) * texsize.y);
+    float sclr = max(step(frame, 2.5), q31);
+    vec3 skeep = texture(sampler_fc_main, uv_orig).xyz;
+    float swv = 0.0;
+    for (int k = -4; k <= 4; k++) {{
+      swv += get_wave(0.4 + uv_orig.x * 0.2 + float(k) / 300.0) * (5.0 - abs(float(k)));
+    }}
+    vec3 sfresh = vec3(mix(clamp(0.5 + swv / 25.0 * 1.4, 0.1, 0.9), 0.5, sclr));
+    float swr = max(sclr, q22 * (1.0 - step(0.5, abs(srow - q30))));
+    ret = mix(skeep, sfresh, swr);
+  }} else {{
+  vec2 tuv = vec2(uv_orig.x, uv_orig.y / pic);
+  vec2 sp = (tuv - 0.5) * s + vec2(q15, q16);
   vec2 p = vec2(sp.x * q7 + sp.y * q8, -sp.x * q8 + sp.y * q7);
+""" + INF_VP + f"""
   float pix = 1.0 / min(texsize.x, texsize.y);
+  float wok = step(2.5, frame) * (1.0 - q31);
+  float ptop = pic - 2.0 / texsize.y;
+  vec3 lgt = normalize(vec3(-0.45, 0.55, 0.7));
   vec3 acc = vec3(0.0);
+  vec3 macc = vec3(0.0);
   float cov = 0.0;
+  float rcov = 0.0;
   for (int i = 0; i < {INF_N}; i++) {{
     float z = (float(i) + 1.0 - q9) / {INF_N}.0;
     float w = smoothstep(0.0, 0.12, z) * smoothstep(1.0, 0.72, z);
     float u = q10 + float(i) + 1.0;
     vec2 ctr = inf_path(u) - vec2(q11, q12) - (u - q10 - q9) * vec2(q13, q14);
-    vec2 c = p * (q17 * z) - ctr;
+    vec2 c0 = p * (q17 * z) - ctr;
     float th = q18 + q19 * {INF_N}.0 * z;
-    c = vec2(c.x * cos(th) - c.y * sin(th), c.x * sin(th) + c.y * cos(th));
+    float cth = cos(th);
+    float sth = sin(th);
+    vec2 c = vec2(c0.x * cth - c0.y * sth, c0.x * sth + c0.y * cth);
     float h = inf_hash(mod(u, {INF_P}.0));
     float pw = q17 * z * pix;
-    float d = {shape}(c, h) - 0.0035;
-    float line = smoothstep(pw, -pw, d);
-    float gs = 0.008 + pw;
-    float glow = gs * gs / (d * d + gs * gs);
-    vec3 pcol = inf_ramp(0.25 + 0.7 * fract(h * 0.73 + q23));
+    float cr = length(c) + 0.00001;
+    vec2 cn = c / cr;
+    float ca = atan(c.y, c.x) / 6.2831853 + 0.5;
+    float tap = smoothstep(0.0, 0.12, ca) * smoothstep(1.0, 0.88, ca);
+    float rim = (0.30 + 0.04 * (h - 0.5)) * (1.0 + 0.42 * inf_wave(mod(u, {INF_ROWS}.0), ca) * tap * wok);
+    float dr = cr - rim;
+    float tr = 0.011;
+    float tq = clamp(dr / tr, -1.0, 1.0);
+    vec2 nsc = vec2(cn.x * cth + cn.y * sth, -cn.x * sth + cn.y * cth) * tq;
+    vec3 nrm = normalize(vec3(nsc, sqrt(max(1.0 - tq * tq, 0.0)) + 0.02));
+    float dif = max(dot(nrm, lgt), 0.0);
+    float spc = pow(max(dot(reflect(-lgt, nrm), vec3(0.0, 0.0, 1.0)), 0.0), 28.0);
+    vec3 base = inf_ramp(0.25 + 0.7 * fract(h * 0.73 + q23));
     float fog = 1.0 - exp(-2.2 * z);
-    pcol = mix(pcol, vec3(dot(pcol, {LUM})), 0.45 * z);
-    vec3 lcol = mix(pcol * (1.0 + 0.35 * q5 + 0.2 * q3), NOKKVI_BG, fog * 0.8);
-    float a = w * line;
-    acc += (1.0 - cov) * (a * lcol + w * glow * 0.12 * (1.0 - line) * lcol);
-    cov += (1.0 - cov) * a;
+    base = mix(base, vec3(dot(base, {LUM})), 0.45 * z);
+    vec3 tube = base * (0.16 + 0.95 * dif) * (1.0 + 0.3 * q5 + 0.2 * q3) + NOKKVI_TEXT * spc * 0.6;
+    tube = mix(tube, NOKKVI_BG, fog * 0.75);
+    float at = w * smoothstep(tr + pw, tr - pw, abs(dr));
+    acc += (1.0 - cov) * at * tube;
+    cov += (1.0 - cov) * at;
+    rcov += (1.0 - rcov) * at;
+    float dsh = abs(length(c - vec2(0.45 * cth + 0.55 * sth, 0.45 * sth - 0.55 * cth) * 0.02) - rim);
+    float ash = w * 0.4 * exp(-dsh * dsh / (tr * tr * 4.0)) * smoothstep(tr - pw, tr + pw, abs(dr));
+    cov += (1.0 - cov) * ash;
+    float mag = rim / (q17 * z) / 0.45;
+    vec2 muv = vuv + c * (0.45 / rim) / s;
+    float edge = min(min(muv.x, 1.0 - muv.x), min(muv.y, 1.0 - muv.y));
+    float ai = w * 0.5 * smoothstep(-pw, pw, -(dr + tr)) * smoothstep(1.4, 0.8, mag)
+               * smoothstep(0.0, 0.06, edge);
+    vec3 mir = texture(sampler_main, vec2(clamp(muv.x, 0.0, 1.0), min(clamp(muv.y, 0.0, 1.0) * pic, ptop))).xyz;
+    macc += (1.0 - cov) * ai * mir * 0.72;
+    cov += (1.0 - cov) * ai;
   }}
   vec2 hp = p - vec2(q26, q27);
   float hr = length(hp) + 0.0001;
@@ -1877,46 +1929,51 @@ def infinity():
   float fil = pow(1.0 - abs(2.0 * clamp(hz, 0.0, 1.0) - 1.0), 5.0);
 """ + ramp("hzc", "0.15 + 0.75 * smoothstep(0.2, 0.8, hz)") + f"""
   vec3 back = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.35 * hzf * smoothstep(0.2, 0.7, hz));
-  back += hzc * fil * hzf * (0.35 + 0.25 * q25);
+  vec3 glow = hzc * fil * hzf * (0.15 + 0.12 * q25);
   float cg = 0.02 / (0.02 + hr * hr * 40.0);
-  back += mix(NOKKVI_ACCENT, NOKKVI_TEXT, 0.3) * cg * (0.12 + 0.18 * q25);
-  vec3 col = acc + (1.0 - cov) * back;
-  col = 1.0 - exp(-1.6 * col);
-  vec2 vp = vec2(q26 * q7 - q27 * q8, q26 * q8 + q27 * q7) - vec2(q15, q16);
-  vec2 vuv = vp / s + 0.5;
-  vec2 ez = vuv + (uv_orig - vuv) * (1.0 - q28);
-  ez = clamp(ez, 0.0, 1.0);
-  vec3 prev = texture(sampler_main, ez).xyz * step(2.5, frame);
+  glow += mix(NOKKVI_ACCENT, NOKKVI_TEXT, 0.3) * cg * (0.08 + 0.12 * q25);
+  vec3 col = 1.0 - exp(-1.6 * (acc + (1.0 - cov) * back + (1.0 - rcov) * glow));
+  col += macc;
+  vec2 ez = clamp(vuv + (tuv - vuv) * (1.0 - q28), 0.0, 1.0);
+  vec3 prev = texture(sampler_main, vec2(ez.x, min(ez.y * pic, ptop))).xyz * step(2.5, frame);
   ret = max(col, prev * q29 - 0.03);
+  }}
  }}"""
-    comp = " shader_body {\n" + HEAD + """
+    comp = " shader_body {\n" + HEAD + f"""
+  {INF_TOP}
   vec2 p = (uv - 0.5) * s;
-  vec3 m = texture(sampler_main, uv).xyz;
-  vec3 b1 = GetBlur1(uv);
-  vec3 b2 = GetBlur2(uv);
-  vec3 col = m + max(b1 - 0.25, 0.0) * 0.5 + max(b2 - 0.2, 0.0) * (0.7 + 0.6 * q3);
-  vec2 vp = vec2(q26 * q7 - q27 * q8, q26 * q8 + q27 * q7) - vec2(q15, q16);
-  vec2 vuv = vp / s + 0.5;
+  vec2 cuv = vec2(uv.x, uv.y * pic);
+  float bfade = smoothstep(pic - 0.03, pic - 0.16, cuv.y);
+  vec3 m = texture(sampler_main, cuv).xyz;
+  vec3 b1 = GetBlur1(cuv);
+  vec3 b2 = GetBlur2(cuv);
+  vec3 col = m + (max(b1 - 0.25, 0.0) * 0.5 + max(b2 - 0.2, 0.0) * (0.7 + 0.6 * q3)) * bfade;
+""" + INF_VP + """
   vec3 rays = vec3(0.0);
   for (int j = 1; j <= 10; j++) {
     float rf = float(j) / 10.0;
-    rays += GetBlur2(uv + (vuv - uv) * rf * 0.35) * (1.0 - rf);
+    vec2 ruv = uv + (vuv - uv) * rf * 0.35;
+    rays += GetBlur2(vec2(ruv.x, ruv.y * pic)) * (1.0 - rf) * smoothstep(0.97, 0.84, ruv.y);
   }
   float rl = dot(rays, vec3(0.299, 0.587, 0.114)) / 5.5;
   col += NOKKVI_ACCENT * max(rl - 0.12, 0.0) * (0.35 + 0.3 * q25);
   col *= 0.85 + 0.15 * smoothstep(1.2, 0.3, length(p));
   ret = col;
  }"""
-    init = ("pulse = 0; pop = 0; dd = rand(1000) / 1000 * " + str(INF_P) + "; psi = 0; tw = 0; tw_m = 0; twg = 0.06;"
+    init = ("pulse = 0; pop = 0; dd = rand(1000) / 1000 * " + str(INF_P) + "; flprev = floor(dd); psi = 0;"
+            " tw = 0; tw_m = 0; twg = 0.06;"
             " spd = 1.2; spd_m = 1.2; roll = rand(1000) / 1000 * 6.2831853; rw = 0; rw_m = 0; rwg = 0.1;"
             " px = 0; px_m = 0; py = 0; py_m = 0; pgx = 0; pgy = 0; foc = 1.3; foc_m = 1.3; focg = 1.3;"
-            " a1 = 0.25; a1_m = 0.25; a1g = 0.25; a2 = 0.05; a2_m = 0.05; a2g = 0.05;"
-            " ttw = 0; trw = 0; tpan = 0; tfoc = 0; tbend = 0; breath = 0; hue = rand(1000) / 1000; core = 0;")
+            " a1 = 0.18; a1_m = 0.18; a1g = 0.18; a2 = 0.02; a2_m = 0.02; a2g = 0.02;"
+            " lpw = 0; lph = 0; ttw = 0; trw = 0; tpan = 0; tfoc = 0; tbend = 0; hue = rand(1000) / 1000; core = 0;")
     frame = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" \
         "loud = min((bass_att + mid_att + treb_att) / 3, 2);\n" \
         + ease("spd", "0.9 + 0.9 * loud", "1.0") + \
         "fly = max(spd * (1 + 0.45 * q3), 0.25);\n" \
         f"dd = dd + fly * dt;\ndd = dd - {INF_P} * floor(dd / {INF_P});\n" \
+        "fl = floor(dd);\nq22 = 1 - equal(fl, flprev);\nflprev = fl;\n" \
+        "q31 = 1 - equal(pixelsx, lpw) * equal(pixelsy, lph);\nlpw = pixelsx; lph = pixelsy;\n" \
+        f"q30 = fl - {INF_ROWS} * floor(fl / {INF_ROWS});\n" \
         + retarget("ttw", 8, 5, ("twg", "(rand(1000) / 1000 * 2 - 1) * 0.12")) \
         + ease("tw", "twg", "2.5") + \
         "psi = psi + tw * fly * dt;\npsi = psi - 6.2831853 * floor(psi / 6.2831853);\n" \
@@ -1938,15 +1995,14 @@ def infinity():
         + inf_path_eel(f"dd + {INF_N}", "gxf", "gyf") + \
         f"q26 = (gxf - gx0 - {INF_N} * tx) / foc;\nq27 = (gyf - gy0 - {INF_N} * ty) / foc;\n" \
         "q7 = cos(roll); q8 = sin(roll);\n" \
-        "q9 = dd - floor(dd); q10 = floor(dd);\n" \
+        "q9 = dd - fl; q10 = fl;\n" \
         "q11 = gx0; q12 = gy0; q13 = tx; q14 = ty;\n" \
         "q15 = px; q16 = py; q17 = foc; q18 = psi; q19 = tw;\n" \
-        "breath = breath + dt * 0.21;\nbreath = breath - 6.2831853 * floor(breath / 6.2831853);\nq22 = breath;\n" \
         "hue = hue + dt * 0.005;\nhue = hue - floor(hue);\nq23 = hue;\n" \
         f"q24 = dd / {INF_N};\n" \
         "core = core + (min(bass_att, 2) - core) * (1 - exp(-dt / 0.4));\nq25 = core;\n" \
         "q28 = min(0.0012 + 0.0022 * fly, 0.012);\n" \
-        "q29 = min(0.66 + 0.1 * q3, 0.8);\n"
+        "q29 = min(0.55 + 0.1 * q3, 0.7);\n"
     return preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, warp, comp, init=init, frame=frame)
 
 presets["nokkvi - infinity"] = infinity()

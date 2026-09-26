@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 - The Julia Lace MilkDrop preset dives endlessly into a Julia set's spiral vortex, the camera swinging between steep dives and skimming glides.
 - The Coral City MilkDrop preset floats through an endless fractal coral reef that sways with the music and leaves light trails.
 - The Coral Dive MilkDrop preset dives endlessly into the coral reef, which repeats itself exactly every 26-fold zoom.
-- The Infinity MilkDrop preset flies down an endless, gently curving corridor of glowing hoops toward a drifting haze.
+- The Infinity MilkDrop preset flies through an endless mirror of lit rings, each shaped by the waveform, toward a drifting haze.
 - Switching MilkDrop presets now dissolves the old preset into the new one, in a pattern that changes each time.
 - A Preset Crossfade setting sets how long MilkDrop's dissolve lasts, up to 10 seconds; 0 cuts straight over.
 
