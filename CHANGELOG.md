@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The Chladni MilkDrop preset pours theme-coloured sand onto a vibrating plate, redrawing its figure as the music retunes it.
+- The Julia Lace MilkDrop preset dives endlessly into a Julia set's spiral vortex, the camera swinging between steep dives and skimming glides.
+- The Coral City MilkDrop preset floats through an endless fractal coral reef that sways with the music and leaves light trails.
+
 ### Changed
 
 ### Fixed

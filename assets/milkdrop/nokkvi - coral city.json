@@ -1,0 +1,99 @@
+{
+ "version": 2,
+ "baseVals": {
+  "gammaadj": 1.0,
+  "decay": 0.0,
+  "echo_zoom": 1.0,
+  "echo_alpha": 0.0,
+  "wave_mode": 0,
+  "additivewave": 1,
+  "wave_a": 0.0,
+  "wave_scale": 0.8,
+  "wave_smoothing": 0.7,
+  "zoom": 1.0,
+  "rot": 0.0,
+  "warp": 0.0,
+  "wave_r": 1.0,
+  "wave_g": 1.0,
+  "wave_b": 1.0,
+  "ob_size": 0.0,
+  "ob_a": 0.0,
+  "ib_size": 0.0,
+  "ib_a": 0.0,
+  "mv_a": 0.0,
+  "darken_center": 0,
+  "brighten": 0,
+  "darken": 0,
+  "solarize": 0,
+  "invert": 0
+ },
+ "shapes": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  }
+ ],
+ "waves": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  }
+ ],
+ "init_eqs_eel": "pulse = 0; pop = 0; q19 = 1.2; q20 = 0; q21 = 0.05; amp = 0.05; flow = 0; spd = 0.1; surge = 0; yawv = 0; pitchv = 0; rollv = 0; hue = 0; lite = 0; sf = 1; sr = 1; sl = 1; su = 1; sd = 1; fx = 0; fy = 0; fz = 1; ux = 0; uy = 1; uz = 0;  tries = 0; q10 = 1; q11 = 1; q12 = 1; free = 0;\nwhile (exec2(\n  q10 = rand(200) / 100 - 1; q11 = rand(200) / 100 - 1; q12 = rand(200) / 100 - 1;\nex = q10; ey = q11; ez = q12;\ndx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;\nloop(8,\n  dx = -1 + 2 * (0.5 * dx + 1000.5 - int(0.5 * dx + 1000.5));\n  dy = -1 + 2 * (0.5 * dy + 1000.5 - int(0.5 * dy + 1000.5));\n  dz = -1 + 2 * (0.5 * dz + 1000.5 - int(0.5 * dz + 1000.5));\n  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);\n  k = q19 / r2;\n  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;\n);\nfree = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));\n  tries = tries + 1;\n, below(free, 0.03) * below(tries, 300)));\n",
+ "frame_eqs_eel": "kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\ndt = min(1 / max(fps, 1), 0.1);\nloud = min((bass_att + mid_att + treb_att) / 3, 2);\namp = amp * 0.97 + 0.03 * (0.05 + 0.04 * min(mid_att, 2) + 0.07 * q3);\nq21 = amp;\nflow = flow + dt * (0.25 + 0.35 * loud);\nq20 = flow;\nq19 = 1.2 + 0.06 * sin(time * 0.05);\nrx = fy * uz - fz * uy; ry = fz * ux - fx * uz; rz = fx * uy - fy * ux;\npt = 0.005;\nloop(18,\nex = q10 + (fx) * pt; ey = q11 + (fy) * pt; ez = q12 + (fz) * pt;\ndx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;\nloop(8,\n  dx = -1 + 2 * (0.5 * dx + 1000.5 - int(0.5 * dx + 1000.5));\n  dy = -1 + 2 * (0.5 * dy + 1000.5 - int(0.5 * dy + 1000.5));\n  dz = -1 + 2 * (0.5 * dz + 1000.5 - int(0.5 * dz + 1000.5));\n  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);\n  k = q19 / r2;\n  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;\n);\npd = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));\npt = min(pt + pd * 0.9, 1);\n);\npf = pt;\npt = 0.005;\nloop(18,\nex = q10 + (fx + 0.45 * rx) * pt; ey = q11 + (fy + 0.45 * ry) * pt; ez = q12 + (fz + 0.45 * rz) * pt;\ndx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;\nloop(8,\n  dx = -1 + 2 * (0.5 * dx + 1000.5 - int(0.5 * dx + 1000.5));\n  dy = -1 + 2 * (0.5 * dy + 1000.5 - int(0.5 * dy + 1000.5));\n  dz = -1 + 2 * (0.5 * dz + 1000.5 - int(0.5 * dz + 1000.5));\n  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);\n  k = q19 / r2;\n  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;\n);\npd = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));\npt = min(pt + pd * 0.9, 1);\n);\npr = pt;\npt = 0.005;\nloop(18,\nex = q10 + (fx - 0.45 * rx) * pt; ey = q11 + (fy - 0.45 * ry) * pt; ez = q12 + (fz - 0.45 * rz) * pt;\ndx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;\nloop(8,\n  dx = -1 + 2 * (0.5 * dx + 1000.5 - int(0.5 * dx + 1000.5));\n  dy = -1 + 2 * (0.5 * dy + 1000.5 - int(0.5 * dy + 1000.5));\n  dz = -1 + 2 * (0.5 * dz + 1000.5 - int(0.5 * dz + 1000.5));\n  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);\n  k = q19 / r2;\n  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;\n);\npd = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));\npt = min(pt + pd * 0.9, 1);\n);\npl = pt;\npt = 0.005;\nloop(18,\nex = q10 + (fx + 0.45 * ux) * pt; ey = q11 + (fy + 0.45 * uy) * pt; ez = q12 + (fz + 0.45 * uz) * pt;\ndx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;\nloop(8,\n  dx = -1 + 2 * (0.5 * dx + 1000.5 - int(0.5 * dx + 1000.5));\n  dy = -1 + 2 * (0.5 * dy + 1000.5 - int(0.5 * dy + 1000.5));\n  dz = -1 + 2 * (0.5 * dz + 1000.5 - int(0.5 * dz + 1000.5));\n  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);\n  k = q19 / r2;\n  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;\n);\npd = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));\npt = min(pt + pd * 0.9, 1);\n);\npu = pt;\npt = 0.005;\nloop(18,\nex = q10 + (fx - 0.45 * ux) * pt; ey = q11 + (fy - 0.45 * uy) * pt; ez = q12 + (fz - 0.45 * uz) * pt;\ndx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;\nloop(8,\n  dx = -1 + 2 * (0.5 * dx + 1000.5 - int(0.5 * dx + 1000.5));\n  dy = -1 + 2 * (0.5 * dy + 1000.5 - int(0.5 * dy + 1000.5));\n  dz = -1 + 2 * (0.5 * dz + 1000.5 - int(0.5 * dz + 1000.5));\n  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);\n  k = q19 / r2;\n  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;\n);\npd = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));\npt = min(pt + pd * 0.9, 1);\n);\npdn = pt;\nex = q10; ey = q11; ez = q12;\ndx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;\nloop(8,\n  dx = -1 + 2 * (0.5 * dx + 1000.5 - int(0.5 * dx + 1000.5));\n  dy = -1 + 2 * (0.5 * dy + 1000.5 - int(0.5 * dy + 1000.5));\n  dz = -1 + 2 * (0.5 * dz + 1000.5 - int(0.5 * dz + 1000.5));\n  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);\n  k = q19 / r2;\n  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;\n);\nhere = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));\nsf = sf * 0.9 + 0.1 * pf; sr = sr * 0.9 + 0.1 * pr; sl = sl * 0.9 + 0.1 * pl;\nsu = su * 0.9 + 0.1 * pu; sd = sd * 0.9 + 0.1 * pdn;\navg = (sr + sl + su + sd) / 4 + 0.001;\nturn = 0.5 + 1.2 * min(max((0.45 - sf) / 0.35, 0), 1);\nyt = min(max(turn * (sr - sl) / avg, -1.2), 1.2);\nptt = min(max(turn * (su - sd) / avg, -1.2), 1.2);\nyawv = yawv * 0.97 + 0.03 * (yt + 0.3 * sin(time * 0.13) + 0.15 * sin(time * 0.31));\npitchv = pitchv * 0.97 + 0.03 * (ptt + 0.22 * sin(time * 0.11 + 1));\nrollv = rollv * 0.98 + 0.02 * (0.3 * sin(time * 0.07) + 0.12 * sin(time * 0.17));\nya = min(max(yawv, -0.7), 0.7) * dt; pa = min(max(pitchv, -0.7), 0.7) * dt; ra = rollv * dt;\nfx = fx + rx * ya + ux * pa; fy = fy + ry * ya + uy * pa; fz = fz + rz * ya + uz * pa;\nfl = sqrt(fx * fx + fy * fy + fz * fz); fx = fx / fl; fy = fy / fl; fz = fz / fl;\nux = ux + rx * ra; uy = uy + ry * ra; uz = uz + rz * ra;\ndd = ux * fx + uy * fy + uz * fz; ux = ux - dd * fx; uy = uy - dd * fy; uz = uz - dd * fz;\nul = sqrt(ux * ux + uy * uy + uz * uz); ux = ux / ul; uy = uy / ul; uz = uz / ul;\nsurge = max(surge * 0.97, q5 * 0.6);\nspd = spd * 0.97 + 0.03 * min(sf * 0.6, here * 12) * (0.7 + 0.4 * loud + surge);\nq10 = q10 + fx * spd * dt; q11 = q11 + fy * spd * dt; q12 = q12 + fz * spd * dt;\nq10 = q10 - 2 * int(q10 / 2 + 30.5) + 60; q11 = q11 - 2 * int(q11 / 2 + 30.5) + 60; q12 = q12 - 2 * int(q12 / 2 + 30.5) + 60;\nq13 = fx; q14 = fy; q15 = fz; q16 = ux; q17 = uy; q18 = uz;\nq25 = min(spd * 0.12, 0.025) + 0.003;\nq26 = min(0.72 + 0.1 * q3, 0.85);\nhue = hue + dt * 0.006;\nq23 = hue;\nlite = max(lite * 0.85, min(treb - treb_att + 0.3, 1.5));\nq24 = lite;\n",
+ "pixel_eqs_eel": "",
+ "warp": "float coral_de(vec3 pw, out float trap, out float lights) {\n  vec3 z = pw + q21 * sin(3.14159265 * vec3(pw.y, pw.z, pw.x) + vec3(q20, q20 * 1.3, q20 * 0.7));\n  float scl = 1.0;\n  trap = 1e9;\n  lights = 0.0;\n  for (int i = 0; i < 8; i++) {\n    z = -1.0 + 2.0 * fract(0.5 * z + 0.5);\n    float r2 = max(dot(z, z), 0.000001);\n    trap = min(trap, r2);\n    if (i > 1 && i < 5 && r2 < 0.06) lights += 1.0;\n    float k = q19 / r2;\n    z *= k;\n    scl *= k;\n  }\n  return 0.25 * (length(z) - 0.35) / scl / (1.0 + 3.14159265 * abs(q21));\n}\nfloat coral_d(vec3 pw) {\n  float a;\n  float b;\n  return coral_de(pw, a, b);\n}\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv_orig - 0.5) * s;\n  vec3 ro = vec3(q10, q11, q12);\n  vec3 fw = normalize(vec3(q13, q14, q15));\n  vec3 rt = normalize(cross(fw, vec3(q16, q17, q18)));\n  vec3 up = cross(rt, fw);\n  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * 1.1);\n  float pixang = 1.1 / min(texsize.x, texsize.y);\n  float t = 0.002;\n  float d = 1.0;\n  float steps = 0.0;\n  float hit = 0.0;\n  for (int i = 0; i < 110; i++) {\n    d = coral_d(ro + rd * t);\n    if (d < t * pixang * 0.7) { hit = 1.0; break; }\n    t += d * 0.95;\n    steps += 1.0;\n    if (t > 4.0) break;\n  }\n  vec3 pos = ro + rd * t;\n  float trap;\n  float lights;\n  coral_de(pos, trap, lights);\n  float e = max(t * pixang, 0.0005);\n  vec3 n = normalize(vec3(\n    coral_d(pos + vec3(e, 0.0, 0.0)) - coral_d(pos - vec3(e, 0.0, 0.0)),\n    coral_d(pos + vec3(0.0, e, 0.0)) - coral_d(pos - vec3(0.0, e, 0.0)),\n    coral_d(pos + vec3(0.0, 0.0, e)) - coral_d(pos - vec3(0.0, 0.0, e))));\n  float ao = 0.0;\n  for (int k = 1; k <= 4; k++) {\n    float h = 0.012 * float(k) * float(k);\n    ao += (h - coral_d(pos + n * h)) / h * (0.5 / float(k));\n  }\n  ao = clamp(1.0 - ao, 0.0, 1.0);\n  vec3 sun = normalize(vec3(0.5, 0.8, -0.3));\n  float dif = max(dot(n, sun), 0.0) * 0.9 + max(dot(n, -rd), 0.0) * 0.6 + 0.15 * (0.5 + 0.5 * n.y);\n  float spc = pow(max(dot(reflect(rd, n), sun), 0.0), 24.0);\n  float tone_x = clamp(sqrt(trap) * 0.9, 0.0, 1.0);\n  float surf_x = clamp(0.15 + 0.75 * fract(tone_x + q23), 0.0, 1.0) * 5.0;\n  vec3 surf = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(surf_x, 0.0, 1.0));\n  surf = mix(surf, NOKKVI_RAMP2, clamp(surf_x - 1.0, 0.0, 1.0));\n  surf = mix(surf, NOKKVI_RAMP3, clamp(surf_x - 2.0, 0.0, 1.0));\n  surf = mix(surf, NOKKVI_RAMP4, clamp(surf_x - 3.0, 0.0, 1.0));\n  surf = mix(surf, NOKKVI_RAMP5, clamp(surf_x - 4.0, 0.0, 1.0));\n  vec3 col = surf * (0.15 + dif * 1.05) * (0.3 + 0.7 * ao);\n  col += NOKKVI_TEXT * spc * 0.35 * ao;\n  float lit = clamp(lights, 0.0, 1.0) * smoothstep(0.07, 0.004, trap);\n  col += mix(NOKKVI_WARM, NOKKVI_HIGHLIGHT, 0.5 + 0.5 * sin(pos.x * 3.0 + pos.z * 2.0))\n         * lit * (0.7 + 1.0 * q24);\n  float fog = 1.0 - exp(-t * (0.6 + 0.25 * q5));\n  vec3 bg = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.4 + 0.3 * p.y);\n  col = mix(col, bg, hit > 0.5 ? fog : 1.0);\n  col += NOKKVI_HIGHLIGHT * pow(steps / 110.0, 2.0) * (0.3 + 0.6 * q3);\n  col *= 1.0 + 0.15 * q5;\n  vec2 ez = 0.5 + (uv_orig - 0.5) * (1.0 - q25);\n  vec3 prev = texture(sampler_main, ez).xyz * step(2.5, frame);\n  ret = max(col, prev * q26 - 0.03);\n }",
+ "comp": " shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv - 0.5) * s;\n  vec3 m = texture(sampler_main, uv).xyz;\n  vec3 b1 = GetBlur1(uv);\n  vec3 b2 = GetBlur2(uv);\n  vec3 col = m + max(b1 - 0.28, 0.0) * 0.6 + max(b2 - 0.22, 0.0) * (0.9 + 0.8 * q3);\n  col *= 0.85 + 0.15 * smoothstep(1.2, 0.3, length(p));\n  ret = col;\n }"
+}

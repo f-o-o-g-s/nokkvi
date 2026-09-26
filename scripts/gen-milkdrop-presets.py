@@ -1110,6 +1110,475 @@ def black_holes_port(cover):
         f"  tmpvar_20.xyz = vec3(1.5 - 1.1 * dot(tmpvar_18.xyz, {LUM}));\n")
     p["comp"] = comp
     return p
+# Chladni (no cover) ------------------------------------------------------
+# Sand on a vibrating metal plate. The plate rings in a Chladni mode
+# A = cos(n pi x) cos(m pi y) + s cos(m pi x) cos(n pi y) (the plate spans
+# -1..1 across the short side), and the sand slides down the gradient of the
+# vibration energy A^2 into the nodal lines, where the plate stands still,
+# drawing the mode's figure. The music tunes the plate: a brighter mix
+# (treble against bass, relative to the song's own average) picks a more
+# complex mode, and on a kick the plate retunes; the old and new modes
+# crossfade over 1.5 s, so the sand visibly migrates from one figure to the
+# next. It retunes anyway after 16 kicks on one mode. Big kicks throw a
+# handful of fresh sand in the next colour somewhere on the plate, and the
+# figure pulls it in. Louder music shakes the plate harder: the sand moves
+# faster and hops off the antinodes; silence freezes the figure.
+# The feedback holds the sand, not the picture: x = density (advected with
+# a continuity term so it piles up where the flow converges, relaxing slowly
+# towards an even layer so bare plate refills), y = the sand's colour tag
+# (carried with it, mass-weighted with fresh sand), z = how fast it moves
+# (glints). The comp draws a brushed dark plate, grains thresholded against
+# a static per-pixel noise, lit and shadowed, coloured from the gradient.
+CHLADNI_MODES = [(1, 2, 1), (1, 3, -1), (1, 4, 1), (2, 3, 1), (1, 5, -1), (2, 5, -1), (3, 4, 1), (3, 5, 1)]
+def chladni_pick(var, idx, k):
+    """Nested EEL ifs: component k (0 = m, 1 = n, 2 = sign) of mode `idx`."""
+    e = str(CHLADNI_MODES[-1][k])
+    for i in range(len(CHLADNI_MODES) - 2, -1, -1):
+        e = f"if(equal({idx}, {i}), {CHLADNI_MODES[i][k]}, {e})"
+    return f"{var} = {e};\n"
+def chladni_a(x, y):
+    """Plate displacement at plate coords (x, y): the old mode (q11-q13)
+    crossfaded into the new one (q14-q16) by q17."""
+    pi = "3.14159265"
+    return (f"mix(cos(q12 * {pi} * ({x})) * cos(q11 * {pi} * ({y})) + q13 * cos(q11 * {pi} * ({x})) * cos(q12 * {pi} * ({y})),"
+            f" cos(q15 * {pi} * ({x})) * cos(q14 * {pi} * ({y})) + q16 * cos(q14 * {pi} * ({x})) * cos(q15 * {pi} * ({y})), q17)")
+def chladni_e(v, x, y):
+    return f"  float {v}_a = {chladni_a(x, y)};\n  float {v} = {v}_a * {v}_a;\n"
+CHLADNI_GRAIN = """
+  vec2 gr_i = floor(uv * texsize.xy / 1.6);
+  float grain = texture(sampler_noise_lq, (gr_i + 0.5) / 256.0).x;
+  float grain2 = texture(sampler_noise_lq, (gr_i.yx + 17.5) / 256.0).y;
+"""
+presets["nokkvi - chladni"] = preset(
+    {"decay": 1.0, "wave_a": 0.0, "zoom": 1.0},
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv_orig - 0.5) * s * 2.0;
+  float h = 0.006;
+""" + chladni_e("e0", "p.x", "p.y") + chladni_e("ex1", "p.x + h", "p.y") + chladni_e("ex0", "p.x - h", "p.y")
+    + chladni_e("ey1", "p.x", "p.y + h") + chladni_e("ey0", "p.x", "p.y - h") + """
+  vec2 grad = vec2(ex1 - ex0, ey1 - ey0) / (2.0 * h);
+  float lap = (ex1 + ex0 + ey1 + ey0 - 4.0 * e0) / (h * h);
+  float k = 0.00006 * q18;
+  vec2 vel = -grad * k;
+  float vl = length(vel);
+  vel *= min(1.0, 0.004 / max(vl, 0.000001));
+  vec2 hop = (texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 * 0.5 + rand_frame.xy).xy - 0.5)
+           * min(e0, 2.0) * (0.0015 * q18 + 0.012 * q5);
+  vec2 src = uv - (vel + hop) / (s * 2.0);
+  vec3 m = texture(sampler_main, src).xyz;
+  vec3 b = GetBlur1(src);
+  float u = m.x / 0.45 * (1.0 + clamp(k * lap, -0.06, 0.06));
+  u = mix(u, b.x / 0.45, clamp(e0 * q18 * 0.08, 0.0, 0.35));
+  float local_mean = max(GetBlur3(src).x / 0.45, 0.02);
+  u *= pow(0.3 / local_mean, 0.04);
+  float tag = m.y;
+  vec2 hd = p - vec2(q21 * s.x, q22 * s.y) * 1.6;
+  float hand = smoothstep(0.16, 0.0, length(hd)) * q23
+             * step(0.55, texture(sampler_noise_hq, uv_orig * texsize.xy / 256.0 + rand_frame.zw).x);
+  float fresh = max(0.3 - u, 0.0) * 0.002 + hand * 0.9;
+  tag = (tag * max(u, 0.0) + q19 * fresh) / (max(u, 0.0) + fresh + 0.0001);
+  u = clamp(u + fresh, 0.0, 2.2);
+  float moving = max(m.z * 0.9, clamp(length(vel) * 400.0, 0.0, 1.0) * clamp(u, 0.0, 1.0));
+  if (frame < 2.5) {
+    u = 0.3;
+    tag = 0.5 + 0.35 * sin(atan(p.y, p.x) * 2.0 + length(p) * 3.0);
+    moving = 0.0;
+  }
+  vec2 dith = texture(sampler_noise_hq, uv_orig * texsize.xy / 256.0 + rand_frame.yz).xy - 0.5;
+  ret = vec3(u * 0.45 + dith.x / 255.0, tag + dith.y / 255.0, moving);
+ }""",
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s * 2.0;
+""" + chladni_e("e0", "p.x", "p.y") + CHLADNI_GRAIN + """
+  vec3 m = texture(sampler_main, uv).xyz;
+  float u = m.x / 0.45;
+  vec2 L = normalize(vec2(-0.6, 0.8));
+  vec2 px = texsize.zw * 2.5;
+  float sh = texture(sampler_main, uv - L * px).x / 0.45;
+  float hx = GetBlur1(uv + vec2(texsize.z * 2.0, 0.0)).x - GetBlur1(uv - vec2(texsize.z * 2.0, 0.0)).x;
+  float hy = GetBlur1(uv + vec2(0.0, texsize.w * 2.0)).x - GetBlur1(uv - vec2(0.0, texsize.w * 2.0)).x;
+  float lit = clamp(0.75 + dot(vec2(hx, hy), L) * 10.0, 0.4, 1.4);
+  float brush = texture(sampler_noise_hq, vec2(uv.x * 0.05, uv.y * 3.0)).x;
+  vec3 plate = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.35 + 0.35 * brush);
+  plate += NOKKVI_SURFACE * pow(max(1.0 - length(p - vec2(-0.5, 0.6)) * 0.6, 0.0), 3.0) * 0.5;
+  plate += NOKKVI_HIGHLIGHT * min(e0, 4.0) * 0.012 * q18 * (0.5 + 0.5 * sin(time * 47.0 + e0 * 3.0));
+  plate *= 1.0 - 0.35 * smoothstep(0.3, 1.2, sh);
+  float g = step(grain, clamp(u * 0.9 - 0.08, 0.0, 1.0));
+""" + ramp("sand", "m.y") + """
+  vec3 col_s = sand * (0.55 + 0.45 * grain2) * lit;
+  col_s = mix(col_s, NOKKVI_TEXT, smoothstep(1.3, 2.0, u) * 0.25);
+  vec3 col = mix(plate, col_s, g);
+  float glint = step(0.985, grain2) * g * (0.3 + m.z * 1.5 + q5 * 0.6);
+  col += NOKKVI_TEXT * glint * 0.7;
+  col *= 0.75 + 0.25 * smoothstep(1.4, 0.3, length(p / s));
+  ret = col;
+ }""",
+    init="pulse = 0; pop = 0; phase = 0; kicks = 0; since = 0; cool = 0; hitcool = 0; tavg = 1; energy = 0;"
+         " cur = 0; old = 0; blend = 1; pc = 0.8; hs = 0; hx = 0; hy = 0; handcool = 0;",
+    frame=PULSE + """dt = 1 / max(fps, 1);
+phase = phase + dt;
+loud = min((bass_att + mid_att + treb_att) / 3, 2.5);
+energy = energy * 0.95 + 0.05 * loud;
+tone = (mid_att + 2 * treb_att) / (bass_att + mid_att + treb_att + 0.01);
+tavg = tavg * 0.997 + tone * 0.003;
+target = min(max(floor(3.5 + (tone / max(tavg, 0.1) - 1) * 10), 0), 7);
+cool = max(cool - dt, 0);
+hitcool = max(hitcool - dt, 0);
+handcool = max(handcool - dt, 0);
+hit = above(kick, 0.25) * below(hitcool, 0.001);
+hitcool = if(hit, 0.2, hitcool);
+since = since + hit;
+retune = hit * below(cool, 0.001) * above(abs(target - cur) + above(since, 15.5) * 2, 0.5);
+nxt = if(above(abs(target - cur), 0.5), target, (cur + 3) % 8);
+old = if(retune, cur, old);
+cur = if(retune, nxt, cur);
+blend = if(retune, 0, min(blend + dt / 1.5, 1));
+cool = if(retune, 4, cool);
+since = if(retune, 0, since);
+pc = if(retune, pc + 0.37 - floor(pc + 0.37), pc);
+throw = hit * above(pop, 0.35) * below(handcool, 0.001);
+handcool = if(throw, 0.6, handcool);
+hx = if(throw, rand(1000) / 1000 - 0.5, hx);
+hy = if(throw, rand(1000) / 1000 - 0.5, hy);
+hs = if(throw, 1, hs * 0.7);
+""" + chladni_pick("q11", "old", 0) + chladni_pick("q12", "old", 1) + chladni_pick("q13", "old", 2)
+    + chladni_pick("q14", "cur", 0) + chladni_pick("q15", "cur", 1) + chladni_pick("q16", "cur", 2) + """q17 = blend * blend * (3 - 2 * blend);
+q18 = min(energy, 2) * above(energy, 0.05);
+q19 = pc;
+q21 = hx;
+q22 = hy;
+q23 = hs;
+""")
+
+# Julia lace (no cover) ---------------------------------------------------
+# An endless dive into a Julia set's spiral vortex. The set is drawn as fine
+# lace (the distance estimate turns its boundary into hairline ridges with a
+# soft glow) on a ground plane seen in perspective, lit as relief. Its
+# parameter c = l/2 - l^2/4 sits just outside the Mandelbrot set's main
+# cardioid in the seahorse valley, where the Julia set is all spirals: l is
+# the multiplier of the fixed point alpha = l/2, |l| = 1.03 so alpha repels
+# and the spirals wind around it. The Julia set maps onto itself under
+# z -> z^2 + c, which near alpha is z -> alpha + l (z - alpha): zooming in by
+# |l|^M while turning by M arg(l) shows the same picture again. So the camera
+# looks steeply down at alpha and sinks towards it, the ground turning under
+# it, and after a zoom of |l|^M (about 3x) it is back where it started, one
+# ring deeper; the last fifth of every cycle crossfades into the next cycle's
+# view (the same window mapped by l^M, drawn a second time), so the seam
+# never shows even where the map is not quite linear. Colour follows the
+# iteration count shifted by M per cycle, so it matches across the seam too.
+# Only M arg(l) modulo a full turn matters at the seam, so the ground turns
+# by at most half a turn per cycle (the state `grot` absorbs the rest at the
+# wrap). The camera is free: it swings between a steep dive and a shallow,
+# horizon-grazing glide, sweeps its heading around the vortex, looks a
+# little off centre (an offset that scales with the altitude and turns with
+# `grot`, so it stays self-similar across the seam) and banks gently.
+# arg(l) drifts slowly, so the spirals wind and unwind as you fall. The music
+# never touches the shape (a Julia set is so sensitive to c that a
+# beat-driven nudge reads as a glitch): loudness speeds the dive, very
+# smoothly, and kicks brighten the lace's glow. Line widths follow each
+# pixel's footprint on the plane (screen derivatives). Pure comp.
+JULIA_ITERS = 240
+JULIA_M = 37
+JULIA_FUNCS = f"""
+float julia(vec2 z, vec2 c, out float d, out float mu) {{
+  vec2 dz = vec2(1.0, 0.0);
+  float m2 = 0.0;
+  float it = 0.0;
+  for (int i = 0; i < {JULIA_ITERS}; i++) {{
+    dz = 2.0 * vec2(z.x * dz.x - z.y * dz.y, z.x * dz.y + z.y * dz.x);
+    z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+    m2 = dot(z, z);
+    if (m2 > 1e5) break;
+    it += 1.0;
+  }}
+  float lz = 0.5 * log(max(m2, 1.0001));
+  d = sqrt(m2 / max(dot(dz, dz), 1e-20)) * lz;
+  mu = it + 1.0 - log2(max(lz, 1e-6));
+  return step({JULIA_ITERS}.0 - 0.5, it);
+}}
+"""
+def julia_shade(v, w0, hueshift):
+    """Lace colour `v` for the ground point `w0` (a vec2 expression)."""
+    return f"""
+  vec2 {v}_w = {w0};
+  float {v}_d;
+  float {v}_mu;
+  float {v}_in = julia({v}_w, c, {v}_d, {v}_mu);
+  float {v}_pix = max(length(dFdx({v}_w)), length(dFdy({v}_w))) + 1e-9;
+  float {v}_line = clamp(1.0 - {v}_d / ({v}_pix * 1.3), 0.0, 1.0) * (1.0 - {v}_in);
+  float {v}_glow = exp(-{v}_d / ({v}_pix * 10.0)) * (1.0 - {v}_in);
+  float {v}_ridge = exp(-{v}_d / ({v}_pix * 4.0));
+  float {v}_shade = clamp(0.75 - dot(vec2(dFdx({v}_ridge), dFdy({v}_ridge)), vec2(0.6, -0.8)) * 2.5, 0.35, 1.4);
+  float {v}_hue = fract({v}_mu * 0.015 - ({hueshift}) + q9);
+""" + ramp(v + "_lace", f"0.35 + 0.6 * abs({v}_hue * 2.0 - 1.0)") + f"""
+  vec3 {v} = mix(ground, NOKKVI_BG * 0.55, {v}_in * 0.8);
+  {v} += {v}_lace * {v}_glow * (0.3 + 0.35 * q3) * {v}_shade;
+  {v} = mix({v}, {v}_lace * (0.9 + 0.3 * q3) * {v}_shade, {v}_line);
+  {v} = mix({v}, NOKKVI_TEXT, {v}_line * smoothstep(0.6, 1.0, {v}_glow) * 0.2);
+"""
+presets["nokkvi - julia lace"] = preset(
+    {"decay": 0.0, "wave_a": 0.0, "zoom": 1.0},
+    " shader_body {\n  ret = vec3(0.0);\n }",
+    JULIA_FUNCS + " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s;
+  p = vec2(p.x * cos(q27) - p.y * sin(q27), p.x * sin(q27) + p.y * cos(q27));
+  float ha = q4;
+  float pt = q10;
+  vec3 fw = vec3(cos(pt) * cos(ha), cos(pt) * sin(ha), -sin(pt));
+  vec3 rt = vec3(sin(ha), -cos(ha), 0.0);
+  vec3 up = cross(rt, fw);
+  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * 1.15);
+  float down = max(-rd.z, 0.02);
+  vec2 wa = vec2(q7, q8) + rd.xy * (q6 / down);
+  vec2 c = vec2(q1, q2);
+  vec2 al = vec2(q15, q16);
+  vec3 ground = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.2);
+""" + julia_shade("ca", "wa", "q11") + """
+  vec3 col = ca;
+  if (q12 > 0.0) {
+    vec2 rel = wa - al;
+    vec2 wb = al + vec2(q13 * rel.x - q14 * rel.y, q13 * rel.y + q14 * rel.x);
+""" + julia_shade("cb", "wb", f"q11 - {JULIA_M}.0 * 0.015") + """
+    col = mix(ca, cb, q12);
+  }
+  float fogd = 1.0 - exp(-(1.0 / down) * 0.12);
+  vec3 sky = mix(NOKKVI_SURFACE, NOKKVI_BG, 0.5);
+  col = mix(col, sky, clamp(fogd, 0.0, 1.0) * 0.6);
+  col *= 0.8 + 0.2 * smoothstep(1.2, 0.3, length(p));
+  ret = col;
+ }""",
+    init="pulse = 0; pop = 0; hue = 0; glide = 0.8; dv = 0; fprev = 0; cyc = 0; grot = 0;",
+    frame=PULSE + f"""dt = min(1 / max(fps, 1), 0.1);
+loud = min((bass_att + mid_att + treb_att) / 3, 2);
+glide = glide * 0.995 + 0.005 * (0.6 + 0.5 * loud);
+m = {JULIA_M};
+lr = 1.03;
+phi = 0.43 + 0.035 * sin(time * 0.017) + 0.005 * sin(time * 0.05);
+a = phi * 6.2831853;
+q1 = 0.5 * lr * cos(a) - 0.25 * lr * lr * cos(2 * a);
+q2 = 0.5 * lr * sin(a) - 0.25 * lr * lr * sin(2 * a);
+q15 = 0.5 * lr * cos(a);
+q16 = 0.5 * lr * sin(a);
+lm = pow(lr, m);
+q13 = lm * cos(m * a);
+q14 = lm * sin(m * a);
+dv = dv + dt * glide / 22;
+f = dv - int(dv);
+wrapped = above(int(dv), cyc);
+cyc = int(dv);
+ma = m * a;
+wma = ma - 6.2831853 * floor(ma / 6.2831853 + 0.5);
+grot = grot - wma * (f - fprev + wrapped) + wrapped * ma;
+grot = grot - 6.2831853 * floor(grot / 6.2831853 + 0.5);
+fprev = f;
+h = grot + 0.8 * sin(time * 0.07) + 0.35 * sin(time * 0.13 + 2);
+pch = 0.85 + 0.38 * sin(time * 0.1 + 1) + 0.05 * sin(time * 0.23);
+alt = 0.09 * pow(lr, -m * f);
+back = alt / tan(pch);
+lox = alt * 0.9 * cos(grot + time * 0.09);
+loy = alt * 0.9 * sin(grot + time * 0.09);
+q7 = q15 + lox - back * cos(h);
+q8 = q16 + loy - back * sin(h);
+q6 = alt;
+q4 = h;
+q10 = pch;
+q27 = 0.16 * sin(time * 0.08) + 0.06 * sin(time * 0.19);
+q11 = m * 0.015 * f;
+w = min(max((f - 0.8) / 0.2, 0), 1);
+q12 = w * w * (3 - 2 * w);
+hue = hue + dt * 0.006;
+q9 = hue;
+""")
+
+# Coral city (no cover) ---------------------------------------------------
+# A flight through an endless coral foam: an Apollonian-style fractal (space
+# folded into a period-2 lattice, then inverted in the unit sphere, eight
+# times over), whose distance estimate keeps a sphere shell of every level,
+# so the city is bubbles inside bubbles: domes, arches, pores and tunnels,
+# all rounded. It is raymarched in full every frame (surface normals,
+# ambient occlusion, a headlamp plus a fixed sun, fog into the theme's
+# background, a near-miss glow). Points that land close to the inversion
+# centre early are the city's lights; they flicker with the treble. Before
+# folding, space is displaced by a smooth sine field that repeats with the
+# lattice (period 2, so it stays seamless, also when the camera wraps); the
+# music swells it and its phase flows with the loudness, so the reef sways
+# and undulates. (Turning the point inside each fold instead tore the
+# lattice apart at the cell edges.) The distance is divided by the field's
+# Lipschitz bound so the march stays safe.
+# The autopilot (martin's mandelbox explorer is the ancestor) runs the same
+# distance estimate in EEL: it probes five directions each frame, steers
+# towards open space, slows near walls and surges on kicks; its probes and
+# turn rates are smoothed and capped, so it glides instead of whipping, and
+# a slow wander in yaw, pitch and roll keeps it drifting like a swimmer. The
+# scene is rendered in the warp and blended (max) over the previous frame,
+# zoomed a touch with the flight speed, so lights and bright edges
+# leave motion trails (longer on kicks); the comp adds bloom. Camera
+# position q10-q12, forward q13-q15, up q16-q18; inversion strength q19,
+# sway phase q20, sway amplitude q21. The position wraps inside one 2-unit cell (space repeats).
+CORAL_ITERS = 8
+def coral_de_eel(x, y, z, out):
+    """The distance estimate in EEL, mirroring coral_de() in the shader
+    exactly (the autopilot must see the walls the viewer sees)."""
+    fold = lambda v: f"{v} = -1 + 2 * (0.5 * {v} + 1000.5 - int(0.5 * {v} + 1000.5));"
+    return f"""ex = {x}; ey = {y}; ez = {z};
+dx = ex + q21 * sin(3.14159265 * ey + q20); dy = ey + q21 * sin(3.14159265 * ez + q20 * 1.3); dz = ez + q21 * sin(3.14159265 * ex + q20 * 0.7); scl = 1;
+loop({CORAL_ITERS},
+  {fold("dx")}
+  {fold("dy")}
+  {fold("dz")}
+  r2 = max(dx * dx + dy * dy + dz * dz, 0.000001);
+  k = q19 / r2;
+  dx = dx * k; dy = dy * k; dz = dz * k; scl = scl * k;
+);
+{out} = 0.25 * (sqrt(dx * dx + dy * dy + dz * dz) - 0.35) / scl / (1 + 3.14159265 * abs(q21));
+"""
+def coral_probe(ox, oy, oz, out):
+    """March from the camera along (ox, oy, oz) with the distance estimate;
+    `out` = how far is free, capped at 1."""
+    return f"""pt = 0.005;
+loop(18,
+{coral_de_eel(f"q10 + ({ox}) * pt", f"q11 + ({oy}) * pt", f"q12 + ({oz}) * pt", "pd")}pt = min(pt + pd * 0.9, 1);
+);
+{out} = pt;
+"""
+CORAL_FUNCS = f"""
+float coral_de(vec3 pw, out float trap, out float lights) {{
+  vec3 z = pw + q21 * sin(3.14159265 * vec3(pw.y, pw.z, pw.x) + vec3(q20, q20 * 1.3, q20 * 0.7));
+  float scl = 1.0;
+  trap = 1e9;
+  lights = 0.0;
+  for (int i = 0; i < {CORAL_ITERS}; i++) {{
+    z = -1.0 + 2.0 * fract(0.5 * z + 0.5);
+    float r2 = max(dot(z, z), 0.000001);
+    trap = min(trap, r2);
+    if (i > 1 && i < 5 && r2 < 0.06) lights += 1.0;
+    float k = q19 / r2;
+    z *= k;
+    scl *= k;
+  }}
+  return 0.25 * (length(z) - 0.35) / scl / (1.0 + 3.14159265 * abs(q21));
+}}
+float coral_d(vec3 pw) {{
+  float a;
+  float b;
+  return coral_de(pw, a, b);
+}}
+"""
+
+presets["nokkvi - coral city"] = preset(
+    {"decay": 0.0, "wave_a": 0.0, "zoom": 1.0},
+    CORAL_FUNCS + " shader_body {\n" + HEAD + """
+  vec2 p = (uv_orig - 0.5) * s;
+  vec3 ro = vec3(q10, q11, q12);
+  vec3 fw = normalize(vec3(q13, q14, q15));
+  vec3 rt = normalize(cross(fw, vec3(q16, q17, q18)));
+  vec3 up = cross(rt, fw);
+  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * 1.1);
+  float pixang = 1.1 / min(texsize.x, texsize.y);
+  float t = 0.002;
+  float d = 1.0;
+  float steps = 0.0;
+  float hit = 0.0;
+  for (int i = 0; i < 110; i++) {
+    d = coral_d(ro + rd * t);
+    if (d < t * pixang * 0.7) { hit = 1.0; break; }
+    t += d * 0.95;
+    steps += 1.0;
+    if (t > 4.0) break;
+  }
+  vec3 pos = ro + rd * t;
+  float trap;
+  float lights;
+  coral_de(pos, trap, lights);
+  float e = max(t * pixang, 0.0005);
+  vec3 n = normalize(vec3(
+    coral_d(pos + vec3(e, 0.0, 0.0)) - coral_d(pos - vec3(e, 0.0, 0.0)),
+    coral_d(pos + vec3(0.0, e, 0.0)) - coral_d(pos - vec3(0.0, e, 0.0)),
+    coral_d(pos + vec3(0.0, 0.0, e)) - coral_d(pos - vec3(0.0, 0.0, e))));
+  float ao = 0.0;
+  for (int k = 1; k <= 4; k++) {
+    float h = 0.012 * float(k) * float(k);
+    ao += (h - coral_d(pos + n * h)) / h * (0.5 / float(k));
+  }
+  ao = clamp(1.0 - ao, 0.0, 1.0);
+  vec3 sun = normalize(vec3(0.5, 0.8, -0.3));
+  float dif = max(dot(n, sun), 0.0) * 0.9 + max(dot(n, -rd), 0.0) * 0.6 + 0.15 * (0.5 + 0.5 * n.y);
+  float spc = pow(max(dot(reflect(rd, n), sun), 0.0), 24.0);
+  float tone_x = clamp(sqrt(trap) * 0.9, 0.0, 1.0);
+""" + ramp("surf", "0.15 + 0.75 * fract(tone_x + q23)") + """
+  vec3 col = surf * (0.15 + dif * 1.05) * (0.3 + 0.7 * ao);
+  col += NOKKVI_TEXT * spc * 0.35 * ao;
+  float lit = clamp(lights, 0.0, 1.0) * smoothstep(0.07, 0.004, trap);
+  col += mix(NOKKVI_WARM, NOKKVI_HIGHLIGHT, 0.5 + 0.5 * sin(pos.x * 3.0 + pos.z * 2.0))
+         * lit * (0.7 + 1.0 * q24);
+  float fog = 1.0 - exp(-t * (0.6 + 0.25 * q5));
+  vec3 bg = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.4 + 0.3 * p.y);
+  col = mix(col, bg, hit > 0.5 ? fog : 1.0);
+  col += NOKKVI_HIGHLIGHT * pow(steps / 110.0, 2.0) * (0.3 + 0.6 * q3);
+  col *= 1.0 + 0.15 * q5;
+  vec2 ez = 0.5 + (uv_orig - 0.5) * (1.0 - q25);
+  vec3 prev = texture(sampler_main, ez).xyz * step(2.5, frame);
+  ret = max(col, prev * q26 - 0.03);
+ }""",
+    " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s;
+  vec3 m = texture(sampler_main, uv).xyz;
+  vec3 b1 = GetBlur1(uv);
+  vec3 b2 = GetBlur2(uv);
+  vec3 col = m + max(b1 - 0.28, 0.0) * 0.6 + max(b2 - 0.22, 0.0) * (0.9 + 0.8 * q3);
+  col *= 0.85 + 0.15 * smoothstep(1.2, 0.3, length(p));
+  ret = col;
+ }""",
+    init="pulse = 0; pop = 0; q19 = 1.2; q20 = 0; q21 = 0.05; amp = 0.05; flow = 0; spd = 0.1; surge = 0;"
+         " yawv = 0; pitchv = 0; rollv = 0; hue = 0; lite = 0; sf = 1; sr = 1; sl = 1; su = 1; sd = 1;"
+         " fx = 0; fy = 0; fz = 1; ux = 0; uy = 1; uz = 0; "
+         " tries = 0; q10 = 1; q11 = 1; q12 = 1; free = 0;\n"
+         "while (exec2(\n"
+         "  q10 = rand(200) / 100 - 1; q11 = rand(200) / 100 - 1; q12 = rand(200) / 100 - 1;\n"
+         + coral_de_eel("q10", "q11", "q12", "free") +
+         "  tries = tries + 1;\n"
+         ", below(free, 0.03) * below(tries, 300)));\n",
+    frame=PULSE + """dt = min(1 / max(fps, 1), 0.1);
+loud = min((bass_att + mid_att + treb_att) / 3, 2);
+amp = amp * 0.97 + 0.03 * (0.05 + 0.04 * min(mid_att, 2) + 0.07 * q3);
+q21 = amp;
+flow = flow + dt * (0.25 + 0.35 * loud);
+q20 = flow;
+q19 = 1.2 + 0.06 * sin(time * 0.05);
+rx = fy * uz - fz * uy; ry = fz * ux - fx * uz; rz = fx * uy - fy * ux;
+""" + coral_probe("fx", "fy", "fz", "pf")
+    + coral_probe("fx + 0.45 * rx", "fy + 0.45 * ry", "fz + 0.45 * rz", "pr")
+    + coral_probe("fx - 0.45 * rx", "fy - 0.45 * ry", "fz - 0.45 * rz", "pl")
+    + coral_probe("fx + 0.45 * ux", "fy + 0.45 * uy", "fz + 0.45 * uz", "pu")
+    + coral_probe("fx - 0.45 * ux", "fy - 0.45 * uy", "fz - 0.45 * uz", "pdn")
+    + coral_de_eel("q10", "q11", "q12", "here") + """sf = sf * 0.9 + 0.1 * pf; sr = sr * 0.9 + 0.1 * pr; sl = sl * 0.9 + 0.1 * pl;
+su = su * 0.9 + 0.1 * pu; sd = sd * 0.9 + 0.1 * pdn;
+avg = (sr + sl + su + sd) / 4 + 0.001;
+turn = 0.5 + 1.2 * min(max((0.45 - sf) / 0.35, 0), 1);
+yt = min(max(turn * (sr - sl) / avg, -1.2), 1.2);
+ptt = min(max(turn * (su - sd) / avg, -1.2), 1.2);
+yawv = yawv * 0.97 + 0.03 * (yt + 0.3 * sin(time * 0.13) + 0.15 * sin(time * 0.31));
+pitchv = pitchv * 0.97 + 0.03 * (ptt + 0.22 * sin(time * 0.11 + 1));
+rollv = rollv * 0.98 + 0.02 * (0.3 * sin(time * 0.07) + 0.12 * sin(time * 0.17));
+ya = min(max(yawv, -0.7), 0.7) * dt; pa = min(max(pitchv, -0.7), 0.7) * dt; ra = rollv * dt;
+fx = fx + rx * ya + ux * pa; fy = fy + ry * ya + uy * pa; fz = fz + rz * ya + uz * pa;
+fl = sqrt(fx * fx + fy * fy + fz * fz); fx = fx / fl; fy = fy / fl; fz = fz / fl;
+ux = ux + rx * ra; uy = uy + ry * ra; uz = uz + rz * ra;
+dd = ux * fx + uy * fy + uz * fz; ux = ux - dd * fx; uy = uy - dd * fy; uz = uz - dd * fz;
+ul = sqrt(ux * ux + uy * uy + uz * uz); ux = ux / ul; uy = uy / ul; uz = uz / ul;
+surge = max(surge * 0.97, q5 * 0.6);
+spd = spd * 0.97 + 0.03 * min(sf * 0.6, here * 12) * (0.7 + 0.4 * loud + surge);
+q10 = q10 + fx * spd * dt; q11 = q11 + fy * spd * dt; q12 = q12 + fz * spd * dt;
+q10 = q10 - 2 * int(q10 / 2 + 30.5) + 60; q11 = q11 - 2 * int(q11 / 2 + 30.5) + 60; q12 = q12 - 2 * int(q12 / 2 + 30.5) + 60;
+q13 = fx; q14 = fy; q15 = fz; q16 = ux; q17 = uy; q18 = uz;
+q25 = min(spd * 0.12, 0.025) + 0.003;
+q26 = min(0.72 + 0.1 * q3, 0.85);
+hue = hue + dt * 0.006;
+q23 = hue;
+lite = max(lite * 0.85, min(treb - treb_att + 0.3, 1.5));
+q24 = lite;
+""")
+
 presets["nokkvi - black holes"] = black_holes_port(False)
 presets["nokkvi - cover black holes"] = black_holes_port(True)
 presets["nokkvi - maxawow"] = maxawow_port(False)
