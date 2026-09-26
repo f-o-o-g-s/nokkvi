@@ -1734,325 +1734,384 @@ q24 = lite;
 """)
 
 # Infinity (no cover) ------------------------------------------------------
-# An infinite mirror: a corridor of portals flown through by a gliding,
-# rolling camera, each portal framed by a lit tube and filled with the
-# previous frame, so every portal holds the whole corridor again, down into a
-# haze of filaments at the vanishing point. The idea is martin's "infinity
-# (2010 update)" (eleven copies of the feedback on planes at depth t, screen
-# scale 1/t, pan and roll); nothing of its code is used. Where it tiled the
-# feedback, blew up its centre on the near planes and drew lens-flare dots,
-# here a portal shows the previous frame only inside its rim (mip-filtered,
-# fading out before a copy would be magnified), rims are anti-aliased from
-# each plane's pixel footprint, and nothing is a 1/r glow.
-# The music is drawn into the rims: when a plane spawns at the far end, the
-# warp writes the waveform at that moment into a row of a 16-row strip kept
-# along the texture's top edge (one row per plane identity mod 16; the comp
-# never shows the strip), and the plane's rim radius follows that row for
-# the rest of its flight: every rim is a frozen snapshot of the song, smooth
-# while it flies. The waveform tapers to nothing at atan's seam, and the
-# strip is read at mip 0, so neither shows. The strip is reset to flat on the
-# first frames (a seeded picture from the previous preset is not a waveform)
-# and after a resize (which crops or moves the rows); rims ignore it meanwhile.
-# Rims are glass tubes: a round cross-section that refracts a blurred view of
-# the scene behind it (outside the tone map, gain below 0.5, since it partly
-# sees itself), with a Fresnel edge, a small specular glint and a glowing core
-# whose light flows around the ring (faster on kicks), and a soft shadow cast
-# on whatever lies behind. Each plane also carries wisps of the haze around
-# its ring, so the nebula fills the corridor and flies past with the rings.
-# The wisps are an endless-zoom fractal: four octaves of noise whose weights
-# follow the plane's magnification (log2 of 1 / (focal * z)), so as a plane
-# approaches, finer tendrils fade in and coarse ones grow past, at a constant
-# on-screen scale; octave k keeps its own offset and turn whatever its slot,
-# so nothing jumps when the window slides. Alternate octaves counter-rotate
-# with the flown distance (a whole number of turns per wrap), so the
-# tendrils swirl as the camera flies, faster when it surges. The octave sum
-# is ridged once (per-octave ridges crosshatched into hair).
-# Depth: the camera has flown D plane spacings (a user variable, wrapped
-# modulo INF_P). Slot i of INF_N sits at depth z = (i + 1 - fract(D)) / N and
-# holds the plane whose identity is u = floor(D) + i + 1, constant while it
-# flies; every function of u is periodic in INF_P, so nothing jumps when D
-# wraps. Planes composite nearest first with "over", fogged and desaturated
-# with depth; the feedback gain through the portals stays below 1.
-# The corridor curves: plane u is centred on a smooth path C(u) (harmonics
-# periodic in INF_P) and the camera rides the path looking along its tangent.
-# The twist of plane u is psi + tw * N * z, with psi += tw * dD: constant for
-# a flying plane, and the mirror copies inherit it, so the recursion spirals.
-# Camera speed, roll rate, pan, focal length, twist and bend are all eased
-# twice toward goals re-drawn on the clock, never on a beat; beats drive
-# brightness and a speed surge only.
-# The vanishing point: faint filaments of domain-warped fbm (ridged) in three
-# layers that each zoom in by 8x over their life and fade in and out, phased
-# by the flown distance, so the haze streams toward the viewer without an
-# angle seam. It glows through the portals' fill (only rims hide it), so the
-# mirror copies it outward. The scene keeps
-# max-blend trails zoomed toward the vanishing point; the comp adds bloom and
-# short, soft god rays from the core.
-# q map: q3 kick pulse, q5 pop, q7/q8 cos/sin roll, q9 fract(D), q10
-# floor(D), q11/q12 path at the camera, q13/q14 path tangent at the camera
-# (per plane spacing), q15/q16 pan, q17 focal length, q18 psi, q19 tw,
-# q20/q21 path amplitudes, q22 a plane spawned this frame, q23 hue drift,
-# q24 haze scroll, q25 core light, q26/q27 vanishing point (camera plane
-# units), q28 trail zoom, q29 trail keep, q30 the spawned plane's strip row,
-# q31 the render size changed this frame, q32 the phase of the light flowing
-# around the rims.
-# Texture coordinates are shared by warp and comp; the picture fills
-# y < 1 - 16 / texsize.y and the strip the rows above.
-INF_N = 16
-INF_P = 64
-INF_ROWS = 16
-INF_W = f"{6.2831853 / INF_P:.9f}"
-def inf_path_eel(u, ox, oy):
-    return (f"{ox} = q20 * cos({INF_W} * ({u})) + q21 * cos(3 * {INF_W} * ({u}) + 1.3);\n"
-            f"{oy} = q20 * sin({INF_W} * ({u})) + q21 * sin(2 * {INF_W} * ({u}) + 0.4);\n")
+# A flight down an endless corridor of frames standing half-sunk in a dark,
+# glossy liquid. The idea is martin's "infinity (2010 update)" (nested
+# polygons that spiral outward while the camera changes pattern); nothing of
+# its code is used, and nothing is feedback: the whole scene is raymarched
+# sharp every frame, like coral city. Each frame is a bevelled metal beam
+# bent into a rounded polygon (mostly triangles, sometimes squares,
+# pentagons or hexagons) with a neon inlay line, placed one spacing apart
+# along a gently winding path and turned a little more than the one before
+# (the twist), so the corridor spirals and the spiral turns as the camera
+# flies. The liquid is a plane of slow noise swells and ripples (periodic
+# with the camera's wrap, faded with distance so it never aliases) that
+# reflects the frames through a second march; frames are lit by a lamp that
+# circles ahead of the camera plus a slow key light, and reflect the scene
+# with a Fresnel sheen. Fog and a horizon glow close the vanishing point.
+# Camera patterns (IFR_ACTS: straight corridor, tight spiral, serpent bends,
+# orbit, counter-twisting vortex) are re-drawn every 13-21 s, never on a
+# beat; twist, path bends, orbit, sway, spin and lens all ease twice (tau
+# ~3 s), so a change glides. Shape and palette changes are frozen per frame:
+# frames spawned after a switch index (q26) take the new order and palette,
+# so a new shape enters from the far end and nothing morphs on screen.
+# Music: loudness sets the cruising speed (0.25 to 3.5 frames per second),
+# kicks add a short surge that also widens the lens, and spin and liquid flow
+# scale with the speed; each detected beat (bass above its follower, 0.2 s
+# cooldown) sends a bright wave down the inlays (the last three beats' ages
+# and strengths ride in q1/q2, q4/q6, q7/q8), with dashes running along the
+# lit beams and a treble shimmer between kicks. Beat never touches geometry.
+# The shader preprocessor collapses a `?:` whose condition uses && or || to
+# grey, so combined conditions are built from step/min/max.
+# q map: q3 kick pulse, q5 pop, q9 fract(flown), q10 flown cell mod 32, q11/q12
+# camera xy, q13-q15 forward, q16 roll sway, q17 lens, q18 spin, q19 twist,
+# q20/q21 path amplitudes, q22 lamp phase, q23 hue drift, q24 liquid flow,
+# q25 core light, q26 shape switch index, q27/q28 old/new polygon order,
+# q29 flown cell mod 256, q30/q31 new/old palette, q32 inlay flow.
 def ease(v, goal, tau):
     """Two cascaded first-order lags (critically damped): no step in velocity."""
     return (f"{v}_m = {v}_m + ({goal} - {v}_m) * (1 - exp(-dt / {tau}));\n"
             f"{v} = {v} + ({v}_m - {v}) * (1 - exp(-dt / {tau}));\n")
-def retarget(timer, lo, span, *sets):
-    """Every lo..lo+span seconds, re-draw goals (`sets` = (var, expr) pairs)."""
-    out = f"{timer} = {timer} - dt;\n{timer}_n = below({timer}, 0);\n"
-    for var, expr in sets:
-        out += f"{var} = if({timer}_n, {expr}, {var});\n"
-    return out + f"{timer} = if({timer}_n, {lo} + rand(1000) / 1000 * {span}, {timer});\n"
-INF_FUNCS = f"""
-vec2 inf_path(float pu) {{
-  return vec2(q20 * cos({INF_W} * pu) + q21 * cos(3.0 * {INF_W} * pu + 1.3),
-              q20 * sin({INF_W} * pu) + q21 * sin(2.0 * {INF_W} * pu + 0.4));
+
+IFR_P = 1.0            # frame spacing
+IFR_R = 1.8            # frame circumradius
+IFR_W = 6.2831853 / 32 # path frequency per cell (path period 32 cells)
+IFR_NF = 26             # frames ahead that are drawn
+IFR_FH = -0.9           # liquid surface height
+
+IFR_FUNCS = f"""
+vec2 ifr_path(float pu) {{
+  return vec2(q20 * cos({IFR_W:.9f} * pu) + q21 * cos({3 * IFR_W:.9f} * pu + 1.3),
+              0.25 * (q20 * sin({IFR_W:.9f} * pu) + q21 * sin({2 * IFR_W:.9f} * pu + 0.4)));
 }}
-float inf_hash(float hu) {{
-  return fract(sin(hu * 12.9898 + 4.1) * 43758.5453);
+float ifr_hash(float hu) {{
+  return fract(sin(mod(hu, 32.0) * 12.9898 + 4.1) * 43758.5453);
 }}
-vec3 inf_ramp(float rx) {{""" + ramp("rr", "rx") + f"""
+vec3 ifr_ramp(float rx) {{""" + ramp("rr", "rx") + f"""
   return rr;
 }}
-float inf_wave(float wrow, float wx) {{
-  float wv = 1.0 - (wrow + 0.5) / texsize.y;
-  float ws = texture(sampler_fc_main, vec2(wx, wv), -16.0).x;
-  return (ws - 0.5) * step(0.05, ws);
+vec2 ifr_local(vec2 lq, float lj) {{
+  float lu = q10 + lj;
+  vec2 lq2 = lq - ifr_path(lu);
+  float la = q19 * (lj - q9) + q18;
+  float lc = cos(la);
+  float ls = sin(la);
+  return vec2(lc * lq2.x + ls * lq2.y, -ls * lq2.x + lc * lq2.y);
 }}
-float inf_fbm(vec2 nc) {{
-  float fs = 0.0;
-  float fa = 0.5;
-  vec2 fx = nc;
-  for (int o = 0; o < 4; o++) {{
-    fs += fa * texture(sampler_noise_hq, fx).x;
-    fx = fx * 2.0 + vec2(0.37, 0.61);
-    fa *= 0.5;
-  }}
-  return fs;
+float ifr_poly(vec2 pq, float pn, out float palong) {{
+  float pan = 3.14159265 / pn;
+  float pa = atan(pq.y, pq.x);
+  float ps = mod(pa + pan, 2.0 * pan) - pan;
+  float pl = length(pq);
+  vec2 pr = pl * vec2(cos(ps), abs(sin(ps)));
+  float prad = {IFR_R * 0.93:.4f};
+  float pap = prad * cos(pan);
+  float ph = prad * sin(pan);
+  vec2 pe = pr - vec2(pap, clamp(pr.y, 0.0, ph));
+  palong = pr.y / ph;
+  return length(pe) * sign(pr.x - pap) - {IFR_R * 0.07:.4f};
 }}
-float inf_wisp(vec2 wp, float wlz, float wsp) {{
-  float wo = floor(wlz);
-  float wfr = wlz - wo;
-  float wsum = 0.0;
-  float wwt = 0.0;
-  for (int j = 0; j < 4; j++) {{
-    float wk = wo + float(j);
-    float wt = sin(3.14159265 * (float(j) + 1.0 - wfr) / 4.0);
-    float wa = wk * 1.7 + wsp * (mod(wk, 2.0) * 2.0 - 1.0);
-    vec2 wq = vec2(wp.x * cos(wa) - wp.y * sin(wa), wp.x * sin(wa) + wp.y * cos(wa)) * exp2(wk)
-              + vec2(0.37, 0.61) * wk;
-    float wv = texture(sampler_noise_hq, wq).x;
-    wsum += wt * wv;
-    wwt += wt;
-  }}
-  return wsum / wwt;
+float ifr_order(float oj) {{
+  return oj >= q26 ? q28 : q27;
 }}
-float inf_haze(vec2 tc) {{
-  float hs = 0.0;
-  for (int l = 0; l < 3; l++) {{
-    float lp = q24 + float(l) / 3.0;
-    float ph = fract(lp);
-    float lid = mod(floor(lp), 4.0) * 3.0 + float(l);
-    float lsc = 0.05 * exp2(3.0 * (1.0 - ph));
-    float la = lid * 2.39996;
-    vec2 lc = vec2(tc.x * cos(la) - tc.y * sin(la), tc.x * sin(la) + tc.y * cos(la)) * lsc
-              + vec2(0.31, 0.17) * lid;
-    float wn = inf_fbm(lc * 0.6 + vec2(0.5, 0.2));
-    vec2 wc = lc + vec2(wn, -wn) * 0.35;
-    hs += inf_fbm(wc) * sin(3.14159265 * ph);
-  }}
-  return hs / 1.5;
+float ifr_frame(vec3 fp, float fj, out float falong, out float fface) {{
+  vec2 fq = ifr_local(fp.xy, fj);
+  float fn = ifr_order(fj);
+  float fd = ifr_poly(fq, fn, falong);
+  float fz = fp.z - fj * {IFR_P:.3f};
+  vec2 fe = vec2(abs(fd - 0.07) - 0.07, abs(fz) - 0.05);
+  float fb = length(max(fe, 0.0)) + min(max(fe.x, fe.y), 0.0) - 0.018;
+  vec2 fe2 = vec2(abs(fd - 0.2) - 0.02, abs(fz) - 0.022);
+  float fb2 = length(max(fe2, 0.0)) + min(max(fe2.x, fe2.y), 0.0) - 0.008;
+  float fg = abs(fd - 0.07) - 0.012;
+  float fgz = abs(fz) - 0.06;
+  fb = max(fb, -max(fg, -fgz + 0.0));
+  fface = fd;
+  return min(fb, fb2);
+}}
+float ifr_scene(vec3 sp, out float sj, out float salong, out float sface) {{
+  float sj0 = floor(sp.z / {IFR_P:.3f});
+  float sa0;
+  float sf0;
+  float sa1;
+  float sf1;
+  float sd0 = ifr_frame(sp, sj0, sa0, sf0);
+  float sj1 = sj0 + 1.0;
+  float sd1 = ifr_frame(sp, sj1, sa1, sf1);
+  sj = sd0 < sd1 ? sj0 : sj1;
+  salong = sd0 < sd1 ? sa0 : sa1;
+  sface = sd0 < sd1 ? sf0 : sf1;
+  return min(sd0, sd1);
+}}
+float ifr_d(vec3 dp) {{
+  float da;
+  float db;
+  float dc;
+  return ifr_scene(dp, da, db, dc);
+}}
+vec3 ifr_lamp() {{
+  float lu = q10 + q9 + 5.0;
+  vec2 lxy = ifr_path(lu);
+  return vec3(lxy + vec2(0.5 * cos(q22), 0.5 * sin(q22)), (q9 + 5.0) * {IFR_P:.3f});
+}}
+vec3 ifr_inlay(float ij) {{
+  float ih = ifr_hash(q10 + ij + 7.0);
+  float ipal = ij >= q26 ? q30 : q31;
+  vec3 ic = ifr_ramp(0.55 + 0.45 * fract(ih * 0.61 + ipal));
+  vec3 iw = mix(NOKKVI_WARM, NOKKVI_HIGHLIGHT, 0.25);
+  return mix(ic, iw, step(0.62, fract(ih + ipal * 0.5)));
+}}
+float ifr_beat(float bdj, float bage, float bstr) {{
+  float bfront = bage * 11.0;
+  float bx = bdj - bfront;
+  return bstr * exp(-bx * bx * 1.3) * exp(-bage * 0.9) * step(0.0, bage);
+}}
+float ifr_pulse(float pj) {{
+  float pdj = pj - q9;
+  return ifr_beat(pdj, q1, q2) + ifr_beat(pdj, q4, q6) + ifr_beat(pdj, q7, q8);
+}}
+vec3 ifr_env(vec3 ed, vec3 efw) {{
+  float eg = pow(max(dot(ed, efw), 0.0), 24.0);
+  float ey = ed.y;
+  vec3 esky = mix(NOKKVI_SURFACE * 0.7, NOKKVI_BG * 0.6, smoothstep(0.0, 0.6, ey));
+  esky = mix(esky, NOKKVI_BG * 0.25, smoothstep(0.0, -0.3, ey));
+  float ehz = exp(-abs(ey) * 18.0);
+  return esky + mix(NOKKVI_ACCENT, NOKKVI_WARM, 0.4) * ehz * (0.18 + 0.1 * q25) + NOKKVI_ACCENT * eg * (0.2 + 0.2 * q25);
+}}
+float ifr_n(vec2 nx) {{
+  vec2 nxx = nx * 256.0 + 0.5;
+  vec2 ni = floor(nxx);
+  vec2 nf = fract(nxx);
+  nf = nf * nf * nf * (nf * (nf * 6.0 - 15.0) + 10.0);
+  return texture(sampler_noise_hq, (ni + nf - 0.5) / 256.0).x;
+}}
+float ifr_h(vec2 hw, float hfade) {{
+  vec2 hw1 = hw * 0.0015 + vec2(q24 * 0.0011, q24 * 0.0004);
+  vec2 hw2 = hw * 0.0117 + vec2(-q24 * 0.0019, q24 * 0.0013);
+  float hwa = ifr_n(hw1);
+  float hwb = ifr_n(hw1 * 2.6 + vec2(0.31, 0.57) + hwa * 0.004);
+  float hwc = ifr_n(hw2);
+  return hwa * 0.5 + hwb * 0.3 + hwc * 0.2 * hfade;
+}}
+vec3 ifr_liquid(vec2 lq, float lf) {{
+  float le = 0.05;
+  float lh0 = ifr_h(lq, lf);
+  vec2 lqx = lq + vec2(le, 0.0);
+  vec2 lqz = lq + vec2(0.0, le);
+  float lhx = ifr_h(lqx, lf);
+  float lhz = ifr_h(lqz, lf);
+  float lamp = 1.4 * (0.35 + 0.65 * lf);
+  return vec3((lhx - lh0) / le * lamp, (lhz - lh0) / le * lamp, lh0);
 }}
 """
-INF_TOP = f"float pic = 1.0 - {INF_ROWS}.0 / texsize.y;"
-INF_VP = """
-  vec2 vp = vec2(q26 * q7 - q27 * q8, q26 * q8 + q27 * q7) - vec2(q15, q16);
-  vec2 vuv = vp / s + 0.5;
+
+def ifr_frame_colour(v, j, n="n", pos="pos", rd="rd", t="t"):
+    """Surface colour of a frame hit: brushed metal tinted by identity."""
+    return f"""
+  float {v}_h = ifr_hash(q10 + {j});
+  float {v}_pal = {j} >= q26 ? q30 : q31;
+  vec3 {v}_base = ifr_ramp(0.15 + 0.7 * fract({v}_h * 0.37 + {v}_pal));
+  vec3 {v}_lp = ifr_lamp() - {pos};
+  float {v}_ld = length({v}_lp);
+  vec3 {v}_l = {v}_lp / {v}_ld;
+  float {v}_att = (1.6 + 1.5 * q25 + 1.2 * q3) / (1.0 + 0.35 * {v}_ld * {v}_ld);
+  vec3 {v}_key = normalize(vec3(cos(q22 * 0.37), 0.7, sin(q22 * 0.37) - 0.6));
+  float {v}_dif = max(dot({n}, {v}_l), 0.0) * {v}_att + max(dot({n}, {v}_key), 0.0) * 0.35 + 0.06;
+  vec3 {v}_hv = normalize({v}_l - {rd});
+  float {v}_spc = pow(max(dot({n}, {v}_hv), 0.0), 60.0) * {v}_att;
+  vec3 {v} = {v}_base * {v}_dif + mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.4) * {v}_spc * 1.4;
 """
-def infinity():
-    warp = INF_FUNCS + " shader_body {\n" + HEAD + f"""
-  {INF_TOP}
-  if (uv_orig.y >= pic) {{
-    float srow = floor((1.0 - uv_orig.y) * texsize.y);
-    float sclr = max(step(frame, 2.5), q31);
-    vec3 skeep = texture(sampler_fc_main, uv_orig).xyz;
-    float swv = 0.0;
-    for (int k = -4; k <= 4; k++) {{
-      swv += get_wave(0.4 + uv_orig.x * 0.2 + float(k) / 300.0) * (5.0 - abs(float(k)));
-    }}
-    vec3 sfresh = vec3(mix(clamp(0.5 + swv / 25.0 * 1.4, 0.1, 0.9), 0.5, sclr));
-    float swr = max(sclr, q22 * (1.0 - step(0.5, abs(srow - q30))));
-    ret = mix(skeep, sfresh, swr);
-  }} else {{
-  vec2 tuv = vec2(uv_orig.x, uv_orig.y / pic);
-  vec2 sp = (tuv - 0.5) * s + vec2(q15, q16);
-  vec2 p = vec2(sp.x * q7 + sp.y * q8, -sp.x * q8 + sp.y * q7);
-""" + INF_VP + f"""
-  float pix = 1.0 / min(texsize.x, texsize.y);
-  float wok = step(2.5, frame) * (1.0 - q31);
-  float ptop = pic - 2.0 / texsize.y;
-  vec3 lgt = normalize(vec3(-0.45, 0.55, 0.7));
-  vec3 acc = vec3(0.0);
-  vec3 macc = vec3(0.0);
-  float cov = 0.0;
-  float rcov = 0.0;
-  for (int i = 0; i < {INF_N}; i++) {{
-    float z = (float(i) + 1.0 - q9) / {INF_N}.0;
-    float w = smoothstep(0.0, 0.12, z) * smoothstep(1.0, 0.72, z);
-    float u = q10 + float(i) + 1.0;
-    vec2 ctr = inf_path(u) - vec2(q11, q12) - (u - q10 - q9) * vec2(q13, q14);
-    vec2 c0 = p * (q17 * z) - ctr;
-    float th = q18 + q19 * {INF_N}.0 * z;
-    float cth = cos(th);
-    float sth = sin(th);
-    vec2 c = vec2(c0.x * cth - c0.y * sth, c0.x * sth + c0.y * cth);
-    float h = inf_hash(mod(u, {INF_P}.0));
-    float pw = q17 * z * pix;
-    float cr = length(c) + 0.00001;
-    vec2 cn = c / cr;
-    float ca = atan(c.y, c.x) / 6.2831853 + 0.5;
-    float tap = smoothstep(0.0, 0.12, ca) * smoothstep(1.0, 0.88, ca);
-    float rim = (0.30 + 0.04 * (h - 0.5)) * (1.0 + 0.42 * inf_wave(mod(u, {INF_ROWS}.0), ca) * tap * wok);
-    float dr = cr - rim;
-    float tr = 0.011;
-    float tq = clamp(dr / tr, -1.0, 1.0);
-    vec2 nsc = vec2(cn.x * cth + cn.y * sth, -cn.x * sth + cn.y * cth) * tq;
-    vec3 nrm = normalize(vec3(nsc, sqrt(max(1.0 - tq * tq, 0.0)) + 0.02));
-    float dif = max(dot(nrm, lgt), 0.0);
-    float spc = pow(max(dot(reflect(-lgt, nrm), vec3(0.0, 0.0, 1.0)), 0.0), 28.0);
-    vec3 base = inf_ramp(0.25 + 0.7 * fract(h * 0.73 + q23));
-    float fog = 1.0 - exp(-2.2 * z);
-    base = mix(base, vec3(dot(base, {LUM})), 0.45 * z);
-    vec2 ruv = clamp(tuv + nsc * 0.035 / s, 0.0, 1.0);
-    vec3 refr = texture(sampler_main, vec2(ruv.x, min(ruv.y * pic, ptop)), 2.5).xyz;
-    float fres = pow(1.0 - nrm.z, 2.0);
-    float flow = 0.5 + 0.5 * sin(6.2831853 * ca * 3.0 + q32 + h * 6.2831853);
-    float core = exp(-dr * dr / (tr * tr * 0.1));
-    vec3 tube = base * (0.06 + 0.3 * dif + 0.85 * fres)
-              + base * core * (0.35 + 0.75 * flow) * (0.8 + 0.5 * q3 + 0.3 * q5)
-              + NOKKVI_TEXT * spc * 0.35;
-    tube = mix(tube, NOKKVI_BG, fog * 0.75);
-    float at = w * smoothstep(tr + pw, tr - pw, abs(dr));
-    acc += (1.0 - cov) * at * tube;
-    macc += (1.0 - cov) * at * refr * (0.3 + 0.2 * base) * (1.0 - fog * 0.6);
-    cov += (1.0 - cov) * at;
-    rcov += (1.0 - rcov) * at;
-    vec2 wsc = c * 0.16 + vec2(h * 7.31, h * 3.17) + vec2(0.25, 0.25) * q24;
-    float wn0 = texture(sampler_noise_hq, wsc * 2.0).x;
-    float wlz = log2(1.0 / (q17 * z)) - 1.0;
-    float wn = inf_wisp(wsc + vec2(wn0, -wn0) * 0.3, wlz, (q10 + q9) * {2 * 6.2831853 / INF_P:.9f});
-    float wf = pow(smoothstep(0.6, 1.0, 1.0 - abs(2.0 * wn - 1.0)), 2.0);
-    float hug = exp(-dr * dr / 0.012);
-    vec3 wcol = inf_ramp(0.15 + 0.7 * smoothstep(0.25, 0.8, wn));
-    acc += (1.0 - cov) * w * wf * (0.004 + 0.12 * hug) * wcol * (1.0 - fog * 0.6) * (0.8 + 0.3 * q25);
-    float dsh = abs(length(c - vec2(0.45 * cth + 0.55 * sth, 0.45 * sth - 0.55 * cth) * 0.02) - rim);
-    float ash = w * 0.4 * exp(-dsh * dsh / (tr * tr * 4.0)) * smoothstep(tr - pw, tr + pw, abs(dr));
-    cov += (1.0 - cov) * ash;
-    float mag = rim / (q17 * z) / 0.45;
-    vec2 muv = vuv + c * (0.45 / rim) / s;
-    float edge = min(min(muv.x, 1.0 - muv.x), min(muv.y, 1.0 - muv.y));
-    float ai = w * 0.5 * smoothstep(-pw, pw, -(dr + tr)) * smoothstep(1.4, 0.8, mag)
-               * smoothstep(0.0, 0.06, edge);
-    vec3 mir = texture(sampler_main, vec2(clamp(muv.x, 0.0, 1.0), min(clamp(muv.y, 0.0, 1.0) * pic, ptop))).xyz;
-    macc += (1.0 - cov) * ai * mir * 0.72;
-    cov += (1.0 - cov) * ai;
+
+IFR_WARP = IFR_FUNCS + " shader_body {\n" + HEAD + f"""
+  vec2 p = (uv_orig - 0.5) * s;
+  vec3 ro = vec3(q11, q12, q9 * {IFR_P:.3f});
+  vec3 fw = normalize(vec3(q13, q14, q15));
+  vec3 upr = vec3(sin(q16), cos(q16), 0.0);
+  vec3 rt = normalize(cross(fw, upr));
+  vec3 up = cross(rt, fw);
+  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * q17);
+  float pixang = q17 / min(texsize.x, texsize.y);
+  float t = 0.02;
+  float d = 1.0;
+  float hit = 0.0;
+  float mind = 1e9;
+  float mint = 0.0;
+  for (int i = 0; i < 120; i++) {{
+    d = ifr_d(ro + rd * t);
+    float dr = d / (t * pixang);
+    if (dr < mind) {{ mind = dr; mint = t; }}
+    if (d < t * pixang * 0.5) {{ hit = 1.0; break; }}
+    t += d * 0.9;
+    if (t > 34.0) break;
   }}
-  vec2 hp = p - vec2(q26, q27);
-  float hr = length(hp) + 0.0001;
-  float hz = inf_haze(hp);
-  float hzf = smoothstep(0.42, 0.06, hr);
-  float fil = pow(1.0 - abs(2.0 * clamp(hz, 0.0, 1.0) - 1.0), 5.0);
-""" + ramp("hzc", "0.15 + 0.75 * smoothstep(0.2, 0.8, hz)") + f"""
-  vec3 back = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.35 * hzf * smoothstep(0.2, 0.7, hz));
-  vec3 glow = hzc * fil * hzf * (0.15 + 0.12 * q25);
-  float cg = 0.02 / (0.02 + hr * hr * 40.0);
-  glow += mix(NOKKVI_ACCENT, NOKKVI_TEXT, 0.3) * cg * (0.08 + 0.12 * q25);
-  vec3 col = 1.0 - exp(-1.6 * (acc + (1.0 - cov) * back + (1.0 - rcov) * glow));
-  col += macc;
-  vec2 ez = clamp(vuv + (tuv - vuv) * (1.0 - q28), 0.0, 1.0);
-  vec3 prev = texture(sampler_main, vec2(ez.x, min(ez.y * pic, ptop))).xyz * step(2.5, frame);
-  ret = max(col, prev * q29 - 0.03);
+  float tfl = rd.y < -0.0001 ? ({IFR_FH:.3f} - ro.y) / rd.y : 1e9;
+  float onfl = max(step(tfl, t), 1.0 - hit) * step(tfl, 1e8);
+  float ts = onfl > 0.5 ? tfl : t;
+  vec3 pos = ro + rd * ts;
+  float hj;
+  float halong;
+  float hface;
+  ifr_scene(pos, hj, halong, hface);
+  float e = max(t * pixang, 0.0008);
+  vec3 n = normalize(vec3(
+    ifr_d(pos + vec3(e, 0.0, 0.0)) - ifr_d(pos - vec3(e, 0.0, 0.0)),
+    ifr_d(pos + vec3(0.0, e, 0.0)) - ifr_d(pos - vec3(0.0, e, 0.0)),
+    ifr_d(pos + vec3(0.0, 0.0, e)) - ifr_d(pos - vec3(0.0, 0.0, e))));
+  float ao = 0.0;
+  for (int k = 1; k <= 3; k++) {{
+    float hk = 0.03 * float(k);
+    ao += (hk - ifr_d(pos + n * hk)) / hk * (0.5 / float(k));
   }}
+  ao = clamp(1.0 - ao, 0.0, 1.0);
+  vec2 lw = vec2(pos.x, pos.z + q29);
+  float lfade = exp(-ts * 0.12);
+  vec3 lg = ifr_liquid(lw, lfade);
+  vec3 ln = normalize(vec3(-lg.x, 1.0, -lg.y));
+  if (onfl > 0.5) {{ n = ln; ao = 1.0; }}
+""" + ifr_frame_colour("sc", "hj") + f"""
+  vec3 rfd = reflect(rd, n);
+  rfd = onfl > 0.5 ? vec3(rfd.x, abs(rfd.y), rfd.z) : rfd;
+  float rt2 = 0.03;
+  float rhit = 0.0;
+  for (int i = 0; i < 64; i++) {{
+    float rdd = ifr_d(pos + rfd * rt2);
+    if (rdd < 0.002 * rt2 + 0.001) {{ rhit = 1.0; break; }}
+    rt2 += rdd * 0.9;
+    if (rt2 > 30.0) break;
+  }}
+  vec3 rpos = pos + rfd * rt2;
+  float rj;
+  float ralong;
+  float rface;
+  ifr_scene(rpos, rj, ralong, rface);
+  vec3 rn = normalize(vec3(
+    ifr_d(rpos + vec3(0.003, 0.0, 0.0)) - ifr_d(rpos - vec3(0.003, 0.0, 0.0)),
+    ifr_d(rpos + vec3(0.0, 0.003, 0.0)) - ifr_d(rpos - vec3(0.0, 0.003, 0.0)),
+    ifr_d(rpos + vec3(0.0, 0.0, 0.003)) - ifr_d(rpos - vec3(0.0, 0.0, 0.003))));
+""" + ifr_frame_colour("rc", "rj", n="rn", pos="rpos", rd="rfd") + f"""
+  float rinl = smoothstep(0.03, 0.0, abs(rface - 0.07));
+  float rpl = ifr_pulse(rj);
+  vec3 ricol = ifr_inlay(rj);
+  rc = rc * 0.6 + mix(ricol, NOKKVI_TEXT, min(rpl * 0.35, 0.6)) * rinl * (0.8 + 0.6 * q3 + 3.0 * rpl);
+  vec3 renv = ifr_env(rfd, fw);
+  vec3 refl = rhit > 0.5 ? mix(rc, renv, 1.0 - exp(-rt2 * 0.075)) : renv;
+  float fre = 0.25 + 0.75 * pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+  float q24t = clamp(treb - treb_att, 0.0, 1.0);
+  float inl = smoothstep(0.022, 0.006, abs(hface - 0.07)) * smoothstep(0.03, 0.05, abs(pos.z - hj * {IFR_P:.3f}));
+  float wav = 0.5 + 0.5 * sin(q32 - hj * 0.9 + halong * 1.5);
+  float hpl = ifr_pulse(hj);
+  vec3 hicol = ifr_inlay(hj);
+  float dash = 0.5 + 0.5 * sin(halong * 14.0 - q32 * 2.5 + hj * 2.0);
+  vec3 emis = mix(hicol, NOKKVI_TEXT, min(hpl * 0.35, 0.6)) * inl
+              * (0.6 + 0.5 * wav + 0.6 * q3 * wav + hpl * (2.2 + 1.6 * dash) + 0.5 * q24t * dash);
+  vec3 col = (sc * 0.4 + refl * fre * 0.8) * (0.35 + 0.65 * ao) + emis;
+  float lcs = max(dot(ln, -rd), 0.0);
+  float lfr = 0.1 + 0.9 * pow(1.0 - lcs, 5.0);
+  vec3 llp = ifr_lamp() - pos;
+  float lld = length(llp);
+  float lsp = pow(max(dot(rfd, llp / lld), 0.0), 900.0) * (0.6 + 1.2 * q3) / (1.0 + 0.08 * lld * lld);
+  float ldeep = lg.z;
+""" + ramp("ltint", "0.1 + 0.3 * ldeep + 0.2 * fract(q23)") + f"""
+  vec3 lcol = refl * mix(vec3(1.0), ltint * 1.6, 0.35) * (0.15 + 0.85 * lfr) + ltint * (1.0 - lfr) * (0.05 + 0.08 * ldeep) + mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.3) * lsp;
+  col = onfl > 0.5 ? lcol : col;
+  float fog = 1.0 - exp(-ts * (onfl > 0.5 ? 0.06 : 0.075));
+  vec3 bg = ifr_env(rd, fw);
+  float solid = max(hit, onfl);
+  col = solid > 0.5 ? mix(col, bg, fog) : bg;
+  float cov = smoothstep(1.0, 0.0, mind);
+  vec3 edgec = mix(sc * 0.55 + refl * 0.5, bg, 1.0 - exp(-mint * 0.075));
+  float solidf = hit * (1.0 - onfl);
+  col = mix(mix(col, edgec, cov * 0.8 * step(mint, ts)), col, solidf);
+  col *= 1.0 + 0.12 * q5;
+  ret = col;
  }}"""
-    comp = " shader_body {\n" + HEAD + f"""
-  {INF_TOP}
+
+IFR_COMP = " shader_body {\n" + HEAD + """
   vec2 p = (uv - 0.5) * s;
-  vec2 cuv = vec2(uv.x, uv.y * pic);
-  float bfade = smoothstep(pic - 0.03, pic - 0.16, cuv.y);
-  vec3 m = texture(sampler_main, cuv).xyz;
-  vec3 b1 = GetBlur1(cuv);
-  vec3 b2 = GetBlur2(cuv);
-  vec3 col = m + (max(b1 - 0.25, 0.0) * 0.5 + max(b2 - 0.2, 0.0) * (0.7 + 0.6 * q3)) * bfade;
-""" + INF_VP + """
-  vec3 rays = vec3(0.0);
-  for (int j = 1; j <= 10; j++) {
-    float rf = float(j) / 10.0;
-    vec2 ruv = uv + (vuv - uv) * rf * 0.35;
-    rays += GetBlur2(vec2(ruv.x, ruv.y * pic)) * (1.0 - rf) * smoothstep(0.97, 0.84, ruv.y);
-  }
-  float rl = dot(rays, vec3(0.299, 0.587, 0.114)) / 5.5;
-  col += NOKKVI_ACCENT * max(rl - 0.12, 0.0) * (0.35 + 0.3 * q25);
-  col *= 0.85 + 0.15 * smoothstep(1.2, 0.3, length(p));
+  vec3 m = texture(sampler_main, uv).xyz;
+  vec3 b1 = GetBlur1(uv);
+  vec3 b2 = GetBlur2(uv);
+  vec3 col = m + max(b1 - 0.3, 0.0) * 0.5 + max(b2 - 0.22, 0.0) * (0.6 + 0.6 * q3);
+  col = 1.0 - exp(-col * 1.35);
+  col *= 0.8 + 0.2 * smoothstep(1.3, 0.3, length(p));
   ret = col;
  }"""
-    init = ("pulse = 0; pop = 0; flow = 0; dd = rand(1000) / 1000 * " + str(INF_P) + "; flprev = floor(dd); psi = 0;"
-            " tw = 0; tw_m = 0; twg = 0.06;"
-            " spd = 1.2; spd_m = 1.2; roll = rand(1000) / 1000 * 6.2831853; rw = 0; rw_m = 0; rwg = 0.1;"
-            " px = 0; px_m = 0; py = 0; py_m = 0; pgx = 0; pgy = 0; foc = 1.3; foc_m = 1.3; focg = 1.3;"
-            " a1 = 0.18; a1_m = 0.18; a1g = 0.18; a2 = 0.02; a2_m = 0.02; a2g = 0.02;"
-            " lpw = 0; lph = 0; ttw = 0; trw = 0; tpan = 0; tfoc = 0; tbend = 0; hue = rand(1000) / 1000; core = 0;")
-    frame = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" \
-        "loud = min((bass_att + mid_att + treb_att) / 3, 2);\n" \
-        + ease("spd", "0.9 + 0.9 * loud", "1.0") + \
-        "fly = max(spd * (1 + 0.45 * q3), 0.25);\n" \
-        f"dd = dd + fly * dt;\ndd = dd - {INF_P} * floor(dd / {INF_P});\n" \
-        "fl = floor(dd);\nq22 = 1 - equal(fl, flprev);\nflprev = fl;\n" \
-        "q31 = 1 - equal(pixelsx, lpw) * equal(pixelsy, lph);\nlpw = pixelsx; lph = pixelsy;\n" \
-        f"q30 = fl - {INF_ROWS} * floor(fl / {INF_ROWS});\n" \
-        + retarget("ttw", 8, 5, ("twg", "(rand(1000) / 1000 * 2 - 1) * 0.12")) \
-        + ease("tw", "twg", "2.5") + \
-        "psi = psi + tw * fly * dt;\npsi = psi - 6.2831853 * floor(psi / 6.2831853);\n" \
-        + retarget("trw", 6, 4, ("rwg", "(rand(1000) / 1000 * 2 - 1) * 0.25")) \
-        + ease("rw", "rwg", "1.5") + \
-        "roll = roll + rw * dt;\nroll = roll - 6.2831853 * floor(roll / 6.2831853);\n" \
-        + retarget("tpan", 5, 3, ("pgx", "(rand(1000) / 1000 * 2 - 1) * 0.06"),
-                   ("pgy", "(rand(1000) / 1000 * 2 - 1) * 0.05")) \
-        + ease("px", "pgx", "1.4") + ease("py", "pgy", "1.4") \
-        + retarget("tfoc", 9, 6, ("focg", "1.05 + rand(1000) / 1000 * 0.5")) \
-        + ease("foc", "focg", "3") \
-        + retarget("tbend", 12, 6, ("a1g", "0.08 + rand(1000) / 1000 * 0.2"),
-                   ("a2g", "rand(1000) / 1000 * 0.04")) \
-        + ease("a1", "a1g", "3.5") + ease("a2", "a2g", "3.5") + \
-        "q20 = a1; q21 = a2;\n" \
-        + inf_path_eel("dd", "gx0", "gy0") \
-        + f"tx = -q20 * {INF_W} * sin({INF_W} * dd) - q21 * 3 * {INF_W} * sin(3 * {INF_W} * dd + 1.3);\n" \
-        f"ty = q20 * {INF_W} * cos({INF_W} * dd) + q21 * 2 * {INF_W} * cos(2 * {INF_W} * dd + 0.4);\n" \
-        + inf_path_eel(f"dd + {INF_N}", "gxf", "gyf") + \
-        f"q26 = (gxf - gx0 - {INF_N} * tx) / foc;\nq27 = (gyf - gy0 - {INF_N} * ty) / foc;\n" \
-        "q7 = cos(roll); q8 = sin(roll);\n" \
-        "q9 = dd - fl; q10 = fl;\n" \
-        "q11 = gx0; q12 = gy0; q13 = tx; q14 = ty;\n" \
-        "q15 = px; q16 = py; q17 = foc; q18 = psi; q19 = tw;\n" \
-        "hue = hue + dt * 0.005;\nhue = hue - floor(hue);\nq23 = hue;\n" \
-        "flow = flow + dt * (1.2 + 3 * q3);\nflow = flow - 6.2831853 * floor(flow / 6.2831853);\nq32 = flow;\n" \
-        f"q24 = dd / {INF_N};\n" \
-        "core = core + (min(bass_att, 2) - core) * (1 - exp(-dt / 0.4));\nq25 = core;\n" \
-        "q28 = min(0.0012 + 0.0022 * fly, 0.012);\n" \
-        "q29 = min(0.55 + 0.1 * q3, 0.7);\n"
-    return preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, warp, comp, init=init, frame=frame)
 
-presets["nokkvi - infinity"] = infinity()
+# Acts: twist per frame, path amps a1/a2, orbit radius, orbit rate, roll rate, spin rate, fov.
+IFR_ACTS = [
+    (0.04, 0.35, 0.10, 0.00, 0.0, 0.10, 0.10, 1.00),
+    (0.22, 0.20, 0.05, 0.10, 0.2, 0.35, 0.25, 1.10),
+    (0.08, 1.40, 0.40, 0.10, 0.3, 0.20, 0.05, 0.90),
+    (0.12, 0.40, 0.10, 0.45, 0.5, 0.15, -0.20, 1.20),
+    (-0.30, 0.30, 0.20, 0.25, -0.6, 0.45, -0.35, 1.30),
+]
+def ifr_act_pick(var, col):
+    e = f"{IFR_ACTS[-1][col]}"
+    for i in range(len(IFR_ACTS) - 2, -1, -1):
+        e = f"if(equal(act, {i}), {IFR_ACTS[i][col]}, {e})"
+    return f"{var} = {e};\n"
+
+IFR_INIT = ("pulse = 0; pop = 0; hue = 0; lite = 0; core = 0; flow = 0; dist = 0; spd = 1; spd_m = 1; surge = 0; sg = 0; sg_m = 0; spdt = 1;"
+        " act = rand(5); acttm = 12; sgn = 1; tw = 0.05; tw_m = 0.05; a1 = 0.3; a1_m = 0.3; a2 = 0.1; a2_m = 0.1;"
+        " orr = 0; orr_m = 0; ora = 0; ora_m = 0; oph = 0; rlr = 0; rlr_m = 0; rlang = 0; spr = 0; spr_m = 0; spin = 0;"
+        " fov = 1; fov_m = 1; ks = -100; nold = 3; nnew = 3; pold = rand(1000) / 1000; pnew = pold; lph = 0; lqt = 0; sinceb = 1; ba1 = 9; ba2 = 9; ba3 = 9; bs1 = 0; bs2 = 0; bs3 = 0;")
+IFR_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" \
+    "loud = min((bass_att + mid_att + treb_att) / 3, 2);\n" \
+    "acttm = acttm - dt;\nchg = below(acttm, 0);\n" \
+    "act = if(chg, (act + 1 + rand(4)) % 5, act);\n" \
+    "sgn = if(chg, if(below(rand(100), 50), -1, 1), sgn);\n" \
+    "acttm = if(chg, 13 + rand(1000) / 1000 * 8, acttm);\n" \
+    "cabs = int(dist);\n" \
+    "shp = chg * above(cabs, ks);\n" \
+    "nold = if(shp, nnew, nold); pold = if(shp, pnew, pold);\n" \
+    "r = rand(100);\n" \
+    "nnew = if(shp, if(below(r, 55), 3, if(below(r, 75), 4, if(below(r, 90), 5, 6))), nnew);\n" \
+    "pnew = if(shp, rand(1000) / 1000, pnew);\n" \
+    f"ks = if(shp, cabs + {IFR_NF + 2}, ks);\n" \
+    + ifr_act_pick("twg", 0) + ifr_act_pick("a1g", 1) + ifr_act_pick("a2g", 2) + ifr_act_pick("org", 3) \
+    + ifr_act_pick("orag", 4) + ifr_act_pick("rlg", 5) + ifr_act_pick("spg", 6) + ifr_act_pick("fovg", 7) \
+    + ease("tw", "twg * sgn", "3.0") + ease("a1", "a1g", "3.5") + ease("a2", "a2g", "3.5") \
+    + ease("orr", "org", "3.0") + ease("ora", "orag * sgn", "3.0") + ease("rlr", "rlg * sgn", "3.0") \
+    + ease("spr", "spg * sgn", "3.0") + ease("fov", "fovg", "3.0") \
+    + "en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);\n" \
+    + ease("spd", "min(0.25 + 1.1 * en * en, 3.5)", "0.8") + \
+    "surge = max(surge * exp(-dt / 0.4), 1.6 * q5 + 0.9 * q3);\n" \
+    + ease("sg", "surge", "0.07") + \
+    "spdt = spd + sg;\n" \
+    "dist = dist + spdt * dt;\n" \
+    "cabs = int(dist); fr = dist - cabs;\n" \
+    "q9 = fr; q10 = cabs % 32;\n" \
+    "q20 = a1; q21 = a2;\n" \
+    f"pu = q10 + q9; px0 = a1 * cos({IFR_W} * pu) + a2 * cos({3 * IFR_W} * pu + 1.3);\n" \
+    f"py0 = 0.25 * (a1 * sin({IFR_W} * pu) + a2 * sin({2 * IFR_W} * pu + 0.4));\n" \
+    f"pu = pu + 3; px3 = a1 * cos({IFR_W} * pu) + a2 * cos({3 * IFR_W} * pu + 1.3);\n" \
+    f"py3 = 0.25 * (a1 * sin({IFR_W} * pu) + a2 * sin({2 * IFR_W} * pu + 0.4));\n" \
+    "oph = oph + ora * dt;\n" \
+    "ox = orr * cos(oph); oy = 0.35 * orr * sin(oph);\n" \
+    "q11 = px0 + ox; q12 = py0 + oy;\n" \
+    "lwx = 0.08 * sin(time * 0.13) - 0.25 * ox; lwy = 0.06 * sin(time * 0.17 + 1) - 0.25 * oy;\n" \
+    f"fx = px3 - px0 + lwx * 3; fy = py3 - py0 + lwy * 3; fz = 3 * {IFR_P};\n" \
+    "fl = sqrt(fx * fx + fy * fy + fz * fz);\nq13 = fx / fl; q14 = fy / fl; q15 = fz / fl;\n" \
+    "rlang = rlang + dt * 0.21; q16 = rlr * sin(rlang);\n" "lqt = lqt + dt * (0.3 + 0.5 * spdt); q24 = lqt;\n" "q29 = cabs % 256;\n" \
+    "q17 = fov * (1 + 0.08 * min(sg, 2) + 0.03 * max(spd - 1, 0));\n" \
+    "spin = spin + spr * dt * (0.4 + 0.6 * spdt); spin = spin - 6.2831853 * int(spin / 6.2831853); q18 = spin;\n" \
+    "q19 = tw;\n" \
+    "lph = lph + dt * (0.4 + 0.5 * loud); q22 = lph;\n" \
+    "hue = hue + dt * 0.004; q23 = hue;\n" \
+    "core = core + (min(bass_att, 2) - core) * (1 - exp(-dt / 0.4)); q25 = core;\n" \
+    "q26 = ks - cabs; q27 = nold; q28 = nnew; q30 = pnew + hue; q31 = pold + hue;\n" \
+    "flow = flow + dt * (1.5 + 4 * q3); q32 = flow;\n" \
+    "bk = bass - bass_att; sinceb = sinceb + dt;\n" \
+    "trig = above(bk, 0.22) * above(sinceb, 0.2);\n" \
+    "ba3 = if(trig, ba2, ba3); bs3 = if(trig, bs2, bs3);\n" \
+    "ba2 = if(trig, ba1, ba2); bs2 = if(trig, bs1, bs2);\n" \
+    "ba1 = if(trig, 0, ba1); bs1 = if(trig, min(0.5 + bk * 1.4, 1.6), bs1);\n" \
+    "sinceb = if(trig, 0, sinceb);\n" \
+    "ba1 = ba1 + dt; ba2 = ba2 + dt; ba3 = ba3 + dt;\n" \
+    "q1 = ba1; q2 = bs1; q4 = ba2; q6 = bs2; q7 = ba3; q8 = bs3;\n"
+
+
+presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IFR_WARP, IFR_COMP,
+                                     init=IFR_INIT, frame=IFR_FRAME)
 
 presets["nokkvi - black holes"] = black_holes_port(False)
 presets["nokkvi - cover black holes"] = black_holes_port(True)
