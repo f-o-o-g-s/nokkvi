@@ -13,7 +13,6 @@
 pub(crate) mod palette;
 mod program;
 pub(crate) mod shared;
-#[cfg_attr(not(test), expect(dead_code, reason = "wired by the pipeline slice"))]
 mod transition;
 
 use std::{sync::Arc, time::Duration};
@@ -291,6 +290,35 @@ mod tests {
                 e.emit_to_string_with_path(BLIT_WGSL, "blit.wgsl")
             )
         });
+    }
+
+    #[test]
+    fn blit_wgsl_declares_both_crossfade_groups() {
+        // The pipeline layout has two groups (incoming, outgoing); a shader
+        // that stopped declaring group 1 would silently never crossfade.
+        assert!(BLIT_WGSL.contains("@group(0) @binding(0)"));
+        assert!(BLIT_WGSL.contains("@group(1) @binding(0)"));
+    }
+
+    /// Needs a GPU: the blit pipeline (two bind groups) is valid on a device
+    /// with iced's limits. A shader/layout mismatch panics at first paint
+    /// otherwise; naga alone does not catch it.
+    #[test]
+    #[ignore = "needs a GPU"]
+    fn blit_pipeline_builds_on_icedlike_limits() {
+        use iced::widget::shader::Pipeline as _;
+        let Some(gpu) = iced_like_gpu() else {
+            return;
+        };
+        for format in [
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+        ] {
+            let built = run_in_error_scopes(&gpu.device, || {
+                program::MilkdropPipeline::new(&gpu.device, &gpu.queue, format)
+            });
+            assert!(built.is_ok(), "{format:?}: {:?}", built.err());
+        }
     }
 
     #[test]

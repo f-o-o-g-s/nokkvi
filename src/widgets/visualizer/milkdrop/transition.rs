@@ -134,12 +134,19 @@ impl<S> Default for SlotPair<S> {
 }
 
 impl<S> SlotPair<S> {
-    pub(crate) fn current(&self) -> Option<&S> {
+    #[cfg(test)]
+    fn current(&self) -> Option<&S> {
         self.current.as_ref()
     }
 
-    pub(crate) fn is_fading(&self) -> bool {
+    #[cfg(test)]
+    fn is_fading(&self) -> bool {
         self.fade.is_some()
+    }
+
+    /// The running fade, if any.
+    pub(crate) fn fade(&self) -> Option<&Fade> {
+        self.fade.as_ref().map(|(_, fade)| fade)
     }
 
     /// Mutable access to both sides at once: (current, outgoing).

@@ -32,6 +32,10 @@ fn now_ms() -> u64 {
         .saturating_add(1)
 }
 
+/// The crossfade before the settings are first applied (their defaults).
+const DEFAULT_CROSSFADE_SECS: f32 = 2.0;
+const DEFAULT_INTERVAL_SECS: f32 = 30.0;
+
 /// Size the builder uses before the panel has reported one.
 pub(crate) const FALLBACK_RENDER_SIZE: (u32, u32) = (720, 720);
 
@@ -89,6 +93,10 @@ pub struct MilkdropShared {
     pub(crate) current_generation: AtomicU64,
     /// Shorter-side render cap in physical px; 0 = native.
     pub(crate) quality_short_side: AtomicU32,
+    /// Renderer advances a crossfade into the next arriving preset lasts
+    /// (0 = cut). The app sets it from the settings each tick; `prepare` reads
+    /// it once per arrival, so a running fade keeps its length.
+    pub(crate) crossfade_frames: AtomicU32,
     /// `analyzer.analysis_sample_rate()` as `f32` bits (0 = no analyzer yet).
     /// Written by the FFT thread on (re)init, read when a renderer is swapped in.
     analysis_rate: AtomicU32,
@@ -120,6 +128,10 @@ impl MilkdropShared {
             epoch_counter: AtomicU64::new(0),
             current_generation: AtomicU64::new(0),
             quality_short_side: AtomicU32::new(DEFAULT_QUALITY_SHORT_SIDE),
+            crossfade_frames: AtomicU32::new(super::transition::fade_frames(
+                DEFAULT_CROSSFADE_SECS,
+                DEFAULT_INTERVAL_SECS,
+            )),
             analysis_rate: AtomicU32::new(0),
             features: Mutex::new(particle_audio::Features::default()),
             gpu: Mutex::new(None),

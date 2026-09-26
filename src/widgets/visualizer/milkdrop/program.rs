@@ -21,7 +21,11 @@ use tracing::{debug, warn};
 use super::{
     MILKDROP_FRAME_INTERVAL, desired_render_size, run_in_error_scopes,
     shared::{GpuHandles, MilkdropShared},
+    transition::{BlitPlan, SlotPair, fade_seed},
 };
+
+/// Width of the soft band where two presets mix, in pattern units (0..1).
+const FADE_SOFTNESS: f32 = 0.2;
 
 /// The widget program. Event-transparent (it captures nothing), so the panel's
 /// context menu and the theater hover still see every event.
@@ -100,7 +104,8 @@ pub(crate) struct MilkdropPipeline {
     format: wgpu::TextureFormat,
     /// Captured on the first `prepare` (`Pipeline::new` cannot receive it).
     shared: Option<Arc<MilkdropShared>>,
-    slot: Option<Slot>,
+    /// The renderer on screen and, during a crossfade, the one it replaces.
+    slots: SlotPair<Slot>,
 }
 
 fn make_bind_group(
@@ -135,12 +140,7 @@ impl MilkdropPipeline {
     /// app's release watermark.
     fn enforce_release(&mut self, shared: &MilkdropShared) {
         let below = shared.released_below.load(Ordering::Acquire);
-        if self
-            .slot
-            .as_ref()
-            .is_some_and(|slot| slot.generation < below)
-            && let Some(slot) = self.slot.take()
-        {
+        for slot in self.slots.release_below(below, |slot| slot.generation) {
             debug!(preset = %slot.name, "milkdrop: renderer released");
         }
         let mut built = shared.built.lock();
@@ -171,7 +171,7 @@ impl MilkdropPipeline {
             epoch,
         });
         drop(gpu);
-        self.slot = None;
+        self.slots.take_all();
         shared.built.lock().take();
     }
 
@@ -189,8 +189,9 @@ impl MilkdropPipeline {
         let mut renderer = built.renderer;
         // Start from the picture on screen, as MilkDrop does: presets that grow
         // out of the previous image (self-sharpening feedback) have nothing to
-        // grow from on black. Declines on its own when the sizes differ.
-        if let Some(old) = self.slot.as_ref() {
+        // grow from on black. Mid-fade that is the side that dominates the
+        // picture. Declines on its own when the sizes differ.
+        if let Some(old) = self.slots.seed_source() {
             let old = old.renderer.lock();
             match run_in_error_scopes(device, || renderer.seed_feedback_from(&old)) {
                 Ok(seeded) => debug!(preset = %built.name, seeded, "milkdrop: picture handoff"),
@@ -208,7 +209,7 @@ impl MilkdropPipeline {
             renderer.retained_comp_view(),
         );
         debug!(preset = %built.name, ?size, "milkdrop: renderer swapped in");
-        self.slot = Some(Slot {
+        let incoming = Slot {
             generation: built.generation,
             name: built.name,
             renderer: Mutex::new(renderer),
@@ -222,7 +223,149 @@ impl MilkdropPipeline {
                 .unwrap_or_else(Instant::now),
             rate_set: None,
             debouncer: MilkdropResizeDebouncer::default(),
+        };
+        let total = shared.crossfade_frames.load(Ordering::Relaxed);
+        let seed = fade_seed(built.generation);
+        let dropped = self
+            .slots
+            .arrive(incoming, total, seed, |slot| slot.frames_rendered > 0);
+        for slot in dropped {
+            debug!(preset = %slot.name, "milkdrop: renderer replaced");
+        }
+        if let Some(fade) = self.slots.fade() {
+            debug!(
+                frames = total,
+                pattern = ?fade.pattern,
+                seed,
+                "milkdrop: crossfade started"
+            );
+        }
+    }
+
+    /// Write this frame's blit parameters from the blit plan (`draw` follows
+    /// the same plan). `trim` has no queue, so the end state is written here.
+    fn write_params(&self, queue: &wgpu::Queue, aspect: f32) {
+        let (pattern, seed, progress) = match self.slots.blit_plan(|slot| slot.frames_rendered) {
+            BlitPlan::Mix { progress, fade, .. } => (fade.pattern.shader_id(), fade.seed, progress),
+            BlitPlan::Solo(_) | BlitPlan::Nothing => (0, 0, 1.0),
+        };
+        let words: [u32; 8] = [
+            u32::from(self.format.is_srgb()),
+            pattern,
+            seed,
+            0,
+            progress.to_bits(),
+            FADE_SOFTNESS.to_bits(),
+            aspect.to_bits(),
+            0,
+        ];
+        queue.write_buffer(&self.params, 0, bytemuck::cast_slice(&words));
+    }
+}
+
+impl Slot {
+    /// A new playing cover: swap it into the live renderer in place. Returns
+    /// false on a GPU error (the renderer is lost).
+    fn sync_cover(&mut self, shared: &MilkdropShared, device: &wgpu::Device) -> bool {
+        let cover_version = shared.cover_version();
+        if cover_version == self.cover_version {
+            return true;
+        }
+        self.cover_version = cover_version;
+        let Some(cover) = shared.cover.lock().clone() else {
+            return true;
+        };
+        let mut renderer = self.renderer.lock();
+        if let Err(e) = run_in_error_scopes(device, || {
+            renderer.set_named_texture(super::COVER_TEXTURE, &cover.rgba, cover.width, cover.height)
+        }) {
+            warn!(preset = %self.name, "milkdrop: GPU error updating the cover: {e}");
+            return false;
+        }
+        true
+    }
+
+    /// Debounced resize toward `desired`, then one render (paused or not).
+    /// Returns false on a GPU error (the renderer is lost).
+    fn maybe_resize(
+        &mut self,
+        desired: (u32, u32),
+        now: Instant,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        params: &wgpu::Buffer,
+    ) -> bool {
+        if desired != self.size {
+            self.debouncer.request(desired.0, desired.1, now);
+        } else {
+            self.debouncer.clear();
+        }
+        let Some((w, h)) = self.debouncer.take_ready(now) else {
+            return true;
+        };
+        let renderer = self.renderer.get_mut();
+        // Render once right away: `try_resize` rebuilds the retained comp
+        // texture black, and a paused (or not-yet-due) panel would blit that
+        // until the next advance.
+        let resized = run_in_error_scopes(device, || {
+            renderer
+                .try_resize(w, h)
+                .map(|()| renderer.render_to_retained_comp())
         });
+        match resized {
+            Ok(Ok(())) => {
+                self.size = renderer.dimensions();
+                // The retained view is replaced on every resize.
+                self.bind_group = make_bind_group(
+                    device,
+                    layout,
+                    sampler,
+                    params,
+                    renderer.retained_comp_view(),
+                );
+            }
+            // Keeps the old size; the blit scales it.
+            Ok(Err(e)) => warn!("milkdrop: resize to {w}x{h} refused: {e:?}"),
+            Err(e) => {
+                warn!(preset = %self.name, "milkdrop: GPU error on resize: {e}");
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Feed the latest analysis frame and render one frame. A fresh renderer's
+    /// first frame runs under error scopes. Returns false on a GPU error.
+    fn advance(
+        &mut self,
+        shared: &MilkdropShared,
+        device: &wgpu::Device,
+        features: &particle_audio::Features,
+    ) -> bool {
+        let renderer = self.renderer.get_mut();
+        if let Some(rate) = shared.analysis_rate()
+            && self.rate_set != Some(rate)
+        {
+            renderer.set_enhanced_audio_sample_rate(rate);
+            self.rate_set = Some(rate);
+        }
+        super::apply_features(
+            renderer,
+            features,
+            shared.analysis_rate().unwrap_or(44_100.0),
+        );
+        if self.frames_rendered == 0 {
+            // A validation error must never reach wgpu's panicking handler.
+            if let Err(e) = run_in_error_scopes(device, || renderer.render_to_retained_comp()) {
+                warn!(preset = %self.name, "milkdrop: GPU error on first frame: {e}");
+                return false;
+            }
+        } else {
+            renderer.render_to_retained_comp();
+        }
+        self.frames_rendered += 1;
+        true
     }
 }
 
@@ -261,130 +404,91 @@ impl shader::Primitive for MilkdropPrimitive {
         *shared.render_size.lock() = desired;
 
         let now = Instant::now();
+        let aspect = if bounds.height > 0.0 {
+            bounds.width / bounds.height
+        } else {
+            1.0
+        };
         let MilkdropPipeline {
-            slot: slot_opt,
+            slots,
             layout,
             sampler,
             params,
             ..
-        } = pipeline;
-        let Some(slot) = slot_opt.as_mut() else {
-            return;
-        };
-        let mut lost = false;
+        } = &mut *pipeline;
 
-        // A new playing cover: swap it into the live renderer in place.
-        let cover_version = shared.cover_version();
-        if cover_version != slot.cover_version {
-            slot.cover_version = cover_version;
-            if let Some(cover) = shared.cover.lock().clone() {
-                let mut renderer = slot.renderer.lock();
-                if let Err(e) = run_in_error_scopes(device, || {
-                    renderer.set_named_texture(
-                        super::COVER_TEXTURE,
-                        &cover.rgba,
-                        cover.width,
-                        cover.height,
-                    )
-                }) {
-                    warn!(preset = %slot.name, "milkdrop: GPU error updating the cover: {e}");
-                    lost = true;
-                }
-            }
+        // Cover and resize reach both sides of a fade. The outgoing is dropped
+        // on a GPU error without blaming it (by now the name on screen is the
+        // incoming's, and it already ran a whole interval).
+        let (current, outgoing) = slots.both_mut();
+        let mut lost = current.is_some_and(|slot| {
+            !(slot.sync_cover(&shared, device)
+                && slot.maybe_resize(desired, now, device, layout, sampler, params))
+        });
+        let outgoing_lost = outgoing.is_some_and(|slot| {
+            !(slot.sync_cover(&shared, device)
+                && slot.maybe_resize(desired, now, device, layout, sampler, params))
+        });
+        if outgoing_lost && let Some(slot) = slots.end_fade() {
+            warn!(preset = %slot.name, "milkdrop: crossfade cut short, outgoing renderer lost");
         }
 
-        if desired != slot.size {
-            slot.debouncer.request(desired.0, desired.1, now);
-        } else {
-            slot.debouncer.clear();
-        }
-        if let Some((w, h)) = slot.debouncer.take_ready(now) {
-            let mut renderer = slot.renderer.lock();
-            // Render once right away: `try_resize` rebuilds the retained comp
-            // texture black, and a paused (or not-yet-due) panel would blit
-            // that until the next advance.
-            let resized = run_in_error_scopes(device, || {
-                renderer
-                    .try_resize(w, h)
-                    .map(|()| renderer.render_to_retained_comp())
-            });
-            match resized {
-                Ok(Ok(())) => {
-                    slot.size = renderer.dimensions();
-                    // The retained view is replaced on every resize.
-                    slot.bind_group = make_bind_group(
-                        device,
-                        layout,
-                        sampler,
-                        params,
-                        renderer.retained_comp_view(),
-                    );
-                }
-                // Keeps the old size; the blit scales it.
-                Ok(Err(e)) => warn!("milkdrop: resize to {w}x{h} refused: {e:?}"),
-                Err(e) => {
-                    warn!(preset = %slot.name, "milkdrop: GPU error on resize: {e}");
-                    lost = true;
-                }
-            }
-        }
-
-        if running && !lost && now >= slot.last_advance + MILKDROP_FRAME_INTERVAL {
+        if running
+            && !lost
+            && let (Some(slot), outgoing) = slots.both_mut()
+            && now >= slot.last_advance + MILKDROP_FRAME_INTERVAL
+        {
             // Catch-up schedule: 60 advances a second at 144 Hz (a plain
-            // `last = now` gate gives ~48), re-based after a long stall.
+            // `last = now` gate gives ~48), re-based after a long stall. The
+            // outgoing side of a fade advances in lockstep on this schedule.
             slot.last_advance += MILKDROP_FRAME_INTERVAL;
             if now.saturating_duration_since(slot.last_advance) > MILKDROP_FRAME_INTERVAL * 2 {
                 slot.last_advance = now;
             }
             let features = *shared.features.lock();
-            let mut renderer = slot.renderer.lock();
-            if let Some(rate) = shared.analysis_rate()
-                && slot.rate_set != Some(rate)
-            {
-                renderer.set_enhanced_audio_sample_rate(rate);
-                slot.rate_set = Some(rate);
-            }
-            super::apply_features(
-                &mut renderer,
-                &features,
-                shared.analysis_rate().unwrap_or(44_100.0),
-            );
-            if slot.frames_rendered == 0 {
-                // A fresh renderer's first frame runs under error scopes: a
-                // validation error must never reach wgpu's panicking handler.
-                if let Err(e) = run_in_error_scopes(device, || renderer.render_to_retained_comp()) {
-                    warn!(preset = %slot.name, "milkdrop: GPU error on first frame: {e}");
-                    lost = true;
-                }
-            } else {
-                renderer.render_to_retained_comp();
-            }
-            if !lost {
-                if slot.frames_rendered == 0 {
+            if slot.advance(&shared, device, &features) {
+                if slot.frames_rendered == 1 {
                     shared.mark_shown(slot.generation);
                 }
-                slot.frames_rendered += 1;
+                // Steady-state advances are unscoped, so this never fails.
+                if let Some(outgoing) = outgoing {
+                    outgoing.advance(&shared, device, &features);
+                }
+                if let Some(done) = slots.advance_fade() {
+                    debug!(preset = %done.name, "milkdrop: crossfade finished");
+                }
+            } else {
+                lost = true;
             }
         }
 
         if lost {
-            // The app's tick takes the generation and blames that load.
-            let generation = slot.generation;
-            *slot_opt = None;
-            shared.slot_lost.store(generation, Ordering::Release);
+            // The app's tick takes the generation and blames that load. Losing
+            // the incoming ends any fade: the cover shows until the next load.
+            let dropped = slots.take_all();
+            if let Some(slot) = dropped.first() {
+                shared.slot_lost.store(slot.generation, Ordering::Release);
+            }
         }
+
+        pipeline.write_params(queue, aspect);
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         // Nothing until the first frame: a fresh renderer is black, and the cover
         // underneath is the better placeholder.
-        if let Some(slot) = pipeline.slot.as_ref()
-            && slot.frames_rendered > 0
-        {
-            render_pass.set_pipeline(&pipeline.blit);
-            render_pass.set_bind_group(0, &slot.bind_group, &[]);
-            render_pass.draw(0..3, 0..1);
-        }
+        let (incoming, outgoing) = match pipeline.slots.blit_plan(|slot| slot.frames_rendered) {
+            BlitPlan::Nothing => return true,
+            // One group bound twice: progress 1 shows it alone.
+            BlitPlan::Solo(slot) => (slot, slot),
+            BlitPlan::Mix {
+                incoming, outgoing, ..
+            } => (incoming, outgoing),
+        };
+        render_pass.set_pipeline(&pipeline.blit);
+        render_pass.set_bind_group(0, &incoming.bind_group, &[]);
+        render_pass.set_bind_group(1, &outgoing.bind_group, &[]);
+        render_pass.draw(0..3, 0..1);
         true
     }
 }
@@ -435,7 +539,9 @@ impl shader::Pipeline for MilkdropPipeline {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("milkdrop blit pipeline layout"),
-            bind_group_layouts: &[Some(&layout)],
+            // Group 0 the incoming preset, group 1 the outgoing: exactly iced's
+            // `max_bind_groups: 2`.
+            bind_group_layouts: &[Some(&layout), Some(&layout)],
             immediate_size: 0,
         });
         let blit = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -474,11 +580,20 @@ impl shader::Pipeline for MilkdropPipeline {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let decode_srgb = u32::from(format.is_srgb());
+        // Rewritten by `prepare` every frame (`write_params`).
         let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("milkdrop blit params"),
-            contents: bytemuck::cast_slice(&[decode_srgb, 0, 0, 0]),
-            usage: wgpu::BufferUsages::UNIFORM,
+            contents: bytemuck::cast_slice(&[
+                u32::from(format.is_srgb()),
+                0,
+                0,
+                0,
+                1.0f32.to_bits(),
+                FADE_SOFTNESS.to_bits(),
+                1.0f32.to_bits(),
+                0,
+            ]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         Self {
             blit,
@@ -487,7 +602,7 @@ impl shader::Pipeline for MilkdropPipeline {
             params,
             format,
             shared: None,
-            slot: None,
+            slots: SlotPair::default(),
         }
     }
 
@@ -496,6 +611,13 @@ impl shader::Pipeline for MilkdropPipeline {
         // a view without the panel still frees the renderer's GPU memory.
         if let Some(shared) = self.shared.clone() {
             self.enforce_release(&shared);
+            // Nobody is watching: end a fade at once (the jump is invisible)
+            // and free the second renderer.
+            if !shared.mounted_recently()
+                && let Some(slot) = self.slots.end_fade()
+            {
+                debug!(preset = %slot.name, "milkdrop: crossfade ended off screen");
+            }
         }
     }
 }
