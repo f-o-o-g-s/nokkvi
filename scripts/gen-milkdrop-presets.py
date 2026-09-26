@@ -1757,9 +1757,16 @@ q24 = lite;
 # the scene behind it (outside the tone map, gain below 0.5, since it partly
 # sees itself), with a Fresnel edge, a small specular glint and a glowing core
 # whose light flows around the ring (faster on kicks), and a soft shadow cast
-# on whatever lies behind. Each plane also carries wisps of the haze (ridged
-# fbm, densest around its ring, drifting with the flown distance), so the
-# nebula fills the corridor and flies past with the rings.
+# on whatever lies behind. Each plane also carries wisps of the haze around
+# its ring, so the nebula fills the corridor and flies past with the rings.
+# The wisps are an endless-zoom fractal: four octaves of noise whose weights
+# follow the plane's magnification (log2 of 1 / (focal * z)), so as a plane
+# approaches, finer tendrils fade in and coarse ones grow past, at a constant
+# on-screen scale; octave k keeps its own offset and turn whatever its slot,
+# so nothing jumps when the window slides. Alternate octaves counter-rotate
+# with the flown distance (a whole number of turns per wrap), so the
+# tendrils swirl as the camera flies, faster when it surges. The octave sum
+# is ridged once (per-octave ridges crosshatched into hair).
 # Depth: the camera has flown D plane spacings (a user variable, wrapped
 # modulo INF_P). Slot i of INF_N sits at depth z = (i + 1 - fract(D)) / N and
 # holds the plane whose identity is u = floor(D) + i + 1, constant while it
@@ -1833,6 +1840,23 @@ float inf_fbm(vec2 nc) {{
     fa *= 0.5;
   }}
   return fs;
+}}
+float inf_wisp(vec2 wp, float wlz, float wsp) {{
+  float wo = floor(wlz);
+  float wfr = wlz - wo;
+  float wsum = 0.0;
+  float wwt = 0.0;
+  for (int j = 0; j < 4; j++) {{
+    float wk = wo + float(j);
+    float wt = sin(3.14159265 * (float(j) + 1.0 - wfr) / 4.0);
+    float wa = wk * 1.7 + wsp * (mod(wk, 2.0) * 2.0 - 1.0);
+    vec2 wq = vec2(wp.x * cos(wa) - wp.y * sin(wa), wp.x * sin(wa) + wp.y * cos(wa)) * exp2(wk)
+              + vec2(0.37, 0.61) * wk;
+    float wv = texture(sampler_noise_hq, wq).x;
+    wsum += wt * wv;
+    wwt += wt;
+  }}
+  return wsum / wwt;
 }}
 float inf_haze(vec2 tc) {{
   float hs = 0.0;
@@ -1926,11 +1950,12 @@ def infinity():
     rcov += (1.0 - rcov) * at;
     vec2 wsc = c * 0.16 + vec2(h * 7.31, h * 3.17) + vec2(0.25, 0.25) * q24;
     float wn0 = texture(sampler_noise_hq, wsc * 2.0).x;
-    float wn = inf_fbm(wsc + vec2(wn0, -wn0) * 0.3);
-    float wf = pow(1.0 - abs(2.0 * clamp(wn, 0.0, 1.0) - 1.0), 7.0);
-    float hug = exp(-dr * dr / 0.004);
+    float wlz = log2(1.0 / (q17 * z)) - 1.0;
+    float wn = inf_wisp(wsc + vec2(wn0, -wn0) * 0.3, wlz, (q10 + q9) * {2 * 6.2831853 / INF_P:.9f});
+    float wf = pow(smoothstep(0.6, 1.0, 1.0 - abs(2.0 * wn - 1.0)), 2.0);
+    float hug = exp(-dr * dr / 0.012);
     vec3 wcol = inf_ramp(0.15 + 0.7 * smoothstep(0.25, 0.8, wn));
-    acc += (1.0 - cov) * w * wf * (0.014 + 0.16 * hug) * wcol * (1.0 - fog * 0.6) * (0.8 + 0.3 * q25);
+    acc += (1.0 - cov) * w * wf * (0.004 + 0.12 * hug) * wcol * (1.0 - fog * 0.6) * (0.8 + 0.3 * q25);
     float dsh = abs(length(c - vec2(0.45 * cth + 0.55 * sth, 0.45 * sth - 0.55 * cth) * 0.02) - rim);
     float ash = w * 0.4 * exp(-dsh * dsh / (tr * tr * 4.0)) * smoothstep(tr - pw, tr + pw, abs(dr));
     cov += (1.0 - cov) * ash;
