@@ -94,6 +94,20 @@ WAVE_THEME = "wave_r = NOKKVI_HIGHLIGHT_R;\nwave_g = NOKKVI_HIGHLIGHT_G;\nwave_b
 #     punches hit on the beat instead of easing in.
 PULSE = ("kick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\n"
          "pop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\n")
+def ease(v, goal, tau):
+    """Two cascaded first-order lags (critically damped): no step in velocity."""
+    return (f"{v}_m = {v}_m + ({goal} - {v}_m) * (1 - exp(-dt / {tau}));\n"
+            f"{v} = {v} + ({v}_m - {v}) * (1 - exp(-dt / {tau}));\n")
+# Travel speed from the music, in `spdt` (infinity's flight, julia lace's
+# dive): loudness (the bands over their recent average) sets a cruising
+# speed of 0.25 to 3.5 that eases over ~1 s, and kicks add a short surge on
+# top (decays over ~0.4 s). Runs after PULSE (reads q3, q5) and `dt`.
+SPEED_INIT = "spd = 1; spd_m = 1; surge = 0; sg = 0; sg_m = 0; spdt = 1;"
+SPEED = ("en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);\n"
+         + ease("spd", "min(0.25 + 1.1 * en * en, 3.5)", "0.8")
+         + "surge = max(surge * exp(-dt / 0.4), 1.6 * q5 + 0.9 * q3);\n"
+         + ease("sg", "surge", "0.07")
+         + "spdt = spd + sg;\n")
 
 presets = {}
 
@@ -1268,15 +1282,22 @@ q23 = hs;
 # iteration count shifted by M per cycle, so it matches across the seam too.
 # Only M arg(l) modulo a full turn matters at the seam, so the ground turns
 # by at most half a turn per cycle (the state `grot` absorbs the rest at the
-# wrap). The camera is free: it swings between a steep dive and a shallow,
-# horizon-grazing glide, sweeps its heading around the vortex, looks a
-# little off centre (an offset that scales with the altitude and turns with
-# `grot`, so it stays self-similar across the seam) and banks gently.
-# arg(l) drifts slowly, so the spirals wind and unwind as you fall. The music
-# never touches the shape (a Julia set is so sensitive to c that a
-# beat-driven nudge reads as a glitch): loudness speeds the dive, very
-# smoothly, and kicks brighten the lace's glow. Line widths follow each
-# pixel's footprint on the plane (screen derivatives). Pure comp.
+# wrap). The wrap's jump alone maps the view by l^M, so the turn during the
+# cycle is free: when arg(l)'s drift carries it past half a turn it swaps
+# sides (+pi becomes -pi), and instead of reversing in one frame the offset
+# `tof` takes over the jump and settles over ~4 s, so the spin slows, stops
+# and turns back. The camera is free: it swings between a steep dive and a
+# shallow, horizon-grazing glide, sweeps its heading around the vortex,
+# looks a little off centre (an offset that scales with the altitude and
+# turns with `grot`, so it stays self-similar across the seam) and banks
+# gently. arg(l) drifts slowly, so the spirals wind and unwind as you fall.
+# The music never touches the shape (a Julia set is so sensitive to c that
+# a beat-driven nudge reads as a glitch). It drives the dive the way it
+# drives infinity's flight (SPEED): loudness sets the pace and kicks add a
+# short surge, so the lace sinks and twists faster as the music swells
+# (a cycle takes ~17 s at a typical speed of 2.4, ~10 s at 4 and 160 s at
+# the 0.25 floor); kicks also brighten the lace's glow. Line widths follow
+# each pixel's footprint on the plane (screen derivatives). Pure comp.
 JULIA_ITERS = 240
 JULIA_M = 37
 JULIA_FUNCS = f"""
@@ -1347,11 +1368,9 @@ presets["nokkvi - julia lace"] = preset(
   col *= 0.8 + 0.2 * smoothstep(1.2, 0.3, length(p));
   ret = col;
  }""",
-    init="pulse = 0; pop = 0; hue = 0; glide = 0.8; dv = 0; fprev = 0; cyc = 0; grot = 0;",
-    frame=PULSE + f"""dt = min(1 / max(fps, 1), 0.1);
-loud = min((bass_att + mid_att + treb_att) / 3, 2);
-glide = glide * 0.995 + 0.005 * (0.6 + 0.5 * loud);
-m = {JULIA_M};
+    init="pulse = 0; pop = 0; hue = 0; dv = 0; fprev = 0; cyc = 0; grot = 0; wprev = 0; tof = 0; tof_m = 0; "
+    + SPEED_INIT,
+    frame=PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED + f"""m = {JULIA_M};
 lr = 1.03;
 phi = 0.43 + 0.035 * sin(time * 0.017) + 0.005 * sin(time * 0.05);
 a = phi * 6.2831853;
@@ -1362,13 +1381,18 @@ q16 = 0.5 * lr * sin(a);
 lm = pow(lr, m);
 q13 = lm * cos(m * a);
 q14 = lm * sin(m * a);
-dv = dv + dt * glide / 22;
+dv = dv + dt * spdt / 40;
 f = dv - int(dv);
 wrapped = above(int(dv), cyc);
 cyc = int(dv);
 ma = m * a;
 wma = ma - 6.2831853 * floor(ma / 6.2831853 + 0.5);
-grot = grot - wma * (f - fprev + wrapped) + wrapped * ma;
+jmp = 6.2831853 * floor((wma - wprev) / 6.2831853 + 0.5);
+wprev = wma;
+tof = tof - jmp;
+tof_m = tof_m - jmp;
+""" + ease("tof", "0", "1.0") + """turn = wma + tof;
+grot = grot - turn * (f - fprev + wrapped) + wrapped * ma;
 grot = grot - 6.2831853 * floor(grot / 6.2831853 + 0.5);
 fprev = f;
 h = grot + 0.8 * sin(time * 0.07) + 0.35 * sin(time * 0.13 + 2);
@@ -1767,10 +1791,6 @@ q24 = lite;
 # q20/q21 path amplitudes, q22 lamp phase, q23 hue drift, q24 liquid flow,
 # q25 core light, q26 shape switch index, q27/q28 old/new polygon order,
 # q29 flown cell mod 256, q30/q31 new/old palette, q32 inlay flow.
-def ease(v, goal, tau):
-    """Two cascaded first-order lags (critically damped): no step in velocity."""
-    return (f"{v}_m = {v}_m + ({goal} - {v}_m) * (1 - exp(-dt / {tau}));\n"
-            f"{v} = {v} + ({v}_m - {v}) * (1 - exp(-dt / {tau}));\n")
 
 IFR_P = 1.0            # frame spacing
 IFR_R = 1.8            # frame circumradius
@@ -2050,7 +2070,7 @@ def ifr_act_pick(var, col):
         e = f"if(equal(act, {i}), {IFR_ACTS[i][col]}, {e})"
     return f"{var} = {e};\n"
 
-IFR_INIT = ("pulse = 0; pop = 0; hue = 0; lite = 0; core = 0; flow = 0; dist = 0; spd = 1; spd_m = 1; surge = 0; sg = 0; sg_m = 0; spdt = 1;"
+IFR_INIT = ("pulse = 0; pop = 0; hue = 0; lite = 0; core = 0; flow = 0; dist = 0; " + SPEED_INIT +
         " act = rand(5); acttm = 12; sgn = 1; tw = 0.05; tw_m = 0.05; a1 = 0.3; a1_m = 0.3; a2 = 0.1; a2_m = 0.1;"
         " orr = 0; orr_m = 0; ora = 0; ora_m = 0; oph = 0; rlr = 0; rlr_m = 0; rlang = 0; spr = 0; spr_m = 0; spin = 0;"
         " fov = 1; fov_m = 1; ks = -100; nold = 3; nnew = 3; pold = rand(1000) / 1000; pnew = pold; lph = 0; lqt = 0; sinceb = 1; ba1 = 9; ba2 = 9; ba3 = 9; bs1 = 0; bs2 = 0; bs3 = 0;")
@@ -2072,11 +2092,7 @@ IFR_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" \
     + ease("tw", "twg * sgn", "3.0") + ease("a1", "a1g", "3.5") + ease("a2", "a2g", "3.5") \
     + ease("orr", "org", "3.0") + ease("ora", "orag * sgn", "3.0") + ease("rlr", "rlg * sgn", "3.0") \
     + ease("spr", "spg * sgn", "3.0") + ease("fov", "fovg", "3.0") \
-    + "en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);\n" \
-    + ease("spd", "min(0.25 + 1.1 * en * en, 3.5)", "0.8") + \
-    "surge = max(surge * exp(-dt / 0.4), 1.6 * q5 + 0.9 * q3);\n" \
-    + ease("sg", "surge", "0.07") + \
-    "spdt = spd + sg;\n" \
+    + SPEED + \
     "dist = dist + spdt * dt;\n" \
     "cabs = int(dist); fr = dist - cabs;\n" \
     "q9 = fr; q10 = cabs % 32;\n" \

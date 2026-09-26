@@ -8,7 +8,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Julia Lace's spiralling dive speeds up as the music gets louder.
+- Julia Lace's dive lurches deeper on kicks.
+
 ### Fixed
+
+- Julia Lace's spin now eases to a stop and turns back, instead of reversing direction in a single frame.
 
 ### Removed
 
