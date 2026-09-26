@@ -435,6 +435,7 @@ keyword_table! {
             "warp",
         ],
         "visualizer.milkdrop.preset_interval_secs" => &["milkdrop", "preset", "timer", "switch", "rotate", "seconds"],
+        "visualizer.milkdrop.preset_crossfade_secs" => &["milkdrop", "preset", "crossfade", "blend", "fade", "transition", "dissolve", "seconds"],
         "visualizer.milkdrop.switch_on_track_change" => &["milkdrop", "preset", "track", "song change", "next song"],
         "visualizer.milkdrop.preset_source" => &["milkdrop", "preset", "favorites", "pool"],
         "visualizer.milkdrop.render_quality" => &[

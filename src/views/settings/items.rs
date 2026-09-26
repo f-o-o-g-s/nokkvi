@@ -333,6 +333,7 @@ mod tests {
             "MilkDrop",
             &[
                 vkeys::MILKDROP_PRESET_INTERVAL_SECS,
+                vkeys::MILKDROP_PRESET_CROSSFADE_SECS,
                 vkeys::MILKDROP_SWITCH_ON_TRACK_CHANGE,
                 vkeys::MILKDROP_PRESET_SOURCE,
                 vkeys::MILKDROP_RENDER_QUALITY,
@@ -341,9 +342,9 @@ mod tests {
         );
 
         // Single coarse backstop: the per-section pins above sum to
-        // 7 + 4 + 23 + 5 + 5 + 14 + 17 + 5 = 80. Catches an item landing OUTSIDE
+        // 7 + 4 + 23 + 5 + 5 + 14 + 17 + 6 = 81. Catches an item landing OUTSIDE
         // the pinned sections (which the section asserts cannot see).
-        assert_eq!(count_items(&entries), 80);
+        assert_eq!(count_items(&entries), 81);
     }
 
     /// Every dispatchable Visualizer-table key renders exactly one UI row —

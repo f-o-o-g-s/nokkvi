@@ -21,7 +21,7 @@ use crate::{
     state::{MILKDROP_HISTORY_CAP, MILKDROP_MAX_CONSECUTIVE_FAILURES},
     widgets::visualizer::milkdrop::{
         BuiltPreset, CompiledPreset, GpuHandles, build_renderer, compile_preset, cover_from_rgba,
-        decode_cover, neutral_cover, palette::PresetPalette,
+        decode_cover, fade_frames, neutral_cover, palette::PresetPalette,
     },
 };
 
@@ -145,6 +145,12 @@ impl Nokkvi {
             .shared
             .quality_short_side
             .store(cfg.render_quality.short_side_px(), Ordering::Release);
+        // Clamped to half the live interval, so a fade always finishes well
+        // before the timer brings the next preset.
+        self.milkdrop.shared.crossfade_frames.store(
+            fade_frames(cfg.preset_crossfade_secs, cfg.preset_interval_secs as f32),
+            Ordering::Release,
+        );
     }
 
     /// Arm the switch timer from now, unless locked or the interval is 0.

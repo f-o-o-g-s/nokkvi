@@ -21,6 +21,7 @@ use iced::wgpu;
 use particle_milkdrop::{CompiledMilkdropShaderBodies, MilkShaders, MilkdropRenderer};
 pub(crate) use program::MilkdropProgram;
 pub(crate) use shared::{BuiltPreset, GpuHandles, MilkdropShared};
+pub(crate) use transition::fade_frames;
 
 include!(concat!(env!("OUT_DIR"), "/milkdrop_presets_generated.rs"));
 

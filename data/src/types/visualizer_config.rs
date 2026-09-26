@@ -594,6 +594,10 @@ pub struct MilkdropConfig {
     pub render_quality: MilkdropRenderQuality,
     /// Toast each preset's name as it appears. Default: true
     pub show_preset_names: bool,
+    /// Seconds one preset takes to dissolve into the next (0 = a hard cut).
+    /// Clamped to 0-10; the renderer also caps it at half the interval.
+    /// Default: 2.0
+    pub preset_crossfade_secs: f32,
 }
 
 impl Default for MilkdropConfig {
@@ -604,6 +608,7 @@ impl Default for MilkdropConfig {
             preset_source: MilkdropPresetSource::All,
             render_quality: MilkdropRenderQuality::Medium,
             show_preset_names: true,
+            preset_crossfade_secs: 2.0,
         }
     }
 }
@@ -694,6 +699,7 @@ pub mod keys {
 
     // MilkDrop section
     pub const MILKDROP_PRESET_INTERVAL_SECS: &str = "visualizer.milkdrop.preset_interval_secs";
+    pub const MILKDROP_PRESET_CROSSFADE_SECS: &str = "visualizer.milkdrop.preset_crossfade_secs";
     pub const MILKDROP_SWITCH_ON_TRACK_CHANGE: &str = "visualizer.milkdrop.switch_on_track_change";
     pub const MILKDROP_PRESET_SOURCE: &str = "visualizer.milkdrop.preset_source";
     pub const MILKDROP_RENDER_QUALITY: &str = "visualizer.milkdrop.render_quality";
@@ -769,6 +775,7 @@ pub mod keys {
         SCOPE_TRAILS,
         SCOPE_ECHO,
         MILKDROP_PRESET_INTERVAL_SECS,
+        MILKDROP_PRESET_CROSSFADE_SECS,
         MILKDROP_SWITCH_ON_TRACK_CHANGE,
         MILKDROP_PRESET_SOURCE,
         MILKDROP_RENDER_QUALITY,
@@ -975,6 +982,8 @@ impl VisualizerConfig {
         self.scope.echo = finite_clamp32(self.scope.echo, 0.0, 1.0);
 
         self.milkdrop.preset_interval_secs = self.milkdrop.preset_interval_secs.min(600);
+        self.milkdrop.preset_crossfade_secs =
+            finite_clamp32(self.milkdrop.preset_crossfade_secs, 0.0, 10.0);
 
         // Validate height_percent (10% to 60% — above 60% the visualizer overlaps the player bar)
         self.height_percent = finite_clamp32(self.height_percent, 0.1, 0.60);

@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - The Coral Dive MilkDrop preset dives endlessly into the coral reef, which repeats itself exactly every 26-fold zoom.
 - The Infinity MilkDrop preset flies down an endless, gently curving corridor of glowing hoops toward a drifting haze.
 - Switching MilkDrop presets now dissolves the old preset into the new one, in a pattern that changes each time.
+- A Preset Crossfade setting sets how long MilkDrop's dissolve lasts, up to 10 seconds; 0 cuts straight over.
 
 ### Changed
 

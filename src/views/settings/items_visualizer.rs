@@ -267,6 +267,7 @@ pub(crate) fn build_visualizer_items(
         icon: MD,
     });
     e.push(m.take(keys::MILKDROP_PRESET_INTERVAL_SECS));
+    e.push(m.take(keys::MILKDROP_PRESET_CROSSFADE_SECS));
     e.push(m.take(keys::MILKDROP_SWITCH_ON_TRACK_CHANGE));
     e.push(m.take(keys::MILKDROP_PRESET_SOURCE));
     e.push(m.take(keys::MILKDROP_RENDER_QUALITY));

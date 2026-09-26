@@ -2571,6 +2571,20 @@ name = "sentinel preset"
             "a typo falls back to the default"
         );
         assert_eq!(live.visualizer.milkdrop.preset_interval_secs, 45);
+        assert_eq!(
+            live.visualizer.milkdrop.preset_crossfade_secs, 2.0,
+            "an absent crossfade keeps its default"
+        );
+
+        for (raw, want) in [("99.0", 10.0), ("-3.0", 0.0), ("nan", 0.0), ("4.5", 4.5)] {
+            let live = visualizer_toml_to_live(&format!(
+                "[visualizer.milkdrop]\npreset_crossfade_secs = {raw}\n"
+            ));
+            assert_eq!(
+                live.visualizer.milkdrop.preset_crossfade_secs, want,
+                "preset_crossfade_secs = {raw}"
+            );
+        }
     }
 
     // ── M4 golden-bytes harness ─────────────────────────────────────────

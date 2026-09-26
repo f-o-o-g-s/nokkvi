@@ -805,6 +805,44 @@ fn switch_on_track_change_off_keeps_the_preset() {
     assert_eq!(app.milkdrop.generation, generation);
 }
 
+fn crossfade_frames(app: &Nokkvi) -> u32 {
+    app.milkdrop.shared.crossfade_frames.load(Ordering::Acquire)
+}
+
+#[test]
+fn crossfade_setting_reaches_the_renderer_in_frames() {
+    let mut app = md_app();
+    set_milkdrop_config(&mut app, |md| {
+        md.preset_crossfade_secs = 1.5;
+        md.preset_interval_secs = 30;
+    });
+    enter_milkdrop(&mut app);
+    assert_eq!(crossfade_frames(&app), 90, "1.5 s at 60 advances a second");
+
+    set_milkdrop_config(&mut app, |md| md.preset_crossfade_secs = 0.0);
+    tick(&mut app);
+    assert_eq!(crossfade_frames(&app), 0, "0 is a cut");
+}
+
+#[test]
+fn crossfade_is_clamped_to_half_the_live_interval() {
+    let mut app = md_app();
+    set_milkdrop_config(&mut app, |md| {
+        md.preset_crossfade_secs = 10.0;
+        md.preset_interval_secs = 5;
+    });
+    enter_milkdrop(&mut app);
+    assert_eq!(crossfade_frames(&app), 150, "clamped to 2.5 s");
+
+    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 1);
+    tick(&mut app);
+    assert_eq!(crossfade_frames(&app), 30, "a 1 s interval allows 0.5 s");
+
+    set_milkdrop_config(&mut app, |md| md.preset_interval_secs = 0);
+    tick(&mut app);
+    assert_eq!(crossfade_frames(&app), 600, "interval 0 never clamps");
+}
+
 #[test]
 fn favorites_only_and_quality_reach_the_library_and_renderer() {
     use nokkvi_data::types::visualizer_config::{MilkdropPresetSource, MilkdropRenderQuality};
