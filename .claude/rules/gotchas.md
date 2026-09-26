@@ -66,7 +66,9 @@ paths:
 
 ## MilkDrop
 
-- **iced's device grants `max_bind_groups: 2`** (`iced_wgpu` compositor). The upstream engine's custom-warp pipeline needed 3; the fork pin fixes it. A new engine pin must pass the ignored `bundled_pack_builds_on_icedlike_limits` test on a real GPU before it ships.
+- **iced's device grants `max_bind_groups: 2`** (`iced_wgpu` compositor). The upstream engine's custom-warp pipeline needed 3; the fork pin fixes it. A new engine pin must pass the ignored `bundled_pack_builds_on_icedlike_limits` test on a real GPU before it ships. nokkvi's own blit uses both groups (incoming + outgoing for the preset crossfade): nothing else can bind there.
+- **The blit shader and its pipeline layout change in one commit.** naga passes a shader that declares `@group(1)` against a one-group layout; `create_render_pipeline` then panics at first paint. The ignored `blit_pipeline_builds_on_icedlike_limits` test (GPU) catches the mismatch; run it after any `blit.wgsl` or layout edit.
+- **A lost outgoing renderer is never a failure**: by the time it fails, the name on screen is the incoming's, so storing `slot_lost` would blame the wrong preset. Only a lost incoming stores its generation.
 - **`MilkdropRenderer` is `Send` but not `Sync`** (a `RefCell` in its EEL program), so it lives in a `parking_lot::Mutex` inside iced's pipeline storage. Only `prepare` and `trim` touch it.
 - **Never hand iced's target to the engine**: `render(view)` clears the whole view it gets. Use `render_to_retained_comp()` + the blit. The retained view is REPLACED on every resize, so rebuild the bind group after `try_resize`.
 - **Theme reloads key on colours, not the counter**: `set_light_mode` bumps `theme_generation()` on every settings reload. A themed MilkDrop preset reloads only when `PresetPalette::from_theme()` differs from the palette it was built with.
