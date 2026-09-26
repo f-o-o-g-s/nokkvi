@@ -1753,8 +1753,13 @@ q24 = lite;
 # strip is read at mip 0, so neither shows. The strip is reset to flat on the
 # first frames (a seeded picture from the previous preset is not a waveform)
 # and after a resize (which crops or moves the rows); rims ignore it meanwhile.
-# Rims are tubes: a round cross-section lit by a fixed light (diffuse +
-# specular), with a soft shadow cast on whatever lies behind.
+# Rims are glass tubes: a round cross-section that refracts a blurred view of
+# the scene behind it (outside the tone map, gain below 0.5, since it partly
+# sees itself), with a Fresnel edge, a small specular glint and a glowing core
+# whose light flows around the ring (faster on kicks), and a soft shadow cast
+# on whatever lies behind. Each plane also carries wisps of the haze (ridged
+# fbm, densest around its ring, drifting with the flown distance), so the
+# nebula fills the corridor and flies past with the rings.
 # Depth: the camera has flown D plane spacings (a user variable, wrapped
 # modulo INF_P). Slot i of INF_N sits at depth z = (i + 1 - fract(D)) / N and
 # holds the plane whose identity is u = floor(D) + i + 1, constant while it
@@ -1781,7 +1786,8 @@ q24 = lite;
 # q20/q21 path amplitudes, q22 a plane spawned this frame, q23 hue drift,
 # q24 haze scroll, q25 core light, q26/q27 vanishing point (camera plane
 # units), q28 trail zoom, q29 trail keep, q30 the spawned plane's strip row,
-# q31 the render size changed this frame.
+# q31 the render size changed this frame, q32 the phase of the light flowing
+# around the rims.
 # Texture coordinates are shared by warp and comp; the picture fills
 # y < 1 - 16 / texsize.y and the strip the rows above.
 INF_N = 16
@@ -1904,12 +1910,27 @@ def infinity():
     vec3 base = inf_ramp(0.25 + 0.7 * fract(h * 0.73 + q23));
     float fog = 1.0 - exp(-2.2 * z);
     base = mix(base, vec3(dot(base, {LUM})), 0.45 * z);
-    vec3 tube = base * (0.16 + 0.95 * dif) * (1.0 + 0.3 * q5 + 0.2 * q3) + NOKKVI_TEXT * spc * 0.6;
+    vec2 ruv = clamp(tuv + nsc * 0.035 / s, 0.0, 1.0);
+    vec3 refr = texture(sampler_main, vec2(ruv.x, min(ruv.y * pic, ptop)), 2.5).xyz;
+    float fres = pow(1.0 - nrm.z, 2.0);
+    float flow = 0.5 + 0.5 * sin(6.2831853 * ca * 3.0 + q32 + h * 6.2831853);
+    float core = exp(-dr * dr / (tr * tr * 0.1));
+    vec3 tube = base * (0.06 + 0.3 * dif + 0.85 * fres)
+              + base * core * (0.35 + 0.75 * flow) * (0.8 + 0.5 * q3 + 0.3 * q5)
+              + NOKKVI_TEXT * spc * 0.35;
     tube = mix(tube, NOKKVI_BG, fog * 0.75);
     float at = w * smoothstep(tr + pw, tr - pw, abs(dr));
     acc += (1.0 - cov) * at * tube;
+    macc += (1.0 - cov) * at * refr * (0.3 + 0.2 * base) * (1.0 - fog * 0.6);
     cov += (1.0 - cov) * at;
     rcov += (1.0 - rcov) * at;
+    vec2 wsc = c * 0.16 + vec2(h * 7.31, h * 3.17) + vec2(0.25, 0.25) * q24;
+    float wn0 = texture(sampler_noise_hq, wsc * 2.0).x;
+    float wn = inf_fbm(wsc + vec2(wn0, -wn0) * 0.3);
+    float wf = pow(1.0 - abs(2.0 * clamp(wn, 0.0, 1.0) - 1.0), 7.0);
+    float hug = exp(-dr * dr / 0.004);
+    vec3 wcol = inf_ramp(0.15 + 0.7 * smoothstep(0.25, 0.8, wn));
+    acc += (1.0 - cov) * w * wf * (0.014 + 0.16 * hug) * wcol * (1.0 - fog * 0.6) * (0.8 + 0.3 * q25);
     float dsh = abs(length(c - vec2(0.45 * cth + 0.55 * sth, 0.45 * sth - 0.55 * cth) * 0.02) - rim);
     float ash = w * 0.4 * exp(-dsh * dsh / (tr * tr * 4.0)) * smoothstep(tr - pw, tr + pw, abs(dr));
     cov += (1.0 - cov) * ash;
@@ -1960,7 +1981,7 @@ def infinity():
   col *= 0.85 + 0.15 * smoothstep(1.2, 0.3, length(p));
   ret = col;
  }"""
-    init = ("pulse = 0; pop = 0; dd = rand(1000) / 1000 * " + str(INF_P) + "; flprev = floor(dd); psi = 0;"
+    init = ("pulse = 0; pop = 0; flow = 0; dd = rand(1000) / 1000 * " + str(INF_P) + "; flprev = floor(dd); psi = 0;"
             " tw = 0; tw_m = 0; twg = 0.06;"
             " spd = 1.2; spd_m = 1.2; roll = rand(1000) / 1000 * 6.2831853; rw = 0; rw_m = 0; rwg = 0.1;"
             " px = 0; px_m = 0; py = 0; py_m = 0; pgx = 0; pgy = 0; foc = 1.3; foc_m = 1.3; focg = 1.3;"
@@ -1999,6 +2020,7 @@ def infinity():
         "q11 = gx0; q12 = gy0; q13 = tx; q14 = ty;\n" \
         "q15 = px; q16 = py; q17 = foc; q18 = psi; q19 = tw;\n" \
         "hue = hue + dt * 0.005;\nhue = hue - floor(hue);\nq23 = hue;\n" \
+        "flow = flow + dt * (1.2 + 3 * q3);\nflow = flow - 6.2831853 * floor(flow / 6.2831853);\nq32 = flow;\n" \
         f"q24 = dd / {INF_N};\n" \
         "core = core + (min(bass_att, 2) - core) * (1 - exp(-dt / 0.4));\nq25 = core;\n" \
         "q28 = min(0.0012 + 0.0022 * fly, 0.012);\n" \
