@@ -6,21 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- The Chladni MilkDrop preset pours theme-coloured sand onto a vibrating plate, redrawing its figure as the music retunes it.
-- The Julia Lace MilkDrop preset dives endlessly into a Julia set's spiral vortex, the camera swinging between steep dives and skimming glides.
-- The Coral City MilkDrop preset floats through an endless fractal coral reef that sways with the music and leaves light trails.
-- The Coral Dive MilkDrop preset dives endlessly into the coral reef, which repeats itself exactly every 26-fold zoom.
-- The Infinity MilkDrop preset flies down a spiralling corridor of neon-lit triangles standing in a dark, rippling liquid that reflects them.
-- Infinity flies faster as the music gets louder and lunges forward on kicks.
-- Each beat sends a wave of light down Infinity's neon inlays.
-- Switching MilkDrop presets now dissolves the old preset into the new one, in a pattern that changes each time.
-- A Preset Crossfade setting sets how long MilkDrop's dissolve lasts, up to 10 seconds; 0 cuts straight over.
-
 ### Changed
 
 ### Fixed
 
 ### Removed
+
+## v0.21.1 — 2026-09-26
+
+### Added
+
+- The Chladni MilkDrop preset pours theme-coloured sand onto a vibrating plate, redrawing its figure as the music retunes it.
+- The Julia Lace MilkDrop preset dives endlessly into a Julia set's spiral vortex, the camera swinging between steep dives and skimming glides.
+- The Coral City MilkDrop preset floats through an endless fractal coral reef that sways with the music and leaves light trails.
+- The Coral Dive MilkDrop preset dives endlessly into the coral reef, which repeats itself exactly every 26-fold zoom.
+- The Infinity MilkDrop preset flies down a spiralling corridor of neon-lit polygon frames standing in a dark, rippling liquid that reflects them.
+- Infinity flies faster as the music gets louder and lunges forward on kicks.
+- Each beat sends a wave of light down Infinity's neon inlays.
+- Switching MilkDrop presets now dissolves the old preset into the new one, in a pattern that changes each time.
+- A Preset Crossfade setting sets how long MilkDrop's dissolve lasts, up to 10 seconds.
+- A Preset Crossfade of 0 cuts straight to the next preset.
 
 ## v0.21.0 — 2026-09-25
 
