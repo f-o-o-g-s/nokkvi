@@ -6,27 +6,30 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Julia Lace now journeys through four fractals in turn: a Julia set, the Burning Ship, the Mandelbrot set and the dragon curve.
-- Each Julia Lace phase dives toward its fractal's centre and eases to a stop there.
-- Between fractals, Julia Lace's camera tilts up to the moon while the scene blurs into the next one.
-- Each visit to Julia Lace's Julia phase shows a different set, from spiral lace to a galaxy, a snowflake and a dendrite.
-- Julia Lace's dragon curve unfolds from a single line as the camera sinks toward it.
-- Every beat sends a glowing ripple out from Julia Lace's dive centre across the liquid.
+- Julia Lace now morphs between different Julia sets, from single spirals through feathery stars to starbursts.
+- Every beat sends a glowing ripple out from Julia Lace's vortex across the liquid.
+- The Fractal Voyage MilkDrop preset journeys through four fractals in turn: a Julia set, the Burning Ship, the Mandelbrot set and the dragon curve.
+- Each Fractal Voyage phase dives toward its fractal's centre and eases to a stop there.
+- Between fractals, Fractal Voyage's camera looks up at the moon while the scene blurs into the next one.
+- Each beat swells Fractal Voyage's moon and its reflection on the water.
+- Fractal Voyage moves on to its next fractal roughly every 45 seconds, sooner when the music is loud.
+- Each visit to Fractal Voyage's Julia phase shows a different set, from spiral lace to a galaxy, a snowflake and a dendrite.
+- Fractal Voyage's dragon curve unfolds from a single line as the camera sinks toward it.
+- On each beat, light runs outward through Fractal Voyage's Burning Ship and Mandelbrot set along their own contours.
 
 ### Changed
 
-- Julia Lace's dives speed up as the music gets louder.
-- Julia Lace's dives lurch deeper on kicks.
-- Julia Lace moves on to its next fractal roughly every 45 seconds, sooner when the music is loud.
-- Julia Lace's fractals now lie in a dark, glossy liquid instead of a grey haze.
+- Julia Lace's spiralling dive speeds up as the music gets louder.
+- Julia Lace's dive lurches deeper on kicks.
+- Julia Lace's lace now lies in a dark, glossy liquid instead of a grey haze.
 - At shallow angles Julia Lace's liquid reflects the sky and a low moon.
-- Rippling light from the liquid plays over Julia Lace's fractals.
+- Rippling light from the liquid plays over Julia Lace's lace.
 
 ### Fixed
 
 - Julia Lace no longer snaps its spin into reverse every minute or two.
 - Julia Lace no longer lingers on a sparse pattern of a few straight arms.
-- Julia Lace keeps the point it dives toward in view instead of drifting it off-screen.
+- Julia Lace keeps its vortex in view instead of drifting it off-screen.
 - Julia Lace's horizon no longer shows vertical streaks.
 
 ### Removed
