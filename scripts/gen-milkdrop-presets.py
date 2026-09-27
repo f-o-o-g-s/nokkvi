@@ -1277,70 +1277,110 @@ q23 = hs;
 """)
 
 # Julia lace (no cover) ---------------------------------------------------
-# An endless dive into a Julia set's spiral vortex, the set drawn as fine
-# lace (the distance estimate turns its boundary into hairline ridges with a
-# soft glow) lying in a dark, glossy liquid seen in perspective. Its
-# parameter c = l/2 - l^2/4 sits just outside the Mandelbrot set's main
-# cardioid, where the Julia set is all spirals: l is the multiplier of the
-# fixed point alpha = l/2, |l| = 1.03 so alpha repels and the spirals wind
-# around it. The Julia set maps onto itself under z -> z^2 + c, which near
-# alpha is z -> alpha + l (z - alpha): zooming in by |l|^M while turning by
-# M arg(l) shows the same picture again. So the camera looks down at alpha
-# and sinks towards it, and after a zoom of |l|^M (about 3x) it jumps back
-# up by exactly that map (height times |l|^M, heading plus M arg(l), both
-# kept in `grot`), one ring deeper; the last fifth of every cycle crossfades
-# into the next cycle's view (the same window mapped by l^M, drawn a second
-# time), so the seam never shows even where the map is not quite linear.
-# Colour follows the iteration count shifted by M per cycle, so it matches
-# across the seam too. Between wraps the dive is a pure zoom: the spirals
-# twist by their own geometry, and the camera only drifts (a swing between
-# a steep dive and a horizon-grazing glide, a slow sweep around the vortex,
-# a gentle bank), aiming a bounded angle off the vortex so it stays framed.
-# The shape morphs: arg(l) (in turns) glides (tau 5 s) between JULIA_STOPS,
-# a curated walk over the family, from one elegant spiral (0.035) through
-# feathery stars (0.09), sunflowers (0.19) and rosettes (0.3) to starbursts
-# (0.42); it dwells 18-32 s per stop and turns back 12% of the time. Near a
-# fraction p/q with q <= 9 (1/2, 1/3, 1/4, 2/5, 3/7, 1/8, 4/9...) the set
-# collapses into q straight arms over a void (c lands in or beside that
-# bulb), so every stop keeps |arg - p/q| q^2 above ~0.12 and a glide only
-# sweeps through a star for a few seconds. The engine seeds rand from the
-# preset text, so the walk would replay one route; its start and its turns
-# also hash the music at that moment.
+# A voyage through four fractals lying in a dark, glossy liquid, each a
+# phase of about 45 s: a Julia set, the Burning Ship, the Mandelbrot set and
+# the Heighway dragon curve, round and round. Every phase starts high above
+# the whole fractal, dives towards a target, eases to a stop in it (its
+# dark "eye" where it has one), then the camera tilts up to the horizon
+# while the scene blurs and smears; the fractal swaps inside the smear and
+# the camera tilts back down onto the next one.
+#
+# The fractals are drawn as fine lace: a distance estimate turns each
+# boundary into hairline ridges with a soft glow, coloured by the smooth
+# iteration count (the dragon by its position along the curve). The ground
+# plane is the complex plane; the camera stands at height q6 over it,
+# looking at the target q15/q16 from a pitch that swings between a steep
+# dive and a horizon-grazing glide, sweeping its heading around it.
+#
+# Julia: c = l/2 - l^2/4 makes l the multiplier of the fixed point
+# alpha = l/2, and the set maps onto itself near alpha by
+# z -> alpha + l (z - alpha), so zooming in by |l|^M while turning by
+# M arg(l) shows the same picture again. The phase opens on the whole set,
+# zooms down to height 0.09, then dives endlessly: after a zoom of |l|^M
+# (about 3x) the camera jumps back up by exactly that map (height times
+# |l|^M, heading plus M arg(l), kept in `grot`), one ring deeper, and the
+# last fifth of every cycle crossfades into the next cycle's view (the same
+# window mapped by l^M, drawn a second time), so the seam never shows.
+# After two cycles it stops wrapping and plunges into alpha until the
+# points that never escape (the eye, radius ~0.3 |l|^-240) fill the view
+# (2x to 500x; the galaxy's and the dendrite's eyes are sub-pixel, so those
+# dives just slow to a stop). Each visit takes the
+# next set from JULIA_FAMILIES: the lace family (|l| = 1.03, at a random
+# JULIA_STOP) alternates with a galaxy, tendrils, a snowflake and a
+# dendrite. Near arg(l) = p/q with q <= 9 the set collapses into q straight
+# arms over a void (c lands in or beside that bulb), so every lace stop
+# keeps |arg - p/q| q^2 above ~0.12.
+# Burning Ship and Mandelbrot: plain zooms (float precision allows about
+# 1000x) from the whole set into a mini-copy (VOY_SHIP / VOY_MANDEL: nuclei
+# found with Newton on the period-p orbit, 2D with the fold's Jacobian for
+# the ship), whose dark body fills the view at the end. The ship's distance
+# estimate uses that Jacobian; both loops check for a repeating orbit
+# (Brent) so the interior exits early. The ship's flames are dust far below
+# a pixel, which a distance estimate lights solid (a white wash), so the ship
+# is graded by escape time against the view's median count (about
+# 2.4 / sqrt(height), measured along the dive): only pixels escaping several
+# times slower than the median light up, thin filaments keep their lines.
+# Dragon: the Heighway dragon (the attractor of f1 = (1+i)z/2 and
+# f2 = 1 - (1-i)z/2, a curve from 0 to 1). Its distance runs down the IFS
+# keeping the 4 best branches per level (by bounding disc, then distance
+# to the chord; greedy descent misses 65% of the curve, 4 branches are
+# exact to 0.01%), and the last level is a segment that folds into the next
+# level's corner as the level's fraction grows, so the curve unfolds
+# smoothly as the camera sinks. The level follows each pixel's footprint
+# and a cap (q31) that grows through the phase, so the curve first folds
+# up from a single line. The camera dives into the start point, where the
+# curve is only copies of its first half (the second half never comes
+# closer than 1/3), so those levels are skipped straight away.
+#
 # The liquid: its swells are four octaves of noise in camera space
-# (u = the ground point about alpha, turned by -grot, over the height), each
-# octave |l|^M apart and weighted by where the cycle is (q17), so every
-# octave rides the zoom with the lace and the ladder repeats exactly across
-# the wrap; the octaves drift (q19, faster as the dive speeds up). The noise
-# is sampler_noise_hq read straight (it is already smooth, a cubic lattice
-# every 8 texels) with slopes over 2 texels: the texel-snapping quintic of
-# tnoise zeroes the slope at every texel edge and drew the texel grid into
-# the glints as straight streaks. The surface refracts the lace (a lookup
-# offset by its slope, scaled by the distance to the vortex so it stays in
-# proportion to the lace's detail), focuses light into caustics on it (where
-# the swells curve, brighter with the bass, q30), absorbs it with the path
-# length (grazing rays see less), reflects a sky gradient by Fresnel, and
-# glints where it mirrors a low moon that turns with `grot`. Rays above the
-# horizon see that sky. The music never touches the shape (a Julia set is
-# so sensitive to c that a beat-driven nudge reads as a glitch): loudness
-# sets the dive speed and kicks surge it (SPEED; a cycle takes ~17 s at a
-# typical speed of 2.4), and every beat (BEATS) sends a ripple ring out
-# from the vortex across the liquid (in log radius, so it looks the same at
-# any depth), which bends the lace, catches the light, glows faintly on the
-# water and lights the lace it passes (both fade in as the ring leaves the
-# vortex, so the dense centre never whites out); kicks also brighten the
-# lace's glow and the glints. Line widths follow each pixel's footprint on
-# the plane (screen derivatives), and the lace, rings and fine swells fade
-# where a pixel covers too much of them.
-# The scene is drawn in the warp; the comp adds bloom. q map: q1/q2 c, q3
-# kick, q4/q10 view heading and pitch, q5 pop, q6 height, q7/q8 camera,
-# q9 hue drift, q11 seam hue shift, q12 seam crossfade, q13/q14 l^M,
-# q15/q16 alpha, q17 cycle fraction, q18 grot, q19 liquid drift, q20-q25
-# beat ages and strengths, q26 light heading, q27 bank, q30 bass glow.
+# (u = the ground point about the target, turned by -q18, over the height),
+# each octave LM = |q13, q14| apart and weighted by the depth's fraction
+# (q17), so every octave rides the zoom with the fractal and the ladder
+# repeats exactly across the Julia wrap; the octaves drift (q19, faster as
+# the dive speeds up). The noise is sampler_noise_hq read straight (it is
+# already smooth, a cubic lattice every 8 texels) with slopes over 2 texels:
+# the texel-snapping quintic of tnoise zeroes the slope at every texel edge
+# and drew the texel grid into the glints as straight streaks. The surface
+# refracts the fractal (a lookup offset by its slope, scaled by the
+# distance to the target so it stays in proportion to the detail), focuses
+# light into caustics on it (where the swells curve, brighter with the
+# bass, q30), absorbs it with the path length, reflects a sky gradient by
+# Fresnel, and glints where it mirrors a low moon. Rays above the horizon
+# see that sky.
+#
+# Music never touches a shape (a Julia set is so sensitive to c that a
+# beat-driven nudge reads as a glitch): loudness sets the dive speed and
+# kicks surge it (SPEED; the phase clock runs at that speed, clamped so a
+# phase takes 22 to 72 s), and every beat (BEATS) sends a ripple ring out
+# from the target across the liquid (in log radius, so it looks the same at
+# any depth), which bends the fractal, catches the light, glows faintly and
+# lights the lace it passes; kicks also brighten the glow and the glints.
+# The phase changes on its own clock, never on a beat.
+#
+# The scene is drawn in the warp, which during a transition keeps q29 * 0.8
+# of the previous frame (the smear that hides the swap); the comp adds
+# bloom and blurs by q29. EEL notes: the engine has no fract (unknown
+# functions evaluate to 0), rand(n) is a float, and rand is seeded from
+# the preset text, so the per-visit choices also hash the music.
+# q map: q1/q2 Julia c, q3 kick, q4/q10 view heading and pitch, q5 pop,
+# q6 height, q7/q8 camera, q9 hue, q11 seam hue shift, q12 seam crossfade,
+# q13/q14 l^M (Julia) or (3, 0), q15/q16 target, q17 depth fraction, q18 the
+# u-space turn (grot or the visit's heading), q19 liquid drift, q20-q25 beat
+# ages and strengths, q26 moon heading, q27 bank, q28 fractal (0 Julia,
+# 1 ship, 2 Mandelbrot, 3 dragon), q29 transition blur, q30 bass glow,
+# q31 dragon level cap.
 JULIA_ITERS = 240
 JULIA_M = 37
 JULIA_STOPS = [0.035, 0.05, 0.07, 0.09, 0.12, 0.155, 0.185, 0.225,
                0.265, 0.297, 0.315, 0.36, 0.385, 0.415, 0.452, 0.47]
-JULIA_FUNCS = f"""
+# (|l|, arg(l) in turns, M) for the odd Julia visits: galaxy (c = -0.8 +
+# 0.156i), tendrils (0.285 + 0.01i), snowflake (-0.4 + 0.6i), dendrite (i).
+JULIA_FAMILIES = [(1.0659, 0.4773, 17), (1.0197, 0.0604, 56), (1.0171, 0.3824, 65), (1.3864, 0.3213, 3)]
+# (target, start height, end height) per visit; the arrival plunges a further 3x.
+VOY_SHIP = [((-1.7322877381, -0.0337903588), 1.2, 0.002), ((-1.7577830601, -0.0137961434), 1.2, 0.01)]
+VOY_MANDEL = [((-0.745348441, 0.084712189), 1.5, 0.0025), ((-0.742435816, 0.107942324), 1.5, 0.003)]
+ESC_ITERS = 400
+VOY_FUNCS = f"""
 float julia(vec2 z, vec2 c, out float d, out float mu) {{
   vec2 dz = vec2(1.0, 0.0);
   float m2 = 0.0;
@@ -1356,6 +1396,161 @@ float julia(vec2 z, vec2 c, out float d, out float mu) {{
   d = sqrt(m2 / max(dot(dz, dz), 1e-20)) * lz;
   mu = it + 1.0 - log2(max(lz, 1e-6));
   return step({JULIA_ITERS}.0 - 0.5, it);
+}}
+float mandelf(vec2 mc, out float md, out float mmu) {{
+  vec2 mz = vec2(0.0);
+  vec2 mdz = vec2(0.0);
+  vec2 msv = vec2(1e9);
+  float mm2 = 0.0;
+  float mit = 0.0;
+  int msi = 1;
+  for (int i = 0; i < {ESC_ITERS}; i++) {{
+    mdz = 2.0 * vec2(mz.x * mdz.x - mz.y * mdz.y, mz.x * mdz.y + mz.y * mdz.x) + vec2(1.0, 0.0);
+    mz = vec2(mz.x * mz.x - mz.y * mz.y, 2.0 * mz.x * mz.y) + mc;
+    mm2 = dot(mz, mz);
+    if (mm2 > 1e5) break;
+    vec2 mdd = mz - msv;
+    if (dot(mdd, mdd) < 1e-11) {{ mit = {ESC_ITERS}.0; break; }}
+    if (i == msi) {{ msv = mz; msi = msi * 2 + 1; }}
+    mit += 1.0;
+  }}
+  float mlz = 0.5 * log(max(mm2, 1.0001));
+  md = sqrt(mm2 / max(dot(mdz, mdz), 1e-20)) * mlz;
+  mmu = mit + 1.0 - log2(max(mlz, 1e-6));
+  return step({ESC_ITERS}.0 - 0.5, mit);
+}}
+float shipf(vec2 sc, out float sd, out float smu) {{
+  vec2 sz = vec2(0.0);
+  vec4 sj = vec4(0.0);
+  vec2 ssv = vec2(1e9);
+  float sm2 = 0.0;
+  float sit = 0.0;
+  int ssi = 1;
+  for (int i = 0; i < {ESC_ITERS}; i++) {{
+    vec2 ssg = vec2(2.0 * step(0.0, sz.x) - 1.0, 2.0 * step(0.0, sz.y) - 1.0);
+    vec2 sw = abs(sz);
+    sj = vec4(2.0 * (sw.x * ssg.x * sj.x - sw.y * ssg.y * sj.z) + 1.0,
+              2.0 * (sw.x * ssg.x * sj.y - sw.y * ssg.y * sj.w),
+              2.0 * (sw.y * ssg.x * sj.x + sw.x * ssg.y * sj.z),
+              2.0 * (sw.y * ssg.x * sj.y + sw.x * ssg.y * sj.w) + 1.0);
+    sz = vec2(sw.x * sw.x - sw.y * sw.y, 2.0 * sw.x * sw.y) + sc;
+    sm2 = dot(sz, sz);
+    if (sm2 > 1e5) break;
+    vec2 sdd = sz - ssv;
+    if (dot(sdd, sdd) < 1e-11) {{ sit = {ESC_ITERS}.0; break; }}
+    if (i == ssi) {{ ssv = sz; ssi = ssi * 2 + 1; }}
+    sit += 1.0;
+  }}
+  float slz = 0.5 * log(max(sm2, 1.0001));
+  float sjn = sqrt(0.5 * dot(sj, sj)) + 1e-20;
+  sd = sqrt(sm2) * slz / sjn;
+  smu = sit + 1.0 - log2(max(slz, 1e-6));
+  return step({ESC_ITERS}.0 - 0.5, sit);
+}}
+float dg_seg(vec2 dsq) {{
+  return length(dsq - vec2(clamp(dsq.x, 0.0, 1.0), 0.0));
+}}
+vec4 dg_c0(vec4 dp0) {{
+  vec2 dq0 = vec2(dp0.x + dp0.y, dp0.y - dp0.x);
+  vec2 dr0 = dq0 - vec2(0.4167, 0.1667);
+  float dk0 = max(length(dr0) - 0.83, 0.0) * 1000.0 + dg_seg(dq0);
+  return vec4(dq0, dk0, dp0.w);
+}}
+vec4 dg_c1(vec4 dp1, float dbl) {{
+  vec2 dq1 = vec2(1.0 - dp1.x + dp1.y, 1.0 - dp1.x - dp1.y);
+  vec2 dr1 = dq1 - vec2(0.4167, 0.1667);
+  float dk1 = max(length(dr1) - 0.83, 0.0) * 1000.0 + dg_seg(dq1);
+  float dnf1 = step(3.5, dp1.w);
+  float da1 = dp1.w - 4.0 * dnf1 + dbl * (1.0 - 2.0 * dnf1);
+  return vec4(dq1, dk1, da1 + 4.0 * (1.0 - dnf1));
+}}
+vec2 dg_leaf(vec2 dlq, float dlt) {{
+  vec2 dm = vec2(0.5, 0.5 * dlt);
+  float dh0 = clamp(dot(dlq, dm) / dot(dm, dm), 0.0, 1.0);
+  float dd0 = length(dlq - dm * dh0);
+  vec2 de1 = vec2(1.0, 0.0) - dm;
+  vec2 dlm = dlq - dm;
+  float dh1 = clamp(dot(dlm, de1) / dot(de1, de1), 0.0, 1.0);
+  float dd1 = length(dlm - de1 * dh1);
+  float dsel = step(dd1, dd0);
+  return vec2(mix(dd0, dd1, dsel), mix(0.5 * dh0, 0.5 + 0.5 * dh1, dsel));
+}}
+float dragonf(vec2 dgp, float dgn, float dgt, out float dgd, out float dgmu) {{
+  float dgr = length(dgp);
+  float dgk = floor(clamp(2.0 * log2(0.25 / max(dgr, 1e-30)), 0.0, dgn));
+  float dga = -0.78539816 * dgk;
+  vec2 dgq = exp2(0.5 * dgk) * vec2(dgp.x * cos(dga) - dgp.y * sin(dga), dgp.x * sin(dga) + dgp.y * cos(dga));
+  vec4 dx0 = vec4(dgq, 0.0, 0.0);
+  vec4 dx1 = vec4(1e4, 1e4, 1e9, 0.0);
+  vec4 dx2 = vec4(1e4, 1e4, 1e9, 0.0);
+  vec4 dx3 = vec4(1e4, 1e4, 1e9, 0.0);
+  float dsw = 0.0;
+  vec4 dtmp = vec4(0.0);
+  for (int k = 0; k < 30; k++) {{
+    float dlev = dgk + float(k);
+    if (dlev >= dgn) break;
+    float dbl = exp2(-dlev);
+    vec4 dy0 = dg_c0(dx0);
+    vec4 dy1 = dg_c1(dx0, dbl);
+    vec4 dy2 = dg_c0(dx1);
+    vec4 dy3 = dg_c1(dx1, dbl);
+    vec4 dy4 = dg_c0(dx2);
+    vec4 dy5 = dg_c1(dx2, dbl);
+    vec4 dy6 = dg_c0(dx3);
+    vec4 dy7 = dg_c1(dx3, dbl);
+""" + "".join(f"""
+    dsw = step({b}.z, {a}.z);
+    dtmp = mix({a}, {b}, dsw);
+    {b} = mix({b}, {a}, dsw);
+    {a} = dtmp;""" for a, b in (("dy0", "dy1"), ("dy2", "dy3"), ("dy0", "dy2"), ("dy1", "dy3"), ("dy1", "dy2"),
+                                ("dy4", "dy5"), ("dy6", "dy7"), ("dy4", "dy6"), ("dy5", "dy7"), ("dy5", "dy6"))) + f"""
+    dx0 = mix(dy0, dy7, step(dy7.z, dy0.z));
+    dx1 = mix(dy1, dy6, step(dy6.z, dy1.z));
+    dx2 = mix(dy2, dy5, step(dy5.z, dy2.z));
+    dx3 = mix(dy3, dy4, step(dy4.z, dy3.z));
+  }}
+  float dgs = exp2(-0.5 * dgn);
+  float dgb = exp2(-dgn);
+  vec2 dl0 = dg_leaf(dx0.xy, dgt);
+  vec2 dl1 = dg_leaf(dx1.xy, dgt);
+  vec2 dl2 = dg_leaf(dx2.xy, dgt);
+  vec2 dl3 = dg_leaf(dx3.xy, dgt);
+  float dgbest = dl0.x;
+  float dgw = dx0.w;
+  float dgl = dl0.y;
+  float dgsel = step(dl1.x, dgbest);
+  dgbest = mix(dgbest, dl1.x, dgsel);
+  dgw = mix(dgw, dx1.w, dgsel);
+  dgl = mix(dgl, dl1.y, dgsel);
+  dgsel = step(dl2.x, dgbest);
+  dgbest = mix(dgbest, dl2.x, dgsel);
+  dgw = mix(dgw, dx2.w, dgsel);
+  dgl = mix(dgl, dl2.y, dgsel);
+  dgsel = step(dl3.x, dgbest);
+  dgbest = mix(dgbest, dl3.x, dgsel);
+  dgw = mix(dgw, dx3.w, dgsel);
+  dgl = mix(dgl, dl3.y, dgsel);
+  float dgnf = step(3.5, dgw);
+  dgd = dgbest * dgs;
+  dgmu = ((dgw - 4.0 * dgnf) + dgb * (1.0 - 2.0 * dgnf) * dgl) * 400.0;
+  return 0.0;
+}}
+float fr_eval(vec2 few, float fepix, out float fed, out float femu) {{
+  float fein = 0.0;
+  if (q28 < 0.5) {{
+    fein = julia(few, vec2(q1, q2), fed, femu);
+  }} else if (q28 < 1.5) {{
+    fein = shipf(few, fed, femu);
+    float fesg = smoothstep(0.5, 2.2, log2(max(femu, 1.0) * sqrt(q6) / 2.4));
+    fed = max(fed * 3.0, fepix * (0.25 + 30.0 * (1.0 - fesg)));
+  }} else if (q28 < 2.5) {{
+    fein = mandelf(few, fed, femu);
+  }} else {{
+    float fel = clamp(min(2.0 * log2(0.12 / max(fepix, 1e-30)), q31), 0.0, 26.0);
+    float fen = floor(fel);
+    fein = dragonf(few, fen, fel - fen, fed, femu);
+  }}
+  return fein;
 }}
 float jl_h(vec2 jhv) {{
   vec2 jha = jhv * 0.0156 + vec2(q19 * 0.0011, q19 * 0.0004);
@@ -1406,15 +1601,16 @@ vec3 jl_env(vec3 jed) {{
   return jsky;
 }}
 """
-def julia_shade(v, w0, hueshift, light="0.0"):
-    """Lace colour `v` for the ground point `w0` (a vec2 expression) over
-    `ground`; `light` (a float expression) adds a wave of light."""
+def lace_shade(v, w0, hueshift, light, evalcall):
+    """Lace colour `v` for the ground point `w0` over `ground`: `evalcall`
+    (GLSL, may use {v}_w and {v}_pix) sets {v}_d and {v}_mu and returns the
+    'never escapes' flag; `light` (a float expression) adds a wave of light."""
     return f"""
   vec2 {v}_w = {w0};
+  float {v}_pix = max(length(dFdx({v}_w)), length(dFdy({v}_w))) + 1e-9;
   float {v}_d;
   float {v}_mu;
-  float {v}_in = julia({v}_w, c, {v}_d, {v}_mu);
-  float {v}_pix = max(length(dFdx({v}_w)), length(dFdy({v}_w))) + 1e-9;
+  float {v}_in = {evalcall.format(v=v)};
   float {v}_line = clamp(1.0 - {v}_d / ({v}_pix * 1.3), 0.0, 1.0) * (1.0 - {v}_in);
   float {v}_glow = exp(-{v}_d / ({v}_pix * 10.0)) * (1.0 - {v}_in);
   float {v}_ridge = exp(-{v}_d / ({v}_pix * 4.0));
@@ -1426,12 +1622,12 @@ def julia_shade(v, w0, hueshift, light="0.0"):
   {v} = mix({v}, {v}_lace * (0.9 + 0.3 * q3 + 0.45 * ({light})) * {v}_shade, {v}_line);
   {v} = mix({v}, NOKKVI_TEXT, {v}_line * smoothstep(0.6, 1.0, {v}_glow) * 0.2);
 """
-def julia_stop_pick(var, idx):
-    e = f"{JULIA_STOPS[-1]}"
-    for i in range(len(JULIA_STOPS) - 2, -1, -1):
-        e = f"if(equal({idx}, {i}), {JULIA_STOPS[i]}, {e})"
+def voy_pick(var, idx, values):
+    e = f"{values[-1]}"
+    for i in range(len(values) - 2, -1, -1):
+        e = f"if(equal({idx}, {i}), {values[i]}, {e})"
     return f"{var} = {e};\n"
-JULIA_WARP = JULIA_FUNCS + " shader_body {\n" + HEAD + """
+VOY_WARP = VOY_FUNCS + " shader_body {\n" + HEAD + """
   vec2 p = (uv_orig - 0.5) * s;
   p = vec2(p.x * cos(q27) - p.y * sin(q27), p.x * sin(q27) + p.y * cos(q27));
   float ha = q4;
@@ -1463,12 +1659,12 @@ JULIA_WARP = JULIA_FUNCS + " shader_body {\n" + HEAD + """
   vec3 n = normalize(vec3(-wsl.x, -wsl.y, 1.0));
   vec2 wa = wa0 - wsl * (q6 * lr * 0.22);
   vec3 ground = mix(NOKKVI_BG, NOKKVI_ACCENT, 0.07) * 0.7;
-""" + julia_shade("ca", "wa", "q11", "rgl") + """
+""" + lace_shade("ca", "wa", "q11", "rgl", "fr_eval({v}_w, {v}_pix, {v}_d, {v}_mu)") + """
   vec3 lace = ca;
   if (q12 > 0.0) {
     vec2 rel = wa - al;
     vec2 wb = al + vec2(q13 * rel.x - q14 * rel.y, q13 * rel.y + q14 * rel.x);
-""" + julia_shade("cb", "wb", f"q11 - {JULIA_M}.0 * 0.015", "rgl") + """
+""" + lace_shade("cb", "wb", f"q11 - {JULIA_M}.0 * 0.015", "rgl", "julia({v}_w, c, {v}_d, {v}_mu)") + """
     lace = mix(ca, cb, q12);
   }
   float lfar = smoothstep(0.06, 0.02, lpix / lr);
@@ -1485,81 +1681,120 @@ JULIA_WARP = JULIA_FUNCS + " shader_body {\n" + HEAD + """
   float spec = pow(sdot, 2200.0) * 1.1 + pow(sdot, 220.0) * 0.05;
   float trans = exp(-0.15 * (1.0 / dn - 1.0));
   vec3 col = lace * trans * (1.0 - fre) + env * fre + mix(NOKKVI_TEXT, NOKKVI_HIGHLIGHT, 0.35) * spec * (0.8 + 0.8 * q3);
-  vec3 sky = jl_env(rd);
   col += mix(NOKKVI_ACCENT, NOKKVI_HIGHLIGHT, 0.3) * rgl * 0.3 * (1.0 - 0.6 * fre);
+  vec3 sky = jl_env(rd);
   col = mix(sky, col, smoothstep(0.0, 0.01, down));
-  ret = col;
+  vec3 prv = texture(sampler_main, uv).xyz;
+  ret = mix(col, prv, q29 * 0.8);
  }"""
-JULIA_COMP = " shader_body {\n" + HEAD + """
+VOY_COMP = " shader_body {\n" + HEAD + """
   vec2 p = (uv - 0.5) * s;
   vec3 m = texture(sampler_main, uv).xyz;
   vec3 b1 = GetBlur1(uv);
   vec3 b2 = GetBlur2(uv);
+  vec3 b3 = GetBlur3(uv);
   vec3 col = m + max(b1 - 0.4, 0.0) * 0.3 + max(b2 - 0.3, 0.0) * (0.2 + 0.25 * q3);
+  col = mix(col, b3 * 1.1 + b2 * 0.1, q29 * 0.85);
   col *= 0.82 + 0.18 * smoothstep(1.3, 0.3, length(p));
   ret = col;
  }"""
-JULIA_INIT = ("pulse = 0; pop = 0; hue = 0; dv = 0; cyc = 0; grot = 0; flw = 0; core = 1;"
-              f" jfc = 0; jidx = 0; jdir = 1; jt = 24; jph = {JULIA_STOPS[0]}; jph_m = jph; "
-              + SPEED_INIT + " " + BEATS_INIT)
-JULIA_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED + BEATS + f"""m = {JULIA_M};
-lr = 1.03;
-jfc = jfc + 1;
-jnew = equal(jfc, 2);
-jseed = bass * 5.31 + mid * 2.13 + treb * 1.71 + rand(1);
-jseed = jseed - floor(jseed);
-jidx = if(jnew, int(jseed * {len(JULIA_STOPS)}), jidx);
-jdir = if(jnew, if(below(jseed * 7.3 - floor(jseed * 7.3), 0.5), -1, 1), jdir);
-jt = jt - dt;
-jchg = below(jt, 0);
-jflp = rand(1) + bass * 1.37 + treb * 2.9;
-jdir = if(jchg * below(jflp - floor(jflp), 0.12), -jdir, jdir);
-jnx = jidx + jdir;
-jdir = if(jchg * (below(jnx, 0) + above(jnx, {len(JULIA_STOPS) - 1})), -jdir, jdir);
-jidx = if(jchg, jidx + jdir, jidx);
-jt = if(jchg, 18 + rand(1000) / 1000 * 14, jt);
-""" + julia_stop_pick("jtg", "jidx") + """jph_m = if(jnew, jtg, jph_m);
-jph = if(jnew, jtg, jph);
-""" + ease("jph", "jtg", "5.0") + """a = (jph + 0.003 * sin(time * 0.05)) * 6.2831853;
+NFAM = 2 * len(JULIA_FAMILIES)
+VOY_INIT = ("pulse = 0; pop = 0; hue = 0; flw = 0; core = 1; cyc = 0; grot = 0;"
+            " ph = 0; pt = 0; pz = 0; pa = 0; pu = 0; pinit = 0; jv = -1; mv = -1; sv = -1; jst = 0; hb = 0; "
+            + SPEED_INIT + " " + BEATS_INIT)
+VOY_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED + BEATS + f"""pt = pt + dt;
+pz = min(pz + dt * min(max(spdt, 1.2), 4) / 86.4, 1);
+pa = if(below(pz, 1), 0, min(pa + dt / 3, 1));
+pu = if(below(pa, 1), 0, min(pu + dt / 3, 1));
+pnext = above(pu, 0.9999);
+swp = pnext + below(pinit, 0.5);
+pinit = 1;
+ph = if(pnext, (ph + 1) % 4, ph);
+pt = if(swp, 0, pt);
+pz = if(swp, 0, pz);
+pa = if(swp, 0, pa);
+pu = if(swp, 0, pu);
+jv = if(swp * equal(ph, 0), jv + 1, jv);
+sv = if(swp * equal(ph, 1), sv + 1, sv);
+mv = if(swp * equal(ph, 2), mv + 1, mv);
+vsd = rand(1) + bass * 1.37 + treb * 2.9 + mid * 0.71;
+vsd = vsd - floor(vsd);
+jst = if(swp, int(vsd * {len(JULIA_STOPS)}), jst);
+hb = if(swp, vsd * 37.7, hb);
+hb = hb - 6.2831853 * floor(hb / 6.2831853);
+cyc = if(swp, 0, cyc);
+grot = if(swp, hb, grot);
+jf = jv % {NFAM};
+jlace = equal(jf % 2, 0);
+jfo = int(jf / 2);
+""" + voy_pick("jlr", "jfo", [f[0] for f in JULIA_FAMILIES]) + voy_pick("jfph", "jfo", [f[1] for f in JULIA_FAMILIES]) \
+    + voy_pick("jfm", "jfo", [f[2] for f in JULIA_FAMILIES]) + voy_pick("jstp", "jst", JULIA_STOPS) + f"""lr = if(jlace, 1.03, jlr);
+m = if(jlace, {JULIA_M}, jfm);
+a = (if(jlace, jstp, jfph) + 0.003 * sin(time * 0.05)) * 6.2831853;
 q1 = 0.5 * lr * cos(a) - 0.25 * lr * lr * cos(2 * a);
 q2 = 0.5 * lr * sin(a) - 0.25 * lr * lr * sin(2 * a);
-q15 = 0.5 * lr * cos(a);
-q16 = 0.5 * lr * sin(a);
+jalx = 0.5 * lr * cos(a);
+jaly = 0.5 * lr * sin(a);
 lm = pow(lr, m);
-q13 = lm * cos(m * a);
-q14 = lm * sin(m * a);
-dv = dv + dt * spdt / 40;
-f = dv - int(dv);
-wrapped = above(int(dv), cyc);
-cyc = int(dv);
+isj = equal(ph, 0);
+pae = 1 - (1 - pa) * (1 - pa);
+jzs = log(0.09 / 1.2) / log(lm);
+jz = jzs + (2 - jzs) * pz;
+jn = floor(max(jz, 0));
+wrapped = above(jn, cyc) * isj;
+cyc = jn;
 grot = grot + wrapped * m * a;
 grot = grot - 6.2831853 * floor(grot / 6.2831853 + 0.5);
-h = grot + 0.8 * sin(time * 0.07) + 0.35 * sin(time * 0.13 + 2);
+jfr = jz - floor(jz);
+jpl = min(max(0.11 / (0.3 * pow(lr, -240)), 2), 500);
+jalt = if(below(jz, 0), 0.09 * pow(lm, -jz), 0.09 * pow(lm, -jfr)) * pow(jpl, -pae);
+jlad = jz + pae * log(jpl) / log(lm);
+jw = min(max((jfr - 0.8) / 0.2, 0), 1) * above(jz, 0) * below(pz, 1);
+svi = sv % {len(VOY_SHIP)};
+mvi = mv % {len(VOY_MANDEL)};
+""" + voy_pick("stx", "svi", [t[0][0] for t in VOY_SHIP]) + voy_pick("sty", "svi", [t[0][1] for t in VOY_SHIP]) \
+    + voy_pick("sa1", "svi", [t[2] for t in VOY_SHIP]) + voy_pick("mtx", "mvi", [t[0][0] for t in VOY_MANDEL]) \
+    + voy_pick("mty", "mvi", [t[0][1] for t in VOY_MANDEL]) + voy_pick("ma1", "mvi", [t[2] for t in VOY_MANDEL]) + f"""pa0 = if(equal(ph, 2), {VOY_MANDEL[0][1]}, 1.2);
+pa1 = if(equal(ph, 1), sa1, if(equal(ph, 2), ma1, 0.004));
+ppl = if(equal(ph, 3), 2, 3);
+palt = pa0 * pow(pa1 / pa0, pz) * pow(ppl, -pae);
+plad = log(pa0 / palt) / log(3);
+alt = if(isj, jalt, palt);
+lad = if(isj, jlad, plad);
+q15 = if(isj, jalx, if(equal(ph, 1), stx, if(equal(ph, 2), mtx, 0)));
+q16 = if(isj, jaly, if(equal(ph, 1), sty, if(equal(ph, 2), mty, 0)));
+gb = if(isj, grot, hb);
+h = gb + 0.8 * sin(time * 0.07) + 0.35 * sin(time * 0.13 + 2);
 pch = 0.72 + 0.3 * sin(time * 0.1 + 1) + 0.04 * sin(time * 0.23);
-alt = 0.09 * pow(lr, -m * f);
 back = alt / tan(pch);
 q7 = q15 - back * cos(h);
 q8 = q16 - back * sin(h);
 q6 = alt;
+dsc = max(1 - pt / 3, 0);
+tilt = max(dsc * dsc * (3 - 2 * dsc), pu * pu * (3 - 2 * pu));
 q4 = h + 0.28 * sin(time * 0.083) + 0.08 * sin(time * 0.21 + 1);
-q10 = pch + 0.1 * sin(time * 0.067 + 2);
+q10 = (pch + 0.1 * sin(time * 0.067 + 2)) * (1 - tilt) - 0.12 * tilt;
 q27 = 0.16 * sin(time * 0.08) + 0.06 * sin(time * 0.19);
-q11 = m * 0.015 * f;
-w = min(max((f - 0.8) / 0.2, 0), 1);
-q12 = w * w * (3 - 2 * w);
+q11 = isj * m * 0.015 * jfr * above(jz, 0);
+q12 = jw * jw * (3 - 2 * jw);
+q13 = if(isj, lm * cos(m * a), 3);
+q14 = if(isj, lm * sin(m * a), 0);
+q17 = lad - floor(lad);
+q18 = gb;
 hue = hue + dt * 0.006;
-q9 = hue;
-q17 = f;
-q18 = grot;
+q9 = hue + ph * 0.23;
 flw = flw + dt * (0.5 + 0.35 * spdt);
 q19 = flw;
 q20 = ba1; q21 = bs1; q22 = ba2; q23 = bs2; q24 = ba3; q25 = bs3;
-q26 = grot + 0.3 + 0.35 * sin(time * 0.041);
+q26 = gb + 0.3 + 0.35 * sin(time * 0.041);
 core = core + (min(bass_att, 2) - core) * (1 - exp(-dt / 0.4));
 q30 = core;
+q28 = ph;
+q29 = pow(tilt, 1.4);
+q31 = pz * 27;
 """
-presets["nokkvi - julia lace"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, JULIA_WARP, JULIA_COMP,
-                                       init=JULIA_INIT, frame=JULIA_FRAME)
+presets["nokkvi - julia lace"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, VOY_WARP, VOY_COMP,
+                                       init=VOY_INIT, frame=VOY_FRAME)
 
 # Coral city (no cover) ---------------------------------------------------
 # A flight through an endless coral foam: an Apollonian-style fractal (space
