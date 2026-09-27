@@ -6,14 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Julia Lace now morphs between different Julia sets, from single spirals through feathery stars to starbursts.
+- Every beat sends a glowing ripple out from Julia Lace's vortex across the liquid.
+
 ### Changed
 
 - Julia Lace's spiralling dive speeds up as the music gets louder.
 - Julia Lace's dive lurches deeper on kicks.
+- Julia Lace's lace now lies in a dark, glossy liquid instead of a grey haze.
+- At shallow angles Julia Lace's liquid reflects the sky and a low moon.
+- Rippling light from the liquid plays over Julia Lace's lace.
 
 ### Fixed
 
-- Julia Lace's spin now eases to a stop and turns back, instead of reversing direction in a single frame.
+- Julia Lace no longer snaps its spin into reverse every minute or two.
+- Julia Lace no longer lingers on a sparse pattern of a few straight arms.
+- Julia Lace keeps its vortex in view instead of drifting it off-screen.
+- Julia Lace's horizon no longer shows vertical streaks.
 
 ### Removed
 

@@ -108,6 +108,18 @@ SPEED = ("en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);\n"
          + "surge = max(surge * exp(-dt / 0.4), 1.6 * q5 + 0.9 * q3);\n"
          + ease("sg", "surge", "0.07")
          + "spdt = spd + sg;\n")
+# The last three beats (bass above its follower, 0.2 s cooldown) as a ring
+# buffer of ages (ba1..ba3, seconds, 9 = long ago) and strengths (bs1..bs3,
+# 0.5 to 1.6), newest first, for presets that send something out per beat
+# (infinity's inlay waves, julia lace's ripples). Needs `dt`.
+BEATS_INIT = "sinceb = 1; ba1 = 9; ba2 = 9; ba3 = 9; bs1 = 0; bs2 = 0; bs3 = 0;"
+BEATS = ("bk = bass - bass_att; sinceb = sinceb + dt;\n"
+         "trig = above(bk, 0.22) * above(sinceb, 0.2);\n"
+         "ba3 = if(trig, ba2, ba3); bs3 = if(trig, bs2, bs3);\n"
+         "ba2 = if(trig, ba1, ba2); bs2 = if(trig, bs1, bs2);\n"
+         "ba1 = if(trig, 0, ba1); bs1 = if(trig, min(0.5 + bk * 1.4, 1.6), bs1);\n"
+         "sinceb = if(trig, 0, sinceb);\n"
+         "ba1 = ba1 + dt; ba2 = ba2 + dt; ba3 = ba3 + dt;\n")
 
 presets = {}
 
@@ -1265,41 +1277,69 @@ q23 = hs;
 """)
 
 # Julia lace (no cover) ---------------------------------------------------
-# An endless dive into a Julia set's spiral vortex. The set is drawn as fine
+# An endless dive into a Julia set's spiral vortex, the set drawn as fine
 # lace (the distance estimate turns its boundary into hairline ridges with a
-# soft glow) on a ground plane seen in perspective, lit as relief. Its
+# soft glow) lying in a dark, glossy liquid seen in perspective. Its
 # parameter c = l/2 - l^2/4 sits just outside the Mandelbrot set's main
-# cardioid in the seahorse valley, where the Julia set is all spirals: l is
-# the multiplier of the fixed point alpha = l/2, |l| = 1.03 so alpha repels
-# and the spirals wind around it. The Julia set maps onto itself under
-# z -> z^2 + c, which near alpha is z -> alpha + l (z - alpha): zooming in by
-# |l|^M while turning by M arg(l) shows the same picture again. So the camera
-# looks steeply down at alpha and sinks towards it, the ground turning under
-# it, and after a zoom of |l|^M (about 3x) it is back where it started, one
-# ring deeper; the last fifth of every cycle crossfades into the next cycle's
-# view (the same window mapped by l^M, drawn a second time), so the seam
-# never shows even where the map is not quite linear. Colour follows the
-# iteration count shifted by M per cycle, so it matches across the seam too.
-# Only M arg(l) modulo a full turn matters at the seam, so the ground turns
-# by at most half a turn per cycle (the state `grot` absorbs the rest at the
-# wrap). The wrap's jump alone maps the view by l^M, so the turn during the
-# cycle is free: when arg(l)'s drift carries it past half a turn it swaps
-# sides (+pi becomes -pi), and instead of reversing in one frame the offset
-# `tof` takes over the jump and settles over ~4 s, so the spin slows, stops
-# and turns back. The camera is free: it swings between a steep dive and a
-# shallow, horizon-grazing glide, sweeps its heading around the vortex,
-# looks a little off centre (an offset that scales with the altitude and
-# turns with `grot`, so it stays self-similar across the seam) and banks
-# gently. arg(l) drifts slowly, so the spirals wind and unwind as you fall.
-# The music never touches the shape (a Julia set is so sensitive to c that
-# a beat-driven nudge reads as a glitch). It drives the dive the way it
-# drives infinity's flight (SPEED): loudness sets the pace and kicks add a
-# short surge, so the lace sinks and twists faster as the music swells
-# (a cycle takes ~17 s at a typical speed of 2.4, ~10 s at 4 and 160 s at
-# the 0.25 floor); kicks also brighten the lace's glow. Line widths follow
-# each pixel's footprint on the plane (screen derivatives). Pure comp.
+# cardioid, where the Julia set is all spirals: l is the multiplier of the
+# fixed point alpha = l/2, |l| = 1.03 so alpha repels and the spirals wind
+# around it. The Julia set maps onto itself under z -> z^2 + c, which near
+# alpha is z -> alpha + l (z - alpha): zooming in by |l|^M while turning by
+# M arg(l) shows the same picture again. So the camera looks down at alpha
+# and sinks towards it, and after a zoom of |l|^M (about 3x) it jumps back
+# up by exactly that map (height times |l|^M, heading plus M arg(l), both
+# kept in `grot`), one ring deeper; the last fifth of every cycle crossfades
+# into the next cycle's view (the same window mapped by l^M, drawn a second
+# time), so the seam never shows even where the map is not quite linear.
+# Colour follows the iteration count shifted by M per cycle, so it matches
+# across the seam too. Between wraps the dive is a pure zoom: the spirals
+# twist by their own geometry, and the camera only drifts (a swing between
+# a steep dive and a horizon-grazing glide, a slow sweep around the vortex,
+# a gentle bank), aiming a bounded angle off the vortex so it stays framed.
+# The shape morphs: arg(l) (in turns) glides (tau 5 s) between JULIA_STOPS,
+# a curated walk over the family, from one elegant spiral (0.035) through
+# feathery stars (0.09), sunflowers (0.19) and rosettes (0.3) to starbursts
+# (0.42); it dwells 18-32 s per stop and turns back 12% of the time. Near a
+# fraction p/q with q <= 9 (1/2, 1/3, 1/4, 2/5, 3/7, 1/8, 4/9...) the set
+# collapses into q straight arms over a void (c lands in or beside that
+# bulb), so every stop keeps |arg - p/q| q^2 above ~0.12 and a glide only
+# sweeps through a star for a few seconds. The engine seeds rand from the
+# preset text, so the walk would replay one route; its start and its turns
+# also hash the music at that moment.
+# The liquid: its swells are four octaves of noise in camera space
+# (u = the ground point about alpha, turned by -grot, over the height), each
+# octave |l|^M apart and weighted by where the cycle is (q17), so every
+# octave rides the zoom with the lace and the ladder repeats exactly across
+# the wrap; the octaves drift (q19, faster as the dive speeds up). The noise
+# is sampler_noise_hq read straight (it is already smooth, a cubic lattice
+# every 8 texels) with slopes over 2 texels: the texel-snapping quintic of
+# tnoise zeroes the slope at every texel edge and drew the texel grid into
+# the glints as straight streaks. The surface refracts the lace (a lookup
+# offset by its slope, scaled by the distance to the vortex so it stays in
+# proportion to the lace's detail), focuses light into caustics on it (where
+# the swells curve, brighter with the bass, q30), absorbs it with the path
+# length (grazing rays see less), reflects a sky gradient by Fresnel, and
+# glints where it mirrors a low moon that turns with `grot`. Rays above the
+# horizon see that sky. The music never touches the shape (a Julia set is
+# so sensitive to c that a beat-driven nudge reads as a glitch): loudness
+# sets the dive speed and kicks surge it (SPEED; a cycle takes ~17 s at a
+# typical speed of 2.4), and every beat (BEATS) sends a ripple ring out
+# from the vortex across the liquid (in log radius, so it looks the same at
+# any depth), which bends the lace, catches the light, glows faintly on the
+# water and lights the lace it passes (both fade in as the ring leaves the
+# vortex, so the dense centre never whites out); kicks also brighten the
+# lace's glow and the glints. Line widths follow each pixel's footprint on
+# the plane (screen derivatives), and the lace, rings and fine swells fade
+# where a pixel covers too much of them.
+# The scene is drawn in the warp; the comp adds bloom. q map: q1/q2 c, q3
+# kick, q4/q10 view heading and pitch, q5 pop, q6 height, q7/q8 camera,
+# q9 hue drift, q11 seam hue shift, q12 seam crossfade, q13/q14 l^M,
+# q15/q16 alpha, q17 cycle fraction, q18 grot, q19 liquid drift, q20-q25
+# beat ages and strengths, q26 light heading, q27 bank, q30 bass glow.
 JULIA_ITERS = 240
 JULIA_M = 37
+JULIA_STOPS = [0.035, 0.05, 0.07, 0.09, 0.12, 0.155, 0.185, 0.225,
+               0.265, 0.297, 0.315, 0.36, 0.385, 0.415, 0.452, 0.47]
 JULIA_FUNCS = f"""
 float julia(vec2 z, vec2 c, out float d, out float mu) {{
   vec2 dz = vec2(1.0, 0.0);
@@ -1317,9 +1357,58 @@ float julia(vec2 z, vec2 c, out float d, out float mu) {{
   mu = it + 1.0 - log2(max(lz, 1e-6));
   return step({JULIA_ITERS}.0 - 0.5, it);
 }}
+float jl_h(vec2 jhv) {{
+  vec2 jha = jhv * 0.0156 + vec2(q19 * 0.0011, q19 * 0.0004);
+  vec2 jhb = jhv * 0.0273 + vec2(-q19 * 0.0009, q19 * 0.0013);
+  return texture(sampler_noise_hq, jha).x * 0.6 + texture(sampler_noise_hq, jhb).x * 0.4;
+}}
+vec3 jl_swell(vec2 jsu, float jspix) {{
+  vec3 jss = vec3(0.0);
+  float jslm = length(vec2(q13, q14));
+  for (int i = 0; i < 4; i++) {{
+    float jsk = float(i) - 2.0 + q17;
+    float jsc = pow(jslm, -jsk);
+    vec2 jsv = jsu * jsc;
+    vec2 jsvx = jsv + vec2(0.3, 0.0);
+    vec2 jsvy = jsv + vec2(0.0, 0.3);
+    vec2 jsvxm = jsv - vec2(0.3, 0.0);
+    vec2 jsvym = jsv - vec2(0.0, 0.3);
+    float jh0 = jl_h(jsv);
+    float jhx = jl_h(jsvx);
+    float jhy = jl_h(jsvy);
+    float jhxm = jl_h(jsvxm);
+    float jhym = jl_h(jsvym);
+    float jsw = 0.5 + 0.5 * cos(1.5707963 * jsk);
+    float jsaa = smoothstep(0.4, 0.15, jspix * jsc);
+    jss += vec3((jhx - jhxm) * 1.667, (jhy - jhym) * 1.667, (jhx + jhxm + jhy + jhym - 4.0 * jh0) * 11.11) * (jsw * jsaa);
+  }}
+  return jss;
+}}
+float jl_ring(float jrr, float jra, float jrs) {{
+  float jrf = -2.3 + jra * 2.8;
+  float jrx = jrr - jrf;
+  return jrs * exp(-jra * 1.2) * sin(jrx * 12.0) * exp(-jrx * jrx * 14.0);
+}}
+float jl_glow(float jgr, float jga, float jgs) {{
+  float jgf = -2.3 + jga * 2.8;
+  float jgx = jgr - jgf;
+  return jgs * exp(-jga * 1.3) * exp(-jgx * jgx * 30.0) * smoothstep(-2.3, -1.0, jgf);
+}}
+vec3 jl_env(vec3 jed) {{
+  vec3 jel = vec3(0.98 * cos(q26), 0.98 * sin(q26), 0.2);
+  float jez = jed.z;
+  vec3 jhor = mix(NOKKVI_SURFACE, NOKKVI_ACCENT, 0.2);
+  vec3 jsky = mix(jhor * 0.85, NOKKVI_BG * 0.6, smoothstep(0.0, 0.5, jez));
+  float jsun = max(dot(jed, jel), 0.0);
+  vec3 jlc = mix(NOKKVI_TEXT, NOKKVI_HIGHLIGHT, 0.35);
+  jsky += jlc * (pow(jsun, 600.0) * 0.9 + pow(jsun, 12.0) * 0.07);
+  jsky += mix(NOKKVI_ACCENT, NOKKVI_WARM, 0.35) * exp(-abs(jez) * 14.0) * (0.12 + 0.08 * q30);
+  return jsky;
+}}
 """
-def julia_shade(v, w0, hueshift):
-    """Lace colour `v` for the ground point `w0` (a vec2 expression)."""
+def julia_shade(v, w0, hueshift, light="0.0"):
+    """Lace colour `v` for the ground point `w0` (a vec2 expression) over
+    `ground`; `light` (a float expression) adds a wave of light."""
     return f"""
   vec2 {v}_w = {w0};
   float {v}_d;
@@ -1333,15 +1422,17 @@ def julia_shade(v, w0, hueshift):
   float {v}_hue = fract({v}_mu * 0.015 - ({hueshift}) + q9);
 """ + ramp(v + "_lace", f"0.35 + 0.6 * abs({v}_hue * 2.0 - 1.0)") + f"""
   vec3 {v} = mix(ground, NOKKVI_BG * 0.55, {v}_in * 0.8);
-  {v} += {v}_lace * {v}_glow * (0.3 + 0.35 * q3) * {v}_shade;
-  {v} = mix({v}, {v}_lace * (0.9 + 0.3 * q3) * {v}_shade, {v}_line);
+  {v} += {v}_lace * {v}_glow * (0.3 + 0.35 * q3 + 0.9 * ({light})) * {v}_shade;
+  {v} = mix({v}, {v}_lace * (0.9 + 0.3 * q3 + 0.45 * ({light})) * {v}_shade, {v}_line);
   {v} = mix({v}, NOKKVI_TEXT, {v}_line * smoothstep(0.6, 1.0, {v}_glow) * 0.2);
 """
-presets["nokkvi - julia lace"] = preset(
-    {"decay": 0.0, "wave_a": 0.0, "zoom": 1.0},
-    " shader_body {\n  ret = vec3(0.0);\n }",
-    JULIA_FUNCS + " shader_body {\n" + HEAD + """
-  vec2 p = (uv - 0.5) * s;
+def julia_stop_pick(var, idx):
+    e = f"{JULIA_STOPS[-1]}"
+    for i in range(len(JULIA_STOPS) - 2, -1, -1):
+        e = f"if(equal({idx}, {i}), {JULIA_STOPS[i]}, {e})"
+    return f"{var} = {e};\n"
+JULIA_WARP = JULIA_FUNCS + " shader_body {\n" + HEAD + """
+  vec2 p = (uv_orig - 0.5) * s;
   p = vec2(p.x * cos(q27) - p.y * sin(q27), p.x * sin(q27) + p.y * cos(q27));
   float ha = q4;
   float pt = q10;
@@ -1349,31 +1440,87 @@ presets["nokkvi - julia lace"] = preset(
   vec3 rt = vec3(sin(ha), -cos(ha), 0.0);
   vec3 up = cross(rt, fw);
   vec3 rd = normalize(fw + (p.x * rt + p.y * up) * 1.15);
-  float down = max(-rd.z, 0.02);
-  vec2 wa = vec2(q7, q8) + rd.xy * (q6 / down);
+  float down = -rd.z;
+  float dn = max(down, 0.004);
+  vec2 wa0 = vec2(q7, q8) + rd.xy * (q6 / dn);
   vec2 c = vec2(q1, q2);
   vec2 al = vec2(q15, q16);
-  vec3 ground = mix(NOKKVI_BG, NOKKVI_SURFACE, 0.2);
-""" + julia_shade("ca", "wa", "q11") + """
-  vec3 col = ca;
+  float cg = cos(q18);
+  float sn = sin(q18);
+  vec2 rel0 = wa0 - al;
+  vec2 lu = vec2(cg * rel0.x + sn * rel0.y, cg * rel0.y - sn * rel0.x) / q6;
+  float lr = length(lu) + 1e-4;
+  float lpix = max(length(dFdx(lu)), length(dFdy(lu))) + 1e-6;
+  vec3 lsw = jl_swell(lu, lpix);
+  vec2 lsl = lsw.xy * 0.13;
+  float caus = pow(max(-lsw.z * 0.12, 0.0), 2.0);
+  float lrr = log(lr);
+  float rfade = smoothstep(0.1, 0.035, lpix / lr);
+  float rsl = jl_ring(lrr, q20, q21) + jl_ring(lrr, q22, q23) + jl_ring(lrr, q24, q25);
+  lsl += (lu / lr) * (rsl * 0.16 * rfade);
+  float rgl = (jl_glow(lrr, q20, q21) + jl_glow(lrr, q22, q23) + jl_glow(lrr, q24, q25)) * rfade;
+  vec2 wsl = vec2(cg * lsl.x - sn * lsl.y, sn * lsl.x + cg * lsl.y);
+  vec3 n = normalize(vec3(-wsl.x, -wsl.y, 1.0));
+  vec2 wa = wa0 - wsl * (q6 * lr * 0.22);
+  vec3 ground = mix(NOKKVI_BG, NOKKVI_ACCENT, 0.07) * 0.7;
+""" + julia_shade("ca", "wa", "q11", "rgl") + """
+  vec3 lace = ca;
   if (q12 > 0.0) {
     vec2 rel = wa - al;
     vec2 wb = al + vec2(q13 * rel.x - q14 * rel.y, q13 * rel.y + q14 * rel.x);
-""" + julia_shade("cb", "wb", f"q11 - {JULIA_M}.0 * 0.015") + """
-    col = mix(ca, cb, q12);
+""" + julia_shade("cb", "wb", f"q11 - {JULIA_M}.0 * 0.015", "rgl") + """
+    lace = mix(ca, cb, q12);
   }
-  float fogd = 1.0 - exp(-(1.0 / down) * 0.12);
-  vec3 sky = mix(NOKKVI_SURFACE, NOKKVI_BG, 0.5);
-  col = mix(col, sky, clamp(fogd, 0.0, 1.0) * 0.6);
-  col *= 0.8 + 0.2 * smoothstep(1.2, 0.3, length(p));
+  float lfar = smoothstep(0.06, 0.02, lpix / lr);
+  lace = mix(ground, lace, lfar);
+  lace *= 1.0 + caus * (0.8 + 0.5 * q30) * lfar;
+  lace += mix(NOKKVI_ACCENT, NOKKVI_TEXT, 0.35) * caus * 0.09 * lfar;
+  float cosv = max(dot(n, -rd), 0.0);
+  float fre = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
+  vec3 rfl = reflect(rd, n);
+  rfl = vec3(rfl.x, rfl.y, abs(rfl.z));
+  vec3 env = jl_env(rfl);
+  vec3 lgt = vec3(0.98 * cos(q26), 0.98 * sin(q26), 0.2);
+  float sdot = max(dot(rfl, lgt), 0.0);
+  float spec = pow(sdot, 2200.0) * 1.1 + pow(sdot, 220.0) * 0.05;
+  float trans = exp(-0.15 * (1.0 / dn - 1.0));
+  vec3 col = lace * trans * (1.0 - fre) + env * fre + mix(NOKKVI_TEXT, NOKKVI_HIGHLIGHT, 0.35) * spec * (0.8 + 0.8 * q3);
+  vec3 sky = jl_env(rd);
+  col += mix(NOKKVI_ACCENT, NOKKVI_HIGHLIGHT, 0.3) * rgl * 0.3 * (1.0 - 0.6 * fre);
+  col = mix(sky, col, smoothstep(0.0, 0.01, down));
   ret = col;
- }""",
-    init="pulse = 0; pop = 0; hue = 0; dv = 0; fprev = 0; cyc = 0; grot = 0; wprev = 0; tof = 0; tof_m = 0; "
-    + SPEED_INIT,
-    frame=PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED + f"""m = {JULIA_M};
+ }"""
+JULIA_COMP = " shader_body {\n" + HEAD + """
+  vec2 p = (uv - 0.5) * s;
+  vec3 m = texture(sampler_main, uv).xyz;
+  vec3 b1 = GetBlur1(uv);
+  vec3 b2 = GetBlur2(uv);
+  vec3 col = m + max(b1 - 0.4, 0.0) * 0.3 + max(b2 - 0.3, 0.0) * (0.2 + 0.25 * q3);
+  col *= 0.82 + 0.18 * smoothstep(1.3, 0.3, length(p));
+  ret = col;
+ }"""
+JULIA_INIT = ("pulse = 0; pop = 0; hue = 0; dv = 0; cyc = 0; grot = 0; flw = 0; core = 1;"
+              f" jfc = 0; jidx = 0; jdir = 1; jt = 24; jph = {JULIA_STOPS[0]}; jph_m = jph; "
+              + SPEED_INIT + " " + BEATS_INIT)
+JULIA_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED + BEATS + f"""m = {JULIA_M};
 lr = 1.03;
-phi = 0.43 + 0.035 * sin(time * 0.017) + 0.005 * sin(time * 0.05);
-a = phi * 6.2831853;
+jfc = jfc + 1;
+jnew = equal(jfc, 2);
+jseed = bass * 5.31 + mid * 2.13 + treb * 1.71 + rand(1);
+jseed = jseed - floor(jseed);
+jidx = if(jnew, int(jseed * {len(JULIA_STOPS)}), jidx);
+jdir = if(jnew, if(below(jseed * 7.3 - floor(jseed * 7.3), 0.5), -1, 1), jdir);
+jt = jt - dt;
+jchg = below(jt, 0);
+jflp = rand(1) + bass * 1.37 + treb * 2.9;
+jdir = if(jchg * below(jflp - floor(jflp), 0.12), -jdir, jdir);
+jnx = jidx + jdir;
+jdir = if(jchg * (below(jnx, 0) + above(jnx, {len(JULIA_STOPS) - 1})), -jdir, jdir);
+jidx = if(jchg, jidx + jdir, jidx);
+jt = if(jchg, 18 + rand(1000) / 1000 * 14, jt);
+""" + julia_stop_pick("jtg", "jidx") + """jph_m = if(jnew, jtg, jph_m);
+jph = if(jnew, jtg, jph);
+""" + ease("jph", "jtg", "5.0") + """a = (jph + 0.003 * sin(time * 0.05)) * 6.2831853;
 q1 = 0.5 * lr * cos(a) - 0.25 * lr * lr * cos(2 * a);
 q2 = 0.5 * lr * sin(a) - 0.25 * lr * lr * sin(2 * a);
 q15 = 0.5 * lr * cos(a);
@@ -1385,34 +1532,34 @@ dv = dv + dt * spdt / 40;
 f = dv - int(dv);
 wrapped = above(int(dv), cyc);
 cyc = int(dv);
-ma = m * a;
-wma = ma - 6.2831853 * floor(ma / 6.2831853 + 0.5);
-jmp = 6.2831853 * floor((wma - wprev) / 6.2831853 + 0.5);
-wprev = wma;
-tof = tof - jmp;
-tof_m = tof_m - jmp;
-""" + ease("tof", "0", "1.0") + """turn = wma + tof;
-grot = grot - turn * (f - fprev + wrapped) + wrapped * ma;
+grot = grot + wrapped * m * a;
 grot = grot - 6.2831853 * floor(grot / 6.2831853 + 0.5);
-fprev = f;
 h = grot + 0.8 * sin(time * 0.07) + 0.35 * sin(time * 0.13 + 2);
-pch = 0.85 + 0.38 * sin(time * 0.1 + 1) + 0.05 * sin(time * 0.23);
+pch = 0.72 + 0.3 * sin(time * 0.1 + 1) + 0.04 * sin(time * 0.23);
 alt = 0.09 * pow(lr, -m * f);
 back = alt / tan(pch);
-lox = alt * 0.9 * cos(grot + time * 0.09);
-loy = alt * 0.9 * sin(grot + time * 0.09);
-q7 = q15 + lox - back * cos(h);
-q8 = q16 + loy - back * sin(h);
+q7 = q15 - back * cos(h);
+q8 = q16 - back * sin(h);
 q6 = alt;
-q4 = h;
-q10 = pch;
+q4 = h + 0.28 * sin(time * 0.083) + 0.08 * sin(time * 0.21 + 1);
+q10 = pch + 0.1 * sin(time * 0.067 + 2);
 q27 = 0.16 * sin(time * 0.08) + 0.06 * sin(time * 0.19);
 q11 = m * 0.015 * f;
 w = min(max((f - 0.8) / 0.2, 0), 1);
 q12 = w * w * (3 - 2 * w);
 hue = hue + dt * 0.006;
 q9 = hue;
-""")
+q17 = f;
+q18 = grot;
+flw = flw + dt * (0.5 + 0.35 * spdt);
+q19 = flw;
+q20 = ba1; q21 = bs1; q22 = ba2; q23 = bs2; q24 = ba3; q25 = bs3;
+q26 = grot + 0.3 + 0.35 * sin(time * 0.041);
+core = core + (min(bass_att, 2) - core) * (1 - exp(-dt / 0.4));
+q30 = core;
+"""
+presets["nokkvi - julia lace"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, JULIA_WARP, JULIA_COMP,
+                                       init=JULIA_INIT, frame=JULIA_FRAME)
 
 # Coral city (no cover) ---------------------------------------------------
 # A flight through an endless coral foam: an Apollonian-style fractal (space
@@ -2073,7 +2220,7 @@ def ifr_act_pick(var, col):
 IFR_INIT = ("pulse = 0; pop = 0; hue = 0; lite = 0; core = 0; flow = 0; dist = 0; " + SPEED_INIT +
         " act = rand(5); acttm = 12; sgn = 1; tw = 0.05; tw_m = 0.05; a1 = 0.3; a1_m = 0.3; a2 = 0.1; a2_m = 0.1;"
         " orr = 0; orr_m = 0; ora = 0; ora_m = 0; oph = 0; rlr = 0; rlr_m = 0; rlang = 0; spr = 0; spr_m = 0; spin = 0;"
-        " fov = 1; fov_m = 1; ks = -100; nold = 3; nnew = 3; pold = rand(1000) / 1000; pnew = pold; lph = 0; lqt = 0; sinceb = 1; ba1 = 9; ba2 = 9; ba3 = 9; bs1 = 0; bs2 = 0; bs3 = 0;")
+        " fov = 1; fov_m = 1; ks = -100; nold = 3; nnew = 3; pold = rand(1000) / 1000; pnew = pold; lph = 0; lqt = 0; " + BEATS_INIT)
 IFR_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" \
     "loud = min((bass_att + mid_att + treb_att) / 3, 2);\n" \
     "acttm = acttm - dt;\nchg = below(acttm, 0);\n" \
@@ -2116,13 +2263,7 @@ IFR_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" \
     "core = core + (min(bass_att, 2) - core) * (1 - exp(-dt / 0.4)); q25 = core;\n" \
     "q26 = ks - cabs; q27 = nold; q28 = nnew; q30 = pnew + hue; q31 = pold + hue;\n" \
     "flow = flow + dt * (1.5 + 4 * q3); q32 = flow;\n" \
-    "bk = bass - bass_att; sinceb = sinceb + dt;\n" \
-    "trig = above(bk, 0.22) * above(sinceb, 0.2);\n" \
-    "ba3 = if(trig, ba2, ba3); bs3 = if(trig, bs2, bs3);\n" \
-    "ba2 = if(trig, ba1, ba2); bs2 = if(trig, bs1, bs2);\n" \
-    "ba1 = if(trig, 0, ba1); bs1 = if(trig, min(0.5 + bk * 1.4, 1.6), bs1);\n" \
-    "sinceb = if(trig, 0, sinceb);\n" \
-    "ba1 = ba1 + dt; ba2 = ba2 + dt; ba3 = ba3 + dt;\n" \
+    + BEATS + \
     "q1 = ba1; q2 = bs1; q4 = ba2; q6 = bs2; q7 = ba3; q8 = bs3;\n"
 
 
