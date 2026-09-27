@@ -2762,6 +2762,830 @@ IFR_FRAME = PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" \
 presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IFR_WARP, IFR_COMP,
                                      init=IFR_INIT, frame=IFR_FRAME)
 
+# Fjord (no cover) -----------------------------------------------------------
+# A low flight down a winding fjord whose walls are the song. The feedback
+# texture is not a picture here, it is data: the warp keeps a spectrum history
+# in a small block in the texture's first rows and columns and bakes a height
+# cache of the whole valley beside it, and the comp raymarches the landscape
+# from that cache, sharp every frame (the comp never shows the feedback).
+# History: FJ_NB log-spaced bands (40 Hz to 14 kHz, from get_fft) across, one
+# row per FJ_DZ of flight along. Row 0 is a per-band running average (AGC, log
+# encoded, ~10 s), row 1 a per-band follower of the level over that average
+# (fast attack, slower release), rows 2.. the history, newest first: when the
+# camera crosses a row boundary (q1), every row moves one texel along and the
+# follower becomes row 2. Values are 16 bit, split high/low over two 8-bit
+# channels; the split is linear, so bilinear taps still interpolate the true
+# values. (The engine's feedback mips pick one texel per block rather than
+# averaging, so nothing here reads them.) The block sits where the engine's
+# resize keeps the old feedback (low x, low y), so the history survives a
+# resize; only the first frames (seeded from the previous preset) are wiped.
+# Place: the newest row lies FJ_AHEAD rows (24 units) ahead of the camera. Past
+# it the land keeps the typical printed loudness; as the front sweeps forward
+# the music reshapes it (fading in over ~3 units, by distance from the camera,
+# so nothing steps when a row is committed): loud stretches build tall,
+# snow-capped walls, quiet ones sink to low banks, and printed land stays put.
+# Cache: canyon coordinates over at most FJ_CWMAX x FJ_CHMAX texels (x = depth
+# z relative to the camera, denser near it; y = u = x - river path(z), denser
+# near the river). Each texel is the full coarse height: a valley whose width
+# swells and narrows along the path, with headland spurs and side valleys at
+# hashed places, its profile scaled by the band at |u| of that row (bass by the
+# water, treble on the heights), eroded fbm, terraced walls, and gully
+# erosion: sharp-crested cosine ridges along the contour in jittered cells
+# with random wavelengths, oriented by the base terrain's slope, bent by their
+# own derivatives and gated off in polished patches, so gullies run downhill,
+# branch and break. The comp marches the cache with one texture read per step
+# (a cubic B-spline near the camera and for normals, so the shoreline is
+# smooth), stops where the cache ends (fog has closed by then) and adds fine
+# rock detail to normals only. The blue channel is a gully/ridge mask.
+# Scene: matte low-albedo rock with vertical stain streaks on steep faces and a
+# wet tide band, cavity AO from eight cache taps around the hit, soft shadows
+# (start jittered per pixel), a liquid plane at y = 0 (ripples streaked along
+# the view, Fresnel, a reflection march with shadows, depth tint, a foam fringe
+# at the shore), sky with drifting clouds, sunlight reddened by airmass,
+# height fog and patchy valley mist, filmic tone map.
+# Each visit picks a time of day from the audio at frame 3 (the rand stream
+# replays per preset): overcast day with a side sun, golden hour with the sun
+# low beside the valley's axis and sinking through the visit, or night with the
+# moon, stars and aurora curtains marched through a slab of sky (so they have
+# perspective), brightening per position with the bands (read from the
+# follower row). Kicks drop a ring on the water a few units ahead (two slots).
+# The camera eases between four altitudes (skim, glide, soar, high) every
+# 14-22 s and banks into the river's bends ahead; loudness sets the speed,
+# kicks a softened surge. Beat never touches the terrain directly.
+# Everything world-space is periodic in 256 along z (path, width, spurs,
+# hashes mod 64 at multiples of 0.25 per unit, snow line, clouds via q25, flow
+# mod 640), so the camera's wrap at 256 is seamless.
+# q map: q1 row committed this frame, q2 newest row minus the camera's row
+# (fractional), q3 kick pulse, q4 camera z (mod 256), q5 pop, q7/q8 camera x/y,
+# q9 night, q10-q12 forward, q13 roll, q14 lens, q15/q16 key light (sun, or moon
+# at night) azimuth/elevation, q18 AGC rate, q19 liquid flow, q20 loudness, q21
+# treble shimmer, q22 hue drift, q23/q24 follower attack/release rates, q25
+# cloud drift, q27 aurora strength, q28 aurora clock, q29-q32 the two rings'
+# ages and z.
+FJ_NB = 32
+FJ_NR = 84
+FJ_DZ = 0.4
+FJ_AHEAD = 60
+FJ_DW = FJ_NB
+FJ_DH = FJ_NR + 2
+FJ_SMAX = 4.0
+FJ_SBASE = 1.7
+FJ_HMIN = -1.0
+FJ_HMAX = 7.0
+FJ_U = 14.0
+FJ_UC = 0.35
+FJ_ZB = 3.0
+FJ_ZL = 90.0
+FJ_ZP = 1.8
+FJ_CWMAX = 1400
+FJ_CHMAX = 800
+FJ_U0, FJ_U1 = 0.8, 11.0
+FJ_W1 = 6.2831853 * 3 / 256
+FJ_W2 = 6.2831853 * 8 / 256
+FJ_A1, FJ_A2 = 2.2, 0.9
+
+FJ_COMMON = f"""
+float fj_dec(vec2 dc) {{
+  return (dc.x * 65280.0 + dc.y * 255.0) / 65535.0;
+}}
+vec2 fj_enc(float ev) {{
+  float ex = floor(clamp(ev, 0.0, 1.0) * 65535.0 + 0.5);
+  float eh = floor(ex / 256.0);
+  return vec2(eh, ex - eh * 256.0) / 255.0;
+}}
+float fj_path(float pz) {{
+  return {FJ_A1} * sin({FJ_W1:.9f} * pz) + {FJ_A2} * sin({FJ_W2:.9f} * pz + 1.7);
+}}
+vec2 fj_duv(float fdi, float fdj) {{
+  return (vec2(fdi, fdj) + 0.5) * texsize.zw;
+}}
+float fj_cw() {{
+  return clamp(texsize.x - {FJ_DW + 1}.0, 8.0, {FJ_CWMAX}.0);
+}}
+float fj_ch() {{
+  return min(texsize.y, {FJ_CHMAX}.0);
+}}
+vec3 fj_tex(vec2 tuv) {{
+  return textureLod(sampler2D(sampler_fc_main, sampler_fc_main_samp), tuv, 0.0).xyz;
+}}
+vec3 fj_bspline(vec2 bc, vec2 bbase) {{
+  vec2 bi0 = floor(bc);
+  vec2 bf = bc - bi0;
+  vec2 bf2 = bf * bf;
+  vec2 bf3 = bf2 * bf;
+  vec2 bw0 = (1.0 - 3.0 * bf + 3.0 * bf2 - bf3) / 6.0;
+  vec2 bw1 = (4.0 - 6.0 * bf2 + 3.0 * bf3) / 6.0;
+  vec2 bw2 = (1.0 + 3.0 * bf + 3.0 * bf2 - 3.0 * bf3) / 6.0;
+  vec2 bw3 = bf3 / 6.0;
+  vec2 bg0 = bw0 + bw1;
+  vec2 bg1 = bw2 + bw3;
+  vec2 bh0 = bbase + bi0 - 0.5 + bw1 / bg0;
+  vec2 bh1 = bbase + bi0 + 1.5 + bw3 / bg1;
+  vec2 bt00 = bh0 * texsize.zw;
+  vec2 bt10 = vec2(bh1.x, bh0.y) * texsize.zw;
+  vec2 bt01 = vec2(bh0.x, bh1.y) * texsize.zw;
+  vec2 bt11 = bh1 * texsize.zw;
+  vec3 bs00 = fj_tex(bt00);
+  vec3 bs10 = fj_tex(bt10);
+  vec3 bs01 = fj_tex(bt01);
+  vec3 bs11 = fj_tex(bt11);
+  return (bs00 * bg0.x + bs10 * bg1.x) * bg0.y + (bs01 * bg0.x + bs11 * bg1.x) * bg1.y;
+}}
+float fj_hash(vec2 hp) {{
+  vec2 hq = mod(hp, 64.0);
+  vec3 h3 = fract(vec3(hq.xyx) * 0.1031);
+  h3 += dot(h3, h3.yzx + 33.33);
+  return fract((h3.x + h3.y) * h3.z);
+}}
+vec3 fj_noised(vec2 nx) {{
+  vec2 ni = floor(nx);
+  vec2 nf = nx - ni;
+  vec2 nu = nf * nf * nf * (nf * (nf * 6.0 - 15.0) + 10.0);
+  vec2 ndu = 30.0 * nf * nf * (nf * (nf - 2.0) + 1.0);
+  vec2 n10 = ni + vec2(1.0, 0.0);
+  vec2 n01 = ni + vec2(0.0, 1.0);
+  vec2 n11 = ni + vec2(1.0, 1.0);
+  float na = fj_hash(ni);
+  float nb = fj_hash(n10);
+  float nc = fj_hash(n01);
+  float nd = fj_hash(n11);
+  float k1 = nb - na;
+  float k2 = nc - na;
+  float k4 = na - nb - nc + nd;
+  return vec3(na + k1 * nu.x + k2 * nu.y + k4 * nu.x * nu.y,
+              ndu * vec2(k1 + k4 * nu.y, k2 + k4 * nu.x));
+}}
+"""
+
+FJ_WARP_FUNCS = FJ_COMMON + f"""
+float fj_eroded(vec2 ep) {{
+  vec2 eq = ep * 0.25;
+  float ea = 0.0;
+  float eb = 1.0;
+  vec2 ed = vec2(0.0);
+  for (int k = 0; k < 4; k++) {{
+    vec3 en = fj_noised(eq);
+    ed += en.yz;
+    ea += eb * en.x / (1.0 + dot(ed, ed));
+    eb *= 0.45;
+    eq = vec2(2.0 * eq.x - eq.y, eq.x + 2.0 * eq.y) + vec2(0.37, 0.71);
+  }}
+  return ea;
+}}
+float fj_spur(float sz, float sper, float ssalt, float swid, out float sside) {{
+  float scell = floor(sz / sper);
+  float sbest = 0.0;
+  sside = 1.0;
+  for (int k = -1; k <= 1; k++) {{
+    float sc = scell + float(k);
+    float scm = mod(sc, {256.0} / sper);
+    vec2 sh1 = vec2(scm, ssalt);
+    vec2 sh2 = vec2(scm, ssalt + 13.0);
+    vec2 sh3 = vec2(scm, ssalt + 29.0);
+    float szs = (sc + 0.2 + 0.6 * fj_hash(sh1)) * sper;
+    float sdz = (sz - szs) / swid;
+    float samp = (0.5 + 0.5 * fj_hash(sh3)) * exp(-sdz * sdz);
+    float sgn = fj_hash(sh2) < 0.5 ? -1.0 : 1.0;
+    sside = samp > sbest ? sgn : sside;
+    sbest = max(sbest, samp);
+  }}
+  return sbest;
+}}
+float fj_base(float gu, float gzr) {{
+  float gzw = q4 + gzr;
+  float gwd = clamp(1.35 + 0.5 * sin({6.2831853 * 5 / 256:.9f} * gzw + 0.6) + 0.3 * sin({6.2831853 * 11 / 256:.9f} * gzw + 2.1), 0.85, 2.3);
+  float gsd;
+  float gsp = fj_spur(gzw, 25.6, 3.0, 2.4, gsd);
+  float gnd;
+  float gnt = fj_spur(gzw, 32.0, 41.0, 3.2, gnd);
+  float gon = step(0.0, gu * gsd);
+  float gonn = step(0.0, gu * gnd);
+  float gau = abs(gu) / gwd;
+  float gaw = gau + gsp * gon * 0.9;
+  float gab = gau + gsp * gon * 0.3;
+  float gbi = 1.0 + clamp((gau - {FJ_U0}) / {FJ_U1 - FJ_U0}, 0.0, 1.0) * {FJ_NB - 4}.0;
+  float gj = 2.0 + q2 - q1 - gzr / {FJ_DZ};
+  float gjc = clamp(gj, 3.0, {FJ_DH - 3}.0);
+  vec2 gc = vec2(gbi, gjc);
+  vec2 gbase = vec2(0.0);
+  vec3 gh = fj_bspline(gc, gbase);
+  float grise = smoothstep(3.0, 10.0, {FJ_AHEAD}.0 - gzr / {FJ_DZ});
+  float gok = grise * step(1.5, frame);
+  float graw = mix({FJ_SBASE}, fj_dec(gh.xy) * {FJ_SMAX}, gok);
+  float gs = 2.2 * graw / (1.2 + graw);
+  vec2 gp = vec2(gu, gzw);
+  float gn = fj_eroded(gp);
+  float gbank = smoothstep(0.35, 1.1, gab);
+  float gwall = smoothstep(0.9, 2.6, gaw) * (1.0 - 0.45 * gnt * gonn);
+  float gup = smoothstep(3.0, 7.5, gaw) * (1.0 - 0.8 * gnt * gonn);
+  gn = mix(gn, max(gn, 0.32), gup);
+  float gh0 = -0.45 + 0.5 * gbank + gwall * (0.35 + 0.8 * gs) + gup * (0.5 + 0.9 * gs);
+  gh0 += (0.15 + 0.5 * gwall + 1.3 * gup) * (gn - 0.35) * (0.7 + 0.3 * gs);
+  vec2 glq = gp * 2.0 + vec2(0.61, 0.23);
+  vec3 gln = fj_noised(glq);
+  gh0 += (gln.x - 0.5) * 0.07 * gbank;
+  float gt = (gh0 + 0.3 * gn) * 2.5;
+  float gtf = fract(gt);
+  float gter = (gt - gtf + smoothstep(0.1, 0.9, gtf)) / 2.5 - 0.3 * gn;
+  return mix(gh0, gter, 0.45 * gwall * (1.0 - gup * 0.6) * smoothstep(0.1, 0.6, gh0));
+}}
+vec3 fj_gully(vec2 lp, vec2 ldir) {{
+  vec2 li = floor(lp);
+  vec2 lf = lp - li;
+  vec3 lva = vec3(0.0);
+  float lwt = 0.0;
+  for (int i = -1; i <= 1; i++) {{
+    for (int j = -1; j <= 1; j++) {{
+      vec2 lo = vec2(float(i), float(j));
+      vec2 lc = li + lo;
+      vec2 lc2 = lc + vec2(17.0, 31.0);
+      vec2 lc3 = lc + vec2(5.0, 11.0);
+      vec2 lh = vec2(fj_hash(lc), fj_hash(lc2)) * 0.5;
+      float lk = 0.6 + 0.8 * fj_hash(lc3);
+      vec2 lpp = lf - lo - lh;
+      float ld = dot(lpp, lpp);
+      float lw = exp(-ld * 2.0);
+      lwt += lw;
+      float lmag = dot(lpp, ldir) * 6.2831853 * lk;
+      float lrid = pow(1.0 - abs(cos(lmag)), 1.5);
+      lva += vec3(lrid, -sin(lmag) * ldir * lk) * lw;
+    }}
+  }}
+  return lva / lwt;
+}}
+float fj_height(float cu, float czr, out float cmat) {{
+  float ce = 0.06;
+  float ch0 = fj_base(cu, czr);
+  float chu = fj_base(cu + ce, czr);
+  float chz = fj_base(cu, czr + ce);
+  vec2 cg = vec2(chu - ch0, chz - ch0) / ce;
+  float cslope = length(cg);
+  vec2 cp = vec2(cu, q4 + czr) * 1.5;
+  vec2 cdir = vec2(cg.y, -cg.x) / max(cslope, 0.001) * 1.1;
+  vec3 cacc = vec3(0.0);
+  float cam = 0.5;
+  float cf = 1.0;
+  for (int k = 0; k < 3; k++) {{
+    vec2 cpk = cp * cf;
+    vec2 cdk = cdir + cacc.zy * vec2(1.0, -1.0) * 0.35;
+    vec3 cgl = fj_gully(cpk, cdk);
+    cacc += cgl * cam * vec3(1.0, cf, cf);
+    cam *= 0.42;
+    cf *= 2.0;
+  }}
+  vec2 cmq = vec2(cu, q4 + czr) * 0.25 + vec2(0.43, 0.17);
+  vec3 cmn = fj_noised(cmq);
+  float cgate = smoothstep(0.32, 0.62, cmn.x);
+  float cstr = smoothstep(0.35, 1.2, cslope) * (0.14 + 0.12 * smoothstep(2.0, 6.0, abs(cu))) * cgate;
+  float cmw = smoothstep(0.4, 1.1, cslope) * cgate;
+  cmat = mix(0.55, clamp(0.5 + (cacc.x - 0.3) * 1.8, 0.0, 1.0), cmw);
+  return ch0 + (cacc.x - 0.3) * cstr;
+}}
+"""
+
+FJ_WARP = FJ_WARP_FUNCS + " shader_body {\n" + f"""
+  vec2 tx = uv_orig * texsize.xy;
+  vec3 outc = vec3(0.0);
+  float dj = floor(tx.y);
+  if (tx.x < {FJ_DW}.0 && dj < {FJ_DH}.0) {{
+    float di = floor(tx.x);
+    float clr = step(frame, 2.5);
+    vec2 duv0 = fj_duv(di, dj);
+    float fcur = 0.0;
+    for (int k = 0; k < 6; k++) {{
+      float fq = 40.0 * pow(350.0, (di - 0.5 + (float(k) + 0.5) / 6.0) / {FJ_NB - 1}.0);
+      fcur += get_fft_hz(fq);
+    }}
+    fcur /= 6.0;
+    vec2 agcuv = fj_duv(di, 0.0);
+    vec3 agc = fj_tex(agcuv);
+    float favg = exp2(fj_dec(agc.xy) * 18.0 - 14.0);
+    float fval = fcur / max(favg, 0.001);
+    if (dj < 0.5) {{
+      float fnew = mix(favg, fcur, q18);
+      fnew = mix(fnew, 0.05, clr);
+      outc = vec3(fj_enc((log2(max(fnew, 0.0001)) + 14.0) / 18.0), 0.0);
+    }} else {{
+      vec2 penduv = fj_duv(di, 1.0);
+      vec3 pend = fj_tex(penduv);
+      float ffol = fj_dec(pend.xy) * {FJ_SMAX};
+      float fgo = min(fval, {FJ_SMAX});
+      float frate = fgo > ffol ? q23 : q24;
+      float fnew = ffol + (fgo - ffol) * frate;
+      vec3 fresh = vec3(fj_enc(fnew / {FJ_SMAX}), 0.0);
+      vec3 keep = fj_tex(duv0);
+      vec2 prevuv = fj_duv(di, dj - 1.0);
+      vec3 older = fj_tex(prevuv);
+      vec3 wiped = vec3(fj_enc({FJ_SBASE / FJ_SMAX}), 0.0);
+      if (dj < 1.5) {{
+        outc = fresh;
+      }} else if (dj < 2.5) {{
+        outc = q1 > 0.5 ? fresh : keep;
+      }} else {{
+        outc = q1 > 0.5 ? older : keep;
+      }}
+      outc = mix(outc, wiped, clr);
+    }}
+  }} else {{
+    float cw = fj_cw();
+    float chh = fj_ch();
+    float cxl = tx.x - {FJ_DW + 1}.0;
+    if (cxl >= 0.0 && cxl < cw && tx.y < chh) {{
+      float cb = cxl / cw;
+      float ca = tx.y / chh;
+      float cap = 2.0 * ca - 1.0;
+      float cu = {FJ_U} * cap * ({FJ_UC} + {1 - FJ_UC:.4f} * abs(cap));
+      float czr = -{FJ_ZB} + {FJ_ZL} * pow(cb, {FJ_ZP});
+      float cmat;
+      float ch = fj_height(cu, czr, cmat);
+      outc = vec3(fj_enc((ch - {FJ_HMIN}) / {FJ_HMAX - FJ_HMIN}), cmat);
+    }}
+  }}
+  ret = outc;
+ }}"""
+
+FJ_COMP_FUNCS = FJ_COMMON + f"""
+vec2 fj_cuv(float qu, float qzr) {{
+  float qcw = fj_cw();
+  float qch = fj_ch();
+  float qa = min(abs(qu) / {FJ_U}, 1.0);
+  float qap = (sqrt({FJ_UC * FJ_UC:.6f} + {4 * (1 - FJ_UC):.4f} * qa) - {FJ_UC}) / {2 * (1 - FJ_UC):.4f};
+  float qca = 0.5 + 0.5 * sign(qu) * qap;
+  float qcb = pow(clamp((qzr + {FJ_ZB}) / {FJ_ZL}, 0.0, 1.0), {1 / FJ_ZP:.6f});
+  return vec2(({FJ_DW + 1}.0 + clamp(qcb * qcw, 0.5, qcw - 0.5)) * texsize.z, clamp(qca * qch, 0.5, qch - 0.5) * texsize.w);
+}}
+float fj_h(vec3 hq3) {{
+  float hu = hq3.x - fj_path(hq3.z);
+  float hzr = hq3.z - q4;
+  vec2 huv = fj_cuv(hu, hzr);
+  vec3 hc = fj_tex(huv);
+  return {FJ_HMIN} + {FJ_HMAX - FJ_HMIN} * fj_dec(hc.xy);
+}}
+vec3 fj_hs(vec3 sp) {{
+  float su = sp.x - fj_path(sp.z);
+  float szr = sp.z - q4;
+  vec2 suv = fj_cuv(su, szr);
+  vec2 sc = suv * texsize.xy - 0.5;
+  sc = clamp(sc, vec2({FJ_DW + 2}.0, 1.0), vec2({FJ_DW + 1}.0 + fj_cw() - 3.0, fj_ch() - 3.0));
+  vec2 sbase = vec2(0.0);
+  vec3 sv = fj_bspline(sc, sbase);
+  return vec3({FJ_HMIN} + {FJ_HMAX - FJ_HMIN} * fj_dec(sv.xy), sv.z, su);
+}}
+vec3 fj_nrm(vec3 np, float ne, out float nmat) {{
+  vec3 nh0 = fj_hs(np);
+  nmat = nh0.y;
+  vec3 npx = np + vec3(ne, 0.0, 0.0);
+  vec3 npz = np + vec3(0.0, 0.0, ne);
+  vec3 nhx = fj_hs(npx);
+  vec3 nhz = fj_hs(npz);
+  return normalize(vec3(-(nhx.x - nh0.x) / ne, 1.0, -(nhz.x - nh0.x) / ne));
+}}
+vec2 fj_detail(vec2 dq) {{
+  vec2 dx = dq * 1.5;
+  vec2 dg = vec2(0.0);
+  float dam = 1.5;
+  mat2 djm = mat2(1.5, 0.0, 0.0, 1.5);
+  for (int k = 0; k < 4; k++) {{
+    vec3 dn = fj_noised(dx);
+    dg += dam * (dn.yz * djm);
+    dam *= 0.42;
+    dx = vec2(2.0 * dx.x - dx.y, dx.x + 2.0 * dx.y) + vec2(0.37, 0.71);
+    djm = mat2(2.0, 1.0, -1.0, 2.0) * djm;
+  }}
+  return dg;
+}}
+vec3 fj_sun() {{
+  return normalize(vec3(sin(q15) * cos(q16), sin(q16), cos(q15) * cos(q16)));
+}}
+float fj_gold() {{
+  return smoothstep(0.32, 0.04, q16) * (1.0 - q9);
+}}
+vec3 fj_airmass() {{
+  float am = 1.0 / max(sin(max(q16, 0.0)) + 0.02, 0.03);
+  vec3 at = exp(-vec3(0.018, 0.05, 0.11) * am);
+  return at / max(at.r, 0.05) * mix(1.0, at.r, 0.5);
+}}
+vec3 fj_suncol() {{
+  float kgw = fj_gold();
+  vec3 kbase = mix(NOKKVI_TEXT, NOKKVI_HIGHLIGHT, 0.25);
+  kbase = mix(kbase, mix(NOKKVI_WARM, NOKKVI_TEXT, 0.4), kgw * 0.5);
+  vec3 kday = kbase * fj_airmass() * 3.6;
+  vec3 kmc = mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.35) * 0.75;
+  return mix(kday, kmc, q9) * (0.92 + 0.16 * q20);
+}}
+vec3 fj_ambient() {{
+  vec3 aday = (NOKKVI_ACCENT * 0.35 + NOKKVI_SURFACE * 0.5 + vec3(0.05)) * 1.3;
+  vec3 agold = NOKKVI_ACCENT * 0.3 + NOKKVI_WARM * 0.2 + NOKKVI_SURFACE * 0.4;
+  vec3 anight = NOKKVI_BG * 0.9 + NOKKVI_ACCENT * (0.08 + 0.14 * q27);
+  float agw = fj_gold();
+  return mix(mix(aday, agold, agw), anight, q9);
+}}
+vec3 fj_skybase(vec3 kd, vec3 ksun) {{
+  float ky = max(kd.y, 0.0);
+  float kgw = fj_gold();
+  vec3 kzen = mix(NOKKVI_BG * 0.9 + NOKKVI_ACCENT * 0.12, NOKKVI_BG * 0.7 + NOKKVI_ACCENT * 0.1 + NOKKVI_WARM * 0.05, kgw);
+  vec3 khor = mix(NOKKVI_WARM, NOKKVI_ACCENT, 0.45) * 0.55 + NOKKVI_SURFACE * 0.45 + vec3(0.03);
+  khor = mix(khor, NOKKVI_WARM * 0.9 + NOKKVI_HIGHLIGHT * 0.25, kgw * 0.8);
+  vec3 kc = mix(khor, kzen, pow(ky, 0.5));
+  vec3 knight = mix(NOKKVI_BG * 0.35 + NOKKVI_ACCENT * 0.04, NOKKVI_BG * 0.18, pow(ky, 0.4));
+  kc = mix(kc, knight, q9);
+  float kdot = max(dot(kd, ksun), 0.0);
+  vec3 kglow = mix(NOKKVI_HIGHLIGHT, NOKKVI_WARM, 0.4 + 0.4 * kgw) * fj_airmass();
+  kc += kglow * (pow(kdot, 6.0) * (0.3 + 0.5 * kgw) + pow(kdot, 48.0) * 0.5) * (1.0 - q9);
+  kc += mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.3) * pow(kdot, 30.0) * 0.12 * q9;
+  return kc;
+}}
+float fj_hash2(vec2 hp) {{
+  vec3 h3 = fract(vec3(hp.xyx) * 0.1031);
+  h3 += dot(h3, h3.yzx + 33.33);
+  return fract((h3.x + h3.y) * h3.z);
+}}
+vec3 fj_aurora(vec3 ad) {{
+  vec3 aacc = NOKKVI_ACCENT * 0.035 * exp(-max(ad.y, 0.0) * 7.0) * (0.5 + 0.5 * q27);
+  if (ad.y < 0.012) return aacc;
+  vec3 alow = NOKKVI_ACCENT * 1.1 + NOKKVI_HIGHLIGHT * 0.3;
+  vec3 ahigh = mix(NOKKVI_WARM, NOKKVI_ACCENT, 0.35) * 0.7;
+  vec2 ajq = floor(ad.xy * 3000.0);
+  float ajit = fj_hash2(ajq);
+  for (int i = 0; i < 16; i++) {{
+    float afi = float(i) + ajit;
+    float ahg = 20.0 + afi * 1.7;
+    float att = (ahg - q8) / ad.y;
+    vec2 axz = vec2(q7 + ad.x * att, ad.z * att);
+    float acz = 120.0 + 28.0 * sin(axz.x * 0.012 + q28 * 0.035) + 9.0 * sin(axz.x * 0.043 - q28 * 0.06 + 1.3)
+              + 3.0 * sin(axz.x * 0.11 + q28 * 0.2);
+    float add = axz.y - acz;
+    float acv = exp(-add * add * 0.03);
+    float acz2 = 175.0 + 30.0 * sin(axz.x * 0.009 - q28 * 0.03 + 2.0) + 7.0 * sin(axz.x * 0.05 + q28 * 0.05);
+    float add2 = axz.y - acz2;
+    acv += 0.7 * exp(-add2 * add2 * 0.02);
+    vec2 arq = vec2(axz.x * 0.5, q28 * 0.35 + afi * 0.02);
+    vec3 arn = fj_noised(arq);
+    vec2 arq2 = vec2(axz.x * 1.5 + 3.1, q28 * 0.9);
+    vec3 arn2 = fj_noised(arq2);
+    float arays = 0.25 + 0.75 * arn.x * (0.45 + 0.55 * arn2.x);
+    float ahp = afi / 15.0;
+    float aprof = exp(-ahp * 2.6) * smoothstep(0.0, 0.1, ahp + 0.03);
+    float abi = 1.0 + clamp(0.5 + axz.x / 220.0, 0.0, 1.0) * {FJ_NB - 3}.0;
+    vec2 abuv = fj_duv(abi, 1.0);
+    vec3 abt = fj_tex(abuv);
+    float aspec = fj_dec(abt.xy) * {FJ_SMAX};
+    vec3 acol = mix(alow, ahigh, smoothstep(0.1, 0.8, ahp));
+    aacc += acol * acv * arays * aprof * (0.12 + 0.5 * aspec * aspec) * 0.2;
+  }}
+  return aacc;
+}}
+vec3 fj_sky(vec3 kd, vec3 ksun, float kcl) {{
+  vec3 kc = fj_skybase(kd, ksun);
+  float kdot = max(dot(kd, ksun), 0.0);
+  kc += NOKKVI_TEXT * fj_airmass() * smoothstep(0.99985, 0.99992, kdot) * 5.0 * (1.0 - q9);
+  kc += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.5) * fj_airmass() * pow(kdot, 900.0) * 0.8 * (1.0 - q9);
+  float kmoon = smoothstep(0.99982, 0.99990, kdot);
+  vec2 kmq = vec2(kd.x * 900.0, kd.y * 900.0);
+  vec3 kmn = fj_noised(kmq);
+  kc = mix(kc, mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.15) * (0.8 + 0.3 * kmn.x), kmoon * q9);
+  float kcy = max(kd.y, 0.01);
+  if (q9 > 0.5) {{
+    vec2 ksg = vec2(atan(kd.x, kd.z), kd.y) * 170.0;
+    vec2 ksc = floor(ksg);
+    float ksh = fj_hash2(ksc + vec2(301.0, 173.0));
+    vec2 ksj = vec2(fj_hash2(ksc + vec2(11.0, 7.0)), fj_hash2(ksc + vec2(5.0, 19.0)));
+    float ksd = length(ksg - ksc - 0.25 - 0.5 * ksj);
+    float kst = step(0.985, ksh) * smoothstep(0.35, 0.0, ksd) * (0.5 + 0.5 * sin(q28 * 7.0 + ksh * 90.0));
+    kc += NOKKVI_TEXT * kst * 0.7 * smoothstep(0.02, 0.2, kd.y) * (1.0 - kmoon);
+    kc += fj_aurora(kd);
+  }}
+  if (kcl > 0.5) {{
+    float kt = (22.0 - q8) / kcy;
+    vec2 kq = vec2(q7 + kd.x * kt, kd.z * kt) * 0.03125 + vec2(0.0, q25);
+    float kn = 0.0;
+    float kna = 0.5;
+    for (int k = 0; k < 4; k++) {{
+      vec3 knn = fj_noised(kq);
+      kn += kna * knn.x;
+      kna *= 0.5;
+      kq = vec2(2.0 * kq.x - kq.y, kq.x + 2.0 * kq.y) + vec2(0.13, 0.29);
+    }}
+    float kcov = smoothstep(0.42 + 0.12 * q9, 0.78, kn) * smoothstep(0.02, 0.25, kd.y);
+    vec3 kcc = mix(NOKKVI_SURFACE * 0.8 + NOKKVI_BG * 0.4, fj_suncol() * 0.4, 0.25 + 0.5 * pow(kdot, 3.0));
+    kcc = mix(kcc, mix(NOKKVI_WARM, NOKKVI_HIGHLIGHT, 0.4) * fj_airmass() * 1.1, fj_gold() * (0.3 + 0.5 * pow(kdot, 2.0)));
+    kcc = mix(kcc, NOKKVI_BG * 0.3 + fj_suncol() * 0.12, q9);
+    kc = mix(kc, kcc, kcov * (0.85 - 0.35 * q9));
+  }}
+  return kc;
+}}
+float fj_shadow(vec3 so, vec3 sd, float sj) {{
+  float sres = 1.0;
+  float st = 0.02 + 0.06 * sj;
+  for (int k = 0; k < 32; k++) {{
+    vec3 wp = so + sd * st;
+    float sdh = wp.y - fj_h(wp);
+    sres = min(sres, 8.0 * sdh / st);
+    if (sres < 0.0) break;
+    if (wp.y > {FJ_HMAX}) break;
+    st += clamp(sdh * 0.5, 0.03 + 0.03 * sj, 0.9);
+  }}
+  return smoothstep(0.0, 1.0, clamp(sres, 0.0, 1.0));
+}}
+vec3 fj_rock(vec3 rp, vec3 rn, float rpu, float rmat) {{
+  vec2 rv = vec2(rpu, rp.z) * 0.25;
+  vec3 rvn = fj_noised(rv);
+  float rq = fract(rp.y * 0.42 + 0.3 * rvn.x + q22);""" + ramp("rr", "rq") + f"""
+  float rl = dot(rr, vec3(0.3, 0.5, 0.2));
+  vec3 rs = mix(vec3(rl), rr, 0.5);
+  vec3 ra = mix(NOKKVI_SURFACE + vec3(0.05), rs, 0.6);
+  ra *= 0.22 / max(dot(ra, vec3(0.3, 0.5, 0.2)), 0.02);
+  float rsteep = smoothstep(0.85, 0.45, rn.y);
+  float rbl = smoothstep(-0.15, 0.15, abs(rn.x) - abs(rn.z));
+  vec2 rsq = vec2(rp.z * 3.0, rp.y * 0.5);
+  vec3 rsn1 = fj_noised(rsq);
+  vec2 rsq2 = vec2(rp.z * 9.0, rp.y * 1.5 + 0.3);
+  vec3 rsn2 = fj_noised(rsq2);
+  vec2 rsq3 = vec2(rpu * 3.0 + 0.5, rp.y * 0.5);
+  vec3 rsn3 = fj_noised(rsq3);
+  vec2 rsq4 = vec2(rpu * 9.0 + 0.5, rp.y * 1.5 + 0.3);
+  vec3 rsn4 = fj_noised(rsq4);
+  float rstreak = mix(rsn3.x * 0.6 + rsn4.x * 0.4, rsn1.x * 0.6 + rsn2.x * 0.4, rbl);
+  ra *= mix(1.0, 0.6 + 0.8 * rstreak, rsteep);
+  ra *= 0.8 + 0.4 * rmat;
+  float rflat = smoothstep(0.72, 0.9, rn.y) * smoothstep(0.05, 0.3, rp.y);
+  vec3 rveg = mix(NOKKVI_ACCENT, NOKKVI_SURFACE, 0.55);
+  rveg *= 0.13 / max(dot(rveg, vec3(0.3, 0.5, 0.2)), 0.02);
+  ra = mix(ra, rveg, rflat * 0.55);
+  float rsn = smoothstep(2.4, 3.4, rp.y + 0.35 * sin(rp.x * 2.1 + rp.z * 1.693504)) * smoothstep(0.5, 0.75, rn.y);
+  ra = mix(ra, NOKKVI_TEXT * 0.75, rsn);
+  ra *= mix(0.4, 1.0, smoothstep(0.0, 0.15, rp.y));
+  return ra;
+}}
+vec3 fj_lit(vec3 lp, vec3 ln, float lpu, float lmat, vec3 lsun, float lsh, float lao, vec3 lrd) {{
+  vec3 la = fj_rock(lp, ln, lpu, lmat);
+  float ldif = max(dot(ln, lsun), 0.0);
+  vec3 lsky = fj_ambient();
+  vec3 lbd = normalize(vec3(-lsun.x, 0.0, -lsun.z));
+  float lbn = max(dot(ln, lbd), 0.0);
+  vec3 lsc = fj_suncol();
+  vec3 lcol = la * (lsc * ldif * lsh + lsky * (0.55 + 0.45 * ln.y) * lao + NOKKVI_WARM * lbn * 0.15 * lao);
+  float lwet = 1.0 - smoothstep(0.02, 0.16, lp.y);
+  vec3 lhv = normalize(lsun - lrd);
+  float lspc = pow(max(dot(ln, lhv), 0.0), 60.0) * lsh * lwet * 0.6;
+  return lcol + lsc * lspc;
+}}
+vec3 fj_fog(vec3 fc, vec3 fd, float ft, float fy, vec3 fsun) {{
+  vec3 fdh = normalize(vec3(fd.x, 0.03, fd.z));
+  vec3 fh = fj_skybase(fdh, fsun);
+  float fdot = max(dot(fd, fsun), 0.0);
+  fh += mix(NOKKVI_HIGHLIGHT, NOKKVI_WARM, 0.5 + 0.3 * fj_gold()) * fj_airmass() * pow(fdot, 5.0) * (0.35 + 0.4 * fj_gold()) * (1.0 - q9);
+  float fyav = max(0.5 * (q8 + fy), 0.0);
+  float fa = max(1.0 - exp(-ft * 0.03 * exp(-fyav * 0.22)), smoothstep({FJ_ZL - FJ_ZB - 32.0}, {FJ_ZL - FJ_ZB - 3.0}, ft));
+  float fmt = min(ft, 14.0) * 0.5;
+  vec2 fmq = vec2(q7 + fd.x * fmt, q4 + fd.z * fmt) * 0.25 + vec2(q19 * 0.1, 0.0);
+  vec3 fmn = fj_noised(fmq);
+  float fm = exp(-max(fy, 0.0) * 2.2) * (1.0 - exp(-ft * 0.06)) * (0.5 - 0.15 * fj_gold()) * (0.45 + 1.1 * fmn.x);
+  return mix(fc, fh, clamp(fa + fm, 0.0, 1.0));
+}}
+vec2 fj_ripple(vec2 wq) {{
+  vec2 wq1 = wq * 1.75 + vec2(0.0, q19 * 0.7);
+  vec2 wq2 = vec2(4.0 * wq.x - wq.y, wq.x + 4.0 * wq.y) + vec2(q19 * 1.1, -q19 * 0.4);
+  vec3 wn1 = fj_noised(wq1);
+  vec3 wn2 = fj_noised(wq2);
+  vec2 wg2 = vec2(4.0 * wn2.y + wn2.z, -wn2.y + 4.0 * wn2.z);
+  return wn1.yz * 1.75 * 0.6 + wg2 * 0.12;
+}}
+"""
+
+FJ_COMP = FJ_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
+  vec2 p = (uv - 0.5) * s;
+  vec3 ro = vec3(q7, q8, q4);
+  vec3 fw = normalize(vec3(q10, q11, q12));
+  vec3 upr = vec3(sin(q13), cos(q13), 0.0);
+  vec3 rt = normalize(cross(upr, fw));
+  vec3 up = cross(fw, rt);
+  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * q14);
+  vec3 sun = fj_sun();
+  vec2 jpx = floor(uv * texsize.xy);
+  float jit = fj_hash2(jpx);
+  float tw = rd.y < -0.0001 ? -ro.y / rd.y : 1e9;
+  float tmax = min(tw, 90.0);
+  float t = 0.03;
+  float tp = t;
+  float hit = 0.0;
+  float mdh = 1.0;
+  for (int i = 0; i < 220; i++) {{
+    vec3 mp = ro + rd * t;
+    float mhn = 0.0;
+    if (t < 6.0) {{
+      vec3 mhs = fj_hs(mp);
+      mhn = mhs.x;
+    }} else {{
+      mhn = fj_h(mp);
+    }}
+    mdh = mp.y - mhn;
+    if (mdh < 0.0) {{ hit = 1.0; break; }}
+    tp = t;
+    t += clamp(mdh * 0.3, 0.004 + 0.004 * t, 0.25 + 0.03 * t);
+    if (t > tmax) break;
+    if (mp.z - q4 > {FJ_ZL - FJ_ZB - 2.0}) break;
+  }}
+  vec3 tend = ro + rd * t;
+  hit = max(hit, step(t, tmax) * step(mdh, 0.05 + 0.01 * t) * step(tend.z - q4, {FJ_ZL - FJ_ZB - 2.0}));
+  if (hit > 0.5) {{
+    float ta = tp;
+    float tb = t;
+    for (int k = 0; k < 7; k++) {{
+      float tm = 0.5 * (ta + tb);
+      vec3 bp = ro + rd * tm;
+      vec3 bhs = fj_hs(bp);
+      float bdh = bp.y - bhs.x;
+      tb = bdh < 0.0 ? tm : tb;
+      ta = bdh < 0.0 ? ta : tm;
+    }}
+    t = 0.5 * (ta + tb);
+  }}
+  vec3 col = fj_sky(rd, sun, 1.0);
+  vec3 wq0 = ro + rd * tw;
+  vec3 wqs = fj_hs(wq0);
+  float shore = (1.0 - hit) * step(tw, 1e8) * step(0.0, wqs.x);
+  t = shore > 0.5 ? tw : t;
+  hit = max(hit, shore);
+  if (hit > 0.5) {{
+    vec3 pos = ro + rd * t;
+    float e = 0.025 + 0.004 * t;
+    float pmat;
+    vec3 n = fj_nrm(pos, e, pmat);
+    float pu = pos.x - fj_path(pos.z);
+    vec2 dq = vec2(pu, pos.z) * 1.0;
+    vec2 dg = fj_detail(dq);
+    float damp = (0.03 + 0.07 * smoothstep(0.95, 0.5, n.y)) * exp(-t * 0.07);
+    n = normalize(n + vec3(-dg.x, 0.0, -dg.y) * damp);
+    float aor = 0.0;
+    for (int k = 0; k < 4; k++) {{
+      float aoa = float(k) * 1.5707963 + 0.4;
+      vec3 aop1 = pos + vec3(cos(aoa), 0.0, sin(aoa)) * 0.5;
+      vec3 aop2 = pos + vec3(cos(aoa + 0.785), 0.0, sin(aoa + 0.785)) * 1.6;
+      aor += (fj_h(aop1) - pos.y) * 0.9 + (fj_h(aop2) - pos.y) * 0.3;
+    }}
+    float ao = clamp(1.0 - max(aor, 0.0) * 0.22, 0.25, 1.0);
+    vec3 spos = pos + n * 0.02;
+    float sh = fj_shadow(spos, sun, jit);
+    col = fj_lit(pos, n, pu, pmat, sun, sh, ao, rd);
+    col = fj_fog(col, rd, t, pos.y, sun);
+  }} else if (tw < 1e8) {{
+    vec3 wp = ro + rd * tw;
+    float wfade = exp(-tw * 0.05);
+    vec2 wg0 = fj_ripple(wp.xz);
+    vec2 wf2 = normalize(rd.xz + vec2(0.00001, 0.0));
+    vec2 wl2 = vec2(-wf2.y, wf2.x);
+    vec2 wg = wf2 * dot(wg0, wf2) + wl2 * dot(wg0, wl2) * 0.35;
+    float wa = (0.012 + 0.03 * wfade) / (1.0 + 0.15 * tw);
+    vec2 rg = vec2(0.0);
+    for (int k = 0; k < 2; k++) {{
+      float rage = k == 0 ? q29 : q31;
+      float rzz = k == 0 ? q30 : q32;
+      float rcx = fj_path(rzz) + (fract(rzz * 7.13) - 0.5) * 0.7;
+      vec2 rdv = vec2(wp.x - rcx, mod(wp.z - rzz + 128.0, 256.0) - 128.0);
+      float rgr = length(rdv) + 0.0001;
+      float rx = rgr - (0.15 + 1.2 * rage);
+      float ramp = exp(-rage * 1.3) * step(rage, 4.0) * 0.02;
+      float rg0 = exp(-rx * rx * 25.0);
+      float rdr = (-30.0 * sin(rx * 30.0) - 50.0 * rx * cos(rx * 30.0)) * rg0 * ramp;
+      rg += rdv / rgr * rdr;
+    }}
+    vec3 wn = normalize(vec3(-(wg.x * wa + rg.x), 1.0, -(wg.y * wa + rg.y)));
+    vec3 rfd = reflect(rd, wn);
+    rfd.y = abs(rfd.y);
+    float rt2 = 0.03;
+    float rtp = rt2;
+    float rhit = 0.0;
+    float rdh = 1.0;
+    for (int i = 0; i < 90; i++) {{
+      vec3 rp = wp + rfd * rt2;
+      rdh = rp.y - fj_h(rp);
+      if (rdh < 0.0) {{ rhit = 1.0; break; }}
+      rtp = rt2;
+      rt2 += clamp(rdh * 0.35, 0.01 + 0.006 * rt2, 0.4 + 0.03 * rt2);
+      if (rt2 > 70.0) break;
+      if (rp.y > {FJ_HMAX}) break;
+    }}
+    vec3 refl = fj_sky(rfd, sun, 1.0);
+    if (rhit > 0.5) {{
+      float ra2 = rtp;
+      float rb2 = rt2;
+      for (int k = 0; k < 6; k++) {{
+        float rm2 = 0.5 * (ra2 + rb2);
+        vec3 rbp = wp + rfd * rm2;
+        float rbd = rbp.y - fj_h(rbp);
+        rb2 = rbd < 0.0 ? rm2 : rb2;
+        ra2 = rbd < 0.0 ? ra2 : rm2;
+      }}
+      rt2 = 0.5 * (ra2 + rb2);
+      vec3 rpos = wp + rfd * rt2;
+      float rmat;
+      vec3 rn = fj_nrm(rpos, 0.05, rmat);
+      float rpu = rpos.x - fj_path(rpos.z);
+      vec3 rsp = rpos + rn * 0.03;
+      float rsh = fj_shadow(rsp, sun, jit);
+      refl = fj_lit(rpos, rn, rpu, rmat, sun, rsh, 0.8, rfd);
+      refl = fj_fog(refl, rfd, rt2 + tw, rpos.y, sun);
+    }}
+    float wc = max(dot(-rd, wn), 0.0);
+    float fre = 0.02 + 0.98 * pow(1.0 - wc, 5.0);
+    float bed = fj_h(wp);
+    float wdep = max(-bed, 0.0);
+    vec3 deep = NOKKVI_BG * 0.3 + NOKKVI_ACCENT * 0.07;
+    vec3 wsh3 = wp + vec3(0.0, 0.01, 0.0);
+    float wsh = fj_shadow(wsh3, sun, jit);
+    vec3 wup = vec3(0.0, 1.0, 0.0);
+    float wpu = wp.x - fj_path(wp.z);
+    vec3 shallow = fj_rock(wp, wup, wpu, 0.5) * (fj_suncol() * wsh * 0.35 + fj_ambient() * 0.6);
+    vec3 under = mix(shallow, deep, 1.0 - exp(-wdep * 5.0));
+    col = mix(under, refl, fre);
+    float wdp = max(-wqs.x, 0.0);
+    vec2 wfq = vec2(wp.x * 4.0, wp.z * 4.0 + q19 * 0.4);
+    vec3 wfn = fj_noised(wfq);
+    float foam = smoothstep(0.04, 0.0, wdp) * (0.35 + 0.65 * wfn.x) * exp(-tw * 0.04);
+    col = mix(col, fj_suncol() * wsh * 0.16 + fj_ambient() * 0.3, foam * 0.6);
+    float gl = pow(max(dot(rfd, sun), 0.0), 350.0) * (1.5 + 2.0 * q21);
+    col += fj_suncol() * gl * wsh;
+    col = fj_fog(col, rd, tw, 0.0, sun);
+  }}
+  col *= 1.05 + 0.45 * q9;
+  col = clamp((col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14), 0.0, 1.0);
+  col *= 0.8 + 0.2 * smoothstep(1.45, 0.35, length(p));
+  ret = col;
+ }}"""
+
+FJ_ACTS = [
+    (0.14, 4.0, 0.05, 0.10, 1.00),
+    (0.55, 5.0, 0.25, 0.20, 0.95),
+    (1.60, 7.0, 0.55, 0.25, 0.90),
+    (3.00, 9.0, 1.00, 0.25, 0.85),
+]
+def fj_act_pick(var, col):
+    e = f"{FJ_ACTS[-1][col]}"
+    for i in range(len(FJ_ACTS) - 2, -1, -1):
+        e = f"if(equal(act, {i}), {FJ_ACTS[i][col]}, {e})"
+    return f"{var} = {e};\n"
+def fj_path_eel(z, out):
+    return f"{out} = {FJ_A1} * sin({FJ_W1:.9f} * ({z})) + {FJ_A2} * sin({FJ_W2:.9f} * ({z}) + 1.7);\n"
+
+FJ_INIT = ("pulse = 0; pop = 0; dist = 0; lastrow = 0; " + SPEED_INIT + " " + BEATS_INIT +
+           " act = int(rand(4)); acttm = 12; alt = 0.5; alt_m = 0.5; lk = 5; lk_m = 5; lkh = 0.3; lkh_m = 0.3;"
+           " lat = 0.1; lat_m = 0.1; fov = 1; fov_m = 1; bank = 0; bank_m = 0; lsm = 1; flow = 0; hue = 0; vis = -1; vt = 0; aur = 1; fsp = 1; fsp_m = 1; rcool = 0; rslot = 0; ra1 = 9; ra2 = 9; rz1 = 0; rz2 = 0; gside = 1;")
+FJ_FRAME = (PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED
+    + ease("fsp", "spd + 0.55 * sg", "0.12")
+    + f"dstep = min(fsp * 1.1 * dt, {FJ_DZ * 0.93});\n"
+    "dist = dist + dstep;\n"
+    f"rowf = dist / {FJ_DZ}; rowi = int(rowf);\n"
+    "wfl = above(rowi, lastrow); lastrow = rowi;\n"
+    f"q1 = wfl; q2 = {FJ_AHEAD} + rowi - rowf;\n"
+    "zc = dist - 256 * int(dist / 256); q4 = zc;\n"
+    + BEATS +
+    "agt = min(10, 0.3 + frame / 60 * 0.8); q18 = 1 - exp(-dt / agt);\n"
+    "q23 = 1 - exp(-dt / 0.07); q24 = 1 - exp(-dt / 0.45);\n"
+    "cld = dist * 0.03125 + time * 0.02; q25 = cld - 64 * int(cld / 64);\n"
+    "acttm = acttm - dt; chg = below(acttm, 0);\n"
+    "act = if(chg, (act + 1 + int(rand(3))) % 4, act);\n"
+    "acttm = if(chg, 14 + rand(1000) / 1000 * 8, acttm);\n"
+    + fj_act_pick("altg", 0) + fj_act_pick("lkg", 1) + fj_act_pick("lkhg", 2) + fj_act_pick("latg", 3)
+    + fj_act_pick("fovg", 4)
+    + ease("alt", "altg", "3.0") + ease("lk", "lkg", "3.0") + ease("lkh", "lkhg", "3.0")
+    + ease("lat", "latg", "3.0") + ease("fov", "fovg", "3.0")
+    + fj_path_eel("zc", "cxp")
+    + "q7 = cxp + lat * sin(time * 0.13); q8 = alt + 0.03 * sin(time * 0.31);\n"
+    + fj_path_eel("zc + lk", "cxt")
+    + "fx = cxt - q7; fy = lkh - q8; fz = lk;\n"
+      "fl = sqrt(fx * fx + fy * fy + fz * fz); q10 = fx / fl; q11 = fy / fl; q12 = fz / fl;\n"
+    "bz = zc + 0.5 * lk + 1.1 * spd * 3.0;\n"
+    f"curv = -({FJ_A1 * FJ_W1 ** 2:.9f} * sin({FJ_W1:.9f} * bz) + {FJ_A2 * FJ_W2 ** 2:.9f} * sin({FJ_W2:.9f} * bz + 1.7));\n"
+    + ease("bank", "curv * 5", "1.5")
+    + "q13 = bank;\n"
+      "q14 = fov * (1 + 0.04 * min(fsp - spd, 2));\n"
+      "vt = vt + dt;\n"
+      "vpick = below(vis, 0) * above(frame, 2);\n"
+      "vh = int(bass * 977 + mid * 631 + treb * 401 + rand(1000));\n"
+      "vis = if(vpick, if(below(vh % 20, 6), 0, if(below(vh % 20, 13), 1, 2)), vis);\n"
+      "vv = max(vis, 0); isgold = equal(vv, 1); q9 = equal(vv, 2);\n"
+      "gside = if(vpick, if(below(vh % 2, 1), -1, 1), gside);\n"
+      "q15 = if(isgold, gside * 0.6 + 0.12 * sin(time * 0.013 + 0.7), 1.0 * sin(time * 0.008 + 1.2) + 0.25 * sin(time * 0.021));\n"
+      "q16 = if(isgold, max(0.2 - vt * 0.0035, 0.035), if(q9, 0.42, 0.38 + 0.04 * sin(time * 0.01)));\n"
+      "q28 = time * 0.25;\n"
+      "aur = aur + (min(mid_att, 2) - aur) * (1 - exp(-dt / 1.5)); q27 = aur * q9;\n"
+      "loud = min((bass_att + mid_att + treb_att) / 3, 2);\n"
+      "lsm = lsm + (loud - lsm) * (1 - exp(-dt / 0.6)); q20 = lsm;\n"
+      "flow = flow + dt * (0.3 + 0.4 * fsp); flow = flow - 640 * int(flow / 640); q19 = flow;\n"
+      "q21 = min(max(treb - treb_att, 0), 1);\n"
+      "rcool = rcool - dt; rtrig = trig * below(rcool, 0); rcool = if(rtrig, 0.45, rcool);\n"
+      "rslot = if(rtrig, 1 - rslot, rslot);\n"
+      "zring = zc + 7 + rand(1000) / 1000 * 4; zring = zring - 256 * int(zring / 256);\n"
+      "ra1 = ra1 + dt; ra2 = ra2 + dt;\n"
+      "r1 = rtrig * equal(rslot, 0); r2 = rtrig * equal(rslot, 1);\n"
+      "ra1 = if(r1, 0, ra1); rz1 = if(r1, zring, rz1); ra2 = if(r2, 0, ra2); rz2 = if(r2, zring, rz2);\n"
+      "q29 = ra1; q30 = rz1; q31 = ra2; q32 = rz2;\n"
+      "hue = hue + dt * 0.004; q22 = hue;\n")
+
+presets["nokkvi - fjord"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, FJ_WARP, FJ_COMP,
+                                  init=FJ_INIT, frame=FJ_FRAME)
+
 presets["nokkvi - black holes"] = black_holes_port(False)
 presets["nokkvi - cover black holes"] = black_holes_port(True)
 presets["nokkvi - maxawow"] = maxawow_port(False)
