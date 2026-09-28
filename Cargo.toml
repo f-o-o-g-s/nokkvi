@@ -107,11 +107,12 @@ libc = "0.2"
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 # MilkDrop visualizer mode: the `particle-milkdrop` renderer (wgpu 29.0.3, the same wgpu iced pins)
 # and its `particle-audio` analyzer, from the project's fork of sho-run/ojodrop: upstream 093e4098
-# plus three patches (branch nokkvi-host-textures): the custom warp pipeline fits the two bind
+# plus four patches (branch nokkvi-prev-comp): the custom warp pipeline fits the two bind
 # groups iced's device grants (`max_bind_groups: 2`), `set_named_texture` lets nokkvi feed a
-# preset the playing album's cover in place (512 px atlas cells), and EEL names match
-# case-insensitively as in MilkDrop (`FLen` is `flen`). `default-features = false`
+# preset the playing album's cover in place (512 px atlas cells), EEL names match
+# case-insensitively as in MilkDrop (`FLen` is `flen`), and a COMP can read its own previous
+# frame (`sampler_prev_comp`, fjord's echo and depth of field). `default-features = false`
 # drops the standalone player (winit/cpal) and the C++ .milk converter: presets load from
 # Butterchurn's pre-converted JSON. Root crate only; data/ and nokkvi-ipc/ stay free of both.
-particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "f7d6807da2b7b858c1f546319c0500e2d81aa154", default-features = false }
-particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "f7d6807da2b7b858c1f546319c0500e2d81aa154", default-features = false }
+particle-milkdrop = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "74a6ee1a2b70af79dfdeca2a495d802cf69e09e4", default-features = false }
+particle-audio = { git = "https://github.com/f-o-o-g-s/ojodrop", rev = "74a6ee1a2b70af79dfdeca2a495d802cf69e09e4", default-features = false }

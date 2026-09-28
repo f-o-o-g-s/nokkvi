@@ -21,6 +21,8 @@ All notable changes to this project will be documented in this file.
 - Each Fjord light leaves a wake on the surface that ripples the reflections of the cliffs and sky.
 - Each visit to Fjord picks a time of day: an overcast day, a low golden-hour sun, or a moonlit night with an aurora.
 - Fjord's aurora brightens with the spectrum and is mirrored in the water.
+- Fjord's distance and sky now blur into a soft, dreamlike glow, as if the camera were focused on the water.
+- Fjord's lights, wakes and ripples leave faint echoes as they move.
 
 ### Changed
 
