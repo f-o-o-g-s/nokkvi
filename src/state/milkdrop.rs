@@ -83,6 +83,11 @@ pub struct MilkdropState {
     /// The switch interval the current timer was armed with; a different
     /// live setting re-arms it.
     pub armed_interval: Option<std::time::Duration>,
+    /// The load of a preset chosen in the picker, until its first frame: if
+    /// it fails, the lock the choice set is released.
+    pub chosen_generation: Option<u64>,
+    /// The preset picker, while open (`update/milkdrop_picker.rs`).
+    pub picker: Option<crate::widgets::milkdrop_picker::MilkdropPickerState>,
 }
 
 impl Default for MilkdropState {
@@ -117,6 +122,8 @@ impl Default for MilkdropState {
             cover_owner: None,
             recolouring: false,
             armed_interval: None,
+            chosen_generation: None,
+            picker: None,
         }
     }
 }

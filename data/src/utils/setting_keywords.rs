@@ -121,6 +121,7 @@ keyword_table! {
         "hotkey.cycle_vis" => &["spectrum", "bars", "lines", "scope", "waveform", "milkdrop"],
         "hotkey.next_preset" => &["milkdrop", "preset", "skip", "visualizer"],
         "hotkey.previous_preset" => &["milkdrop", "preset", "back", "visualizer"],
+        "hotkey.choose_preset" => &["milkdrop", "preset", "picker", "list", "select", "browse"],
         "hotkey.lock_preset" => &["milkdrop", "preset", "hold", "pin", "freeze"],
         "hotkey.toggle_eq_modal" => &["eq", "bands", "tone", "treble", "bass"],
         "hotkey.open_trawl" => &["mix", "trawl", "crate", "builder", "blend", "anchor"],

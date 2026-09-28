@@ -37,7 +37,7 @@ Theater Mode reuses the bar unchanged, translated by `OverflowPin` under a corne
 
 The Visualizer mode icon per mode: Off/Bars `audio-lines`, Lines `audio-waveform`, Scope `radar`, MilkDrop `droplet` (Phosphor `drop-regular`); tooltip and kebab label are the same string ("Visualizer: MilkDrop").
 
-**MilkDrop panel menu rows** (`context_menu::milkdrop_panel_entries`): appended to the Queue cover and Theater panel menus while the mode is MilkDrop — Next Preset (`skip-forward`), Previous Preset (`skip-back`), Lock/Unlock Preset (`lock`/`lock-open`), Favorite/Unfavorite Preset (`heart`), Never Show This Preset (`eye-off` → Phosphor `eye-slash-regular`). Every row, key and the `preset` CLI verb carry one `MilkdropControl` into the same handler.
+**MilkDrop panel menu rows** (`context_menu::milkdrop_panel_entries`): appended to the Queue cover and Theater panel menus while the mode is MilkDrop — Next Preset (`skip-forward`), Previous Preset (`skip-back`), Choose Preset… (`list`, opens the picker), Lock/Unlock Preset (`lock`/`lock-open`), Favorite/Unfavorite Preset (`heart`), Never Show This Preset (`eye-off` → Phosphor `eye-slash-regular`). Every row and key carries one `MilkdropControl` into the same handler; the `preset` CLI verb covers every row except Choose Preset.
 
 Scroll-to-volume on wheel (both music + SFX sliders publish a delta via `on_scroll`). Horizontal volume mode stacks sliders. `Nokkvi::mini_player_artwork()` is the gated resolver that surfaces the cached large-artwork handle only in `MiniPlayer` mode.
 
@@ -80,6 +80,7 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 | Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
 | Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
 | Default Playlist Picker | `default_playlist_picker.rs` | Modal overlay (font-picker pattern) to pick the default playlist; state lives on `Nokkvi.default_playlist_picker` |
+| MilkDrop Preset Picker | `milkdrop_picker.rs` | Modal overlay (default-playlist-picker pattern) over the running visualizer: searchable preset list with a Favorites chip and per-row heart / eye (hide) toggles; state lives on `Nokkvi.milkdrop.picker` |
 | Library Filter Trigger | `library_filter_trigger.rs` | Nav-bar button anchoring the multi-library selector popover. Renders a count badge via `badge_pip::draw_badge_pip` when a subset is active. Auto-hidden on single-library servers. `FILTERED_CHASSIS_WIDTH` const pins the filtered render's wider chassis |
 | Badge Pip | `badge_pip.rs` | Tiny "active-state" pip drawn in the top-right of an icon button. Shared between the kebab `player_modes_menu` and `library_filter_trigger` |
 | Boat | `boat.rs` (+ `boat_physics.rs` / `boat_tests.rs`) | Surfing-boat overlay. CPU-only — reads a shared bar buffer. Two uses: the lines-mode over-cover boat (`boat_overlay(..., None)` — the `None` trail-offset keeps its drop-anchor doodad) and the Harbour Trawl seascape (`harbour_sea::trawl_scene` calls `boat_overlay` with a trail offset for the trawling longship) |
@@ -98,7 +99,7 @@ Custom `iced::advanced` seekable widget. The handle draws in its own `with_layer
 
 ## Modal Frame Style
 
-`theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, `default_playlist_picker`, and `trawl_modal` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
+`theme::modal_frame_style(theme)` returns the `container::Style` for every overlay modal panel — `bg0_hard()` fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners. Routed by `about_modal`, `info_modal`, `eq_modal`, `text_input_dialog`, `default_playlist_picker`, `milkdrop_picker`, and `trawl_modal` so a future tweak (e.g. switching the outline onto `border()` for a chrome-quiet variant) lands at one site.
 
 The settings **font + theme pickers** are the exception: they share their own chrome via `render_picker_modal()` (`src/views/settings/view.rs`) — a dimmed backdrop (press → Escape, wheel → slot Up/Down) behind a centered `bg0_hard()` + 1.5 px `accent()` panel with an X-back title bar, a search bar, and a caller-built slot-list body. `render_font_modal` / `render_theme_modal` differ only in title/placeholder/search-input-id and their row renderer; the theme picker passes `.without_hover_wash()` so each row stays in its own palette (selection shows via a per-row accent ring).
 

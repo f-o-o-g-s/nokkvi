@@ -61,6 +61,14 @@ impl Nokkvi {
             ));
         }
 
+        // The MilkDrop preset picker closes at the same tier (back to the
+        // preset that was on screen when it opened).
+        if self.milkdrop.picker.is_some() {
+            return self.handle_milkdrop_picker(
+                crate::widgets::milkdrop_picker::MilkdropPickerMessage::Close,
+            );
+        }
+
         // Trawl modal closes at the same overlay tier (after the picker — the
         // tiers agree across all three interception points). The crate itself
         // survives; only the editor closes.

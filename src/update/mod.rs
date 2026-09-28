@@ -61,6 +61,7 @@ mod loader_target;
 mod lyrics;
 mod menus;
 pub(crate) mod milkdrop;
+mod milkdrop_picker;
 mod mpris;
 mod navigation;
 mod notifications;
@@ -702,6 +703,7 @@ impl Nokkvi {
             Message::CrossPaneDrag(msg) => self.handle_cross_pane_drag_message(msg),
             Message::Theater(msg) => self.handle_theater(msg),
             Message::Milkdrop(msg) => self.handle_milkdrop(msg),
+            Message::MilkdropPicker(msg) => self.handle_milkdrop_picker(msg),
 
             // -----------------------------------------------------------------
             // Show in File Manager

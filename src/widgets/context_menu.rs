@@ -470,6 +470,15 @@ impl<Message> PanelMenuEntry<Message> {
         }
     }
 
+    /// "Choose Preset…" — MilkDrop: open the preset picker.
+    pub(crate) fn choose_preset(message: Message) -> Self {
+        Self {
+            icon: "assets/icons/list.svg",
+            label: "Choose Preset…",
+            message,
+        }
+    }
+
     /// "Previous Preset" — MilkDrop: go back to the preset before this one.
     pub(crate) fn previous_preset(message: Message) -> Self {
         Self {
@@ -536,6 +545,7 @@ pub(crate) fn milkdrop_panel_entries<Message>(
     vec![
         PanelMenuEntry::next_preset(map(C::Next)),
         PanelMenuEntry::previous_preset(map(C::Previous)),
+        PanelMenuEntry::choose_preset(map(C::ChoosePreset)),
         PanelMenuEntry::lock_preset(locked, map(C::ToggleLock)),
         PanelMenuEntry::favorite_preset(is_favorite, map(C::ToggleFavorite)),
         PanelMenuEntry::hide_preset(map(C::Hide)),

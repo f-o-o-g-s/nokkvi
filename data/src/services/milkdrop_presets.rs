@@ -223,6 +223,17 @@ impl PresetLibrary {
         self.curation.hidden.insert(name.to_string())
     }
 
+    /// Put a hidden preset back in the rotation. Returns `false` when it was
+    /// not hidden.
+    pub fn unhide(&mut self, name: &str) -> bool {
+        self.curation.hidden.remove(name)
+    }
+
+    /// Whether the preset failed to load this session.
+    pub fn is_broken(&self, name: &str) -> bool {
+        self.broken.contains(name)
+    }
+
     /// Flip a preset's favorite mark; returns the new state.
     pub fn toggle_favorite(&mut self, name: &str) -> bool {
         let now_favorite = if self.curation.favorites.remove(name) {
@@ -396,6 +407,25 @@ mod tests {
             lib.hide(name);
         }
         assert_eq!(lib.next(None, &mut rng), None, "everything hidden → None");
+    }
+
+    #[test]
+    fn unhide_returns_a_preset_to_the_rotation() {
+        let mut lib = library(&no_user_dir());
+        assert!(lib.hide("b"));
+        assert!(!lib.eligible().contains(&"b"));
+        assert!(lib.unhide("b"));
+        assert!(!lib.is_hidden("b"));
+        assert!(lib.eligible().contains(&"b"));
+        assert!(!lib.unhide("b"), "not hidden any more");
+    }
+
+    #[test]
+    fn broken_presets_are_reported() {
+        let mut lib = library(&no_user_dir());
+        assert!(!lib.is_broken("c"));
+        lib.mark_broken("c");
+        assert!(lib.is_broken("c"));
     }
 
     #[test]

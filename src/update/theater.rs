@@ -155,6 +155,7 @@ pub(crate) fn theater_key_policy(action: HotkeyAction) -> TheaterKeyPolicy {
         | A::NextVisualizerPreset
         | A::PreviousVisualizerPreset
         | A::ToggleVisualizerPresetLock
+        | A::ChooseVisualizerPreset
         | A::ToggleEqModal
         | A::ToggleCrossfade
         | A::ToggleLyrics

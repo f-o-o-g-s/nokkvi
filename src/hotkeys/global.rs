@@ -148,6 +148,11 @@ pub(crate) fn action_to_message(action: HotkeyAction) -> Message {
                 crate::app_message::MilkdropControl::ToggleLock,
             ))
         }
+        HotkeyAction::ChooseVisualizerPreset => {
+            Message::Milkdrop(crate::app_message::MilkdropMessage::Control(
+                crate::app_message::MilkdropControl::ChoosePreset,
+            ))
+        }
         HotkeyAction::ToggleEqModal => Message::EqModal(crate::widgets::EqModalMessage::Toggle),
         HotkeyAction::OpenTrawl => {
             Message::TrawlModal(crate::widgets::trawl_modal::TrawlModalMessage::Open)

@@ -51,6 +51,24 @@ impl Nokkvi {
             };
         }
 
+        // MilkDrop preset picker — same tier: the keys step (and so preview)
+        // the list, Enter chooses. Ctrl+Enter has no shuffle meaning here.
+        if self.milkdrop.picker.is_some() {
+            use crate::widgets::milkdrop_picker::MilkdropPickerMessage;
+            return match msg {
+                SlotListMessage::NavigateUp => {
+                    self.handle_milkdrop_picker(MilkdropPickerMessage::SlotListUp)
+                }
+                SlotListMessage::NavigateDown => {
+                    self.handle_milkdrop_picker(MilkdropPickerMessage::SlotListDown)
+                }
+                SlotListMessage::ActivateCenter | SlotListMessage::ActivateCenterShuffled => {
+                    self.handle_milkdrop_picker(MilkdropPickerMessage::ActivateCenter)
+                }
+                _ => Task::none(),
+            };
+        }
+
         // Trawl modal — same priority tier as the picker (which wins the
         // theoretical double-open; the tiers stay consistent across the gate,
         // this intercept, and the Escape cascade). Enter toggles the centered

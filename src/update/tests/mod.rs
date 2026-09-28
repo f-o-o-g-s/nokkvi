@@ -36,6 +36,7 @@ mod library_refresh;
 mod lyrics;
 mod menus;
 mod milkdrop;
+mod milkdrop_picker;
 mod mpris;
 #[macro_use]
 mod navigation_macros;

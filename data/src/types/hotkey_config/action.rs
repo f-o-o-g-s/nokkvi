@@ -279,6 +279,14 @@ define_hotkey_actions! {
             settings_key: "hotkey.lock_preset",
             default: KeyCombo::shift(KeyCode::Char('m')),
         },
+        ChooseVisualizerPreset {
+            display: "Choose Preset",
+            description: "MilkDrop: pick a preset from the full list",
+            category: "Playback",
+            toml_key: "choose_visualizer_preset",
+            settings_key: "hotkey.choose_preset",
+            default: KeyCombo::key(KeyCode::Char('m')),
+        },
         ToggleEqModal {
             display: "Toggle Equalizer",
             description: "Open or close the 10-band graphic equalizer",

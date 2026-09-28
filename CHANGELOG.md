@@ -24,6 +24,10 @@ All notable changes to this project will be documented in this file.
 - Fjord's aurora brightens with the spectrum and is mirrored in the water.
 - Fjord's distance and sky now blur into a soft, dreamlike glow, as if the camera were focused on the water.
 - Fjord's glowing water and ripples leave faint echoes as they move.
+- Press m, or choose Choose Preset… from the panel menu, to browse every MilkDrop preset in a searchable list.
+- The MilkDrop preset list plays each preset live as you scroll; Enter keeps the one on screen and locks it.
+- Closing the MilkDrop preset list without choosing returns to the preset you started from.
+- In the MilkDrop preset list you can favorite or hide any preset, bring hidden ones back, or show only favorites.
 
 ### Changed
 

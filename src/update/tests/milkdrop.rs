@@ -19,7 +19,7 @@ use crate::{
 
 /// A logged-in, playing app on the Queue with a real visualizer sharing the
 /// app's MilkDrop handle and the bundled pack (no user dir on disk).
-fn md_app() -> Nokkvi {
+pub(super) fn md_app() -> Nokkvi {
     let mut app = test_app();
     app.screen = Screen::Home;
     app.current_view = View::Queue;
@@ -42,7 +42,7 @@ fn md_app() -> Nokkvi {
 }
 
 /// Stand-in for the pipeline rendering the current load's first frame.
-fn first_frame(app: &mut Nokkvi) {
+pub(super) fn first_frame(app: &mut Nokkvi) {
     let generation = app.milkdrop.generation;
     app.milkdrop.shared.mark_shown(generation);
     tick(app);
@@ -57,19 +57,19 @@ fn cycle(app: &mut Nokkvi) {
     let _ = app.update(Message::Playback(PlaybackMessage::CycleVisualization));
 }
 
-fn tick(app: &mut Nokkvi) {
+pub(super) fn tick(app: &mut Nokkvi) {
     let _ = app.update(Message::Playback(PlaybackMessage::Tick));
 }
 
 /// Cycle from Scope into MilkDrop and run one tick, which picks a preset.
-fn enter_milkdrop(app: &mut Nokkvi) {
+pub(super) fn enter_milkdrop(app: &mut Nokkvi) {
     app.engine.visualization_mode = VisualizationMode::Scope;
     cycle(app);
     assert_eq!(app.engine.visualization_mode, VisualizationMode::Milkdrop);
     tick(app);
 }
 
-fn built(app: &mut Nokkvi, generation: u64, result: Result<(), String>) {
+pub(super) fn built(app: &mut Nokkvi, generation: u64, result: Result<(), String>) {
     let _ = app.update(Message::Milkdrop(MilkdropMessage::Built {
         generation,
         result,
@@ -295,7 +295,7 @@ fn a_release_never_covers_a_later_load() {
 // Switching: keys, timer, track change
 // ----------------------------------------------------------------------------
 
-fn press(app: &mut Nokkvi, c: &str, modifiers: iced::keyboard::Modifiers) {
+pub(super) fn press(app: &mut Nokkvi, c: &str, modifiers: iced::keyboard::Modifiers) {
     let _ = app.handle_raw_key_event(
         iced::keyboard::Key::Character(c.into()),
         modifiers,
@@ -303,12 +303,12 @@ fn press(app: &mut Nokkvi, c: &str, modifiers: iced::keyboard::Modifiers) {
     );
 }
 
-fn press_plain(app: &mut Nokkvi, c: &str) {
+pub(super) fn press_plain(app: &mut Nokkvi, c: &str) {
     press(app, c, iced::keyboard::Modifiers::default());
 }
 
 /// Enter MilkDrop and land the first build, which arms the timer.
-fn on_screen(app: &mut Nokkvi) {
+pub(super) fn on_screen(app: &mut Nokkvi) {
     enter_milkdrop(app);
     let generation = app.milkdrop.generation;
     built(app, generation, Ok(()));
@@ -316,7 +316,7 @@ fn on_screen(app: &mut Nokkvi) {
     first_frame(app);
 }
 
-fn past() -> std::time::Instant {
+pub(super) fn past() -> std::time::Instant {
     std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(1))
         .expect("monotonic clock is past boot")
@@ -471,6 +471,7 @@ fn theater_policy_passes_preset_keys() {
         A::NextVisualizerPreset,
         A::PreviousVisualizerPreset,
         A::ToggleVisualizerPresetLock,
+        A::ChooseVisualizerPreset,
     ] {
         assert_eq!(theater_key_policy(action), TheaterKeyPolicy::Passthrough);
     }
@@ -744,16 +745,18 @@ fn milkdrop_menu_rows_carry_the_shipped_icons() {
         [
             ("assets/icons/skip-forward.svg", "Next Preset"),
             ("assets/icons/skip-back.svg", "Previous Preset"),
+            ("assets/icons/list.svg", "Choose Preset…"),
             ("assets/icons/lock.svg", "Lock Preset"),
             ("assets/icons/heart.svg", "Favorite Preset"),
             ("assets/icons/eye-off.svg", "Never Show This Preset"),
         ]
     );
-    assert!(matches!(rows[4].message, C::Hide));
+    assert!(matches!(rows[2].message, C::ChoosePreset));
+    assert!(matches!(rows[5].message, C::Hide));
     let rows = milkdrop_panel_entries(true, true, |c| c);
-    assert_eq!(rows[2].label, "Unlock Preset");
-    assert_eq!(rows[2].icon, "assets/icons/lock-open.svg");
-    assert_eq!(rows[3].label, "Unfavorite Preset");
+    assert_eq!(rows[3].label, "Unlock Preset");
+    assert_eq!(rows[3].icon, "assets/icons/lock-open.svg");
+    assert_eq!(rows[4].label, "Unfavorite Preset");
 }
 
 // ----------------------------------------------------------------------------

@@ -199,6 +199,7 @@ fn policy_table_is_pinned() {
         A::NextVisualizerPreset,
         A::PreviousVisualizerPreset,
         A::ToggleVisualizerPresetLock,
+        A::ChooseVisualizerPreset,
         A::ToggleEqModal,
         A::ToggleCrossfade,
         A::ToggleLyrics,

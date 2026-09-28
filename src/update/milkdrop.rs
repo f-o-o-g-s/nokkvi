@@ -98,7 +98,7 @@ pub(crate) enum AdvanceReason {
 }
 
 impl Nokkvi {
-    fn milkdrop_mode_active(&self) -> bool {
+    pub(super) fn milkdrop_mode_active(&self) -> bool {
         self.engine.visualization_mode == VisualizationMode::Milkdrop
     }
 
@@ -197,6 +197,7 @@ impl Nokkvi {
                 MilkdropControl::ToggleLock => self.handle_milkdrop_toggle_lock(),
                 MilkdropControl::ToggleFavorite => self.handle_milkdrop_toggle_favorite(),
                 MilkdropControl::Hide => self.handle_milkdrop_hide(),
+                MilkdropControl::ChoosePreset => self.open_milkdrop_picker(),
             },
         }
     }
@@ -224,6 +225,7 @@ impl Nokkvi {
     /// or re-entry loads again. Called on leaving the mode, on stop and on
     /// logout.
     pub(crate) fn milkdrop_release(&mut self) {
+        self.milkdrop_picker_discard();
         self.milkdrop.shared.running.store(false, Ordering::Release);
         self.milkdrop.current = None;
         self.milkdrop.on_screen = None;
@@ -478,7 +480,7 @@ impl Nokkvi {
         Task::none()
     }
 
-    fn milkdrop_can_return_to(&self, name: &str) -> bool {
+    pub(super) fn milkdrop_can_return_to(&self, name: &str) -> bool {
         self.milkdrop.library.source(name).is_some() && !self.milkdrop.library.is_hidden(name)
     }
 
@@ -531,15 +533,22 @@ impl Nokkvi {
         if self.milkdrop_is_running() {
             self.milkdrop_advance(AdvanceReason::Manual)
         } else {
-            // Paused or off the panel: forget it (and any pending build) now;
-            // the tick loads another the moment MilkDrop runs again.
-            let generation = self.milkdrop.generation + 1;
-            self.milkdrop_set_generation(generation);
-            self.milkdrop.current = None;
-            self.milkdrop.build_in_flight = None;
-            self.milkdrop.awaiting_gpu = None;
+            // Paused or off the panel: forget it now; the tick loads another
+            // the moment MilkDrop runs again.
+            self.milkdrop_forget_current();
             Task::none()
         }
+    }
+
+    /// Forget the current preset and any build pending for it (its frames stay
+    /// on screen until a replacement lands); the tick draws the next one once
+    /// MilkDrop runs.
+    pub(super) fn milkdrop_forget_current(&mut self) {
+        let generation = self.milkdrop.generation + 1;
+        self.milkdrop_set_generation(generation);
+        self.milkdrop.current = None;
+        self.milkdrop.build_in_flight = None;
+        self.milkdrop.awaiting_gpu = None;
     }
 
     fn handle_milkdrop_toggle_favorite(&mut self) -> Task<Message> {
@@ -562,7 +571,7 @@ impl Nokkvi {
 
     /// Persist hidden + favorite presets; a failed write is reported, never
     /// fatal (the in-memory curation still applies this session).
-    fn milkdrop_save_curation(&mut self) {
+    pub(super) fn milkdrop_save_curation(&mut self) {
         if self.milkdrop.curation_path.as_os_str().is_empty() {
             return;
         }
@@ -606,6 +615,11 @@ impl Nokkvi {
                 "unavailable",
                 "the visualizer is not in MilkDrop mode".to_string(),
             ));
+        }
+        // The open picker owns the preset and the lock (it restores the lock
+        // on close), so a script's change would be undone or lost.
+        if self.milkdrop.picker.is_some() {
+            return Err(("unavailable", "the preset picker is open".to_string()));
         }
         let needs_on_screen = matches!(
             action,
@@ -812,6 +826,7 @@ impl Nokkvi {
         if self.milkdrop_is_running()
             && self.milkdrop_switch_on_track_change()
             && !self.milkdrop.locked
+            && self.milkdrop.picker.is_none()
             && self.milkdrop.current.is_some()
             && self.milkdrop.build_in_flight.is_none()
         {
@@ -830,12 +845,21 @@ impl Nokkvi {
         self.milkdrop.build_in_flight = None;
         self.milkdrop.awaiting_gpu = None;
         self.milkdrop.consecutive_failures = self.milkdrop.consecutive_failures.saturating_add(1);
+        // A preset chosen in the picker failed: its lock would hold whatever
+        // random preset replaces it, so let the rotation resume instead.
+        if self.milkdrop.chosen_generation.take() == Some(self.milkdrop.generation) {
+            self.milkdrop.locked = false;
+            let name = self.milkdrop.current.as_deref().unwrap_or_default();
+            self.toast_warn(format!("MilkDrop: {name} could not be loaded"));
+        }
         // Out of the rotation for this session, so a broken file is not
         // retried every round.
         if let Some(name) = self.milkdrop.current.clone() {
             self.milkdrop.library.mark_broken(&name);
         }
-        if self.milkdrop_is_running() {
+        // An open picker owns what loads: its tick sync skips the broken row
+        // rather than a random preset replacing the one being looked for.
+        if self.milkdrop_is_running() && self.milkdrop.picker.is_none() {
             self.milkdrop_advance(AdvanceReason::Failure)
         } else {
             // Nobody would see a retry; the tick loads one once running.
@@ -962,13 +986,18 @@ impl Nokkvi {
             .load(Ordering::Acquire);
         if shown == self.milkdrop.generation && shown != self.milkdrop.announced_generation {
             self.milkdrop.announced_generation = shown;
+            self.milkdrop.chosen_generation = None;
             self.milkdrop.consecutive_failures = 0;
             self.milkdrop.empty_warned = false;
             if let Some(name) = self.milkdrop.current.clone() {
                 info!(preset = %name, "milkdrop: preset on screen");
                 self.milkdrop.on_screen = Some(name.clone());
                 let recolour = std::mem::take(&mut self.milkdrop.recolouring);
-                if !recolour && self.milkdrop_config().show_preset_names {
+                // The open picker already shows the name it is previewing.
+                if !recolour
+                    && self.milkdrop.picker.is_none()
+                    && self.milkdrop_config().show_preset_names
+                {
                     self.toast_info(name);
                 }
             }
@@ -1028,6 +1057,9 @@ impl Nokkvi {
 
         if !running {
             self.milkdrop.next_switch_at = None;
+        } else if self.milkdrop.picker.is_some() {
+            // The picker holds the lock and chooses what loads.
+            tasks.push(self.milkdrop_picker_sync_preview());
         } else if self.milkdrop.current.is_none()
             && self.milkdrop.build_in_flight.is_none()
             && self.milkdrop.consecutive_failures < MILKDROP_MAX_CONSECUTIVE_FAILURES

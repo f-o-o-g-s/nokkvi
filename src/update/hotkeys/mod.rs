@@ -874,6 +874,7 @@ impl Nokkvi {
             || self.info_modal.visible
             || self.text_input_dialog.visible
             || self.default_playlist_picker.is_some()
+            || self.milkdrop.picker.is_some()
             || self.trawl_modal.is_some();
 
         // Rules-session grammar: view-gated keys for the smart-playlist
@@ -900,7 +901,26 @@ impl Nokkvi {
         // slot-list nav keys through — slot_list.rs already routes those to the
         // picker when it is open.
         if any_blocking_modal {
-            let is_picker_nav = self.default_playlist_picker.is_some()
+            // The MilkDrop picker also takes the arrow keys (the rules-editor
+            // sub-picker precedent): stepping a live preview is its whole job,
+            // and the search field never uses Up/Down.
+            if self.milkdrop.picker.is_some()
+                && let iced::keyboard::Key::Named(
+                    named @ (iced::keyboard::key::Named::ArrowUp
+                    | iced::keyboard::key::Named::ArrowDown),
+                ) = &key
+            {
+                use crate::widgets::milkdrop_picker::MilkdropPickerMessage as P;
+                return self.handle_milkdrop_picker(
+                    if *named == iced::keyboard::key::Named::ArrowUp {
+                        P::SlotListUp
+                    } else {
+                        P::SlotListDown
+                    },
+                );
+            }
+            let is_picker_nav = (self.default_playlist_picker.is_some()
+                || self.milkdrop.picker.is_some())
                 && matches!(
                     resolved,
                     Some(Message::SlotList(

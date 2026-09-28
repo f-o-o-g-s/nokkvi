@@ -1256,6 +1256,20 @@ impl Nokkvi {
             stack = stack.push(picker_overlay.map(Message::DefaultPlaylistPicker));
         }
 
+        // MilkDrop preset picker — same tier, over the visualizer it previews
+        // into; below toasts so a failed-load warning stays visible.
+        if let Some(picker_state) = &self.milkdrop.picker {
+            let picker_overlay = crate::widgets::milkdrop_picker::milkdrop_picker_overlay(
+                picker_state,
+                crate::widgets::milkdrop_picker::MilkdropPickerViewData {
+                    library: &self.milkdrop.library,
+                    on_screen: self.milkdrop.on_screen.as_deref(),
+                    window_height: self.window.height,
+                },
+            );
+            stack = stack.push(picker_overlay.map(Message::MilkdropPicker));
+        }
+
         // Trawl mix-builder modal — same tier as the picker, below toasts so
         // "Added N songs to queue" stays visible over the open modal.
         if let Some(trawl_state) = &self.trawl_modal {

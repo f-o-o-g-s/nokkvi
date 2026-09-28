@@ -1005,6 +1005,8 @@ pub enum MilkdropControl {
     Previous,
     /// Keep the current preset until unlocked (Shift+M).
     ToggleLock,
+    /// Open the preset picker (the `m` key).
+    ChoosePreset,
     /// Mark the preset on screen as a favorite, or clear the mark.
     ToggleFavorite,
     /// Never show the preset on screen again, and move on.
@@ -1597,6 +1599,8 @@ pub enum Message {
 
     // --- MilkDrop visualizer mode (preset loading + switching) ---
     Milkdrop(MilkdropMessage),
+    /// MilkDrop preset picker (modal overlay over the running visualizer)
+    MilkdropPicker(crate::widgets::milkdrop_picker::MilkdropPickerMessage),
 
     /// Open a song's containing folder in the file manager (relative path from Navidrome)
     ShowInFolder(String),
