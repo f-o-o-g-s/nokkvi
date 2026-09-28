@@ -2796,7 +2796,10 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # resize; only the first frames are wiped.
 # Cache: at most FJ_CWMAX x FJ_CHMAX texels (and FJ_SR rows fewer than the
 # texture), x = depth, y = u = x - river
-# path(z) (uniform). Depth texels are anchored to the world: spacing 256/N (N
+# path(z) (uniform; past |u| = FJ_U - 1.5 the comp adds analytic ridges that
+# keep rising, fj_hx, since the clamped edge row stretched sideways forever
+# showed as a dead-straight plateau edge over the far peaks). Depth texels are
+# anchored to the world: spacing 256/N (N
 # texels per 256 units, so the grid survives the wrap) from an origin snapped
 # to that spacing, so a world point is sampled identically every frame (a
 # camera-relative grid made small peaks and crests crawl). Each texel is the
@@ -3318,12 +3321,25 @@ vec2 fj_cuv(float qu, float qzr) {{
   float qci = (q4 + qzr - fj_z0()) / fj_dzt();
   return vec2(({FJ_DW + 1}.0 + clamp(qci, 0.0, qcw - 1.0) + 0.5) * texsize.z, clamp(qca * qch, 0.5, qch - 0.5) * texsize.w);
 }}
+float fj_hx(float xu, float xz) {{
+  float xe = max(abs(xu) - {FJ_U - 1.5}, 0.0);
+  if (xe <= 0.0) {{
+    return 0.0;
+  }}
+  float xs = xe * xe / (xe + 3.0);
+  vec2 xq = vec2(xu * 0.3 + 11.0, xz * 0.25);
+  vec3 xn = fj_noised(xq);
+  vec2 xq2 = vec2(xu * 0.7 - 5.0, xz * 0.75 + 0.5);
+  vec3 xn2 = fj_noised(xq2);
+  float xr = (1.0 - abs(2.0 * xn.x - 1.0)) * 0.8 + xn2.x * 0.2;
+  return xs * (0.15 + 0.55 * xr);
+}}
 float fj_h(vec3 hq3) {{
   float hu = hq3.x - fj_path(hq3.z);
   float hzr = hq3.z - q4;
   vec2 huv = fj_cuv(hu, hzr);
   vec3 hc = fj_tex(huv);
-  return {FJ_HMIN} + {FJ_HMAX - FJ_HMIN} * fj_dec(hc.xy);
+  return {FJ_HMIN} + {FJ_HMAX - FJ_HMIN} * fj_dec(hc.xy) + fj_hx(hu, hq3.z);
 }}
 vec3 fj_hs(vec3 sp) {{
   float su = sp.x - fj_path(sp.z);
@@ -3333,7 +3349,7 @@ vec3 fj_hs(vec3 sp) {{
   sc = clamp(sc, vec2({FJ_DW + 2}.0, 1.0), vec2({FJ_DW + 1}.0 + fj_cw() - 3.0, fj_ch() - 3.0));
   vec2 sbase = vec2(0.0);
   vec3 sv = fj_bspline(sc, sbase);
-  return vec3({FJ_HMIN} + {FJ_HMAX - FJ_HMIN} * fj_dec(sv.xy), sv.z, su);
+  return vec3({FJ_HMIN} + {FJ_HMAX - FJ_HMIN} * fj_dec(sv.xy) + fj_hx(su, sp.z), sv.z, su);
 }}
 vec3 fj_nrm(vec3 np, float ne, out float nmat) {{
   vec3 nh0 = fj_hs(np);
