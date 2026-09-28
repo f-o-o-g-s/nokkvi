@@ -18,7 +18,8 @@ All notable changes to this project will be documented in this file.
 - On each beat, light runs outward through Fractal Voyage's Burning Ship and Mandelbrot set along their own contours.
 - The Fjord MilkDrop preset flies low down a winding Norwegian fjord between cliffs that rise straight out of the water.
 - Fjord's river glows with the music: the song's spectrum flows down the water as a glossy relief traced by neon contour lines.
-- On each kick, Fjord's river lines flare and light up the water, its plankton and the cliff feet as the beat flows downstream.
+- On each kick, Fjord's river lines flare as the beat flows downstream.
+- Fjord's kick flares light up the water, its plankton and the cliff feet.
 - Fjord's water surface rises and falls with the music in real swells that travel down the fjord.
 - Each visit to Fjord picks a time of day: an overcast day, a low golden-hour sun, or a moonlit night with an aurora.
 - Fjord's aurora brightens with the spectrum and is mirrored in the water.
@@ -28,6 +29,18 @@ All notable changes to this project will be documented in this file.
 - The MilkDrop preset list plays each preset live as you scroll; Enter keeps the one on screen and locks it.
 - Closing the MilkDrop preset list without choosing returns to the preset you started from.
 - In the MilkDrop preset list you can favorite or hide any preset, bring hidden ones back, or show only favorites.
+- The Starfield Nebula MilkDrop preset flies the starfield through a living nebula grown from the Predator Prey Spirals reaction.
+- Starfield Nebula's gas takes its colours from your theme's visualizer gradient.
+- Stars in Starfield Nebula leave wakes that the nebula grows into new fronts.
+- Starfield Nebula's star trails are pushed and bent by the gas.
+- Starfield Nebula's star trails take on the colour of the gas they cross.
+- Starfield Nebula's stars swirl with the gas, reversing direction when it does.
+- When Starfield Nebula's flight speeds up with the music, its gas swirls faster too.
+- Starfield Nebula's thick gas dims the stars behind it.
+- Thin patches in Starfield Nebula's gas open onto dark space full of stars.
+- Starfield Nebula's star trails look raised and lit, like the gas.
+- Starfield Nebula's star trails cast soft shadows on the gas.
+- Soft gas clouds drift past on Starfield Nebula's flight.
 
 ### Changed
 
