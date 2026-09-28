@@ -41,10 +41,11 @@ All notable changes to this project will be documented in this file.
 - Starfield Nebula's star trails look raised and lit, like the gas.
 - Starfield Nebula's star trails cast soft shadows on the gas.
 - Soft gas clouds drift past on Starfield Nebula's flight.
-- Every so often Starfield Nebula's whole scene slows to a stop, usually on a kick.
-- While stopped, Starfield Nebula's view is dragged to a new camera angle, leaving a motion smear.
+- Starfield Nebula's scene stops on the beat and flows again between beats.
+- On each beat, Starfield Nebula's view is dragged to a new camera angle, leaving a motion smear.
 - Most of Starfield Nebula's camera angles tilt the scene in perspective.
-- After each drag, Starfield Nebula starts moving again from its new angle.
+- Harder kicks shift Starfield Nebula's camera further.
+- Starfield Nebula's camera drags quicken with the tempo.
 
 ### Changed
 

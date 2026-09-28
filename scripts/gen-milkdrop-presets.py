@@ -633,11 +633,10 @@ presets["nokkvi - starfield"] = preset(
 #   gas they cross, and a drifting gas-density field trades the two layers'
 #   opacity by region: thick gas hides the stars, thin gas opens onto space.
 # Soft gas clouds (big dim blobs on the same flight) ride in the comp.
-# Camera acts: every 12-26 s (on a kick) the whole scene slows to a stop, the
-# view is dragged over 0.8 s to a new camera (the picture's plane tilted in
-# perspective, rolled and zoomed, smeared by the COMP's echo of its last
-# frame), holds, and starts again. A third of the acts from a tilted view go
-# back to a flat one.
+# Camera acts: on every beat the whole scene stops, the view is dragged to a
+# new camera (the picture's plane tilted in perspective, rolled and zoomed,
+# smeared by the COMP's echo of its last frame), and it starts again: it
+# flows between beats and snaps to a new perspective on them.
 # While stopped, the warp copies the feedback through unchanged and the
 # equations hold the flight, roll and swirl sums.
 NEB_RADII = [0.0, 0.25, 0.5, 0.75, 1.0, 1.25]
@@ -651,28 +650,40 @@ def neb_swirl(v, pos):
     for i in range(2, 6):
         out += f"  {v} = mix({v}, q{25 + i}, clamp({v}_f - {i - 1}.0, 0.0, 1.0));\n"
     return out
-# Camera acts (see above). `at` counts calm seconds up to `nexta`; an act
-# (`inact`, clock `aa`) stops the scene (`frz` eases to 1 in ~0.2 s), drags the
-# camera from its old pose (f*) to a new one (t*) over 0.8 s, holds, and
-# lets go at 1.2 s. The new pose mixes the rand stream with the audio, so
-# visits differ; its zoom always covers the tilt and roll. q6 = stop,
-# q7..q10 = pitch, yaw, roll, zoom, q11 = drag speed (the COMP's echo).
+# Camera acts (see above). Each beat (bass over its follower, 0.22 s apart)
+# starts one unless the last is still running; quiet music gets one after
+# 4 s without. An act (`inact`, clock `aa`) stops the scene (`frz` eases to 1
+# in ~0.05 s), drags the camera from its old pose (f*) to a new one (t*) over
+# ~45% of the smoothed beat interval (`ibi`, 0.12-0.4 s), and lets go, so the
+# picture flows between beats and snaps to a new perspective on them. A
+# harder kick shifts it further; each pose pulls halfway back to the centre
+# so the tilt stays bounded, and every 16th act goes back to flat. The new
+# pose mixes the rand stream with the audio, so visits differ; its zoom
+# always covers the tilt and roll. q6 = stop, q7..q10 = pitch, yaw, roll,
+# zoom, q11 = drag speed (the COMP's echo).
 NEB_CAMERA = """dt = 1 / max(fps, 1);
 at = at + dt * (1 - inact);
-go = below(inact, 0.5) * above(at, nexta) * max(above(bass - bass_att, 0.2), above(at, nexta + 3));
+sinceb = sinceb + dt;
+beat = above(bass - bass_att, 0.18) * above(sinceb, 0.22);
+ibi = if(beat, ibi * 0.8 + min(sinceb, 1.5) * 0.2, ibi);
+sinceb = if(beat, 0, sinceb);
+go = below(inact, 0.5) * max(beat, above(at, 4));
 inact = max(inact, go);
 aa = if(go, 0, aa + dt * inact);
+nacts = nacts + go;
 u1 = rand(1000) / 1000 + bass_att * 3.7; u1 = u1 - int(u1);
 u2 = rand(1000) / 1000 + mid_att * 5.3; u2 = u2 - int(u2);
 u3 = rand(1000) / 1000 + treb_att * 7.1; u3 = u3 - int(u3);
-flat = below(rand(1000), 330) * above(abs(cpit) + abs(cyaw), 0.2);
+flat = equal(nacts % 16, 0);
+amp = min(0.14 + max(bass - bass_att, 0) * 0.35, 0.36);
 fpit = if(go, cpit, fpit); fyaw = if(go, cyaw, fyaw); frol = if(go, crol, frol); fzm = if(go, czm, fzm);
-tpit = if(go, (u1 - 0.5) * 0.8 * (1 - flat), tpit);
-tyaw = if(go, (u2 - 0.5) * 0.7 * (1 - flat), tyaw);
-trol = if(go, (u3 - 0.5) * 0.4, trol);
-tzm = if(go, 1.06 + 0.75 * max(abs(tpit), abs(tyaw)) + 0.5 * abs(trol) + 0.12 * u1, tzm);
+tpit = if(go, min(max(cpit * 0.5 + (u1 - 0.5) * 2 * amp, -0.42), 0.42) * (1 - flat), tpit);
+tyaw = if(go, min(max(cyaw * 0.5 + (u2 - 0.5) * 2 * amp, -0.36), 0.36) * (1 - flat), tyaw);
+trol = if(go, min(max(crol * 0.5 + (u3 - 0.5) * amp, -0.2), 0.2), trol);
+tzm = if(go, 1.06 + 0.75 * max(abs(tpit), abs(tyaw)) + 0.5 * abs(trol) + 0.08 * u1, tzm);
+ddur = if(go, min(max(ibi * 0.45, 0.12), 0.4), ddur);
 eprev = if(go, 0, eprev);
-e = min(max((aa - 0.2) / 0.8, 0), 1);
+e = min(max((aa - 0.05) / ddur, 0), 1);
 e = e * e * (3 - 2 * e);
 cpit = if(inact, fpit + (tpit - fpit) * e, cpit);
 cyaw = if(inact, fyaw + (tyaw - fyaw) * e, cyaw);
@@ -680,13 +691,12 @@ crol = if(inact, frol + (trol - frol) * e, crol);
 czm = if(inact, fzm + (tzm - fzm) * e, czm);
 cmv = abs(e - eprev) / dt * (abs(tpit - fpit) + abs(tyaw - fyaw) + abs(trol - frol) + abs(tzm - fzm) * 0.6);
 eprev = e;
-frzt = inact * below(aa, 1.2);
-done = inact * above(aa, 1.2);
+frzt = inact * below(aa, 0.07 + ddur);
+done = inact * above(aa, 0.07 + ddur);
 inact = inact * (1 - done);
 at = if(done, 0, at);
-nexta = if(done, 12 + 14 * u2, nexta);
-frz = frz + (frzt - frz) * (1 - exp(-dt / 0.07));
-q6 = frz; q7 = cpit; q8 = cyaw; q9 = crol; q10 = czm; q11 = min(cmv * 0.7, 0.8);
+frz = frz + (frzt - frz) * (1 - exp(-dt / 0.025));
+q6 = frz; q7 = cpit; q8 = cyaw; q9 = crol; q10 = czm; q11 = min(cmv * 0.35, 0.8);
 """
 def gas_cloud(l):
     return f"""
@@ -813,7 +823,7 @@ presets["nokkvi - starfield nebula"] = preset(
   ret = col;
  }""",
     init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0; " + " ".join(f"sa{i} = 0;" for i in range(6))
-         + " at = 0; nexta = 8; inact = 0; aa = 0; e = 0; eprev = 0; frz = 0;"
+         + " at = 0; sinceb = 1; ibi = 0.5; nacts = 0; ddur = 0.25; inact = 0; aa = 0; e = 0; eprev = 0; frz = 0;"
          " cpit = 0; cyaw = 0; crol = 0; czm = 1; fpit = 0; fyaw = 0; frol = 0; fzm = 1;"
          " tpit = 0; tyaw = 0; trol = 0; tzm = 1;",
     frame=PULSE + NEB_CAMERA + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3 + 0.1 * pop);\n"
