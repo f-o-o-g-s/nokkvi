@@ -17,12 +17,11 @@ All notable changes to this project will be documented in this file.
 - Fractal Voyage's dragon curve unfolds from a single line as the camera sinks toward it.
 - On each beat, light runs outward through Fractal Voyage's Burning Ship and Mandelbrot set along their own contours.
 - The Fjord MilkDrop preset flies low down a winding Norwegian fjord between cliffs that rise straight out of the water.
-- Each kick sends a glowing light racing under Fjord's water down the fjord, following its bends and leaving a sparkling trail.
-- Each Fjord light leaves a wake on the surface that ripples the reflections of the cliffs and sky.
+- Fjord's river glows with the music: the song's spectrum flows down the water as a glossy relief traced by neon contour lines.
 - Each visit to Fjord picks a time of day: an overcast day, a low golden-hour sun, or a moonlit night with an aurora.
 - Fjord's aurora brightens with the spectrum and is mirrored in the water.
 - Fjord's distance and sky now blur into a soft, dreamlike glow, as if the camera were focused on the water.
-- Fjord's lights, wakes and ripples leave faint echoes as they move.
+- Fjord's glowing water and ripples leave faint echoes as they move.
 
 ### Changed
 

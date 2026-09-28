@@ -2771,18 +2771,18 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # and bakes a height cache of the valley beside it, and the comp raymarches the
 # landscape from that cache, sharp every frame (the comp never shows the
 # feedback).
-# Kicks: each kick (bass over its follower, 0.5 s cooldown) launches a light
-# under the water just ahead of the camera that races down the fjord in a lane
-# beside the centre line (left and right alternate), following the river's
-# bends (the track is straight in channel coordinates: u = x - path(z) across,
-# z along), and fades into the distance. On the surface it leaves
-# a Kelvin-style wake (divergent crests along the arms at the 19.5 degree
-# cusp, transverse crests inside the V, a bow swell) and a splash ring where it
-# dove in; these bend the water's normal, so reflections of the cliffs and sky
-# ripple. The light is seen through that surface: the view ray is refracted
-# into the water and the glow is looked up where it reaches the light's depth,
-# so the wake distorts the glow, with a sparkling trail of stirred plankton
-# behind it and the wake crests catching its light. Beat never touches terrain.
+# The river is the music: the warp keeps a spectrum history (FJ_HN rows of the
+# FJ_NB band levels, the follower over its band's own slow mean, one row per
+# 1/FJ_HRATE s committed on the clock, so it flows the same at any frame rate)
+# and the water shows it in channel coordinates: across the river the bands
+# mirror out from the centre (bass in the middle lanes, treble toward the
+# cliffs), along it the history races ahead of the camera at FJ_VFLOW units/s
+# (what you hear rises under the camera and flows down the fjord, taking every
+# bend). A slow liquid warp melts the lanes. The level is a glossy relief that
+# bends the reflections, neon contour lines trace it (each level its own
+# colour from the theme ramp, drifting), and a body glow fills between them;
+# the glow is strongest at night and fades in the shallows. Kicks show as
+# bass swells surging down the middle. Beat never touches terrain.
 # Bands: FJ_NB log-spaced bands (40 Hz to 14 kHz, from get_fft) across. Row 0
 # is a per-band running average (AGC, log encoded, ~10 s), row 1 a follower of
 # the level over that average (fast attack, 0.2 s release), row 2 the
@@ -2836,7 +2836,7 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # valley mist is looked up at the hit point and does not drift.
 # Scene: matte low-albedo rock with stain streaks and a wet tide band, snow on
 # the flat tops, cavity AO from taps along the normal, soft shadows, a liquid plane at y = 0 (ripples streaked along the
-# view, the wakes, Fresnel, a reflection march with shadows, depth tint, a foam
+# view, the music relief, Fresnel, a reflection march with shadows, depth tint, a foam
 # fringe at the shore), sky with drifting clouds, sunlight reddened by airmass,
 # height fog and patchy valley mist, filmic tone map.
 # Each visit picks a time of day from the audio at frame 3 (the rand stream
@@ -2849,23 +2849,25 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # stays at least 1.75 units from the channel's centre line and the drift is at
 # most 0.5, so the camera is always over water.
 # Everything world-space is periodic in 256 along z (path, width, cliffs,
-# spurs, hashes mod 64 at multiples of 0.25 per unit, snow line, sparkle cells,
-# clouds via q25, flow mod 640), so the camera's wrap at 256 is seamless.
+# spurs, hashes mod 64 at multiples of 0.25 per unit, snow line, the river's
+# liquid warp, clouds via q25, flow mod 640), so the camera's wrap at 256 is
+# seamless.
 # Dream (after the mandelbox explorer's soft, echoing look): the comp also reads
 # its own previous frame (sampler_prev_comp, with averaged blur levels) and
 # blends it in after the tone map. The warp keeps the camera as 24-bit values
 # (three channels; texels 8-10 hold the texture size and the cache origin's
-# index for the wall strip) in a small block under the bands: row FJ_DH this frame's,
+# index for the wall strip, texel 11 the last committed history row) in a
+# small block under the bands: row FJ_DH this frame's,
 # row FJ_DH + 1 a copy of the last frame's, which the comp reads to reproject:
 # each pixel's world point (rock hit; on water the reflection's mirror image
 # along the view ray, its inverse depth weighted by Fresnel so a faint sky
 # reflection stays near the surface; sky by direction) is projected with last
 # frame's camera and the history is sampled there. The rock takes no sharp echo
 # (resampling it every frame only softens detail in drifting bands); what moves
-# or depends on the view on the water and in the sky (lights, wakes, plankton,
-# ripples, aurora) leaves a short echo (q17). The blur taps read one level finer
+# or depends on the view on the water and in the sky (the river's glowing
+# relief, ripples, aurora) leaves a short echo (q17). The blur taps read one level finer
 # than their spread, so a moving glow slides instead of stepping. On top, a
-# depth of field focused on the water where the lights run (q3, aperture q24;
+# depth of field focused on the water just ahead (q3, aperture q24;
 # the sky's blur capped at FJ_SKYCOC so stars and aurora survive) pulls each
 # pixel toward the blurred history, never less than FJ_HALO: a soft halo
 # everywhere and a glowing, softened distance. The history weight is zero for
@@ -2873,12 +2875,12 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # (the engine clears it on a resize), and fades out over the last 4% toward the
 # screen edge (a hard cut left a seam). Every blend is convex, so the loop
 # gain stays below 1; a 1/255 dither keeps the 8-bit history from sticking.
-# q map: pulse slots (packed origin; age ms + strength * 0.3 in one q) in q1/q2,
-# q5/q6, q18/q23, q26/q28, q30/q31; q3 focus distance, q17 echo, q24 aperture;
+# q map: q3 focus distance, q17 echo, q24 aperture;
 # q4 camera z (mod 256), q7/q8 camera x/y, q9 night,
 # q10-q12 forward, q13 roll, q14 lens, q15/q16 key light (sun, or moon at
 # night) azimuth/elevation, q19 liquid flow, q20 loudness, q21 treble shimmer,
-# q22 rock tint, q25 cloud drift, q27 aurora strength; q29, q32 free.
+# q22 rock tint, q25 cloud drift, q27 aurora strength; q1, q2, q5, q6, q18,
+# q23, q26, q28-q32 free.
 FJ_NB = 16
 FJ_DW = FJ_NB
 FJ_DH = 4
@@ -2893,9 +2895,14 @@ FJ_CHMAX = 800
 FJ_W1 = 6.2831853 * 3 / 256
 FJ_W2 = 6.2831853 * 8 / 256
 FJ_A1, FJ_A2 = 2.2, 0.9
-FJ_PV = 9.0
-FJ_PLIFE = 2.5
-FJ_CAMN = 11
+FJ_CAMN = 12
+FJ_HR0 = FJ_DH + 2
+FJ_HN = 240
+FJ_HRATE = 60
+FJ_VFLOW = 12.0
+FJ_LAMP = 0.12
+FJ_LCONT = 8.0
+FJ_LDAY = 0.4
 FJ_WK = 32
 FJ_WKLOG = 5
 FJ_SR = 2 * (FJ_WK + 1)
@@ -2918,8 +2925,8 @@ vec2 fj_enc(float ev) {{
   float eh = floor(ex / 256.0);
   return vec2(eh, ex - eh * 256.0) / 255.0;
 }}
-float fj_dec24(vec3 dd) {{
-  vec3 db = floor(dd * 255.0 + 0.5);
+float fj_dec24(vec3 d24) {{
+  vec3 db = floor(d24 * 255.0 + 0.5);
   return (db.x * 65536.0 + db.y * 256.0 + db.z) / 16777215.0;
 }}
 vec3 fj_enc24(float ev) {{
@@ -3228,6 +3235,7 @@ float fj_camv(float cvi) {{
   if (cvi > 8.5) cvv = texsize.y / 8192.0;
   float cvzd = fj_dzt();
   if (cvi > 9.5) cvv = (floor(q4 / cvzd) - ceil({FJ_ZB} / cvzd) + 1000.0) / 16777215.0;
+  if (cvi > 10.5) cvv = floor(time * {FJ_HRATE}.0) / 16777215.0;
   return cvv;
 }}
 """ + " shader_body {\n" + f"""
@@ -3286,6 +3294,26 @@ float fj_camv(float cvi) {{
     vec2 clastuv = fj_duv(ci, {FJ_DH}.0);
     vec3 clast = fj_tex(clastuv);
     outc = mix(clast, ccur, step(dj, {FJ_DH}.5));
+  }} else if (tx.x < {FJ_NB}.0 && dj < {FJ_HR0 + FJ_HN}.0) {{
+    float hdi = floor(tx.x);
+    float hj = dj - {FJ_HR0}.0;
+    vec2 hcuv = fj_duv(11.0, {FJ_DH}.0);
+    vec3 hcv = fj_tex(hcuv);
+    float hcp = floor(fj_dec24(hcv) * 16777215.0 + 0.5);
+    float hk = floor(time * {FJ_HRATE}.0) - hcp;
+    hk = mix(1.0, clamp(hk, 0.0, {FJ_HN}.0), step(0.0, hk));
+    vec2 hfuv = fj_duv(hdi, 1.0);
+    vec3 hfv = fj_tex(hfuv);
+    vec2 hmuv = fj_duv(hdi, 2.0);
+    vec3 hmv = fj_tex(hmuv);
+    float hfol = fj_dec(hfv.xy) * {FJ_SMAX};
+    float hmean = max(fj_dec(hmv.xy) * {FJ_SMAX}, 0.2);
+    float hlv = smoothstep(0.4, 2.2, hfol / hmean);
+    vec2 hsuv = fj_duv(hdi, {FJ_HR0}.0 + max(hj - hk, 0.0));
+    vec3 hsv = fj_tex(hsuv);
+    vec3 hnew = vec3(fj_enc(hlv), 0.0);
+    outc = mix(hsv, hnew, step(hj, hk - 0.5));
+    outc = mix(outc, vec3(0.0), step(frame, 2.5));
   }} else {{
     float cw = fj_cw();
     float chh = fj_ch();
@@ -3374,43 +3402,15 @@ vec2 fj_detail(vec2 dq) {{
   }}
   return dg;
 }}
-vec2 fj_ptrack(int pk, out float page, out float pstr) {{
-  float po = pk == 0 ? q1 : (pk == 1 ? q5 : (pk == 2 ? q18 : (pk == 3 ? q26 : q30)));
-  float pq = pk == 0 ? q2 : (pk == 1 ? q6 : (pk == 2 ? q23 : (pk == 3 ? q28 : q31)));
-  page = floor(pq) / 1000.0;
-  pstr = fract(pq) / 0.3;
-  float psd = po < 0.0 ? -1.0 : 1.0;
-  float pz0 = abs(po) - 1.0;
-  return vec2(psd * (0.55 + 0.45 * fract(pz0 * 0.618)), pz0);
+float fj_hist(float fhb, float fhr) {{
+  vec2 fhc = vec2(clamp(fhb, 0.0, {FJ_NB - 2.5}), {FJ_HR0}.0 + clamp(fhr, 1.0, {FJ_HN - 3}.0));
+  vec2 fhbase = vec2(0.0);
+  vec3 fhv = fj_bspline(fhc, fhbase);
+  return fj_dec(fhv.xy);
 }}
 float fj_cam(float cri) {{
   vec2 cruv = fj_duv(cri, {FJ_DH + 1}.0);
   return fj_dec24(fj_tex(cruv));
-}}
-float fj_penv(float eage) {{
-  return smoothstep(0.0, 0.15, eage) * smoothstep({FJ_PLIFE}, {FJ_PLIFE - 0.45}, eage);
-}}
-float fj_wakeh(vec2 wkr, vec2 wkd, float wktrav, float wkage) {{
-  vec2 wkc = wkr - wkd * wktrav;
-  float wka = -dot(wkc, wkd);
-  float wkb = abs(wkd.x * wkc.y - wkd.y * wkc.x);
-  float wkh = exp(-dot(wkc, wkc) * 5.0) * 0.8;
-  float wkedge = max(wka, 0.0) * 0.3536;
-  float wkwid = 0.05 + 0.08 * max(wka, 0.0);
-  float wkbd = (wkb - wkedge) / wkwid;
-  float wkarm = exp(-wkbd * wkbd);
-  float wkdiv = sin(14.0 * (0.35 * wka + 0.94 * wkb)) * wkarm;
-  float wkin = smoothstep(wkedge + 0.05, wkedge * 0.4, wkb);
-  float wktr = sin(9.0 * wka) * wkin * 0.45;
-  float wklive = step(0.0, wka) * smoothstep(wktrav + 0.4, wktrav - 0.4, wka) * exp(-wka * 0.16);
-  wkh += (wkdiv + wktr) * wklive;
-  float wkrr = length(wkr);
-  float wkrx = wkrr - 0.2 - 3.2 * wkage;
-  wkh += sin(wkrx * 11.0) * exp(-wkrx * wkrx * 3.0) * exp(-wkage * 1.4) * 0.7;
-  return wkh;
-}}
-vec3 fj_glowcol() {{
-  return mix(NOKKVI_ACCENT, NOKKVI_HIGHLIGHT, 0.35) * 1.8;
 }}
 vec3 fj_sun() {{
   return normalize(vec3(sin(q15) * cos(q16), sin(q16), cos(q15) * cos(q16)));
@@ -3720,27 +3720,24 @@ FJ_COMP = FJ_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
     vec2 wl2 = vec2(-wf2.y, wf2.x);
     vec2 wg = wf2 * dot(wg0, wf2) + wl2 * dot(wg0, wl2) * 0.35;
     float wa = (0.012 + 0.03 * wfade) / (1.0 + 0.15 * tw);
-    vec2 wkg = vec2(0.0);
-    float wkamp = 0.01 * smoothstep(45.0, 12.0, tw);
-    float pwu = wp.x - fj_path(wp.z);
-    vec2 pdir = vec2(0.0, 1.0);
-    for (int k = 0; k < 5; k++) {{
-      float pag;
-      float pst;
-      vec2 ptr = fj_ptrack(k, pag, pst);
-      float pen = fj_penv(pag) * pst;
-      float ptrav = {FJ_PV} * pag;
-      vec2 prel = vec2(pwu - ptr.x, mod(wp.z - ptr.y + 128.0, 256.0) - 128.0);
-      vec2 prx = prel + vec2(0.02, 0.0);
-      vec2 prz = prel + vec2(0.0, 0.02);
-      float ph0 = fj_wakeh(prel, pdir, ptrav, pag);
-      float phx = fj_wakeh(prx, pdir, ptrav, pag);
-      float phz = fj_wakeh(prz, pdir, ptrav, pag);
-      wkg += vec2(phx - ph0, phz - ph0) / 0.02 * pen;
-    }}
-    vec2 wks = wkg * wkamp;
-    wks *= min(1.0, 0.22 / max(length(wks), 0.0001));
-    vec3 wn = normalize(vec3(-wg.x * wa - wks.x, 1.0, -wg.y * wa - wks.y));
+    float lu = wp.x - fj_path(wp.z);
+    float lz = wp.z - q4;
+    vec2 lwq = vec2(lu * 0.5 + 3.0, wp.z * 0.25 - time * 0.2);
+    vec3 lwn = fj_noised(lwq);
+    vec2 lwq2 = vec2(lu * 0.5 - 7.0, wp.z * 0.25 + time * 0.13 + 5.0);
+    vec3 lwn2 = fj_noised(lwq2);
+    float lue = lu + (lwn.x - 0.5) * 0.9;
+    float lze = lz + (lwn2.x - 0.5) * 1.6;
+    float lrow = max(lze - 0.6, 0.0) / {FJ_VFLOW} * {FJ_HRATE}.0 - fract(time * {FJ_HRATE}.0);
+    float lwid = max(fj_width(wp.z) - 0.3, 1.5);
+    float lb = abs(lue) / lwid * {FJ_NB - 2.5};
+    float lr0 = fj_hist(lb, lrow);
+    float lrb = fj_hist(lb + 0.5, lrow);
+    float lrr = fj_hist(lb, lrow + 2.0);
+    float lsgn = lue < 0.0 ? -1.0 : 1.0;
+    vec2 lgr = vec2((lrb - lr0) / (0.5 * lwid / {FJ_NB - 2.5}) * lsgn, (lrr - lr0) / (2.0 * {FJ_VFLOW} / {FJ_HRATE}.0));
+    float lamp = {FJ_LAMP} * smoothstep(60.0, 15.0, tw);
+    vec3 wn = normalize(vec3(-wg.x * wa - lgr.x * lamp, 1.0, -wg.y * wa - lgr.y * lamp));
     vec3 rfd = reflect(rd, wn);
     rfd.y = abs(rfd.y);
     float rt2 = 0.03;
@@ -3796,37 +3793,28 @@ FJ_COMP = FJ_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
     vec3 wfn = fj_noised(wfq);
     float foam = smoothstep(0.04, 0.0, wdp) * (0.35 + 0.65 * wfn.x) * exp(-tw * 0.04);
     col = mix(col, fj_suncol() * wsh * 0.16 + fj_ambient() * 0.3, foam * 0.6);
-    vec3 wrf = refract(rd, wn, 0.75);
-    float wdd = 0.3 / max(-wrf.y, 0.08);
-    vec2 wpd = wp.xz + wrf.xz * wdd;
-    vec2 gspg = wpd * 13.0;
-    vec2 gspc = mod(floor(gspg), vec2(384.0, 3328.0));
-    vec2 gspc2 = gspc + vec2(19.0, 7.0);
-    vec2 gspc3 = gspc + vec2(3.0, 41.0);
-    vec2 gspo = vec2(fj_hash2(gspc2), fj_hash2(gspc3)) * 0.6 + 0.2;
-    float gspd = length(fract(gspg) - gspo);
-    float gsph = fj_hash2(gspc);
-    float gspdot = smoothstep(0.08 + 0.12 * gsph, 0.0, gspd) * step(0.7, gsph) * (1.0 + 3.0 * (gsph - 0.7));
-    float gspk = mix(0.5 + gspdot * 3.0, 1.0, smoothstep(3.0, 10.0, tw));
-    float plit = 0.0;
-    float lwu = wpd.x - fj_path(wpd.y);
-    for (int k = 0; k < 5; k++) {{
-      float lag;
-      float lst;
-      vec2 ltr = fj_ptrack(k, lag, lst);
-      float len2 = fj_penv(lag) * lst;
-      float ltrav = {FJ_PV} * lag;
-      vec2 lts = vec2(lwu - ltr.x, mod(wpd.y - ltr.y + 128.0, 256.0) - 128.0);
-      vec2 ldv = lts - vec2(0.0, ltrav);
-      float ld2 = dot(ldv, ldv);
-      float lglo = exp(-ld2 * 3.0) * 1.2 + 0.12 / (1.0 + ld2 * 3.0);
-      float lsg = clamp(lts.y, 0.0, ltrav);
-      vec2 lto = lts - vec2(0.0, lsg);
-      float ltrl = exp(-dot(lto, lto) * 6.0) * exp(-(ltrav - lsg) * 0.4) * 0.55;
-      plit += len2 * (lglo + ltrl * gspk);
-    }}
-    float wkcr = min(length(wks) * 5.0, 1.0);
-    col += fj_glowcol() * plit * (0.3 + 0.7 * (1.0 - fre) + 0.8 * wkcr);
+    float lk = lr0 * {FJ_LCONT};
+    float lfw = max(fwidth(lk), 0.0001);
+    float lcd = abs(fract(lk + 0.5) - 0.5);
+    float lline = (1.0 - smoothstep(0.0, lfw * 1.2 + 0.05, lcd)) * smoothstep(0.03, 0.12, lr0);
+    float lglow = exp(-lcd * lcd * 40.0) * smoothstep(0.03, 0.12, lr0);
+    float lci = floor(lk + 0.5);
+    float lcx = fract(lci * 0.19 + time * 0.02) * 5.0;
+    vec3 lc = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(lcx, 0.0, 1.0));
+    lc = mix(lc, NOKKVI_RAMP2, clamp(lcx - 1.0, 0.0, 1.0));
+    lc = mix(lc, NOKKVI_RAMP3, clamp(lcx - 2.0, 0.0, 1.0));
+    lc = mix(lc, NOKKVI_RAMP4, clamp(lcx - 3.0, 0.0, 1.0));
+    lc = mix(lc, NOKKVI_RAMP5, clamp(lcx - 4.0, 0.0, 1.0));
+    float lbx = clamp(lr0, 0.0, 1.0) * 5.0;
+    vec3 lbc = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(lbx, 0.0, 1.0));
+    lbc = mix(lbc, NOKKVI_RAMP2, clamp(lbx - 1.0, 0.0, 1.0));
+    lbc = mix(lbc, NOKKVI_RAMP3, clamp(lbx - 2.0, 0.0, 1.0));
+    lbc = mix(lbc, NOKKVI_RAMP4, clamp(lbx - 3.0, 0.0, 1.0));
+    lbc = mix(lbc, NOKKVI_RAMP5, clamp(lbx - 4.0, 0.0, 1.0));
+    float lemk = mix({FJ_LDAY}, 1.0, q9) * exp(-tw * 0.025) * smoothstep(0.0, 0.35, wdp);
+    lemk *= smoothstep({FJ_NB - 1.0}, {FJ_NB - 3.0}, lb);
+    vec3 lemit = (lbc * 0.4 * lr0 * lr0 + lc * (1.3 * lline + 0.35 * lglow) * (0.35 + lr0)) * lemk;
+    col += lemit * (1.0 - 0.6 * fre);
     float gl = pow(max(dot(rfd, sun), 0.0), 350.0) * (1.5 + 2.0 * q21);
     col += fj_suncol() * gl * wsh * (0.92 + 0.16 * q20);
     col = fj_fog(col, rd, tw, 0.0, sun);
@@ -3894,38 +3882,12 @@ def fj_act_pick(var, col):
 def fj_path_eel(z, out):
     return f"{out} = {FJ_A1} * sin({FJ_W1:.9f} * ({z})) + {FJ_A2} * sin({FJ_W2:.9f} * ({z}) + 1.7);\n"
 
-# Light pulses: a kick (bass over its follower, 0.5 s cooldown) launches a
-# light under the water 2.5 units ahead of the camera that races down the
-# fjord at FJ_PV units/s along a lane beside the centre line (left and right
-# alternate; the lane follows the river path, so the light takes every bend)
-# and fades by FJ_PLIFE. Five slots, newest first, each packed as
-# side * (origin z + 1) and whole milliseconds of age (capped at 60 s) plus
-# strength * 0.3 as the fraction (freeing q's for the dream pass); the cooldown
-# times the slot count equals the lifetime, so a slot is recycled only once its
-# pulse has faded.
-FJ_PULSE_EEL = ("kk = bass - bass_att; ksince = ksince + dt;\n"
-    "ktr = above(kk, 0.26) * above(ksince, 0.5);\n"
-    "p5o = if(ktr, p4o, p5o); p5a = if(ktr, p4a, p5a); p5s = if(ktr, p4s, p5s);\n"
-    "p4o = if(ktr, p3o, p4o); p4a = if(ktr, p3a, p4a); p4s = if(ktr, p3s, p4s);\n"
-    "p3o = if(ktr, p2o, p3o); p3a = if(ktr, p2a, p3a); p3s = if(ktr, p2s, p3s);\n"
-    "p2o = if(ktr, p1o, p2o); p2a = if(ktr, p1a, p2a); p2s = if(ktr, p1s, p2s);\n"
-    "kside = if(ktr, -kside, kside);\n"
-    "kz = zc + 2.5; kz = kz - 256 * int(kz / 256);\n"
-    "p1o = if(ktr, kside * (kz + 1), p1o); p1a = if(ktr, 0, p1a); p1s = if(ktr, min(0.6 + kk * 1.2, 1.6), p1s);\n"
-    "ksince = if(ktr, 0, ksince);\n"
-    "p1a = p1a + dt; p2a = p2a + dt; p3a = p3a + dt; p4a = p4a + dt; p5a = p5a + dt;\n"
-    "q1 = p1o; q2 = int(min(p1a, 60) * 1000) + p1s * 0.3;\n"
-    "q5 = p2o; q6 = int(min(p2a, 60) * 1000) + p2s * 0.3;\n"
-    "q18 = p3o; q23 = int(min(p3a, 60) * 1000) + p3s * 0.3;\n"
-    "q26 = p4o; q28 = int(min(p4a, 60) * 1000) + p4s * 0.3;\n"
-    "q30 = p5o; q31 = int(min(p5a, 60) * 1000) + p5s * 0.3;\n")
 
 FJ_INIT = ("pulse = 0; pop = 0; dist = 0; " + SPEED_INIT +
            " act = int(rand(4)); acttm = 12; alt = 0.5; alt_m = 0.5; lk = 5; lk_m = 5; lkh = 0.3; lkh_m = 0.3;"
            " lat = 0.1; lat_m = 0.1; fov = 1; fov_m = 1; bank = 0; bank_m = 0; lsm = 1; flow = 0; hue = 0; vis = -1;"
            " aur = 1; fsp = 1; fsp_m = 1; gside = 1; saz = 0.8;"
-           " ksince = 1; kside = 1; p1o = 1; p2o = 1; p3o = 1; p4o = 1; p5o = 1;"
-           " p1a = 9; p2a = 9; p3a = 9; p4a = 9; p5a = 9; p1s = 0; p2s = 0; p3s = 0; p4s = 0; p5s = 0;")
+           "")
 FJ_FRAME = (PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED
     + ease("fsp", "spd + 0.55 * sg", "0.12")
     + "dstep = min(fsp * 1.1 * dt, 0.4);\n"
@@ -3963,8 +3925,7 @@ FJ_FRAME = (PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED
       "lsm = lsm + (loud - lsm) * (1 - exp(-dt / 0.6)); q20 = lsm;\n"
       "flow = flow + dt * (0.3 + 0.4 * fsp); flow = flow - 640 * int(flow / 640); q19 = flow;\n"
       "q21 = min(max(treb - treb_att, 0), 1);\n"
-      f"q3 = {FJ_FOCUS}; q17 = {FJ_ECHO}; q24 = {FJ_APER};\n"
-    + FJ_PULSE_EEL)
+      f"q3 = {FJ_FOCUS}; q17 = {FJ_ECHO}; q24 = {FJ_APER};\n")
 
 presets["nokkvi - fjord"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, FJ_WARP, FJ_COMP,
                                   init=FJ_INIT, frame=FJ_FRAME)
