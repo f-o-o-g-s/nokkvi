@@ -633,6 +633,13 @@ presets["nokkvi - starfield"] = preset(
 #   gas they cross, and a drifting gas-density field trades the two layers'
 #   opacity by region: thick gas hides the stars, thin gas opens onto space.
 # Soft gas clouds (big dim blobs on the same flight) ride in the comp.
+# Camera acts: every 12-26 s (on a kick) the whole scene slows to a stop, the
+# view is dragged over 0.8 s to a new camera (the picture's plane tilted in
+# perspective, rolled and zoomed, smeared by the COMP's echo of its last
+# frame), holds, and starts again. A third of the acts from a tilted view go
+# back to a flat one.
+# While stopped, the warp copies the feedback through unchanged and the
+# equations hold the flight, roll and swirl sums.
 NEB_RADII = [0.0, 0.25, 0.5, 0.75, 1.0, 1.25]
 NEB_GASROT = "0.08 * abs(0.746 - {r}) * sin(2.2 * (0.5 - {r}) + 5.7 * sin(0.1 * time))"
 def neb_swirl(v, pos):
@@ -644,6 +651,43 @@ def neb_swirl(v, pos):
     for i in range(2, 6):
         out += f"  {v} = mix({v}, q{25 + i}, clamp({v}_f - {i - 1}.0, 0.0, 1.0));\n"
     return out
+# Camera acts (see above). `at` counts calm seconds up to `nexta`; an act
+# (`inact`, clock `aa`) stops the scene (`frz` eases to 1 in ~0.2 s), drags the
+# camera from its old pose (f*) to a new one (t*) over 0.8 s, holds, and
+# lets go at 1.2 s. The new pose mixes the rand stream with the audio, so
+# visits differ; its zoom always covers the tilt and roll. q6 = stop,
+# q7..q10 = pitch, yaw, roll, zoom, q11 = drag speed (the COMP's echo).
+NEB_CAMERA = """dt = 1 / max(fps, 1);
+at = at + dt * (1 - inact);
+go = below(inact, 0.5) * above(at, nexta) * max(above(bass - bass_att, 0.2), above(at, nexta + 3));
+inact = max(inact, go);
+aa = if(go, 0, aa + dt * inact);
+u1 = rand(1000) / 1000 + bass_att * 3.7; u1 = u1 - int(u1);
+u2 = rand(1000) / 1000 + mid_att * 5.3; u2 = u2 - int(u2);
+u3 = rand(1000) / 1000 + treb_att * 7.1; u3 = u3 - int(u3);
+flat = below(rand(1000), 330) * above(abs(cpit) + abs(cyaw), 0.2);
+fpit = if(go, cpit, fpit); fyaw = if(go, cyaw, fyaw); frol = if(go, crol, frol); fzm = if(go, czm, fzm);
+tpit = if(go, (u1 - 0.5) * 0.8 * (1 - flat), tpit);
+tyaw = if(go, (u2 - 0.5) * 0.7 * (1 - flat), tyaw);
+trol = if(go, (u3 - 0.5) * 0.4, trol);
+tzm = if(go, 1.06 + 0.75 * max(abs(tpit), abs(tyaw)) + 0.5 * abs(trol) + 0.12 * u1, tzm);
+eprev = if(go, 0, eprev);
+e = min(max((aa - 0.2) / 0.8, 0), 1);
+e = e * e * (3 - 2 * e);
+cpit = if(inact, fpit + (tpit - fpit) * e, cpit);
+cyaw = if(inact, fyaw + (tyaw - fyaw) * e, cyaw);
+crol = if(inact, frol + (trol - frol) * e, crol);
+czm = if(inact, fzm + (tzm - fzm) * e, czm);
+cmv = abs(e - eprev) / dt * (abs(tpit - fpit) + abs(tyaw - fyaw) + abs(trol - frol) + abs(tzm - fzm) * 0.6);
+eprev = e;
+frzt = inact * below(aa, 1.2);
+done = inact * above(aa, 1.2);
+inact = inact * (1 - done);
+at = if(done, 0, at);
+nexta = if(done, 12 + 14 * u2, nexta);
+frz = frz + (frzt - frz) * (1 - exp(-dt / 0.07));
+q6 = frz; q7 = cpit; q8 = cyaw; q9 = crol; q10 = czm; q11 = min(cmv * 0.7, 0.8);
+"""
 def gas_cloud(l):
     return f"""
   {{
@@ -710,40 +754,51 @@ presets["nokkvi - starfield nebula"] = preset(
   vec3 dom = pp * pp * pp * pp;
   dom = dom / max(dom.x + dom.y + dom.z, 0.0001);
   pp += vec3(dom.z, dom.x, dom.y) * trail * 0.15 * (1.0 - pp);
-  ret = pp;
-  ret_alpha = trail;
+  vec4 held = texture(sampler_main, (floor(uv_orig * texsize.xy) + 0.5) * texsize.zw);
+  ret = mix(pp, held.xyz, q6);
+  ret_alpha = mix(trail, held.w, q6);
  }""",
     " shader_body {\n" + HEAD + """
-  vec2 p = (uv - 0.5) * s;
+  float cpit = q7 + 0.025 * sin(time * 0.13);
+  float cyaw = q8 + 0.025 * sin(time * 0.11 + 1.3);
+  vec3 cex = vec3(cos(cyaw), 0.0, -sin(cyaw));
+  vec3 cey = vec3(sin(cpit) * sin(cyaw), cos(cpit), sin(cpit) * cos(cyaw));
+  vec3 cen = vec3(cos(cpit) * sin(cyaw), -sin(cpit), cos(cpit) * cos(cyaw));
+  vec3 crd = vec3((uv - 0.5) * s, 1.6);
+  vec3 chit = crd * (1.6 * cen.z / max(dot(crd, cen), 0.2)) - vec3(0.0, 0.0, 1.6);
+  vec2 cpl = vec2(dot(chit, cex), dot(chit, cey));
+  cpl = vec2(cpl.x * cos(q9) - cpl.y * sin(q9), cpl.x * sin(q9) + cpl.y * cos(q9)) / max(q10, 0.5);
+  vec2 wuv = 1.0 - abs(1.0 - mod(cpl / s + 0.5, 2.0));
+  vec2 p = (wuv - 0.5) * s;
   vec2 nd = texsize.zw * 4.0;
-  vec2 ng = vec2(GetBlur1(uv + vec2(nd.x, 0.0)).y - GetBlur1(uv - vec2(nd.x, 0.0)).y,
-                 GetBlur1(uv + vec2(0.0, nd.y)).y - GetBlur1(uv - vec2(0.0, nd.y)).y);
-  float relief = texture(sampler_fc_main, uv - ng * 0.4).x;
-  vec3 sp = texture(sampler_main, uv).xyz;
+  vec2 ng = vec2(GetBlur1(wuv + vec2(nd.x, 0.0)).y - GetBlur1(wuv - vec2(nd.x, 0.0)).y,
+                 GetBlur1(wuv + vec2(0.0, nd.y)).y - GetBlur1(wuv - vec2(0.0, nd.y)).y);
+  float relief = texture(sampler_fc_main, wuv - ng * 0.4).x;
+  vec3 sp = texture(sampler_main, wuv).xyz;
   vec3 sw3 = sp * sp * sp;
   sw3 = sw3 / max(sw3.x + sw3.y + sw3.z, 0.0001);
 """ + ramp("nc", "sw3.y * 0.5 + sw3.z + (relief - 0.5) * 0.3") + """
-  vec3 neb = mix(NOKKVI_BG, nc, clamp(0.15 + 0.95 * relief, 0.0, 1.0)) * (0.75 + 0.5 * GetBlur1(uv).z);
+  vec3 neb = mix(NOKKVI_BG, nc, clamp(0.15 + 0.95 * relief, 0.0, 1.0)) * (0.75 + 0.5 * GetBlur1(wuv).z);
   neb = mix(neb, mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.4), clamp(length(ng) * 6.0, 0.0, 1.0) * 0.35);
   float cr = cos(q4); float sr = sin(q4);
   vec2 pr = vec2(p.x * cr - p.y * sr, p.x * sr + p.y * cr);
-""" + neb_swirl("swirl", "uv") + """
+""" + neb_swirl("swirl", "wuv") + """
   vec3 clouds = vec3(0.0);
 """ + "".join(gas_cloud(l) for l in range(3)) + """
-  vec3 gb3 = GetBlur3(uv);
+  vec3 gb3 = GetBlur3(wuv);
   float dens = clamp((gb3.x + gb3.y + gb3.z) * 0.45 - 0.2 + (gb3.x - gb3.z) * 0.6, 0.0, 1.0);
   vec2 gq = p * 0.11 + vec2(time * 0.0035, -time * 0.0023) + vec2(q1 * 0.004, 0.0);
   float gn = texture(sampler_noise_hq, gq).x * 0.65 + texture(sampler_noise_hq, gq * 2.3 + 0.37).x * 0.35;
   float gas = smoothstep(0.3, 0.7, dens * 0.4 + gn * 1.1 - 0.28);
   vec2 td = texsize.zw * 1.5;
-  vec2 tg = vec2(texture(sampler_main, uv + vec2(td.x, 0.0)).w - texture(sampler_main, uv - vec2(td.x, 0.0)).w,
-                 texture(sampler_main, uv + vec2(0.0, td.y)).w - texture(sampler_main, uv - vec2(0.0, td.y)).w);
-  float tr = texture(sampler_main, uv - tg * texsize.zw * 2.0).w;
+  vec2 tg = vec2(texture(sampler_main, wuv + vec2(td.x, 0.0)).w - texture(sampler_main, wuv - vec2(td.x, 0.0)).w,
+                 texture(sampler_main, wuv + vec2(0.0, td.y)).w - texture(sampler_main, wuv - vec2(0.0, td.y)).w);
+  float tr = texture(sampler_main, wuv - tg * texsize.zw * 2.0).w;
   vec3 tn = normalize(vec3(-tg * 3.0, 1.0));
   vec3 tl = normalize(vec3(-0.45, 0.55, 0.7));
   float tlit = max(dot(tn, tl), 0.0);
   float tspec = pow(max(dot(reflect(-tl, tn), vec3(0.0, 0.0, 1.0)), 0.0), 24.0);
-  float tsh = texture(sampler_main, uv + vec2(0.45, -0.55) * texsize.zw * 5.0).w;
+  float tsh = texture(sampler_main, wuv + vec2(0.45, -0.55) * texsize.zw * 5.0).w;
   vec3 nhue = neb / max(max(neb.x, neb.y), max(neb.z, 0.05));
   vec3 starc = mix(nhue, NOKKVI_TEXT, smoothstep(0.45, 0.95, tr)) * tr * (0.35 + 0.9 * tlit) + NOKKVI_TEXT * tspec * tr;
   vec3 col = mix(NOKKVI_BG, neb, clamp(0.55 * mix(0.1, 1.55, gas), 0.0, 1.0)) + clouds * (0.4 + 0.8 * gas);
@@ -751,20 +806,25 @@ presets["nokkvi - starfield nebula"] = preset(
   col += NOKKVI_ACCENT * exp(-length(p) * 6.0) * 0.3 * q3;
   vec3 sl = clamp(starc * 1.6, 0.0, 1.0) * clamp(0.6 * mix(1.6, 0.35, gas), 0.0, 1.0);
   col = 1.0 - (1.0 - clamp(col, 0.0, 1.0)) * (1.0 - sl);
-  col *= 0.9 + 0.1 * smoothstep(1.1, 0.2, length(p));
+  col *= 0.9 + 0.1 * smoothstep(1.1, 0.2, length((uv - 0.5) * s));
   col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.xy).x - 0.5) * 0.012;
+  vec4 cprev = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), uv, 0.0);
+  col = mix(col, cprev.rgb, clamp(q11, 0.0, 0.8) * cprev.a);
   ret = col;
  }""",
-    init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0; " + " ".join(f"sa{i} = 0;" for i in range(6)),
-    frame=PULSE + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3 + 0.1 * pop);\n"
-          "travel = travel + speed * 0.25;\nroll = roll + 0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05));\n"
+    init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0; " + " ".join(f"sa{i} = 0;" for i in range(6))
+         + " at = 0; nexta = 8; inact = 0; aa = 0; e = 0; eprev = 0; frz = 0;"
+         " cpit = 0; cyaw = 0; crol = 0; czm = 1; fpit = 0; fyaw = 0; frol = 0; fzm = 1;"
+         " tpit = 0; tyaw = 0; trol = 0; tzm = 1;",
+    frame=PULSE + NEB_CAMERA + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3 + 0.1 * pop);\n"
+          "travel = travel + speed * 0.25 * (1 - frz);\nroll = roll + (0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05))) * (1 - frz);\n"
           "q1 = travel;\nq2 = speed * 6;\nq4 = roll;\n"
           "q20 = min(max(0.5 * sin(time * 1.13), 0), 1);\n"
           "q21 = min(max(0.99 + 0.5 * sin(time * 1.23), 0), 1);\n"
           "q22 = min(max(1 + 0.5 * sin(time * 1.33), 0), 1);\n"
           "q23 = 0.5 + sin(time);\nq24 = 0.5 + cos(time * 0.65);\n"
           "q31 = min(0.7 + q2 * 0.8, 1.5);\n"
-          + "".join(f"sa{i} = sa{i} * 0.992 + q31 * {NEB_GASROT.format(r=r)};\nq{25 + i} = sa{i};\n"
+          + "".join(f"sa{i} = sa{i} - (sa{i} * 0.008 - q31 * {NEB_GASROT.format(r=r)}) * (1 - frz);\nq{25 + i} = sa{i};\n"
                     for i, r in enumerate(NEB_RADII)))
 presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
     "zoom = zoom + 0.0095*(sin(10*ang) + sin(sin(time*2*sin(time)*rad))*0.3 - cos(rad)*0.1);\n"
