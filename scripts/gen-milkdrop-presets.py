@@ -2778,7 +2778,12 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # mirror out from the centre (bass in the middle lanes, treble toward the
 # cliffs), along it the history races ahead of the camera at FJ_VFLOW units/s
 # (what you hear rises under the camera and flows down the fjord, taking every
-# bend). A slow liquid warp melts the lanes. The level is a glossy relief that
+# bend). A slow liquid warp melts the lanes. The level is real, glossy
+# relief: the water surface is displaced by it (up to FJ_WAMP, and never more
+# than 0.6 of the camera's height, so crests stay clear of the skimming
+# camera; flat at the cliff margins, so the shore holds, and beyond 45 units),
+# found by a short march between the crest plane and y = 0 plus bisection
+# (on the bilinear history, one read a step; the shading uses the B-spline); it
 # bends the reflections, neon contour lines trace it (each level its own
 # colour from the theme ramp, drifting), and a body glow fills between them;
 # the glow is strongest at night and fades in the shallows. Each kick is
@@ -2904,7 +2909,7 @@ FJ_HR0 = FJ_DH + 2
 FJ_HN = 240
 FJ_HRATE = 60
 FJ_VFLOW = 12.0
-FJ_LAMP = 0.12
+FJ_WAMP = 0.18
 FJ_LCONT = 8.0
 FJ_LDAY = 0.4
 FJ_LFLARE = 1.8
@@ -3416,6 +3421,28 @@ vec2 fj_hist(float fhb, float fhr) {{
   vec3 fhv = fj_bspline(fhc, fhbase);
   return vec2(fj_dec(fhv.xy), fhv.z);
 }}
+vec3 fj_wlane(float wx, float wz) {{
+  float wlu = wx - fj_path(wz);
+  vec2 wlq = vec2(wlu * 0.5 + 3.0, wz * 0.25 - time * 0.2);
+  vec3 wln = fj_noised(wlq);
+  vec2 wlq2 = vec2(wlu * 0.5 - 7.0, wz * 0.25 + time * 0.13 + 5.0);
+  vec3 wln2 = fj_noised(wlq2);
+  float wlue = wlu + (wln.x - 0.5) * 0.9;
+  float wlze = wz - q4 + (wln2.x - 0.5) * 1.6;
+  float wlrow = max(wlze - 0.6, 0.0) / {FJ_VFLOW} * {FJ_HRATE}.0 - fract(time * {FJ_HRATE}.0);
+  float wlwid = max(fj_width(wz) - 0.3, 1.5);
+  float wlsg = wlue < 0.0 ? -1.0 : 1.0;
+  return vec3(abs(wlue) / wlwid * {FJ_NB - 2.5}, wlrow, wlsg);
+}}
+float fj_wfade(float fb, float ft) {{
+  return smoothstep({FJ_NB - 1.0}, {FJ_NB - 3.0}, fb) * smoothstep(45.0, 15.0, ft);
+}}
+float fj_wh(vec3 whp, float whamp, float wht) {{
+  vec3 whl = fj_wlane(whp.x, whp.z);
+  vec2 whuv = (vec2(clamp(whl.x, 0.0, {FJ_NB - 2.5}), {FJ_HR0}.0 + clamp(whl.y, 1.0, {FJ_HN - 3}.0)) + 0.5) * texsize.zw;
+  vec3 whv = fj_tex(whuv);
+  return whamp * fj_dec(whv.xy) * fj_wfade(whl.x, wht);
+}}
 float fj_cam(float cri) {{
   vec2 cruv = fj_duv(cri, {FJ_DH + 1}.0);
   return fj_dec24(fj_tex(cruv));
@@ -3635,7 +3662,36 @@ FJ_COMP = FJ_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
   vec3 up = cross(fw, rt);
   vec3 rd = normalize(fw + (p.x * rt + p.y * up) * q14);
   vec3 sun = fj_sun();
-  float tw = rd.y < -0.0001 ? -ro.y / rd.y : 1e9;
+  float wamp = min({FJ_WAMP}, 0.6 * max(q8, 0.05));
+  float tw = 1e9;
+  if (rd.y < -0.0001) {{
+    float twb = -ro.y / rd.y;
+    tw = twb;
+    if (twb < 45.0) {{
+      float twa = max((ro.y - wamp) / -rd.y, 0.0);
+      float wsteps = clamp(ceil((twb - twa) / 0.18), 3.0, 10.0);
+      float wtp = twa;
+      float wtc = twb;
+      for (int i = 1; i <= 10; i++) {{
+        if (float(i) > wsteps) break;
+        float wti = twa + (twb - twa) * float(i) / wsteps;
+        vec3 wpi = ro + rd * wti;
+        if (wpi.y <= fj_wh(wpi, wamp, wti)) {{
+          wtc = wti;
+          break;
+        }}
+        wtp = wti;
+      }}
+      for (int k = 0; k < 4; k++) {{
+        float wtm = 0.5 * (wtp + wtc);
+        vec3 wpm = ro + rd * wtm;
+        float wbel = step(wpm.y, fj_wh(wpm, wamp, wtm));
+        wtc = mix(wtc, wtm, wbel);
+        wtp = mix(wtm, wtp, wbel);
+      }}
+      tw = wtc;
+    }}
+  }}
   float tmax = min(tw, 90.0);
   float t = 0.03;
   float tp = t;
@@ -3738,17 +3794,11 @@ FJ_COMP = FJ_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
     vec2 wl2 = vec2(-wf2.y, wf2.x);
     vec2 wg = wf2 * dot(wg0, wf2) + wl2 * dot(wg0, wl2) * 0.35;
     float wa = (0.012 + 0.03 * wfade) / (1.0 + 0.15 * tw);
-    float lu = wp.x - fj_path(wp.z);
-    float lz = wp.z - q4;
-    vec2 lwq = vec2(lu * 0.5 + 3.0, wp.z * 0.25 - time * 0.2);
-    vec3 lwn = fj_noised(lwq);
-    vec2 lwq2 = vec2(lu * 0.5 - 7.0, wp.z * 0.25 + time * 0.13 + 5.0);
-    vec3 lwn2 = fj_noised(lwq2);
-    float lue = lu + (lwn.x - 0.5) * 0.9;
-    float lze = lz + (lwn2.x - 0.5) * 1.6;
-    float lrow = max(lze - 0.6, 0.0) / {FJ_VFLOW} * {FJ_HRATE}.0 - fract(time * {FJ_HRATE}.0);
+    vec3 lln = fj_wlane(wp.x, wp.z);
+    float lb = lln.x;
+    float lrow = lln.y;
+    float lsgn = lln.z;
     float lwid = max(fj_width(wp.z) - 0.3, 1.5);
-    float lb = abs(lue) / lwid * {FJ_NB - 2.5};
     vec2 lh0 = fj_hist(lb, lrow);
     float lr0 = lh0.x;
     float lbt = lh0.y;
@@ -3756,9 +3806,8 @@ FJ_COMP = FJ_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
     float lrb = lhb.x;
     vec2 lhr = fj_hist(lb, lrow + 2.0);
     float lrr = lhr.x;
-    float lsgn = lue < 0.0 ? -1.0 : 1.0;
     vec2 lgr = vec2((lrb - lr0) / (0.5 * lwid / {FJ_NB - 2.5}) * lsgn, (lrr - lr0) / (2.0 * {FJ_VFLOW} / {FJ_HRATE}.0));
-    float lamp = {FJ_LAMP} * smoothstep(60.0, 15.0, tw);
+    float lamp = wamp * fj_wfade(lb, tw);
     vec3 wn = normalize(vec3(-wg.x * wa - lgr.x * lamp, 1.0, -wg.y * wa - lgr.y * lamp));
     vec3 rfd = reflect(rd, wn);
     rfd.y = abs(rfd.y);
