@@ -548,7 +548,7 @@ presets["nokkvi - cover orb"] = preset(
 # speed); each star is tied to a frequency and flares with it; kicks surge
 # the speed. (A screen-space nebula read as a smudge on the lens; removed.)
 STAR_LAYERS = 6
-def star_layer(l, twist="q11 * (1.0 - z) * 2.2"):
+def star_layer(l, twist="q11 * (1.0 - z) * 2.2", girth=""):
     return f"""
   {{
     float z = fract({l}.0 / {STAR_LAYERS}.0 + q1);
@@ -562,7 +562,7 @@ def star_layer(l, twist="q11 * (1.0 - z) * 2.2"):
     float h = fract(sin(dot(id, vec2(127.1, 311.7))) * 43758.5453);
     float h2 = fract(h * 91.3);
     vec2 d = f - (vec2(h, h2) - 0.5) * 0.5;
-    float size = mix(0.012, 0.04, h2) * (0.6 + z);
+    float size = mix(0.012, 0.04, h2) * (0.6 + z){girth};
     float dist = length(d);
     float core = smoothstep(size, 0.0, dist);
     float glow = size * 0.5 / (dist + 0.02) * smoothstep(0.2, 0.0, dist);
@@ -659,8 +659,13 @@ def neb_swirl(v, pos):
 # harder kick shifts it further; each pose pulls halfway back to the centre
 # so the tilt stays bounded, and every 16th act goes back to flat. The new
 # pose mixes the rand stream with the audio, so visits differ; its zoom
-# always covers the tilt and roll. q6 = stop, q7..q10 = pitch, yaw, roll,
-# zoom, q11 = drag speed (the COMP's echo).
+# covers about half the tilt and roll (past that the picture folds back as a
+# mirror at the edges, which keeps it sharp where a full cover would blur). Each act also twists (`ttw`, random
+# direction, bigger on harder kicks). q6 = stop, q7..q10 = pitch, yaw, roll,
+# zoom, q11 = drag speed (the COMP's echo), q18 = focal length (a wide lens
+# exaggerates the tilt), q12..q15 = this frame's step of
+# yaw, pitch, roll, zoom and q16 of the twist (the warp melts the held
+# picture by them), q17 = the on-screen twist (in and back out over the drag).
 NEB_CAMERA = """dt = 1 / max(fps, 1);
 at = at + dt * (1 - inact);
 sinceb = sinceb + dt;
@@ -675,12 +680,13 @@ u1 = rand(1000) / 1000 + bass_att * 3.7; u1 = u1 - int(u1);
 u2 = rand(1000) / 1000 + mid_att * 5.3; u2 = u2 - int(u2);
 u3 = rand(1000) / 1000 + treb_att * 7.1; u3 = u3 - int(u3);
 flat = equal(nacts % 16, 0);
-amp = min(0.14 + max(bass - bass_att, 0) * 0.35, 0.36);
-fpit = if(go, cpit, fpit); fyaw = if(go, cyaw, fyaw); frol = if(go, crol, frol); fzm = if(go, czm, fzm);
-tpit = if(go, min(max(cpit * 0.5 + (u1 - 0.5) * 2 * amp, -0.42), 0.42) * (1 - flat), tpit);
-tyaw = if(go, min(max(cyaw * 0.5 + (u2 - 0.5) * 2 * amp, -0.36), 0.36) * (1 - flat), tyaw);
-trol = if(go, min(max(crol * 0.5 + (u3 - 0.5) * amp, -0.2), 0.2), trol);
-tzm = if(go, 1.06 + 0.75 * max(abs(tpit), abs(tyaw)) + 0.5 * abs(trol) + 0.08 * u1, tzm);
+amp = min(0.3 + max(bass - bass_att, 0) * 0.6, 0.7);
+fpit = if(go, cpit, fpit); fyaw = if(go, cyaw, fyaw); frol = if(go, crol, frol); fzm = if(go, czm, fzm); ffoc = if(go, cfoc, ffoc);
+tpit = if(go, min(max(cpit * 0.35 + (u1 - 0.5) * 2 * amp, -0.75), 0.75) * (1 - flat), tpit);
+tyaw = if(go, min(max(cyaw * 0.35 + (u2 - 0.5) * 2 * amp, -0.65), 0.65) * (1 - flat), tyaw);
+trol = if(go, min(max(crol * 0.35 + (u3 - 0.5) * 2 * amp, -0.6), 0.6), trol);
+tfoc = if(go, 0.8 + 0.9 * u3 + 0.8 * flat, tfoc);
+tzm = if(go, 1.04 + 0.5 * max(abs(tpit), abs(tyaw)) * 1.6 / tfoc + 0.25 * abs(trol) + 0.08 * u1, tzm);
 ddur = if(go, min(max(ibi * 0.45, 0.12), 0.4), ddur);
 eprev = if(go, 0, eprev);
 e = min(max((aa - 0.05) / ddur, 0), 1);
@@ -689,14 +695,56 @@ cpit = if(inact, fpit + (tpit - fpit) * e, cpit);
 cyaw = if(inact, fyaw + (tyaw - fyaw) * e, cyaw);
 crol = if(inact, frol + (trol - frol) * e, crol);
 czm = if(inact, fzm + (tzm - fzm) * e, czm);
+cfoc = if(inact, ffoc + (tfoc - ffoc) * e, cfoc);
 cmv = abs(e - eprev) / dt * (abs(tpit - fpit) + abs(tyaw - fyaw) + abs(trol - frol) + abs(tzm - fzm) * 0.6);
+dee = e - eprev;
 eprev = e;
+ttw = if(go, (above(u2, 0.5) * 2 - 1) * (0.5 + 2.2 * amp), ttw);
 frzt = inact * below(aa, 0.07 + ddur);
 done = inact * above(aa, 0.07 + ddur);
 inact = inact * (1 - done);
 at = if(done, 0, at);
 frz = frz + (frzt - frz) * (1 - exp(-dt / 0.025));
 q6 = frz; q7 = cpit; q8 = cyaw; q9 = crol; q10 = czm; q11 = min(cmv * 0.35, 0.8);
+q12 = dee * (tyaw - fyaw); q13 = dee * (tpit - fpit); q14 = dee * (trol - frol); q15 = dee * (tzm - fzm);
+q16 = dee * ttw * 0.5; q17 = sin(3.14159 * e) * ttw * inact; q18 = cfoc;
+"""
+NEB_LIQUID_TAPS = """  { vec2 lo = vec2(3.000, 0.000);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0222); }
+  { vec2 lo = vec2(4.243, 4.243);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0111); }
+  { vec2 lo = vec2(1.500, 2.598);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0222); }
+  { vec2 lo = vec2(-1.553, 5.796);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0111); }
+  { vec2 lo = vec2(-1.500, 2.598);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0222); }
+  { vec2 lo = vec2(-5.796, 1.553);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0111); }
+  { vec2 lo = vec2(-3.000, 0.000);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0222); }
+  { vec2 lo = vec2(-4.243, -4.243);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0111); }
+  { vec2 lo = vec2(-1.500, -2.598);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0222); }
+  { vec2 lo = vec2(1.553, -5.796);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0111); }
+  { vec2 lo = vec2(1.500, -2.598);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0222); }
+  { vec2 lo = vec2(5.796, -1.553);
+    float lw = texture(sampler_main, wuv + lo * texsize.zw).w;
+    lt += lw * 0.0667; lg += lo * (lw * 0.0111); }
 """
 def gas_cloud(l):
     return f"""
@@ -751,7 +799,7 @@ presets["nokkvi - starfield nebula"] = preset(
   pp = mix(pp, sdc, step(sdd, 1.0) * mix(0.2, 1.0, clamp(sdd, 0.0, 1.0)));
 """ + neb_swirl("swirl", "uv_orig") + """
   vec3 stars = vec3(0.0);
-""" + "".join(star_layer(l, "swirl") for l in range(STAR_LAYERS)) + """
+""" + "".join(star_layer(l, "swirl", " * 1.5") for l in range(STAR_LAYERS)) + """
   float si = min(max(max(stars.x, stars.y), stars.z), 1.0);
   vec2 cs = (uv_orig - 0.5) * s;
   float crad = 2.0 * length(cs) / max(s.x, s.y);
@@ -764,7 +812,14 @@ presets["nokkvi - starfield nebula"] = preset(
   vec3 dom = pp * pp * pp * pp;
   dom = dom / max(dom.x + dom.y + dom.z, 0.0001);
   pp += vec3(dom.z, dom.x, dom.y) * trail * 0.15 * (1.0 - pp);
-  vec4 held = texture(sampler_main, (floor(uv_orig * texsize.xy) + 0.5) * texsize.zw);
+  vec2 mc = (uv_orig - 0.5) * s;
+  float mn = texture(sampler_noise_hq, uv_orig * 0.5 + vec2(time * 0.013, time * 0.007)).x;
+  float mtw = q16 * exp(-length(mc) * 1.3);
+  vec2 mm = vec2(mc.x * cos(mtw) - mc.y * sin(mtw), mc.x * sin(mtw) + mc.y * cos(mtw));
+  mm = vec2(mm.x * cos(q14) - mm.y * sin(q14), mm.x * sin(q14) + mm.y * cos(q14)) / (1.0 + q15 * 0.7);
+  mm += vec2(q12, -q13) * 0.6;
+  vec2 mdisp = (mm - mc) * (0.4 + 1.2 * mn) + vec2(0.0, (abs(q12) + abs(q13) + abs(q16) * 0.3) * (0.3 + mn) * 0.5);
+  vec4 held = texture(sampler_main, (floor(uv_orig * texsize.xy) + 0.5) * texsize.zw + mdisp / s);
   ret = mix(pp, held.xyz, q6);
   ret_alpha = mix(trail, held.w, q6);
  }""",
@@ -774,9 +829,11 @@ presets["nokkvi - starfield nebula"] = preset(
   vec3 cex = vec3(cos(cyaw), 0.0, -sin(cyaw));
   vec3 cey = vec3(sin(cpit) * sin(cyaw), cos(cpit), sin(cpit) * cos(cyaw));
   vec3 cen = vec3(cos(cpit) * sin(cyaw), -sin(cpit), cos(cpit) * cos(cyaw));
-  vec3 crd = vec3((uv - 0.5) * s, 1.6);
-  vec3 chit = crd * (1.6 * cen.z / max(dot(crd, cen), 0.2)) - vec3(0.0, 0.0, 1.6);
+  vec3 crd = vec3((uv - 0.5) * s, q18);
+  vec3 chit = crd * (q18 * cen.z / max(dot(crd, cen), 0.08)) - vec3(0.0, 0.0, q18);
   vec2 cpl = vec2(dot(chit, cex), dot(chit, cey));
+  float ctw = q17 * exp(-length(cpl) * 1.3);
+  cpl = vec2(cpl.x * cos(ctw) - cpl.y * sin(ctw), cpl.x * sin(ctw) + cpl.y * cos(ctw));
   cpl = vec2(cpl.x * cos(q9) - cpl.y * sin(q9), cpl.x * sin(q9) + cpl.y * cos(q9)) / max(q10, 0.5);
   vec2 wuv = 1.0 - abs(1.0 - mod(cpl / s + 0.5, 2.0));
   vec2 p = (wuv - 0.5) * s;
@@ -800,21 +857,30 @@ presets["nokkvi - starfield nebula"] = preset(
   vec2 gq = p * 0.11 + vec2(time * 0.0035, -time * 0.0023) + vec2(q1 * 0.004, 0.0);
   float gn = texture(sampler_noise_hq, gq).x * 0.65 + texture(sampler_noise_hq, gq * 2.3 + 0.37).x * 0.35;
   float gas = smoothstep(0.3, 0.7, dens * 0.4 + gn * 1.1 - 0.28);
-  vec2 td = texsize.zw * 1.5;
-  vec2 tg = vec2(texture(sampler_main, wuv + vec2(td.x, 0.0)).w - texture(sampler_main, wuv - vec2(td.x, 0.0)).w,
-                 texture(sampler_main, wuv + vec2(0.0, td.y)).w - texture(sampler_main, wuv - vec2(0.0, td.y)).w);
-  float tr = texture(sampler_main, wuv - tg * texsize.zw * 2.0).w;
-  vec3 tn = normalize(vec3(-tg * 3.0, 1.0));
-  vec3 tl = normalize(vec3(-0.45, 0.55, 0.7));
-  float tlit = max(dot(tn, tl), 0.0);
-  float tspec = pow(max(dot(reflect(-tl, tn), vec3(0.0, 0.0, 1.0)), 0.0), 24.0);
-  float tsh = texture(sampler_main, wuv + vec2(0.45, -0.55) * texsize.zw * 5.0).w;
+  float tr = texture(sampler_main, wuv).w;
+  float lt = tr * 0.2;
+  vec2 lg = vec2(0.0);
+""" + NEB_LIQUID_TAPS + """
+  float lq = smoothstep(0.08, 0.34, lt);
+  float lrip = texture(sampler_noise_hq, wuv * 3.0 + vec2(time * 0.02, -time * 0.015)).x - 0.5;
+  vec3 ln = normalize(vec3(-lg * 4.0 + vec2(lrip, -lrip) * 0.5 * lq, 1.0));
+  vec3 ll = normalize(vec3(-0.45, 0.55, 0.7));
+  float ldif = max(dot(ln, ll), 0.0);
+  float lspec = pow(max(dot(reflect(-ll, ln), vec3(0.0, 0.0, 1.0)), 0.0), 40.0);
+  float lfres = pow(1.0 - clamp(ln.z, 0.0, 1.0), 2.0);
+  float lrel = texture(sampler_fc_main, wuv - ng * 0.4 + ln.xy * 0.035 * lq).x;
   vec3 nhue = neb / max(max(neb.x, neb.y), max(neb.z, 0.05));
-  vec3 starc = mix(nhue, NOKKVI_TEXT, smoothstep(0.45, 0.95, tr)) * tr * (0.35 + 0.9 * tlit) + NOKKVI_TEXT * tspec * tr;
+  vec3 liquid = mix(mix(NOKKVI_BG, nc, lrel) * 1.25, nhue, 0.25) * (0.45 + 0.7 * ldif);
+  liquid += NOKKVI_TEXT * (lspec * 1.2 + lfres * 0.45);
+  vec3 lcore = mix(nhue, NOKKVI_TEXT, 0.6) * smoothstep(0.5, 1.0, tr);
+  float lsh = 0.5 * (texture(sampler_main, wuv + vec2(0.45, -0.55) * texsize.zw * 6.0).w
+                   + texture(sampler_main, wuv + vec2(0.45, -0.55) * texsize.zw * 9.0).w);
+  float lop = clamp(0.72 * mix(1.6, 0.35, gas), 0.0, 0.95);
   vec3 col = mix(NOKKVI_BG, neb, clamp(0.55 * mix(0.1, 1.55, gas), 0.0, 1.0)) + clouds * (0.4 + 0.8 * gas);
-  col *= 1.0 - 0.35 * clamp(tsh - tr, 0.0, 1.0) * (0.4 + 0.6 * gas);
+  col *= 1.0 - 0.4 * smoothstep(0.05, 0.3, lsh) * (1.0 - lq) * lop;
   col += NOKKVI_ACCENT * exp(-length(p) * 6.0) * 0.3 * q3;
-  vec3 sl = clamp(starc * 1.6, 0.0, 1.0) * clamp(0.6 * mix(1.6, 0.35, gas), 0.0, 1.0);
+  col = mix(col, liquid, lq * lop);
+  vec3 sl = clamp(lcore * 1.4 + mix(nhue, NOKKVI_TEXT, 0.5) * tr * 0.9 * (1.0 - lq), 0.0, 1.0) * lop;
   col = 1.0 - (1.0 - clamp(col, 0.0, 1.0)) * (1.0 - sl);
   col *= 0.9 + 0.1 * smoothstep(1.1, 0.2, length((uv - 0.5) * s));
   col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.xy).x - 0.5) * 0.012;
@@ -823,8 +889,8 @@ presets["nokkvi - starfield nebula"] = preset(
   ret = col;
  }""",
     init="pulse = 0; pop = 0; travel = 0; roll = 0; speed = 0; " + " ".join(f"sa{i} = 0;" for i in range(6))
-         + " at = 0; sinceb = 1; ibi = 0.5; nacts = 0; ddur = 0.25; inact = 0; aa = 0; e = 0; eprev = 0; frz = 0;"
-         " cpit = 0; cyaw = 0; crol = 0; czm = 1; fpit = 0; fyaw = 0; frol = 0; fzm = 1;"
+         + " at = 0; sinceb = 1; ibi = 0.5; nacts = 0; ddur = 0.25; inact = 0; aa = 0; e = 0; eprev = 0; dee = 0; ttw = 0; frz = 0;"
+         " cpit = 0; cyaw = 0; crol = 0; czm = 1; fpit = 0; fyaw = 0; frol = 0; fzm = 1; cfoc = 1.6; ffoc = 1.6; tfoc = 1.6;"
          " tpit = 0; tyaw = 0; trol = 0; tzm = 1;",
     frame=PULSE + NEB_CAMERA + "speed = speed * 0.9 + 0.1 * (0.012 + 0.03 * min(bass_att, 2) + 0.12 * q3 + 0.1 * pop);\n"
           "travel = travel + speed * 0.25 * (1 - frz);\nroll = roll + (0.0012 * (mid_att - 0.8) + 0.004 * q3 * sign(sin(time * 0.05))) * (1 - frz);\n"

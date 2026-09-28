@@ -38,12 +38,17 @@ All notable changes to this project will be documented in this file.
 - When Starfield Nebula's flight speeds up with the music, its gas swirls faster too.
 - Starfield Nebula's thick gas dims the stars behind it.
 - Thin patches in Starfield Nebula's gas open onto dark space full of stars.
-- Starfield Nebula's star trails look raised and lit, like the gas.
-- Starfield Nebula's star trails cast soft shadows on the gas.
+- Starfield Nebula's stars flow as thick, glossy liquid that refracts the gas behind it.
+- Starfield Nebula's stars merge into larger liquid bodies where they crowd together.
+- Starfield Nebula's liquid stars cast soft shadows on the gas.
 - Soft gas clouds drift past on Starfield Nebula's flight.
 - Starfield Nebula's scene stops on the beat and flows again between beats.
 - On each beat, Starfield Nebula's view is dragged to a new camera angle, leaving a motion smear.
-- Most of Starfield Nebula's camera angles tilt the scene in perspective.
+- Most of Starfield Nebula's camera angles tilt the scene steeply in perspective.
+- Starfield Nebula's camera changes lens on each beat, from wide to narrow.
+- At steep angles Starfield Nebula's picture folds back on itself at the edges.
+- Each camera drag melts Starfield Nebula's picture, smearing the gas and stars along the move.
+- Starfield Nebula's picture twists as the camera moves.
 - Harder kicks shift Starfield Nebula's camera further.
 - Starfield Nebula's camera drags quicken with the tempo.
 
