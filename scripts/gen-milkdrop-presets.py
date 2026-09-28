@@ -2794,7 +2794,8 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # than averaging, so nothing here reads them.) The block sits where the
 # engine's resize keeps the old feedback (low x, low y), so it survives a
 # resize; only the first frames are wiped.
-# Cache: at most FJ_CWMAX x FJ_CHMAX texels, x = depth, y = u = x - river
+# Cache: at most FJ_CWMAX x FJ_CHMAX texels (and FJ_SR rows fewer than the
+# texture), x = depth, y = u = x - river
 # path(z) (uniform). Depth texels are anchored to the world: spacing 256/N (N
 # texels per 256 units, so the grid survives the wrap) from an origin snapped
 # to that spacing, so a world point is sampled identically every frame (a
@@ -2805,6 +2806,20 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # ridged noise about as fine up the face as along it (vertical-only relief read
 # as organ pipes); a rolling plateau with far peaks; gully erosion only on
 # shoulders and slopes (on a cliff its small height steps became flutes).
+# The relief pushes the wall out by an amount that depends on the height, and
+# a heightfield cannot overhang: the wall's position was once estimated from
+# the unrelieved height, so where the relief changed faster than the wall
+# climbs the wall folded back on itself and baked knife-thin fins into the
+# cache that shimmered like paper waves in flight. Now each depth column's wall
+# is sampled at FJ_WK + 1 heights (even in height, true heights), made monotone
+# by averaging the fill envelope (a bulge extends down) and the carve envelope
+# (a bulge is trimmed back), and each texel inverts that monotone wall by binary
+# search: no folds by construction. The polylines (one per column and side,
+# 16-bit, (W + 1) / 4) sit in FJ_SR rows above the cache and are written each
+# frame; the bake reads last frame's, shifted by how far the snapped origin
+# moved (the camera block keeps that origin's index and the texture size). The
+# first frames, a resized texture and the newest column fall back to the old
+# direct estimate for that one frame.
 # The rock is one surface, the cubic B-spline of the cache: the march reads it
 # directly within 6 units and beyond that lets the bilinear cache (one read
 # per step) only propose hits that the B-spline confirms, backtracking until
@@ -2836,7 +2851,8 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # Dream (after the mandelbox explorer's soft, echoing look): the comp also reads
 # its own previous frame (sampler_prev_comp, with averaged blur levels) and
 # blends it in after the tone map. The warp keeps the camera as 24-bit values
-# (three channels) in a small block under the bands: row FJ_DH this frame's,
+# (three channels; texels 8-10 hold the texture size and the cache origin's
+# index for the wall strip) in a small block under the bands: row FJ_DH this frame's,
 # row FJ_DH + 1 a copy of the last frame's, which the comp reads to reproject:
 # each pixel's world point (rock hit; on water the reflection's mirror image
 # along the view ray, its inverse depth weighted by Fresnel so a faint sky
@@ -2850,8 +2866,9 @@ presets["nokkvi - infinity"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}
 # the sky's blur capped at FJ_SKYCOC so stars and aurora survive) pulls each
 # pixel toward the blurred history, never less than FJ_HALO: a soft halo
 # everywhere and a glowing, softened distance. The history weight is zero for
-# the first frames, off screen, behind the old camera and where the history has
-# no alpha (the engine clears it on a resize). Every blend is convex, so the loop
+# the first frames, behind the old camera and where the history has no alpha
+# (the engine clears it on a resize), and fades out over the last 4% toward the
+# screen edge (a hard cut left a seam). Every blend is convex, so the loop
 # gain stays below 1; a 1/255 dither keeps the 8-bit history from sticking.
 # q map: pulse slots (packed origin; age ms + strength * 0.3 in one q) in q1/q2,
 # q5/q6, q18/q23, q26/q28, q30/q31; q3 focus distance, q17 echo, q24 aperture;
@@ -2875,7 +2892,10 @@ FJ_W2 = 6.2831853 * 8 / 256
 FJ_A1, FJ_A2 = 2.2, 0.9
 FJ_PV = 9.0
 FJ_PLIFE = 2.5
-FJ_CAMN = 8
+FJ_CAMN = 11
+FJ_WK = 32
+FJ_WKLOG = 5
+FJ_SR = 2 * (FJ_WK + 1)
 FJ_NEARCOC = 0.5
 FJ_DOFW = 0.6
 FJ_HALO = 0.2
@@ -2921,7 +2941,7 @@ float fj_cw() {{
   return clamp(texsize.x - {FJ_DW + 1}.0, 8.0, {FJ_CWMAX}.0);
 }}
 float fj_ch() {{
-  return min(texsize.y, {FJ_CHMAX}.0);
+  return clamp(texsize.y - {FJ_SR}.0, 8.0, {FJ_CHMAX}.0);
 }}
 float fj_dzt() {{
   return 256.0 / max(floor(256.0 * fj_cw() / {FJ_ZL} + 0.5), 1.0);
@@ -3016,39 +3036,123 @@ float fj_spur(float sz, float sper, float ssalt, float swid, out float sside) {{
   }}
   return sbest;
 }}
-float fj_base(float gu, float gzw) {{
+float fj_prof(float pa, float pcl, float prr, float pbz, float pbw, float pn) {{
+  float px = clamp(pa / prr, -0.4, 1.0);
+  float pxlo = px * (pbz + 0.4 * pbw) / pbz;
+  float pxmid = pbz + 0.4 * pbw + (px - pbz) * 0.6;
+  float pxb = mix(pxlo, mix(pxmid, px, step(pbz + pbw, px)), step(pbz, px));
+  float ph = max(pcl * (1.0 - pow(1.0 - pxb, 2.4)), -0.9);
+  float ppl = max(pa - prr, 0.0);
+  float ppw = smoothstep(0.0, 2.5, ppl);
+  ph += ppw * ((pn - 0.35) * 1.2 + 0.06 * ppl);
+  ph += smoothstep(2.0, 7.0, ppl) * max(pn - 0.3, 0.0) * 2.5;
+  return ph;
+}}
+float fj_relief(float rzw, float ry, float rsd) {{
+  vec2 rq1 = vec2(rzw * 0.75 + ry * 0.3, ry * 0.75 + rsd * 5.0);
+  vec3 rn1 = fj_noised(rq1);
+  vec2 rq2 = vec2(rzw * 2.25 - ry * 0.9 + 0.3, ry * 1.9 + rzw * 0.5 + 1.7);
+  vec3 rn2 = fj_noised(rq2);
+  return (1.0 - abs(2.0 * rn1.x - 1.0)) * 0.4 + (1.0 - abs(2.0 * rn2.x - 1.0)) * 0.13;
+}}
+float fj_wa(float wk, float wrr) {{
+  float wt = clamp((wk - 2.0) / {FJ_WK - 2}.0, 0.0, 1.0);
+  float wx = 1.0 - pow(1.0 - wt, 1.0 / 2.4);
+  wx = mix(-0.4, mix(-0.15, wx, step(1.5, wk)), step(0.5, wk));
+  return wx * wrr;
+}}
+float fj_wm(float wzw, float wsd, float wk) {{
+  float wcl = fj_cliff(wzw, wsd);
+  float wrr = wcl / 3.0;
+  vec2 wbq = vec2(wzw * 0.25, wsd * 7.0);
+  vec3 wbn = fj_noised(wbq);
+  float wbz = 0.35 + 0.25 * wbn.x;
+  float wbw = 0.1 + 0.12 * wbn.x;
+  float wtop = wrr + fj_relief(wzw, wcl, wsd);
+  float wfl = 1e9;
+  float wcv = -1e9;
+  for (int j = 0; j <= {FJ_WK}; j++) {{
+    float wj = float(j);
+    float waj = fj_wa(wj, wrr);
+    float wyj = fj_prof(waj, wcl, wrr, wbz, wbw, 0.35);
+    float wwj = waj + fj_relief(wzw, max(wyj, 0.0), wsd);
+    wfl = mix(wfl, min(wfl, wwj), step(wk - 0.5, wj));
+    wcv = mix(wcv, max(wcv, wwj), step(wj, wk + 0.5));
+  }}
+  return 0.5 * (wfl + min(wcv, wtop));
+}}
+float fj_wmr(float rip, float rs, float rk) {{
+  vec2 ruv = fj_duv({FJ_DW + 1}.0 + rip, fj_ch() + rs * {FJ_WK + 1}.0 + rk);
+  vec3 rv = fj_tex(ruv);
+  return fj_dec(rv.xy) * 4.0 - 1.0;
+}}
+vec2 fj_base(float gu, float gu1, float gzw, float gcip) {{
   float gsd0 = gu < 0.0 ? -1.0 : 1.0;
-  float gau = abs(gu);
   float gsd;
   float gsp = fj_spur(gzw, 25.6, 3.0, 3.0, gsd);
   float gon = step(0.0, gu * gsd);
   float gwf = max(fj_width(gzw) - gsp * gon * 1.3, 2.0);
   vec2 gp = vec2(gu, gzw);
-  float gn = fj_eroded(gp);
+  vec2 gp1 = vec2(gu1, gzw);
+  vec2 gn = vec2(fj_eroded(gp), fj_eroded(gp1));
   float gcl = fj_cliff(gzw, gsd0);
   float grr = gcl / 3.0;
-  float gx0 = clamp((gau - gwf) / grr, 0.0, 1.0);
-  float gyf = gx0 * gcl;
-  vec2 gfq = vec2(gzw * 0.75 + gyf * 0.3, gyf * 0.75 + gsd0 * 5.0);
-  vec3 gfn = fj_noised(gfq);
-  vec2 gfq2 = vec2(gzw * 2.25 - gyf * 0.9 + 0.3, gyf * 1.9 + gzw * 0.5 + 1.7);
-  vec3 gfn2 = fj_noised(gfq2);
-  float gbut = (1.0 - abs(2.0 * gfn.x - 1.0)) * 0.4 + (1.0 - abs(2.0 * gfn2.x - 1.0)) * 0.13;
-  float gaa = gau - gwf - gbut + 0.6 * (gn - 0.35);
-  float gx = clamp(gaa / grr, -0.4, 1.0);
   vec2 gbq = vec2(gzw * 0.25, gsd0 * 7.0);
   vec3 gbn = fj_noised(gbq);
   float gbz = 0.35 + 0.25 * gbn.x;
   float gbw = 0.1 + 0.12 * gbn.x;
-  float gxlo = gx * (gbz + 0.4 * gbw) / gbz;
-  float gxmid = gbz + 0.4 * gbw + (gx - gbz) * 0.6;
-  float gxb = mix(gxlo, mix(gxmid, gx, step(gbz + gbw, gx)), step(gbz, gx));
-  float gh0 = max(gcl * (1.0 - pow(1.0 - gxb, 2.4)), -0.9);
-  float gpl = max(gaa - grr, 0.0);
-  float gpw = smoothstep(0.0, 2.5, gpl);
-  gh0 += gpw * ((gn - 0.35) * 1.2 + 0.06 * gpl);
-  gh0 += smoothstep(2.0, 7.0, gpl) * max(gn - 0.3, 0.0) * 2.5;
-  return gh0;
+  vec2 gau = vec2(abs(gu), abs(gu1));
+  vec2 gxc = gau - gwf + 0.6 * (gn - 0.35);
+  float ga0 = -0.4 * grr;
+  vec2 gh = vec2(0.0);
+  if (gcip < -0.5) {{
+    vec2 gyf = clamp((gau - gwf) / grr, 0.0, 1.0) * gcl;
+    vec2 gaa = gxc - vec2(fj_relief(gzw, gyf.x, gsd0), fj_relief(gzw, gyf.y, gsd0));
+    gh = vec2(fj_prof(gaa.x, gcl, grr, gbz, gbw, gn.x), fj_prof(gaa.y, gcl, grr, gbz, gbw, gn.y));
+  }} else {{
+    float gs = step(0.0, gsd0);
+    float gtop = fj_wmr(gcip, gs, {FJ_WK}.0);
+    vec2 gabove = step(gtop, gxc);
+    vec2 gpa = mix(gxc, gxc - gtop + grr, gabove);
+    gh = vec2(fj_prof(gpa.x, gcl, grr, gbz, gbw, gn.x), fj_prof(gpa.y, gcl, grr, gbz, gbw, gn.y));
+    vec2 gin = (1.0 - gabove) * step(ga0, gxc);
+    if (gin.x + gin.y > 0.5) {{
+      vec2 blo = vec2(0.0);
+      vec2 bhi = vec2({FJ_WK}.0);
+      for (int it = 0; it < {FJ_WKLOG}; it++) {{
+        vec2 bmid = floor((blo + bhi) * 0.5);
+        vec2 bwm = vec2(fj_wmr(gcip, gs, bmid.x), fj_wmr(gcip, gs, bmid.y));
+        vec2 blt = 1.0 - step(gxc, bwm);
+        blo = mix(blo, bmid, blt);
+        bhi = mix(bmid, bhi, blt);
+      }}
+      vec2 bwlo = vec2(fj_wmr(gcip, gs, blo.x), fj_wmr(gcip, gs, blo.y));
+      vec2 bwhi = vec2(fj_wmr(gcip, gs, bhi.x), fj_wmr(gcip, gs, bhi.y));
+      vec2 balo = vec2(fj_wa(blo.x, grr), fj_wa(blo.y, grr));
+      vec2 bahi = vec2(fj_wa(bhi.x, grr), fj_wa(bhi.y, grr));
+      vec2 bylo = vec2(fj_prof(balo.x, gcl, grr, gbz, gbw, 0.35), fj_prof(balo.y, gcl, grr, gbz, gbw, 0.35));
+      vec2 byhi = vec2(fj_prof(bahi.x, gcl, grr, gbz, gbw, 0.35), fj_prof(bahi.y, gcl, grr, gbz, gbw, 0.35));
+      vec2 bfr = clamp((gxc - bwlo) / max(bwhi - bwlo, vec2(0.00001)), 0.0, 1.0);
+      gh = mix(gh, mix(bylo, byhi, bfr), gin);
+    }}
+  }}
+  return gh;
+}}
+float fj_stripcol(float sci, float scib, float sczn, float scw) {{
+  vec2 spuv = fj_duv(10.0, {FJ_DH}.0);
+  vec3 spv = fj_tex(spuv);
+  float spib = floor(fj_dec24(spv) * 16777215.0 + 0.5) - 1000.0;
+  vec2 stxuv = fj_duv(8.0, {FJ_DH}.0);
+  vec3 stxv = fj_tex(stxuv);
+  vec2 styuv = fj_duv(9.0, {FJ_DH}.0);
+  vec3 styv = fj_tex(styuv);
+  float stx = fj_dec24(stxv) * 8192.0;
+  float sty = fj_dec24(styv) * 8192.0;
+  float ssh = mod(scib - spib + sczn * 0.5, sczn) - sczn * 0.5;
+  float sip = sci + ssh;
+  float sok = step(3.5, frame) * step(abs(stx - texsize.x), 0.5) * step(abs(sty - texsize.y), 0.5);
+  sok *= step(0.0, sip) * step(sip, scw - 1.0) * step({FJ_SR + 8}.0, texsize.y);
+  return mix(-1.0, sip, sok);
 }}
 vec3 fj_gully(vec2 lp, vec2 ldir) {{
   vec2 li = floor(lp);
@@ -3074,12 +3178,15 @@ vec3 fj_gully(vec2 lp, vec2 ldir) {{
   }}
   return lva / lwt;
 }}
-float fj_height(float cu, float czw, out float cmat) {{
+float fj_height(float cu, float czw, float cip, float czd, out float cmat) {{
   float ce = 0.06;
-  float ch0 = fj_base(cu, czw);
-  float chu = fj_base(cu + ce, czw);
-  float chz = fj_base(cu, czw + ce);
-  vec2 cg = vec2(chu - ch0, chz - ch0) / ce;
+  vec2 chuv = fj_base(cu, cu + ce, czw, cip);
+  float ch0 = chuv.x;
+  float chu = chuv.y;
+  float chip = mix(-1.0, cip + 1.0, step(-0.5, cip) * step(cip + 1.5, fj_cw()));
+  vec2 chzv = fj_base(cu, cu, czw + czd, chip);
+  float chz = chzv.x;
+  vec2 cg = vec2((chu - ch0) / ce, (chz - ch0) / czd);
   float cslope = length(cg);
   vec2 cp = vec2(cu, czw) * 1.5;
   vec2 cdir = vec2(cg.y, -cg.x) / max(cslope, 0.001) * 1.1;
@@ -3114,6 +3221,10 @@ float fj_camv(float cvi) {{
   if (cvi > 4.5) cvv = (q12 + 1.0) * 0.5;
   if (cvi > 5.5) cvv = (q13 + 2.0) * 0.25;
   if (cvi > 6.5) cvv = q14 * 0.25;
+  if (cvi > 7.5) cvv = texsize.x / 8192.0;
+  if (cvi > 8.5) cvv = texsize.y / 8192.0;
+  float cvzd = fj_dzt();
+  if (cvi > 9.5) cvv = (floor(q4 / cvzd) - ceil({FJ_ZB} / cvzd) + 1000.0) / 16777215.0;
   return cvv;
 }}
 """ + " shader_body {\n" + f"""
@@ -3176,16 +3287,24 @@ float fj_camv(float cvi) {{
     float cw = fj_cw();
     float chh = fj_ch();
     float cxl = tx.x - {FJ_DW + 1}.0;
+    float czd = fj_dzt();
+    float czn = floor(256.0 / czd + 0.5);
+    float cib = floor(q4 / czd) - ceil({FJ_ZB} / czd);
+    float czi = cib + floor(cxl);
+    float czw = mod(czi, czn) * czd;
     if (cxl >= 0.0 && cxl < cw && tx.y < chh) {{
       float ca = tx.y / chh;
       float cu = {FJ_U} * (2.0 * ca - 1.0);
-      float czd = fj_dzt();
-      float czn = floor(256.0 / czd + 0.5);
-      float czi = floor(q4 / czd) - ceil({FJ_ZB} / czd) + floor(cxl);
-      float czw = mod(czi, czn) * czd;
+      float cip = fj_stripcol(floor(cxl), cib, czn, cw);
       float cmat;
-      float ch = fj_height(cu, czw, cmat);
+      float ch = fj_height(cu, czw, cip, czd, cmat);
       outc = vec3(fj_enc((ch - {FJ_HMIN}) / {FJ_HMAX - FJ_HMIN}), cmat);
+    }} else if (cxl >= 0.0 && cxl < cw && tx.y < chh + {FJ_SR}.0) {{
+      float sr = floor(tx.y - chh);
+      float ss = floor(sr / {FJ_WK + 1}.0);
+      float sk = sr - ss * {FJ_WK + 1}.0;
+      float swm = fj_wm(czw, ss * 2.0 - 1.0, sk);
+      outc = vec3(fj_enc((swm + 1.0) * 0.25), 0.0);
     }}
   }}
   ret = outc;
@@ -3714,7 +3833,8 @@ FJ_COMP = FJ_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
   float cvz = dot(cv, cfw);
   vec2 hp = vec2(dot(cv, crt), dot(cv, cup)) / (max(cvz, 0.001) * cln);
   vec2 huv = hp / s + 0.5;
-  float hok = step(0.001, cvz) * step(abs(huv.x - 0.5), 0.5) * step(abs(huv.y - 0.5), 0.5) * step(3.5, frame);
+  vec2 hedge = min(huv, 1.0 - huv);
+  float hok = step(0.001, cvz) * smoothstep(0.0, 0.04, min(hedge.x, hedge.y)) * step(3.5, frame);
   float fdist = max(q3, 0.5);
   float cocd = dd > fdist ? q24 * (1.0 - fdist / dd) : {FJ_NEARCOC} * q24 * (fdist / dd - 1.0);
   cocd *= mix(1.0, {FJ_SKYCOC}, smoothstep(60.0, 300.0, dd));
