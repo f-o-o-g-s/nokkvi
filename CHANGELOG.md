@@ -51,6 +51,13 @@ All notable changes to this project will be documented in this file.
 - Starfield Nebula's picture twists as the camera moves.
 - Harder kicks shift Starfield Nebula's camera further.
 - Starfield Nebula's camera drags quicken with the tempo.
+- The Pirate Signal MilkDrop preset shows nokkvi's pirate smiley as a broadcast on an LCD, over living sand and oil paint.
+- Pirate Signal's smiley pours paint from its rim, each part of the rim following its own slice of the spectrum.
+- On each beat, echoes of Pirate Signal's smiley bloom outward and melt into the sand.
+- Beats glitch Pirate Signal's picture with torn rows, split colours and stuck blocks.
+- Hard beats blow Pirate Signal's picture up into big LCD pixels for a moment.
+- Sharp treble breaks Pirate Signal's picture into static and sprinkles grains into the sand.
+- Pirate Signal's smiley blinks now and then and grins wider as the music gets louder.
 
 ### Changed
 

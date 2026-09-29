@@ -1,0 +1,100 @@
+{
+ "version": 2,
+ "baseVals": {
+  "gammaadj": 1.0,
+  "decay": 1.0,
+  "echo_zoom": 1.0,
+  "echo_alpha": 0.0,
+  "wave_mode": 0,
+  "additivewave": 1,
+  "wave_a": 0.0,
+  "wave_scale": 0.8,
+  "wave_smoothing": 0.7,
+  "zoom": 1.0,
+  "rot": 0.0,
+  "warp": 0.0,
+  "wave_r": 1.0,
+  "wave_g": 1.0,
+  "wave_b": 1.0,
+  "ob_size": 0.0,
+  "ob_a": 0.0,
+  "ib_size": 0.0,
+  "ib_a": 0.0,
+  "mv_a": 0.0,
+  "darken_center": 0,
+  "brighten": 0,
+  "darken": 0,
+  "solarize": 0,
+  "invert": 0,
+  "wrap": 0
+ },
+ "shapes": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": ""
+  }
+ ],
+ "waves": [
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  },
+  {
+   "baseVals": {
+    "enabled": 0
+   },
+   "init_eqs_eel": "",
+   "frame_eqs_eel": "",
+   "point_eqs_eel": ""
+  }
+ ],
+ "init_eqs_eel": "sinceb = 1; ba1 = 9; ba2 = 9; ba3 = 9; bs1 = 0; bs2 = 0; bs3 = 0; pulse = 0; pop = 0; nb = 0; gl = 0; lb = 0; stt = 0; bt = 2; bph = 1; es = 0; rdir = 1; hb = 0.3; sm = 0; jmp = 0; gcool = 0; ng = 0; trt = 1;",
+ "frame_eqs_eel": "dt = 1 / max(fps, 1);\nkick = max(bass - bass_att, 0);\npulse = max(pulse * 0.86, min(kick * 0.9, 1));\nq3 = pulse;\npop = max(pop * 0.78, min(max(bass - 1.2, 0) * 0.55, 1.4));\nq5 = pop;\nbk = bass - bass_att; sinceb = sinceb + dt;\ntrig = above(bk, 0.22) * above(sinceb, 0.2);\nba3 = if(trig, ba2, ba3); bs3 = if(trig, bs2, bs3);\nba2 = if(trig, ba1, ba2); bs2 = if(trig, bs1, bs2);\nba1 = if(trig, 0, ba1); bs1 = if(trig, min(0.5 + bk * 1.4, 1.6), bs1);\nsinceb = if(trig, 0, sinceb);\nba1 = ba1 + dt; ba2 = ba2 + dt; ba3 = ba3 + dt;\nnb = nb + trig;\ngtr = trig * above(bk, 0.3 + 0.25 * gcool); gcool = if(gtr, 1, gcool * exp(-dt / 0.6));\ngl = if(gtr, max(gl, min(0.25 + (bk - 0.3) * 1.2, 1)), gl * exp(-dt / 0.07));\nq7 = gl * above(gl, 0.04);\nq8 = (int(time * 15) * 7 + nb * 13) % 101;\nng = ng + gtr;\nlb = if(gtr * min(equal(ng % 6, 0) + above(bk, 1.1), 1), 1, lb * exp(-dt / 0.12));\nq9 = lb * above(lb, 0.03);\ntrt = treb / max(treb_att, 0.05);\nstt = max(stt * exp(-dt / 0.07), min(max(trt - 1.55, 0) * 1.6, 1));\nq10 = stt * above(stt, 0.04);\nq11 = 0.03 * sin(time * 0.31);\nq12 = 0.02 * sin(time * 0.43 + 1);\nq13 = 0.3 * (1 + 0.035 * q5);\nbt = bt - dt; bst = below(bt, 0); bt = if(bst, 3 + rand(40) / 10, bt); bph = if(bst, 0, bph + dt);\nq14 = if(below(bph, 0.16), sin(3.14159 * bph / 0.16), 0);\nq15 = trig * min(0.5 + bs1 * 0.4, 1);\nes = if(trig, 0.03 * min(bs1, 1.3), es * exp(-dt / 0.18)); q16 = es;\nrdir = if(trig, -rdir, rdir);\nq18 = 0.0015 * sin(time * 0.07) + es * 0.4 * rdir;\nhb = hb + dt * 0.02 + trig * 0.13; hb = hb - 2 * int(hb / 2); q17 = 1 - abs(1 - hb);\nsm = sm + (min(max(bass_att + mid_att - 1.6, 0) * 0.25, 0.35) - sm) * (1 - exp(-dt / 0.5)); q19 = sm;\njmp = if(trig * above(bs1, 1.0), (rand(100) / 100 - 0.5) * 0.12, jmp * exp(-dt / 0.06));\nq20 = jmp * above(abs(jmp), 0.002);\n",
+ "pixel_eqs_eel": "",
+ "warp": "vec2 pf_face(vec2 pfq, float pfblink, float pfext) {\n  vec2 pfv = vec2(pfq.x, -pfq.y) * 132.46;\n  float pfdisc = length(pfv) - 132.46;\n  float pfphi = atan(pfv.x, pfv.y);\n  float pfin = step(abs(pfphi), 1.5708 + pfext);\n  vec2 pfe = vec2(92.11 * cos(pfext), -92.11 * sin(pfext));\n  vec2 pfax = vec2(abs(pfv.x), pfv.y);\n  float pfarc = mix(length(pfax - pfe), abs(length(pfv) - 92.11), pfin) - 3.31;\n  float pfry = 32.19 * (1.0 - 0.9 * pfblink);\n  vec2 pfed = (pfv - vec2(-41.08, -43.58)) / vec2(25.74, pfry);\n  float pfeye = (length(pfed) - 1.0) * min(25.74, pfry);\n  vec2 pfpd = pfv - vec2(56.64, -60.13);\n  float pfu = pfpd.x * 0.9427 + pfpd.y * 0.3336;\n  float pfw = pfpd.y * 0.9427 - pfpd.x * 0.3336;\n  float pfpatch = max((length(vec2(pfu / 40.64, pfw / 51.13)) - 1.0) * 40.64, 0.004 * pfu * pfu - 17.05 - pfw);\n  vec2 pfsq = pfv - vec2(-68.59, -112.27);\n  float pfsh = clamp(dot(pfsq, vec2(192.24, 68.01)) / 41582.0, 0.0, 1.0);\n  vec2 pfso = pfsq - vec2(192.24, 68.01) * pfsh;\n  float pfstrap = length(pfso) - 3.31;\n  float pffeat = min(min(pfarc, pfeye), min(pfpatch, pfstrap));\n  return vec2(pfdisc, pffeat) / 132.46;\n}\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  vec2 p = (uv_orig - 0.5) * s;\n  vec2 fc = vec2(q11, q12);\n  vec2 d = p - fc;\n  float an = q18;\n  vec2 dr = vec2(d.x * cos(an) - d.y * sin(an), d.x * sin(an) + d.y * cos(an)) / (1.0022 + q16);\n  vec2 sw = vec2(0.0);\n  {\n    vec2 wc = vec2(0.3 * sin(time * 0.618), 0.22 * cos(time * 1.618));\n    vec2 wd = p - wc;\n    float wr = 0.1 + 0.12 * min(bass_att, 2.0);\n    float wk = max(wr * wr - dot(wd, wd), 0.0) * 0.35 * (bass - 0.4) * 1.0;\n    sw += vec2(-wd.y, wd.x) * wk;\n  }\n  {\n    vec2 wc = vec2(0.45 * sin(time * 0.93 + 2.0), 0.3 * cos(time * 0.71));\n    vec2 wd = p - wc;\n    float wr = 0.1 + 0.12 * min(mid_att, 2.0);\n    float wk = max(wr * wr - dot(wd, wd), 0.0) * 0.35 * (mid - 0.4) * -1.0;\n    sw += vec2(-wd.y, wd.x) * wk;\n  }\n  {\n    vec2 wc = vec2(0.5 * sin(-time * 1.21), 0.35 * cos(-time * 0.57 + 1.0));\n    vec2 wd = p - wc;\n    float wr = 0.1 + 0.12 * min(treb_att, 2.0);\n    float wk = max(wr * wr - dot(wd, wd), 0.0) * 0.35 * (treb - 0.4) * 1.0;\n    sw += vec2(-wd.y, wd.x) * wk;\n  }\n  vec2 suv = (fc + dr + sw) / s + 0.5;\n  float gband = floor(uv_orig.y * 40.0);\n  float gh = fract(sin(gband * 12.9898 + q8 * 78.233) * 43758.5453);\n  suv.x += (gh - 0.5) * 0.02 * q7 * step(0.75, fract(gh * 57.3));\n  suv += (texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 * 0.5 + rand_frame.xy).xy - 0.5) * texsize.zw;\n  vec2 auv = 2.0 * suv - uv_orig;\n  vec3 ahead = texture(sampler_main, auv).xyz - GetBlur1(auv);\n  vec2 bd = texsize.zw * 3.0;\n  float gx = GetBlur1(suv + vec2(bd.x, 0.0)).x - GetBlur1(suv - vec2(bd.x, 0.0)).x;\n  float gy = GetBlur1(suv + vec2(0.0, bd.y)).x - GetBlur1(suv - vec2(0.0, bd.y)).x;\n  vec2 flow = vec2(-gy, gx) * texsize.zw * (1.0 + 3.0 * min(mid_att, 2.0))\n            + ahead.xy * (0.05 * clamp(vec2(bass, treb) - 1.0, 0.0, 1.0) + 0.004);\n  vec3 f = texture(sampler_main, suv + flow).xyz;\n  float grain = texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 + rand_frame.zw).x;\n  float dens = f.x + (f.x - GetBlur1(suv + flow).x) * 0.06 - (0.0005 + (grain - 0.5) * 0.03);\n  float hue = f.y;\n  float hot = f.z * 0.965;\n  float fr = q13;\n  float rd = length(d) / fr - 1.0;\n  float band = abs(atan(d.x, d.y)) / 3.14159;\n  float spec = get_fft(0.02 + band * 0.5);\n  float feed = smoothstep(0.07, 0.01, rd) * step(0.0, rd) * clamp(spec * 2.2 * (0.6 + 0.6 * q5), 0.0, 1.0);\n  float fhue = q17 + (band - 0.5) * 0.35;\n  dens = max(dens, feed * 0.95);\n  hue = mix(hue, 1.0 - abs(1.0 - mod(fhue + 2.0, 2.0)), feed);\n  vec2 fq = d / fr;\n  vec2 fs = pf_face(fq, 0.0, q19);\n  float inside = smoothstep(0.01, -0.01, fs.x);\n  float featm = max(smoothstep(0.02, 0.0, fs.y), smoothstep(0.02, 0.0, abs(fs.x) - 0.03));\n  float stamp = q15 * max(inside, featm);\n  dens = mix(dens, 0.02, stamp * featm);\n  hue = mix(hue, q17, stamp);\n  hot = max(hot, stamp * (1.0 - featm));\n  dens += q10 * 0.4 * step(0.992, texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 + rand_frame.yx).y);\n  ret = vec3(clamp(dens, 0.0, 1.0), clamp(hue, 0.0, 1.0), clamp(hot, 0.0, 1.0));\n }",
+ "comp": "vec2 pf_face(vec2 pfq, float pfblink, float pfext) {\n  vec2 pfv = vec2(pfq.x, -pfq.y) * 132.46;\n  float pfdisc = length(pfv) - 132.46;\n  float pfphi = atan(pfv.x, pfv.y);\n  float pfin = step(abs(pfphi), 1.5708 + pfext);\n  vec2 pfe = vec2(92.11 * cos(pfext), -92.11 * sin(pfext));\n  vec2 pfax = vec2(abs(pfv.x), pfv.y);\n  float pfarc = mix(length(pfax - pfe), abs(length(pfv) - 92.11), pfin) - 3.31;\n  float pfry = 32.19 * (1.0 - 0.9 * pfblink);\n  vec2 pfed = (pfv - vec2(-41.08, -43.58)) / vec2(25.74, pfry);\n  float pfeye = (length(pfed) - 1.0) * min(25.74, pfry);\n  vec2 pfpd = pfv - vec2(56.64, -60.13);\n  float pfu = pfpd.x * 0.9427 + pfpd.y * 0.3336;\n  float pfw = pfpd.y * 0.9427 - pfpd.x * 0.3336;\n  float pfpatch = max((length(vec2(pfu / 40.64, pfw / 51.13)) - 1.0) * 40.64, 0.004 * pfu * pfu - 17.05 - pfw);\n  vec2 pfsq = pfv - vec2(-68.59, -112.27);\n  float pfsh = clamp(dot(pfsq, vec2(192.24, 68.01)) / 41582.0, 0.0, 1.0);\n  vec2 pfso = pfsq - vec2(192.24, 68.01) * pfsh;\n  float pfstrap = length(pfso) - 3.31;\n  float pffeat = min(min(pfarc, pfeye), min(pfpatch, pfstrap));\n  return vec2(pfdisc, pffeat) / 132.46;\n}\nvec3 pf_scene(vec2 psu) {\n  vec2 ps = texsize.xy / min(texsize.x, texsize.y);\n  vec2 pp = (psu - 0.5) * ps;\n  vec3 pm = texture(sampler_main, psu).xyz;\n  vec2 pe = texsize.zw;\n  float pgx = texture(sampler_main, psu + vec2(pe.x, 0.0)).x - texture(sampler_main, psu - vec2(pe.x, 0.0)).x;\n  float pgy = texture(sampler_main, psu + vec2(0.0, pe.y)).x - texture(sampler_main, psu - vec2(0.0, pe.y)).x;\n  vec2 pg = vec2(pgx, pgy);\n  vec2 pe4 = texsize.zw * 4.0;\n  float pbx = GetBlur1(psu + vec2(pe4.x, 0.0)).x - GetBlur1(psu - vec2(pe4.x, 0.0)).x;\n  float pby = GetBlur1(psu + vec2(0.0, pe4.y)).x - GetBlur1(psu - vec2(0.0, pe4.y)).x;\n  vec2 pgb = vec2(pbx, pby);\n  float pcol_x = clamp(pm.y, 0.0, 1.0) * 5.0;\n  vec3 pcol = mix(NOKKVI_RAMP0, NOKKVI_RAMP1, clamp(pcol_x, 0.0, 1.0));\n  pcol = mix(pcol, NOKKVI_RAMP2, clamp(pcol_x - 1.0, 0.0, 1.0));\n  pcol = mix(pcol, NOKKVI_RAMP3, clamp(pcol_x - 2.0, 0.0, 1.0));\n  pcol = mix(pcol, NOKKVI_RAMP4, clamp(pcol_x - 3.0, 0.0, 1.0));\n  pcol = mix(pcol, NOKKVI_RAMP5, clamp(pcol_x - 4.0, 0.0, 1.0));\n  vec3 pn = normalize(vec3(-(pg * 14.0 + pgb * 5.0), 1.0));\n  vec3 pl = normalize(vec3(0.5 * cos(time * 0.21), 0.45 + 0.2 * sin(time * 0.17), 0.8));\n  float pdif = max(dot(pn, pl), 0.0);\n  float pspec = pow(max(dot(reflect(-pl, pn), vec3(0.0, 0.0, 1.0)), 0.0), 24.0);\n  float pthick = smoothstep(0.0, 0.2, pm.x);\n  vec3 paint = mix(NOKKVI_BG, pcol, pthick * (0.55 + 0.45 * smoothstep(0.1, 0.7, pm.x))) * (0.35 + 0.9 * pdif);\n  paint += NOKKVI_HIGHLIGHT * pspec * pthick * 0.6;\n  vec2 pu1 = 0.3 * cos((psu - 0.5) * 2.0) - pg;\n  vec2 pu2 = 0.3 * cos(pu1 * 12.0) - 9.0 * pg;\n  paint += NOKKVI_HIGHLIGHT * clamp(0.04 / length(pu2), 0.0, 1.0) * pthick * 0.5;\n  paint += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * smoothstep(0.0, 0.8, pm.z) * 0.8;\n  vec2 pfc = vec2(q11, q12);\n  float pr = q13;\n  vec2 pq = (pp - pfc) / pr;\n  vec2 pf = pf_face(pq, q14, q19);\n  float paw = 1.2 / (pr * min(texsize.x, texsize.y));\n  float pshd = length(pq - vec2(0.08, -0.11)) - 1.0;\n  paint *= 1.0 - 0.6 * smoothstep(0.3, -0.05, pshd);\n  float pcov = smoothstep(paw, -paw, pf.x - 0.0248);\n  float pink = max(smoothstep(paw, -paw, abs(pf.x) - 0.0248), smoothstep(paw, -paw, pf.y));\n  vec2 pqd = pq * 0.6;\n  vec3 pfn = normalize(vec3(pqd, sqrt(max(1.0 - dot(pqd, pqd), 0.05))));\n  float pfd = max(dot(pfn, pl), 0.0);\n  float pfs = pow(max(dot(reflect(-pl, pfn), vec3(0.0, 0.0, 1.0)), 0.0), 60.0);\n  vec3 pfbase = mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.45);\n  vec3 pface = pfbase * (0.35 + 0.8 * pfd) + NOKKVI_TEXT * pfs * 0.7;\n  float pedge = smoothstep(-0.03, 0.0, pf.y) * (1.0 - smoothstep(0.0, 0.004, pf.y));\n  vec3 pinkc = NOKKVI_BG * 0.6 + NOKKVI_TEXT * (pfs * 0.5 + pedge * 0.12);\n  pface = mix(pface, pinkc, pink);\n  pface += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * pm.z * 0.15 * (1.0 - pink);\n  return mix(paint, pface, pcov);\n}\n shader_body {\n  vec2 s = texsize.xy / min(texsize.x, texsize.y);\n  float g = q7;\n  float sd = q8;\n  vec2 guv = uv;\n  float rb = floor(uv.y * (24.0 + 40.0 * fract(sd * 0.137)));\n  float rh = fract(sin(rb * 12.9898 + sd * 78.233) * 43758.5453);\n  guv.x += (rh - 0.5) * 0.25 * g * step(1.0 - 0.45 * g, fract(rh * 91.7));\n  guv.y += q20;\n  float srow = floor(uv.y * texsize.y / 2.0);\n  float swb = texture(sampler_noise_lq, vec2((srow + 0.5) / 256.0, rand_frame.x)).x - 0.5;\n  guv.x += swb * q10 * 0.008;\n  float lp = max(3.0, floor(min(texsize.x, texsize.y) / 150.0 + 0.5));\n  float cell = floor(mix(1.0, lp * 3.0, q9));\n  vec2 cpx = (floor(guv * texsize.xy / cell) + 0.5) * cell;\n  guv = mix(guv, cpx * texsize.zw, step(1.5, cell));\n  vec2 ro = vec2((1.5 + 16.0 * g) * texsize.z, 0.0);\n  vec2 gr = guv + ro;\n  vec2 gb = guv - ro;\n  vec3 col = vec3(pf_scene(gr).x, pf_scene(guv).y, pf_scene(gb).z);\n  float sb = floor(uv.y * 12.0);\n  float sh = fract(sin(sb * 7.13 + sd * 1.7) * 43758.5453);\n  col = mix(col, col.zxy, step(1.0 - 0.12 * g, sh));\n  vec2 sq = floor(uv * texsize.xy / 2.0);\n  float sn = texture(sampler_noise_lq, (sq + 0.5) / 256.0 + rand_frame.xy).x;\n  float sline = step(0.94, texture(sampler_noise_lq, vec2(rand_frame.z, (srow + 0.5) / 256.0)).x);\n  col = mix(col, mix(NOKKVI_BG, NOKKVI_TEXT, sn), clamp(q10 * 0.55, 0.0, 0.8));\n  col += NOKKVI_TEXT * sline * q10 * 0.35;\n  float lpm = max(lp, cell);\n  vec2 lc = uv * texsize.xy / lpm;\n  float sub = floor(fract(lc.x) * 3.0);\n  vec3 lmask = vec3(1.0 - step(0.5, sub), step(0.5, sub) * (1.0 - step(1.5, sub)), step(1.5, sub));\n  float lgap = step(fract(lc.y) * lpm, 1.0);\n  vec3 lm = mix(vec3(0.3), vec3(1.0), lmask) * (1.0 - 0.6 * lgap);\n  col = mix(col, col * lm * 1.8, 0.3 + 0.45 * q9);\n  float bandy = 1.15 - fract(time * 0.23) * 1.3;\n  vec2 bq = floor(uv * texsize.xy / (lp * 5.0));\n  float bh = fract(sin(dot(bq, vec2(12.9898, 78.233)) + sd * 3.7) * 43758.5453);\n  float mosh = step(1.0 - 0.3 * g, bh) * step(0.2, g);\n  vec2 mo = floor((vec2(fract(bh * 37.1), fract(bh * 71.3)) - 0.5) * 4.0) * lp * texsize.zw;\n  vec4 prev = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), uv + mo, 0.0);\n  col *= 1.0 + 0.1 * exp(-pow((uv.y - bandy) / 0.06, 2.0));\n  col *= 0.97 + 0.03 * sin(time * 46.0) * (1.0 + 3.0 * g);\n  col *= 1.0 - 0.3 * pow(length((uv - 0.5) * s), 2.5);\n  col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.zw).x - 0.5) * 0.02;\n  col = mix(col, prev.rgb, mosh * prev.a);\n  ret = col;\n }"
+}

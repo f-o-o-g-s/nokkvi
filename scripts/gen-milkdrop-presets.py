@@ -4311,6 +4311,229 @@ FJ_FRAME = (PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + SPEED
 presets["nokkvi - fjord"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, FJ_WARP, FJ_COMP,
                                   init=FJ_INIT, frame=FJ_FRAME)
 
+# Pirate signal (no cover) --------------------------------------------------
+# The owner's avatar, the pirate smiley (assets/moon_face.svg), as a pirate
+# TV broadcast. The face is an analytic shape (the SVG's circle, smile arc,
+# eye, patch and strap fitted as distance functions, so it is sharp at any
+# size and can blink, grin and pop), drawn over a living oil-and-sand field
+# in the manner of maxawow: the feedback holds paint (x = thickness, y = its
+# place on the theme gradient, z = heat), advected along its own contours
+# and by its own colour, stirred by three whirlpools (bass, mid, treble) and
+# eaten by a grainy subtractive fade, which the loop integrates into sand.
+# The face sheds the paint: each angle around its rim is a frequency, so the
+# spectrum pours out of it. On each beat the face is stamped into the paint
+# and the field surges outward in a turning spiral, so echoes of the face
+# bloom out from behind it and melt into the sand; the beat's glitch also
+# tears rows of the paint (scars that stay). The signal is shown as an LCD:
+# beats glitch it (torn rows, RGB split, datamosh blocks that stick from the
+# last frame, a channel-swapped slab, a vertical jump), every fourth or a
+# hard beat blows the image up into big LCD cells for a moment, and treble
+# transients break it into static (snow, bright interference rows, row
+# wobble) and sprinkle grains into the sand.
+PF_FN = """
+vec2 pf_face(vec2 pfq, float pfblink, float pfext) {
+  vec2 pfv = vec2(pfq.x, -pfq.y) * 132.46;
+  float pfdisc = length(pfv) - 132.46;
+  float pfphi = atan(pfv.x, pfv.y);
+  float pfin = step(abs(pfphi), 1.5708 + pfext);
+  vec2 pfe = vec2(92.11 * cos(pfext), -92.11 * sin(pfext));
+  vec2 pfax = vec2(abs(pfv.x), pfv.y);
+  float pfarc = mix(length(pfax - pfe), abs(length(pfv) - 92.11), pfin) - 3.31;
+  float pfry = 32.19 * (1.0 - 0.9 * pfblink);
+  vec2 pfed = (pfv - vec2(-41.08, -43.58)) / vec2(25.74, pfry);
+  float pfeye = (length(pfed) - 1.0) * min(25.74, pfry);
+  vec2 pfpd = pfv - vec2(56.64, -60.13);
+  float pfu = pfpd.x * 0.9427 + pfpd.y * 0.3336;
+  float pfw = pfpd.y * 0.9427 - pfpd.x * 0.3336;
+  float pfpatch = max((length(vec2(pfu / 40.64, pfw / 51.13)) - 1.0) * 40.64, 0.004 * pfu * pfu - 17.05 - pfw);
+  vec2 pfsq = pfv - vec2(-68.59, -112.27);
+  float pfsh = clamp(dot(pfsq, vec2(192.24, 68.01)) / 41582.0, 0.0, 1.0);
+  vec2 pfso = pfsq - vec2(192.24, 68.01) * pfsh;
+  float pfstrap = length(pfso) - 3.31;
+  float pffeat = min(min(pfarc, pfeye), min(pfpatch, pfstrap));
+  return vec2(pfdisc, pffeat) / 132.46;
+}
+"""
+PF_OUTLINE = "0.0248"
+def pf_whirl(i, cx, cy, band):
+    return f"""
+  {{
+    vec2 wc = vec2({cx}, {cy});
+    vec2 wd = p - wc;
+    float wr = 0.1 + 0.12 * min({band}_att, 2.0);
+    float wk = max(wr * wr - dot(wd, wd), 0.0) * 0.35 * ({band} - 0.4) * {1 if i % 2 == 0 else -1}.0;
+    sw += vec2(-wd.y, wd.x) * wk;
+  }}
+"""
+PF_WARP = PF_FN + " shader_body {\n" + HEAD + """
+  vec2 p = (uv_orig - 0.5) * s;
+  vec2 fc = vec2(q11, q12);
+  vec2 d = p - fc;
+  float an = q18;
+  vec2 dr = vec2(d.x * cos(an) - d.y * sin(an), d.x * sin(an) + d.y * cos(an)) / (1.0022 + q16);
+  vec2 sw = vec2(0.0);
+""" + pf_whirl(0, "0.3 * sin(time * 0.618)", "0.22 * cos(time * 1.618)", "bass") \
+    + pf_whirl(1, "0.45 * sin(time * 0.93 + 2.0)", "0.3 * cos(time * 0.71)", "mid") \
+    + pf_whirl(2, "0.5 * sin(-time * 1.21)", "0.35 * cos(-time * 0.57 + 1.0)", "treb") + """
+  vec2 suv = (fc + dr + sw) / s + 0.5;
+  float gband = floor(uv_orig.y * 40.0);
+  float gh = fract(sin(gband * 12.9898 + q8 * 78.233) * 43758.5453);
+  suv.x += (gh - 0.5) * 0.02 * q7 * step(0.75, fract(gh * 57.3));
+  suv += (texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 * 0.5 + rand_frame.xy).xy - 0.5) * texsize.zw;
+  vec2 auv = 2.0 * suv - uv_orig;
+  vec3 ahead = texture(sampler_main, auv).xyz - GetBlur1(auv);
+  vec2 bd = texsize.zw * 3.0;
+  float gx = GetBlur1(suv + vec2(bd.x, 0.0)).x - GetBlur1(suv - vec2(bd.x, 0.0)).x;
+  float gy = GetBlur1(suv + vec2(0.0, bd.y)).x - GetBlur1(suv - vec2(0.0, bd.y)).x;
+  vec2 flow = vec2(-gy, gx) * texsize.zw * (1.0 + 3.0 * min(mid_att, 2.0))
+            + ahead.xy * (0.05 * clamp(vec2(bass, treb) - 1.0, 0.0, 1.0) + 0.004);
+  vec3 f = texture(sampler_main, suv + flow).xyz;
+  float grain = texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 + rand_frame.zw).x;
+  float dens = f.x + (f.x - GetBlur1(suv + flow).x) * 0.06 - (0.0005 + (grain - 0.5) * 0.03);
+  float hue = f.y;
+  float hot = f.z * 0.965;
+  float fr = q13;
+  float rd = length(d) / fr - 1.0;
+  float band = abs(atan(d.x, d.y)) / 3.14159;
+  float spec = get_fft(0.02 + band * 0.5);
+  float feed = smoothstep(0.07, 0.01, rd) * step(0.0, rd) * clamp(spec * 2.2 * (0.6 + 0.6 * q5), 0.0, 1.0);
+  float fhue = q17 + (band - 0.5) * 0.35;
+  dens = max(dens, feed * 0.95);
+  hue = mix(hue, 1.0 - abs(1.0 - mod(fhue + 2.0, 2.0)), feed);
+  vec2 fq = d / fr;
+  vec2 fs = pf_face(fq, 0.0, q19);
+  float inside = smoothstep(0.01, -0.01, fs.x);
+  float featm = max(smoothstep(0.02, 0.0, fs.y), smoothstep(0.02, 0.0, abs(fs.x) - 0.03));
+  float stamp = q15 * max(inside, featm);
+  dens = mix(dens, 0.02, stamp * featm);
+  hue = mix(hue, q17, stamp);
+  hot = max(hot, stamp * (1.0 - featm));
+  dens += q10 * 0.4 * step(0.992, texture(sampler_noise_lq, uv_orig * texsize.xy / 256.0 + rand_frame.yx).y);
+  ret = vec3(clamp(dens, 0.0, 1.0), clamp(hue, 0.0, 1.0), clamp(hot, 0.0, 1.0));
+ }"""
+PF_SCENE = PF_FN + """
+vec3 pf_scene(vec2 psu) {
+  vec2 ps = texsize.xy / min(texsize.x, texsize.y);
+  vec2 pp = (psu - 0.5) * ps;
+  vec3 pm = texture(sampler_main, psu).xyz;
+  vec2 pe = texsize.zw;
+  float pgx = texture(sampler_main, psu + vec2(pe.x, 0.0)).x - texture(sampler_main, psu - vec2(pe.x, 0.0)).x;
+  float pgy = texture(sampler_main, psu + vec2(0.0, pe.y)).x - texture(sampler_main, psu - vec2(0.0, pe.y)).x;
+  vec2 pg = vec2(pgx, pgy);
+  vec2 pe4 = texsize.zw * 4.0;
+  float pbx = GetBlur1(psu + vec2(pe4.x, 0.0)).x - GetBlur1(psu - vec2(pe4.x, 0.0)).x;
+  float pby = GetBlur1(psu + vec2(0.0, pe4.y)).x - GetBlur1(psu - vec2(0.0, pe4.y)).x;
+  vec2 pgb = vec2(pbx, pby);
+""" + ramp("pcol", "pm.y") + """
+  vec3 pn = normalize(vec3(-(pg * 14.0 + pgb * 5.0), 1.0));
+  vec3 pl = normalize(vec3(0.5 * cos(time * 0.21), 0.45 + 0.2 * sin(time * 0.17), 0.8));
+  float pdif = max(dot(pn, pl), 0.0);
+  float pspec = pow(max(dot(reflect(-pl, pn), vec3(0.0, 0.0, 1.0)), 0.0), 24.0);
+  float pthick = smoothstep(0.0, 0.2, pm.x);
+  vec3 paint = mix(NOKKVI_BG, pcol, pthick * (0.55 + 0.45 * smoothstep(0.1, 0.7, pm.x))) * (0.35 + 0.9 * pdif);
+  paint += NOKKVI_HIGHLIGHT * pspec * pthick * 0.6;
+  vec2 pu1 = 0.3 * cos((psu - 0.5) * 2.0) - pg;
+  vec2 pu2 = 0.3 * cos(pu1 * 12.0) - 9.0 * pg;
+  paint += NOKKVI_HIGHLIGHT * clamp(0.04 / length(pu2), 0.0, 1.0) * pthick * 0.5;
+  paint += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * smoothstep(0.0, 0.8, pm.z) * 0.8;
+  vec2 pfc = vec2(q11, q12);
+  float pr = q13;
+  vec2 pq = (pp - pfc) / pr;
+  vec2 pf = pf_face(pq, q14, q19);
+  float paw = 1.2 / (pr * min(texsize.x, texsize.y));
+  float pshd = length(pq - vec2(0.08, -0.11)) - 1.0;
+  paint *= 1.0 - 0.6 * smoothstep(0.3, -0.05, pshd);
+  float pcov = smoothstep(paw, -paw, pf.x - """ + PF_OUTLINE + """);
+  float pink = max(smoothstep(paw, -paw, abs(pf.x) - """ + PF_OUTLINE + """), smoothstep(paw, -paw, pf.y));
+  vec2 pqd = pq * 0.6;
+  vec3 pfn = normalize(vec3(pqd, sqrt(max(1.0 - dot(pqd, pqd), 0.05))));
+  float pfd = max(dot(pfn, pl), 0.0);
+  float pfs = pow(max(dot(reflect(-pl, pfn), vec3(0.0, 0.0, 1.0)), 0.0), 60.0);
+  vec3 pfbase = mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.45);
+  vec3 pface = pfbase * (0.35 + 0.8 * pfd) + NOKKVI_TEXT * pfs * 0.7;
+  float pedge = smoothstep(-0.03, 0.0, pf.y) * (1.0 - smoothstep(0.0, 0.004, pf.y));
+  vec3 pinkc = NOKKVI_BG * 0.6 + NOKKVI_TEXT * (pfs * 0.5 + pedge * 0.12);
+  pface = mix(pface, pinkc, pink);
+  pface += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * pm.z * 0.15 * (1.0 - pink);
+  return mix(paint, pface, pcov);
+}
+"""
+PF_COMP = PF_SCENE + " shader_body {\n" + HEAD + """
+  float g = q7;
+  float sd = q8;
+  vec2 guv = uv;
+  float rb = floor(uv.y * (24.0 + 40.0 * fract(sd * 0.137)));
+  float rh = fract(sin(rb * 12.9898 + sd * 78.233) * 43758.5453);
+  guv.x += (rh - 0.5) * 0.25 * g * step(1.0 - 0.45 * g, fract(rh * 91.7));
+  guv.y += q20;
+  float srow = floor(uv.y * texsize.y / 2.0);
+  float swb = texture(sampler_noise_lq, vec2((srow + 0.5) / 256.0, rand_frame.x)).x - 0.5;
+  guv.x += swb * q10 * 0.008;
+  float lp = max(3.0, floor(min(texsize.x, texsize.y) / 150.0 + 0.5));
+  float cell = floor(mix(1.0, lp * 3.0, q9));
+  vec2 cpx = (floor(guv * texsize.xy / cell) + 0.5) * cell;
+  guv = mix(guv, cpx * texsize.zw, step(1.5, cell));
+  vec2 ro = vec2((1.5 + 16.0 * g) * texsize.z, 0.0);
+  vec2 gr = guv + ro;
+  vec2 gb = guv - ro;
+  vec3 col = vec3(pf_scene(gr).x, pf_scene(guv).y, pf_scene(gb).z);
+  float sb = floor(uv.y * 12.0);
+  float sh = fract(sin(sb * 7.13 + sd * 1.7) * 43758.5453);
+  col = mix(col, col.zxy, step(1.0 - 0.12 * g, sh));
+  vec2 sq = floor(uv * texsize.xy / 2.0);
+  float sn = texture(sampler_noise_lq, (sq + 0.5) / 256.0 + rand_frame.xy).x;
+  float sline = step(0.94, texture(sampler_noise_lq, vec2(rand_frame.z, (srow + 0.5) / 256.0)).x);
+  col = mix(col, mix(NOKKVI_BG, NOKKVI_TEXT, sn), clamp(q10 * 0.55, 0.0, 0.8));
+  col += NOKKVI_TEXT * sline * q10 * 0.35;
+  float lpm = max(lp, cell);
+  vec2 lc = uv * texsize.xy / lpm;
+  float sub = floor(fract(lc.x) * 3.0);
+  vec3 lmask = vec3(1.0 - step(0.5, sub), step(0.5, sub) * (1.0 - step(1.5, sub)), step(1.5, sub));
+  float lgap = step(fract(lc.y) * lpm, 1.0);
+  vec3 lm = mix(vec3(0.3), vec3(1.0), lmask) * (1.0 - 0.6 * lgap);
+  col = mix(col, col * lm * 1.8, 0.3 + 0.45 * q9);
+  float bandy = 1.15 - fract(time * 0.23) * 1.3;
+  vec2 bq = floor(uv * texsize.xy / (lp * 5.0));
+  float bh = fract(sin(dot(bq, vec2(12.9898, 78.233)) + sd * 3.7) * 43758.5453);
+  float mosh = step(1.0 - 0.3 * g, bh) * step(0.2, g);
+  vec2 mo = floor((vec2(fract(bh * 37.1), fract(bh * 71.3)) - 0.5) * 4.0) * lp * texsize.zw;
+  vec4 prev = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), uv + mo, 0.0);
+  col *= 1.0 + 0.1 * exp(-pow((uv.y - bandy) / 0.06, 2.0));
+  col *= 0.97 + 0.03 * sin(time * 46.0) * (1.0 + 3.0 * g);
+  col *= 1.0 - 0.3 * pow(length((uv - 0.5) * s), 2.5);
+  col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.zw).x - 0.5) * 0.02;
+  col = mix(col, prev.rgb, mosh * prev.a);
+  ret = col;
+ }"""
+PF_INIT = (BEATS_INIT + " pulse = 0; pop = 0; nb = 0; gl = 0; lb = 0; stt = 0; bt = 2; bph = 1; es = 0;"
+           " rdir = 1; hb = 0.3; sm = 0; jmp = 0; gcool = 0; ng = 0; trt = 1;")
+PF_FRAME = ("dt = 1 / max(fps, 1);\n" + PULSE + BEATS
+    + "nb = nb + trig;\n"
+      "gtr = trig * above(bk, 0.3 + 0.25 * gcool); gcool = if(gtr, 1, gcool * exp(-dt / 0.6));\n"
+      "gl = if(gtr, max(gl, min(0.25 + (bk - 0.3) * 1.2, 1)), gl * exp(-dt / 0.07));\n"
+      "q7 = gl * above(gl, 0.04);\n"
+      "q8 = (int(time * 15) * 7 + nb * 13) % 101;\n"
+      "ng = ng + gtr;\n"
+      "lb = if(gtr * min(equal(ng % 6, 0) + above(bk, 1.1), 1), 1, lb * exp(-dt / 0.12));\n"
+      "q9 = lb * above(lb, 0.03);\n"
+      "trt = treb / max(treb_att, 0.05);\n"
+      "stt = max(stt * exp(-dt / 0.07), min(max(trt - 1.55, 0) * 1.6, 1));\n"
+      "q10 = stt * above(stt, 0.04);\n"
+      "q11 = 0.03 * sin(time * 0.31);\nq12 = 0.02 * sin(time * 0.43 + 1);\n"
+      "q13 = 0.3 * (1 + 0.035 * q5);\n"
+      "bt = bt - dt; bst = below(bt, 0); bt = if(bst, 3 + rand(40) / 10, bt); bph = if(bst, 0, bph + dt);\n"
+      "q14 = if(below(bph, 0.16), sin(3.14159 * bph / 0.16), 0);\n"
+      "q15 = trig * min(0.5 + bs1 * 0.4, 1);\n"
+      "es = if(trig, 0.03 * min(bs1, 1.3), es * exp(-dt / 0.18)); q16 = es;\n"
+      "rdir = if(trig, -rdir, rdir);\n"
+      "q18 = 0.0015 * sin(time * 0.07) + es * 0.4 * rdir;\n"
+      "hb = hb + dt * 0.02 + trig * 0.13; hb = hb - 2 * int(hb / 2); q17 = 1 - abs(1 - hb);\n"
+      "sm = sm + (min(max(bass_att + mid_att - 1.6, 0) * 0.25, 0.35) - sm) * (1 - exp(-dt / 0.5)); q19 = sm;\n"
+      "jmp = if(trig * above(bs1, 1.0), (rand(100) / 100 - 0.5) * 0.12, jmp * exp(-dt / 0.06));\n"
+      "q20 = jmp * above(abs(jmp), 0.002);\n")
+presets["nokkvi - pirate signal"] = preset({"decay": 1.0, "wave_a": 0.0, "zoom": 1.0, "wrap": 0},
+                                          PF_WARP, PF_COMP, init=PF_INIT, frame=PF_FRAME)
+
 presets["nokkvi - black holes"] = black_holes_port(False)
 presets["nokkvi - cover black holes"] = black_holes_port(True)
 presets["nokkvi - maxawow"] = maxawow_port(False)
