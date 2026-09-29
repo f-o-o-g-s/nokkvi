@@ -4355,6 +4355,77 @@ vec2 pf_face(vec2 pfq, float pfblink, float pfext) {
 }
 """
 PF_OUTLINE = "0.0248"
+# The face lies on a card tilted in perspective (the starfield nebula's
+# camera, centred on the face): screen offset `pd` from the face centre is
+# cast onto the plane (pitch, yaw, roll, scale `zm`, focal length `foc`) and
+# comes back in the card's own coordinates as `{x}_q`; with `th`, `{x}_b` is
+# the same point on the card's back face, `th` deeper (the coin's edge).
+def pf_proj(x, pd, pit, yaw, rol, zm, foc, th=None):
+    out = f"""
+  float {x}_cp = cos({pit}); float {x}_sp = sin({pit});
+  float {x}_cy = cos({yaw}); float {x}_sy = sin({yaw});
+  vec3 {x}_ex = vec3({x}_cy, 0.0, -{x}_sy);
+  vec3 {x}_ey = vec3({x}_sp * {x}_sy, {x}_cp, {x}_sp * {x}_cy);
+  vec3 {x}_en = vec3({x}_cp * {x}_sy, -{x}_sp, {x}_cp * {x}_cy);
+  vec3 {x}_rd = vec3({pd}, {foc});
+  float {x}_dn = max(dot({x}_rd, {x}_en), 0.05);
+  vec3 {x}_h = {x}_rd * ({foc} * {x}_en.z / {x}_dn) - vec3(0.0, 0.0, {foc});
+  vec2 {x}_pl = vec2(dot({x}_h, {x}_ex), dot({x}_h, {x}_ey));
+  float {x}_cr = cos({rol}); float {x}_sr = sin({rol});
+  vec2 {x}_q = vec2({x}_pl.x * {x}_cr - {x}_pl.y * {x}_sr, {x}_pl.x * {x}_sr + {x}_pl.y * {x}_cr) / {zm};
+"""
+    if th:
+        out += f"""
+  vec3 {x}_hb = {x}_rd * (({foc} * {x}_en.z + {th}) / {x}_dn) - vec3(0.0, 0.0, {foc}) - {x}_en * {th};
+  vec2 {x}_pb = vec2(dot({x}_hb, {x}_ex), dot({x}_hb, {x}_ey));
+  vec2 {x}_b = vec2({x}_pb.x * {x}_cr - {x}_pb.y * {x}_sr, {x}_pb.x * {x}_sr + {x}_pb.y * {x}_cr) / {zm};
+"""
+    return out
+# Camera acts (the starfield nebula's, per beat): the scene stops (q6, the
+# warp holds the paint), the card is dragged from its old pose to a new one
+# over ~45% of the beat interval, and everything flows again. q21..q25 =
+# pitch, yaw, roll, scale, focal length; q26..q29 = this frame's step of the
+# first four (the comp's motion blur); q31 = drag speed (its echo smear).
+PF_CAMERA = """cs = cs + dt;
+ibi = if(trig, ibi * 0.8 + min(cs, 1.5) * 0.2, ibi);
+cs = if(trig, 0, cs);
+at = at + dt * (1 - inact);
+go = below(inact, 0.5) * max(trig, above(at, 6));
+inact = max(inact, go);
+aa = if(go, 0, aa + dt * inact);
+nacts = nacts + go;
+u1 = rand(1000) / 1000 + bass_att * 3.7; u1 = u1 - int(u1);
+u2 = rand(1000) / 1000 + mid_att * 5.3; u2 = u2 - int(u2);
+u3 = rand(1000) / 1000 + treb_att * 7.1; u3 = u3 - int(u3);
+flat = equal(nacts % 8, 0);
+amp = min(0.35 + max(bk, 0) * 0.7, 0.85);
+fpit = if(go, cpit, fpit); fyaw = if(go, cyaw, fyaw); frol = if(go, crol, frol); fzm = if(go, czm, fzm); ffoc = if(go, cfoc, ffoc);
+tpit = if(go, min(max(cpit * 0.3 + (u1 - 0.5) * 2 * amp, -0.8), 0.8) * (1 - flat), tpit);
+tyaw = if(go, min(max(cyaw * 0.3 + (u2 - 0.5) * 2 * amp, -0.8), 0.8) * (1 - flat), tyaw);
+trol = if(go, min(max(crol * 0.3 + (u3 - 0.5) * 1.4 * amp, -0.5), 0.5) * (1 - flat), trol);
+tfoc = if(go, 0.8 + u3 + 0.8 * flat, tfoc);
+tzm = if(go, 0.85 + 0.4 * u1 * (1 - flat) + 0.15 * flat, tzm);
+ddur = if(go, min(max(ibi * 0.45, 0.12), 0.4), ddur);
+eprev = if(go, 0, eprev);
+e = min(max((aa - 0.05) / ddur, 0), 1);
+e = e * e * (3 - 2 * e);
+cpit = if(inact, fpit + (tpit - fpit) * e, cpit);
+cyaw = if(inact, fyaw + (tyaw - fyaw) * e, cyaw);
+crol = if(inact, frol + (trol - frol) * e, crol);
+czm = if(inact, fzm + (tzm - fzm) * e, czm);
+cfoc = if(inact, ffoc + (tfoc - ffoc) * e, cfoc);
+cmv = abs(e - eprev) / dt * (abs(tpit - fpit) + abs(tyaw - fyaw) + abs(trol - frol) + abs(tzm - fzm));
+dee = e - eprev;
+eprev = e;
+frzt = inact * below(aa, 0.07 + ddur);
+done = inact * above(aa, 0.07 + ddur);
+inact = inact * (1 - done);
+at = if(done, 0, at);
+frz = frz + (frzt - frz) * (1 - exp(-dt / 0.025));
+q6 = frz; q21 = cpit; q22 = cyaw; q23 = crol; q24 = czm; q25 = cfoc;
+q26 = dee * (tpit - fpit); q27 = dee * (tyaw - fyaw); q28 = dee * (trol - frol); q29 = dee * (tzm - fzm);
+q31 = min(cmv * 0.3, 0.75);
+"""
 def pf_whirl(i, cx, cy, band):
     return f"""
   {{
@@ -4392,19 +4463,24 @@ PF_WARP = PF_FN + " shader_body {\n" + HEAD + """
   float dens = f.x + (f.x - GetBlur1(suv + flow).x) * 0.06 - (0.0005 + (grain - 0.5) * 0.03);
   float hue = f.y;
   float hot = f.z * 0.965;
+  vec3 held = texture(sampler_main, (floor(uv_orig * texsize.xy) + 0.5) * texsize.zw).xyz;
+  dens = mix(dens, held.x, q6);
+  hue = mix(hue, held.y, q6);
+  hot = mix(hot, held.z, q6);
   float fr = q13;
-  float rd = length(d) / fr - 1.0;
-  float band = abs(atan(d.x, d.y)) / 3.14159;
+""" + pf_proj("pw", "d", "q21", "q22", "q23", "q24", "q25") + """
+  vec2 fq = pw_q / fr;
+  float rd = length(fq) - 1.0;
+  float band = abs(atan(fq.x, fq.y)) / 3.14159;
   float spec = get_fft(0.02 + band * 0.5);
-  float feed = smoothstep(0.07, 0.01, rd) * step(0.0, rd) * clamp(spec * 2.2 * (0.6 + 0.6 * q5), 0.0, 1.0);
+  float feed = smoothstep(0.07, 0.01, rd) * step(0.0, rd) * clamp(spec * 2.2 * (0.6 + 0.6 * q5), 0.0, 1.0) * (0.3 + 0.7 * q30);
   float fhue = q17 + (band - 0.5) * 0.35;
   dens = max(dens, feed * 0.95);
   hue = mix(hue, 1.0 - abs(1.0 - mod(fhue + 2.0, 2.0)), feed);
-  vec2 fq = d / fr;
   vec2 fs = pf_face(fq, 0.0, q19);
   float inside = smoothstep(0.01, -0.01, fs.x);
   float featm = max(smoothstep(0.02, 0.0, fs.y), smoothstep(0.02, 0.0, abs(fs.x) - 0.03));
-  float stamp = q15 * max(inside, featm);
+  float stamp = q15 * q30 * max(inside, featm);
   dens = mix(dens, 0.02, stamp * featm);
   hue = mix(hue, q17, stamp);
   hot = max(hot, stamp * (1.0 - featm));
@@ -4438,23 +4514,51 @@ vec3 pf_scene(vec2 psu) {
   paint += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * smoothstep(0.0, 0.8, pm.z) * 0.8;
   vec2 pfc = vec2(q11, q12);
   float pr = q13;
-  vec2 pq = (pp - pfc) / pr;
-  vec2 pf = pf_face(pq, q14, q19);
-  float paw = 1.2 / (pr * min(texsize.x, texsize.y));
-  float pshd = length(pq - vec2(0.08, -0.11)) - 1.0;
-  paint *= 1.0 - 0.6 * smoothstep(0.3, -0.05, pshd);
-  float pcov = smoothstep(paw, -paw, pf.x - """ + PF_OUTLINE + """);
-  float pink = max(smoothstep(paw, -paw, abs(pf.x) - """ + PF_OUTLINE + """), smoothstep(paw, -paw, pf.y));
-  vec2 pqd = pq * 0.6;
-  vec3 pfn = normalize(vec3(pqd, sqrt(max(1.0 - dot(pqd, pqd), 0.05))));
-  float pfd = max(dot(pfn, pl), 0.0);
-  float pfs = pow(max(dot(reflect(-pl, pfn), vec3(0.0, 0.0, 1.0)), 0.0), 60.0);
-  vec3 pfbase = mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.45);
-  vec3 pface = pfbase * (0.35 + 0.8 * pfd) + NOKKVI_TEXT * pfs * 0.7;
-  float pedge = smoothstep(-0.03, 0.0, pf.y) * (1.0 - smoothstep(0.0, 0.004, pf.y));
-  vec3 pinkc = NOKKVI_BG * 0.6 + NOKKVI_TEXT * (pfs * 0.5 + pedge * 0.12);
-  pface = mix(pface, pinkc, pink);
-  pface += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * pm.z * 0.15 * (1.0 - pink);
+  vec2 pd0 = pp - pfc;
+  vec2 psd0 = pd0 - vec2(0.03, -0.04) * pr;
+""" + pf_proj("ps", "psd0", "q21", "q22", "q23", "q24", "q25") + """
+  float pshd = length(ps_q / pr) - 1.0;
+  paint *= 1.0 - 0.6 * smoothstep(0.3, -0.05, pshd) * q30;
+  float phc = fract(sin(dot(floor(psu * texsize.xy / 8.0), vec2(12.9898, 78.233))) * 43758.5453);
+  float pvis = clamp((q30 * 1.3 - 0.15 - phc * 0.8) * 5.0, 0.0, 1.0);
+  vec3 pfacc = vec3(0.0);
+  float pfcov = 0.0;
+  for (int k = 0; k < 5; k++) {
+    float pkt = float(k) * 0.6;
+    float pkpit = q21 - q26 * pkt;
+    float pkyaw = q22 - q27 * pkt;
+    float pkrol = q23 - q28 * pkt;
+    float pkzm = q24 - q29 * pkt;
+""" + pf_proj("pk", "pd0", "pkpit", "pkyaw", "pkrol", "pkzm", "q25", th="0.035") + """
+    vec2 pq = pk_q / pr;
+    vec2 pqb = pk_b / pr;
+    vec2 pf = pf_face(pq, q14, q19);
+    float paw = 1.2 / (pr * min(texsize.x, texsize.y) * max(pk_en.z, 0.25) * pkzm);
+    float pcv = smoothstep(paw, -paw, pf.x - """ + PF_OUTLINE + """);
+    float pink = max(smoothstep(paw, -paw, abs(pf.x) - """ + PF_OUTLINE + """), smoothstep(paw, -paw, pf.y));
+    float pedg = smoothstep(paw, -paw, length(pqb) - 1.0248) * (1.0 - pcv);
+    vec2 pqd = pq * 0.6;
+    vec3 pnl = vec3(pqd, sqrt(max(1.0 - dot(pqd, pqd), 0.05)));
+    vec2 pdir = normalize(pqb + vec2(0.0001, 0.0));
+    pnl = mix(pnl, vec3(pdir, 0.15), pedg);
+    vec2 pnr = vec2(pnl.x * pk_cr + pnl.y * pk_sr, pnl.y * pk_cr - pnl.x * pk_sr);
+    vec3 pnv = pk_ex * pnr.x + pk_ey * pnr.y - pk_en * pnl.z;
+    vec3 pfn = normalize(vec3(pnv.x, pnv.y, -pnv.z));
+    float pfd = max(dot(pfn, pl), 0.0);
+    float pfs = pow(max(dot(reflect(-pl, pfn), vec3(0.0, 0.0, 1.0)), 0.0), 60.0);
+    vec3 pfbase = mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.45);
+    vec3 pfk = pfbase * (0.35 + 0.8 * pfd) + NOKKVI_TEXT * pfs * 0.7;
+    float pedge = smoothstep(-0.03, 0.0, pf.y) * (1.0 - smoothstep(0.0, 0.004, pf.y));
+    vec3 pinkc = NOKKVI_BG * 0.6 + NOKKVI_TEXT * (pfs * 0.5 + pedge * 0.12);
+    pfk = mix(pfk, pinkc, pink * pcv);
+    pfk += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * pm.z * 0.15 * (1.0 - pink) * pcv;
+    pfk = mix(pfk, mix(NOKKVI_BG, pfbase, 0.35) * (0.3 + 0.9 * pfd) + NOKKVI_TEXT * pfs * 0.4, pedg);
+    float pck = max(pcv, pedg);
+    pfacc += pfk * pck;
+    pfcov += pck;
+  }
+  vec3 pface = pfacc / max(pfcov, 0.0001);
+  float pcov = pfcov * 0.2 * pvis;
   return mix(paint, pface, pcov);
 }
 """
@@ -4503,10 +4607,15 @@ PF_COMP = PF_SCENE + " shader_body {\n" + HEAD + """
   col *= 1.0 - 0.3 * pow(length((uv - 0.5) * s), 2.5);
   col += (texture(sampler_noise_lq, uv * texsize.xy / 256.0 + rand_frame.zw).x - 0.5) * 0.02;
   col = mix(col, prev.rgb, mosh * prev.a);
+  vec4 pecho = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), uv, 0.0);
+  col = mix(col, pecho.rgb, q31 * pecho.a);
   ret = col;
  }"""
 PF_INIT = (BEATS_INIT + " pulse = 0; pop = 0; nb = 0; gl = 0; lb = 0; stt = 0; bt = 2; bph = 1; es = 0;"
-           " rdir = 1; hb = 0.3; sm = 0; jmp = 0; gcool = 0; ng = 0; trt = 1;")
+           " rdir = 1; hb = 0.3; sm = 0; jmp = 0; gcool = 0; ng = 0; trt = 1; vtg = 1; vis = 1; ft = 0;"
+           " cs = 0; ibi = 0.5; at = 0; inact = 0; aa = 0; nacts = 0; ddur = 0.25; e = 0; eprev = 0; dee = 0; frz = 0;"
+           " cpit = 0; cyaw = 0; crol = 0; czm = 1; cfoc = 1.6; fpit = 0; fyaw = 0; frol = 0; fzm = 1; ffoc = 1.6;"
+           " tpit = 0; tyaw = 0; trol = 0; tzm = 1; tfoc = 1.6;")
 PF_FRAME = ("dt = 1 / max(fps, 1);\n" + PULSE + BEATS
     + "nb = nb + trig;\n"
       "gtr = trig * above(bk, 0.3 + 0.25 * gcool); gcool = if(gtr, 1, gcool * exp(-dt / 0.6));\n"
@@ -4519,7 +4628,13 @@ PF_FRAME = ("dt = 1 / max(fps, 1);\n" + PULSE + BEATS
       "trt = treb / max(treb_att, 0.05);\n"
       "stt = max(stt * exp(-dt / 0.07), min(max(trt - 1.55, 0) * 1.6, 1));\n"
       "q10 = stt * above(stt, 0.04);\n"
-      "q11 = 0.03 * sin(time * 0.31);\nq12 = 0.02 * sin(time * 0.43 + 1);\n"
+      + PF_CAMERA +
+      "ft = ft + dt * (1 - frz);\n"
+      "q11 = 0.03 * sin(ft * 0.31);\nq12 = 0.02 * sin(ft * 0.43 + 1);\n"
+      "en = (bass_att + mid_att + treb_att) / 3;\n"
+      "vtg = if(trig, 1, vtg * exp(-dt / (0.5 + 3 * min(max(en - 0.6, 0), 1))));\n"
+      "vis = vis + (vtg - vis) * (1 - exp(-dt / if(above(vtg, vis), 0.07, 0.35)));\n"
+      "q30 = vis;\n"
       "q13 = 0.3 * (1 + 0.035 * q5);\n"
       "bt = bt - dt; bst = below(bt, 0); bt = if(bst, 3 + rand(40) / 10, bt); bph = if(bst, 0, bph + dt);\n"
       "q14 = if(below(bph, 0.16), sin(3.14159 * bph / 0.16), 0);\n"

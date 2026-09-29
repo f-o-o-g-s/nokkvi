@@ -58,6 +58,9 @@ All notable changes to this project will be documented in this file.
 - Hard beats blow Pirate Signal's picture up into big LCD pixels for a moment.
 - Sharp treble breaks Pirate Signal's picture into static and sprinkles grains into the sand.
 - Pirate Signal's smiley blinks now and then and grins wider as the music gets louder.
+- Pirate Signal's smiley is a thick coin tilted in perspective.
+- On each beat Pirate Signal pauses, drags the coin to a new angle with motion blur, then flows again.
+- Pirate Signal's smiley dissolves into LCD blocks when the music goes quiet and snaps back on the beat.
 
 ### Changed
 
