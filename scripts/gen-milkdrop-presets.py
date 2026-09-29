@@ -4383,9 +4383,12 @@ def pf_proj(x, pd, pit, yaw, rol, zm, foc, th=None):
     return out
 # Camera acts (the starfield nebula's, per beat): the scene stops (q6, the
 # warp holds the paint), the card is dragged from its old pose to a new one
-# over ~45% of the beat interval, and everything flows again. q21..q25 =
+# over ~45% of the beat interval while it hops to a new spot on screen
+# (overshooting a little as it lands), and everything flows again. q21..q25 =
 # pitch, yaw, roll, scale, focal length; q26..q29 = this frame's step of the
-# first four (the comp's motion blur); q31 = drag speed (its echo smear).
+# first four (the comp's motion blur); q31 = drag speed (its echo smear);
+# q11/q12 = the face's spot (-1..1 of the room the panel leaves it), q1/q2
+# its step this frame.
 PF_CAMERA = """cs = cs + dt;
 ibi = if(trig, ibi * 0.8 + min(cs, 1.5) * 0.2, ibi);
 cs = if(trig, 0, cs);
@@ -4407,14 +4410,25 @@ tfoc = if(go, 0.8 + u3 + 0.8 * flat, tfoc);
 tzm = if(go, 0.85 + 0.4 * u1 * (1 - flat) + 0.15 * flat, tzm);
 ddur = if(go, min(max(ibi * 0.45, 0.12), 0.4), ddur);
 eprev = if(go, 0, eprev);
-e = min(max((aa - 0.05) / ddur, 0), 1);
-e = e * e * (3 - 2 * e);
+lin = min(max((aa - 0.05) / ddur, 0), 1);
+e = lin * lin * (3 - 2 * lin);
+lb1 = lin - 1; eb = 1 + 2.70158 * lb1 * lb1 * lb1 + 1.70158 * lb1 * lb1;
+u4 = rand(1000) / 1000 + bass * 2.9; u4 = u4 - int(u4);
+u5 = rand(1000) / 1000 + treb * 4.3; u5 = u5 - int(u5);
+fpx = if(go, cpx, fpx); fpy = if(go, cpy, fpy);
+mamp = min(0.55 + max(bk, 0), 1);
+tpx = if(go, min(max(cpx * 0.25 + (u4 - 0.5) * 2 * mamp, -1), 1) * (1 - flat), tpx);
+tpy = if(go, min(max(cpy * 0.25 + (u5 - 0.5) * 2 * mamp, -1), 1) * (1 - flat), tpy);
+thop = if(go, 0.25 + 0.6 * u4 * mamp, thop);
+cpx = if(inact, fpx + (tpx - fpx) * eb, cpx);
+cpy = if(inact, fpy + (tpy - fpy) * eb, cpy);
+hop = inact * sin(3.14159 * lin) * thop;
 cpit = if(inact, fpit + (tpit - fpit) * e, cpit);
 cyaw = if(inact, fyaw + (tyaw - fyaw) * e, cyaw);
 crol = if(inact, frol + (trol - frol) * e, crol);
 czm = if(inact, fzm + (tzm - fzm) * e, czm);
 cfoc = if(inact, ffoc + (tfoc - ffoc) * e, cfoc);
-cmv = abs(e - eprev) / dt * (abs(tpit - fpit) + abs(tyaw - fyaw) + abs(trol - frol) + abs(tzm - fzm));
+cmv = abs(e - eprev) / dt * (abs(tpit - fpit) + abs(tyaw - fyaw) + abs(trol - frol) + abs(tzm - fzm) + 0.4 * (abs(tpx - fpx) + abs(tpy - fpy)));
 dee = e - eprev;
 eprev = e;
 frzt = inact * below(aa, 0.07 + ddur);
@@ -4438,7 +4452,7 @@ def pf_whirl(i, cx, cy, band):
 """
 PF_WARP = PF_FN + " shader_body {\n" + HEAD + """
   vec2 p = (uv_orig - 0.5) * s;
-  vec2 fc = vec2(q11, q12);
+  vec2 fc = vec2(q11, q12) * max(0.5 * s - q13 * 0.85, vec2(0.02));
   vec2 d = p - fc;
   float an = q18;
   vec2 dr = vec2(d.x * cos(an) - d.y * sin(an), d.x * sin(an) + d.y * cos(an)) / (1.0022 + q16);
@@ -4512,7 +4526,8 @@ vec3 pf_scene(vec2 psu) {
   vec2 pu2 = 0.3 * cos(pu1 * 12.0) - 9.0 * pg;
   paint += NOKKVI_HIGHLIGHT * clamp(0.04 / length(pu2), 0.0, 1.0) * pthick * 0.5;
   paint += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3) * smoothstep(0.0, 0.8, pm.z) * 0.8;
-  vec2 pfc = vec2(q11, q12);
+  vec2 pfspan = max(0.5 * ps - q13 * 0.85, vec2(0.02));
+  vec2 pfc = vec2(q11, q12) * pfspan;
   float pr = q13;
   vec2 pd0 = pp - pfc;
   vec2 psd0 = pd0 - vec2(0.03, -0.04) * pr;
@@ -4529,7 +4544,8 @@ vec3 pf_scene(vec2 psu) {
     float pkyaw = q22 - q27 * pkt;
     float pkrol = q23 - q28 * pkt;
     float pkzm = q24 - q29 * pkt;
-""" + pf_proj("pk", "pd0", "pkpit", "pkyaw", "pkrol", "pkzm", "q25", th="0.035") + """
+    vec2 pdk = pd0 + vec2(q1, q2) * pfspan * pkt;
+""" + pf_proj("pk", "pdk", "pkpit", "pkyaw", "pkrol", "pkzm", "q25", th="0.035") + """
     vec2 pq = pk_q / pr;
     vec2 pqb = pk_b / pr;
     vec2 pf = pf_face(pq, q14, q19);
@@ -4615,7 +4631,8 @@ PF_INIT = (BEATS_INIT + " pulse = 0; pop = 0; nb = 0; gl = 0; lb = 0; stt = 0; b
            " rdir = 1; hb = 0.3; sm = 0; jmp = 0; gcool = 0; ng = 0; trt = 1; vtg = 1; vis = 1; ft = 0;"
            " cs = 0; ibi = 0.5; at = 0; inact = 0; aa = 0; nacts = 0; ddur = 0.25; e = 0; eprev = 0; dee = 0; frz = 0;"
            " cpit = 0; cyaw = 0; crol = 0; czm = 1; cfoc = 1.6; fpit = 0; fyaw = 0; frol = 0; fzm = 1; ffoc = 1.6;"
-           " tpit = 0; tyaw = 0; trol = 0; tzm = 1; tfoc = 1.6;")
+           " tpit = 0; tyaw = 0; trol = 0; tzm = 1; tfoc = 1.6;"
+           " lin = 0; eb = 0; cpx = 0; cpy = 0; fpx = 0; fpy = 0; tpx = 0; tpy = 0; thop = 0; hop = 0; pxp = 0; pyp = 0;")
 PF_FRAME = ("dt = 1 / max(fps, 1);\n" + PULSE + BEATS
     + "nb = nb + trig;\n"
       "gtr = trig * above(bk, 0.3 + 0.25 * gcool); gcool = if(gtr, 1, gcool * exp(-dt / 0.6));\n"
@@ -4630,7 +4647,9 @@ PF_FRAME = ("dt = 1 / max(fps, 1);\n" + PULSE + BEATS
       "q10 = stt * above(stt, 0.04);\n"
       + PF_CAMERA +
       "ft = ft + dt * (1 - frz);\n"
-      "q11 = 0.03 * sin(ft * 0.31);\nq12 = 0.02 * sin(ft * 0.43 + 1);\n"
+      "pxn = cpx + 0.06 * sin(ft * 0.31); pyn = min(cpy + hop + 0.06 * sin(ft * 0.43 + 1), 1.2);\n"
+      "q1 = pxn - pxp; q2 = pyn - pyp; pxp = pxn; pyp = pyn;\n"
+      "q11 = pxn; q12 = pyn;\n"
       "en = (bass_att + mid_att + treb_att) / 3;\n"
       "vtg = if(trig, 1, vtg * exp(-dt / (0.5 + 3 * min(max(en - 0.6, 0), 1))));\n"
       "vis = vis + (vtg - vis) * (1 - exp(-dt / if(above(vtg, vis), 0.07, 0.35)));\n"

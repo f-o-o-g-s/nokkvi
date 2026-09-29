@@ -60,6 +60,7 @@ All notable changes to this project will be documented in this file.
 - Pirate Signal's smiley blinks now and then and grins wider as the music gets louder.
 - Pirate Signal's smiley is a thick coin tilted in perspective.
 - On each beat Pirate Signal pauses, drags the coin to a new angle with motion blur, then flows again.
+- Each Pirate Signal drag also hops the smiley to a new spot on screen, landing with a little overshoot.
 - Pirate Signal's smiley dissolves into LCD blocks when the music goes quiet and snaps back on the beat.
 
 ### Changed
