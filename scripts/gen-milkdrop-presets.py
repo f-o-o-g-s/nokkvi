@@ -1022,6 +1022,21 @@ def ik_sub(text):
     for k, v in IK_TOK.items():
         text = text.replace(k, v)
     return text
+def ik_lod0(shader):
+    """Read the noise volumes at mip 0. A plain texture() takes its mip from
+    screen-space derivatives, which are arbitrary inside the march, so the
+    same point got a different field in the march loop and in the shading
+    (the surface the march found was gone when it was shaded: black patches)."""
+    import re
+    out, i = [], 0
+    for m in re.finditer(r"texture\((sampler_noisevol_(?:hq|lq)), ", shader):
+        j, depth = m.end(), 1
+        while depth:
+            depth += (shader[j] == "(") - (shader[j] == ")")
+            j += 1
+        out.append(shader[i:m.start()] + f"textureLod(sampler3D({m.group(1)}, {m.group(1)}_samp), {shader[m.end():j - 1]}, 0.0)")
+        i = j
+    return "".join(out) + shader[i:]
 
 IK_COMMON = ik_sub("""
 float ik_ba(float bqa) {
@@ -1614,6 +1629,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub(
   float tsn = 1000.0;
   float tsx = -1000.0;
   float hk = -1.0;
+  vec4 hs0 = vec4(0.0);
 """) + "".join(ik_sub(f"""
   vec4 sb{k} = vec4(0.0, 1000.0, 0.0, 0.0);
   {{""" + ik_slot_vals(k) + f"""
@@ -1649,6 +1665,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub(
       if (bfv > 0.0) {
         hit = 1.0;
         hk = bax.w - 1.0;
+        hs0 = bsp;
         break;
       }
       float veil = smoothstep(0.0, 0.08, bax.x) * smoothstep(0.9, 2.0, tt);
@@ -1713,6 +1730,7 @@ IKHKSEL
       hbz = ik_bd(hpz, thit, bsp, bax);
       hd1 = ik_bd(hpi, thit, bsp, bax);
     }
+    hsp = mix(hs0, hsp, step(0.01, hsp.x + hsp.y + hsp.z));
     vec3 hn = -normalize(vec3(hbx - hb0, hby - hb0, hbz - hb0) + vec3(0.00001));
     hn = normalize(hn - rd * max(dot(hn, rd), 0.0) * 1.05);
     float hdep = smoothstep(-0.05, 0.4, hd1);
@@ -1886,7 +1904,7 @@ paz = az; pel = el; plq = lqi; ppq = pqi; pvalid = 1;
 q7 = if(frz, drg, -taaw); q8 = spawnf; q9 = inkt; q10 = mood + spb * 0.999; q11 = turb; q12 = dts;
 q13 = min(ba1, 15.9) + 16 * int(bs1 * 100); q14 = min(ba2, 15.9) + 16 * int(bs2 * 100);
 """ + "".join(f"q{17 + k} = ika{k}; q{25 + k} = ikc{k};\n" for k in range(IK_NS))
-presets["nokkvi - living ink"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IK_WARP, IK_COMP,
+presets["nokkvi - living ink"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IK_WARP, ik_lod0(IK_COMP),
                                         init=IK_INIT, frame=IK_FRAME)
 
 # 6. Aurora (no cover) ----------------------------------------------------
