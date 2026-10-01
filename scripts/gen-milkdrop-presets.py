@@ -974,18 +974,22 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # widely, every 4th lands level. While it swings the COMP mixes in last
 # frame's picture, reprojected through both cameras, at up to 85%: the frozen
 # frame drags and twists as an echo smear and the new view resolves as the
-# camera settles. The pose is (azimuth, elevation, lens, roll) at a fixed
-# distance; the look-at point wanders with the azimuth (ik_cam), so the tank
-# is not always centred. Each visit picks a mood from the audio at frame 3:
+# camera settles. The pose is (azimuth, elevation, lens, roll, look-at) at a
+# fixed distance. Each move re-aims at where the live drops' rings will be
+# 0.7 s later (their weighted centroid, ik_eel_drop) and sets the lens from
+# their spread, so the ink fills the frame instead of sitting small in empty
+# water. Each visit picks a mood from the audio at frame 3:
 # studio black (side key), sunlit shallows (key from above, shafts) or abyss
 # (dim key, strong glow), and which ramp stops the three species take.
-# q map: q1-q3 azimuth, elevation, lens; q4-q6 the same last frame; q7 echo
-# weight while the camera moves (> 0) or minus the TAA weight; q8 spawn flag
+# q map: q1/q2 azimuth, elevation; q3 lens and roll (12 bits each, ik_cam
+# unpacks); q4-q6 the same last frame; q7 echo weight while the camera moves
+# (> 0) or minus the TAA weight; q8 spawn flag
 # (slot + 1 on the spawn frame); q9 ink clock; q10 mood + species ramp offset
 # (fraction); q11 turbulence; q12 this frame's ink-clock step (0 while the
 # camera moves); q13/q14 the last two beats (age + 16 * strength in
-# hundredths); q15/q16 roll now and last frame; q17-q24 slot ages; q25-q32
-# slot codes (ik_code).
+# hundredths); q15/q16 the look-at point's offsets across and up the view
+# (12 bits each), now and last frame; q17-q24 slot ages; q25-q32 slot codes
+# (ik_code).
 IK_NS = 8
 IK_LIFE = 8.0
 IK_TS = 3.0
@@ -996,7 +1000,7 @@ IK_SC = 1.25
 IK_BMIN = (-2.4, -2.4, -2.4)
 IK_BSIZE = (4.8, 4.8, 4.8)
 IK_STEPS = 120
-IK_DTS = 0.052
+IK_DTS = 0.066
 IK_CR = 5.0        # camera distance from the tank's centre
 IK_CSTEP = 0.5     # spacing of the 4x4x4 lattice of aim points
 IK_LEAD = 1.3      # a drop starts this many of its own sizes before its aim point...
@@ -1535,12 +1539,15 @@ vec3 ik_curl(vec3 cup) {
  }""").replace("IKDECAY", "3.0").replace("IKDEP", "1.6")
 
 IK_CAMFN = ik_sub("""
-float ik_cam(float caz, float cel, float crl, out vec3 cro, out vec3 crt, out vec3 cup, out vec3 cfw) {
+float ik_cam(float caz, float cel, float clr, float cpn, out vec3 cro, out vec3 crt, out vec3 cup, out vec3 cfw) {
   vec3 cdir = vec3(cos(cel) * cos(caz), sin(cel), cos(cel) * sin(caz));
   vec3 cr0 = normalize(vec3(cdir.z, 0.0, -cdir.x));
   vec3 cu0 = cross(cdir, cr0);
-  float cpx = 0.9 * sin(caz * 0.8 + 1.7);
-  float cpy = 0.5 * sin(caz * 1.2 + cel * 2.0 + 0.5);
+  float clh = floor(clr / 4096.0);
+  float crl = (clr - clh * 4096.0) / 4095.0 * 2.0 - 1.0;
+  float cph = floor(cpn / 4096.0);
+  float cpx = cph / 4095.0 * 5.0 - 2.5;
+  float cpy = (cpn - cph * 4096.0) / 4095.0 * 5.0 - 2.5;
   vec3 cpos = cdir * @CR@;
   vec3 cfd = normalize(cr0 * cpx + cu0 * cpy - cpos);
   vec3 cr1 = normalize(vec3(-cfd.z, 0.0, cfd.x));
@@ -1550,7 +1557,7 @@ float ik_cam(float caz, float cel, float crl, out vec3 cro, out vec3 crt, out ve
   cfw = cfd;
   crt = cr2;
   cup = cross(cr2, cfd);
-  return 1.0;
+  return 0.3 + clh / 4095.0 * 0.9;
 }
 """)
 
@@ -1564,8 +1571,8 @@ IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub(
   vec3 fw = vec3(0.0);
   vec3 rt = vec3(0.0);
   vec3 up = vec3(0.0);
-  float cok = ik_cam(q1, q2, q15, ro, rt, up, fw);
-  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * q3);
+  float vlens = ik_cam(q1, q2, q3, q15, ro, rt, up, fw);
+  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * vlens);
   float mood = floor(q10 + 0.0005);
   vec3 L = normalize(mix(mix(vec3(0.6, 0.75, -0.3), vec3(0.2, 1.0, -0.15), step(0.5, mood)), vec3(0.15, 1.0, 0.3), step(1.5, mood)));
   float mkey = mix(1.0, 0.8, step(1.5, mood));
@@ -1645,7 +1652,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub(
         break;
       }
       float veil = smoothstep(0.0, 0.08, bax.x) * smoothstep(0.9, 2.0, tt);
-      float mstep = @DTS@ * mix(0.45, 1.0, smoothstep(0.03, 0.15, -bfv)) * mix(1.0, 2.0, step(bax.x, -0.99));
+      float mstep = @DTS@ * mix(0.5, 1.0, smoothstep(0.03, 0.15, -bfv)) * mix(1.0, 2.0, step(bax.x, -0.99));
       if (bax.z < 0.5) {
         vec3 vgc = (pos - @BMIN@) / @BSIZE@ * vnc;
         vec3 vnx = (floor(vgc) + step(vec3(0.0), rd) - vgc) / vnc * @BSIZE@ / rd;
@@ -1741,7 +1748,7 @@ IKHKSEL
   }
   col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.4) * shaft * 0.06 * mshaft;
   float mote = 0.0;
-  float mpx = q3 / min(texsize.x, texsize.y);
+  float mpx = vlens / min(texsize.x, texsize.y);
   for (int k = 0; k < 4; k++) {
     float mt = 1.2 + float(k) * 0.5;
     vec3 mp = (ro + rd * mt) / 0.5 + vec3(0.0, q9 * 0.05, 0.0);
@@ -1768,9 +1775,9 @@ IKHKSEL
   vec3 fwp = vec3(0.0);
   vec3 rtp = vec3(0.0);
   vec3 upp = vec3(0.0);
-  float pok = ik_cam(q4, q5, q16, rop, rtp, upp, fwp);
+  float plens = ik_cam(q4, q5, q6, q16, rop, rtp, upp, fwp);
   vec3 pvw = ro + rd * min(tmed, @CR@ + 1.0) - rop;
-  vec2 puv = vec2(dot(pvw, rtp), dot(pvw, upp)) / (max(dot(pvw, fwp), 0.05) * max(q6, 0.2)) / s + 0.5;
+  vec2 puv = vec2(dot(pvw, rtp), dot(pvw, upp)) / (max(dot(pvw, fwp), 0.05) * max(plens, 0.2)) / s + 0.5;
   float hval = step(0.0, puv.x) * step(puv.x, 1.0) * step(0.0, puv.y) * step(puv.y, 1.0);
   vec4 hist = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), puv, 0.0);
   vec3 blm = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), uv, 4.5).xyz;
@@ -1792,10 +1799,32 @@ IK_AGE0 = [1.2, 3.3, 5.4] + [99] * (IK_NS - 3)
 IK_CODE0 = [ik_code(3, 0, 1, 2, 1, 5, 1, 2), ik_code(1, 1, 0, 1, 1, 41, 2, 1), ik_code(4, 2, 1, 2, 2, 22, 1, 1)] + [0] * (IK_NS - 3)
 IK_INIT = (BEATS_INIT + " inkt = 0; since = 2; bavg = 1; mavg = 1; tavg = 1; lastcq = int(rand(3)); lastdi = int(rand(64));"
            " loud = 1; loud_m = 1; rate = 1; rate_m = 1; turb = 0.12; turb_m = 0.12; mood = 0; spb = 0.1; spawnf = 0;"
-           " az = rand(628) / 100; el = 0.15; lens = 0.85; az0 = az; el0 = el; lens0 = lens; az1 = az; el1 = el; lens1 = lens;"
-           " rol = 0; rol0 = 0; rol1 = 0; rdir = 1;"
+           " az = rand(628) / 100; el = 0.15; lens = 0.62; az0 = az; el0 = el; lens0 = lens; az1 = az; el1 = el; lens1 = lens;"
+           " rol = 0; rol0 = 0; rol1 = 0; rdir = 1; lpx = 0; lpy = 0; lpx0 = 0; lpy0 = 0; lpx1 = 0; lpy1 = 0;"
            " mvt = 9; mvd = 0.3; odir = 1; tsb = 0.5; ibi = 0.5; smv = 0; nmv = 0; pvalid = 0; "
            + " ".join(f"ika{k} = {IK_AGE0[k]}; ikc{k} = {IK_CODE0[k]};" for k in range(IK_NS)))
+def ik_eel_drop(k):
+    """Where drop k's ring will be 0.7 s from now (the same model as
+    ik_slot_frame), and its weight in the camera's framing."""
+    return (f"kc = ikc{k}; ka = min(ika{k} + 0.7, 6.5); kw{k} = min(max((6.5 - ika{k}) / 1.5, 0), 1);\n"
+            f"kdi = int(kc / 4096) % 64; kdh = (2 * kdi + 1) / 64 - 1; kdr = sqrt(max(1 - kdh * kdh, 0));\n"
+            f"ksz = (0.8 + 0.15 * (int(kc / 64) % 4)) * {IK_SC};\n"
+            f"ktr = (0.7 * log(1 + ka / 0.25) - {IK_KOFF}) * ksz - min({IK_LEAD} * ksz, {IK_LEADMAX});\n"
+            f"kx{k} = ((int(kc / 262144) % 4) - 1.5) * {IK_CSTEP} + kdr * cos(kdi * 2.3999632) * ktr;\n"
+            f"ky{k} = ((int(kc / 256) % 4) - 1.5) * {IK_CSTEP} - kdh * ktr;\n"
+            f"kz{k} = ((int(kc / 1048576) % 4) - 1.5) * {IK_CSTEP} + kdr * sin(kdi * 2.3999632) * ktr;\n"
+            f"wsm = wsm + kw{k}; cgx = cgx + kw{k} * kx{k}; cgy = cgy + kw{k} * ky{k}; cgz = cgz + kw{k} * kz{k};\n")
+
+IK_TARGETS = """odir = if(gom * above(rand(100), 75), -odir, odir);
+az = if(gom * above(abs(az), 31.4159265), az - sign(az) * 62.8318531, az);
+ur1 = rand(1000) / 1000 + bass_att * 2.9 + mid_att * 1.7; ur1 = (ur1 - int(ur1)) * 2 - 1;
+ur2 = rand(1000) / 1000 + treb_att * 3.1 + bass_att * 1.3; ur2 = ur2 - int(ur2);
+az0 = if(gom, az, az0); el0 = if(gom, el, el0); lens0 = if(gom, lens, lens0); rol0 = if(gom, rol, rol0); lpx0 = if(gom, lpx, lpx0); lpy0 = if(gom, lpy, lpy0);
+rdir = if(gom, -rdir, rdir);
+rol1 = if(gom, if(equal(nmv % 4, 0), 0, rdir * (0.15 + 0.4 * kk)), rol1);
+az1 = if(gom, az + odir * (0.3 + 0.55 * kk + 0.8 * big), az1);
+el1 = if(gom, if(big, ur1, min(max(el * 0.8 + ur1 * (0.25 + 0.4 * kk), -1.05), 1.05)), el1);
+"""
 IK_FRAME = "dt = min(1 / max(fps, 1), 0.1);\n" + BEATS + f"""tsb = tsb + dt;
 ibi = if(trig, ibi + (min(tsb, 1.2) - ibi) * 0.4, ibi);
 tsb = if(trig, 0, tsb);
@@ -1806,21 +1835,10 @@ gom = max(trig, above(smv, 4)) * above(mvt, mvd) * above(smv, 0.22);
 kk = if(trig, min(max((bs1 - 0.8) / 0.8, 0), 1), 0.25);
 nmv = nmv + gom;
 big = equal(nmv % 8, 0);
-odir = if(gom * above(rand(100), 75), -odir, odir);
-az = if(gom * above(abs(az), 31.4159265), az - sign(az) * 62.8318531, az);
-ur1 = rand(1000) / 1000 + bass_att * 2.9 + mid_att * 1.7; ur1 = (ur1 - int(ur1)) * 2 - 1;
-ur2 = rand(1000) / 1000 + treb_att * 3.1 + bass_att * 1.3; ur2 = ur2 - int(ur2);
-az0 = if(gom, az, az0); el0 = if(gom, el, el0); lens0 = if(gom, lens, lens0); rol0 = if(gom, rol, rol0);
-rdir = if(gom, -rdir, rdir);
-rol1 = if(gom, if(equal(nmv % 4, 0), 0, rdir * (0.15 + 0.4 * kk)), rol1);
-az1 = if(gom, az + odir * (0.3 + 0.55 * kk + 0.8 * big), az1);
-el1 = if(gom, if(big, ur1, min(max(el * 0.8 + ur1 * (0.25 + 0.4 * kk), -1.05), 1.05)), el1);
-lens1 = if(gom, if(big, 0.7 + 0.35 * ur2, min(max(lens + (ur2 - 0.5) * (0.16 + 0.3 * kk), 0.7), 1.05)), lens1);
 mvd = if(gom, if(trig, min(max(0.42 * ibi, 0.12), 0.36), 0.36), mvd);
 mvt = if(gom, 0, mvt); smv = if(gom, 0, smv);
 mvx = min(mvt / mvd, 1);
 mvu = 1 - (1 - mvx) * (1 - mvx) * (1 - mvx);
-az = az0 + (az1 - az0) * mvu; el = el0 + (el1 - el0) * mvu; lens = lens0 + (lens1 - lens0) * mvu; rol = rol0 + (rol1 - rol0) * mvu;
 frz = below(mvt, mvd);
 mvs = min(max((mvx - 0.35) / 0.65, 0), 1); mvs = mvs * mvs * (3 - 2 * mvs);
 drg = frz * 0.85 * (1 - mvs);
@@ -1850,10 +1868,21 @@ lastdi = if(go, di, lastdi);
 code = nn + 8 * cq + 64 * sz + 256 * int(rand(4)) + 1024 * tb + 4096 * di + 262144 * int(rand(4)) + 1048576 * int(rand(4));
 """ + "".join(f"ika{k} = if(go * equal(old, {k}), 0, ika{k}); ikc{k} = if(go * equal(old, {k}), code, ikc{k});\n" for k in range(IK_NS)) + f"""since = if(go, 0, since);
 spawnf = if(go, old + 1, 0);
-paz = if(pvalid, paz, az); pel = if(pvalid, pel, el); plens = if(pvalid, plens, lens); prol = if(pvalid, prol, rol);
-q1 = az; q2 = el; q3 = lens; q4 = paz; q5 = pel; q6 = plens;
-q15 = rol; q16 = prol;
-paz = az; pel = el; plens = lens; prol = rol; pvalid = 1;
+wsm = 0; cgx = 0; cgy = 0; cgz = 0;
+""" + "".join(ik_eel_drop(k) for k in range(IK_NS)) + """cgx = cgx / max(wsm, 0.01); cgy = cgy / max(wsm, 0.01); cgz = cgz / max(wsm, 0.01);
+sig = 0;
+""" + "".join(f"sig = sig + kw{k} * (sqr(kx{k} - cgx) + sqr(ky{k} - cgy) + sqr(kz{k} - cgz));\n" for k in range(IK_NS)) + """sig = if(above(wsm, 0.01), sqrt(sig / max(wsm, 0.01)), 1);
+""" + IK_TARGETS + f"""lpx1 = if(gom, 0.85 * min(max(cgx * sin(az1) - cgz * cos(az1), -1.6), 1.6), lpx1);
+lpy1 = if(gom, 0.85 * min(max(-cgx * sin(el1) * cos(az1) + cgy * cos(el1) - cgz * sin(el1) * sin(az1), -1.6), 1.6), lpy1);
+lens1 = if(gom, min(max(2 * min(max(0.9 * sig + 0.75, 1.4), 2.0) * (0.88 + 0.24 * ur2) / {IK_CR}, 0.36), 0.85), lens1);
+az = az0 + (az1 - az0) * mvu; el = el0 + (el1 - el0) * mvu; lens = lens0 + (lens1 - lens0) * mvu; rol = rol0 + (rol1 - rol0) * mvu;
+lpx = lpx0 + (lpx1 - lpx0) * mvu; lpy = lpy0 + (lpy1 - lpy0) * mvu;
+lqi = int((min(max(lens, 0.3), 1.2) - 0.3) / 0.9 * 4095 + 0.5) * 4096 + int((min(max(rol, -1), 1) + 1) / 2 * 4095 + 0.5);
+pqi = int((min(max(lpx, -2.5), 2.5) + 2.5) / 5 * 4095 + 0.5) * 4096 + int((min(max(lpy, -2.5), 2.5) + 2.5) / 5 * 4095 + 0.5);
+paz = if(pvalid, paz, az); pel = if(pvalid, pel, el); plq = if(pvalid, plq, lqi); ppq = if(pvalid, ppq, pqi);
+q1 = az; q2 = el; q3 = lqi; q4 = paz; q5 = pel; q6 = plq;
+q15 = pqi; q16 = ppq;
+paz = az; pel = el; plq = lqi; ppq = pqi; pvalid = 1;
 q7 = if(frz, drg, -taaw); q8 = spawnf; q9 = inkt; q10 = mood + spb * 0.999; q11 = turb; q12 = dts;
 q13 = min(ba1, 15.9) + 16 * int(bs1 * 100); q14 = min(ba2, 15.9) + 16 * int(bs2 * 100);
 """ + "".join(f"q{17 + k} = ika{k}; q{25 + k} = ikc{k};\n" for k in range(IK_NS))
