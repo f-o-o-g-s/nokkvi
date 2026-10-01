@@ -94,6 +94,8 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 - The Chladni MilkDrop preset is gone.
+- The Cover Kaleido MilkDrop preset is gone.
+- The Cover Orb MilkDrop preset is gone.
 
 ## v0.21.1 — 2026-09-26
 
