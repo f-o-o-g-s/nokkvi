@@ -70,6 +70,20 @@ All notable changes to this project will be documented in this file.
 - Julia Lace's lace now lies in a dark, glossy liquid instead of a grey haze.
 - At shallow angles Julia Lace's liquid reflects the sky and a low moon.
 - Rippling light from the liquid plays over Julia Lace's lace.
+- Chladni is rebuilt as a 3D scene: a brushed metal plate with sand heaped in ridges along its still lines.
+- Chladni's bare metal shows fine glowing contour lines of the plate's vibration in your theme's colours.
+- Brighter music retunes Chladni's plate to a figure with more lines.
+- After each Chladni retune the sand flows to the new figure in a few seconds.
+- Strong kicks throw sprays of Chladni's sand off the ridges.
+- Strong kicks send a flare outward through Chladni's contour lines.
+- When a song drops well below its recent loudness, Chladni's sand rolls off the lines into cushions between them.
+- Chladni's camera glides between six views, from a square-on overview to grazing close-ups.
+- Living Ink is rebuilt as a 3D tank: drops of ink fall into dark water and linger as drifting, curling clouds.
+- Living Ink's dense ink is drawn as glossy liquid bodies with soft translucent veils around them.
+- A Living Ink drop falls on a kick every two to three seconds and opens into a ring that sheds its own cloud.
+- Living Ink's three inks take their colours from your theme's visualizer gradient.
+- Living Ink's camera glides between five views of the tank.
+- Each visit to Living Ink picks one of three lighting moods.
 
 ### Fixed
 
