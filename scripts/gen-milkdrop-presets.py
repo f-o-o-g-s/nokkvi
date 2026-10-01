@@ -910,96 +910,108 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
     "zoom = zoom - 0.015*(0.5*abs(3)-rad)*below(rad,1.5);")
 
 # Living ink (no cover) ----------------------------------------------------
-# Ink cascade: drops of ink fall into dark water and the ink stays. The
-# feedback is not a picture: it holds a 3D dye volume (y slices tiled as a 2D
-# atlas from texel (0, 1); 96^3 at 1080p, 64^3 / 48^3 / 32^3 on smaller
-# renders, picked from texsize), RGB = three dye species (three stops of the
-# theme ramp, chosen per visit), A = heat (the beat glow). The WARP is the
-# simulation, one step a frame: semi-Lagrangian advection through an analytic
-# velocity field (divergence-free curl noise whose strength follows the mids,
-# each live ring's swirl around its core circle and the drag of its descent,
-# a slight sink), slow decay, and injection from the analytic drop model: a
-# bead punches in on a kick, opens into a vortex ring, grows lobes and breaks
-# into 3 to 7 tilted child rings (and again, for big bass-heavy drops), and
-# every part deposits dye of the drop's species where it is. So each drop
-# leaves a turbulent wake and each ring sheds a cloud that keeps drifting and
-# curling long after the shape is gone, and the tank fills with layered,
-# mixing clouds. Values are rounded stochastically and unbiased
-# (floor(v * 255 + hash)), so slow decay never stalls; total mass is bounded
-# (decay 6 s plus a small absolute loss).
+# Ink cascade: drops of ink shoot into dark water from every direction and the
+# ink stays. The feedback is not a picture: it holds a 3D dye volume (y slices
+# tiled as a 2D atlas from texel (0, 1); 96^3 at 1080p, 64^3 / 48^3 / 32^3 on
+# smaller renders, picked from texsize), RGB = three dye species (three stops
+# of the theme ramp, chosen per visit), A = heat (the beat glow). The WARP is
+# the simulation, one step a frame: semi-Lagrangian advection through an
+# analytic velocity field (divergence-free curl noise whose strength follows
+# the mids, each live ring's swirl around its core circle and the drag of its
+# travel), slow decay, and injection from the analytic drop model: a bead
+# punches in on a kick, opens into a vortex ring, grows lobes and breaks into
+# 3 to 7 tilted child rings (and again, for big bass-heavy drops), and every
+# part deposits dye of the drop's species where it is. The model lives in a
+# per-drop frame (ik_slot_frame): one of 64 travel directions spread over the
+# sphere, aimed at a point near the tank's centre, so drops cross the tank
+# from all sides. Each drop leaves a turbulent wake and each ring sheds a
+# cloud that keeps drifting and curling after the shape is gone. Values are
+# rounded stochastically and unbiased (floor(v * 255 + hash)), so slow decay
+# never stalls; total mass is bounded (decay 3 s plus a small absolute loss,
+# faster within half a unit of the walls so no cloud is cut by one).
 # Beside the atlas the warp keeps a 4x coarser occupancy grid (any dye within
 # two cells), which lets the render leap empty water, a header texel (grid
-# size + render size: a resize or a seeded start re-initialises the tank, which
-# is then pre-filled with seven noise-warped blobs in the three species so the
+# size: a new grid size or a seeded start re-initialises the tank, which is
+# then pre-filled with seven noise-warped blobs in the three species so the
 # first frames are not empty) and one row of per-drop waveform harmonics.
 # Renders smaller than 216 x 193 have no dye grid, only the young drops.
 # The COMP is the render, at full resolution. Dense ink is a liquid BODY with
 # a surface: the dye density, eroded by three octaves of noise (the lookup
 # itself displaced by a noise offset) through a steep transfer, is marched
-# until it crosses the body threshold, the crossing is bisected (5 steps) to
+# until it crosses the body threshold, the crossing is bisected (4 steps) to
 # the iso-surface, and that point is shaded as glossy liquid: a normal from
 # the field's gradient, wrapped key light with a shadow tap and caustic dapple
 # on upward faces, a tight specular, a Fresnel rim reflecting the water, the
 # back light glowing through thin parts (thickness from one tap behind the
 # surface), colour deepening with thickness. Below the body threshold the same
 # field is a thin translucent VEIL, accumulated as volume in front of the
-# bodies. The young drop (bead, then ring, up to 3.4 s) joins the same field
-# analytically (sphere-traced inside its bounding sphere), so it is crisp, and
-# hands over to its own dye. Species keep their (chroma-boosted) ramp colours
+# bodies. The young drop (bead, then ring, up to IK_NF[1] s) joins the same
+# field analytically (sphere-traced inside its bounding sphere), so it is
+# crisp, and hands over to its own dye. The march has three field functions
+# because the young-drop code is the expensive part: ik_bd (dye only, most
+# steps), ik_bf (dye + every young drop, only between the ray's first entry
+# into and last exit from a bounding sphere) and ik_b1 (dye + the one drop
+# that was hit, for shading). Species keep their (chroma-boosted) ramp colours
 # and mix by density. Water is a depth gradient (dark below, lit from above),
 # with faint shafts and drifting motes. Jitter (a fixed per-pixel hash stepped
 # by the golden ratio each frame) is resolved by TAA against
-# sampler_prev_comp, reprojected with last frame's whole camera and clamped
-# to the new sample (+/- 0.12).
+# sampler_prev_comp, reprojected with last frame's camera and clamped to the
+# new sample (+/- 0.12).
 # Music: each drop holds a snapshot of the moment it was born: the spectral
 # balance (each band against its own 8 s average) picks the child count, the
 # beat strength its size, the mids how turbulent it gets, the waveform's
 # harmonics 2 to 5 (captured from get_wave into the data row on the spawn
 # frame) bend its rim; species cycle so neighbours differ. Each beat lights
 # the dense ink and the young ring's core (heat, in the theme's warm colour);
-# the mids stir the whole tank; loudness sets the ink clock (0.8-1.2x) and how
-# soon the next drop may fall (2.0-2.9 s on a beat, 5.5 s without one).
-# Camera acts (infinity's pattern: redrawn every 14-22 s, never on a beat,
-# every value eased twice, the orbit reversing through zero): side, under the
-# light looking up, high three-quarter, low and wide, all telephoto from
-# outside the ink (ink nearer than ~1 unit fades out, so nothing blurs across
-# the lens). Each visit picks a mood from the audio at frame 3: studio black
-# (side key), sunlit shallows (key from above, shafts) or abyss (dim key,
-# strong glow), and which ramp stops the three species take.
-# q map: q1-q3 camera, q4-q6 look-at, q7 lens, q8 aperture + last frame's
-# lens (x1000, integer part), q9 ink clock, q10 mood, q11 turbulence,
-# q13/q14 and q15/q16 the last two beats' ages and strengths, q17 spawn flag
-# (slot + 1 on the spawn frame), q18-q21 slot ages, q22 this frame's ink-clock
-# step, q23-q26 slot codes (child count, species, size, turbulence, position),
-# q27 species ramp offset, q29-q31 last frame's camera, q12/q28/q32 last
-# frame's look-at.
-IK_NS = 4
-IK_Y0 = 1.25
-IK_SPAN = 2.8
+# the mids stir the whole tank; loudness sets the ink clock and how soon the
+# next drop may come (0.6-0.9 ink-seconds on a beat, 3 without one, and never
+# before the oldest of the IK_NS slots has finished its life).
+# Camera: it stands still and moves only with the music (starfield nebula's
+# language). On a beat (or after 4 s without one) the ink clock stops, and the
+# camera swings to a new pose around the tank in 42% of the beat interval
+# (0.12-0.36 s, ease-out): a kick-sized orbit step, a new elevation and lens,
+# and a roll that alternates sides (the twist); every 8th move re-frames
+# widely, every 4th lands level. While it swings the COMP mixes in last
+# frame's picture, reprojected through both cameras, at up to 85%: the frozen
+# frame drags and twists as an echo smear and the new view resolves as the
+# camera settles. The pose is (azimuth, elevation, lens, roll) at a fixed
+# distance; the look-at point wanders with the azimuth (ik_cam), so the tank
+# is not always centred. Each visit picks a mood from the audio at frame 3:
+# studio black (side key), sunlit shallows (key from above, shafts) or abyss
+# (dim key, strong glow), and which ramp stops the three species take.
+# q map: q1-q3 azimuth, elevation, lens; q4-q6 the same last frame; q7 echo
+# weight while the camera moves (> 0) or minus the TAA weight; q8 spawn flag
+# (slot + 1 on the spawn frame); q9 ink clock; q10 mood + species ramp offset
+# (fraction); q11 turbulence; q12 this frame's ink-clock step (0 while the
+# camera moves); q13/q14 the last two beats (age + 16 * strength in
+# hundredths); q15/q16 roll now and last frame; q17-q24 slot ages; q25-q32
+# slot codes (ik_code).
+IK_NS = 8
 IK_LIFE = 8.0
 IK_TS = 3.0
 IK_KOFF = 0.15
 IK_TSURF = 0.14
 IK_KSF = 1.7955  # 0.7 ln(1 + IK_TS / 0.25): the split depth
-IK_SC = 1.55
-IK_BMIN = (-2.4, -3.4, -2.4)
-IK_BSIZE = (4.8, 5.8, 4.8)
+IK_SC = 1.25
+IK_BMIN = (-2.4, -2.4, -2.4)
+IK_BSIZE = (4.8, 4.8, 4.8)
 IK_STEPS = 120
 IK_DTS = 0.052
-IK_ACTS = [
-    # radius, height, lens, orbit rate, aperture, look at the drop nearest 3.2 s
-    (4.3, -0.4, 0.76, 0.045, 0.15, 0.35),
-    (4.0, -2.8, 0.84, 0.040, 0.15, 0.30),
-    (3.9, 2.8, 0.72, 0.055, 0.12, 0.30),
-    (4.0, -1.3, 0.68, 0.035, 0.15, 0.60),
-    (4.8, 0.5, 0.78, 0.040, 0.10, 0.15),
-]
+IK_CR = 5.0        # camera distance from the tank's centre
+IK_CSTEP = 0.5     # spacing of the 4x4x4 lattice of aim points
+IK_LEAD = 1.3      # a drop starts this many of its own sizes before its aim point...
+IK_LEADMAX = 2.0   # ...but no farther than this
+IK_RATE = 1.3      # ink clock scale (the clock stands still during a camera move)
+IK_NF = (1.2, 1.9) # a young drop's analytic shape fades into its own dye over these ages
 IK_TOK = {
     "@SC@": f"{IK_SC}", "@TS@": f"{IK_TS}", "@TS2@": f"{IK_TS + 1.2}", "@KSF@": f"{IK_KSF:.4f}",
     "@SR@": f"{0.36 * (1.0 + 0.09 * IK_TS):.4f}", "@L0@": f"{IK_LIFE - 2.2}", "@L1@": f"{IK_LIFE - 0.3}",
-    "@LIFE@": f"{IK_LIFE}", "@Y0@": f"{IK_Y0}", "@SPAN@": f"{IK_SPAN}", "@DTS@": f"{IK_DTS}",
+    "@LIFE@": f"{IK_LIFE}", "@DTS@": f"{IK_DTS}", "@CR@": f"{IK_CR}", "@CSTEP@": f"{IK_CSTEP}",
+    "@LEAD@": f"{IK_LEAD}", "@LEADMAX@": f"{IK_LEADMAX}", "@NS2@": f"{2 * IK_NS}", "@NF0@": f"{IK_NF[0]}", "@NF1@": f"{IK_NF[1]}",
     "@BMIN@": "vec3({}, {}, {})".format(*IK_BMIN), "@BSIZE@": "vec3({}, {}, {})".format(*IK_BSIZE),
     "@BMAX@": "vec3({}, {}, {})".format(*(a + b for a, b in zip(IK_BMIN, IK_BSIZE))),
+    "@RMIN@": "vec3({}, {}, {})".format(*(a - 0.4 for a in IK_BMIN)),
+    "@RMAX@": "vec3({}, {}, {})".format(*(a + b + 0.4 for a, b in zip(IK_BMIN, IK_BSIZE))),
     "@STEPS@": f"{IK_STEPS}", "@KOFF@": f"{IK_KOFF}", "@TSURF@": f"{IK_TSURF}",
 }
 def ik_sub(text):
@@ -1008,6 +1020,12 @@ def ik_sub(text):
     return text
 
 IK_COMMON = ik_sub("""
+float ik_ba(float bqa) {
+  return bqa - 16.0 * floor(bqa / 16.0);
+}
+float ik_bs(float bqs) {
+  return floor(bqs / 16.0) * 0.01;
+}
 float ik_hash(float hx) {
   float hp = fract(hx * 0.1031);
   hp *= hp + 33.33;
@@ -1135,9 +1153,9 @@ vec4 ik_drop(vec3 kp, float kage, float kcode, float kslot, float kdet) {
       kdens += (kbody * 0.85 + kcore * 0.6) * glive * kthin;
     }
     if (kcore > 0.0001) {
-      float ke1 = (q13 - 0.18 * kfg) / 0.12;
-      float ke2 = (q15 - 0.18 * kfg) / 0.12;
-      float kgl = q14 * exp(-ke1 * ke1) + q16 * exp(-ke2 * ke2);
+      float ke1 = (ik_ba(q13) - 0.18 * kfg) / 0.12;
+      float ke2 = (ik_ba(q14) - 0.18 * kfg) / 0.12;
+      float kgl = ik_bs(q13) * exp(-ke1 * ke1) + ik_bs(q14) * exp(-ke2 * ke2);
       kemit += sqrt(kcore) * glive * kthin * (kgl * 1.3 + (1.0 - step(0.5, kfg)) * smoothstep(0.35, 0.0, kt) * 1.2);
     }
     float ksdr = (ktr - 1.95 * ka2) * ksc;
@@ -1171,11 +1189,29 @@ vec4 ik_drop(vec3 kp, float kage, float kcode, float kslot, float kdet) {
 """)
 
 def ik_slot_vals(k):
+    return ik_slot_frame(f"q{17 + k}", f"q{25 + k}")
+def ik_slot_frame(age, code):
+    """A drop's age, code and frame: the drop model lives in a local frame whose
+    -y axis is the drop's travel direction (one of 64 directions spread evenly
+    over the sphere, a Fibonacci lattice); `sex`, `sey`, `sez` are that frame's
+    axes in the tank (a branchless orthonormal basis, Duff et al. 2017) and
+    `so` its origin: the aim point (a 4x4x4 lattice about the tank's centre)
+    backed off against the travel direction."""
     return ik_sub(f"""
-        float sa = q{18 + k};
-        float sc = q{23 + k};
-        vec3 so = vec3((mod(floor(sc / 4096.0), 32.0) / 31.0 - 0.5) * @SPAN@, 0.3 + 0.3 * mod(floor(sc / 256.0), 4.0), (mod(floor(sc / 131072.0), 32.0) / 31.0 - 0.5) * @SPAN@);
+        float sa = {age};
+        float sc = {code};
+        float sdi = mod(floor(sc / 4096.0), 64.0);
+        float sdh = (2.0 * sdi + 1.0) / 64.0 - 1.0;
+        float sdr = sqrt(max(1.0 - sdh * sdh, 0.0));
+        vec3 sey = vec3(-sdr * cos(sdi * 2.3999632), sdh, -sdr * sin(sdi * 2.3999632));
+        float ssg = step(0.0, sey.z) * 2.0 - 1.0;
+        float sfa = -1.0 / (ssg + sey.z);
+        float sfb = sey.x * sey.y * sfa;
+        vec3 sez = vec3(1.0 + ssg * sey.x * sey.x * sfa, ssg * sfb, -ssg * sey.x);
+        vec3 sex = vec3(sfb, ssg + sey.y * sey.y * sfa, -sey.y);
         float ssz = (0.8 + 0.15 * mod(floor(sc / 64.0), 4.0)) * @SC@;
+        vec3 saim = (vec3(mod(floor(sc / 262144.0), 4.0), mod(floor(sc / 256.0), 4.0), mod(floor(sc / 1048576.0), 4.0)) - 1.5) * @CSTEP@;
+        vec3 so = saim + sey * min(@LEAD@ * ssz, @LEADMAX@);
         float sspc = mod(floor(sc / 8.0), 8.0);
         vec3 smsk = vec3(1.0 - step(0.5, sspc), step(0.5, sspc) * (1.0 - step(1.5, sspc)), step(1.5, sspc));
 """)
@@ -1183,7 +1219,7 @@ def ik_slot_bound(pv):
     return ik_sub(f"""
         float sf0 = 0.7 * log(1.0 + sa / 0.25) - @KOFF@;
         float sbr = ssz * (0.42 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * min(sa, 3.0)) + 0.45 + 0.95 * smoothstep(2.8, 5.5, sa)) + 0.12;
-        float sbd = max(length({pv}.xz - so.xz) - sbr, max({pv}.y - so.y + ssz * (sf0 - 0.45), so.y - 3.9 * ssz - {pv}.y));
+        float sbd = max(length({pv}.xz) - sbr, max({pv}.y + ssz * (sf0 - 0.45), -3.9 * ssz - {pv}.y));
         sbd = mix(1000.0, sbd, step(sa, @LIFE@));
 """)
 
@@ -1191,10 +1227,13 @@ def ik_warp_slot(k):
     """Simulation cell: the ring's swirl and descent drag on the velocity, and
     the drop's dye (its species) and beat heat deposited where it is."""
     return ik_sub(f"""
-      {{""" + ik_slot_vals(k) + ik_slot_bound("wp") + f"""
+      {{""" + ik_slot_vals(k) + """
+        vec3 swp = wp - so;
+        vec3 swl = vec3(dot(swp, sex), dot(swp, sey), dot(swp, sez));
+""" + ik_slot_bound("swl") + f"""
         if (sa < 6.5) {{
           float swf = (0.7 * log(1.0 + sa / 0.25) - @KOFF@) * ssz;
-          vec3 swd = wp - vec3(so.x, so.y - swf, so.z);
+          vec3 swd = swl + vec3(0.0, swf, 0.0);
           float swR = 0.36 * ssz * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * sa);
           float swrho = length(swd.xz);
           vec2 swq = vec2(swrho - swR, swd.y);
@@ -1203,15 +1242,49 @@ def ik_warp_slot(k):
           float swg = 0.3 * ssz * exp(-sa / 2.2);
           vec2 swu = vec2(-swq.y, swq.x) * swg / (swr2 + swa * swa);
           vec2 swh = swd.xz / max(swrho, 0.001);
-          wv += vec3(swh.x * swu.x, swu.y, swh.y * swu.x);
-          wv.y -= 0.7 / (0.25 + sa) * ssz * 0.6 * exp(-swr2 / (swR * swR + 0.05));
+          float swy = swu.y - 0.7 / (0.25 + sa) * ssz * 0.6 * exp(-swr2 / (swR * swR + 0.05));
+          wv += sex * (swh.x * swu.x) + sey * swy + sez * (swh.y * swu.x);
         }}
-        if (sa < @LIFE@) {{
-          vec4 sr = ik_drop(wp - so, sa, sc, {k}.0, 0.0);
+        if (sbd < 0.0) {{
+          vec4 sr = ik_drop(swl, sa, sc, {k}.0, 0.0);
           wdep += sr.x * smsk;
           whd += sr.y;
         }}
       }}
+""")
+
+# The dye volume's field at a point (shared by the two march functions below):
+# density through the erosion noise, species in `fsp`.
+IK_DYEBODY = ik_sub("""
+  float fv = -1.0;
+  float focc = 0.0;
+  fsp = vec4(0.0);
+  if (ik_occ(fp) > 0.001) {
+    focc = 1.0;
+    vec3 fq = fp * vec3(0.44, 0.33, 0.44) + vec3(q9 * 0.004, q9 * 0.011, -q9 * 0.003);
+    vec3 fcn = ik_sn(fq) - 0.5;
+    vec3 fdp = fp + fcn * 0.2;
+    vec4 fvd = ik_vol(fdp);
+    float fsum = fvd.x + fvd.y + fvd.z;
+    if (fsum > 0.02) {
+      vec3 fq1 = fq * 2.6 + fcn * 0.35 + 0.17;
+      vec3 fq2 = fq * 6.1 + fcn * 0.5 + 0.53;
+      vec3 fq3 = fq * 4.3 + fcn * 0.3 + 0.29;
+      float fno = ik_sn(fq1).x * 0.5 + texture(sampler_noisevol_hq, fq2).x * 0.3 + ik_snl(fq3) * 0.2;
+      float fbs = smoothstep(0.05, 0.42, fsum);
+      fv = fbs * 1.3 - 0.26 - (fno - 0.5) * (1.25 - 0.45 * fbs);
+      fsp = vec4(fvd.xyz / fsum, fvd.w);
+    }
+  }
+""")
+# March function without the young drops: most steps of most rays are nowhere
+# near one, and the per-drop bounding tests are not free.
+IK_DYEFN = ik_sub("""
+float ik_bd(vec3 fp, float ft, out vec4 fsp, out vec4 fax) {
+""") + IK_DYEBODY + ik_sub("""
+  fax = vec4(fv, 1000.0, focc, 0.0);
+  return fv - @TSURF@ - (1.0 - smoothstep(0.9, 2.0, ft)) * 2.0;
+}
 """)
 
 IK_NEARFN = ik_sub("""
@@ -1284,53 +1357,51 @@ vec2 ik_near(vec3 np, float nage, float ncode, float nslot) {
     vec3 nen = nrq * (0.11 / nga) + vec3(nseed * 9.0, q9 * 0.02, nslot * 1.7);
     float nero = ik_sn(nen).x;
     nbase -= 0.5 * (nero - 0.5);
-    float ne1 = q13 / 0.12;
-    float ne2 = q15 / 0.12;
-    nemit = smoothstep(-0.2, 0.5, nbase) * ((q14 * exp(-ne1 * ne1) + q16 * exp(-ne2 * ne2)) * 0.8 + smoothstep(0.4, 0.0, nage) * 2.0);
+    float ne1 = ik_ba(q13) / 0.12;
+    float ne2 = ik_ba(q14) / 0.12;
+    nemit = smoothstep(-0.2, 0.5, nbase) * ((ik_bs(q13) * exp(-ne1 * ne1) + ik_bs(q14) * exp(-ne2 * ne2)) * 0.8 + smoothstep(0.4, 0.0, nage) * 2.0);
   }
-  float nfade = smoothstep(2.4, 3.4, nage);
+  float nfade = smoothstep(@NF0@, @NF1@, nage);
   return vec2((nbase - 0.22 - nfade * 1.3) * 1.8 * na2 * nsz * 14.0, nemit * (1.0 - nfade));
 }
-float ik_bf(vec3 fp, float ft, float fdo, vec4 fb0, vec4 fb1, vec4 fb2, vec4 fb3, out vec4 fsp, out vec3 fax) {
-  float fv = -1.0;
-  float focc = 0.0;
-  fsp = vec4(0.0);
-  if (ik_occ(fp) > 0.001) {
-    focc = 1.0;
-    vec3 fq = fp * vec3(0.44, 0.33, 0.44) + vec3(q9 * 0.004, q9 * 0.011, -q9 * 0.003);
-    vec3 fcn = ik_sn(fq) - 0.5;
-    vec3 fdp = fp + fcn * 0.2;
-    vec4 fvd = ik_vol(fdp);
-    float fsum = fvd.x + fvd.y + fvd.z;
-    if (fsum > 0.02) {
-      vec3 fq1 = fq * 2.6 + fcn * 0.35 + 0.17;
-      vec3 fq2 = fq * 6.1 + fcn * 0.5 + 0.53;
-      vec3 fq3 = fq * 4.3 + fcn * 0.3 + 0.29;
-      float fno = ik_sn(fq1).x * 0.5 + texture(sampler_noisevol_hq, fq2).x * 0.3 + ik_snl(fq3) * 0.2;
-      float fbs = smoothstep(0.05, 0.42, fsum);
-      fv = fbs * 1.3 - 0.26 - (fno - 0.5) * (1.25 - 0.45 * fbs);
-      fsp = vec4(fvd.xyz / fsum, fvd.w);
-    }
-  }
+""") + IK_DYEFN + ik_sub("""
+float ik_bf(vec3 fp, float ft, """) + ", ".join(f"vec4 fb{k}" for k in range(IK_NS)) + ik_sub(""", out vec4 fsp, out vec4 fax) {
+""") + IK_DYEBODY + ik_sub("""
   float fr = -1000.0;
   float frd = 1000.0;
+  float fwin = 0.0;
 """) + "".join(ik_sub(f"""
-  if (fdo > 0.5) {{
-    float sbd = length(fp - fb{k}.xyz) - fb{k}.w;
-    if (sbd < 0.0) {{""" + ik_slot_vals(k) + f"""
-      vec3 srel = fp - so;
-      vec2 snr = ik_near(srel, sa, sc, {k}.0);
-      frd = min(frd, -snr.x / 14.0);
-      if (snr.x > fr) {{
-        fr = snr.x;
-        if (snr.x > fv - @TSURF@) fsp = vec4(smsk, snr.y);
+  float sbd{k} = length(fp - fb{k}.xyz) - fb{k}.w;
+  if (sbd{k} < 0.0) {{""" + ik_slot_vals(k) + f"""
+    vec3 srw = fp - so;
+    vec3 srel = vec3(dot(srw, sex), dot(srw, sey), dot(srw, sez));
+    vec2 snr = ik_near(srel, sa, sc, {k}.0);
+    frd = min(frd, -snr.x / 14.0);
+    if (snr.x > fr) {{
+      fr = snr.x;
+      if (snr.x > fv - @TSURF@) {{
+        fsp = vec4(smsk, snr.y);
+        fwin = {k + 1}.0;
       }}
-    }} else {{
-      frd = min(frd, sbd + 0.03);
     }}
+  }} else {{
+    frd = min(frd, sbd{k} + 0.03);
   }}
 """) for k in range(IK_NS)) + ik_sub("""
-  fax = vec3(fv, frd, focc);
+  fax = vec4(fv, frd, focc, fwin);
+  return max(fv - @TSURF@, fr) - (1.0 - smoothstep(0.9, 2.0, ft)) * 2.0;
+}
+float ik_b1(vec3 fp, float ft, float f1a, float f1c, float f1k, out vec4 fsp, out vec4 fax) {
+""") + IK_DYEBODY + ik_sub("""
+  float fr = -1000.0;
+  if (f1k > -0.5) {""" + ik_slot_frame("f1a", "f1c") + """
+    vec3 srw = fp - so;
+    vec3 srel = vec3(dot(srw, sex), dot(srw, sey), dot(srw, sez));
+    vec2 snr = ik_near(srel, sa, sc, f1k);
+    fr = snr.x;
+    if (snr.x > fv - @TSURF@) fsp = vec4(smsk, snr.y);
+  }
+  fax = vec4(fv, 1000.0, focc, 0.0);
   return max(fv - @TSURF@, fr) - (1.0 - smoothstep(0.9, 2.0, ft)) * 2.0;
 }
 """)
@@ -1358,8 +1429,8 @@ vec3 ik_curl(vec3 cup) {
   vec4 h4 = vec4(float(dh & 255u), float((dh >> 8u) & 255u), float((dh >> 16u) & 255u), float((dh >> 24u) & 255u)) / 256.0 + 0.5 / 256.0;
   float vn = ik_vn();
   float vt = ik_vt();
-  vec4 hnow = floor(vec4(vn, mod(floor(texsize.x / 16.0), 256.0), mod(floor(texsize.y / 16.0), 256.0), 77.0) + 0.5) / 255.0;
-  vec4 hold = texelFetch(sampler2D(sampler_pc_main, sampler_pc_main_samp), ivec2(8, 0), 0);
+  vec4 hnow = floor(vec4(vn, 141.0, 37.0, 78.0) + 0.5) / 255.0;
+  vec4 hold = texelFetch(sampler2D(sampler_pc_main, sampler_pc_main_samp), ivec2(@NS2@, 0), 0);
   vec4 hdif = abs(hold - hnow);
   float vok = step(2.5, frame) * step(max(max(hdif.x, hdif.y), max(hdif.z, hdif.w)), 0.002);
   vec2 cxy = vec2(ipx) - vec2(0.0, 1.0);
@@ -1368,12 +1439,12 @@ vec3 ik_curl(vec3 cup) {
   float ckk = ctx + cty * vt;
   float onc = vn * 0.25;
   float otc = 3.0 + step(10.0, onc) + step(20.0, onc);
-  if (ipx.y == 0 && ipx.x < 8) {
+  if (ipx.y == 0 && ipx.x < @NS2@) {
     int dslot = ipx.x / 2;
     int dpart = ipx.x - dslot * 2;
     vec4 dold = texelFetch(sampler2D(sampler_pc_main, sampler_pc_main_samp), ipx, 0);
     vec4 dnew = dold;
-    if (abs(q17 - float(dslot + 1)) < 0.5) {
+    if (abs(q8 - float(dslot + 1)) < 0.5) {
       float dk1 = 2.0 + 2.0 * float(dpart);
       float dk2 = dk1 + 1.0;
       float dc1 = 0.0;
@@ -1401,28 +1472,30 @@ vec3 ik_curl(vec3 cup) {
     dnew = floor(dnew * 255.0 + 0.5) / 255.0;
     ret = dnew.xyz;
     ret_alpha = dnew.w;
-  } else if (ipx.y == 0 && ipx.x == 8) {
+  } else if (ipx.y == 0 && ipx.x == @NS2@) {
     ret = hnow.xyz;
     ret_alpha = hnow.w;
   } else if (ipx.y >= 1 && cxy.x < vt * vn && cxy.y < vt * vn && ckk < vn && ik_vq() > 0.5) {
     vec3 wp = @BMIN@ + (vec3(cxy.x - ctx * vn, ckk, cxy.y - cty * vn) + 0.5) / vn * @BSIZE@;
-    vec3 wv = ik_curl(wp) * q11 + vec3(0.0, -0.045, 0.0);
+    vec3 wv = ik_curl(wp) * q11;
     vec3 wdep = vec3(0.0);
     float whd = 0.0;
 """) + "".join(ik_warp_slot(k) for k in range(IK_NS)) + ik_sub("""
-    vec4 wd = ik_vol(wp - wv * q22);
+    vec4 wd = ik_vol(wp - wv * q12);
     float wsum = wd.x + wd.y + wd.z;
-    wd.xyz = max(wd.xyz * exp(-q22 / 6.0) - 0.018 * q22, vec3(0.0));
-    wd.xyz += (1.0 - wd.xyz) * min(wdep * 2.0 * q22, vec3(1.0));
-    float wbeat = q14 * exp(-q13 / 0.07);
-    wd.w = max(wd.w * exp(-q22 / 0.45), max(min(whd, 1.0), wbeat * smoothstep(0.3, 0.8, wsum) * 0.35));
+    vec3 wwl = min(wp - @BMIN@, @BMAX@ - wp);
+    float wwall = 1.0 - smoothstep(0.0, 0.5, min(wwl.x, min(wwl.y, wwl.z)));
+    wd.xyz = max(wd.xyz * exp(-q12 * (1.0 / IKDECAY + 4.0 * wwall)) - 0.018 * q12, vec3(0.0));
+    wd.xyz += (1.0 - wd.xyz) * min(wdep * IKDEP * q12, vec3(1.0));
+    float wbeat = ik_bs(q13) * exp(-ik_ba(q13) / 0.07);
+    wd.w = max(wd.w * exp(-q12 / 0.45), max(min(whd, 1.0), wbeat * smoothstep(0.3, 0.8, wsum) * 0.35));
     if (vok < 0.5) {
       vec3 pfn = texture(sampler_noisevol_hq, wp * 0.21 + 0.37).xyz - 0.5;
       vec3 pfq = wp + pfn * 1.1;
       vec3 pfd = vec3(0.0);
       for (int j = 0; j < 7; j++) {
         float pfj = float(j);
-        vec3 pfc = vec3((ik_hash(pfj * 1.37 + 0.71) - 0.5) * 3.0, -2.3 + 2.6 * ik_hash(pfj * 2.11 + 3.3), (ik_hash(pfj * 3.17 + 5.9) - 0.5) * 3.0);
+        vec3 pfc = vec3((ik_hash(pfj * 1.37 + 0.71) - 0.5) * 3.0, (ik_hash(pfj * 2.11 + 3.3) - 0.5) * 3.0, (ik_hash(pfj * 3.17 + 5.9) - 0.5) * 3.0);
         float pfr = 0.5 + 0.45 * ik_hash(pfj * 4.31 + 1.1);
         float pfv = smoothstep(pfr, 0.35 * pfr, length(pfq - pfc)) * 0.62;
         float pfs = mod(pfj, 3.0);
@@ -1459,23 +1532,45 @@ vec3 ik_curl(vec3 cup) {
     ret = vec3(0.0);
     ret_alpha = 0.0;
   }
- }""")
+ }""").replace("IKDECAY", "3.0").replace("IKDEP", "1.6")
 
-IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
+IK_CAMFN = ik_sub("""
+float ik_cam(float caz, float cel, float crl, out vec3 cro, out vec3 crt, out vec3 cup, out vec3 cfw) {
+  vec3 cdir = vec3(cos(cel) * cos(caz), sin(cel), cos(cel) * sin(caz));
+  vec3 cr0 = normalize(vec3(cdir.z, 0.0, -cdir.x));
+  vec3 cu0 = cross(cdir, cr0);
+  float cpx = 0.9 * sin(caz * 0.8 + 1.7);
+  float cpy = 0.5 * sin(caz * 1.2 + cel * 2.0 + 0.5);
+  vec3 cpos = cdir * @CR@;
+  vec3 cfd = normalize(cr0 * cpx + cu0 * cpy - cpos);
+  vec3 cr1 = normalize(vec3(-cfd.z, 0.0, cfd.x));
+  vec3 cu1 = cross(cr1, cfd);
+  vec3 cr2 = cr1 * cos(crl) + cu1 * sin(crl);
+  cro = cpos;
+  cfw = cfd;
+  crt = cr2;
+  cup = cross(cr2, cfd);
+  return 1.0;
+}
+""")
+
+IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub("""
   vec2 p = (uv - 0.5) * s;
   uvec2 du = uvec2(uv * texsize.xy);
   uint dh = du.x * 1664525u + du.y * 1013904223u;
   dh ^= dh >> 16u; dh *= 2246822519u; dh ^= dh >> 13u; dh *= 3266489917u; dh ^= dh >> 16u;
   float h01 = fract(float(dh & 65535u) / 65536.0 + mod(frame, 64.0) * 0.618034);
-  vec3 ro = vec3(q1, q2, q3);
-  vec3 fw = normalize(vec3(q4, q5, q6) - ro);
-  vec3 rt = normalize(cross(fw, vec3(0.0, 1.0, 0.0)));
-  vec3 up = cross(rt, fw);
-  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * q7);
-  vec3 L = normalize(mix(mix(vec3(0.6, 0.75, -0.3), vec3(0.2, 1.0, -0.15), step(0.5, q10)), vec3(0.15, 1.0, 0.3), step(1.5, q10)));
-  float mkey = mix(1.0, 0.8, step(1.5, q10));
-  float mglow = mix(1.0, 1.8, step(1.5, q10));
-  float mshaft = mix(mix(0.3, 1.0, step(0.5, q10)), 0.25, step(1.5, q10));
+  vec3 ro = vec3(0.0);
+  vec3 fw = vec3(0.0);
+  vec3 rt = vec3(0.0);
+  vec3 up = vec3(0.0);
+  float cok = ik_cam(q1, q2, q15, ro, rt, up, fw);
+  vec3 rd = normalize(fw + (p.x * rt + p.y * up) * q3);
+  float mood = floor(q10 + 0.0005);
+  vec3 L = normalize(mix(mix(vec3(0.6, 0.75, -0.3), vec3(0.2, 1.0, -0.15), step(0.5, mood)), vec3(0.15, 1.0, 0.3), step(1.5, mood)));
+  float mkey = mix(1.0, 0.8, step(1.5, mood));
+  float mglow = mix(1.0, 1.8, step(1.5, mood));
+  float mshaft = mix(mix(0.3, 1.0, step(0.5, mood)), 0.25, step(1.5, mood));
   vec3 Lb = normalize(-fw + up * 0.45 + rt * 0.25);
   float cth = dot(rd, L);
   float hgb = 0.75 / pow(1.25 - dot(rd, Lb), 1.5) * 0.25;
@@ -1483,7 +1578,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
   vec3 backc = mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.3);
   vec3 fillc = mix(NOKKVI_SURFACE, NOKKVI_HIGHLIGHT, 0.25);
   vec3 glowc = mix(NOKKVI_WARM, NOKKVI_HIGHLIGHT, 0.3);
-""") + ramp("sc0", "fract(q27)") + ramp("sc1", "fract(q27 + 0.333)") + ramp("sc2", "fract(q27 + 0.667)") + ik_sub("""
+""") + ramp("sc0", "fract(q10)") + ramp("sc1", "fract(q10 + 0.333)") + ramp("sc2", "fract(q10 + 0.667)") + ik_sub("""
   float scl0 = dot(sc0, vec3(0.2126, 0.7152, 0.0722));
   float scl1 = dot(sc1, vec3(0.2126, 0.7152, 0.0722));
   float scl2 = dot(sc2, vec3(0.2126, 0.7152, 0.0722));
@@ -1496,8 +1591,8 @@ IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
   vec3 water = mix(wdeep, wtop, smoothstep(0.2, 1.0, yup));
   water += mix(NOKKVI_SURFACE, NOKKVI_ACCENT, 0.3) * 0.25 * pow(max(dot(rd, Lb), 0.0), 2.5);
   water += wtop * 0.3 * pow(yup, 4.0);
-  vec3 bmn = @BMIN@;
-  vec3 bmx = @BMAX@ + vec3(0.0, 0.8, 0.0);
+  vec3 bmn = @RMIN@;
+  vec3 bmx = @RMAX@;
   vec3 bi0 = (bmn - ro) / rd;
   vec3 bi1 = (bmx - ro) / rd;
   vec3 bnr = min(bi0, bi1);
@@ -1509,28 +1604,44 @@ IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
   float tmed = 40.0;
   float vnc = ik_vn() * 0.25;
   float hit = 0.0;
+  float tsn = 1000.0;
+  float tsx = -1000.0;
+  float hk = -1.0;
 """) + "".join(ik_sub(f"""
   vec4 sb{k} = vec4(0.0, 1000.0, 0.0, 0.0);
   {{""" + ik_slot_vals(k) + f"""
-    if (sa < 3.4) {{
+    if (sa < @NF1@) {{
       float sf0 = 0.7 * log(1.0 + sa / 0.25) - @KOFF@;
-      sb{k} = vec4(so - vec3(0.0, sf0 * ssz, 0.0), ssz * (0.47 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * sa) + 0.3) + 0.08);
+      sb{k} = vec4(so - sey * (sf0 * ssz), ssz * (0.47 * smoothstep(0.02, 0.38, sa) * (1.0 + 0.09 * sa) + 0.3) + 0.08);
+      vec3 sro = ro - sb{k}.xyz;
+      float srb = dot(sro, rd);
+      float srd = srb * srb - dot(sro, sro) + sb{k}.w * sb{k}.w;
+      if (srd > 0.0) {{
+        tsn = min(tsn, -srb - sqrt(srd));
+        tsx = max(tsx, -srb + sqrt(srd));
+      }}
     }}
   }}
 """) for k in range(IK_NS)) + ik_sub("""
   float tt = tb0 + @DTS@ * h01;
   float tprev = tt;
-  float tnr = 0.0;
+  float tnr = tsn;
   vec4 bsp = vec4(0.0);
-  vec3 bax = vec3(0.0);
+  vec4 bax = vec4(0.0);
   if (tb1 > tb0) {
     for (int i = 0; i < @STEPS@; i++) {
       vec3 pos = ro + rd * tt;
-      float rdo = step(tnr, tt);
-      float bfv = ik_bf(pos, tt, rdo, sb0, sb1, sb2, sb3, bsp, bax);
-      if (rdo > 0.5) tnr = tt + max(bax.y, 0.0) * 0.85;
+      float bfv = 0.0;
+      if (tt >= tnr && tt <= tsx) {
+        bfv = ik_bf(pos, tt, IKSB, bsp, bax);
+        tnr = tt + max(bax.y, 0.0) * 0.85;
+      } else {
+        bfv = ik_bd(pos, tt, bsp, bax);
+      }
+      float tnl = mix(tnr, 1000.0, step(tsx, tt));
       if (bfv > 0.0) {
         hit = 1.0;
+        hk = bax.w - 1.0;
         break;
       }
       float veil = smoothstep(0.0, 0.08, bax.x) * smoothstep(0.9, 2.0, tt);
@@ -1540,7 +1651,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
         vec3 vnx = (floor(vgc) + step(vec3(0.0), rd) - vgc) / vnc * @BSIZE@ / rd;
         mstep = max(mstep, min(vnx.x, min(vnx.y, vnx.z)) + 0.004 + @DTS@ * fract(h01 + float(i) * 0.618034));
       }
-      mstep = max(min(mstep, max(tnr - tt, @DTS@ * 0.4)), 0.012);
+      mstep = max(min(mstep, max(tnl - tt, @DTS@ * 0.4)), 0.012);
       if (veil > 0.002) {
         vec3 vcm = sc0 * bsp.x + sc1 * bsp.y + sc2 * bsp.z;
         vec3 vsig = veil * 9.0 * (vcm * 0.7 + 0.03);
@@ -1559,28 +1670,44 @@ IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
   vec3 col = water;
   float thit = 40.0;
   if (hit > 0.5) {
+    float hka = q17;
+    float hkc = q25;
+IKHKSEL
     float bta = tprev;
     float btb = tt;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
       float btm = 0.5 * (bta + btb);
       vec3 bpm = ro + rd * btm;
-      float bvm = ik_bf(bpm, btm, 1.0, sb0, sb1, sb2, sb3, bsp, bax);
+      float bvm = ik_b1(bpm, btm, hka, hkc, hk, bsp, bax);
       if (bvm > 0.0) { btb = btm; } else { bta = btm; }
     }
     thit = btb;
     vec3 hp = ro + rd * thit;
     vec4 hsp = vec4(0.0);
-    float hb0 = ik_bf(hp, thit, 1.0, sb0, sb1, sb2, sb3, hsp, bax);
     vec3 hpx = hp + vec3(0.035, 0.0, 0.0);
     vec3 hpy = hp + vec3(0.0, 0.035, 0.0);
     vec3 hpz = hp + vec3(0.0, 0.0, 0.035);
-    float hbx = ik_bf(hpx, thit, 1.0, sb0, sb1, sb2, sb3, bsp, bax);
-    float hby = ik_bf(hpy, thit, 1.0, sb0, sb1, sb2, sb3, bsp, bax);
-    float hbz = ik_bf(hpz, thit, 1.0, sb0, sb1, sb2, sb3, bsp, bax);
+    vec3 hpi = hp + rd * 0.13;
+    float hb0 = 0.0;
+    float hbx = 0.0;
+    float hby = 0.0;
+    float hbz = 0.0;
+    float hd1 = 0.0;
+    if (hk > -0.5) {
+      hb0 = ik_b1(hp, thit, hka, hkc, hk, hsp, bax);
+      hbx = ik_b1(hpx, thit, hka, hkc, hk, bsp, bax);
+      hby = ik_b1(hpy, thit, hka, hkc, hk, bsp, bax);
+      hbz = ik_b1(hpz, thit, hka, hkc, hk, bsp, bax);
+      hd1 = ik_b1(hpi, thit, hka, hkc, hk, bsp, bax);
+    } else {
+      hb0 = ik_bd(hp, thit, hsp, bax);
+      hbx = ik_bd(hpx, thit, bsp, bax);
+      hby = ik_bd(hpy, thit, bsp, bax);
+      hbz = ik_bd(hpz, thit, bsp, bax);
+      hd1 = ik_bd(hpi, thit, bsp, bax);
+    }
     vec3 hn = -normalize(vec3(hbx - hb0, hby - hb0, hbz - hb0) + vec3(0.00001));
     hn = normalize(hn - rd * max(dot(hn, rd), 0.0) * 1.05);
-    vec3 hpi = hp + rd * 0.13;
-    float hd1 = ik_bf(hpi, thit, 1.0, sb0, sb1, sb2, sb3, bsp, bax);
     float hdep = smoothstep(-0.05, 0.4, hd1);
     float hws = max(hsp.x + hsp.y + hsp.z, 0.001);
     vec3 hcm = (sc0 * hsp.x + sc1 * hsp.y + sc2 * hsp.z) / hws;
@@ -1614,7 +1741,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
   }
   col += mix(NOKKVI_HIGHLIGHT, NOKKVI_TEXT, 0.4) * shaft * 0.06 * mshaft;
   float mote = 0.0;
-  float mpx = q7 / min(texsize.x, texsize.y);
+  float mpx = q3 / min(texsize.x, texsize.y);
   for (int k = 0; k < 4; k++) {
     float mt = 1.2 + float(k) * 0.5;
     vec3 mp = (ro + rd * mt) / 0.5 + vec3(0.0, q9 * 0.05, 0.0);
@@ -1637,95 +1764,99 @@ IK_COMP = IK_COMMON + IK_NEARFN + " shader_body {\n" + HEAD + ik_sub("""
   float over = max(tm.x, max(tm.y, tm.z));
   tm = tm / max(over, 1.0);
   tm = mix(tm, vec3(1.0), clamp((over - 1.0) * 0.4, 0.0, 0.6));
-  vec3 rop = vec3(q29, q30, q31);
-  vec3 fwp = normalize(vec3(q12, q28, q32) - rop);
-  vec3 rtp = normalize(cross(fwp, vec3(0.0, 1.0, 0.0)));
-  vec3 upp = cross(rtp, fwp);
-  vec3 pvw = ro + rd * min(tmed, length(vec3(q4, q5, q6) - ro) + 1.0) - rop;
-  vec2 puv = vec2(dot(pvw, rtp), dot(pvw, upp)) / (max(dot(pvw, fwp), 0.05) * max(floor(q8) / 1000.0, 0.2)) / s + 0.5;
+  vec3 rop = vec3(0.0);
+  vec3 fwp = vec3(0.0);
+  vec3 rtp = vec3(0.0);
+  vec3 upp = vec3(0.0);
+  float pok = ik_cam(q4, q5, q16, rop, rtp, upp, fwp);
+  vec3 pvw = ro + rd * min(tmed, @CR@ + 1.0) - rop;
+  vec2 puv = vec2(dot(pvw, rtp), dot(pvw, upp)) / (max(dot(pvw, fwp), 0.05) * max(q6, 0.2)) / s + 0.5;
   float hval = step(0.0, puv.x) * step(puv.x, 1.0) * step(0.0, puv.y) * step(puv.y, 1.0);
   vec4 hist = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), puv, 0.0);
   vec3 blm = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), uv, 4.5).xyz;
   tm += max(blm - 0.45, 0.0) * 0.2 * hist.w;
-  vec3 res = mix(tm, clamp(hist.xyz, tm - 0.12, tm + 0.12), IKTAAW * hist.w * hval * step(2.5, frame));
+  vec3 res = mix(tm, clamp(hist.xyz, tm - 0.12, tm + 0.12), max(-q7, 0.0) * hist.w * hval * step(2.5, frame));
+  float dedge = smoothstep(0.0, 0.04, puv.x) * smoothstep(0.0, 0.04, 1.0 - puv.x) * smoothstep(0.0, 0.04, puv.y) * smoothstep(0.0, 0.04, 1.0 - puv.y);
+  res = mix(res, hist.xyz, max(q7, 0.0) * hist.w * dedge * step(2.5, frame));
   res += (h01 - 0.5) / 255.0;
   ret = res;
- }""").replace("IKTAAW", "0.8")
+ }""").replace("IKSB, ", "".join(f"sb{k}, " for k in range(IK_NS))).replace(
+    "IKHKSEL", "\n".join(f"    hka = mix(hka, q{17 + k}, step({k - 0.5}, hk));\n    hkc = mix(hkc, q{25 + k}, step({k - 0.5}, hk));" for k in range(1, IK_NS)))
 
-def ik_act_pick(var, col):
-    e = f"{IK_ACTS[-1][col]}"
-    for i in range(len(IK_ACTS) - 2, -1, -1):
-        e = f"if(equal(act, {i}), {IK_ACTS[i][col]}, {e})"
-    return f"{var} = {e};\n"
+def ik_code(nn, cq, sz, cy, tb, di, cx, cz):
+    """A drop's code: child count - 3, species, size, aim point y, turbulence,
+    travel direction (0..63), aim point x and z."""
+    return nn + 8 * cq + 64 * sz + 256 * cy + 1024 * tb + 4096 * di + 262144 * cx + 1048576 * cz
 
-IK_INIT = (BEATS_INIT + " inkt = 0; since = 4.6; bavg = 1; mavg = 1; tavg = 1; osg = 1; osg_m = 1; lastcq = int(rand(3)); lastu = rand(1000) / 500 - 1;"
-           " loud = 1; loud_m = 1; rate = 1; rate_m = 1; turb = 0.12; turb_m = 0.12; mood = 0; nacts = 0; spb = 0.1;"
-           " act = 0; acttm = 16; osgn = 1; orb = rand(628) / 100; spawnf = 0;"
-           f" crad = {IK_ACTS[0][0]}; crad_m = {IK_ACTS[0][0]}; chgt = {IK_ACTS[0][1]}; chgt_m = {IK_ACTS[0][1]}; clens = {IK_ACTS[0][2]}; clens_m = {IK_ACTS[0][2]};"
-           f" corb = {IK_ACTS[0][3]}; corb_m = {IK_ACTS[0][3]}; caper = {IK_ACTS[0][4]}; caper_m = {IK_ACTS[0][4]}; clw = {IK_ACTS[0][5]}; clw_m = {IK_ACTS[0][5]};"
-           " lkx = 0; lkx_m = 0; lky = -1.25; lky_m = -1.25; lkz = 0; lkz_m = 0;"
-           " pvalid = 0;"
-           + " ".join(f"ika{k} = {[1.2, 3.3, 5.4, 99][k]}; ikc{k} = {[3 + 8 * 0 + 64 * 1 + 256 + 1024 + 4096 * 8 + 131072 * 20, 1 + 8 * 1 + 64 * 2 + 512 + 1024 + 4096 * 22 + 131072 * 9, 4 + 8 * 2 + 64 * 1 + 256 * 2 + 2048 + 4096 * 14 + 131072 * 25, 0][k]};" for k in range(IK_NS)))
-IK_FRAME = "dt = min(1 / max(fps, 1), 0.1);\n" + BEATS + f"""en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);
-""" + ease("loud", "en", "1.0") + ease("rate", "0.8 + 0.4 * min(max(loud - 0.6, 0), 1)", "2.0") + f"""inkt = inkt + dt * rate;
-""" + "".join(f"ika{k} = min(ika{k} + dt * rate, 99);\n" for k in range(IK_NS)) + f"""
+IK_AGE0 = [1.2, 3.3, 5.4] + [99] * (IK_NS - 3)
+IK_CODE0 = [ik_code(3, 0, 1, 2, 1, 5, 1, 2), ik_code(1, 1, 0, 1, 1, 41, 2, 1), ik_code(4, 2, 1, 2, 2, 22, 1, 1)] + [0] * (IK_NS - 3)
+IK_INIT = (BEATS_INIT + " inkt = 0; since = 2; bavg = 1; mavg = 1; tavg = 1; lastcq = int(rand(3)); lastdi = int(rand(64));"
+           " loud = 1; loud_m = 1; rate = 1; rate_m = 1; turb = 0.12; turb_m = 0.12; mood = 0; spb = 0.1; spawnf = 0;"
+           " az = rand(628) / 100; el = 0.15; lens = 0.85; az0 = az; el0 = el; lens0 = lens; az1 = az; el1 = el; lens1 = lens;"
+           " rol = 0; rol0 = 0; rol1 = 0; rdir = 1;"
+           " mvt = 9; mvd = 0.3; odir = 1; tsb = 0.5; ibi = 0.5; smv = 0; nmv = 0; pvalid = 0; "
+           + " ".join(f"ika{k} = {IK_AGE0[k]}; ikc{k} = {IK_CODE0[k]};" for k in range(IK_NS)))
+IK_FRAME = "dt = min(1 / max(fps, 1), 0.1);\n" + BEATS + f"""tsb = tsb + dt;
+ibi = if(trig, ibi + (min(tsb, 1.2) - ibi) * 0.4, ibi);
+tsb = if(trig, 0, tsb);
+en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);
+""" + ease("loud", "en", "1.0") + ease("rate", f"{IK_RATE} * (0.8 + 0.4 * min(max(loud - 0.6, 0), 1))", "2.0") + f"""
+mvt = mvt + dt; smv = smv + dt;
+gom = max(trig, above(smv, 4)) * above(mvt, mvd) * above(smv, 0.22);
+kk = if(trig, min(max((bs1 - 0.8) / 0.8, 0), 1), 0.25);
+nmv = nmv + gom;
+big = equal(nmv % 8, 0);
+odir = if(gom * above(rand(100), 75), -odir, odir);
+az = if(gom * above(abs(az), 31.4159265), az - sign(az) * 62.8318531, az);
+ur1 = rand(1000) / 1000 + bass_att * 2.9 + mid_att * 1.7; ur1 = (ur1 - int(ur1)) * 2 - 1;
+ur2 = rand(1000) / 1000 + treb_att * 3.1 + bass_att * 1.3; ur2 = ur2 - int(ur2);
+az0 = if(gom, az, az0); el0 = if(gom, el, el0); lens0 = if(gom, lens, lens0); rol0 = if(gom, rol, rol0);
+rdir = if(gom, -rdir, rdir);
+rol1 = if(gom, if(equal(nmv % 4, 0), 0, rdir * (0.15 + 0.4 * kk)), rol1);
+az1 = if(gom, az + odir * (0.3 + 0.55 * kk + 0.8 * big), az1);
+el1 = if(gom, if(big, ur1, min(max(el * 0.8 + ur1 * (0.25 + 0.4 * kk), -1.05), 1.05)), el1);
+lens1 = if(gom, if(big, 0.7 + 0.35 * ur2, min(max(lens + (ur2 - 0.5) * (0.16 + 0.3 * kk), 0.7), 1.05)), lens1);
+mvd = if(gom, if(trig, min(max(0.42 * ibi, 0.12), 0.36), 0.36), mvd);
+mvt = if(gom, 0, mvt); smv = if(gom, 0, smv);
+mvx = min(mvt / mvd, 1);
+mvu = 1 - (1 - mvx) * (1 - mvx) * (1 - mvx);
+az = az0 + (az1 - az0) * mvu; el = el0 + (el1 - el0) * mvu; lens = lens0 + (lens1 - lens0) * mvu; rol = rol0 + (rol1 - rol0) * mvu;
+frz = below(mvt, mvd);
+mvs = min(max((mvx - 0.35) / 0.65, 0), 1); mvs = mvs * mvs * (3 - 2 * mvs);
+drg = frz * 0.85 * (1 - mvs);
+taaw = 0.8 * min(max((mvt - mvd) / 0.15, 0), 1);
+dts = dt * rate * (1 - frz);
+inkt = inkt + dts;
+""" + "".join(f"ika{k} = min(ika{k} + dts, 99);\n" for k in range(IK_NS)) + f"""
 vis = equal(frame, 3);
 uv1 = rand(1000) / 1000 + bass_att * 3.7 + treb_att * 1.3; uv1 = uv1 - int(uv1);
 mood = if(vis, int(uv1 * 3), mood);
 spb = if(vis, uv1 * 7.3 - int(uv1 * 7.3), spb);
-since = since + dt;
-gap = 2.0 + 0.9 * (1 - min(max(loud - 0.7, 0), 1));
-go = max(trig * above(since, gap), above(since, 5.5));
+since = since + dts;
+gap = 0.6 + 0.3 * (1 - min(max(loud - 0.7, 0), 1));
 old = 0; oa = ika0;
-""" + "".join(f"old = if(above(ika{k}, oa), {k}, old); oa = max(oa, ika{k});\n" for k in range(1, IK_NS)) + f"""
+""" + "".join(f"old = if(above(ika{k}, oa), {k}, old); oa = max(oa, ika{k});\n" for k in range(1, IK_NS)) + f"""go = max(trig * above(since, gap), above(since, 3)) * above(oa, {IK_LIFE - 0.8});
 bavg = bavg + (bass_att - bavg) * (1 - exp(-dt / 8)); mavg = mavg + (mid_att - mavg) * (1 - exp(-dt / 8)); tavg = tavg + (treb_att - tavg) * (1 - exp(-dt / 8));
 nb = bass_att / max(bavg, 0.01); nm = mid_att / max(mavg, 0.01); nt = treb_att / max(tavg, 0.01);
 """ + ease("turb", "0.12 + 0.09 * min(max(nm - 0.7, 0), 1.5)", "1.5") + f"""cent = (0.5 * nm + nt) / max(nb + nm + nt, 0.01);
 nn = min(max(int(5 + (cent - 0.5) * 14 + rand(2) - 0.5), 3), 7) - 3;
 cq = (lastcq + 1 + above(rand(100), 75)) % 3;
 lastcq = if(go, cq, lastcq);
-sz = min(max(int((bs1 - 0.4) * 2.8), 0), 3);
-tg = min(max(int((lky + 0.36 * crad * clens - 0.3) / 0.3 + 0.5), 0), 3);
+sz = min(max(int((bs1 - 0.7) * 4.5), 0), 3);
 tb = min(max(int((nm - 0.6) * 3.5), 0), 3);
-uv2 = rand(1000) / 1000 + mid_att * 5.3; uv2 = uv2 - int(uv2);
-su = lastu + 0.75 + uv2 * 0.5; su = if(above(su, 1), su - 2, su);
-lastu = if(go, su, lastu);
-sv = (rand(1000) / 1000 - 0.5) * 0.9;
-swx = -sin(orb) * su * 1.3 - cos(orb) * sv;
-swz = cos(orb) * su * 1.3 - sin(orb) * sv;
-pxi = min(max(int((swx / {IK_SPAN} + 0.5) * 31 + 0.5), 0), 31);
-pzi = min(max(int((swz / {IK_SPAN} + 0.5) * 31 + 0.5), 0), 31);
-code = nn + 8 * cq + 64 * sz + 256 * tg + 1024 * tb + 4096 * pxi + 131072 * pzi;
+uv2 = rand(1000) / 1000 + mid_att * 5.3 + bass * 1.7; uv2 = uv2 - int(uv2);
+di = (lastdi + 13 + int(uv2 * 38)) % 64;
+lastdi = if(go, di, lastdi);
+code = nn + 8 * cq + 64 * sz + 256 * int(rand(4)) + 1024 * tb + 4096 * di + 262144 * int(rand(4)) + 1048576 * int(rand(4));
 """ + "".join(f"ika{k} = if(go * equal(old, {k}), 0, ika{k}); ikc{k} = if(go * equal(old, {k}), code, ikc{k});\n" for k in range(IK_NS)) + f"""since = if(go, 0, since);
 spawnf = if(go, old + 1, 0);
-newest = 0; na = ika0; nd = abs(ika0 - 3.2);
-""" + "".join(f"newest = if(below(abs(ika{k} - 3.2), nd), {k}, newest); na = if(below(abs(ika{k} - 3.2), nd), ika{k}, na); nd = min(nd, abs(ika{k} - 3.2));\n" for k in range(1, IK_NS)) + "ncode = " + "".join(f"if(equal(newest, {k}), ikc{k}, " for k in range(IK_NS - 1)) + f"ikc{IK_NS - 1}" + ")" * (IK_NS - 1) + f""";
-nx = ((int(ncode / 4096) % 32) / 31 - 0.5) * {IK_SPAN};
-nz = ((int(ncode / 131072) % 32) / 31 - 0.5) * {IK_SPAN};
-nsz = (0.8 + 0.15 * (int(ncode / 64) % 4)) * {IK_SC};
-ny = 0.3 + 0.3 * (int(ncode / 256) % 4) - (0.7 * log(1 + min(na, 5) / 0.25) - {IK_KOFF}) * nsz - 0.4 * nsz * min(max(na - 2, 0), 3) / 3;
-acttm = acttm - dt;
-chg = below(acttm, 0) * (1 - trig);
-act = if(chg, (act + 1 + int(rand(4))) % 5, act);
-osgn = if(chg, -osgn, osgn);
-acttm = if(chg, 14 + rand(1000) / 1000 * 8, acttm);
-""" + ik_act_pick("crg", 0) + ik_act_pick("chg2", 1) + ik_act_pick("clg", 2) + ik_act_pick("cog", 3) + ik_act_pick("cag", 4) + ik_act_pick("cwg", 5) \
-    + ease("crad", "crg", "3.0") + ease("chgt", "chg2", "3.0") + ease("clens", "clg", "3.0") + ease("corb", "cog", "3.0") \
-    + ease("caper", "cag", "3.0") + ease("clw", "cwg", "3.0") \
-    + ease("lkx", "nx * clw", "2.5") + ease("lky", "-1.25 + (ny + 1.25) * clw", "2.5") + ease("lkz", "nz * clw", "2.5") + ease("osg", "osgn", "1.5") + f"""
-dorb = dt * corb * osg * (0.7 + 0.3 * min(loud, 1.5));
-orb = orb + dorb;
-q1 = lkx + crad * cos(orb); q2 = lky + chgt; q3 = lkz + crad * sin(orb);
-q4 = lkx; q5 = lky; q6 = lkz;
-q7 = clens; q9 = inkt; q10 = mood; q11 = turb;
-pcx = if(pvalid, pcx, q1); pcy = if(pvalid, pcy, q2); pcz = if(pvalid, pcz, q3);
-plx = if(pvalid, plx, q4); ply = if(pvalid, ply, q5); plz = if(pvalid, plz, q6); plens = if(pvalid, plens, clens);
-q29 = pcx; q30 = pcy; q31 = pcz; q12 = plx; q28 = ply; q32 = plz;
-q8 = min(caper, 0.95) + int(plens * 1000 + 0.5);
-pcx = q1; pcy = q2; pcz = q3; plx = q4; ply = q5; plz = q6; plens = clens; pvalid = 1;
-q13 = ba1; q14 = bs1; q15 = ba2; q16 = bs2; q17 = spawnf;
-""" + "".join(f"q{18 + k} = ika{k}; q{23 + k} = ikc{k};\n" for k in range(IK_NS)) + """q22 = dt * rate; q27 = spb;
-"""
+paz = if(pvalid, paz, az); pel = if(pvalid, pel, el); plens = if(pvalid, plens, lens); prol = if(pvalid, prol, rol);
+q1 = az; q2 = el; q3 = lens; q4 = paz; q5 = pel; q6 = plens;
+q15 = rol; q16 = prol;
+paz = az; pel = el; plens = lens; prol = rol; pvalid = 1;
+q7 = if(frz, drg, -taaw); q8 = spawnf; q9 = inkt; q10 = mood + spb * 0.999; q11 = turb; q12 = dts;
+q13 = min(ba1, 15.9) + 16 * int(bs1 * 100); q14 = min(ba2, 15.9) + 16 * int(bs2 * 100);
+""" + "".join(f"q{17 + k} = ika{k}; q{25 + k} = ikc{k};\n" for k in range(IK_NS))
 presets["nokkvi - living ink"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IK_WARP, IK_COMP,
                                         init=IK_INIT, frame=IK_FRAME)
 
@@ -2160,904 +2291,6 @@ def black_holes_port(cover):
         f"  tmpvar_20.xyz = vec3(1.5 - 1.1 * dot(tmpvar_18.xyz, {LUM}));\n")
     p["comp"] = comp
     return p
-# Chladni (no cover) ------------------------------------------------------
-# Resonance: sand on a vibrating metal plate, as a photograph. A dark polished
-# plate fills the frame in a dim studio (a soft overhead bank, a small softbox,
-# a circular-brushed sheen); tens of thousands of sand grains lie heaped in
-# ridges along the nodal lines of the plate's vibration, and the bare metal
-# between them shows fine fringes: contours of the vibration amplitude, as in
-# time-averaged holographic interferometry (each one the next ramp colour, more
-# of them as the plate is driven harder, fading toward the antinodes and under
-# the sand; their width is a fraction of the frame, so every render size looks
-# the same).
-# The plate is driven at one point with wavenumber k, and its response is the
-# point-driven Green's function over the plate's modes (Tuan et al.'s "modern
-# Chladni figures"): A(u) = sum_mn phi_mn(u) w_mn, phi_mn = cos(m pi u.x)
-# cos(n pi u.y) (m, n < CHL_M), w_mn = (phi_mn(drive) + q10 phi_nm(drive))
-# d / (d^2 + gamma^2), d = k^2 - pi^2 (m^2 + n^2), normalised to unit RMS. The
-# real weights keep every nodal line continuous. Each visit picks a drive point
-# (centre, diagonal and corner drives give the classic symmetric figures,
-# mid-line and off-axis ones organic figures), a damping and a k range.
-# The music tunes it: k follows the mix's brightness (treble against bass,
-# smoothed over 2 s, against the song's own ~10 s average; brighter = more
-# nodal lines) but only moves on a retune: a kick at least 18 s after the last
-# one that wants a clearly different k, or a nudge after 34 s. A retune snaps k
-# to a plate resonance sqrt(m^2 + n^2) (even m, n for the centre drives), eases
-# there in about a second, and holds the treble/bass balance of that moment as
-# the weight q10 of the transposed mode, so the snapshot shapes the figure
-# (the classic (m, n) +- (n, m) pairs). The sand then migrates to the new
-# figure in 2-5 s and holds it.
-# The plate's acceleration Gamma is the loudness relative to the song's own
-# recent level. The analyzer only reports each band over its ~4 s average, so
-# the equations integrate that ratio back into a level (d ln L = ln(rho / (1 -
-# r (1 - rho))), rho = exp(-dt / 4.15)) and compare it with a reference that
-# rises with it in ~6 s and falls in ~45 s (in ~8 s once the level has stayed
-# low for 15 s, and in ~1.5 s for 10 s after a half-second gap, so a quieter master
-# after a track change becomes the new normal). At the song's own loud level Gamma
-# is ~2.4: the grains bounce and collect at the nodes. A passage ~4 dB or more
-# below it drops Gamma under 1 g and the grains roll the other way into
-# cushions at the antinodes (van Gerner et al. 2010, inverse Chladni patterns)
-# until the level returns or the reference has followed it down. A song at a
-# steady level never inverts. Silence (no signal, or the analyzer's idle
-# output of exactly 1) stops everything. Beats never move k: strong kicks (at
-# most one per 2.2 s) throw clusters of grains off the ridges that rain back,
-# and send a flare outward through the fringes, order by order.
-# The feedback is data, never shown (texel blocks anchored at (0, 0), so a
-# resize keeps them; a data texel holding N detects a changed N and re-seeds):
-# - SAND block [0, N)^2: R/G = sand mass, 16 bit (0..CHL_MMAX grain layers),
-#   B/A = its smoothed flow vector. Each frame is a conservative finite-volume
-#   step on a 13-cell diamond: a drift -beta grad|A| of the mobile top layer
-#   (beta > 0 bounce to the nodes, fading out on the node itself; < 0 roll to
-#   the antinodes; heaps are nearly immobile on a node and fluid away from
-#   one, so a retune empties the old ridges; it refuses cells near CHL_CAP
-#   layers, so a heap tops out and widens instead of clipping), an Ito hop D(|A|) m (bouncing
-#   grains leave where the plate shakes, so sand collects where D -> 0), and a
-#   repose flux past slope q13 that sets the ridges' angle; each cell's outflow
-#   is limited to its mass using its neighbours' outflows, so mass is exact and
-#   never negative, and it is written with stochastic rounding (an unbiased
-#   hi/lo split). A start or re-seed lays the sand already shaped to the
-#   visit's figure (16 exp(-14 |A|), one frame after the field is valid), so
-#   nothing floods the frame.
-# - FIELD block (beside it, or above on a tall panel): R/G = the signed plate
-#   response A / RMS, 16 bit over -CHL_AMAX..CHL_AMAX, recomputed every frame.
-# The comp is a camera over the plate: a bounded slab march of the sand height
-# (a cubic B-spline of the 16-bit mass times CHL_LAYER), three layers of
-# procedural grains on a world-anchored grid (irregular: size, ellipse, wobble;
-# coverage from the mass; stretched along the flow vector while the sand
-# moves), analytic grain-edge antialiasing with a footprint fade to a stable
-# mip-noise speckle, a raking key with heightfield shadows, glints on grain
-# facets, the plate's reflection of the studio and of the sand, and the
-# fringes. Its last frame (sampler_prev_comp, reprojected with the previous
-# camera in q27..q32) adds a light temporal smoothing clamped to the pixel
-# quad and a depth of field for the close shots.
-# Camera shots (CHL_SHOTS: three-quarter, grazing, macro, near top-down, low
-# orbit, square-on overview) change every 14-22 s, never on a beat, and ease
-# twice (tau 3 s) while the camera orbits; the distance is clamped every frame
-# so the frame's corner rays land on the plate at any aspect. The grazing shot
-# lets its top corners run past the far edge, the overview a little; every
-# limit is smooth in the eased values (smooth min / max), so the clamp never
-# kinks the motion.
-# q map: q1 k, q2 Gamma, q3/q5 PULSE, q4/q6 drive point, q7 spray age, q8 spray
-# speed, q9 spray seed, q10 transposed-mode weight, q11 damping, q12 drift
-# beta, q13 repose slope, q14 hop, q15/q16 key azimuth/elevation, q17 flare
-# strength, q18 flare age, q19 aperture, q20 fringes per unit amplitude,
-# q21..q26 camera (azimuth, elevation, distance, target x/z, focal length),
-# q27..q32 the same for the previous frame.
-CHL_M = 12
-CHL_MMAX = 96.0
-CHL_CAP = 60.0
-CHL_AMAX = 4.0
-CHL_M0 = 1.0
-CHL_VCAP = 0.35
-CHL_KAP = 0.19
-CHL_MOB = 1.5
-CHL_LAYER = 0.00065
-CHL_GRAINS = 480.0
-CHL_AIRG = 520.0
-CHL_GRAV = 1.6
-
-CHL_COMMON = f"""
-float chl_hash(vec2 hhp) {{
-  vec3 h3 = fract(vec3(hhp.xyx) * 0.1031);
-  h3 += dot(h3, h3.yzx + 33.33);
-  return fract((h3.x + h3.y) * h3.z);
-}}
-vec4 chl_tex(vec2 tuv) {{
-  return textureLod(sampler2D(sampler_fc_main, sampler_fc_main_samp), tuv, 0.0);
-}}
-float chl_dec(vec4 dv) {{
-  return (dv.x * 65280.0 + dv.y * 255.0) / 65535.0;
-}}
-float chl_na() {{
-  return min(min(512.0, floor((texsize.x - 6.0) * 0.5)), floor(texsize.y) - 4.0);
-}}
-float chl_nb() {{
-  return min(min(512.0, floor(texsize.x) - 4.0), floor((texsize.y - 6.0) * 0.5));
-}}
-float chl_n() {{
-  float nna = chl_na();
-  float nnb = chl_nb();
-  return max(nna, nnb);
-}}
-vec2 chl_fo() {{
-  float ona = chl_na();
-  float onb = chl_nb();
-  float onn = max(ona, onb);
-  float ost = step(ona + 0.5, onb);
-  return mix(vec2(onn + 2.0, 0.0), vec2(0.0, onn + 2.0), ost);
-}}
-float chl_mass(vec2 mc) {{
-  vec2 muv = mc * texsize.zw;
-  vec4 mtx = chl_tex(muv);
-  float mdv = chl_dec(mtx);
-  return mdv * {CHL_MMAX};
-}}
-float chl_amp(vec2 ac, vec2 afo) {{
-  vec2 auv = (ac + afo) * texsize.zw;
-  vec4 atx = chl_tex(auv);
-  float adv = chl_dec(atx);
-  return (adv * 2.0 - 1.0) * {CHL_AMAX};
-}}
-"""
-
-def chl_field(p, x, y):
-    """GLSL: the plate response at plate point ({x}, {y}) in 0..1 into {p}a,
-    normalised to unit RMS over the plate. Drive (q4, q6), drive2 (q6, q4)
-    with weight q10, k = q1, damping q11; cos(m pi u) by Chebyshev recurrence."""
-    return f"""
-  float {p}pi = 3.14159265;
-  float {p}kk = q1 * q1;
-  float {p}gg = q11;
-  float {p}tdx = cos({p}pi * q4);
-  float {p}tdy = cos({p}pi * q6);
-  float {p}tex = cos({p}pi * q6);
-  float {p}tey = cos({p}pi * q4);
-  float {p}tx = cos({p}pi * ({x}));
-  float {p}ty = cos({p}pi * ({y}));
-  float {p}a = 0.0;
-  float {p}ms = 0.0;
-  float {p}md = 1.0; float {p}mdp = {p}tdx;
-  float {p}me = 1.0; float {p}mep = {p}tex;
-  float {p}mx = 1.0; float {p}mxp = {p}tx;
-  for (int mi = 0; mi < {CHL_M}; mi++) {{
-    float {p}fm = float(mi);
-    float {p}nd = 1.0; float {p}ndp = {p}tdy;
-    float {p}ne = 1.0; float {p}nep = {p}tey;
-    float {p}ny = 1.0; float {p}nyp = {p}ty;
-    float {p}t = 0.0;
-    for (int ni = 0; ni < {CHL_M}; ni++) {{
-      float {p}fn = float(ni);
-      float {p}dd = {p}kk - {p}pi * {p}pi * ({p}fm * {p}fm + {p}fn * {p}fn);
-      float {p}w = ({p}md * {p}nd + q10 * {p}me * {p}ne) * {p}dd / ({p}dd * {p}dd + {p}gg * {p}gg) * step(0.5, {p}fm + {p}fn);
-      {p}ms += {p}w * {p}w * mix(1.0, 0.5, step(0.5, {p}fm)) * mix(1.0, 0.5, step(0.5, {p}fn));
-      {p}t += {p}w * {p}ny;
-      float {p}ndn = 2.0 * {p}tdy * {p}nd - {p}ndp; {p}ndp = {p}nd; {p}nd = {p}ndn;
-      float {p}nen = 2.0 * {p}tey * {p}ne - {p}nep; {p}nep = {p}ne; {p}ne = {p}nen;
-      float {p}nyn = 2.0 * {p}ty * {p}ny - {p}nyp; {p}nyp = {p}ny; {p}ny = {p}nyn;
-    }}
-    {p}a += {p}mx * {p}t;
-    float {p}mdn = 2.0 * {p}tdx * {p}md - {p}mdp; {p}mdp = {p}md; {p}md = {p}mdn;
-    float {p}men = 2.0 * {p}tex * {p}me - {p}mep; {p}mep = {p}me; {p}me = {p}men;
-    float {p}mxn = 2.0 * {p}tx * {p}mx - {p}mxp; {p}mxp = {p}mx; {p}mx = {p}mxn;
-  }}
-  {p}a = {p}a / sqrt(max({p}ms, 1e-12));
-"""
-
-CHL_WARP_FUNCS = CHL_COMMON + f"""
-float chl_fl(float fla, float flb, float faa, float fab, float fda, float fdb) {{
-  float flg = mix(1.0, smoothstep(0.0, 0.5, 0.5 * (faa + fab)), step(0.0, q12));
-  float flv = clamp(-q12 * (fab - faa), -{CHL_VCAP}, {CHL_VCAP}) * flg;
-  float fdh = fla - flb;
-  float fmoa = fla / (1.0 + {CHL_MOB} * fla * (1.0 - 0.95 * smoothstep(0.08, 0.45, faa)));
-  float fmob = flb / (1.0 + {CHL_MOB} * flb * (1.0 - 0.95 * smoothstep(0.08, 0.45, fab)));
-  float fgo = min(q2 / 0.3, 1.0);
-  float ffl = max(flv, 0.0) * fmoa * (1.0 - smoothstep({CHL_CAP * 0.75}, {CHL_CAP}, flb))
-            - max(-flv, 0.0) * fmob * (1.0 - smoothstep({CHL_CAP * 0.75}, {CHL_CAP}, fla));
-  ffl += fda * fla - fdb * flb;
-  ffl += fgo * ({CHL_KAP} * sign(fdh) * max(abs(fdh) - q13, 0.0) + 0.02 * fdh);
-  return ffl;
-}}
-float chl_hop(float hamp) {{
-  return q14 * smoothstep(0.015, 0.25, hamp);
-}}
-"""
-
-CHL_CELLS = {"C": (0, 0), "E": (1, 0), "W": (-1, 0), "N": (0, 1), "S": (0, -1),
-             "EE": (2, 0), "WW": (-2, 0), "NN": (0, 2), "SS": (0, -2),
-             "NE": (1, 1), "NW": (-1, 1), "SE": (1, -1), "SW": (-1, -1)}
-CHL_NB = {"E": ["EE", "NE", "SE"], "W": ["WW", "NW", "SW"], "N": ["NN", "NE", "NW"], "S": ["SS", "SE", "SW"]}
-def chl_sand_step():
-    """GLSL: the conservative sand update of cell `ci` into `mnew` (and the
-    moved mass into `mmove`)."""
-    s = "    vec2 c0 = ci + 0.5;\n"
-    for n, (dx, dy) in CHL_CELLS.items():
-        s += (f"    vec2 k{n} = c0 + vec2({dx}.0, {dy}.0);\n"
-              f"    float m{n} = chl_mass(k{n});\n"
-              f"    float a{n} = abs(chl_amp(k{n}, cfo));\n"
-              f"    float d{n} = chl_hop(a{n});\n"
-              f"    float i{n} = step(0.0, k{n}.x) * step(k{n}.x, cn) * step(0.0, k{n}.y) * step(k{n}.y, cn);\n")
-    for n in ["E", "W", "N", "S"]:
-        s += f"    float fC{n} = chl_fl(mC, m{n}, aC, a{n}, dC, d{n}) * i{n};\n"
-    s += "    float oC = max(fCE, 0.0) + max(fCW, 0.0) + max(fCN, 0.0) + max(fCS, 0.0);\n"
-    for n in ["E", "W", "N", "S"]:
-        terms = [f"max(-fC{n}, 0.0)"]
-        for b in CHL_NB[n]:
-            s += f"    float f{n}{b} = chl_fl(m{n}, m{b}, a{n}, a{b}, d{n}, d{b}) * i{n} * i{b};\n"
-            terms.append(f"max(f{n}{b}, 0.0)")
-        s += f"    float o{n} = " + " + ".join(terms) + ";\n"
-    for n in ["C", "E", "W", "N", "S"]:
-        s += f"    float l{n} = min(1.0, m{n} / max(o{n}, 1e-9));\n"
-    s += "    float mout = 0.0;\n"
-    for n in ["E", "W", "N", "S"]:
-        s += f"    mout += mix(l{n}, lC, step(0.0, fC{n})) * fC{n};\n"
-    s += ("    float mmove = abs(fCE) + abs(fCW) + abs(fCN) + abs(fCS);\n"
-          "    float mnew = max(mC - mout, 0.0);\n")
-    return s
-
-CHL_WARP = CHL_WARP_FUNCS + " shader_body {\n" + f"""
-  vec2 tx = uv_orig * texsize.xy;
-  vec2 ci = floor(tx);
-  float cn = chl_n();
-  vec2 cfo = chl_fo();
-  vec2 dpos = vec2(0.0, cn + 1.0);
-  vec3 outc = vec3(0.0);
-  float outa = 0.0;
-  float rh = chl_hash(ci + vec2(mod(frame, 997.0) * 17.13, mod(frame, 991.0) * 5.37));
-  vec4 dtx = chl_tex((dpos + 0.5) * texsize.zw);
-  float dhi = floor(cn / 256.0);
-  vec3 dwant = vec3(dhi, cn - dhi * 256.0, 64.0) / 255.0;
-  float dok = step(abs(dtx.x - dwant.x) + abs(dtx.y - dwant.y), 0.002);
-  float pend = step(0.375, dtx.z) * dok;
-  float blank = max(step(frame, 3.5), 1.0 - dok);
-  float fresh = max(max(step(frame, 4.5), pend), blank);
-  dwant.z = mix(64.0, 128.0, 1.0 - dok) / 255.0;
-  if (ci.x < cn && ci.y < cn) {{
-""" + chl_sand_step() + f"""
-    float minit = {CHL_M0} * (cn / 512.0) * (0.92 + 0.16 * rh) * 16.0 * exp(-14.0 * aC) * (1.0 - blank);
-    mnew = mix(mnew, minit, fresh);
-    float cq = clamp(floor(mnew / {CHL_MMAX} * 65535.0 + rh), 0.0, 65535.0);
-    float chi = floor(cq / 256.0);
-    vec4 flo = chl_tex(c0 * texsize.zw);
-    vec2 fvel = vec2(fCE * mix(lE, lC, step(0.0, fCE)) - fCW * mix(lW, lC, step(0.0, fCW)),
-                     fCN * mix(lN, lC, step(0.0, fCN)) - fCS * mix(lS, lC, step(0.0, fCS))) * 0.5 / max(mC, 0.25);
-    vec2 fsm = mix(flo.zw - 0.5, clamp(fvel * 1.2, -0.5, 0.5), 0.3);
-    fsm = mix(fsm, vec2(0.0), fresh);
-    outc = vec3(chi, cq - chi * 256.0, floor((fsm.x + 0.5) * 255.0 + rh)) / 255.0;
-    outa = floor((fsm.y + 0.5) * 255.0 + rh) / 255.0;
-  }} else if (ci.x >= cfo.x && ci.x < cfo.x + cn && ci.y >= cfo.y && ci.y < cfo.y + cn) {{
-    vec2 fu = (ci - cfo + 0.5) / cn;
-""" + chl_field("f", "fu.x", "fu.y") + f"""
-    float fq = floor(clamp(fa / {CHL_AMAX} * 0.5 + 0.5, 0.0, 1.0) * 65535.0 + rh);
-    fq = min(fq, 65535.0);
-    float fhi = floor(fq / 256.0);
-    outc = vec3(fhi, fq - fhi * 256.0, 0.0) / 255.0;
-    outa = 1.0;
-  }} else if (abs(ci.x - dpos.x) < 0.5 && abs(ci.y - dpos.y) < 0.5) {{
-    outc = dwant;
-    outa = 1.0;
-  }}
-  ret = outc;
-  ret_alpha = outa;
- }}"""
-
-CHL_COMP_FUNCS = CHL_COMMON + f"""
-float chl_h(vec2 hxz, float hn) {{
-  vec2 hmc = (hxz + 1.0) * 0.5 * hn;
-  float hmv = chl_mass(hmc);
-  return hmv * {CHL_LAYER} * 512.0 / hn;
-}}
-float chl_hb(vec2 bxz, float bn) {{
-  vec2 bc = (bxz + 1.0) * 0.5 * bn - 0.5;
-  vec2 bi = floor(bc);
-  vec2 bf = bc - bi;
-  vec2 bf2 = bf * bf;
-  vec2 bf3 = bf2 * bf;
-  vec2 bw0 = (1.0 - 3.0 * bf + 3.0 * bf2 - bf3) / 6.0;
-  vec2 bw1 = (4.0 - 6.0 * bf2 + 3.0 * bf3) / 6.0;
-  vec2 bw2 = (1.0 + 3.0 * bf + 3.0 * bf2 - 3.0 * bf3) / 6.0;
-  vec2 bw3 = bf3 / 6.0;
-  vec2 bg0 = bw0 + bw1;
-  vec2 bg1 = bw2 + bw3;
-  vec2 bh0 = bi - 0.5 + bw1 / bg0;
-  vec2 bh1 = bi + 1.5 + bw3 / bg1;
-  vec2 bq00 = bh0;
-  vec2 bq10 = vec2(bh1.x, bh0.y);
-  vec2 bq01 = vec2(bh0.x, bh1.y);
-  vec2 bq11 = bh1;
-  float b00 = chl_mass(bq00);
-  float b10 = chl_mass(bq10);
-  float b01 = chl_mass(bq01);
-  float b11 = chl_mass(bq11);
-  return (bg0.y * (bg0.x * b00 + bg1.x * b10) + bg1.y * (bg0.x * b01 + bg1.x * b11)) * {CHL_LAYER} * 512.0 / bn;
-}}
-vec3 chl_env(vec3 ed, vec3 ekd) {{
-  vec3 eku = normalize(cross(ekd, vec3(0.0, 1.0, 0.0)));
-  vec3 ekv = cross(eku, ekd);
-  float ekc = max(dot(ed, ekd), 0.001);
-  vec2 ekq = vec2(dot(ed, eku), dot(ed, ekv)) / ekc;
-  vec2 ekb = abs(ekq) - vec2(0.05, 0.03);
-  float ebox = smoothstep(0.045, -0.02, max(ekb.x, ekb.y)) * step(0.0, dot(ed, ekd));
-  float ehal = pow(max(dot(ed, ekd), 0.0), 24.0) * 0.10;
-  vec3 ebk = normalize(vec3(ekd.x * 0.3, 0.95, ekd.z * 0.3));
-  float ebank = pow(max(dot(ed, ebk), 0.0), 1.6);
-  vec3 erd = normalize(vec3(-ekd.x, 0.3, -ekd.z));
-  float efill = pow(max(dot(ed, erd), 0.0), 3.0);
-  float ewall = exp(-abs(ed.y - 0.08) * 5.0) * (0.6 + 0.4 * dot(normalize(ed.xz + 0.0001), normalize(ekd.xz + 0.0001)));
-  vec3 studio = mix(NOKKVI_SURFACE, NOKKVI_TEXT, 0.3) * (0.11 + 0.62 * ebank + 0.25 * ewall) + mix(NOKKVI_SURFACE, NOKKVI_ACCENT, 0.3) * 0.1 * efill;
-  return NOKKVI_TEXT * (ebox * 1.6 + ehal) + studio;
-}}
-"""
-
-def chl_grain_layer(v, off, cov):
-    """GLSL: 2x2 search of the grain grid at `gpos` (shifted by off[0:2],
-    ids by off[2:4]): {v}a = coverage (antialiased with the footprint `fw`),
-    {v}n = the topmost grain's normal, {v}h = its height over its radius,
-    {v}id = its id. Grains grow in as `cov` passes their own threshold."""
-    s = f"""
-  vec2 {v}g = gpos + vec2({off[0]}, {off[1]});
-  vec2 {v}b = floor({v}g - 0.5);
-  float {v}c = 0.0;
-  float {v}a = 0.0;
-  float {v}h = 0.0;
-  vec3 {v}n = vec3(0.0, 1.0, 0.0);
-  vec2 {v}id = vec2(0.0);
-  if ({cov} > 0.001) {{
-"""
-    for ox, oy in ((0, 0), (1, 0), (0, 1), (1, 1)):
-        s += f"""
-  {{
-    vec2 gcl = {v}b + vec2({ox}.0, {oy}.0);
-    vec2 gky = gcl + vec2({off[2]}, {off[3]});
-    float gh1 = chl_hash(gky + 11.7);
-    float gh2 = chl_hash(gky + 57.3);
-    float gh3 = chl_hash(gky + 91.1);
-    float gh4 = chl_hash(gky + 23.9);
-    float gh5 = chl_hash(gky + 71.3);
-    float gpr = chl_hash(gky + 5.1);
-    float ggrow = smoothstep(gpr * 0.9, gpr * 0.9 + 0.12, {cov});
-    vec2 gctr = gcl + 0.5 + (vec2(gh1, gh2) - 0.5) * 0.55;
-    float gsz = (0.62 + 0.78 * gh3 * gh3) * ggrow;
-    float gan = gh5 * 6.2831853;
-    float gco = cos(gan);
-    float gsi = sin(gan);
-    vec2 gd = {v}g - gctr;
-    gd -= fdir * (dot(gd, fdir) * fstr);
-    vec2 gq = vec2(gd.x * gco + gd.y * gsi, gd.y * gco - gd.x * gsi);
-    float gel = 0.1 + 0.32 * gh4;
-    gq = gq / vec2(1.0 + gel, 1.0 - gel);
-    float grho = length(gq);
-    float gcs = gq.x / max(grho, 0.0001);
-    float gc3 = gcs * gcs * gcs;
-    float gwob = 1.0 + 0.10 * (4.0 * gc3 - 3.0 * gcs) + 0.14 * (gh1 - 0.5) * (16.0 * gc3 * gcs * gcs - 20.0 * gc3 + 5.0 * gcs);
-    float grr = 0.42 * gsz * gwob;
-    float gcp = sqrt(max(grr * grr - grho * grho, 0.0));
-    float galp = clamp((grr - grho) / max(fw * 2.0, 0.03) + 0.5, 0.0, 1.0) * step(0.02, gsz);
-    float gtk = step({v}c, gcp) * step(0.001, galp);
-    vec2 gnq = gq / max(grr, 0.0001);
-    vec2 gnw = vec2(gnq.x * gco - gnq.y * gsi, gnq.x * gsi + gnq.y * gco);
-    vec3 gnn = normalize(vec3(gnw.x, sqrt(max(1.0 - dot(gnq, gnq), 0.0)) * 0.9 + 0.12, gnw.y));
-    {v}c = mix({v}c, gcp, gtk);
-    {v}a = max({v}a, galp);
-    {v}n = mix({v}n, gnn, gtk);
-    {v}id = mix({v}id, gky, gtk);
-    {v}h = mix({v}h, clamp(gcp / max(grr, 0.001), 0.0, 1.0), gtk);
-  }}
-"""
-    s += "  }\n"
-    return s
-
-def chl_grain_shade(v, out, depth):
-    """GLSL: lit colour `out` of layer {v}'s grain: a sand tone around the
-    visit's stop of the ramp (sbase) jittered in place and value, one grain in
-    eight from anywhere on the ramp (a mineral mix), rare dark and quartz
-    grains, facet glints; `depth` darkens the layers under the top one."""
-    return f"""
-  vec3 {out} = vec3(0.0);
-  if ({v}a > 0.001) {{
-  float {v}r1 = chl_hash({v}id + 3.3);
-  float {v}r2 = chl_hash({v}id + 8.1);
-  float {v}r3 = chl_hash({v}id + 5.5);
-  float {v}r4 = chl_hash({v}id + 2.7);
-""" + ramp(f"{v}alb", f"mix(sbase + 0.2 * ({v}r1 - 0.5), 0.05 + 0.9 * {v}r1, step(0.88, {v}r4))") + f"""
-  {v}alb = mix({v}alb, NOKKVI_TEXT * 0.8, 0.22) * (0.62 + 0.55 * {v}r2);
-  {v}alb = mix({v}alb, {v}alb * 0.22, step(0.91, {v}r3));
-  {v}alb = mix({v}alb, NOKKVI_TEXT * 0.95, step(0.965, {v}r3) * 0.7);
-  vec3 {v}nf = normalize(mix(nmac, {v}n, 0.45) + (vec3(chl_hash({v}id + 1.1), 0.0, chl_hash({v}id + 2.2)) - 0.5) * 0.35);
-  float {v}dl = dot({v}nf, kdir);
-  float {v}wr = clamp({v}dl * 0.85 + 0.15, 0.0, 1.0);
-  float {v}ao = 0.3 + 0.7 * {v}h;
-  vec3 {v}hv = normalize(kdir - rd);
-  float {v}sp = pow(max(dot({v}nf, {v}hv), 0.0), 36.0) * 0.18;
-  vec3 {v}gf = normalize({v}nf + (vec3(chl_hash({v}id + 4.4), chl_hash({v}id + 6.6), chl_hash({v}id + 9.9)) - 0.5) * 1.4);
-  float {v}gl = step(0.94 - 0.2 * fmov, chl_hash({v}id + 7.7)) * pow(max(dot(reflect(-kdir, {v}gf), -rd), 0.0), mix(260.0, 40.0, clamp(fw * 2.0, 0.0, 1.0))) * mix(14.0, 0.6, clamp(fw * 2.0, 0.0, 1.0));
-  {out} = ({v}alb * (0.13 + 2.3 * {v}wr * {v}wr * shd) * {v}ao * ao + NOKKVI_TEXT * ({v}sp + {v}gl) * shd) * {depth};
-  }}
-"""
-
-CHL_TAA = 0.5
-def chl_air_band(b):
-    """GLSL: band b of the kick spray: grains launched at speed factor
-    0.45 + 0.3 (b + h) of q8 from the sand (where the kick's noise pattern and
-    the mass at the band's crossing allow), found by a 2x2 search around where
-    the ray crosses the band's mean height; each is a small lit sphere
-    stretched along its vertical motion (motion blur), composited by coverage
-    into acol / aalp."""
-    s = f"""
-  {{
-    float abf = {0.45 + 0.3 * (b + 0.5):.3f};
-    float abz = q8 * abf * airt - {0.5 * CHL_GRAV} * airt * airt;
-    float abt = (abz + 0.01 - ro.y) / min(rd.y, -0.00001);
-    vec2 abxz = ro.xz + rd.xz * abt;
-    vec2 abm0 = (abxz + 1.0) * 0.5 * cn;
-    float abm = chl_mass(abm0);
-    vec2 anuv = abxz * 0.012 + vec2(q9 * 7.0, q9 * 3.0);
-    float apat = textureLod(sampler2D(sampler_noise_hq, sampler_noise_hq_samp), anuv, 0.0).x;
-    float aden = 0.95 * smoothstep(1.5, 4.0, abm) * smoothstep(0.42, 0.55, apat) * step(max(abs(abxz.x), abs(abxz.y)), 0.99);
-    vec2 abb = floor((abxz + 1.0) * 0.5 * {CHL_AIRG} - 0.5);
-"""
-    for ox in range(2):
-        for oy in range(2):
-            s += f"""
-    {{
-      vec2 acl = abb + vec2({ox}.0, {oy}.0);
-      vec2 aky = acl + vec2({b * 53.0}, {b * 29.0});
-      float ah1 = chl_hash(aky + 3.1);
-      float ah2 = chl_hash(aky + 7.7);
-      float ah3 = chl_hash(aky + 13.3);
-      float ah4 = chl_hash(aky + 17.9);
-      vec2 actr = (acl + 0.5 + (vec2(ah1, ah2) - 0.5) * 0.6) / {CHL_AIRG} * 2.0 - 1.0;
-      float afv = {0.45 + 0.3 * b:.3f} + 0.3 * ah4;
-      float az = q8 * afv * airt - {0.5 * CHL_GRAV} * airt * airt;
-      float avz = q8 * afv - {CHL_GRAV} * airt;
-      vec3 apc = vec3(actr.x + (ah1 - 0.5) * 0.03 * airt, abm * {CHL_LAYER} * 512.0 / cn + max(az, 0.0), actr.y + (ah2 - 0.5) * 0.03 * airt);
-      float ahl = min(abs(avz) * 0.0025, 0.0014) + 0.0002;
-      vec3 aw0 = ro - apc;
-      float adq = dot(rd, aw0);
-      float adn = max(1.0 - rd.y * rd.y, 0.00001);
-      float au = clamp((aw0.y - rd.y * adq) / adn, -ahl, ahl);
-      float atr = rd.y * au - adq;
-      vec3 aq = ro + rd * atr - apc - vec3(0.0, au, 0.0);
-      float adis = length(aq);
-      float arad = 0.0015 * (0.7 + 0.6 * ah3);
-      float apx = atr / (cfoc * min(texsize.x, texsize.y)) * 1.2;
-      float acov = smoothstep(arad + apx, max(arad - apx, 0.0), adis) * step(ah3, aden) * step(0.0, az) * step(atr, tsurf) * step(0.0, atr);
-      acov *= arad / (arad + ahl * 0.5);
-      vec3 anr = normalize(aq + vec3(0.0, 0.00001, 0.0));
-      vec3 aab = mix(NOKKVI_RAMP2, NOKKVI_RAMP4, ah2) * (0.6 + 0.5 * ah1);
-      vec3 acc = aab * (0.08 + 1.5 * max(dot(anr, kdir), 0.0)) + NOKKVI_TEXT * pow(max(dot(reflect(-kdir, anr), -rd), 0.0), 40.0) * 0.6;
-      float atk = step(aalp, acov) * step(0.001, acov);
-      acol = mix(acol, acc, atk);
-      aalp = max(aalp, acov);
-    }}
-"""
-    s += "  }\n"
-    return s
-
-CHL_COMP = CHL_COMP_FUNCS + " shader_body {\n" + HEAD + f"""
-  vec2 p = (uv - 0.5) * s;
-  float cn = chl_n();
-  vec2 cfo = chl_fo();
-  float caz = q21;
-  float cel = q22;
-  float cdist = q23;
-  vec3 ctg = vec3(q24, 0.0, q25);
-  float cfoc = q26;
-  vec3 cdir = vec3(cos(cel) * sin(caz), sin(cel), cos(cel) * cos(caz));
-  vec3 ro = ctg + cdist * cdir;
-  vec3 cfw = -cdir;
-  vec3 crt = vec3(cos(caz), 0.0, -sin(caz));
-  vec3 cup = cross(crt, cfw);
-  vec3 rd = normalize(cfw * cfoc + crt * p.x + cup * p.y);
-  vec3 kdir = normalize(vec3(cos(q16) * sin(q15), sin(q16), cos(q16) * cos(q15)));
-  float tpl = -ro.y / min(rd.y, -0.00001);
-  vec2 pxz = ro.xz + rd.xz * tpl;
-  vec2 gpp = (pxz + 1.0) * 0.5 * {CHL_GRAINS};
-  float fw = length(abs(dFdx(gpp)) + abs(dFdy(gpp)));
-  vec3 studc = mix(NOKKVI_SURFACE, NOKKVI_TEXT, 0.3);
-  vec3 col = NOKKVI_BG * 0.05 + studc * (0.05 + 0.22 * exp(-abs(rd.y - 0.05) * 3.5) * (0.6 + 0.4 * dot(normalize(rd.xz + 0.0001), normalize(kdir.xz + 0.0001))))
-            + NOKKVI_TEXT * pow(max(dot(rd, kdir), 0.0), 60.0) * 0.08;
-  float tfl = (-0.45 - ro.y) / min(rd.y, -0.00001);
-  vec3 flp = ro + rd * tfl;
-  vec2 fpc = flp.xz - kdir.xz * 1.2;
-  float fpool = exp(-dot(fpc, fpc) * 0.07);
-  vec2 fsh = flp.xz + kdir.xz * (0.45 / max(kdir.y, 0.05));
-  vec2 fsd = abs(fsh) - 1.0;
-  float fshadow = smoothstep(-0.15, 0.45, max(fsd.x, fsd.y));
-  vec3 floorc = studc * (0.04 + 0.34 * fpool) * (0.25 + 0.75 * fshadow);
-  col = mix(col, floorc, smoothstep(-0.01, -0.06, rd.y));
-  float hmx = {CHL_LAYER * 100.0:.5f};
-  vec3 rdg = rd + vec3(0.000001);
-  vec3 ird = 1.0 / rdg;
-  vec3 bt0 = (vec3(-1.0, -0.012, -1.0) - ro) * ird;
-  vec3 bt1 = (vec3(1.0, hmx, 1.0) - ro) * ird;
-  vec3 btn = min(bt0, bt1);
-  vec3 btf = max(bt0, bt1);
-  float ta = max(max(btn.x, btn.y), max(btn.z, 0.0));
-  float tb = min(min(btf.x, btf.y), btf.z);
-  float tsurf = 1000.0;
-  vec3 hp = ro + rd * 50.0;
-  float airt = q7;
-  float airz = q8 * 0.85 * airt - {0.5 * CHL_GRAV} * airt * airt;
-  if (tb > ta) {{
-    vec3 pa0p = ro + rd * ta;
-    float edge = step(pa0p.y, -0.0005);
-    float thit = -1.0;
-    float tl = ta;
-    float tend = min(tb, tpl);
-    float tstep = (tend - ta) / 43.0;
-    float tt = ta;
-    for (int i = 0; i < 44; i++) {{
-      vec3 mp = ro + rd * tt;
-      float mh = chl_h(mp.xz, cn);
-      if (thit < 0.0 && mp.y <= mh + 0.000005) {{
-        thit = tt;
-      }}
-      if (thit < 0.0) {{
-        tl = tt;
-        tt += tstep;
-      }}
-    }}
-    if (thit > 0.0) {{
-      float bl = tl;
-      float bh = thit;
-      for (int j = 0; j < 7; j++) {{
-        float bm = 0.5 * (bl + bh);
-        vec3 bp = ro + rd * bm;
-        float bhh = chl_hb(bp.xz, cn);
-        if (bp.y < bhh) {{ bh = bm; }} else {{ bl = bm; }}
-      }}
-      thit = bh;
-    }}
-    float sidemiss = step(thit, 0.0) * step(tb + 0.00001, tpl) * (1.0 - step(pa0p.y, -0.0005));
-    if (sidemiss < 0.5) {{
-    tsurf = mix(mix(tend, thit, step(0.0, thit)), ta, edge);
-    hp = ro + rd * tsurf;
-    float hc = 2.0 / cn;
-    vec2 hmc = (hp.xz + 1.0) * 0.5 * cn;
-    float hm = chl_hb(hp.xz, cn) / ({CHL_LAYER} * 512.0 / cn);
-    vec4 flw = chl_tex(hmc * texsize.zw);
-    vec2 fvec = flw.zw - 0.5;
-    float fmov = smoothstep(0.02, 0.2, length(fvec)) * step(max(abs(hp.x), abs(hp.z)), 0.999);
-    vec2 fdir = fvec / max(length(fvec), 0.001);
-    float fstr = 0.72 * fmov;
-    vec2 hq1 = hp.xz + vec2(hc, 0.0);
-    vec2 hq2 = hp.xz - vec2(hc, 0.0);
-    vec2 hq3 = hp.xz + vec2(0.0, hc);
-    vec2 hq4 = hp.xz - vec2(0.0, hc);
-    float hx1 = chl_hb(hq1, cn);
-    float hx0 = chl_hb(hq2, cn);
-    float hz1 = chl_hb(hq3, cn);
-    float hz0 = chl_hb(hq4, cn);
-    vec3 nmac = normalize(vec3(hx0 - hx1, 2.0 * hc, hz0 - hz1));
-    vec2 hr1 = hmc + vec2(4.0, 0.0);
-    vec2 hr2 = hmc - vec2(4.0, 0.0);
-    vec2 hr3 = hmc + vec2(0.0, 4.0);
-    vec2 hr4 = hmc - vec2(0.0, 4.0);
-    float mring = 0.25 * (chl_mass(hr1) + chl_mass(hr2) + chl_mass(hr3) + chl_mass(hr4));
-    float ao = clamp(1.0 - max(mring - hm, 0.0) * 0.09, 0.55, 1.0);
-    float shd = 1.0;
-    for (int k = 1; k < 17; k++) {{
-      float sk = float(k) * hc * 1.35;
-      vec3 sp = hp + kdir * sk + vec3(0.0, 0.0004, 0.0);
-      float shh = chl_h(sp.xz, cn);
-      shd = min(shd, clamp(1.0 - (shh - sp.y) / (hc * 0.45), 0.0, 1.0) + float(k) * 0.008);
-    }}
-    shd = clamp(shd, 0.0, 1.0);
-    if (airz > 0.0004 && q8 > 0.01) {{
-      float lsc = (airz - hp.y) / max(kdir.y, 0.05);
-      vec2 sxz = hp.xz + kdir.xz * lsc;
-      vec2 scm = (sxz + 1.0) * 0.5 * cn;
-      float sbm = chl_mass(scm);
-      vec2 snuv = sxz * 0.012 + vec2(q9 * 7.0, q9 * 3.0);
-      float spat = textureLod(sampler2D(sampler_noise_hq, sampler_noise_hq_samp), snuv, 0.0).x;
-      vec2 sgc = floor((sxz + 1.0) * 0.5 * {CHL_AIRG} * 1.2);
-      float sspk = step(chl_hash(sgc + 91.7), 0.45);
-      float sden = smoothstep(1.5, 4.0, sbm) * smoothstep(0.42, 0.55, spat);
-      shd *= 1.0 - 0.55 * sden * sspk * smoothstep(0.0, 0.004, airz);
-    }}
-    vec2 hgr = -nmac.xz / max(nmac.y, 0.5);
-    hgr *= min(1.0, 1.0 / max(length(hgr), 0.001));
-    vec2 gpos = (hp.xz + 1.0 + hgr * (hp.y * 0.4)) * 0.5 * {CHL_GRAINS};
-    float stray = 0.05 * smoothstep(0.6, 2.0, mring);
-    vec2 cluv = gpos / 256.0 * 0.23;
-    float clump = textureLod(sampler2D(sampler_noise_lq, sampler_noise_lq_samp), cluv, log2(max(fw * 0.23, 1.0))).x;
-    float covThin = smoothstep(0.03, 0.35, hm) * smoothstep(0.52, 0.7, clump + 0.3 * smoothstep(0.1, 0.45, hm));
-    float covC = max(max(smoothstep(0.3, 0.65, hm), covThin), stray);
-    float covA = clamp((hm - 0.3) * 1.5, 0.0, 1.0);
-    float covB = clamp(hm - 1.2, 0.0, 1.0);
-    float sbase = 0.22 + 0.3 * fract(q15 * 0.37);
-""" + chl_grain_layer("glc", (0.71, 0.23, 57.0, 213.0), "covC") + chl_grain_layer("gla", (0.0, 0.0, 0.0, 0.0), "covA") \
-    + chl_grain_layer("glb", (0.37, 0.61, 131.0, 71.0), "covB") \
-    + chl_grain_shade("glc", "shC", "mix(1.0, 0.6, step(0.4, hm))") + chl_grain_shade("gla", "shA", "mix(1.0, 0.85, step(1.3, hm))") \
-    + chl_grain_shade("glb", "shB", "1.0") + ramp("savg", "sbase") + f"""
-    float glod = smoothstep(0.85, 0.4, fw);
-    float fql = log2(max(fw, 1.0));
-    vec2 nuv = gpos / 256.0;
-    vec4 spkv = textureLod(sampler2D(sampler_noise_lq, sampler_noise_lq_samp), nuv, fql);
-    float spk = spkv.x;
-    float spk2 = spkv.y;
-    vec3 farc = savg * (0.34 + 0.56 * spk) * (0.1 + 1.55 * pow(clamp(dot(nmac, kdir) * 0.75 + 0.25, 0.0, 1.0), 2.0) * shd) * ao
-              + NOKKVI_TEXT * smoothstep(0.9, 1.0, spk2) * pow(max(dot(reflect(-kdir, nmac), -rd), 0.0), 12.0) * 1.2 * shd;
-    vec3 deep = savg * 0.55 * (0.1 + 1.55 * pow(clamp(dot(nmac, kdir) * 0.75 + 0.25, 0.0, 1.0), 2.0) * shd) * ao;
-    float bev = 1.0 - max(abs(hp.x), abs(hp.z));
-    vec2 bout = mix(vec2(0.0, sign(hp.z)), vec2(sign(hp.x), 0.0), step(abs(hp.z), abs(hp.x)));
-    vec3 pn = normalize(vec3(0.0, 1.0, 0.0) + vec3(bout.x, 0.0, bout.y) * 2.5 * smoothstep(0.012, 0.0, bev));
-    pn = mix(pn, vec3(bout.x, 0.0, bout.y), edge);
-    vec3 rr = reflect(rd, pn);
-    float fres = 0.05 + 0.95 * pow(1.0 - max(dot(-rd, pn), 0.0), 5.0);
-    vec3 envc = chl_env(rr, kdir);
-    float rrs = 0.0;
-    vec3 rrc = vec3(0.0);
-    for (int m2 = 1; m2 < 11; m2++) {{
-      float rt = float(m2) * hmx / max(rr.y, 0.05) * 0.1;
-      vec3 rp = hp + rr * rt;
-      float rhh = chl_h(rp.xz, cn);
-      float rin = clamp((rhh - rp.y) / (hmx * 0.1), 0.0, 1.0) * (1.0 - rrs);
-      rrc += savg * 0.42 * rin * (1.0 - 0.07 * float(m2));
-      rrs += rin;
-    }}
-    vec2 bruv = vec2(length(hp.xz) * 1.5, 0.37);
-    float bnz = textureLod(sampler2D(sampler_noise_lq, sampler_noise_lq_samp), bruv, log2(max(3.3 * fw, 1.0))).x;
-    vec2 bruv2 = vec2(length(hp.xz) * 0.9, 0.61);
-    float bnz2 = textureLod(sampler2D(sampler_noise_lq, sampler_noise_lq_samp), bruv2, 0.0).y;
-    vec3 metal = mix(mix(NOKKVI_TEXT, NOKKVI_ACCENT, 0.35), NOKKVI_ACCENT, 0.25 * (1.0 - fres)) * 0.55 * (0.8 + 0.25 * bnz + 0.2 * bnz2);
-    vec3 platec = (envc * (1.0 - 0.75 * rrs) + rrc * rrs) * metal * mix(0.45, 0.9, fres) * 1.3;
-    vec3 btan = normalize(vec3(-hp.z, 0.0, hp.x) + vec3(0.0001, 0.0, 0.0));
-    vec3 bhv = normalize(kdir - rd);
-    float btd = dot(btan, bhv);
-    float bsin = sqrt(max(1.0 - btd * btd, 0.0));
-    platec += metal * pow(bsin, 120.0) * pow(max(dot(pn, bhv), 0.0), 8.0) * (0.3 + 1.2 * bnz * bnz) * 0.3 * shd;
-    float pa = abs(chl_amp(hmc, cfo));
-    vec2 hgx = hmc + vec2(1.0, 0.0);
-    vec2 hgz = hmc + vec2(0.0, 1.0);
-    float pgx = abs(chl_amp(hgx, cfo)) - pa;
-    float pgz = abs(chl_amp(hgz, cfo)) - pa;
-    float fwpx = q20 * length(vec2(pgx, pgz)) * fw * cn / {CHL_GRAINS};
-    float fph = q20 * pa;
-    float fdst = abs(fract(fph + 0.5) - 0.5);
-    float fdpx = fdst / max(fwpx, 0.00001);
-    float ford = floor(fph + 0.5);
-    float fwave = q17 * exp(-0.5 * (ford - q18 * 7.0) * (ford - q18 * 7.0));
-    float fres0 = min(texsize.x, texsize.y) / 720.0;
-    float fsig = max(0.7 * fres0, 0.45) * (1.0 + 0.6 * fwave);
-    float fline = exp(-fdpx * fdpx / (2.0 * fsig * fsig)) * smoothstep(0.5, 0.05, fdst) * min(1.0, 0.7 * fres0 / 0.45);
-    float fglow = exp(-fdpx / (2.2 * fres0 * (1.0 + 2.0 * fwave))) * 0.14 * smoothstep(0.5, 0.1, fdst);
-    float fsand = 1.0 - smoothstep(0.05, 0.55, hm + 0.6 * mring);
-    float famp = exp(-0.55 * fph) * smoothstep(0.02, 0.12, pa) * fsand * (1.0 - edge) * (0.5 + 0.5 * fres) / (1.0 + 0.35 * tsurf);
-""" + ramp("frc", "fract(ford * 0.173 + 0.12)") + f"""
-    platec += frc * (fline * 0.75 + fglow) * famp * (0.45 + 2.6 * fwave);
-    platec *= 0.25 + 0.75 * shd;
-    vec3 sidec = NOKKVI_BG * 0.3 + envc * metal * 0.25 + NOKKVI_TEXT * 0.35 * smoothstep(-0.0025, 0.0, hp.y);
-    platec = mix(platec, sidec, edge);
-    float onsand = 1.0 - edge;
-    vec3 base = mix(platec, deep, smoothstep(0.85, 1.05, hm) * onsand);
-    vec3 nearc = mix(base, shC, glca * onsand);
-    nearc = mix(nearc, shA, glaa * onsand);
-    nearc = mix(nearc, shB, glba * onsand);
-    vec3 farcv = mix(base, farc, clamp(max(hm - 0.08, 0.0) * 2.2, 0.0, 1.0) * onsand);
-    col = mix(farcv, nearc, glod);
-    }} else {{
-      tsurf = 1000.0;
-      hp = ro + rd * 50.0;
-    }}
-  }}
-""" + f"""
-  if (airz > 0.0004 && q8 > 0.01) {{
-    float aalp = 0.0;
-    vec3 acol = vec3(0.0);
-""" + "".join(chl_air_band(b) for b in range(3)) + f"""
-    col = mix(col, acol, aalp);
-  }}
-  vec3 wp = mix(hp, ro + rd * 50.0, step(999.0, tsurf));
-  float tdep = min(length(wp - ro), 50.0);
-  col *= 1.6;
-  col = clamp((col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14), 0.0, 1.0);
-  float paz = q27;
-  float pel = q28;
-  float pdi = q29;
-  vec3 ptg = vec3(q30, 0.0, q31);
-  float pfo = q32;
-  vec3 pdir = vec3(cos(pel) * sin(paz), sin(pel), cos(pel) * cos(paz));
-  vec3 pro = ptg + pdi * pdir;
-  vec3 pfw = -pdir;
-  vec3 prt = vec3(cos(paz), 0.0, -sin(paz));
-  vec3 pup = cross(prt, pfw);
-  vec3 pv = wp - pro;
-  float pz = dot(pv, pfw);
-  vec2 ppr = vec2(dot(pv, prt), dot(pv, pup)) * pfo / max(pz, 0.001);
-  vec2 huv = ppr / s + 0.5;
-  vec2 hed = min(huv, 1.0 - huv);
-  float hok = step(0.001, pz) * step(0.0, min(hed.x, hed.y)) * step(4.5, frame);
-  vec4 hs = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), huv, 0.0);
-  hok *= hs.a;
-  vec3 cqd = abs(dFdx(col)) + abs(dFdy(col));
-  vec3 hcl = clamp(hs.rgb, col - cqd, col + cqd);
-  col = mix(col, hcl, {CHL_TAA} * hok);
-  float coc = q19 * abs(1.0 - cdist / max(tdep, 0.001));
-  float cpx = min(coc, 0.03) * min(texsize.x, texsize.y);
-  float hlod = clamp(log2(max(cpx, 1.0)), 0.0, 5.0);
-  vec2 hoff = exp2(hlod) * 0.5 * texsize.zw;
-  float hlod1 = max(hlod - 1.0, 0.0);
-  vec2 hoff2 = vec2(hoff.x, -hoff.y);
-  vec2 huv1 = huv + hoff;
-  vec2 huv2 = huv - hoff;
-  vec2 huv3 = huv + hoff2;
-  vec2 huv4 = huv - hoff2;
-  vec4 hb = textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), huv, hlod1) * 0.4;
-  hb += textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), huv1, hlod1) * 0.15;
-  hb += textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), huv2, hlod1) * 0.15;
-  hb += textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), huv3, hlod1) * 0.15;
-  hb += textureLod(sampler2D(sampler_prev_comp, sampler_prev_comp_samp), huv4, hlod1) * 0.15;
-  col = mix(col, hb.rgb, smoothstep(0.7, 3.5, cpx) * 0.75 * hok);
-  vec2 dthq = floor(uv * texsize.xy) + vec2(mod(frame, 64.0) * 7.0, mod(frame, 61.0) * 3.0);
-  col += (chl_hash(dthq) - 0.5) / 255.0;
-  col *= 0.86 + 0.14 * smoothstep(1.4, 0.35, length(p));
-  ret = col;
- }}"""
-
-CHL_SHOTS = [
-    # elevation, distance, target radius, focal length, orbit rate, aperture,
-    # how far past the plate's far edge the top corners may land, square-on
-    (0.85, 2.4, 0.12, 1.6, 0.022, 0.002, 0.0, 0.0),
-    (0.34, 1.2, 0.30, 1.9, 0.012, 0.006, 4.0, 0.0),
-    (0.66, 0.6, 0.35, 1.7, 0.018, 0.018, 0.0, 0.0),
-    (1.42, 2.4, 0.08, 1.5, 0.008, 0.002, 0.0, 0.0),
-    (0.50, 1.0, 0.28, 1.7, 0.035, 0.005, 0.0, 0.0),
-    (0.92, 2.6, 0.0, 1.55, 0.0, 0.0015, 0.9, 1.0),
-]
-def chl_shot_pick(var, col):
-    e = f"{CHL_SHOTS[-1][col]}"
-    for i in range(len(CHL_SHOTS) - 2, -1, -1):
-        e = f"if(equal(act, {i}), {CHL_SHOTS[i][col]}, {e})"
-    return f"{var} = {e};\n"
-
-def chl_smin(a, b, k="0.25"):
-    """EEL: a = smooth min(a, b) (never above the true min, so a limit it
-    enforces still holds; no kink in the camera's motion where it switches)."""
-    return (f"smh = max({k} - abs({a} - {b}), 0) / {k};\n"
-            f"{a} = min({a}, {b}) - smh * smh * {k} * 0.25;\n")
-
-def chl_smax(a, b, k="0.12"):
-    """EEL: a = smooth max(a, b) (never below the true max)."""
-    return (f"smh = max({k} - abs({a} - {b}), 0) / {k};\n"
-            f"{a} = max({a}, {b}) + smh * smh * {k} * 0.25;\n")
-
-def chl_frame_clamp():
-    """EEL: the largest camera distance at which the frame's four corner rays
-    land on the plate (|x|, |z| <= 0.97), into dmax. The top corners may land
-    `cedg` further out along the axis the camera looks down (the far edge: the
-    extra is split between x and z by the azimuth, so it turns with the orbit).
-    Every limit is a smooth function of the eased camera values and the corners
-    are combined by a smooth min, so the clamp never kinks the motion."""
-    s = ("sxh = 0.5 * aspecty; syh = 0.5 * aspectx;\n"
-         "ce = cos(celv); se = sin(celv); ca = cos(caz); sa = sin(caz);\n"
-         "dmax = 99;\n")
-    for px, py in (("sxh", "syh"), ("-sxh", "syh"), ("sxh", "-syh"), ("-sxh", "-syh")):
-        top = not py.startswith("-")
-        s += (f"ry = -se * cfo + ce * ({py});\n"
-              f"rx = -ce * sa * cfo + ca * ({px}) - sa * se * ({py});\n"
-              f"rz = -ce * ca * cfo - sa * ({px}) - ca * se * ({py});\n"
-              "ryc = min(ry, -0.001);\n"
-              "hx = ce * sa - se * rx / ryc; hz = ce * ca - se * rz / ryc;\n"
-              + ("limx = 0.97 + cedg * sa * sa; limz = 0.97 + cedg * ca * ca;\n" if top else "limx = 0.97; limz = 0.97;\n") +
-              "dxl = if(above(hx, 0), (limx - ctx) / max(hx, 0.0001), (limx + ctx) / max(-hx, 0.0001));\n"
-              "dzl = if(above(hz, 0), (limz - ctz) / max(hz, 0.0001), (limz + ctz) / max(-hz, 0.0001));\n"
-              + chl_smin("dmax", "dxl") + chl_smin("dmax", "dzl"))
-    return s
-
-CHL_INIT = ("pulse = 0; pop = 0; " + BEATS_INIT +
-            " kk = 4; kk_m = 4; kgoal = 4; sincer = 0; gam = 0; gam_m = 0; lsm = 1; tavg = 1;"
-            " ww2 = 0; ww2_m = 0; snap2 = 0; vis = -1; dux = 0.5; duy = 0.5; damp = 10; kmin = 3.0; kmax = 10.0;"
-            " tsm = 1; lvb = 0; lvm = 0; lvt = 0; lref = 0; silt = 0; lrt = 0; lowt = 0; kaz = 0.8; kel = 0.42; fden = 2; fden_m = 2; flt = 9; fls = 0; act = 0; acttm = 16; sgn = 1;"
-            " cel = 0.85; cel_m = 0.85; cdi = 2.4; cdi_m = 2.4; ctx = 0; ctx_m = 0; ctz = 0; ctz_m = 0;"
-            " cfo = 1.6; cfo_m = 1.6; caz = 0.6; azr = 0.02; azr_m = 0.02; cap = 0.002; cap_m = 0.002;"
-            " cedg = 0; cedg_m = 0; csq = 0; csq_m = 0; tang = 0; airt = 9; airv = 0; airs = 0; aircool = 0;"
-            " pcaz = 0.6; pcel = 0.85; pcdi = 1; pctx = 0; pctz = 0; pcfo = 1.6; dfin = 1; celv = 0.85;")
-CHL_FRAME = (PULSE + "dt = min(1 / max(fps, 1), 0.1);\n" + BEATS + """loud = (bass + mid + treb) / 3;
-lsm = lsm + (loud - lsm) * (1 - exp(-dt / 0.5));
-idle = equal(bass, 1) * equal(mid, 1) * equal(treb, 1) * equal(bass_att, 1);
-silent = max(below(lsm, 0.06), idle);
-rho = exp(-dt / 4.15);
-lgo = above(frame, 60) * (1 - idle);
-lvb = lvb + lgo * log(rho / max(1 - bass * (1 - rho), 0.2));
-lvm = lvm + lgo * log(rho / max(1 - mid * (1 - rho), 0.2));
-lvt = lvt + lgo * log(rho / max(1 - treb * (1 - rho), 0.2));
-lvl = (lvb + lvm + lvt) / 3;
-gap = max(below(loud, 0.02), idle);
-silt = if(gap, silt + dt, silt);
-lrt = if((1 - gap) * above(silt, 0.5), 10, max(lrt - dt, 0));
-silt = if(gap, silt, 0);
-lowt = if(below(lvl - lref, -0.3), lowt + dt, if(above(lvl - lref, -0.15), 0, lowt));
-ltau = if(above(lrt, 0), 1.5, if(above(lvl, lref), 6, if(above(lowt, 15), 8, 45)));
-lref = if(below(frame, 180), lvl, lref + (lvl - lref) * (1 - exp(-dt / ltau)));
-gamg = if(silent, 0, min(2.45 * exp(2.2 * (lvl - lref)), 3.2));
-""" + ease("gam", "gamg", "0.35") + """q2 = gam;
-bnc = min(max((gam - 0.95) / 0.35, 0), 1);
-rol = 1 - min(max((gam - 0.7) / 0.3, 0), 1);
-q13 = 1.9 / (1 + 0.12 * gam);
-q14 = 0.022 * (0.6 + 0.4 * min(q5, 1)) * bnc * min(gam, 2) * 0.5;
-vpick = below(vis, 0) * above(frame, 2);
-vh = int(bass * 977 + mid * 631 + treb * 401 + rand(1000));
-vis = if(vpick, vh % 20, vis);
-vv = max(vis, 0); fam = vv % 10;
-dux = if(vpick, if(below(fam, 3), 0.5, if(below(fam, 5), 0.35, if(equal(fam, 5), 0.2, if(equal(fam, 6), 0.5, if(equal(fam, 7), 0.44, if(equal(fam, 8), 0.31, 0.27)))))), dux);
-duy = if(vpick, if(below(fam, 3), 0.5, if(below(fam, 5), 0.35, if(equal(fam, 5), 0.2, if(equal(fam, 6), 0.34, if(equal(fam, 7), 0.5, if(equal(fam, 8), 0.43, 0.38)))))), duy);
-kmin = if(vpick, 2.6 + (int(vh / 3) % 5) * 0.2, kmin);
-kmax = if(vpick, 9.4 + (int(vh / 11) % 7) * 0.25, kmax);
-damp = if(vpick, 5 + int(vh / 13) % 4, damp);
-kaz = if(vpick, (int(vh * 7) % 628) / 100, kaz);
-kel = if(vpick, 0.34 + (int(vh / 17) % 4) * 0.04, kel);
-act = if(vpick, int(vh / 5) % 6, act);
-q4 = dux; q6 = duy; q11 = damp; q15 = kaz; q16 = kel;
-tone = (mid_att + 2 * treb_att) / (bass_att + mid_att + treb_att + 0.01);
-tavg = if(below(frame, 3), tone, tavg + (tone - tavg) * (1 - exp(-dt / 10)));
-tsm = if(below(frame, 3), tone, tsm + (tone - tsm) * (1 - exp(-dt / 2)));
-kt = kmin + (kmax - kmin) * min(max(0.64 + (tsm / max(tavg, 0.1) - 1) * 2.2, 0), 1);
-ktq = kt;
-snr = rand(1000) / 1000 + bass * 1.7; snr = snr - int(snr);
-sev = below(fam, 3);
-smm = max(1, int(ktq * (0.3 + 0.45 * snr)));
-smm = if(sev, max(2, 2 * int(smm / 2 + 0.5)), smm);
-snn = int(sqrt(max(ktq * ktq - smm * smm, 0)) + 0.5);
-snn = if(sev, 2 * int(snn / 2 + 0.5), snn);
-ksnap = sqrt(smm * smm + snn * snn);
-kgoal = if(below(frame, 4), ksnap, kgoal);
-kk = if(below(frame, 4), ksnap, kk); kk_m = if(below(frame, 4), ksnap, kk_m);
-sincer = sincer + dt;
-forced = above(sincer, 34);
-rt1 = trig * above(sincer, 18) * above(abs(kt - kgoal), 0.6);
-retune = min(rt1 + forced, 1) * above(gam, 0.3);
-knew = if(forced * below(abs(kt - kgoal), 0.8), if(above(kgoal, 0.5 * (kmin + kmax)), kgoal - 1.2, kgoal + 1.2), kt);
-ktq = knew;
-snr = rand(1000) / 1000 + bass * 1.7; snr = snr - int(snr);
-sev = below(fam, 3);
-smm = max(1, int(ktq * (0.3 + 0.45 * snr)));
-smm = if(sev, max(2, 2 * int(smm / 2 + 0.5)), smm);
-snn = int(sqrt(max(ktq * ktq - smm * smm, 0)) + 0.5);
-snn = if(sev, 2 * int(snn / 2 + 0.5), snn);
-ksnap = sqrt(smm * smm + snn * snn);
-ksnap = if(below(abs(ksnap - kgoal), 0.3), ksnap + if(above(ksnap, 6), -1, 1), ksnap);
-kgoal = if(retune, ksnap, kgoal);
-snap2 = if(retune, -0.6 + 1.6 * min(max((treb_att / (bass_att + 0.05) - 0.5) * 0.8, 0), 1), snap2);
-sincer = if(retune, 0, sincer);
-""" + ease("kk", "kgoal", "0.35") + "q1 = kk * 3.14159265;\nq12 = (36 * bnc - 9 * gam * rol) * min(max(7.5 / max(kk, 0.1), 1), 2.6);\n" + ease("ww2", "snap2", "1.0") + """q10 = ww2;
-flt = if(trig * above(bs1, 0.9) + retune, 0, flt + dt);
-fls = if(trig * above(bs1, 0.9), min(bs1 * 0.7, 1), if(retune, 1, fls));
-q17 = fls * exp(-flt / 0.9);
-""" + ease("fden", "0.45 + 0.35 * min(gam, 2.5)", "0.5") + """q20 = fden;
-aircool = max(aircool - dt, 0);
-launch = trig * above(bs1, 0.9) * below(aircool, 0.001) * above(gam, 0.5);
-aircool = if(launch, 2.2, aircool);
-airt = if(launch, 0, airt + dt);
-airv = if(launch, 0.08 + (0.06 + 0.05 * min(max(bs1 - 0.5, 0), 1)) * min(gam, 2), airv);
-airs = if(launch, rand(1000) / 1000, airs);
-q7 = airt; q8 = airv; q9 = airs;
-pcaz = caz; pcel = celv; pcdi = dfin; pctx = ctx; pctz = ctz; pcfo = cfo;
-acttm = acttm - dt; chg = below(acttm, 0);
-act = if(chg, (act + 1 + int(rand(5))) % 6, act);
-acttm = if(chg, 14 + rand(1000) / 1000 * 8, acttm);
-sgn = if(chg, if(below(rand(100), 50), -1, 1), sgn);
-tang = if(chg + vpick, rand(628) / 100, tang);
-""" + chl_shot_pick("elg", 0) + chl_shot_pick("dig", 1) + chl_shot_pick("trg", 2) + chl_shot_pick("fog", 3)
-    + chl_shot_pick("azrg", 4) + chl_shot_pick("apg", 5) + chl_shot_pick("edg", 6) + chl_shot_pick("sqg", 7)
-    + ease("cel", "elg", "3.0") + ease("cdi", "dig", "3.0") + ease("ctx", "trg * cos(tang)", "3.0")
-    + ease("ctz", "trg * sin(tang)", "3.0") + ease("cfo", "fog", "3.0") + ease("azr", "azrg * sgn", "3.0")
-    + ease("cap", "apg", "3.0") + ease("cedg", "edg", "2.5") + ease("csq", "sqg", "2.5") + """caz = caz + azr * dt;
-sqt = int((caz + 25.1327412) / 1.5707963 + 0.5) * 1.5707963 - 25.1327412;
-caz = caz + (sqt - caz) * csq * (1 - exp(-dt / 1.6));
-caz = caz - 6.2831853 * int(caz / 6.2831853);
-celv = cel;
-celmin = atan(0.5 * aspectx / cfo) + 0.07;
-""" + chl_smax("celv", "celmin") + chl_frame_clamp() + """dfin = cdi;
-""" + chl_smin("dfin", "dmax") + """dfin = max(dfin, 0.05);
-q21 = caz; q22 = celv; q23 = dfin; q24 = ctx; q25 = ctz; q26 = cfo;
-q27 = pcaz; q28 = pcel; q29 = pcdi; q30 = pctx; q31 = pctz; q32 = pcfo;
-q18 = flt; q19 = cap;
-""")
-
-presets["nokkvi - chladni"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, CHL_WARP, CHL_COMP,
-                                     init=CHL_INIT, frame=CHL_FRAME)
-
 # Julia lace (no cover) ---------------------------------------------------
 # An endless dive into a Julia set's spiral vortex, the set drawn as fine
 # lace (the distance estimate turns its boundary into hairline ridges with a
