@@ -962,8 +962,13 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # beat strength its size, the mids how turbulent it gets, the waveform's
 # harmonics 2 to 5 (captured from get_wave into the data row on the spawn
 # frame) bend its rim; species cycle so neighbours differ. Each beat lights
-# the dense ink and the young ring's core (heat, in the theme's warm colour);
-# the mids stir the whole tank; loudness sets the ink clock and how soon the
+# the dense ink and the young ring's core (heat, in the theme's warm colour)
+# and sends a band of that light out from the tank's centre through the ink
+# bodies (5 units a second); it also kicks a damped spring (kvel / kpos, in
+# ink time, so it plays as the clock resumes after the camera move) whose
+# velocity scales the whole tank about its centre and twists it about a
+# slowly turning axis: the ink thumps outward and recoils. The mids stir the
+# whole tank (0.1 to 0.32); loudness sets the ink clock and how soon the
 # next drop may come (0.6-0.9 ink-seconds on a beat, 3 without one, and never
 # before the oldest of the IK_NS slots has finished its life).
 # Camera: it stands still and moves only with the music (starfield nebula's
@@ -985,7 +990,8 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # unpacks); q4-q6 the same last frame; q7 echo weight while the camera moves
 # (> 0) or minus the TAA weight; q8 spawn flag
 # (slot + 1 on the spawn frame); q9 ink clock; q10 mood + species ramp offset
-# (fraction); q11 turbulence; q12 this frame's ink-clock step (0 while the
+# (fraction); q11 turbulence (fraction) + the kick spring's velocity
+# ((v + 4) * 100, integer part); q12 this frame's ink-clock step (0 while the
 # camera moves); q13/q14 the last two beats (age + 16 * strength in
 # hundredths); q15/q16 the look-at point's offsets across and up the view
 # (12 bits each), now and last frame; q17-q24 slot ages; q25-q32 slot codes
@@ -1496,7 +1502,9 @@ vec3 ik_curl(vec3 cup) {
     ret_alpha = hnow.w;
   } else if (ipx.y >= 1 && cxy.x < vt * vn && cxy.y < vt * vn && ckk < vn && ik_vq() > 0.5) {
     vec3 wp = @BMIN@ + (vec3(cxy.x - ctx * vn, ckk, cxy.y - cty * vn) + 0.5) / vn * @BSIZE@;
-    vec3 wv = ik_curl(wp) * q11;
+    float wkv = (floor(q11) / 100.0 - 4.0) * (1.0 - smoothstep(1.5, 2.3, length(wp)));
+    vec3 wka = normalize(vec3(sin(q9 * 0.37), cos(q9 * 0.23), sin(q9 * 0.31 + 1.0)) + 0.001);
+    vec3 wv = ik_curl(wp) * fract(q11) + wp * wkv + cross(wka, wp) * wkv;
     vec3 wdep = vec3(0.0);
     float whd = 0.0;
 """) + "".join(ik_warp_slot(k) for k in range(IK_NS)) + ik_sub("""
@@ -1752,6 +1760,12 @@ IKHKSEL
     float hfre = pow(1.0 - max(dot(hn, -rd), 0.0), 4.0);
     hlit = mix(hlit, mix(wdeep, wtop * 1.6, hn.y * 0.5 + 0.5), hfre * 0.55);
     hlit += glowc * hsp.w * mglow * 0.3;
+    float hrr = length(hp);
+    float hwa = ik_ba(q13);
+    float hwb = ik_ba(q14);
+    float hw1 = (hrr - 5.0 * hwa) / 0.45;
+    float hw2 = (hrr - 5.0 * hwb) / 0.45;
+    hlit += glowc * (ik_bs(q13) * exp(-hw1 * hw1 - hwa / 0.45) + ik_bs(q14) * exp(-hw2 * hw2 - hwb / 0.45)) * 0.7;
     float hfog = exp(-max(thit - 2.2, 0.0) * 0.11);
     col = mix(water, hlit, hfog);
     if (tmed > 39.0) tmed = thit;
@@ -1818,7 +1832,7 @@ IK_CODE0 = [ik_code(3, 0, 1, 2, 1, 5, 1, 2), ik_code(1, 1, 0, 1, 1, 41, 2, 1), i
 IK_INIT = (BEATS_INIT + " inkt = 0; since = 2; bavg = 1; mavg = 1; tavg = 1; lastcq = int(rand(3)); lastdi = int(rand(64));"
            " loud = 1; loud_m = 1; rate = 1; rate_m = 1; turb = 0.12; turb_m = 0.12; mood = 0; spb = 0.1; spawnf = 0;"
            " az = rand(628) / 100; el = 0.15; lens = 0.62; az0 = az; el0 = el; lens0 = lens; az1 = az; el1 = el; lens1 = lens;"
-           " rol = 0; rol0 = 0; rol1 = 0; rdir = 1; lpx = 0; lpy = 0; lpx0 = 0; lpy0 = 0; lpx1 = 0; lpy1 = 0;"
+           " rol = 0; rol0 = 0; rol1 = 0; rdir = 1; kvel = 0; kpos = 0; lpx = 0; lpy = 0; lpx0 = 0; lpy0 = 0; lpx1 = 0; lpy1 = 0;"
            " mvt = 9; mvd = 0.3; odir = 1; tsb = 0.5; ibi = 0.5; smv = 0; nmv = 0; pvalid = 0; "
            + " ".join(f"ika{k} = {IK_AGE0[k]}; ikc{k} = {IK_CODE0[k]};" for k in range(IK_NS)))
 def ik_eel_drop(k):
@@ -1847,7 +1861,7 @@ IK_FRAME = "dt = min(1 / max(fps, 1), 0.1);\n" + BEATS + f"""tsb = tsb + dt;
 ibi = if(trig, ibi + (min(tsb, 1.2) - ibi) * 0.4, ibi);
 tsb = if(trig, 0, tsb);
 en = min((1.2 * bass_att + mid_att + 0.8 * treb_att) / 3, 2);
-""" + ease("loud", "en", "1.0") + ease("rate", f"{IK_RATE} * (0.8 + 0.4 * min(max(loud - 0.6, 0), 1))", "2.0") + f"""
+""" + ease("loud", "en", "1.0") + ease("rate", f"{IK_RATE} * (0.65 + 0.7 * min(max(loud - 0.5, 0), 1))", "1.5") + f"""
 mvt = mvt + dt; smv = smv + dt;
 gom = max(trig, above(smv, 4)) * above(mvt, mvd) * above(smv, 0.22);
 kk = if(trig, min(max((bs1 - 0.8) / 0.8, 0), 1), 0.25);
@@ -1862,6 +1876,10 @@ mvs = min(max((mvx - 0.35) / 0.65, 0), 1); mvs = mvs * mvs * (3 - 2 * mvs);
 drg = frz * 0.85 * (1 - mvs);
 taaw = 0.8 * min(max((mvt - mvd) / 0.15, 0), 1);
 dts = dt * rate * (1 - frz);
+kdt = min(dts, 0.03);
+kvel = if(trig, min(kvel + 2.0 + 1.2 * kk, 3.2), kvel);
+kvel = kvel + (-324 * kpos - 12.6 * kvel) * kdt;
+kpos = kpos + kvel * kdt;
 inkt = inkt + dts;
 """ + "".join(f"ika{k} = min(ika{k} + dts, 99);\n" for k in range(IK_NS)) + f"""
 vis = equal(frame, 3);
@@ -1874,7 +1892,7 @@ old = 0; oa = ika0;
 """ + "".join(f"old = if(above(ika{k}, oa), {k}, old); oa = max(oa, ika{k});\n" for k in range(1, IK_NS)) + f"""go = max(trig * above(since, gap), above(since, 3)) * above(oa, {IK_LIFE - 0.8});
 bavg = bavg + (bass_att - bavg) * (1 - exp(-dt / 8)); mavg = mavg + (mid_att - mavg) * (1 - exp(-dt / 8)); tavg = tavg + (treb_att - tavg) * (1 - exp(-dt / 8));
 nb = bass_att / max(bavg, 0.01); nm = mid_att / max(mavg, 0.01); nt = treb_att / max(tavg, 0.01);
-""" + ease("turb", "0.12 + 0.09 * min(max(nm - 0.7, 0), 1.5)", "1.5") + f"""cent = (0.5 * nm + nt) / max(nb + nm + nt, 0.01);
+""" + ease("turb", "0.1 + 0.15 * min(max(nm - 0.7, 0), 1.5)", "1.0") + f"""cent = (0.5 * nm + nt) / max(nb + nm + nt, 0.01);
 nn = min(max(int(5 + (cent - 0.5) * 14 + rand(2) - 0.5), 3), 7) - 3;
 cq = (lastcq + 1 + above(rand(100), 75)) % 3;
 lastcq = if(go, cq, lastcq);
@@ -1901,7 +1919,7 @@ paz = if(pvalid, paz, az); pel = if(pvalid, pel, el); plq = if(pvalid, plq, lqi)
 q1 = az; q2 = el; q3 = lqi; q4 = paz; q5 = pel; q6 = plq;
 q15 = pqi; q16 = ppq;
 paz = az; pel = el; plq = lqi; ppq = pqi; pvalid = 1;
-q7 = if(frz, drg, -taaw); q8 = spawnf; q9 = inkt; q10 = mood + spb * 0.999; q11 = turb; q12 = dts;
+q7 = if(frz, drg, -taaw); q8 = spawnf; q9 = inkt; q10 = mood + spb * 0.999; q11 = int((min(max(kvel, -4), 4) + 4) * 100 + 0.5) + min(turb, 0.99); q12 = dts;
 q13 = min(ba1, 15.9) + 16 * int(bs1 * 100); q14 = min(ba2, 15.9) + 16 * int(bs2 * 100);
 """ + "".join(f"q{17 + k} = ika{k}; q{25 + k} = ikc{k};\n" for k in range(IK_NS))
 presets["nokkvi - living ink"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IK_WARP, ik_lod0(IK_COMP),

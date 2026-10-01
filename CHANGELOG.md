@@ -77,6 +77,10 @@ All notable changes to this project will be documented in this file.
 - Living Ink's camera holds still, then swings and twists to a new view of the tank on the beat.
 - Each Living Ink camera move freezes the ink and drags the frozen picture into an echo smear.
 - Each visit to Living Ink picks one of three lighting moods.
+- Each kick makes Living Ink's whole tank thump outward and twist, then recoil.
+- Each beat sends a band of warm light out through Living Ink's ink.
+- Louder music speeds up Living Ink's flow.
+- Busier mids stir Living Ink's tank harder.
 
 ### Fixed
 
