@@ -81,6 +81,8 @@ All notable changes to this project will be documented in this file.
 - Each beat sends a band of warm light out through Living Ink's ink.
 - Louder music speeds up Living Ink's flow.
 - Busier mids stir Living Ink's tank harder.
+- Living Ink's ink bodies swell and thin with the bass.
+- Treble sends fine ripples across Living Ink's glossy surfaces.
 
 ### Fixed
 

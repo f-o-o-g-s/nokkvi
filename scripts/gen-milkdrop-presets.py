@@ -967,7 +967,10 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # bodies (5 units a second); it also kicks a damped spring (kvel / kpos, in
 # ink time, so it plays as the clock resumes after the camera move) whose
 # velocity scales the whole tank about its centre and twists it about a
-# slowly turning axis: the ink thumps outward and recoils. The mids stir the
+# slowly turning axis: the ink thumps outward and recoils. The bass level
+# (fast attack, 0.22 s release) lifts the body field in the render, so the
+# bodies and young rings swell and thin with it (about their usual size); the treble level tilts the surface
+# normals with fine drifting noise, so the highlights ripple. The mids stir the
 # whole tank (0.1 to 0.32); loudness sets the ink clock and how soon the
 # next drop may come (0.6-0.9 ink-seconds on a beat, 3 without one, and never
 # before the oldest of the IK_NS slots has finished its life).
@@ -988,9 +991,9 @@ presets["nokkvi - starfield nebula"]["pixel_eqs_eel"] = (
 # (dim key, strong glow), and which ramp stops the three species take.
 # q map: q1/q2 azimuth, elevation; q3 lens and roll (12 bits each, ik_cam
 # unpacks); q4-q6 the same last frame; q7 echo weight while the camera moves
-# (> 0) or minus the TAA weight; q8 spawn flag
-# (slot + 1 on the spawn frame); q9 ink clock; q10 mood + species ramp offset
-# (fraction); q11 turbulence (fraction) + the kick spring's velocity
+# (> 0) or minus the TAA weight; q8 spawn flag (slot + 1 on the spawn frame)
+# + bass swell (fraction); q9 ink clock; q10 mood + 4 * treble ripple
+# (hundredths) + species ramp offset (fraction); q11 turbulence (fraction) + the kick spring's velocity
 # ((v + 4) * 100, integer part); q12 this frame's ink-clock step (0 while the
 # camera moves); q13/q14 the last two beats (age + 16 * strength in
 # hundredths); q15/q16 the look-at point's offsets across and up the view
@@ -1297,7 +1300,7 @@ IK_DYEBODY = ik_sub("""
       vec3 fq3 = fq * 4.3 + fcn * 0.3 + 0.29;
       float fno = ik_sn(fq1).x * 0.5 + texture(sampler_noisevol_hq, fq2).x * 0.3 + ik_snl(fq3) * 0.2;
       float fbs = smoothstep(0.05, 0.42, fsum);
-      fv = fbs * 1.3 - 0.26 - (fno - 0.5) * (1.25 - 0.45 * fbs);
+      fv = fbs * 1.3 - 0.26 - (fno - 0.5) * (1.25 - 0.45 * fbs) + (fract(q8) - 0.4) * 0.25;
       fsp = vec4(fvd.xyz / fsum, fvd.w);
     }
   }
@@ -1387,7 +1390,7 @@ vec2 ik_near(vec3 np, float nage, float ncode, float nslot) {
     nemit = smoothstep(-0.2, 0.5, nbase) * ((ik_bs(q13) * exp(-ne1 * ne1) + ik_bs(q14) * exp(-ne2 * ne2)) * 0.8 + smoothstep(0.4, 0.0, nage) * 2.0);
   }
   float nfade = smoothstep(@NF0@, @NF1@, nage);
-  return vec2((nbase - 0.22 - nfade * 1.3) * 1.8 * na2 * nsz * 14.0, nemit * (1.0 - nfade));
+  return vec2((nbase - 0.22 + (fract(q8) - 0.4) * 0.22 - nfade * 1.3) * 1.8 * na2 * nsz * 14.0, nemit * (1.0 - nfade));
 }
 """) + IK_DYEFN + ik_sub("""
 float ik_bf(vec3 fp, float ft, """) + ", ".join(f"vec4 fb{k}" for k in range(IK_NS)) + ik_sub(""", out vec4 fsp, out vec4 fax) {
@@ -1469,7 +1472,7 @@ vec3 ik_curl(vec3 cup) {
     int dpart = ipx.x - dslot * 2;
     vec4 dold = texelFetch(sampler2D(sampler_pc_main, sampler_pc_main_samp), ipx, 0);
     vec4 dnew = dold;
-    if (abs(q8 - float(dslot + 1)) < 0.5) {
+    if (abs(floor(q8) - float(dslot + 1)) < 0.5) {
       float dk1 = 2.0 + 2.0 * float(dpart);
       float dk2 = dk1 + 1.0;
       float dc1 = 0.0;
@@ -1596,7 +1599,7 @@ IK_COMP = IK_COMMON + IK_NEARFN + IK_CAMFN + " shader_body {\n" + HEAD + ik_sub(
   vec3 up = vec3(0.0);
   float vlens = ik_cam(q1, q2, q3, q15, ro, rt, up, fw);
   vec3 rd = normalize(fw + (p.x * rt + p.y * up) * vlens);
-  float mood = floor(q10 + 0.0005);
+  float mood = mod(floor(q10), 4.0);
   vec3 L = normalize(mix(mix(vec3(0.6, 0.75, -0.3), vec3(0.2, 1.0, -0.15), step(0.5, mood)), vec3(0.15, 1.0, 0.3), step(1.5, mood)));
   float mkey = mix(1.0, 0.8, step(1.5, mood));
   float mglow = mix(1.0, 1.8, step(1.5, mood));
@@ -1740,6 +1743,8 @@ IKHKSEL
     }
     hsp = mix(hs0, hsp, step(0.01, hsp.x + hsp.y + hsp.z));
     vec3 hn = -normalize(vec3(hbx - hb0, hby - hb0, hbz - hb0) + vec3(0.00001));
+    vec3 hrn = texture(sampler_noisevol_hq, hp * 1.9 + vec3(0.0, time * 0.35, 0.0)).xyz - 0.5;
+    hn = normalize(hn + hrn * (floor(q10 / 4.0) * 0.009));
     hn = normalize(hn - rd * max(dot(hn, rd), 0.0) * 1.05);
     float hdep = smoothstep(-0.05, 0.4, hd1);
     float hws = max(hsp.x + hsp.y + hsp.z, 0.001);
@@ -1832,7 +1837,7 @@ IK_CODE0 = [ik_code(3, 0, 1, 2, 1, 5, 1, 2), ik_code(1, 1, 0, 1, 1, 41, 2, 1), i
 IK_INIT = (BEATS_INIT + " inkt = 0; since = 2; bavg = 1; mavg = 1; tavg = 1; lastcq = int(rand(3)); lastdi = int(rand(64));"
            " loud = 1; loud_m = 1; rate = 1; rate_m = 1; turb = 0.12; turb_m = 0.12; mood = 0; spb = 0.1; spawnf = 0;"
            " az = rand(628) / 100; el = 0.15; lens = 0.62; az0 = az; el0 = el; lens0 = lens; az1 = az; el1 = el; lens1 = lens;"
-           " rol = 0; rol0 = 0; rol1 = 0; rdir = 1; kvel = 0; kpos = 0; lpx = 0; lpy = 0; lpx0 = 0; lpy0 = 0; lpx1 = 0; lpy1 = 0;"
+           " rol = 0; rol0 = 0; rol1 = 0; rdir = 1; kvel = 0; kpos = 0; bsw = 0; trp = 0; lpx = 0; lpy = 0; lpx0 = 0; lpy0 = 0; lpx1 = 0; lpy1 = 0;"
            " mvt = 9; mvd = 0.3; odir = 1; tsb = 0.5; ibi = 0.5; smv = 0; nmv = 0; pvalid = 0; "
            + " ".join(f"ika{k} = {IK_AGE0[k]}; ikc{k} = {IK_CODE0[k]};" for k in range(IK_NS)))
 def ik_eel_drop(k):
@@ -1877,6 +1882,9 @@ drg = frz * 0.85 * (1 - mvs);
 taaw = 0.8 * min(max((mvt - mvd) / 0.15, 0), 1);
 dts = dt * rate * (1 - frz);
 kdt = min(dts, 0.03);
+bswg = min(max((bass - 0.6) / 1.9, 0), 1);
+bsw = bsw + (bswg - bsw) * (1 - exp(-dt / if(above(bswg, bsw), 0.03, 0.22)));
+trp = trp + (min(max((treb - 0.4) / 1.5, 0), 1) - trp) * (1 - exp(-dt / 0.07));
 kvel = if(trig, min(kvel + 2.0 + 1.2 * kk, 3.2), kvel);
 kvel = kvel + (-324 * kpos - 12.6 * kvel) * kdt;
 kpos = kpos + kvel * kdt;
@@ -1919,7 +1927,7 @@ paz = if(pvalid, paz, az); pel = if(pvalid, pel, el); plq = if(pvalid, plq, lqi)
 q1 = az; q2 = el; q3 = lqi; q4 = paz; q5 = pel; q6 = plq;
 q15 = pqi; q16 = ppq;
 paz = az; pel = el; plq = lqi; ppq = pqi; pvalid = 1;
-q7 = if(frz, drg, -taaw); q8 = spawnf; q9 = inkt; q10 = mood + spb * 0.999; q11 = int((min(max(kvel, -4), 4) + 4) * 100 + 0.5) + min(turb, 0.99); q12 = dts;
+q7 = if(frz, drg, -taaw); q8 = spawnf + min(bsw, 0.99) * 0.999; q9 = inkt; q10 = mood + 4 * int(trp * 100) + spb * 0.999; q11 = int((min(max(kvel, -4), 4) + 4) * 100 + 0.5) + min(turb, 0.99); q12 = dts;
 q13 = min(ba1, 15.9) + 16 * int(bs1 * 100); q14 = min(ba2, 15.9) + 16 * int(bs2 * 100);
 """ + "".join(f"q{17 + k} = ika{k}; q{25 + k} = ikc{k};\n" for k in range(IK_NS))
 presets["nokkvi - living ink"] = preset({"decay": 0.0, "wave_a": 0.0, "zoom": 1.0}, IK_WARP, ik_lod0(IK_COMP),
