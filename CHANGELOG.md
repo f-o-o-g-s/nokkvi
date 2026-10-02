@@ -6,96 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Julia Lace now morphs between different Julia sets, from single spirals through feathery stars to starbursts.
-- Every beat sends a glowing ripple out from Julia Lace's vortex across the liquid.
 - The Fractal Voyage MilkDrop preset journeys through four fractals in turn: a Julia set, the Burning Ship, the Mandelbrot set and the dragon curve.
-- Each Fractal Voyage phase dives toward its fractal's centre and eases to a stop there.
-- Between fractals, Fractal Voyage's camera looks up at the moon while the scene blurs into the next one.
-- Each beat swells Fractal Voyage's moon and its reflection on the water.
-- Fractal Voyage moves on to its next fractal roughly every 45 seconds, sooner when the music is loud.
-- Each visit to Fractal Voyage's Julia phase shows a different set, from spiral lace to a galaxy, a snowflake and a dendrite.
-- Fractal Voyage's dragon curve unfolds from a single line as the camera sinks toward it.
-- On each beat, light runs outward through Fractal Voyage's Burning Ship and Mandelbrot set along their own contours.
 - The Fjord MilkDrop preset flies low down a winding Norwegian fjord between cliffs that rise straight out of the water.
-- Fjord's river glows with the music: the song's spectrum flows down the water as a glossy relief traced by neon contour lines.
-- On each kick, Fjord's river lines flare as the beat flows downstream.
-- Fjord's kick flares light up the water, its plankton and the cliff feet.
-- Fjord's water surface rises and falls with the music in real swells that travel down the fjord.
-- Each visit to Fjord picks a time of day: an overcast day, a low golden-hour sun, or a moonlit night with an aurora.
-- Fjord's aurora brightens with the spectrum and is mirrored in the water.
-- Fjord's distance and sky now blur into a soft, dreamlike glow, as if the camera were focused on the water.
-- Fjord's glowing water and ripples leave faint echoes as they move.
 - Press m, or choose Choose Preset… from the panel menu, to browse every MilkDrop preset in a searchable list.
-- The MilkDrop preset list plays each preset live as you scroll; Enter keeps the one on screen and locks it.
+- The MilkDrop preset list plays each preset live as you scroll, and Enter locks the one on screen.
 - Closing the MilkDrop preset list without choosing returns to the preset you started from.
 - In the MilkDrop preset list you can favorite or hide any preset, bring hidden ones back, or show only favorites.
-- The Starfield Nebula MilkDrop preset flies the starfield through a living nebula grown from the Predator Prey Spirals reaction.
-- Starfield Nebula's gas takes its colours from your theme's visualizer gradient.
-- Stars in Starfield Nebula leave wakes that the nebula grows into new fronts.
-- Starfield Nebula's star trails are pushed and bent by the gas.
-- Starfield Nebula's star trails take on the colour of the gas they cross.
-- Starfield Nebula's stars swirl with the gas, reversing direction when it does.
-- When Starfield Nebula's flight speeds up with the music, its gas swirls faster too.
-- Starfield Nebula's thick gas dims the stars behind it.
-- Thin patches in Starfield Nebula's gas open onto dark space full of stars.
-- Starfield Nebula's stars flow as thick, glossy liquid that refracts the gas behind it.
-- Starfield Nebula's stars merge into larger liquid bodies where they crowd together.
-- Starfield Nebula's liquid stars cast soft shadows on the gas.
-- Soft gas clouds drift past on Starfield Nebula's flight.
-- Starfield Nebula's scene stops on the beat and flows again between beats.
-- On each beat, Starfield Nebula's view is dragged to a new camera angle, leaving a motion smear.
-- Most of Starfield Nebula's camera angles tilt the scene steeply in perspective.
-- Starfield Nebula's camera changes lens on each beat, from wide to narrow.
-- At steep angles Starfield Nebula's picture folds back on itself at the edges.
-- Each camera drag melts Starfield Nebula's picture, smearing the gas and stars along the move.
-- Starfield Nebula's picture twists as the camera moves.
-- Harder kicks shift Starfield Nebula's camera further.
-- Starfield Nebula's camera drags quicken with the tempo.
+- The Starfield Nebula MilkDrop preset flies through liquid stars and a living nebula coloured by your theme.
 - The Pirate Signal MilkDrop preset shows nokkvi's pirate smiley as a broadcast on an LCD, over living sand and oil paint.
-- Pirate Signal's smiley pours paint from its rim, each part of the rim following its own slice of the spectrum.
-- On each beat, echoes of Pirate Signal's smiley bloom outward and melt into the sand.
-- Beats glitch Pirate Signal's picture with torn rows, split colours and stuck blocks.
-- Hard beats blow Pirate Signal's picture up into big LCD pixels for a moment.
-- Sharp treble breaks Pirate Signal's picture into static and sprinkles grains into the sand.
-- Pirate Signal's smiley blinks now and then and grins wider as the music gets louder.
-- Pirate Signal's smiley is a thick coin tilted in perspective.
-- On each beat Pirate Signal pauses, drags the coin to a new angle with motion blur, then flows again.
-- Each Pirate Signal drag also hops the smiley to a new spot on screen, landing with a little overshoot.
-- Pirate Signal's smiley dissolves into LCD blocks when the music goes quiet and snaps back on the beat.
 
 ### Changed
 
-- Julia Lace's spiralling dive speeds up as the music gets louder.
-- Julia Lace's dive lurches deeper on kicks.
-- Julia Lace's lace now lies in a dark, glossy liquid instead of a grey haze.
-- At shallow angles Julia Lace's liquid reflects the sky and a low moon.
-- Rippling light from the liquid plays over Julia Lace's lace.
+- Julia Lace now morphs between different Julia sets and lies in a dark, glossy liquid instead of a grey haze.
 - Living Ink is rebuilt as a 3D tank: drops of ink shoot into dark water from every direction and linger as drifting, curling clouds.
-- Living Ink's dense ink is drawn as glossy liquid bodies with soft translucent veils around them.
-- A Living Ink drop arrives on a kick about once a second and opens into a ring that sheds its own cloud.
-- Living Ink's three inks take their colours from your theme's visualizer gradient.
-- Living Ink's camera holds still, then swings and twists to a new view of the tank on the beat.
-- Each Living Ink camera move freezes the ink and drags the frozen picture into an echo smear.
-- Each visit to Living Ink picks one of three lighting moods.
-- Each kick makes Living Ink's whole tank thump outward and twist, then recoil.
-- Each beat sends a band of warm light out through Living Ink's ink.
-- Louder music speeds up Living Ink's flow.
-- Busier mids stir Living Ink's tank harder.
-- Living Ink's ink bodies swell and thin with the bass.
-- Treble sends fine ripples across Living Ink's glossy surfaces.
-
-### Fixed
-
-- Julia Lace no longer snaps its spin into reverse every minute or two.
-- Julia Lace no longer lingers on a sparse pattern of a few straight arms.
-- Julia Lace keeps its vortex in view instead of drifting it off-screen.
-- Julia Lace's horizon no longer shows vertical streaks.
 
 ### Removed
 
-- The Chladni MilkDrop preset is gone.
-- The Cover Kaleido MilkDrop preset is gone.
-- The Cover Orb MilkDrop preset is gone.
+- The Chladni, Cover Kaleido and Cover Orb MilkDrop presets are gone.
 
 ## v0.21.1 — 2026-09-26
 
