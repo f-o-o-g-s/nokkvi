@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.21.2 — 2026-10-02
+
+### Added
+
 - The Fractal Voyage MilkDrop preset journeys through four fractals in turn: a Julia set, the Burning Ship, the Mandelbrot set and the dragon curve.
 - The Fjord MilkDrop preset flies low down a winding Norwegian fjord between cliffs that rise straight out of the water.
 - Press m, or choose Choose Preset… from the panel menu, to browse every MilkDrop preset in a searchable list.
@@ -17,7 +27,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Julia Lace now morphs between different Julia sets and lies in a dark, glossy liquid instead of a grey haze.
+- Julia Lace now morphs between different Julia sets and lies in a dark, glossy liquid.
 - Living Ink is rebuilt as a 3D tank: drops of ink shoot into dark water from every direction and linger as drifting, curling clouds.
 
 ### Removed
