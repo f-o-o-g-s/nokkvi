@@ -1568,10 +1568,9 @@ impl VisualizerState {
         self.display.lock().dirty = false;
         // One frame of trail drain consumed (saturating at 0). Tied to rendered
         // frames since clear_dirty() runs once per prepare().
-        let _ = self
-            .trail_settle_frames
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                Some(n.saturating_sub(1))
+        self.trail_settle_frames
+            .update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                n.saturating_sub(1)
             });
     }
 
