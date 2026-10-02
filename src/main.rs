@@ -250,6 +250,9 @@ pub struct Nokkvi {
     /// MilkDrop mode: the preset library, the load pipeline and the state
     /// shared with the render side (see `update/milkdrop.rs`).
     pub milkdrop: crate::state::MilkdropState,
+    /// The accent that follows the playing cover (see
+    /// `update/dynamic_accent.rs`). Transient, never persisted.
+    pub dynamic_accent: crate::state::DynamicAccentState,
     pub toast: crate::state::ToastState,
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
@@ -516,6 +519,7 @@ impl Default for Nokkvi {
             player_bar_layout: crate::widgets::player_bar::PlayerBarLayout::default(),
             theater: crate::state::TheaterState::default(),
             milkdrop: crate::state::MilkdropState::default(),
+            dynamic_accent: crate::state::DynamicAccentState::default(),
             // Misc state
             last_queue_current_index: None,
             last_queue_current_entry_id: None,

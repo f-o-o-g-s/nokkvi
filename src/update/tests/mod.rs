@@ -26,6 +26,7 @@ mod boat;
 mod components;
 mod cross_pane_drag;
 mod default_playlist_picker;
+mod dynamic_accent;
 mod editor;
 mod general;
 mod harbour;

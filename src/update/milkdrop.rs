@@ -700,29 +700,16 @@ impl Nokkvi {
             Rgba(u32, u32, Vec<u8>),
         }
         let mut tasks = Vec::new();
-        let artwork = &self.artwork;
-        let (owner, handle, want_large) = match self.active_playback.radio_station() {
-            Some(station) => (
-                format!("radio:{}", station.id),
-                artwork
-                    .radio_large_art
-                    .snapshot
-                    .get(&station.id)
-                    .or_else(|| artwork.radio_art.snapshot.get(&station.id)),
-                None,
-            ),
-            None => {
-                let Some(album) = self.current_queue_song_album_id() else {
-                    return tasks;
-                };
-                let large = artwork.large_artwork.snapshot.get(album);
-                (
-                    album.to_string(),
-                    large.or_else(|| artwork.album_art.snapshot.get(album)),
-                    large.is_none().then(|| album.to_string()),
-                )
-            }
+        let Some(cover) = self.playing_cover() else {
+            return tasks;
         };
+        // The large cover when it is cached; the mini stands in until then.
+        let handle = cover.large.or(cover.mini);
+        let want_large = cover
+            .album_id
+            .filter(|_| cover.large.is_none())
+            .map(str::to_string);
+        let owner = cover.owner;
         let job = handle.map(|h| {
             (
                 h.id(),

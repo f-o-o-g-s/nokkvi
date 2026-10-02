@@ -394,6 +394,9 @@ keyword_table! {
         "general.light_mode" => &["dark mode", "light mode", "appearance", "color scheme"],
         "general.rounded_mode" => &["border radius", "square corners", "shape"],
         "general.opacity_gradient" => &["fade", "dim", "transparency"],
+        "general.dynamic_accent" => &[
+            "dynamic", "album", "cover", "artwork", "color", "colour", "adaptive", "material",
+        ],
         // Theme COLORS moved out of the GUI into the theme TOML files, so the
         // picker is now the only row a colour search can land on. It inherits
         // the vocabulary the deleted `accent.primary` / `border` rows carried.

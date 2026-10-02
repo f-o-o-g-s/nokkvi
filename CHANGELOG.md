@@ -6,9 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The new Accent From Album Art setting in the Theme tab takes the accent color from the playing cover, adjusted to stay readable.
+
 ### Changed
 
 ### Fixed
+
+- Hovering an active tab or mode toggle is now visible on dark themes with a light accent.
+- The multi-item drag count badge now stays readable on every theme's accent.
+- Check marks in dialogs now stay readable on every theme's accent.
+- Selected text in the EQ preset name field no longer hides behind an opaque highlight.
 
 ### Removed
 

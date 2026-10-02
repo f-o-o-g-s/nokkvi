@@ -2685,7 +2685,10 @@ impl Nokkvi {
                 // ── MilkDrop: running flag, GPU poll, preset loading ────
                 let milkdrop = self.milkdrop_tick();
 
-                Task::batch([autoscroll, milkdrop, self.handle_tick()])
+                // ── Dynamic accent: follow the playing cover ────────────
+                let accent = self.dynamic_accent_tick();
+
+                Task::batch([autoscroll, milkdrop, accent, self.handle_tick()])
             }
             PlaybackMessage::PlaybackStateUpdated(update) => {
                 self.handle_playback_state_updated(*update)

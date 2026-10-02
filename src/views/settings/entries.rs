@@ -98,6 +98,7 @@ impl SettingsPage {
                 &data.theme_file,
                 data.rounded_mode,
                 data.opacity_gradient,
+                data.dynamic_accent,
                 data.is_light_mode,
             ),
             SettingsTab::General => items::build_general_items(&data.general),

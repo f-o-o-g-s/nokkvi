@@ -40,6 +40,7 @@
 
 mod artwork;
 mod audio;
+mod dynamic_accent;
 mod harbour;
 mod library;
 mod lyrics;
@@ -61,6 +62,7 @@ mod window;
 
 pub(crate) use artwork::*;
 pub(crate) use audio::*;
+pub(crate) use dynamic_accent::*;
 pub(crate) use harbour::*;
 pub(crate) use library::*;
 pub(crate) use lyrics::*;

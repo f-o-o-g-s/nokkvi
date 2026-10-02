@@ -233,12 +233,21 @@ pub(crate) fn hover_tint() -> Color {
 /// `accent_bright()` — active nav tabs and active player mode toggles.
 ///
 /// Depositing the accent wash there is a near-no-op (accent over accent), so
-/// these surfaces get a CONTRASTING neutral pull instead: `bg0_hard()` in
-/// light mode, `fg0()` in dark. Call sites opt in via
+/// these surfaces get a CONTRASTING neutral pull instead: whichever of
+/// `bg0_hard()` / `fg0()` stands further from the fill. Measured rather than
+/// keyed on the mode, because a fill can sit on either side of mid-grey in
+/// either mode — a cover-derived accent on a dark palette is light, where the
+/// mode-keyed `fg0()` pull would be light on light. Call sites opt in via
 /// [`HoverOverlay::on_accent_surface`] with their own active flag.
 #[inline]
 pub(crate) fn hover_tint_on_accent() -> Color {
-    if is_light_mode() { bg0_hard() } else { fg0() }
+    let fill = accent_bright();
+    let (chrome, ink) = (bg0_hard(), fg0());
+    if contrast_ratio(fill, chrome) >= contrast_ratio(fill, ink) {
+        chrome
+    } else {
+        ink
+    }
 }
 
 // ============================================================================

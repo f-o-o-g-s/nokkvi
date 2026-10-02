@@ -2,8 +2,8 @@
 //!
 //! Builds the settings UI for the Theme tab. Theme COLORS are edited directly
 //! in each theme's TOML file at `~/.config/nokkvi/themes/`, not in the GUI — the
-//! tab exposes only the dark/light mode switch, the display knobs, and the theme
-//! picker. Creating a custom theme is the same file-based flow (drop a `.toml`
+//! tab exposes only the dark/light mode switch, the display knobs (including the
+//! accent that follows the playing cover), and the theme picker. Creating a custom theme is the same file-based flow (drop a `.toml`
 //! into that directory).
 
 use nokkvi_data::types::{player_settings::RoundedMode, theme_file::ThemeFile};
@@ -17,6 +17,7 @@ pub(crate) fn build_theme_items(
     theme: &ThemeFile,
     rounded_mode: RoundedMode,
     opacity_gradient: bool,
+    dynamic_accent: bool,
     is_light_mode: bool,
 ) -> Vec<SettingsEntry> {
     const MODE_ICON: &str = "assets/icons/monitor.svg";
@@ -60,6 +61,15 @@ pub(crate) fn build_theme_items(
             .with_subtitle("Fade non-center slots in list views"),
         opacity_gradient,
         true,
+    ));
+    e.push(SettingItem::bool_val(
+        SettingMeta::new("general.dynamic_accent", "Accent From Album Art", "Display")
+            .with_subtitle(
+                "On: highlights, buttons and the progress bar take a color from the playing \
+                 cover, adjusted to stay readable · Off: the theme's own accent",
+            ),
+        dynamic_accent,
+        false,
     ));
 
     // ── Select Theme ─────────────────────────────────────────────────

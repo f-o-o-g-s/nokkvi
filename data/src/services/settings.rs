@@ -420,6 +420,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_dynamic_accent(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.dynamic_accent = enabled;
+        self.save()
+    }
+
     pub fn set_slot_text_links(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.slot_text_links = enabled;
         self.save()
@@ -1444,6 +1449,7 @@ mod sentinel_roundtrip_tests {
             track_info_display: TrackInfoDisplay::TopBar, // default Mini Player
             slot_row_height: SlotRowHeight::Spacious, // default Default
             opacity_gradient: false,               // default true
+            dynamic_accent: true,                  // default false
             slot_text_links: true,                 // default false
             scrollbar_visibility: crate::types::player_settings::ScrollbarVisibility::Hidden, // default Always
             icon_set: crate::types::player_settings::IconSet::Lucide, // default Phosphor
@@ -1687,6 +1693,7 @@ mod sentinel_roundtrip_tests {
         assert_eq!(ui_ps1.track_info_display, ui_ps2.track_info_display);
         assert_eq!(ui_ps1.slot_row_height, ui_ps2.slot_row_height);
         assert_eq!(ui_ps1.opacity_gradient, ui_ps2.opacity_gradient);
+        assert_eq!(ui_ps1.dynamic_accent, ui_ps2.dynamic_accent);
         assert_eq!(ui_ps1.slot_text_links, ui_ps2.slot_text_links);
         assert_eq!(ui_ps1.scrollbar_visibility, ui_ps2.scrollbar_visibility);
         assert_eq!(ui_ps1.icon_set, ui_ps2.icon_set);

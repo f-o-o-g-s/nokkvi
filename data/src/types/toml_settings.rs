@@ -105,6 +105,9 @@ pub struct TomlSettings {
     pub slot_row_height: SlotRowHeight,
     pub opacity_gradient: bool,
     pub slot_text_links: bool,
+    /// Whether the accent color follows the playing cover (default false).
+    #[serde(default)]
+    pub dynamic_accent: bool,
     /// How the slot-list scrollbar is shown (default `Always` — a permanent
     /// gutter track). `OnHover` is the transient fade handle; `Hidden` removes
     /// the bar entirely. Missing keys fill from the container `#[serde(default)]`
@@ -349,6 +352,7 @@ impl Default for TomlSettings {
             slot_row_height: SlotRowHeight::Compact,
             opacity_gradient: false,
             slot_text_links: false,
+            dynamic_accent: false,
             scrollbar_visibility: ScrollbarVisibility::default(),
             icon_set: IconSet::default(),
             horizontal_volume: false,

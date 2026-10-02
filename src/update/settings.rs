@@ -173,6 +173,7 @@ impl Nokkvi {
             is_light_mode: crate::theme::is_light_mode(),
             rounded_mode: crate::theme::rounded_mode(),
             opacity_gradient: crate::theme::is_opacity_gradient(),
+            dynamic_accent: self.settings.dynamic_accent,
         }
     }
 

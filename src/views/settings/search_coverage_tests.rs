@@ -37,6 +37,7 @@ fn view_data(interface: InterfaceSettingsData, playback: PlaybackSettingsData) -
         is_light_mode: false,
         rounded_mode: nokkvi_data::types::player_settings::RoundedMode::default(),
         opacity_gradient: false,
+        dynamic_accent: false,
     }
 }
 

@@ -372,9 +372,10 @@ impl Nokkvi {
     /// because the daemon's default font is a launch-time snapshot that an
     /// in-session font change does not reach (see `main.rs`).
     fn drag_fallback_label() -> iced::Element<'static, Message> {
+        // The ghost's own forced ink: the label sits on its loud accent fill.
         iced::widget::text("Drag to queue")
             .font(crate::theme::ui_font())
-            .color(crate::theme::fg0())
+            .color(crate::widgets::slot_list::SlotListSlotStyle::drag_preview().text_color)
             .into()
     }
 
@@ -483,7 +484,7 @@ impl Nokkvi {
                 iced::widget::text(format!("×{selection_count}"))
                     .size(13)
                     .font(crate::theme::ui_font())
-                    .color(crate::theme::fg0()),
+                    .color(crate::theme::legible_text_on(crate::theme::accent())),
             )
             .padding(iced::Padding {
                 left: 6.0,

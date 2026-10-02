@@ -100,7 +100,7 @@ fn rgb(r: u8, g: u8, b: u8) -> Color {
 /// Every shipped palette as `(name, mode, ResolvedTheme)` — for theme-wide
 /// contrast guards. Reads embedded built-in TOML; no disk, no global theme
 /// state, so these sweeps are deterministic and lock-free.
-fn all_builtin_palettes() -> Vec<(String, &'static str, ResolvedTheme)> {
+pub(super) fn all_builtin_palettes() -> Vec<(String, &'static str, ResolvedTheme)> {
     let mut out = Vec::new();
     for stem in nokkvi_data::services::theme_loader::builtin_theme_stems() {
         let tf = nokkvi_data::services::theme_loader::load_builtin_theme(stem)
@@ -654,4 +654,138 @@ fn modal_scaffold_threads_message_type_through() {
         iced::Element::from(Space::new().width(100.0).height(60.0));
     let _scaffold: iced::Element<'_, FakeMsg> =
         modal_scaffold(dialog, FakeMsg::Closed, MODAL_BACKDROP_ALPHA);
+}
+
+// ------------------------------------------------------------------------
+// Dynamic accent overlay — the cover-derived accent laid over the theme.
+// The fit and the extraction are pinned in `dynamic_accent.rs`; these cover
+// the global state around them.
+// ------------------------------------------------------------------------
+
+fn cover_seed() -> AccentSeed {
+    AccentSeed {
+        lightness: 0.6,
+        chroma: 0.2,
+        hue: 0.5,
+    }
+}
+
+/// The overlay recolors the accent tokens and nothing else, in both modes,
+/// and `None` restores the theme file's own accent exactly.
+#[test]
+fn dynamic_accent_overrides_only_the_accent_tokens() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let saved = UI_MODE.light_mode.load(Ordering::Relaxed);
+    set_dynamic_accent(None);
+
+    for light in [false, true] {
+        set_light_mode(light);
+        let before = (accent(), accent_bright(), accent_border_light());
+        let neutrals = (bg0_hard(), bg1(), fg0(), danger(), success(), warning());
+
+        set_dynamic_accent(Some(cover_seed()));
+        assert_ne!(
+            accent(),
+            before.0,
+            "light={light}: accent follows the cover"
+        );
+        assert_ne!(accent_bright(), before.1);
+        assert_eq!(
+            (bg0_hard(), bg1(), fg0(), danger(), success(), warning()),
+            neutrals,
+            "light={light}: only the accent tokens move"
+        );
+        for token in [accent(), accent_bright(), accent_border_light()] {
+            assert!(
+                contrast_ratio(token, bg0_hard()) >= LEGIBLE_TEXT_CONTRAST,
+                "light={light}: a live accent token misses the text floor"
+            );
+        }
+
+        set_dynamic_accent(None);
+        assert_eq!((accent(), accent_bright(), accent_border_light()), before);
+    }
+
+    UI_MODE.light_mode.store(saved, Ordering::Relaxed);
+}
+
+/// The logo and themed MilkDrop presets read the theme's own dark palette:
+/// a cover accent must not recolor the mark or rebuild a preset per track.
+#[test]
+fn dynamic_accent_leaves_the_base_dark_palette_alone() {
+    let _guard = THEME_MODE_LOCK.lock();
+    set_dynamic_accent(None);
+    let base = (
+        read_dark_color(|t| t.accent),
+        read_dark_color(|t| t.accent_bright),
+        logo_shields(),
+    );
+    set_dynamic_accent(Some(cover_seed()));
+    assert_eq!(
+        (
+            read_dark_color(|t| t.accent),
+            read_dark_color(|t| t.accent_bright),
+            logo_shields(),
+        ),
+        base
+    );
+    set_dynamic_accent(None);
+}
+
+/// A change advances the theme generation (theme-derived caches rebuild);
+/// re-setting the same seed is a no-op, so the tick may level-set it.
+#[test]
+fn dynamic_accent_bumps_the_generation_only_on_change() {
+    let _guard = THEME_MODE_LOCK.lock();
+    set_dynamic_accent(None);
+    let start = theme_generation();
+    set_dynamic_accent(None);
+    assert_eq!(theme_generation(), start, "None over None is a no-op");
+    set_dynamic_accent(Some(cover_seed()));
+    let changed = theme_generation();
+    assert!(changed > start);
+    set_dynamic_accent(Some(cover_seed()));
+    assert_eq!(theme_generation(), changed, "the same seed is a no-op");
+    set_dynamic_accent(None);
+    assert!(theme_generation() > changed);
+}
+
+/// A theme reload (file edit, theme switch) keeps the cover accent and refits
+/// it to the reloaded palette.
+#[test]
+fn dynamic_accent_survives_a_theme_reload() {
+    let _guard = THEME_MODE_LOCK.lock();
+    set_dynamic_accent(Some(cover_seed()));
+    reload_theme();
+    assert_eq!(dynamic_accent_seed(), Some(cover_seed()));
+    assert!(contrast_ratio(accent_bright(), bg0_hard()) >= LEGIBLE_TEXT_CONTRAST);
+    set_dynamic_accent(None);
+}
+
+/// Hovering an accent-filled control (active nav tab, mode toggle) must read
+/// against a cover accent too. On a dark palette the fitted fill is LIGHT, so
+/// the old mode-keyed `fg0()` pull was light on light.
+#[test]
+fn hover_tint_on_accent_contrasts_with_a_dynamic_accent_fill() {
+    let _guard = THEME_MODE_LOCK.lock();
+    let saved = UI_MODE.light_mode.load(Ordering::Relaxed);
+
+    for light in [true, false] {
+        set_light_mode(light);
+        for seed in [
+            cover_seed(),
+            AccentSeed::from_color(rgb(0xf2, 0xd0, 0x20)),
+            AccentSeed::from_color(rgb(0x10, 0x18, 0x40)),
+        ] {
+            set_dynamic_accent(Some(seed));
+            let cr = contrast_ratio(hover_tint_on_accent(), accent_bright());
+            assert!(
+                cr >= SELECTION_RING_MIN_CONTRAST,
+                "light={light} {seed:?}: hover pigment only {cr:.2}:1 against the fill"
+            );
+        }
+    }
+
+    set_dynamic_accent(None);
+    UI_MODE.light_mode.store(saved, Ordering::Relaxed);
 }

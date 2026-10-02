@@ -496,6 +496,7 @@ mod tests {
             nokkvi_data::types::player_settings::RoundedMode::Off,
             true,
             false,
+            false,
         );
 
         // The inline per-color editors were stripped (theme colors are edited
@@ -511,7 +512,11 @@ mod tests {
         assert_section_keys(
             &entries,
             "Display",
-            &["general.rounded_mode", "general.opacity_gradient"],
+            &[
+                "general.rounded_mode",
+                "general.opacity_gradient",
+                "general.dynamic_accent",
+            ],
         );
 
         // Select Theme is a single row: the "Browse Themes…" opener that
@@ -1171,6 +1176,7 @@ mod tests {
             &theme,
             nokkvi_data::types::player_settings::RoundedMode::Off,
             true,
+            false,
             false,
         ));
         all_entries.extend(

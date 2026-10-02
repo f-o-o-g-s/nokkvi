@@ -336,7 +336,7 @@ pub(crate) fn eq_modal_overlay<'a>(
                 icon: theme::fg3(),
                 placeholder: theme::fg4(),
                 value: theme::fg0(),
-                selection: theme::accent_bright(),
+                selection: theme::selection_color(),
             });
 
         let ok_button = text_btn("OK", theme::success(), EqModalMessage::SavePresetConfirm);

@@ -21,6 +21,7 @@
   "track_info_display": "top_bar",
   "slot_row_height": "spacious",
   "opacity_gradient": false,
+  "dynamic_accent": true,
   "slot_text_links": true,
   "scrollbar_visibility": "hidden",
   "icon_set": "lucide",

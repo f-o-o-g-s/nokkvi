@@ -13,7 +13,7 @@ use nokkvi_data::types::theme_file::{ThemeFile, VisualizerColors};
 use parking_lot::RwLock;
 use tracing::debug;
 
-use super::UI_MODE;
+use super::{UI_MODE, dynamic_accent, dynamic_accent::AccentSeed};
 use crate::theme_config::{
     ResolvedDualTheme, ResolvedTheme, load_active_theme_file, load_resolved_dual_theme,
 };
@@ -22,27 +22,54 @@ use crate::theme_config::{
 // Global theme state (with hot-reload support via lock-free ArcSwap)
 // ============================================================================
 
+/// The theme file's own palette and the palette on screen. They differ only
+/// while a dynamic accent is active: `shown` is `base` with the accent tokens
+/// refitted from the playing cover (see [`set_dynamic_accent`]).
+#[derive(Debug, Clone)]
+struct ActiveTheme {
+    base: ResolvedDualTheme,
+    shown: ResolvedDualTheme,
+}
+
+impl ActiveTheme {
+    fn compose(base: ResolvedDualTheme, seed: Option<AccentSeed>) -> Self {
+        let mut shown = base.clone();
+        if let Some(seed) = seed {
+            dynamic_accent::apply(seed, &mut shown);
+        }
+        Self { base, shown }
+    }
+}
+
 /// Global resolved dual theme — parsed `iced::Color` values for rendering.
 ///
 /// Uses `ArcSwap` for lock-free reads from the render path. Each color
 /// accessor performs an atomic Arc clone (~1 ns) instead of acquiring a
 /// reader lock or cloning the whole 22-field struct.
-static DUAL_THEME: LazyLock<ArcSwap<ResolvedDualTheme>> = LazyLock::new(|| {
+static DUAL_THEME: LazyLock<ArcSwap<ActiveTheme>> = LazyLock::new(|| {
     // Seed any missing built-in themes to ~/.config/nokkvi/themes/ on first access
     if let Err(e) = nokkvi_data::services::theme_loader::seed_builtin_themes() {
         tracing::warn!("Failed to seed built-in themes: {e}");
     }
-    ArcSwap::from(Arc::new(load_resolved_dual_theme()))
+    ArcSwap::from(Arc::new(ActiveTheme::compose(
+        load_resolved_dual_theme(),
+        None,
+    )))
 });
+
+/// The cover-derived accent currently laid over the theme, if any. Written
+/// only from the UI thread's update handlers.
+static DYNAMIC_ACCENT: parking_lot::Mutex<Option<AccentSeed>> = parking_lot::Mutex::new(None);
 
 /// Global raw theme file — hex strings for visualizer colors and UI that
 /// needs the original color values (not parsed `iced::Color`).
 static THEME_FILE: LazyLock<RwLock<ThemeFile>> =
     LazyLock::new(|| RwLock::new(load_active_theme_file()));
 
-/// Monotonic counter bumped every time the active palette changes — either
-/// by `reload_theme()` (theme file edit, preset switch, color picker) or
-/// `set_light_mode()` (light/dark toggle). Widgets that cache theme-derived
+/// Monotonic counter bumped every time the active palette changes — by
+/// `reload_theme()` (theme file edit, preset switch, color picker),
+/// `set_light_mode()` (light/dark toggle) or `set_dynamic_accent()` (a new
+/// cover accent, about once per track). Widgets that cache theme-derived
 /// content (e.g. the boat's substituted SVG handle) snapshot this on build
 /// and rebuild when it advances. Without this counter, every new code path
 /// that mutates the active theme is a fresh chance to leave a stale cache.
@@ -66,11 +93,15 @@ pub(crate) fn bump_theme_generation() {
 
 /// Reload theme from theme file (hot-reload support).
 /// Call this when the theme file or `theme` key in config.toml changes.
+/// An active dynamic accent is refitted to the new palette.
 pub(crate) fn reload_theme() {
     let new_file = load_active_theme_file();
     let new_resolved = ResolvedDualTheme::from_theme_file(&new_file);
 
-    DUAL_THEME.store(Arc::new(new_resolved));
+    DUAL_THEME.store(Arc::new(ActiveTheme::compose(
+        new_resolved,
+        *DYNAMIC_ACCENT.lock(),
+    )));
     {
         let mut file = THEME_FILE.write();
         *file = new_file;
@@ -78,6 +109,31 @@ pub(crate) fn reload_theme() {
     THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
 
     debug!(" Theme hot-reloaded from theme file");
+}
+
+/// Lay a cover-derived accent over the theme (`Some`), or return to the theme
+/// file's own accent (`None`). Only `accent` / `accent_bright` /
+/// `accent_border_light` change, in both modes, each fitted to its own
+/// backgrounds; nothing is written to disk. A no-op when `seed` is already
+/// the active one, so callers may level-set it.
+pub(crate) fn set_dynamic_accent(seed: Option<AccentSeed>) {
+    {
+        let mut active = DYNAMIC_ACCENT.lock();
+        if *active == seed {
+            return;
+        }
+        *active = seed;
+    }
+    let base = DUAL_THEME.load().base.clone();
+    DUAL_THEME.store(Arc::new(ActiveTheme::compose(base, seed)));
+    THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
+    debug!(" Dynamic accent changed: {seed:?}");
+}
+
+/// The cover-derived accent laid over the theme, if any.
+#[cfg(test)]
+pub(crate) fn dynamic_accent_seed() -> Option<AccentSeed> {
+    *DYNAMIC_ACCENT.lock()
 }
 
 /// Get the active mode's visualizer colors (hex strings).
@@ -112,25 +168,30 @@ pub(crate) fn get_visualizer_colors_dark() -> VisualizerColors {
 /// render path at any frequency.
 #[inline]
 pub(super) fn read_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
-    let dual = DUAL_THEME.load();
+    let active = DUAL_THEME.load();
     let theme = if UI_MODE.light_mode.load(Ordering::Relaxed) {
-        &dual.light
+        &active.shown.light
     } else {
-        &dual.dark
+        &active.shown.dark
     };
     f(theme)
 }
 
-/// Read a single color field from the **dark** palette regardless of the active
-/// light/dark mode. The app logo uses this so the mark keeps one stable look:
-/// the bright-body longship reads on both light and dark backgrounds (its fixed
-/// dark outline carries the definition), whereas tracking light mode inverts the
-/// body to dark ink and turns the mark into an unreadable blob on a light
-/// background. The logo still recolors across *themes* (each theme's dark
-/// palette) — it just no longer flips with the light/dark toggle.
+/// Read a single color field from the theme file's own **dark** palette,
+/// regardless of the active light/dark mode and of any dynamic accent. The app
+/// logo uses this so the mark keeps one stable look: the bright-body longship
+/// reads on both light and dark backgrounds (its fixed dark outline carries the
+/// definition), whereas tracking light mode inverts the body to dark ink and
+/// turns the mark into an unreadable blob on a light background. The logo still
+/// recolors across *themes* (each theme's dark palette) — it just no longer
+/// flips with the light/dark toggle.
+///
+/// Reading the base palette is what keeps a themed MilkDrop preset from
+/// rebuilding on every track change: its `PresetPalette` compares these
+/// colors, and a cover-derived accent must not count as a new theme.
 #[inline]
 pub(crate) fn read_dark_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
-    f(&DUAL_THEME.load().dark)
+    f(&DUAL_THEME.load().base.dark)
 }
 
 /// Logo body fill (sail + hull): the active theme's dark `fg0`, mode-stable.

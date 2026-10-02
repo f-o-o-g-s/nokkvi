@@ -100,6 +100,11 @@ crate::player_settings_schema! {
     /// Whether the opacity gradient on non-center slots is enabled (default: false)
     #[serde(default = "default_opacity_gradient")]
     same opacity_gradient: bool = default_opacity_gradient(),
+    /// Whether the accent color follows the playing cover (default: false).
+    /// The cover's color is fitted to the active theme's backgrounds in
+    /// memory; the theme file is never written.
+    #[serde(default)]
+    same dynamic_accent: bool = false,
     /// Whether clickable text links in slot list items are enabled (default: false)
     #[serde(default)]
     same slot_text_links: bool = false,

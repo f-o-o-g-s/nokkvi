@@ -266,6 +266,17 @@ impl LibraryPage {
     ];
 }
 
+/// What [`Nokkvi::playing_cover`] resolves: the playing item and whichever of
+/// its artwork handles the session caches hold.
+pub(crate) struct PlayingCover<'a> {
+    /// The album id, or `radio:<station id>`.
+    pub owner: String,
+    /// The album to request a cover for; `None` during radio.
+    pub album_id: Option<&'a str>,
+    pub large: Option<&'a iced::widget::image::Handle>,
+    pub mini: Option<&'a iced::widget::image::Handle>,
+}
+
 impl Nokkvi {
     // =========================================================================
     // SECTION: View Functions
@@ -336,6 +347,28 @@ impl Nokkvi {
             .iter()
             .find(|s| s.id == sid)
             .map(|s| s.album_id.as_str())
+    }
+
+    /// The artwork of what is playing: the current queue song's album, or the
+    /// station during radio. `None` when nothing is current. Either handle may
+    /// be missing from the session caches.
+    pub(crate) fn playing_cover(&self) -> Option<PlayingCover<'_>> {
+        let artwork = &self.artwork;
+        if let Some(station) = self.active_playback.radio_station() {
+            return Some(PlayingCover {
+                owner: format!("radio:{}", station.id),
+                album_id: None,
+                large: artwork.radio_large_art.snapshot.get(&station.id),
+                mini: artwork.radio_art.snapshot.get(&station.id),
+            });
+        }
+        let album = self.current_queue_song_album_id()?;
+        Some(PlayingCover {
+            owner: album.to_string(),
+            album_id: Some(album),
+            large: artwork.large_artwork.snapshot.get(album),
+            mini: artwork.album_art.snapshot.get(album),
+        })
     }
 
     /// Resolve the artwork handle for the player-bar mini-player section.

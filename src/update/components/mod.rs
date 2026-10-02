@@ -1538,6 +1538,9 @@ impl Nokkvi {
         // The MilkDrop renderer and cover belong to the session; drop them.
         self.milkdrop_release();
         self.milkdrop_clear_cover();
+        // The cover accent belongs to the session too: the Login screen and
+        // the next server start on the theme's own accent.
+        self.dynamic_accent_reset();
         // Phase 1: cache the storage handle for re-login, then build a single
         // async teardown Task that — in this strict order — (1) stops the audio
         // engine, (2) drains the TaskManager so every tracked persistence /

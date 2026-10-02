@@ -83,6 +83,14 @@ paths:
 - **Font is global, not per-theme**: `font_family` lives in `LivePlayerSettings` / `TomlSettings` and routes to `config.toml`. EQ modal `pick_list` must explicitly receive the active app font.
 - **Database lock on re-login**: redb holds an exclusive lock; cache `StateStorage` on `Nokkvi.cached_storage` and reuse via `AppService::new_with_storage()`. Stop the engine + `TaskManager` on logout.
 
+## Theme & Accent
+
+- **Ink on an accent fill is `bg0_hard()` or `legible_text_on(fill)`, never `fg*()`**: with the dynamic accent on, a dark palette's `accent()` / `accent_bright()` are LIGHT (fitted to 4.5:1 against the background tiers), so light `fg0()` ink on them disappears. The fit only guarantees the accent against the background tiers; any other ink on an accent fill must be measured. Same for an opaque accent `selection` under `fg0()` text in a `text_input` — use `selection_color()`.
+- **`hover_tint_on_accent()` measures, it does not key on the mode**: it returns whichever of `bg0_hard()` / `fg0()` contrasts more with the `accent_bright()` fill.
+- **`read_dark_color` is the theme file's palette, not the one on screen**: it skips the dynamic accent on purpose. A themed MilkDrop preset rebuilds when `PresetPalette::from_theme()` changes, and the logo is a per-theme mark; reading the shown palette there would rebuild a preset and recolor the logo on every track change.
+- **A test that lets a seed reach `theme::set_dynamic_accent` takes `THEME_MODE_LOCK` and leaves the global `None`**: the overlay is process-global like the other theme state. `Nokkvi::dynamic_accent_show` only writes `None` back from the app that set a seed (`DynamicAccentState.applied`), so the hundreds of unrelated tests that tick a default app never touch it.
+- **A seed is only shown against the artwork handle it was read from**: `DynamicAccentState.seeds` stores `(handle id, seed)` and the tick requires that id to still be the album's mini or large handle. That is what lets a late `AccentExtracted` be cached without a staleness check, makes a refreshed cover re-read, and stops the large cover landing after the mini from re-reading the album mid-track.
+
 ## Assets & Icons
 
 - **Auto-generated SVG lookup**: BOTH icon namespaces — `assets/icons/*.svg` (Lucide, the paths every view references) and `assets/icons-phosphor/*.svg` (the alternate set) — are enumerated at build time by `build.rs`, generating `OUT_DIR/embedded_svg_generated.rs` (one `lookup()` keyed by full path + `KNOWN_PATHS`). Adding/removing an icon is just dropping the file in either dir.

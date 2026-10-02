@@ -48,6 +48,7 @@ mod components;
 mod config;
 mod cross_pane_drag;
 mod default_playlist_picker;
+mod dynamic_accent;
 mod editor;
 mod eq_modal;
 mod genres;

@@ -588,7 +588,8 @@ fn dialog_checkbox_style(_theme: &iced::Theme, status: checkbox::Status) -> chec
         } else {
             theme::bg0_soft().into()
         },
-        icon_color: theme::fg0(),
+        // The check mark sits on the accent fill, so it takes that fill's ink.
+        icon_color: theme::legible_text_on(theme::accent()),
         border: iced::Border {
             color: if is_checked {
                 theme::accent_bright()
