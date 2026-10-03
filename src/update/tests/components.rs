@@ -524,6 +524,10 @@ fn clear_queue_stops_a_running_songs_load() {
 
     assert!(!app.library.progressive_queue_generation.is_current(chain));
     assert!(app.library.queue_loading_total().is_none());
+    assert!(
+        app.library.queue_loading_target.is_none(),
+        "a synchronous cancel drops the target itself, not just its generation"
+    );
 }
 
 #[test]
