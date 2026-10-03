@@ -126,6 +126,18 @@ struct DeferredSkipSeek {
     position_ms: u64,
 }
 
+/// How a user-driven track change honors "Fade on Skip" right now
+/// ([`CustomAudioEngine::skip_transition`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipTransition {
+    /// Blend the outgoing into the target (M7's three-phase skip fade).
+    Crossfade,
+    /// Ease the outgoing out, then hard-load the target.
+    BoundaryFade,
+    /// Hard-load the target at once.
+    Cut,
+}
+
 /// Outcome of a manual-skip crossfade attempt
 /// ([`CustomAudioEngine::crossfade_to_next`], M7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3422,21 +3434,44 @@ impl CustomAudioEngine {
         self.immediate_playing() && !self.channels.stream_is_infinite.load(Ordering::Acquire)
     }
 
-    /// Whether a CLICK-initiated track start (play-from-queue /
-    /// play-from-browse, M10) should even PLAN a skip-crossfade: M7's
-    /// viability ([`Self::skip_crossfade_viable`]) plus a bit-perfect
-    /// **Strict** pre-gate. Active Strict refuses every blend at the fire's
-    /// format gate regardless of the incoming format, so planning would only
-    /// buy the click a wasted network decoder build before the same hard cut
-    /// it takes today — the pre-gate keeps that path byte-identical. It reads
-    /// the mode the fire's gate enforces, not the selected one: Strict
-    /// without PipeWire-native volume is a no-op, so that click plans and
-    /// blends like a Next skip does. Relaxed must still plan (its verdict
-    /// needs the incoming format).
-    pub fn click_skip_crossfade_viable(&self) -> bool {
-        self.skip_crossfade_viable()
-            && self.renderer.lock().enforced_bit_perfect_mode()
-                != crate::types::player_settings::BitPerfectMode::Strict
+    /// How a user-driven track change — a Next/Previous skip or a click
+    /// that starts a track (queue click, play-from-here, browse-view play)
+    /// — honors `mode` ("Fade on Skip") right now. The one decision both
+    /// paths share:
+    /// - [`SkipTransition::Crossfade`] needs M7's viability
+    ///   ([`Self::skip_crossfade_viable`]) and no ACTIVE bit-perfect Strict.
+    ///   Active Strict refuses every blend at the fire's format gate
+    ///   whatever the incoming format, so planning would only buy a wasted
+    ///   network decoder build before the same cut. It reads the mode that
+    ///   gate enforces, not the selected one: Strict without PipeWire-native
+    ///   volume is a no-op, so that change blends. Relaxed still plans (its
+    ///   verdict needs the incoming format).
+    /// - [`SkipTransition::BoundaryFade`] needs the same viability: nothing
+    ///   is audible to ease out while paused or stopped, and a radio
+    ///   outgoing is M6's switch-fade domain (`set_source` fades it when
+    ///   "Fade Radio Switches" is on).
+    /// - Everything else cuts.
+    pub fn skip_transition(
+        &self,
+        mode: crate::types::player_settings::FadeOnSkip,
+    ) -> SkipTransition {
+        use crate::types::player_settings::{BitPerfectMode, FadeOnSkip};
+
+        match mode {
+            FadeOnSkip::Crossfade
+                if self.skip_crossfade_viable()
+                    && self.renderer.lock().enforced_bit_perfect_mode()
+                        != BitPerfectMode::Strict =>
+            {
+                SkipTransition::Crossfade
+            }
+            FadeOnSkip::BoundaryFade if self.skip_crossfade_viable() => {
+                SkipTransition::BoundaryFade
+            }
+            FadeOnSkip::Off | FadeOnSkip::BoundaryFade | FadeOnSkip::Crossfade => {
+                SkipTransition::Cut
+            }
+        }
     }
 
     /// The M7 boundary out-fade: ramp the outgoing to silence over the
@@ -4477,6 +4512,59 @@ impl CustomAudioEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The one "Fade on Skip" decision, shared by skips and clicks.
+    #[tokio::test(flavor = "current_thread")]
+    async fn skip_transition_blends_or_eases_only_an_audible_finite_stream() {
+        use crate::types::player_settings::{BitPerfectMode, FadeOnSkip};
+
+        let mut engine = CustomAudioEngine::new();
+        // Stopped: nothing audible to blend or ease out.
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::Crossfade),
+            SkipTransition::Cut
+        );
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::BoundaryFade),
+            SkipTransition::Cut
+        );
+
+        engine.force_playing_for_test();
+        assert_eq!(engine.skip_transition(FadeOnSkip::Off), SkipTransition::Cut);
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::Crossfade),
+            SkipTransition::Crossfade
+        );
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::BoundaryFade),
+            SkipTransition::BoundaryFade
+        );
+
+        // Active Strict refuses every blend at the fire, so none is planned.
+        engine.force_pw_volume_active_for_test();
+        engine.set_bit_perfect(BitPerfectMode::Strict).await;
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::Crossfade),
+            SkipTransition::Cut
+        );
+        // Relaxed decides at the fire, from the incoming format.
+        engine.set_bit_perfect(BitPerfectMode::Relaxed).await;
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::Crossfade),
+            SkipTransition::Crossfade
+        );
+
+        // A radio outgoing belongs to the radio switch fade.
+        engine.force_infinite_for_test();
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::Crossfade),
+            SkipTransition::Cut
+        );
+        assert_eq!(
+            engine.skip_transition(FadeOnSkip::BoundaryFade),
+            SkipTransition::Cut
+        );
+    }
 
     /// Pulled-queue start-offset lifecycle: `set_source` must clear a staged
     /// offset BEFORE its same-source early return, so a stale offset can

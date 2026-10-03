@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 use tracing::debug;
 
 use crate::{
-    audio::engine::CustomAudioEngine,
+    audio::engine::{CustomAudioEngine, SkipTransition},
     services::queue::{PreviousOutcome, QueueManager, TransitionReason},
     types::{NextTrackResetEffect, player_settings::FadeOnSkip, song::Song},
 };
@@ -640,17 +640,12 @@ impl QueueNavigator {
         Ok(())
     }
 
-    /// Complete a manual skip to `song` per the "Fade on Skip" mode (M7):
-    /// hard load (`Off`, the historical path), boundary ease-out then hard
-    /// load (`BoundaryFade` — the ramp self-refuses when there is nothing
-    /// audible to fade), or — when the engine can blend — hand back a
-    /// [`SkipFadePlan`] for the caller to complete (`Crossfade`; the decoder
-    /// build must run with no locks held, so it cannot happen here).
-    ///
-    /// The `Crossfade`-but-not-viable case (paused / stopped / radio
-    /// outgoing) falls through to the hard path: there is no audible
-    /// outgoing to blend, and a radio outgoing is M6's domain (its
-    /// `set_source` fade handles that edge when enabled).
+    /// Complete a manual skip to `song` per the engine's one "Fade on Skip"
+    /// decision ([`CustomAudioEngine::skip_transition`], shared with the
+    /// click paths): a hard load (`Cut`), a boundary ease-out then a hard
+    /// load (`BoundaryFade`), or a [`SkipFadePlan`] handed back for the
+    /// caller to complete (`Crossfade`; the decoder build must run with no
+    /// locks held, so it cannot happen here).
     async fn skip_to_song(
         &self,
         engine: &mut CustomAudioEngine,
@@ -659,8 +654,8 @@ impl QueueNavigator {
         session: &StreamSession,
         skip_fade: FadeOnSkip,
     ) -> Result<Option<SkipFadePlan>> {
-        match skip_fade {
-            FadeOnSkip::Crossfade if engine.skip_crossfade_viable() => {
+        match engine.skip_transition(skip_fade) {
+            SkipTransition::Crossfade => {
                 debug!(
                     "🔀 Skip fade planned: {} - {} (id: {})",
                     song.title, song.artist, song.id
@@ -680,12 +675,12 @@ impl QueueNavigator {
                     stream_url: session.stream_url(&song.id),
                 }))
             }
-            FadeOnSkip::BoundaryFade => {
+            SkipTransition::BoundaryFade => {
                 engine.run_skip_out_fade().await;
                 self.play_song_direct(engine, song, session).await?;
                 Ok(None)
             }
-            FadeOnSkip::Off | FadeOnSkip::Crossfade => {
+            SkipTransition::Cut => {
                 self.play_song_direct(engine, song, session).await?;
                 Ok(None)
             }
@@ -1321,6 +1316,45 @@ mod tests {
             q.song_ids_snapshot(),
             vec!["b"],
             "the skipped-away row is consumed at skip time"
+        );
+    }
+
+    /// Active bit-perfect Strict refuses every blend at the fire's format
+    /// gate, so a Next skip in Crossfade mode cuts at once, as a click does,
+    /// instead of planning a fade whose decoder build is thrown away (and
+    /// then probing the target a second time for the fallback hard load).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn play_next_crossfade_mode_under_active_strict_cuts() {
+        let qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(0));
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        engine.force_playing_for_test();
+        engine.force_pw_volume_active_for_test();
+        engine
+            .set_bit_perfect(crate::types::player_settings::BitPerfectMode::Strict)
+            .await;
+
+        // The cut's play() can't reach 127.0.0.1:9; the route is what's
+        // under test, so its Err is tolerated.
+        let result = nav
+            .play_next(
+                &mut engine,
+                &session("http://127.0.0.1:9"),
+                FadeOnSkip::Crossfade,
+            )
+            .await;
+
+        assert!(
+            !matches!(result, Ok(NextOutcome::FadePlanned(_))),
+            "active Strict must not plan a skip fade"
+        );
+        assert!(
+            engine.source().contains("id=b"),
+            "the cut loads the target at once, got {:?}",
+            engine.source()
         );
     }
 

@@ -1358,20 +1358,18 @@ enum ClickPlayRoute {
 /// starts a track honors "Fade on Skip" — the same setting M7 wired into
 /// manual Next/Previous.
 ///
-/// Crossfade mode with the engine audibly playing a finite stream (and not
-/// bit-perfect Strict — [`CustomAudioEngine::click_skip_crossfade_viable`])
-/// mirrors `QueueNavigator::skip_to_song`'s plan arm: stamp this click as
-/// the latest manual skip (`skip_fade_seq` — a competing skip or click
-/// during the unlocked build must win), discharge the click's queue-mutation
-/// `NextTrackResetEffect` (voiding the pre-click prepared transition), then
-/// `plan_skip_fade` (cancel any live blend + generation bump + pending-window
-/// latch), so nothing can finalize against the just-repositioned/replaced
-/// queue during the build while the outgoing's decode loop keeps producing.
-/// Boundary Fade mode routes
-/// through the M7 ease-out before the hard load. Everything else — mode Off,
-/// paused/stopped, an infinite (radio) outgoing (M6's switch-fade domain),
-/// bit-perfect Strict, or a metadata-less click — takes today's hard path
-/// unchanged.
+/// The route comes from the engine's one "Fade on Skip" decision
+/// ([`CustomAudioEngine::skip_transition`], shared with Next/Previous). Its
+/// Crossfade verdict mirrors `QueueNavigator::skip_to_song`'s plan arm:
+/// stamp this click as the latest manual skip (`skip_fade_seq` — a
+/// competing skip or click during the unlocked build must win), discharge
+/// the click's queue-mutation `NextTrackResetEffect` (voiding the pre-click
+/// prepared transition), then `plan_skip_fade` (cancel any live blend +
+/// generation bump + pending-window latch), so nothing can finalize against
+/// the just-repositioned/replaced queue during the build while the
+/// outgoing's decode loop keeps producing. A Boundary Fade verdict routes
+/// through the M7 ease-out before the hard load. A cut — and a
+/// metadata-less click — takes today's hard path unchanged.
 ///
 /// Module-level (over `&mut CustomAudioEngine` + the supersession counter)
 /// so the routing matrix is unit testable without a full controller.
@@ -1382,10 +1380,10 @@ async fn plan_click_play(
     song: Option<&crate::types::song::Song>,
     stream_url: &str,
 ) -> ClickPlayRoute {
-    use crate::types::player_settings::FadeOnSkip;
+    use crate::audio::engine::SkipTransition;
 
-    match engine.skip_fade_mode() {
-        FadeOnSkip::Crossfade if engine.click_skip_crossfade_viable() => {
+    match engine.skip_transition(engine.skip_fade_mode()) {
+        SkipTransition::Crossfade => {
             let Some(song) = song else {
                 return ClickPlayRoute::Hard(effect);
             };
@@ -1423,12 +1421,8 @@ async fn plan_click_play(
                 seq,
             }
         }
-        FadeOnSkip::BoundaryFade if engine.skip_crossfade_viable() => {
-            ClickPlayRoute::BoundaryFadeThenHard(effect)
-        }
-        FadeOnSkip::Off | FadeOnSkip::BoundaryFade | FadeOnSkip::Crossfade => {
-            ClickPlayRoute::Hard(effect)
-        }
+        SkipTransition::BoundaryFade => ClickPlayRoute::BoundaryFadeThenHard(effect),
+        SkipTransition::Cut => ClickPlayRoute::Hard(effect),
     }
 }
 

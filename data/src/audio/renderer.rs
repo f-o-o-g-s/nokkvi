@@ -1660,8 +1660,8 @@ impl AudioRenderer {
     /// The bit-perfect mode [`Self::crossfade_blocked`] enforces: the selected
     /// mode while bit-perfect is active ([`Self::bit_perfect_active`]), `Off`
     /// otherwise (on the cpal fallback the mode is a no-op). The engine's
-    /// click pre-gate (`click_skip_crossfade_viable`) reads this too, so it
-    /// refuses exactly when the fire's gate would refuse every blend.
+    /// Fade-on-Skip decision (`skip_transition`) reads this too, so it
+    /// refuses to plan exactly when the fire's gate would refuse every blend.
     pub(crate) fn enforced_bit_perfect_mode(&self) -> BitPerfectMode {
         if self.bit_perfect_active() {
             self.bit_perfect_mode
