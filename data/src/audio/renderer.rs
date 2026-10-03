@@ -629,9 +629,9 @@ impl AudioRenderer {
         self.replay_gain_prevent_clipping = prevent_clipping;
     }
 
-    /// Set the ReplayGain tags for the next primary-stream creation
-    /// (`init` or `seek`). Called by the engine immediately before the
-    /// stream is rebuilt; ignored otherwise.
+    /// Set the ReplayGain tags for the next primary-stream creation by
+    /// `init` (a `seek` rebuilds from `current_replay_gain`). Called by the
+    /// engine before the stream is built, and when it picks up a gapless join.
     pub fn set_pending_replay_gain(&mut self, rg: Option<ReplayGain>) {
         self.pending_replay_gain = rg;
     }
@@ -897,7 +897,9 @@ impl AudioRenderer {
             && !rg_blocks_gapless;
 
         if rg_blocks_gapless {
-            debug!("📡 Renderer::init() ReplayGain normalization differs — forcing fresh stream");
+            debug!(
+                "📡 Renderer::init() stream can't follow the next track's normalization (AGC or bit-perfect change) — forcing fresh stream"
+            );
         }
 
         if is_gapless {

@@ -452,6 +452,9 @@ pub struct GaplessTransitionInfo {
     pub duration: u64,
     pub format: AudioFormat,
     pub codec: Option<String>,
+    /// The swapped-in track's ReplayGain tags, restaged by
+    /// `consume_gapless_transition` for the next rebuild of the track.
+    pub replay_gain: Option<crate::types::song::ReplayGain>,
 }
 
 /// Bundled gapless-prep state for the next track. Replaces the three
@@ -1161,7 +1164,7 @@ async fn try_gapless_swap(
                 let mut r = renderer.lock();
                 r.reset_position();
                 r.reset_finished_called();
-                r.adopt_gapless_replay_gain(next_replay_gain);
+                r.adopt_gapless_replay_gain(next_replay_gain.clone());
             }
 
             // Store transition info for the engine to pick up
@@ -1172,6 +1175,7 @@ async fn try_gapless_swap(
                     duration: next_duration,
                     format: next_fmt,
                     codec: next_codec,
+                    replay_gain: next_replay_gain,
                 });
             }
 
@@ -2759,6 +2763,13 @@ impl CustomAudioEngine {
                 info.format
             );
             self.promote_to_now_playing(info.source, info.format, info.duration, info.codec);
+            // The swap only recorded these tags as the stream's (it can't
+            // touch `pending_replay_gain`: a superseded decode loop could
+            // overwrite a newer hard load's). Restage them here, under the
+            // engine lock, so a Stop-then-Play rebuilds this track at its gain.
+            self.renderer
+                .lock()
+                .set_pending_replay_gain(info.replay_gain);
         }
     }
 
@@ -3836,8 +3847,8 @@ impl CustomAudioEngine {
         let should_start = {
             let mut renderer = self.renderer.lock();
             // Stage the incoming track's own tags first: `init` builds a
-            // fresh stream from them, and in ReplayGain Track mode a changed
-            // gain is what makes it build one instead of reusing the stream.
+            // fresh stream from them, or switches a reused stream to their
+            // gain from the track's first sample.
             renderer.set_pending_replay_gain(next_replay_gain);
             renderer.init(&self.current_format, force_reload, Some(&prev_format))?;
 
@@ -7569,6 +7580,7 @@ mod tests {
             duration: 222_222,
             format: staged_format.clone(),
             codec: Some("flac-incoming".to_string()),
+            replay_gain: None,
         });
 
         // Pre-seed every destination to a DIFFERENT sentinel so each of the
@@ -7912,6 +7924,44 @@ mod tests {
             .primary_write_gain_for_test()
             .expect("a stream");
         assert!((gain - db(-9.0)).abs() < 1e-6, "got {gain}");
+    }
+
+    /// Stop then Play after a gapless join into a track with another gain
+    /// rebuilds the stream from `pending_replay_gain`, so the engine's
+    /// pickup of the join must restage the swapped-in track's tags there.
+    /// The swap itself leaves `pending` alone (a superseded decode loop could
+    /// otherwise clobber a newer hard load's tags); the pickup runs under the
+    /// engine lock.
+    #[tokio::test]
+    async fn stop_then_play_after_a_gapless_join_keeps_the_joined_tracks_gain() {
+        let (mut engine, _mixer) = engine_playing_at(rg(-3.0));
+        prepare_next(&mut engine, matching_format(), rg(-9.0)).await;
+        let outcome = try_gapless_swap(
+            &engine.decoder,
+            &engine.renderer,
+            &engine.gapless,
+            &engine.gapless_transition_info,
+            &engine.channels.source_generation,
+            &engine.completion_callback,
+            &matching_format(),
+            &engine.channels.skip_fade_pending,
+        )
+        .await;
+        assert_eq!(outcome, GaplessSwapOutcome::Swapped);
+        engine.consume_gapless_transition().await;
+
+        let gain = {
+            let mut renderer = engine.renderer.lock();
+            renderer.stop();
+            renderer
+                .init(&matching_format(), false, None)
+                .expect("Play rebuilds the stream");
+            renderer.primary_write_gain_for_test().expect("a stream")
+        };
+        assert!(
+            (gain - db(-9.0)).abs() < 1e-6,
+            "the joined track's gain, got {gain}"
+        );
     }
 
     /// A stream can't switch AGC on mid-stream: an untagged track that
