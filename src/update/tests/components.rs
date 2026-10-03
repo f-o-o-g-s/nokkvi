@@ -170,7 +170,7 @@ fn assert_batch_play_entered_new_context(app: &crate::Nokkvi, path: &str) {
     );
     assert!(
         app.library.queue_loading_target.is_none(),
-        "{path}: a batch play must cancel the stale progressive-load target"
+        "{path}: a batch play must clear the stale progressive-load count"
     );
 }
 

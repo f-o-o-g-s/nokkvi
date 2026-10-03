@@ -100,7 +100,7 @@ impl Nokkvi {
             viz.reset();
         }
 
-        // Clear playlist context bar (same pattern as guard_play_action)
+        // Clear playlist context bar: the playlist's queue is gone
         self.clear_active_playlist();
 
         self.toast_success("Queue cleared");

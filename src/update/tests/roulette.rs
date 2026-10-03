@@ -310,7 +310,7 @@ fn start_roulette_hotkey_targets_focused_browser_tab() {
     });
     app.pane_focus = PaneFocus::Browser;
     app.current_view = View::PlaylistEditor;
-    // guard_play_action must not block: edit-control roulette needs no editor.
+    // Only the pinned current_view matters here; no editor session is needed.
     app.playlist_editor = None;
 
     let _ = app.dispatch_hotkey(crate::app_message::HotkeyMessage::StartRoulette);
