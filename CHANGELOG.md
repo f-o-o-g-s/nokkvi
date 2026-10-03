@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- A prompt that opens while another window is up now appears on top of it instead of hiding behind it.
+
 ### Fixed
 
 - Hovering an active tab or mode toggle is now visible on dark themes with a light accent.

@@ -16,7 +16,12 @@ pub(super) fn open_modal(app: &mut Nokkvi, modal: ActiveModal) {
         ActiveModal::TextInputDialog => app.text_input_dialog.visible = true,
         ActiveModal::Eq => app.eq_modal.open = true,
         ActiveModal::About => app.about_modal.visible = true,
-        ActiveModal::Info => app.info_modal.visible = true,
+        ActiveModal::Info => app.info_modal.open(
+            nokkvi_data::types::info_modal::InfoModalItem::from_album_view_data(
+                &make_album("a1", "One", "X"),
+                None,
+            ),
+        ),
         ActiveModal::DefaultPlaylistPicker => {
             app.default_playlist_picker =
                 Some(crate::widgets::default_playlist_picker::DefaultPlaylistPickerState::new(&[]));
@@ -97,6 +102,23 @@ fn the_highest_open_modal_is_top() {
         }
     }
     assert_eq!(app.top_modal(), None);
+}
+
+#[test]
+fn each_open_modal_draws_its_own_overlay_and_no_other() {
+    // The draw order comes from STACK by construction; this pins that each
+    // arm of `modal_overlay` draws the modal it names.
+    for modal in ActiveModal::STACK {
+        let mut app = test_app();
+        open_modal(&mut app, modal);
+        for other in ActiveModal::STACK {
+            assert_eq!(
+                app.modal_overlay(other).is_some(),
+                other == modal,
+                "{other:?}'s overlay with {modal:?} open"
+            );
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------

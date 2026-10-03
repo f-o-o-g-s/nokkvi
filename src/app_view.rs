@@ -10,6 +10,7 @@ use iced::{
 use crate::{
     Nokkvi, Screen, View,
     app_message::{Message, NavigationMessage},
+    update::modals::ActiveModal,
     views, widgets,
 };
 
@@ -1229,90 +1230,15 @@ impl Nokkvi {
     fn wrap_with_global_overlays<'a>(&'a self, base: Element<'a, Message>) -> Element<'a, Message> {
         let mut stack = Stack::new().push(base);
 
-        // Add text input dialog overlay (if visible)
-        if let Some(dialog_overlay) =
-            crate::widgets::text_input_dialog::text_input_dialog_overlay(&self.text_input_dialog)
-        {
-            stack = stack.push(dialog_overlay.map(Message::TextInputDialog));
-        }
-
-        // Add info modal overlay (if visible)
-        if let Some(info_overlay) = crate::widgets::info_modal::info_modal_overlay(&self.info_modal)
-        {
-            stack = stack.push(info_overlay.map(Message::InfoModal));
-        }
-
-        // Add about modal overlay (if visible)
-        if let Some(about_overlay) = crate::widgets::about_modal::about_modal_overlay(
-            &self.about_modal,
-            crate::widgets::about_modal::AboutViewData {
-                server_url: &self.login_page.server_url,
-                username: &self.login_page.username,
-                server_version: self.server_version.as_deref(),
-            },
-        ) {
-            stack = stack.push(about_overlay.map(Message::AboutModal));
-        }
-
-        // When EQ is disabled, show flat gains in the UI so sliders read 0 —
-        // avoids the misleading appearance of active boosts. Real gains are
-        // preserved in EqState and restore visually when re-enabled.
-        let eq_enabled = self.playback.eq_state.is_enabled();
-        let eq_gains = if eq_enabled {
-            let mut gains = [0.0; 10];
-            for (i, g) in gains.iter_mut().enumerate() {
-                *g = self.playback.eq_state.get_band_gain(i);
+        // Modals bottom-up, so the top of `ActiveModal::STACK` draws last, on
+        // top: what the user sees on top is what Escape and the keys reach
+        // first. Every modal sits below the toasts, so a toast raised from
+        // inside one (Trawl's "Added N songs to queue", a failed MilkDrop
+        // preview) stays visible over it.
+        for modal in ActiveModal::STACK.into_iter().rev() {
+            if let Some(overlay) = self.modal_overlay(modal) {
+                stack = stack.push(overlay);
             }
-            gains
-        } else {
-            [0.0; 10]
-        };
-        if let Some(eq_overlay) = crate::widgets::eq_modal_overlay(
-            self.eq_modal.open,
-            eq_enabled,
-            eq_gains,
-            &self.eq_modal.custom_presets,
-            self.eq_modal.save_mode,
-            &self.eq_modal.save_name,
-        ) {
-            stack = stack.push(eq_overlay.map(Message::EqModal));
-        }
-
-        // Add default-playlist picker overlay (if open)
-        if let Some(picker_state) = &self.default_playlist_picker {
-            let picker_overlay =
-                crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
-                    picker_state,
-                    self.window.height,
-                    &self.artwork.playlist.mini.snapshot,
-                );
-            stack = stack.push(picker_overlay.map(Message::DefaultPlaylistPicker));
-        }
-
-        // MilkDrop preset picker — same tier, over the visualizer it previews
-        // into; below toasts so a failed-load warning stays visible.
-        if let Some(picker_state) = &self.milkdrop.picker {
-            let picker_overlay = crate::widgets::milkdrop_picker::milkdrop_picker_overlay(
-                picker_state,
-                crate::widgets::milkdrop_picker::MilkdropPickerViewData {
-                    library: &self.milkdrop.library,
-                    on_screen: self.milkdrop.on_screen.as_deref(),
-                    window_height: self.window.height,
-                },
-            );
-            stack = stack.push(picker_overlay.map(Message::MilkdropPicker));
-        }
-
-        // Trawl mix-builder modal — same tier as the picker, below toasts so
-        // "Added N songs to queue" stays visible over the open modal.
-        if let Some(trawl_state) = &self.trawl_modal {
-            let trawl_overlay = crate::widgets::trawl_modal::trawl_modal_overlay(
-                trawl_state,
-                &self.trawl_crate,
-                self.window.height,
-                &self.artwork.album_art.snapshot,
-            );
-            stack = stack.push(trawl_overlay.map(Message::TrawlModal));
         }
 
         // Add toast status bar overlay (if any active toast)
@@ -1423,6 +1349,84 @@ impl Nokkvi {
         }
 
         stack.into()
+    }
+
+    /// `modal`'s overlay, or `None` while it is closed.
+    pub(crate) fn modal_overlay(&self, modal: ActiveModal) -> Option<Element<'_, Message>> {
+        match modal {
+            ActiveModal::TextInputDialog => {
+                crate::widgets::text_input_dialog::text_input_dialog_overlay(
+                    &self.text_input_dialog,
+                )
+                .map(|overlay| overlay.map(Message::TextInputDialog))
+            }
+            ActiveModal::Eq => {
+                // When EQ is disabled, show flat gains in the UI so sliders read 0 —
+                // avoids the misleading appearance of active boosts. Real gains are
+                // preserved in EqState and restore visually when re-enabled.
+                let eq_enabled = self.playback.eq_state.is_enabled();
+                let eq_gains = if eq_enabled {
+                    let mut gains = [0.0; 10];
+                    for (i, g) in gains.iter_mut().enumerate() {
+                        *g = self.playback.eq_state.get_band_gain(i);
+                    }
+                    gains
+                } else {
+                    [0.0; 10]
+                };
+                crate::widgets::eq_modal_overlay(
+                    self.eq_modal.open,
+                    eq_enabled,
+                    eq_gains,
+                    &self.eq_modal.custom_presets,
+                    self.eq_modal.save_mode,
+                    &self.eq_modal.save_name,
+                )
+                .map(|overlay| overlay.map(Message::EqModal))
+            }
+            ActiveModal::About => crate::widgets::about_modal::about_modal_overlay(
+                &self.about_modal,
+                crate::widgets::about_modal::AboutViewData {
+                    server_url: &self.login_page.server_url,
+                    username: &self.login_page.username,
+                    server_version: self.server_version.as_deref(),
+                },
+            )
+            .map(|overlay| overlay.map(Message::AboutModal)),
+            ActiveModal::Info => crate::widgets::info_modal::info_modal_overlay(&self.info_modal)
+                .map(|overlay| overlay.map(Message::InfoModal)),
+            ActiveModal::DefaultPlaylistPicker => {
+                self.default_playlist_picker.as_ref().map(|picker_state| {
+                    crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
+                        picker_state,
+                        self.window.height,
+                        &self.artwork.playlist.mini.snapshot,
+                    )
+                    .map(Message::DefaultPlaylistPicker)
+                })
+            }
+            // Over the visualizer it previews into.
+            ActiveModal::MilkdropPicker => self.milkdrop.picker.as_ref().map(|picker_state| {
+                crate::widgets::milkdrop_picker::milkdrop_picker_overlay(
+                    picker_state,
+                    crate::widgets::milkdrop_picker::MilkdropPickerViewData {
+                        library: &self.milkdrop.library,
+                        on_screen: self.milkdrop.on_screen.as_deref(),
+                        window_height: self.window.height,
+                    },
+                )
+                .map(Message::MilkdropPicker)
+            }),
+            ActiveModal::Trawl => self.trawl_modal.as_ref().map(|trawl_state| {
+                crate::widgets::trawl_modal::trawl_modal_overlay(
+                    trawl_state,
+                    &self.trawl_crate,
+                    self.window.height,
+                    &self.artwork.album_art.snapshot,
+                )
+                .map(Message::TrawlModal)
+            }),
+        }
     }
 
     /// Visual slot index for the active drag's drop indicator, or `None`.
