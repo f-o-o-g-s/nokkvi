@@ -45,7 +45,7 @@ All notable changes to this project will be documented in this file.
 - With the split view left open behind another view, Enter and the list keys now act on the view on screen, not a hidden tab.
 - A radio station that drops the connection now reconnects instead of staying silent.
 - Auto-advancing into a track with a different sample rate now plays it at its own ReplayGain level instead of the previous track's.
-- In ReplayGain Track mode, a gapless auto-advance into a track with a different gain now plays it at its own level.
+- In ReplayGain Track mode, auto-advancing into a track with a different gain now plays it at its own level instead of the previous track's.
 - On the non-PipeWire audio fallback, where bit-perfect Strict has no effect, clicking a track now crossfades with Fade on Skip like Next does.
 
 ### Removed

@@ -470,8 +470,8 @@ pub(crate) struct GaplessSlot {
     pub source: String,
     /// True when the slot is fully prepared and the renderer can use it
     /// for gapless transition. Distinct from `decoder.is_some()` because
-    /// the decode loop sets `prepared = false` AFTER `take`-ing the
-    /// decoder (so the next loop iteration knows the slot is mid-swap).
+    /// `play()` ungates a slot for a fresh start (`prepared = false`) while
+    /// leaving its decoder in place, so a concurrent prep is not dropped.
     pub prepared: bool,
     /// ReplayGain tags of the prepared track, carried WITH the slot so a
     /// prep landing while a blend is live never overwrites the renderer's
@@ -2562,13 +2562,13 @@ impl CustomAudioEngine {
         let Some((incoming_duration, incoming_format, replay_gain)) = prepared else {
             return;
         };
-        // Re-stage the slot's ReplayGain BEFORE the eligibility gate: the
-        // finalize-time re-arm (M7 mid-fade store) runs AFTER
-        // `finalize_crossfade` consumed the live blend's staged copy into
-        // `current_replay_gain`, and the NON-crossfade gapless consumers
-        // (inline swap adopt / EOF fallback) need the staged copy too —
-        // exactly as the ordinary store path stages it regardless of
-        // crossfade eligibility. Redundant-but-consistent on the seek-rearm
+        // Re-stage the slot's ReplayGain: the finalize-time re-arm (M7
+        // mid-fade store) runs AFTER `finalize_crossfade` consumed the live
+        // blend's staged copy into `current_replay_gain`, and the renderer's
+        // crossfade trigger builds the incoming stream from the staged copy.
+        // Staged before the eligibility gate, as the ordinary store path
+        // does (the gapless consumers read the slot's own copy, so they
+        // don't depend on it). Redundant-but-consistent on the seek-rearm
         // path (same value the store already staged).
         self.renderer
             .lock()
@@ -2718,8 +2718,9 @@ impl CustomAudioEngine {
             slot.replay_gain = replay_gain.clone();
         }
 
-        // Stash the incoming track's ReplayGain so the next crossfade
-        // (or gapless transition) applies the right amplify factor.
+        // Stash the incoming track's ReplayGain so the renderer's crossfade
+        // trigger builds the incoming stream at the right amplify factor
+        // (the gapless consumers read the slot's copy).
         self.renderer
             .lock()
             .set_pending_crossfade_replay_gain(replay_gain);
@@ -2759,8 +2760,9 @@ impl CustomAudioEngine {
     /// [`Self::load_prepared_track`]. The caller installs the decoder and
     /// handles the renderer side, which differs per path.
     ///
-    /// `next_format` described the track being promoted, so it is cleared (a
-    /// prep stored mid-blend gets it back from `rearm_crossfade_if_prepared`).
+    /// `next_format` normally described the track being promoted, so it is
+    /// cleared (a prep stored mid-blend gets it back from
+    /// `rearm_crossfade_if_prepared`).
     /// `next_source` is cleared only while it still names the promoted track:
     /// a prep stored mid-blend names the track after it.
     fn promote_to_now_playing(
