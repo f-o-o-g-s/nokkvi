@@ -249,9 +249,6 @@ mod tests {
             Ok::<(), anyhow::Error>(())
         });
 
-        // Let registration land.
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
         // Drain first (writer finishes), THEN clear (clear wins last).
         let _clean = tm.shutdown_all(Duration::from_millis(500)).await;
         clear_session(&storage).unwrap();

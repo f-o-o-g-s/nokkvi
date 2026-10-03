@@ -4,7 +4,7 @@
 //! - Unique task IDs for debugging
 //! - Error logging with context
 //! - Graceful shutdown via shared `CancellationToken`
-//! - Bounded async shutdown that awaits in-flight tasks and aborts stragglers
+//! - Bounded async shutdown that waits for in-flight tasks up to a budget
 //!
 //! ## Usage
 //!
@@ -21,15 +21,12 @@
 
 use std::{
     future::Future,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
-use tokio::{sync::Mutex, task::JoinSet, time::timeout};
-use tokio_util::sync::CancellationToken;
+use tokio::{sync::Mutex, time::timeout};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::{debug, error, info, warn};
 
 /// Status of a background task
@@ -52,20 +49,16 @@ pub type TaskStatusReceiver = tokio::sync::mpsc::UnboundedReceiver<(TaskHandle, 
 
 /// Task supervisor with bounded async shutdown support.
 ///
-/// Tracks all spawned tasks via a `JoinSet` so that `shutdown_all()` can
-/// await their completion within a configurable time budget, aborting any
-/// that exceed it. The synchronous `shutdown()` method is preserved for
-/// call sites (logout flow) that only need to fire the cancellation signal
-/// without waiting.
+/// Every task is spawned onto a [`TaskTracker`], which counts it before
+/// `spawn_*` returns, so `shutdown_all()` can never miss a task that was
+/// spawned just ahead of it. Every task also watches the shared
+/// cancellation token, so firing it ends each one at its next await.
 pub struct TaskManager {
     next_id: AtomicU64,
     cancellation_token: CancellationToken,
-    /// Name-based active task list (debug / health checks).
-    active_tasks: Arc<Mutex<Vec<TaskHandle>>>,
-    /// JoinSet of all spawned task handles — used by `shutdown_all()`.
-    join_set: Arc<Mutex<JoinSet<()>>>,
+    tracker: TaskTracker,
     status_tx: tokio::sync::mpsc::UnboundedSender<(TaskHandle, TaskStatus)>,
-    status_rx: Arc<Mutex<Option<TaskStatusReceiver>>>,
+    status_rx: Mutex<Option<TaskStatusReceiver>>,
 }
 
 impl TaskManager {
@@ -74,10 +67,9 @@ impl TaskManager {
         Self {
             next_id: AtomicU64::new(1),
             cancellation_token: CancellationToken::new(),
-            active_tasks: Arc::new(Mutex::new(Vec::new())),
-            join_set: Arc::new(Mutex::new(JoinSet::new())),
+            tracker: TaskTracker::new(),
             status_tx: tx,
-            status_rx: Arc::new(Mutex::new(Some(rx))),
+            status_rx: Mutex::new(Some(rx)),
         }
     }
 
@@ -96,72 +88,45 @@ impl TaskManager {
         }
     }
 
-    /// Signal all tasks to shut down gracefully (non-blocking).
+    /// Signal all tasks to shut down and wait for them within `budget`.
     ///
-    /// Fires the shared cancellation token so that any `select!`-guarded task
-    /// begins unwinding. This returns immediately; use `shutdown_all()` if you
-    /// need to wait for tasks to finish.
-    pub fn shutdown(&self) {
-        warn!("[TASK MANAGER] Initiating graceful shutdown (signal only)...");
-        self.cancellation_token.cancel();
-    }
-
-    /// Signal all tasks to shut down and await their completion within `budget`.
+    /// 1. Fires the shared cancellation token: each task ends at its next
+    ///    await.
+    /// 2. Waits until every tracked task has exited, or until the budget
+    ///    runs out.
     ///
-    /// 1. Fires the shared cancellation token.
-    /// 2. Awaits all tracked `JoinHandle`s with the total time budget.
-    /// 3. Aborts any task that has not exited before the budget expires.
+    /// A task still running at the budget is stuck in synchronous code,
+    /// where neither the token nor an abort could reach it, so it is left
+    /// to finish on its own; this only stops waiting for it.
     ///
-    /// Returns the number of tasks that finished cleanly (informational;
-    /// aborted tasks are not counted). Safe to call multiple times — the
-    /// second and subsequent calls are no-ops if the JoinSet is already drained.
+    /// Returns how many of the tasks in flight at the call exited within the
+    /// budget (informational). Safe to call more than once: a later call
+    /// with nothing in flight returns 0 at once.
     pub async fn shutdown_all(&self, budget: Duration) -> usize {
         self.cancellation_token.cancel();
-        info!(
-            "[TASK MANAGER] Awaiting all tasks (budget: {}ms)...",
-            budget.as_millis()
-        );
+        // Closing lets `wait()` resolve once the tracker is empty. Tasks
+        // spawned after this are still tracked and still waited for.
+        self.tracker.close();
 
-        let mut set = self.join_set.lock().await;
-
-        if set.is_empty() {
+        let in_flight = self.tracker.len();
+        if in_flight == 0 {
             debug!("[TASK MANAGER] No tasks in flight at shutdown");
             return 0;
         }
+        info!(
+            "[TASK MANAGER] Awaiting {in_flight} task(s) (budget: {}ms)...",
+            budget.as_millis()
+        );
 
-        let total = set.len();
-        let mut clean = 0usize;
-
-        match timeout(budget, async {
-            while let Some(result) = set.join_next().await {
-                match result {
-                    Ok(()) => clean += 1,
-                    Err(e) if e.is_cancelled() => {
-                        debug!("[TASK MANAGER] Task cancelled during shutdown");
-                    }
-                    Err(e) => {
-                        warn!("[TASK MANAGER] Task panicked during shutdown: {e}");
-                    }
-                }
-            }
-        })
-        .await
-        {
-            Ok(()) => {
-                info!("[TASK MANAGER] All {total} tasks finished cleanly within budget");
-            }
-            Err(_elapsed) => {
-                let remaining = set.len();
-                warn!(
-                    "[TASK MANAGER] Shutdown budget elapsed; aborting {remaining} remaining task(s)"
-                );
-                set.abort_all();
-                // Drain abort results so the JoinSet is empty on next call.
-                while set.join_next().await.is_some() {}
-            }
+        if timeout(budget, self.tracker.wait()).await.is_ok() {
+            info!("[TASK MANAGER] All {in_flight} task(s) finished within budget");
+            return in_flight;
         }
-
-        clean
+        let remaining = self.tracker.len();
+        warn!(
+            "[TASK MANAGER] Shutdown budget elapsed with {remaining} task(s) still running; no longer waiting for them"
+        );
+        in_flight.saturating_sub(remaining)
     }
 
     /// Spawn a tracked task with automatic error logging.
@@ -173,55 +138,15 @@ impl TaskManager {
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let task_name = format!("{name}#{id}");
-        let handle = TaskHandle {
-            id,
-            name: task_name.clone(),
-        };
-
-        let token = self.cancellation_token.clone();
-        let active_tasks = self.active_tasks.clone();
-        let join_set = self.join_set.clone();
-        let handle_clone = handle.clone();
-        let status_tx = self.status_tx.clone();
-
-        // The task body runs the user future and updates bookkeeping.
-        let task_fut = async move {
-            {
-                let mut tasks = active_tasks.lock().await;
-                tasks.push(handle_clone.clone());
-            }
-
-            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
-
+        self.spawn_tracked(name, move |task_name, token| async move {
             tokio::select! {
                 _ = token.cancelled() => {
                     debug!("[TASK {}] cancelled before completion", task_name);
-                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Cancelled));
+                    TaskStatus::Cancelled
                 }
-                _ = future() => {
-                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
-                }
+                _ = future() => TaskStatus::Completed,
             }
-
-            {
-                let mut tasks = active_tasks.lock().await;
-                tasks.retain(|t| t.id != handle_clone.id);
-            }
-        };
-
-        // Spawn the task, then register its JoinHandle in the supervisor set.
-        // The registration happens in a brief async step so the caller doesn't block.
-        let join_handle = tokio::spawn(task_fut);
-        tokio::spawn(async move {
-            let mut set = join_set.lock().await;
-            set.spawn(async move {
-                let _ = join_handle.await;
-            });
-        });
-
-        handle
+        })
     }
 
     /// Spawn a tracked task that returns a `Result`, with automatic error logging.
@@ -235,61 +160,21 @@ impl TaskManager {
         E: std::fmt::Display + Send,
         T: Send + 'static,
     {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let task_name = format!("{name}#{id}");
-        let handle = TaskHandle {
-            id,
-            name: task_name.clone(),
-        };
-
-        let token = self.cancellation_token.clone();
-        let active_tasks = self.active_tasks.clone();
-        let join_set = self.join_set.clone();
-        let handle_clone = handle.clone();
-        let status_tx = self.status_tx.clone();
-
-        let task_fut = async move {
-            {
-                let mut tasks = active_tasks.lock().await;
-                tasks.push(handle_clone.clone());
-            }
-
-            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
-
+        self.spawn_tracked(name, move |task_name, token| async move {
             tokio::select! {
                 _ = token.cancelled() => {
                     debug!("[TASK {}] cancelled before completion", task_name);
-                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Cancelled));
+                    TaskStatus::Cancelled
                 }
-                result = future() => {
-                    match result {
-                        Ok(_) => {
-                            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
-                        }
-                        Err(e) => {
-                            error!("[TASK] {} failed: {}", task_name, e);
-                            let _ = status_tx
-                                .send((handle_clone.clone(), TaskStatus::Failed(e.to_string())));
-                        }
+                result = future() => match result {
+                    Ok(_) => TaskStatus::Completed,
+                    Err(e) => {
+                        error!("[TASK] {} failed: {}", task_name, e);
+                        TaskStatus::Failed(e.to_string())
                     }
-                }
+                },
             }
-
-            {
-                let mut tasks = active_tasks.lock().await;
-                tasks.retain(|t| t.id != handle_clone.id);
-            }
-        };
-
-        let join_handle = tokio::spawn(task_fut);
-        tokio::spawn(async move {
-            let mut set = join_set.lock().await;
-            set.spawn(async move {
-                let _ = join_handle.await;
-            });
-        });
-
-        handle
+        })
     }
 
     /// Spawn a cancellable long-lived task.
@@ -297,12 +182,33 @@ impl TaskManager {
     /// The task receives the shared `CancellationToken` and is responsible for
     /// polling `token.is_cancelled()` (or `token.cancelled().await`) at each
     /// blocking point. The token is also the shared app-wide token, so this
-    /// task exits automatically when `shutdown()` / `shutdown_all()` fires.
+    /// task exits automatically when `shutdown_all()` fires.
     #[cfg(test)]
     pub fn spawn_cancellable<F, Fut>(&self, name: &'static str, future: F) -> TaskHandle
     where
         F: FnOnce(CancellationToken) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.spawn_tracked(name, move |task_name, token| async move {
+            debug!("[TASK] Started: {}", task_name);
+            future(token.clone()).await;
+            if token.is_cancelled() {
+                info!("[TASK] Cancelled: {}", task_name);
+                TaskStatus::Cancelled
+            } else {
+                info!("[TASK] Completed: {}", task_name);
+                TaskStatus::Completed
+            }
+        })
+    }
+
+    /// The one spawn body: number the task, track it, report `Running`,
+    /// run `body` (which owns how the task meets the token and how its
+    /// outcome maps to a status), then report that status.
+    fn spawn_tracked<B, Fut>(&self, name: &'static str, body: B) -> TaskHandle
+    where
+        B: FnOnce(String, CancellationToken) -> Fut + Send + 'static,
+        Fut: Future<Output = TaskStatus> + Send + 'static,
     {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let task_name = format!("{name}#{id}");
@@ -312,42 +218,14 @@ impl TaskManager {
         };
 
         let token = self.cancellation_token.clone();
-        let active_tasks = self.active_tasks.clone();
-        let join_set = self.join_set.clone();
-        let handle_clone = handle.clone();
         let status_tx = self.status_tx.clone();
-
-        let task_fut = async move {
-            {
-                let mut tasks = active_tasks.lock().await;
-                tasks.push(handle_clone.clone());
-            }
-
-            debug!("[TASK] Started: {}", task_name);
-            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
-
-            future(token.clone()).await;
-
-            if token.is_cancelled() {
-                info!("[TASK] Cancelled: {}", task_name);
-                let _ = status_tx.send((handle_clone.clone(), TaskStatus::Cancelled));
-            } else {
-                info!("[TASK] Completed: {}", task_name);
-                let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
-            }
-
-            {
-                let mut tasks = active_tasks.lock().await;
-                tasks.retain(|t| t.id != handle_clone.id);
-            }
-        };
-
-        let join_handle = tokio::spawn(task_fut);
-        tokio::spawn(async move {
-            let mut set = join_set.lock().await;
-            set.spawn(async move {
-                let _ = join_handle.await;
-            });
+        let reported = handle.clone();
+        // `TaskTracker::spawn` counts the task before it returns, so a
+        // `shutdown_all` right after this call already waits for it.
+        self.tracker.spawn(async move {
+            let _ = status_tx.send((reported.clone(), TaskStatus::Running));
+            let status = body(task_name, token).await;
+            let _ = status_tx.send((reported, status));
         });
 
         handle
@@ -391,37 +269,10 @@ mod tests {
             });
         }
 
-        // Allow handle-registration tasks a tick to insert into the JoinSet.
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
         let clean = tm.shutdown_all(Duration::from_millis(sleep_ms * 4)).await;
         assert_eq!(
             clean, n,
             "all {n} tasks should finish cleanly within 4× sleep budget"
-        );
-    }
-
-    /// Spawn a task that sleeps 10 s; shutdown_all with 100 ms budget → returns quickly.
-    #[tokio::test]
-    async fn task_manager_shutdown_aborts_when_over_budget() {
-        let tm = TaskManager::new();
-
-        tm.spawn_result("slow", || async move {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            Ok::<(), anyhow::Error>(())
-        });
-
-        // Allow handle registration.
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let budget = Duration::from_millis(100);
-        let started = Instant::now();
-        let _clean = tm.shutdown_all(budget).await;
-        let elapsed = started.elapsed();
-
-        assert!(
-            elapsed < Duration::from_millis(300),
-            "shutdown_all should return within ~200 ms of budget expiry, got {elapsed:?}"
         );
     }
 
@@ -432,12 +283,10 @@ mod tests {
 
         tm.spawn_result("quick", || async move { Ok::<(), anyhow::Error>(()) });
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
         let _first = tm.shutdown_all(Duration::from_millis(200)).await;
-        // Second call on a drained JoinSet must not panic.
+        // Second call with nothing in flight must not panic.
         let second = tm.shutdown_all(Duration::from_millis(200)).await;
-        assert_eq!(second, 0, "drained JoinSet should report 0 clean tasks");
+        assert_eq!(second, 0, "nothing in flight should report 0 clean tasks");
     }
 
     /// A task that performs a synchronous (uncancellable) redb write AFTER its
@@ -473,8 +322,8 @@ mod tests {
             Ok::<(), anyhow::Error>(())
         });
 
-        // Let the handle registration land in the JoinSet, and let the task
-        // pass its last await into the synchronous commit region.
+        // Let the task pass its last await into the synchronous commit
+        // region before the token fires.
         tokio::time::sleep(Duration::from_millis(15)).await;
 
         let _clean = tm.shutdown_all(Duration::from_millis(500)).await;
@@ -491,6 +340,55 @@ mod tests {
         );
     }
 
+    /// A task is tracked from the moment `spawn_*` returns: a `shutdown_all`
+    /// issued right after the spawn, before the runtime has polled anything,
+    /// still waits for it. The task here ignores the token for a moment, so
+    /// only a tracked wait can see it finish.
+    #[tokio::test]
+    async fn shutdown_all_waits_for_a_task_spawned_just_before() {
+        let tm = TaskManager::new();
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished2 = finished.clone();
+
+        tm.spawn_cancellable("late", move |_token| async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            finished2.store(true, Ordering::SeqCst);
+        });
+
+        let clean = tm.shutdown_all(Duration::from_millis(500)).await;
+
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "shutdown_all returned before the task it was handed had finished"
+        );
+        assert_eq!(clean, 1);
+    }
+
+    /// A task that ignores cancellation is waited for only as long as the
+    /// budget: `shutdown_all` returns on time and does not count it.
+    #[tokio::test]
+    async fn shutdown_all_stops_waiting_at_the_budget() {
+        let tm = TaskManager::new();
+
+        tm.spawn_cancellable("stuck", |_token| async move {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        });
+
+        let started = Instant::now();
+        let clean = tm.shutdown_all(Duration::from_millis(100)).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(100),
+            "shutdown_all returned before the budget while a task was still running ({elapsed:?})"
+        );
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "shutdown_all overran its budget: {elapsed:?}"
+        );
+        assert_eq!(clean, 0, "the straggler did not finish cleanly");
+    }
+
     /// spawn_cancellable registers its handle; shutdown_all cancels it cleanly.
     #[tokio::test]
     async fn task_manager_spawn_cancellable_registers_handle() {
@@ -505,8 +403,6 @@ mod tests {
             }
             finished2.store(true, Ordering::SeqCst);
         });
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
 
         tm.shutdown_all(Duration::from_millis(200)).await;
 

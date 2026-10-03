@@ -58,7 +58,7 @@ symphonia = { version = "0.6.1", default-features = false, features = [
 # via opusic-sys so users need no runtime system package.
 symphonia-adapter-libopus = "0.3.0"
 tokio = { version = "1.52.3", features = ["full"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1.44"
 url = "2.5.8"
 futures = "0.3.32"
