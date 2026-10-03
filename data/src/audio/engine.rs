@@ -882,7 +882,8 @@ async fn radio_reconnect_loop(
         );
         tokio::time::sleep(backoff).await;
 
-        // Re-acquire decoder lock for re-init
+        // Re-acquire decoder lock for re-init. The decoder is at EOF (or
+        // closed by a failed attempt), so `init` reopens the same URL.
         let mut dec = decoder.lock().await;
         match dec.init(reconnect_url).await {
             Ok(()) => {

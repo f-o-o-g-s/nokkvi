@@ -43,6 +43,7 @@ All notable changes to this project will be documented in this file.
 - Playing a row from the smart-playlist rules preview no longer leaves the previous playlist's "Playing From" header on the queue.
 - Enter in a full library view now plays instead of only adding to the queue when the split view was left open on the Queue.
 - With the split view left open behind another view, Enter and the list keys now act on the view on screen, not a hidden tab.
+- A radio station that drops the connection now reconnects instead of staying silent.
 
 ### Removed
 

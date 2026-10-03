@@ -573,9 +573,12 @@ impl AudioDecoder {
         };
     }
 
-    /// Initialize decoder with URL (HTTP or file path)
+    /// Initialize decoder with URL (HTTP or file path). A no-op while the
+    /// decoder is already open on `url` with audio left to read; at EOF it
+    /// reopens the URL, which is how the radio reconnect revives a station
+    /// that dropped the connection.
     pub async fn init(&mut self, url: &str) -> Result<()> {
-        if self.initialized && self.url == url {
+        if self.initialized && self.url == url && !self.eof {
             return Ok(());
         }
 
@@ -2073,11 +2076,22 @@ mod tests {
     /// first audio bytes back after the response headers.
     const FIRST_BYTE_DELAY: std::time::Duration = std::time::Duration::from_millis(800);
 
+    /// What the fake station in [`spawn_slow_start_station`] does once it has
+    /// sent its audio.
+    #[derive(Clone, Copy)]
+    enum AfterAudio {
+        /// Keep the socket open and send nothing more (a stalled stream).
+        Stall,
+        /// Close the socket (the station dropped the listener).
+        HangUp,
+    }
+
     /// Local Icecast-shaped station: `icy-` header, no Content-Length, the
     /// response headers at once, then the MP3 fixture after
-    /// [`FIRST_BYTE_DELAY`], then the socket stays open with no more data (a
-    /// stalled stream). Returns the stream URL.
-    async fn spawn_slow_start_station() -> String {
+    /// [`FIRST_BYTE_DELAY`], then `after_audio`. Every connection gets the
+    /// same treatment, so a reconnect finds the station live again. Returns
+    /// the stream URL.
+    async fn spawn_slow_start_station(after_audio: AfterAudio) -> String {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
@@ -2098,7 +2112,12 @@ mod tests {
                     if request[..len].starts_with(b"GET") {
                         tokio::time::sleep(FIRST_BYTE_DELAY).await;
                         let _ = socket.write_all(AUDIO).await;
-                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        match after_audio {
+                            AfterAudio::Stall => {
+                                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                            }
+                            AfterAudio::HangUp => {}
+                        }
                     }
                 });
             }
@@ -2113,7 +2132,7 @@ mod tests {
     /// 260–500 ms, so its first play attempt failed about half the time).
     #[tokio::test(flavor = "multi_thread")]
     async fn radio_open_waits_for_a_slow_first_audio_byte() {
-        let url = spawn_slow_start_station().await;
+        let url = spawn_slow_start_station(AfterAudio::Stall).await;
 
         let mut decoder = AudioDecoder::default();
         let result = decoder.init(&url).await;
@@ -2131,7 +2150,7 @@ mod tests {
     /// 10 s — the loop's generation check is what makes stop/skip responsive.
     #[tokio::test(flavor = "multi_thread")]
     async fn radio_read_after_probe_returns_promptly_on_a_stall() {
-        let url = spawn_slow_start_station().await;
+        let url = spawn_slow_start_station(AfterAudio::Stall).await;
         let mut decoder = AudioDecoder::default();
         decoder
             .init(&url)
@@ -2150,5 +2169,39 @@ mod tests {
              timeout leaked into the decode path"
         );
         assert!(!decoder.is_eof(), "a stall is not the end of the stream");
+    }
+
+    /// The radio reconnect (`radio_reconnect_loop` in engine.rs) re-inits the
+    /// decoder with the URL that just dropped. That re-init must open a fresh
+    /// connection: returning early because the URL matches left the spent
+    /// stream in place, so the loop logged "Success!" and the station stayed
+    /// silent forever.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn radio_reinit_after_a_dropped_stream_reconnects() {
+        let url = spawn_slow_start_station(AfterAudio::HangUp).await;
+        let mut decoder = AudioDecoder::default();
+        decoder.init(&url).await.expect("the station must open");
+
+        // Drain the fixture; the station then hangs up, which reads as EOF.
+        let started = std::time::Instant::now();
+        while !decoder.is_eof() && started.elapsed() < std::time::Duration::from_secs(10) {
+            tokio::task::block_in_place(|| decoder.read_buffer(4 * 1024 * 1024));
+        }
+        assert!(decoder.is_eof(), "precondition: a hang-up must read as EOF");
+
+        decoder
+            .init(&url)
+            .await
+            .expect("the station must accept the reconnect");
+
+        assert!(
+            !decoder.is_eof(),
+            "a re-init of the dropped URL must reopen it, not keep the spent stream"
+        );
+        let buffer = tokio::task::block_in_place(|| decoder.read_buffer(64 * 1024));
+        assert!(
+            buffer.is_valid() && buffer.byte_count() > 0,
+            "the reconnected stream must decode audio"
+        );
     }
 }
