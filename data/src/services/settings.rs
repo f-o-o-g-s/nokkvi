@@ -263,11 +263,29 @@ impl SettingsManager {
     /// Does NOT save to redb, to prevent feedback loops where a TOML read
     /// triggers a database write. The new values will be propagated to redb
     /// automatically whenever the user next modifies a setting.
+    ///
+    /// A file that can't be read or parsed (e.g. saved mid-edit with a typo)
+    /// is logged and skipped: the current in-memory settings stay as they are
+    /// until the next save of a valid file triggers another reload.
     pub fn reload_from_toml(&mut self) {
         // One file read + one parse for all four sections (the per-section
         // readers each re-parse the whole file).
-        let sections =
-            crate::services::toml_settings_io::read_all_toml_sections().unwrap_or_default();
+        self.apply_reloaded_sections(crate::services::toml_settings_io::read_all_toml_sections());
+    }
+
+    /// The in-memory half of [`Self::reload_from_toml`], split out so tests
+    /// can feed it a read result without touching the real config.toml.
+    fn apply_reloaded_sections(
+        &mut self,
+        sections: Result<crate::services::toml_settings_io::TomlSections>,
+    ) {
+        let sections = match sections {
+            Ok(sections) => sections,
+            Err(e) => {
+                tracing::warn!("Not reloading config.toml, keeping the current settings: {e:#}");
+                return;
+            }
+        };
         if let Some(ts) = sections.settings {
             apply_toml_settings_to_internal(&ts, &mut self.settings.player);
         }
@@ -3237,6 +3255,58 @@ mod load_clamp_tests {
             escaped.is_empty(),
             "out-of-range values survived the load:\n{}",
             escaped.join("\n")
+        );
+    }
+}
+
+#[cfg(test)]
+mod reload_tests {
+    use super::SettingsManager;
+    use crate::services::{state_storage::StateStorage, toml_settings_io::TomlSections};
+
+    fn manager() -> (SettingsManager, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let storage = StateStorage::new(tmp.path().join("test_settings.redb")).expect("storage");
+        (SettingsManager::for_test(storage), tmp)
+    }
+
+    /// A config.toml saved mid-edit with a syntax error must leave the live
+    /// settings alone. The hot-reload used to fall back to all-empty sections,
+    /// which reset the live visualizer to defaults.
+    #[test]
+    fn reload_of_an_unparseable_config_keeps_the_current_settings() {
+        let (mut mgr, _tmp) = manager();
+        mgr.with_visualizer(|v| v.opacity = 0.4)
+            .expect("with_visualizer");
+        mgr.settings.player.seek_step_secs = 17;
+        let visualizer_before = mgr.visualizer().clone();
+
+        mgr.apply_reloaded_sections(Err(anyhow::anyhow!(
+            "Failed to parse config.toml: TOML parse error at line 3"
+        )));
+
+        assert_eq!(
+            *mgr.visualizer(),
+            visualizer_before,
+            "a failed reload must not reset the visualizer"
+        );
+        assert_eq!(mgr.settings.player.seek_step_secs, 17);
+    }
+
+    /// The counterpart that stays: a file that parses but has no
+    /// `[visualizer]` section resets the visualizer to defaults (deleting the
+    /// section is how a user opts back into them).
+    #[test]
+    fn reload_without_a_visualizer_section_resets_it_to_defaults() {
+        let (mut mgr, _tmp) = manager();
+        mgr.with_visualizer(|v| v.opacity = 0.4)
+            .expect("with_visualizer");
+
+        mgr.apply_reloaded_sections(Ok(TomlSections::default()));
+
+        assert_eq!(
+            *mgr.visualizer(),
+            crate::types::visualizer_config::VisualizerConfig::default()
         );
     }
 }

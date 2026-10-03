@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Choosing a theme no longer wipes config.toml when the file can't be read.
 - Saving radio scrobbling credentials no longer wipes config.toml when the file has a typo.
 - Numeric settings hand-edited in config.toml, such as seek step, crossfade length or ReplayGain pre-amp, now stay within their allowed range.
+- Saving config.toml with a typo no longer resets the visualizer to its defaults.
 
 ### Removed
 
