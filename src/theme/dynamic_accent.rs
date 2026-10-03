@@ -358,24 +358,43 @@ const MIN_SECONDARY_SCORE: f32 = 0.12;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoverPalette {
     colors: Vec<AccentSeed>,
+    /// The cover's average Oklch lightness: what a visualizer drawn over the
+    /// artwork sits on (see `cover_visualizer`).
+    backdrop_lightness: f32,
 }
 
 impl CoverPalette {
-    /// A monochrome cover's palette: one zero-chroma seed.
+    /// A monochrome cover's palette: one zero-chroma seed, which also sits
+    /// at the print's average lightness.
     fn neutral(seed: AccentSeed) -> Self {
-        Self { colors: vec![seed] }
+        Self {
+            colors: vec![seed],
+            backdrop_lightness: seed.lightness,
+        }
     }
 
-    /// A palette of one color.
+    /// A palette of one color, over an artwork of that color's lightness.
     #[cfg(test)]
     pub(crate) fn single(seed: AccentSeed) -> Self {
-        Self { colors: vec![seed] }
+        Self {
+            colors: vec![seed],
+            backdrop_lightness: seed.lightness,
+        }
     }
 
-    /// A palette from `colors`, most prominent first; `None` when empty.
+    /// A palette from `colors`, most prominent first, over an artwork of
+    /// average lightness `backdrop_lightness`; `None` when empty.
     #[cfg(test)]
-    pub(crate) fn from_colors(colors: Vec<AccentSeed>) -> Option<Self> {
-        (!colors.is_empty()).then_some(Self { colors })
+    pub(crate) fn from_colors(colors: Vec<AccentSeed>, backdrop_lightness: f32) -> Option<Self> {
+        (!colors.is_empty()).then_some(Self {
+            colors,
+            backdrop_lightness,
+        })
+    }
+
+    /// The cover's average lightness (Oklch).
+    pub(crate) fn backdrop_lightness(&self) -> f32 {
+        self.backdrop_lightness
     }
 
     /// The most prominent hue: the accent's seed.
@@ -516,7 +535,10 @@ pub(crate) fn palette_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<
         })
         .collect();
     match colors.first() {
-        Some(primary) if primary.chroma >= ACHROMATIC_CHROMA => Some(CoverPalette { colors }),
+        Some(primary) if primary.chroma >= ACHROMATIC_CHROMA => Some(CoverPalette {
+            colors,
+            backdrop_lightness: lightness_sum / sampled as f32,
+        }),
         _ => Some(neutral()),
     }
 }

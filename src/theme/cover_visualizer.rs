@@ -6,8 +6,12 @@
 //! ([`CoverPalette`]), darkest-in-the-artwork first, at a lightness ramp the
 //! theme's background can carry: rising on a dark palette, deepening on a
 //! light one. Each stop keeps its hue's saturation (see
-//! `dynamic_accent::saturation`) and is walked away from the background until
-//! it stays visible there. The bar border and its opacities stay the theme's.
+//! `dynamic_accent::saturation`) and takes the lightness nearest its place on
+//! the ramp that stands out both from the panel and from the cover itself —
+//! Bars, Lines and Scope draw over the artwork, where a gradient in the
+//! cover's own colors would otherwise vanish into it. When no lightness can
+//! do both, the panel wins (it is the one guarantee). The bar border and its
+//! opacities stay the theme's.
 
 use iced::{Color, color::Oklch};
 use nokkvi_data::types::theme_file::VisualizerColors;
@@ -35,6 +39,12 @@ const LIGHT_PEAK_LIGHTNESS: f32 = 0.30;
 const BAR_MIN_CONTRAST: f32 = 2.0;
 /// Lowest contrast a peak keeps: a 2 px cap needs more than a whole bar.
 const PEAK_MIN_CONTRAST: f32 = 3.0;
+/// Lowest contrast a stop keeps against the cover's average color, so it
+/// still shows when drawn over the artwork.
+const COVER_MIN_CONTRAST: f32 = 2.0;
+/// Lightness step of the search for a stop that clears both the panel and
+/// the cover.
+const PLACE_STEP: f32 = 0.02;
 /// MilkDrop accent / highlight lightness on the dark panel its presets draw.
 const MILKDROP_ACCENT_LIGHTNESS: f32 = 0.72;
 const MILKDROP_HIGHLIGHT_LIGHTNESS: f32 = 0.86;
@@ -102,10 +112,29 @@ fn visible(anchor: Anchor, l: f32, floor: f32, palette: &ResolvedTheme) -> Color
     } else {
         -1.0
     };
-    let clears = |c: Color| {
-        contrast_ratio(c, palette.bg0_hard) >= floor && contrast_ratio(c, palette.bg0) >= floor
-    };
-    walk(|l| anchor.at(l), away, l, clears).1
+    walk(|l| anchor.at(l), away, l, |c| on_panel(c, floor, palette)).1
+}
+
+fn on_panel(c: Color, floor: f32, palette: &ResolvedTheme) -> bool {
+    contrast_ratio(c, palette.bg0_hard) >= floor && contrast_ratio(c, palette.bg0) >= floor
+}
+
+/// `anchor` at the lightness nearest `l` that clears `floor` on the panel AND
+/// [`COVER_MIN_CONTRAST`] against `backdrop` (the cover's average color);
+/// [`visible`] when no lightness does both.
+fn placed(anchor: Anchor, l: f32, floor: f32, palette: &ResolvedTheme, backdrop: Color) -> Color {
+    let clears =
+        |c: Color| on_panel(c, floor, palette) && contrast_ratio(c, backdrop) >= COVER_MIN_CONTRAST;
+    let steps = (1.0 / PLACE_STEP).ceil() as usize;
+    (0..=steps)
+        .flat_map(|k| {
+            let offset = k as f32 * PLACE_STEP;
+            [l + offset, l - offset]
+        })
+        .filter(|probe| (0.0..=1.0).contains(probe))
+        .map(|probe| anchor.at(probe))
+        .find(|c| clears(*c))
+        .unwrap_or_else(|| visible(anchor, l, floor, palette))
 }
 
 /// The visualizer colors for `cover` on one palette. `base` is the theme's
@@ -139,22 +168,29 @@ pub(super) fn visualizer_colors(
     let mut peak_anchors: Vec<Anchor> = cover.colors().iter().map(|s| Anchor::of(*s)).collect();
     peak_anchors.sort_by(|a, b| b.saturation.total_cmp(&a.saturation));
 
+    let backdrop = Color::from_oklch(Oklch {
+        l: cover.backdrop_lightness().clamp(0.0, 1.0),
+        c: 0.0,
+        h: 0.0,
+        a: 1.0,
+    });
     let bar_gradient_colors = (0..BAR_STOPS)
         .map(|i| {
             let t = i as f32 / (BAR_STOPS - 1) as f32;
             let l = bottom + (top - bottom) * t;
-            hex(visible(
+            hex(placed(
                 along(&bar_anchors, t),
                 l,
                 BAR_MIN_CONTRAST,
                 palette,
+                backdrop,
             ))
         })
         .collect();
     let peak_gradient_colors = (0..PEAK_STOPS)
         .map(|i| {
             let anchor = peak_anchors[i % peak_anchors.len()];
-            hex(visible(anchor, peak_l, PEAK_MIN_CONTRAST, palette))
+            hex(placed(anchor, peak_l, PEAK_MIN_CONTRAST, palette, backdrop))
         })
         .collect();
 
@@ -231,7 +267,7 @@ mod tests {
             vec![seed(0x10, 0x18, 0x40)],
         ]
         .into_iter()
-        .filter_map(CoverPalette::from_colors)
+        .filter_map(|colors| CoverPalette::from_colors(colors, 0.45))
         .collect()
     }
 
@@ -288,7 +324,7 @@ mod tests {
     fn a_two_hue_cover_runs_from_one_hue_to_the_other() {
         let purple = seed(0x5a, 0x20, 0x90);
         let green = seed(0x60, 0xd0, 0x70);
-        let cover = CoverPalette::from_colors(vec![green, purple]).expect("non-empty");
+        let cover = CoverPalette::from_colors(vec![green, purple], 0.3).expect("non-empty");
         for (name, mode, palette) in all_builtin_palettes() {
             let viz = visualizer_colors(&cover, &palette, &VisualizerColors::default());
             let first = parse(&viz.bar_gradient_colors[0]).into_oklch();
@@ -324,6 +360,43 @@ mod tests {
                     assert!(
                         hue_distance(c.h, red.hue) < 0.15,
                         "{name}/{mode} stop {stop} drifted off red"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The case the owner's screenshots caught: a green gradient drawn over a
+    /// green cover vanished. Every stop now stands out from the cover's
+    /// average color as well as from the panel, wherever both can be met.
+    #[test]
+    fn stops_stand_out_from_the_cover_they_draw_over() {
+        let green = seed(0x30, 0xa0, 0x30);
+        for backdrop_l in [0.3_f32, 0.5, 0.62, 0.8] {
+            let cover = CoverPalette::from_colors(vec![green], backdrop_l).expect("non-empty");
+            let backdrop = Color::from_oklch(Oklch {
+                l: backdrop_l,
+                c: 0.0,
+                h: 0.0,
+                a: 1.0,
+            });
+            for (name, mode, palette) in all_builtin_palettes() {
+                let viz = visualizer_colors(&cover, &palette, &VisualizerColors::default());
+                // Only where a lightness can clear both does the cover floor
+                // apply; the panel floor is pinned on every case above.
+                let feasible = (0..=50).any(|k| {
+                    let c = Anchor::of(green).at(k as f32 / 50.0);
+                    on_panel(c, BAR_MIN_CONTRAST, &palette)
+                        && contrast_ratio(c, backdrop) >= COVER_MIN_CONTRAST
+                });
+                if !feasible {
+                    continue;
+                }
+                for stop in &viz.bar_gradient_colors {
+                    let cr = contrast_ratio(parse(stop), backdrop);
+                    assert!(
+                        cr >= COVER_MIN_CONTRAST - 0.05,
+                        "{name}/{mode} backdrop L {backdrop_l}: {stop} only {cr:.2}:1 on the cover"
                     );
                 }
             }
